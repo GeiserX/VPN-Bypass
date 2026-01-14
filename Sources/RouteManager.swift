@@ -22,8 +22,18 @@ final class RouteManager: ObservableObject {
     // MARK: - Types
     
     struct Config: Codable {
-        var domains: [DomainEntry] = []
+        var domains: [DomainEntry] = defaultDomains
         var services: [ServiceEntry] = defaultServices
+        
+        static var defaultDomains: [DomainEntry] {
+            [
+                DomainEntry(domain: "lynxprompt.com"),
+                DomainEntry(domain: "www.lynxprompt.com"),
+                DomainEntry(domain: "hd-olimpo.club"),
+                DomainEntry(domain: "torrentland.li"),
+                DomainEntry(domain: "divteam.com")
+            ]
+        }
         var autoApplyOnVPN: Bool = true
         var manageHostsFile: Bool = true
         var checkInterval: TimeInterval = 300 // 5 minutes

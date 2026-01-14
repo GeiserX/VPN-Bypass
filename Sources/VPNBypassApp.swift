@@ -3,7 +3,6 @@
 // Automatically routes specific domains/services around VPN.
 
 import SwiftUI
-import UserNotifications
 import Network
 
 @main
@@ -34,9 +33,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var networkMonitor: NWPathMonitor?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Request notification permissions
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-        
         // Hide dock icon (menu bar only)
         NSApp.setActivationPolicy(.accessory)
         
@@ -58,9 +54,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func startNetworkMonitoring() {
         networkMonitor = NWPathMonitor()
-        networkMonitor?.pathUpdateHandler = { [weak self] path in
+        networkMonitor?.pathUpdateHandler = { _ in
             DispatchQueue.main.async {
-                RouteManager.shared.updateNetworkStatus(path)
+                Task { @MainActor in
+                    let path = NWPathMonitor().currentPath
+                    RouteManager.shared.updateNetworkStatus(path)
+                }
             }
         }
         networkMonitor?.start(queue: DispatchQueue(label: "NetworkMonitor"))
