@@ -1,0 +1,41 @@
+# Xcode
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+!default.pbxuser
+!default.mode1v3
+!default.mode2v3
+!default.perspectivev3
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Archives
+*.xcarchive
+*.ipa
+*.app
+*.dSYM.zip
+*.dSYM
+
+# Test output
+.test-*
