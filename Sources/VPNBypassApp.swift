@@ -31,37 +31,54 @@ struct VPNBypassApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var networkMonitor: NWPathMonitor?
+    private var refreshTimer: Timer?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide dock icon (menu bar only)
         NSApp.setActivationPolicy(.accessory)
         
-        // Start network monitoring
-        startNetworkMonitoring()
-        
-        // Load config and apply routes on launch
+        // Load config
         Task { @MainActor in
             RouteManager.shared.loadConfig()
-            if RouteManager.shared.config.autoApplyOnVPN {
-                RouteManager.shared.detectAndApplyRoutes()
+        }
+        
+        // Initial VPN check after a short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            Task { @MainActor in
+                RouteManager.shared.refreshStatus()
             }
         }
+        
+        // Start network monitoring for changes
+        startNetworkMonitoring()
+        
+        // Also check periodically (every 30 seconds) as backup
+        startPeriodicRefresh()
     }
     
     func applicationWillTerminate(_ notification: Notification) {
         networkMonitor?.cancel()
+        refreshTimer?.invalidate()
     }
     
     private func startNetworkMonitoring() {
         networkMonitor = NWPathMonitor()
         networkMonitor?.pathUpdateHandler = { _ in
-            DispatchQueue.main.async {
+            // Network changed, refresh VPN status
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 Task { @MainActor in
-                    let path = NWPathMonitor().currentPath
-                    RouteManager.shared.updateNetworkStatus(path)
+                    RouteManager.shared.refreshStatus()
                 }
             }
         }
         networkMonitor?.start(queue: DispatchQueue(label: "NetworkMonitor"))
+    }
+    
+    private func startPeriodicRefresh() {
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
+            Task { @MainActor in
+                RouteManager.shared.refreshStatus()
+            }
+        }
     }
 }

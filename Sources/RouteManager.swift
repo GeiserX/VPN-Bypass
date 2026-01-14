@@ -156,39 +156,152 @@ final class RouteManager: ObservableObject {
     }
     
     func updateNetworkStatus(_ path: NWPath) {
+        Task {
+            await checkVPNStatus()
+        }
+    }
+    
+    func checkVPNStatus() async {
         let wasVPNConnected = isVPNConnected
         
-        // Check for VPN interfaces (utun, ipsec, etc.)
-        let vpnInterfaces = path.availableInterfaces.filter { iface in
-            let name = iface.name
-            return name.hasPrefix("utun") || name.hasPrefix("ipsec") || 
-                   name.hasPrefix("ppp") || name.hasPrefix("gpd") ||
-                   name.hasPrefix("tun")
-        }
+        // Use scutil to detect VPN interfaces with IPv4 addresses
+        let (connected, interface) = await detectVPNInterface()
         
-        isVPNConnected = !vpnInterfaces.isEmpty
-        vpnInterface = vpnInterfaces.first?.name
+        isVPNConnected = connected
+        vpnInterface = interface
         
         // Detect local gateway
-        Task {
-            localGateway = await detectLocalGateway()
-            
-            // Auto-apply routes when VPN connects
-            if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN {
-                log(.info, "VPN connected, applying routes...")
-                await applyAllRoutes()
-            }
+        localGateway = await detectLocalGateway()
+        
+        // Auto-apply routes when VPN connects
+        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN {
+            log(.info, "VPN connected via \(interface ?? "unknown"), applying routes...")
+            await applyAllRoutes()
         }
+        
+        if isVPNConnected {
+            log(.info, "VPN detected: \(interface ?? "unknown") → gateway: \(localGateway ?? "unknown")")
+        }
+    }
+    
+    private func detectVPNInterface() async -> (connected: Bool, interface: String?) {
+        // Method 1: Check scutil for VPN interfaces in network info
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/scutil")
+        process.arguments = ["--nwi"]
+        
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            
+            // Look for utun interfaces with IPv4 addresses in network info
+            // Pattern: "utunX : flags      : 0x5 (IPv4,DNS)"
+            let lines = output.components(separatedBy: "\n")
+            for line in lines {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                // Match utun interfaces that have IPv4 flag
+                if trimmed.hasPrefix("utun") && trimmed.contains(": flags") {
+                    let parts = trimmed.components(separatedBy: ":")
+                    if let ifacePart = parts.first?.trimmingCharacters(in: .whitespaces),
+                       ifacePart.hasPrefix("utun") {
+                        // Check if this interface has IPv4 (VPN indicator)
+                        if line.contains("IPv4") {
+                            return (true, ifacePart)
+                        }
+                    }
+                }
+            }
+        } catch {}
+        
+        // Method 2: Fallback - check ifconfig for utun with inet address
+        return await detectVPNViaIfconfig()
+    }
+    
+    private func detectVPNViaIfconfig() async -> (connected: Bool, interface: String?) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/sbin/ifconfig")
+        
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            
+            // Parse ifconfig output looking for utun interfaces with inet addresses
+            var currentInterface: String?
+            var hasInet = false
+            
+            for line in output.components(separatedBy: "\n") {
+                // New interface starts with interface name (no leading whitespace)
+                if !line.hasPrefix("\t") && !line.hasPrefix(" ") && line.contains(":") {
+                    // Check if previous interface was a VPN
+                    if let iface = currentInterface, hasInet,
+                       (iface.hasPrefix("utun") || iface.hasPrefix("ipsec") || 
+                        iface.hasPrefix("ppp") || iface.hasPrefix("gpd")) {
+                        return (true, iface)
+                    }
+                    // Start new interface
+                    currentInterface = line.components(separatedBy: ":").first
+                    hasInet = false
+                }
+                
+                // Check for inet (IPv4) address - indicates active VPN
+                if line.contains("inet ") && !line.contains("inet6") {
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    if trimmed.hasPrefix("inet ") {
+                        // Extract IP to verify it's a real address
+                        let parts = trimmed.components(separatedBy: " ")
+                        if parts.count >= 2 {
+                            let ip = parts[1]
+                            // Skip localhost and link-local
+                            if !ip.hasPrefix("127.") && !ip.hasPrefix("169.254.") {
+                                hasInet = true
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Check last interface
+            if let iface = currentInterface, hasInet,
+               (iface.hasPrefix("utun") || iface.hasPrefix("ipsec") || 
+                iface.hasPrefix("ppp") || iface.hasPrefix("gpd")) {
+                return (true, iface)
+            }
+        } catch {}
+        
+        return (false, nil)
     }
     
     func detectAndApplyRoutes() {
         Task {
+            // First check VPN status
+            await checkVPNStatus()
+            
             localGateway = await detectLocalGateway()
             if localGateway != nil {
                 await applyAllRoutes()
             } else {
                 log(.error, "Could not detect local gateway")
             }
+        }
+    }
+    
+    func refreshStatus() {
+        Task {
+            await checkVPNStatus()
         }
     }
     
