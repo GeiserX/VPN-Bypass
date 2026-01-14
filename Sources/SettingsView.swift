@@ -356,21 +356,27 @@ struct GeneralTab: View {
                     icon: "play.circle.fill",
                     title: "Auto-apply on VPN Connect",
                     description: "Automatically apply bypass routes when VPN connects",
-                    isOn: $routeManager.config.autoApplyOnVPN
+                    isOn: Binding(
+                        get: { routeManager.config.autoApplyOnVPN },
+                        set: { newValue in
+                            routeManager.config.autoApplyOnVPN = newValue
+                            routeManager.saveConfig()
+                        }
+                    )
                 )
-                .onChange(of: routeManager.config.autoApplyOnVPN) { _, _ in
-                    routeManager.saveConfig()
-                }
                 
                 SettingsToggle(
                     icon: "doc.text.fill",
                     title: "Manage /etc/hosts",
                     description: "Add entries to hosts file for DNS bypass (requires admin)",
-                    isOn: $routeManager.config.manageHostsFile
+                    isOn: Binding(
+                        get: { routeManager.config.manageHostsFile },
+                        set: { newValue in
+                            routeManager.config.manageHostsFile = newValue
+                            routeManager.saveConfig()
+                        }
+                    )
                 )
-                .onChange(of: routeManager.config.manageHostsFile) { _, _ in
-                    routeManager.saveConfig()
-                }
             }
             
             SettingsSection(title: "Network Info") {

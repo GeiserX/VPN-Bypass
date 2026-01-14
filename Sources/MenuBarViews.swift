@@ -374,9 +374,6 @@ struct MenuContent: View {
     }
     
     private func openSettings() {
-        if #available(macOS 14.0, *) {
-            NSApp.mainMenu?.items.first?.submenu?.items.first(where: { $0.title == "Settings…" })?.target?.perform($0.action)
-        }
         SettingsWindowController.shared.show()
     }
 }
