@@ -258,7 +258,7 @@ final class RouteManager: ObservableObject {
         return (false, nil)
     }
     
-    /// Check if IP is likely a corporate VPN (not Tailscale, not localhost, etc.)
+    /// Check if IP is likely a corporate VPN (not Tailscale mesh, not localhost, etc.)
     private func isCorporateVPNIP(_ ip: String) -> Bool {
         let parts = ip.components(separatedBy: ".")
         guard parts.count == 4,
@@ -273,8 +273,11 @@ final class RouteManager: ObservableObject {
         // Skip link-local
         if first == 169 && second == 254 { return false }
         
-        // Skip Tailscale CGNAT range (100.64.0.0/10 = 100.64-127.x.x)
-        if first == 100 && second >= 64 && second <= 127 { return false }
+        // Tailscale CGNAT range (100.64.0.0/10 = 100.64-127.x.x)
+        // Only consider Tailscale as VPN if it's using an exit node (routing all traffic)
+        if first == 100 && second >= 64 && second <= 127 {
+            return isTailscaleExitNodeActive()
+        }
         
         // Corporate VPNs typically use private ranges
         // 10.0.0.0/8 - Most corporate VPNs use this
@@ -285,6 +288,56 @@ final class RouteManager: ObservableObject {
         
         // 192.168.0.0/16 - Less common for VPN but possible
         if first == 192 && second == 168 { return true }
+        
+        return false
+    }
+    
+    /// Check if Tailscale is using an exit node (routing all traffic through Tailscale)
+    /// When exit node is active, Tailscale acts as a full VPN
+    /// When exit node is inactive, Tailscale is just mesh networking (not VPN)
+    private func isTailscaleExitNodeActive() -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/local/bin/tailscale")
+        process.arguments = ["status", "--json"]
+        
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            
+            // Check for "ExitNode": true at the top level (Self status)
+            // This indicates we are using an exit node to route all traffic
+            if let jsonData = output.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+               let selfStatus = json["Self"] as? [String: Any],
+               let exitNode = selfStatus["ExitNode"] as? Bool {
+                return exitNode
+            }
+            
+            // Alternative: check if ExitNodeStatus exists and is active
+            if output.contains("\"ExitNode\": true") || output.contains("\"ExitNode\":true") {
+                // Double-check it's for Self, not a peer
+                let lines = output.components(separatedBy: "\n")
+                var inSelfSection = false
+                for line in lines {
+                    if line.contains("\"Self\":") {
+                        inSelfSection = true
+                    } else if inSelfSection && line.contains("\"ExitNode\": true") {
+                        return true
+                    } else if inSelfSection && line.contains("}") && !line.contains("{") {
+                        inSelfSection = false
+                    }
+                }
+            }
+        } catch {
+            // Tailscale CLI not available, assume not using exit node
+        }
         
         return false
     }
