@@ -1567,11 +1567,11 @@ struct InfoTab: View {
     private var licenseSection: some View {
         SettingsCard(title: "License", icon: "doc.badge.gearshape", iconColor: Color(hex: "F59E0B")) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Source Available License")
+                Text("GPL-3.0 License")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white)
                 
-                Text("This software is source-available. You may view and study the code, but commercial use is restricted. See LICENSE file for details.")
+                Text("This software is free and open source under the GNU General Public License v3.0. You are free to use, modify, and distribute it under the same license terms.")
                     .font(.system(size: 11))
                     .foregroundColor(Color(hex: "9CA3AF"))
                 
