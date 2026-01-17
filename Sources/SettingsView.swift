@@ -1796,14 +1796,14 @@ final class SettingsWindowController {
     }
     
     private func addBrandedTitlebar(to window: NSWindow) {
-        // Create the branded title view - positioned to align with traffic lights
+        // Create the branded title view - full width for proper centering
         let titleView = NSHostingView(rootView: BrandedTitlebarView())
-        titleView.frame = NSRect(x: 0, y: 0, width: window.frame.width - 80, height: 22)
+        titleView.frame = NSRect(x: 0, y: 0, width: window.frame.width, height: 25)
         
         // Create accessory view controller
         let accessory = NSTitlebarAccessoryViewController()
         accessory.view = titleView
-        accessory.layoutAttribute = .trailing // Places it in the titlebar, to the right of traffic lights
+        accessory.layoutAttribute = .bottom
         
         window.addTitlebarAccessoryViewController(accessory)
     }
@@ -1813,13 +1813,12 @@ final class SettingsWindowController {
 
 struct BrandedTitlebarView: View {
     var body: some View {
-        HStack {
-            Spacer()
-            
+        // Use GeometryReader to properly center accounting for traffic lights (~70px on left)
+        GeometryReader { geometry in
             HStack(spacing: 5) {
                 // Shield icon
                 Image(systemName: "shield.checkered")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(BrandColors.blueGradient)
                 
                 // Branded name
@@ -1833,9 +1832,8 @@ struct BrandedTitlebarView: View {
                         .foregroundStyle(BrandColors.silverGradient)
                 }
             }
-            
-            Spacer()
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
-        .frame(height: 22)
+        .frame(height: 25)
     }
 }
