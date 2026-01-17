@@ -1,10 +1,13 @@
 // SettingsView.swift
-// Settings window with tabs for Domains, Services, and Logs.
+// Settings window with tabs for Domains, Services, General, and Logs.
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject var routeManager: RouteManager
+    @EnvironmentObject var notificationManager: NotificationManager
+    @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
     @State private var selectedTab = 0
     
     var body: some View {
@@ -16,7 +19,7 @@ struct SettingsView: View {
             tabContent
                 .animation(.easeInOut(duration: 0.2), value: selectedTab)
         }
-        .frame(width: 580, height: 560)
+        .frame(width: 580, height: 620)
         .background(
             LinearGradient(
                 colors: [Color(hex: "0F0F14"), Color(hex: "1A1B26")],
@@ -182,6 +185,7 @@ struct DomainsTab: View {
                         .font(.system(size: 13))
                         .focused($isInputFocused)
                         .onSubmit { addDomain() }
+                        .disabled(routeManager.isApplyingRoutes)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
@@ -194,23 +198,33 @@ struct DomainsTab: View {
                         )
                 )
                 
-                Button(action: addDomain) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
+                // Loading indicator or add button
+                if routeManager.isApplyingRoutes {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "10B981")))
                         .frame(width: 42, height: 42)
-                        .background(
-                            LinearGradient(
-                                colors: newDomain.isEmpty ? [Color(hex: "374151"), Color(hex: "374151")] : [Color(hex: "10B981"), Color(hex: "059669")],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
+                        .background(Color(hex: "374151"))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .shadow(color: newDomain.isEmpty ? .clear : Color(hex: "10B981").opacity(0.3), radius: 6, y: 2)
+                } else {
+                    Button(action: addDomain) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 42, height: 42)
+                            .background(
+                                LinearGradient(
+                                    colors: newDomain.isEmpty ? [Color(hex: "374151"), Color(hex: "374151")] : [Color(hex: "10B981"), Color(hex: "059669")],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .shadow(color: newDomain.isEmpty ? .clear : Color(hex: "10B981").opacity(0.3), radius: 6, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(newDomain.isEmpty)
                 }
-                .buttonStyle(.plain)
-                .disabled(newDomain.isEmpty)
             }
             
             // Domain list
@@ -223,7 +237,47 @@ struct DomainsTab: View {
                     
                     Spacer()
                     
-                    Text("\(routeManager.config.domains.count)")
+                    // Loading indicator or All/None buttons
+                    if routeManager.isApplyingRoutes {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .scaleEffect(0.5)
+                                .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "10B981")))
+                            Text("Applying...")
+                                .font(.system(size: 9))
+                                .foregroundColor(Color(hex: "6B7280"))
+                        }
+                    } else if !routeManager.config.domains.isEmpty {
+                        HStack(spacing: 6) {
+                            Button {
+                                routeManager.setAllDomainsEnabled(true)
+                            } label: {
+                                Text("All")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundColor(Color(hex: "10B981"))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color(hex: "10B981").opacity(0.15))
+                                    .cornerRadius(4)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            Button {
+                                routeManager.setAllDomainsEnabled(false)
+                            } label: {
+                                Text("None")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundColor(Color(hex: "EF4444"))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color(hex: "EF4444").opacity(0.15))
+                                    .cornerRadius(4)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    
+                    Text("\(routeManager.config.domains.filter { $0.enabled }.count)/\(routeManager.config.domains.count)")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundColor(Color(hex: "10B981"))
                         .padding(.horizontal, 8)
@@ -300,21 +354,22 @@ struct DomainRow: View {
             
             Spacer()
             
-            // Toggle
+            // Toggle - disabled during route operations
             Toggle("", isOn: Binding(
                 get: { domain.enabled },
-                set: { newValue in
-                    if let index = routeManager.config.domains.firstIndex(where: { $0.id == domain.id }) {
-                        routeManager.config.domains[index].enabled = newValue
-                        routeManager.saveConfig()
+                set: { _ in
+                    if !routeManager.isApplyingRoutes {
+                        routeManager.toggleDomain(domain.id)
                     }
                 }
             ))
             .toggleStyle(.switch)
             .tint(Color(hex: "10B981"))
             .scaleEffect(0.7)
+            .disabled(routeManager.isApplyingRoutes)
+            .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
             
-            // Delete button
+            // Delete button - disabled during route operations
             Button {
                 withAnimation(.easeOut(duration: 0.2)) {
                     routeManager.removeDomain(domain)
@@ -325,6 +380,8 @@ struct DomainRow: View {
                     .foregroundColor(Color(hex: "EF4444").opacity(isHovered ? 1 : 0.6))
             }
             .buttonStyle(.plain)
+            .disabled(routeManager.isApplyingRoutes)
+            .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -341,12 +398,27 @@ struct DomainRow: View {
 
 struct ServicesTab: View {
     @EnvironmentObject var routeManager: RouteManager
+    @State private var searchText = ""
+    
+    private var filteredServices: [RouteManager.ServiceEntry] {
+        if searchText.isEmpty {
+            return routeManager.config.services
+        }
+        return routeManager.config.services.filter { 
+            $0.name.localizedCaseInsensitiveContains(searchText) ||
+            $0.domains.contains { $0.localizedCaseInsensitiveContains(searchText) }
+        }
+    }
+    
+    private var enabledCount: Int {
+        routeManager.config.services.filter { $0.enabled }.count
+    }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             // Header
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
+            HStack {
+                HStack(spacing: 8) {
                     Image(systemName: "square.grid.2x2.fill")
                         .font(.system(size: 20))
                         .foregroundStyle(
@@ -356,132 +428,150 @@ struct ServicesTab: View {
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                 }
-                Text("Toggle pre-configured services to bypass VPN automatically.")
-                    .font(.system(size: 13))
-                    .foregroundColor(Color(hex: "9CA3AF"))
+                
+                Spacer()
+                
+                Text("\(enabledCount)/\(routeManager.config.services.count) enabled")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(hex: "6B7280"))
             }
             
-            // Services grid
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                ForEach(routeManager.config.services) { service in
-                    ServiceCard(service: service)
+            // Search and bulk actions
+            HStack(spacing: 10) {
+                // Search box
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(hex: "6B7280"))
+                    
+                    TextField("Search services...", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .disabled(routeManager.isApplyingRoutes)
+                    
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color(hex: "6B7280"))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(8)
+                
+                // Loading indicator
+                if routeManager.isApplyingRoutes {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                            .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "10B981")))
+                        Text("Applying...")
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(hex: "6B7280"))
+                    }
+                    .frame(width: 80)
+                } else {
+                    // Select All button
+                    Button {
+                        routeManager.setAllServicesEnabled(true)
+                    } label: {
+                        Text("All")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color(hex: "10B981"))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color(hex: "10B981").opacity(0.15))
+                            .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    // Select None button
+                    Button {
+                        routeManager.setAllServicesEnabled(false)
+                    } label: {
+                        Text("None")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color(hex: "EF4444"))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color(hex: "EF4444").opacity(0.15))
+                            .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             
-            Spacer()
+            // Services list
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(filteredServices) { service in
+                        ServiceRow(service: service)
+                    }
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.black.opacity(0.2))
+            )
         }
     }
 }
 
-struct ServiceCard: View {
+struct ServiceRow: View {
     @EnvironmentObject var routeManager: RouteManager
     let service: RouteManager.ServiceEntry
     @State private var isHovered = false
-    @State private var isPressed = false
-    
-    private var iconName: String {
-        switch service.id {
-        case "telegram": return "paperplane.fill"
-        case "youtube": return "play.rectangle.fill"
-        case "whatsapp": return "message.fill"
-        case "spotify": return "music.note"
-        case "tailscale": return "network"
-        case "slack": return "number.square.fill"
-        case "discord": return "bubble.left.and.bubble.right.fill"
-        case "twitch": return "tv.fill"
-        default: return "globe"
-        }
-    }
-    
-    private var brandColor: Color {
-        switch service.id {
-        case "telegram": return Color(hex: "26A5E4")
-        case "youtube": return Color(hex: "FF0000")
-        case "whatsapp": return Color(hex: "25D366")
-        case "spotify": return Color(hex: "1DB954")
-        case "tailscale": return Color(hex: "4F46E5")
-        case "slack": return Color(hex: "E01E5A")
-        case "discord": return Color(hex: "5865F2")
-        case "twitch": return Color(hex: "9146FF")
-        default: return Color(hex: "10B981")
-        }
-    }
     
     var body: some View {
-        Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                routeManager.toggleService(service.id)
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    // Icon with glow effect
-                    ZStack {
-                        if service.enabled {
-                            Circle()
-                                .fill(brandColor.opacity(0.3))
-                                .frame(width: 48, height: 48)
-                                .blur(radius: 8)
-                        }
-                        
-                        Circle()
-                            .fill(service.enabled ? brandColor.opacity(0.2) : Color.white.opacity(0.06))
-                            .frame(width: 44, height: 44)
-                        
-                        Image(systemName: iconName)
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(service.enabled ? brandColor : Color(hex: "6B7280"))
-                    }
-                    
-                    Spacer()
-                    
-                    // Status indicator
-                    ZStack {
-                        Circle()
-                            .fill(service.enabled ? Color(hex: "10B981") : Color(hex: "374151"))
-                            .frame(width: 12, height: 12)
-                        
-                        if service.enabled {
-                            Circle()
-                                .fill(Color(hex: "10B981"))
-                                .frame(width: 12, height: 12)
-                                .blur(radius: 4)
-                        }
-                    }
-                }
+        HStack(spacing: 12) {
+            // Status dot
+            Circle()
+                .fill(service.enabled ? Color(hex: "10B981") : Color(hex: "4B5563"))
+                .frame(width: 8, height: 8)
+                .shadow(color: service.enabled ? Color(hex: "10B981").opacity(0.5) : .clear, radius: 4)
+            
+            // Service info
+            VStack(alignment: .leading, spacing: 2) {
+                Text(service.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(service.enabled ? .white : Color(hex: "9CA3AF"))
                 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(service.name)
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(service.enabled ? .white : Color(hex: "9CA3AF"))
-                    
-                    Text("\(service.domains.count) domains • \(service.ipRanges.count) IP ranges")
-                        .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "6B7280"))
-                }
+                Text("\(service.domains.count) domains" + (service.ipRanges.isEmpty ? "" : " • \(service.ipRanges.count) IPs"))
+                    .font(.system(size: 10))
+                    .foregroundColor(Color(hex: "6B7280"))
             }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.white.opacity(isHovered ? 0.07 : 0.04))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(
-                                service.enabled ? brandColor.opacity(0.4) : Color.white.opacity(0.08),
-                                lineWidth: 1
-                            )
-                    )
-            )
-            .scaleEffect(isPressed ? 0.97 : 1.0)
-            .contentShape(RoundedRectangle(cornerRadius: 16))
+            
+            Spacer()
+            
+            // Toggle - disabled while routes are being applied
+            Toggle("", isOn: Binding(
+                get: { service.enabled },
+                set: { _ in 
+                    if !routeManager.isApplyingRoutes {
+                        routeManager.toggleService(service.id)
+                    }
+                }
+            ))
+            .toggleStyle(.switch)
+            .tint(Color(hex: "10B981"))
+            .scaleEffect(0.7)
+            .disabled(routeManager.isApplyingRoutes)
+            .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
         }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in isPressed = true }
-                .onEnded { _ in isPressed = false }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isHovered ? Color.white.opacity(0.05) : Color.clear)
         )
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -489,6 +579,13 @@ struct ServiceCard: View {
 
 struct GeneralTab: View {
     @EnvironmentObject var routeManager: RouteManager
+    @EnvironmentObject var notificationManager: NotificationManager
+    @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
+    @StateObject private var helperManager = HelperManager.shared
+    @State private var showingExportSuccess = false
+    @State private var showingImportPicker = false
+    @State private var showingImportError = false
+    @State private var importErrorMessage = ""
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -504,6 +601,98 @@ struct GeneralTab: View {
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                 }
+            }
+            
+            // Startup section
+            SettingsCard(title: "Startup", icon: "power", iconColor: Color(hex: "10B981")) {
+                SettingsToggleRow(
+                    icon: "arrow.clockwise",
+                    title: "Launch at Login",
+                    subtitle: "Automatically start VPN Bypass when you log in",
+                    isOn: Binding(
+                        get: { launchAtLoginManager.isEnabled },
+                        set: { _ in launchAtLoginManager.toggle() }
+                    )
+                )
+            }
+            
+            // Privileged Helper section
+            SettingsCard(title: "Privileged Helper", icon: "lock.shield.fill", iconColor: Color(hex: "EF4444")) {
+                HStack(spacing: 12) {
+                    Image(systemName: helperManager.isHelperInstalled ? "checkmark.shield.fill" : "xmark.shield.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(helperManager.isHelperInstalled ? Color(hex: "10B981") : Color(hex: "EF4444"))
+                        .frame(width: 20)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(helperManager.isHelperInstalled ? "Helper Installed" : "Helper Not Installed")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white)
+                        if helperManager.isHelperInstalled {
+                            Text("No more password prompts for route changes")
+                                .font(.system(size: 11))
+                                .foregroundColor(Color(hex: "6B7280"))
+                        } else {
+                            Text("Install to avoid repeated admin prompts")
+                                .font(.system(size: 11))
+                                .foregroundColor(Color(hex: "6B7280"))
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    if !helperManager.isHelperInstalled {
+                        Button {
+                            installHelper()
+                        } label: {
+                            HStack(spacing: 4) {
+                                if helperManager.isInstalling {
+                                    ProgressView()
+                                        .scaleEffect(0.6)
+                                        .frame(width: 12, height: 12)
+                                } else {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                        .font(.system(size: 10))
+                                }
+                                Text(helperManager.isInstalling ? "Installing..." : "Install")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color(hex: "10B981"), Color(hex: "059669")],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(helperManager.isInstalling)
+                    } else if let version = helperManager.helperVersion {
+                        Text("v\(version)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(Color(hex: "6B7280"))
+                    }
+                }
+                
+                if let error = helperManager.installationError {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(hex: "F59E0B"))
+                        Text(error)
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(hex: "F59E0B"))
+                            .lineLimit(2)
+                    }
+                }
+                
+                Text("The helper runs as root and handles route/hosts changes without prompting.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(hex: "6B7280"))
             }
             
             // Behavior section
@@ -529,6 +718,233 @@ struct GeneralTab: View {
                         set: { routeManager.config.manageHostsFile = $0; routeManager.saveConfig() }
                     )
                 )
+                
+                Divider().background(Color.white.opacity(0.1))
+                
+                SettingsToggleRow(
+                    icon: "checkmark.circle.fill",
+                    title: "Verify Routes After Apply",
+                    subtitle: "Ping test routes to ensure they're working",
+                    isOn: Binding(
+                        get: { routeManager.config.verifyRoutesAfterApply },
+                        set: { routeManager.config.verifyRoutesAfterApply = $0; routeManager.saveConfig() }
+                    )
+                )
+            }
+            
+            // DNS Refresh section
+            SettingsCard(title: "DNS Refresh", icon: "arrow.triangle.2.circlepath", iconColor: Color(hex: "06B6D4")) {
+                SettingsToggleRow(
+                    icon: "clock.arrow.circlepath",
+                    title: "Auto DNS Refresh",
+                    subtitle: "Periodically re-resolve domains and update routes",
+                    isOn: Binding(
+                        get: { routeManager.config.autoDNSRefresh },
+                        set: { 
+                            routeManager.config.autoDNSRefresh = $0
+                            routeManager.saveConfig()
+                            routeManager.startDNSRefreshTimer()
+                        }
+                    )
+                )
+                
+                if routeManager.config.autoDNSRefresh {
+                    Divider().background(Color.white.opacity(0.1))
+                    
+                    // Interval picker
+                    HStack(spacing: 12) {
+                        Image(systemName: "timer")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color(hex: "06B6D4"))
+                            .frame(width: 20)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Refresh Interval")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white)
+                            Text("How often to re-check DNS for changes")
+                                .font(.system(size: 11))
+                                .foregroundColor(Color(hex: "6B7280"))
+                        }
+                        
+                        Spacer()
+                        
+                        Picker("", selection: Binding(
+                            get: { routeManager.config.dnsRefreshInterval },
+                            set: { 
+                                routeManager.config.dnsRefreshInterval = $0
+                                routeManager.saveConfig()
+                                routeManager.startDNSRefreshTimer()
+                            }
+                        )) {
+                            Text("15 min").tag(TimeInterval(900))
+                            Text("30 min").tag(TimeInterval(1800))
+                            Text("1 hour").tag(TimeInterval(3600))
+                            Text("2 hours").tag(TimeInterval(7200))
+                            Text("6 hours").tag(TimeInterval(21600))
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 100)
+                    }
+                    
+                    Divider().background(Color.white.opacity(0.1))
+                    
+                    // Status and manual refresh
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let lastRefresh = routeManager.lastDNSRefresh {
+                                HStack(spacing: 4) {
+                                    Text("Last refresh:")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(Color(hex: "6B7280"))
+                                    Text(lastRefresh, style: .relative)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(Color(hex: "9CA3AF"))
+                                }
+                            }
+                            if let nextRefresh = routeManager.nextDNSRefresh {
+                                HStack(spacing: 4) {
+                                    Text("Next refresh:")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(Color(hex: "6B7280"))
+                                    Text(nextRefresh, style: .relative)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(Color(hex: "10B981"))
+                                }
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        Button {
+                            routeManager.forceDNSRefresh()
+                        } label: {
+                            HStack(spacing: 4) {
+                                if routeManager.isApplyingRoutes {
+                                    ProgressView()
+                                        .scaleEffect(0.5)
+                                        .frame(width: 10, height: 10)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 10))
+                                }
+                                Text("Refresh Now")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundColor(Color(hex: "06B6D4"))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color(hex: "06B6D4").opacity(0.15))
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(routeManager.isApplyingRoutes)
+                    }
+                }
+                
+                Text("Re-resolves all domains to catch IP changes and ensure routes stay up to date.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(hex: "6B7280"))
+            }
+            
+            // Notifications section
+            SettingsCard(title: "Notifications", icon: "bell.fill", iconColor: Color(hex: "8B5CF6")) {
+                SettingsToggleRow(
+                    icon: "bell.badge.fill",
+                    title: "Enable Notifications",
+                    subtitle: "Show alerts for VPN events",
+                    isOn: Binding(
+                        get: { notificationManager.notificationsEnabled },
+                        set: { 
+                            notificationManager.notificationsEnabled = $0
+                            notificationManager.savePreferences()
+                        }
+                    )
+                )
+                
+                if notificationManager.notificationsEnabled {
+                    Divider().background(Color.white.opacity(0.1))
+                    
+                    HStack(spacing: 12) {
+                        NotificationChip(
+                            label: "Connect",
+                            isOn: Binding(
+                                get: { notificationManager.notifyOnVPNConnect },
+                                set: { notificationManager.notifyOnVPNConnect = $0; notificationManager.savePreferences() }
+                            )
+                        )
+                        NotificationChip(
+                            label: "Disconnect",
+                            isOn: Binding(
+                                get: { notificationManager.notifyOnVPNDisconnect },
+                                set: { notificationManager.notifyOnVPNDisconnect = $0; notificationManager.savePreferences() }
+                            )
+                        )
+                        NotificationChip(
+                            label: "Routes",
+                            isOn: Binding(
+                                get: { notificationManager.notifyOnRoutesApplied },
+                                set: { notificationManager.notifyOnRoutesApplied = $0; notificationManager.savePreferences() }
+                            )
+                        )
+                        NotificationChip(
+                            label: "Failures",
+                            isOn: Binding(
+                                get: { notificationManager.notifyOnRouteFailure },
+                                set: { notificationManager.notifyOnRouteFailure = $0; notificationManager.savePreferences() }
+                            )
+                        )
+                    }
+                }
+            }
+            
+            // Import/Export section
+            SettingsCard(title: "Configuration", icon: "doc.badge.arrow.up.fill", iconColor: Color(hex: "3B82F6")) {
+                HStack(spacing: 12) {
+                    Button {
+                        exportConfig()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 12))
+                            Text("Export")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            LinearGradient(
+                                colors: [Color(hex: "3B82F6"), Color(hex: "2563EB")],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Button {
+                        showingImportPicker = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.system(size: 12))
+                            Text("Import")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(Color(hex: "3B82F6"))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color(hex: "3B82F6").opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+                
+                Text("Export your domains and services configuration to a file, or import from a backup.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(hex: "6B7280"))
             }
             
             // Network status section
@@ -540,6 +956,10 @@ struct GeneralTab: View {
                     showDot: true
                 )
                 
+                if let vpnType = routeManager.vpnType {
+                    StatusRow(label: "VPN Type", value: vpnType.rawValue)
+                }
+                
                 if let vpnIface = routeManager.vpnInterface {
                     StatusRow(label: "Interface", value: vpnIface)
                 }
@@ -548,7 +968,36 @@ struct GeneralTab: View {
                     StatusRow(label: "Gateway", value: gateway)
                 }
                 
+                if let ssid = routeManager.currentNetworkSSID {
+                    StatusRow(label: "WiFi Network", value: ssid)
+                }
+                
                 StatusRow(label: "Active Routes", value: "\(routeManager.activeRoutes.count)")
+                
+                // Route verification results
+                if !routeManager.routeVerificationResults.isEmpty {
+                    Divider().background(Color.white.opacity(0.1))
+                    
+                    let passedCount = routeManager.routeVerificationResults.values.filter { $0.isReachable }.count
+                    let totalCount = routeManager.routeVerificationResults.count
+                    
+                    HStack {
+                        Text("Route Verification")
+                            .font(.system(size: 12))
+                            .foregroundColor(Color(hex: "9CA3AF"))
+                        
+                        Spacer()
+                        
+                        HStack(spacing: 4) {
+                            Image(systemName: passedCount == totalCount ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(passedCount == totalCount ? Color(hex: "10B981") : Color(hex: "F59E0B"))
+                            Text("\(passedCount)/\(totalCount) reachable")
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundColor(passedCount == totalCount ? Color(hex: "10B981") : Color(hex: "F59E0B"))
+                        }
+                    }
+                }
             }
             
             // About section
@@ -557,7 +1006,7 @@ struct GeneralTab: View {
                     Text("VPN Bypass")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
-                    Text("Version 1.0.0")
+                    Text("Version 1.1.0")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
                 }
@@ -586,6 +1035,85 @@ struct GeneralTab: View {
             
             Spacer()
         }
+        .fileImporter(
+            isPresented: $showingImportPicker,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first {
+                    // Need to start accessing security-scoped resource
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if accessing {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+                    
+                    if routeManager.importConfig(from: url) {
+                        // Success handled by routeManager
+                    } else {
+                        importErrorMessage = "Failed to import configuration file."
+                        showingImportError = true
+                    }
+                }
+            case .failure(let error):
+                importErrorMessage = error.localizedDescription
+                showingImportError = true
+            }
+        }
+        .alert("Import Error", isPresented: $showingImportError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(importErrorMessage)
+        }
+    }
+    
+    private func exportConfig() {
+        guard let exportURL = routeManager.exportConfig() else {
+            return
+        }
+        
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.json]
+        savePanel.nameFieldStringValue = exportURL.lastPathComponent
+        savePanel.canCreateDirectories = true
+        
+        if savePanel.runModal() == .OK, let destinationURL = savePanel.url {
+            try? FileManager.default.copyItem(at: exportURL, to: destinationURL)
+        }
+        
+        // Clean up temp file
+        try? FileManager.default.removeItem(at: exportURL)
+    }
+    
+    private func installHelper() {
+        Task {
+            _ = await helperManager.installHelper()
+        }
+    }
+}
+
+struct NotificationChip: View {
+    let label: String
+    @Binding var isOn: Bool
+    
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(isOn ? .white : Color(hex: "6B7280"))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(isOn ? Color(hex: "8B5CF6").opacity(0.3) : Color.white.opacity(0.05))
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -707,6 +1235,23 @@ struct LogsTab: View {
                 
                 if !routeManager.recentLogs.isEmpty {
                     Button {
+                        copyLogsToClipboard()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 10))
+                            Text("Copy")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(Color(hex: "3B82F6"))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color(hex: "3B82F6").opacity(0.15))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Button {
                         withAnimation { routeManager.recentLogs.removeAll() }
                     } label: {
                         HStack(spacing: 4) {
@@ -754,6 +1299,18 @@ struct LogsTab: View {
                 )
             }
         }
+    }
+    
+    private func copyLogsToClipboard() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        
+        let logText = routeManager.recentLogs.map { log in
+            "[\(formatter.string(from: log.timestamp))] [\(log.level.rawValue.uppercased())] \(log.message)"
+        }.joined(separator: "\n")
+        
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(logText, forType: .string)
     }
 }
 
@@ -807,37 +1364,61 @@ struct LogRow: View {
 final class SettingsWindowController {
     static let shared = SettingsWindowController()
     
-    private var window: NSWindow?
+    private var panel: NSPanel?
     
     func show() {
-        if let window = window {
-            window.makeKeyAndOrderFront(nil)
+        showPanel()
+    }
+    
+    func showOnTop() {
+        showPanel()
+    }
+    
+    private func showPanel() {
+        // If panel exists and is visible, just bring it to front
+        if let panel = panel, panel.isVisible {
+            panel.level = .screenSaver
+            panel.orderFrontRegardless()
             NSApp.activate(ignoringOtherApps: true)
             return
         }
         
+        // If panel was closed, remove it so we create a fresh one
+        if panel != nil && !panel!.isVisible {
+            panel = nil
+        }
+        
         let settingsView = SettingsView()
             .environmentObject(RouteManager.shared)
+            .environmentObject(NotificationManager.shared)
+            .environmentObject(LaunchAtLoginManager.shared)
         let hostingView = NSHostingView(rootView: settingsView)
         
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 580, height: 560),
-            styleMask: [.titled, .closable, .fullSizeContentView],
+        // Use NSPanel which can float above other windows
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 620),
+            styleMask: [.titled, .closable, .fullSizeContentView, .utilityWindow],
             backing: .buffered,
             defer: false
         )
         
-        window.contentView = hostingView
-        window.title = "VPN Bypass"
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.backgroundColor = NSColor(Color(hex: "0F0F14"))
-        window.isReleasedWhenClosed = false
-        window.center()
+        panel.contentView = hostingView
+        panel.title = "VPN Bypass Settings"
+        panel.titlebarAppearsTransparent = true
+        panel.titleVisibility = .hidden
+        panel.backgroundColor = NSColor(Color(hex: "0F0F14"))
+        panel.isReleasedWhenClosed = false
+        panel.center()
         
-        window.makeKeyAndOrderFront(nil)
+        // Make it float above EVERYTHING - use screenSaver level (highest)
+        panel.level = .screenSaver
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        
+        panel.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
         
-        self.window = window
+        self.panel = panel
     }
 }

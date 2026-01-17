@@ -1,34 +1,46 @@
 # VPN Bypass - Product Roadmap
 
-## Current State (v1.0)
+## Current State (v1.1)
 
-### ✅ Implemented Features
+### ✅ Phase 1 Complete - Polish & Stability
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Improved VPN Detection** | ✅ Done | GlobalProtect, Cisco, OpenVPN, WireGuard, Fortinet, Zscaler, Cloudflare WARP, Tailscale exit node |
+| **Network Change Handling** | ✅ Done | NWPathMonitor + debouncing, auto-refresh on wake |
+| **Notifications** | ✅ Done | UNUserNotificationCenter, per-event toggles, appears in System Settings |
+| **Route Verification** | ✅ Done | Ping test (disabled by default - many servers block ICMP) |
+| **Import/Export Config** | ✅ Done | JSON export/import in Settings |
+| **Launch at Login** | ✅ Done | SMAppService, enabled by default |
+| **Privileged Helper** | ✅ Done | No sudo prompts, auto-install on first launch |
+| **Auto DNS Refresh** | ✅ Done | Periodic re-resolution (default 1h), keeps hosts file fresh |
+| **Loading States** | ✅ Done | Spinner during route operations, UI blocking |
+| **Incremental Routes** | ✅ Done | Toggle single service/domain without full rebuild |
+| **Bulk Operations** | ✅ Done | All/None for services and domains |
+
+### ✅ Core Features (v1.0)
 - Menu bar app with real-time VPN status
-- VPN detection (GlobalProtect, Cisco AnyConnect, OpenVPN, WireGuard)
-- Smart Tailscale detection (only VPN when exit node active)
 - Domain-based bypass rules
-- Pre-configured services (Telegram, YouTube, WhatsApp, Spotify, etc.)
+- Pre-configured services (37 services: Telegram, YouTube, WhatsApp, Spotify, Netflix, etc.)
 - Route management via system routing table
 - Optional `/etc/hosts` management for DNS bypass
 - Settings UI with Domains, Services, General, Logs tabs
-- Auto-apply routes when VPN connects
-- Activity logging
+- Activity logging with copy functionality
 
 ---
 
 ## Roadmap
 
-### Phase 1: Polish & Stability (v1.1 - v1.2)
-**Timeline: 1-2 months**
+### Phase 1.2: DNS & Distribution (v1.2)
+**Timeline: 1-2 weeks**
 
-| Feature | Description | Tier |
-|---------|-------------|------|
-| **Improved VPN Detection** | Support more VPN types (Fortinet, Zscaler, Cloudflare WARP) | Free |
-| **Network Change Handling** | Better detection when switching networks/WiFi | Free |
-| **Notifications** | Alert when VPN connects/disconnects, routes applied | Free |
-| **Route Verification** | Verify routes are actually working (ping test) | Free |
-| **Import/Export Config** | Backup and restore settings | Free |
-| **Launch at Login** | Option to start automatically | Free |
+| Feature | Description | Priority |
+|---------|-------------|----------|
+| **Respect User's DNS** | Use pre-VPN DNS servers (detected from primary interface) instead of hardcoded Google/Cloudflare | High |
+| **Homebrew Tap** | Publish to homebrew for easy installation | High |
+| **Route Health Dashboard** | Show which routes are active, last verified, issues | Medium |
+
+**Note**: ASN-based routing considered but deferred - current hardcoded IP ranges + DNS resolution is sufficient.
 
 ### Phase 2: Advanced Routing (v1.3 - v1.5)
 **Timeline: 3-6 months**
@@ -42,6 +54,7 @@
 | **IPv6 Leak Protection** | Block IPv6 to prevent leaks | **Premium** |
 | **Connection Profiles** | Different configs for "Home", "Work", "Travel" | **Premium** |
 | **Scheduled Rules** | Auto-enable/disable bypasses based on time | **Premium** |
+| **Local DNS Proxy** | Run local DNS that uses ISP DNS for bypass domains | **Premium** |
 
 ### Phase 3: Power Features (v2.0+)
 **Timeline: 6-12 months**
@@ -55,6 +68,7 @@
 | **CLI Interface** | Command-line control for automation | **Premium** |
 | **API/Webhooks** | Integration with other tools | **Enterprise** |
 | **Statistics Dashboard** | Detailed analytics and history | **Premium** |
+| **Traffic Verification** | Verify traffic actually goes through correct interface | **Premium** |
 
 ### Phase 4: Enterprise & Advanced (v3.0+)
 **Timeline: 12+ months**
@@ -67,6 +81,22 @@
 | **Audit Logging** | Detailed logs for compliance | **Enterprise** |
 | **Custom Branding** | White-label for enterprises | **Enterprise** |
 | **Priority Support** | Dedicated support channel | **Enterprise** |
+
+---
+
+## Defense-in-Depth Strategy
+
+### Current Protection Layers
+1. ✅ **IP Routes** - Kernel routing table bypasses VPN
+2. ✅ **Static IP Ranges** - Services like Telegram have known ranges
+3. ✅ **Hosts File** - Local DNS override, immune to VPN DNS hijacking
+4. ✅ **Auto DNS Refresh** - Catches IP changes within 1 hour
+
+### Future Protection Layers
+5. 🔲 **ASN Routing** - Route all IPs owned by a service
+6. 🔲 **Multiple DNS** - Query Google + Cloudflare for redundancy
+7. 🔲 **Local DNS Proxy** - Intercept and resolve locally
+8. 🔲 **Traffic Verification** - Confirm correct interface usage
 
 ---
 
@@ -115,13 +145,6 @@ For teams and organizations:
 - Pros: Easy to set up, handles payments
 - Cons: No subscription management built-in
 
-```swift
-// Example validation
-let licenseKey = "XXXX-XXXX-XXXX-XXXX"
-let url = "https://api.gumroad.com/v2/licenses/verify"
-// POST with product_id and license_key
-```
-
 ### Option 2: LemonSqueezy (Modern)
 - Supports one-time and subscriptions
 - Built-in license key generation
@@ -136,89 +159,10 @@ let url = "https://api.gumroad.com/v2/licenses/verify"
 - Pros: Professional, handles compliance
 - Cons: More complex setup
 
-### Option 4: RevenueCat (Subscriptions)
-- Subscription management
-- Cross-platform (if you expand to iOS)
-- Analytics built-in
-- Pros: Best for subscriptions
-- Cons: Monthly fees
-
-### Option 5: Custom (Self-hosted)
-- Your own license server
-- Full control
-- Pros: No fees, full control
-- Cons: More work to build/maintain
-
 ### Recommended Approach
 1. **Start with Gumroad** for quick launch
 2. Migrate to **LemonSqueezy** when you need subscriptions
 3. Consider **Paddle** for enterprise/international
-
----
-
-## Implementation: License Gating
-
-### Code Structure
-```swift
-// LicenseManager.swift
-class LicenseManager: ObservableObject {
-    @Published var tier: LicenseTier = .free
-    @Published var isValidated = false
-    
-    enum LicenseTier: String, Codable {
-        case free
-        case premium
-        case enterprise
-    }
-    
-    func validateLicense(_ key: String) async -> Bool {
-        // Call license API
-        // Store in Keychain if valid
-        // Return result
-    }
-    
-    func canUseFeature(_ feature: Feature) -> Bool {
-        switch feature {
-        case .unlimitedDomains:
-            return tier != .free
-        case .appRouting:
-            return tier == .premium || tier == .enterprise
-        case .apiAccess:
-            return tier == .enterprise
-        // etc.
-        }
-    }
-}
-```
-
-### Feature Flags
-```swift
-enum Feature {
-    case unlimitedDomains
-    case unlimitedServices
-    case appRouting
-    case inverseMode
-    case killSwitch
-    case leakProtection
-    case profiles
-    case customDNS
-    case scheduledRules
-    case apiAccess
-    case mdmSupport
-}
-```
-
-### UI Gating Example
-```swift
-Button("Add Domain") {
-    if routeManager.config.domains.count >= 5 && 
-       licenseManager.tier == .free {
-        showUpgradePrompt = true
-    } else {
-        addDomain()
-    }
-}
-```
 
 ---
 
@@ -229,49 +173,35 @@ Button("Add Domain") {
 | **Surfshark Bypasser** | macOS | Per-app/website split tunneling | Part of Surfshark subscription |
 | **ProtonVPN** | macOS | Split tunneling, kill switch, custom DNS | Free tier + $4.99/mo |
 | **VPN Peek** | macOS | Status monitoring, leak detection | $3.99 one-time |
-| **MacInfo** | macOS | VPN status, IP display, diagnostics | Free |
 | **Tunnelblick** | macOS | OpenVPN client, split routing | Free (open source) |
-| **vpn-route-manager** | macOS | Domain/service routing | Free (open source) |
 
 ### Our Differentiators
 1. **Smart VPN Detection** - Correctly identifies corporate VPNs vs Tailscale mesh
-2. **Pre-configured Services** - One-click enable for popular services
+2. **Pre-configured Services** - One-click enable for 37+ popular services
 3. **Beautiful UI** - Modern SwiftUI interface
 4. **No VPN Required** - Works with ANY VPN, not tied to a provider
 5. **Privacy-focused** - No analytics, no cloud dependency
-
----
-
-## Success Metrics
-
-### Free Tier
-- Downloads/installs
-- Daily active users
-- Feature usage (which services enabled)
-- Retention (7-day, 30-day)
-
-### Premium Conversion
-- Conversion rate from free to premium
-- Revenue per user
-- Churn rate (for subscriptions)
-- Support ticket volume
-
-### Enterprise
-- Number of enterprise customers
-- Seats per organization
-- Contract value
-- Renewal rate
+6. **Defense-in-Depth** - Routes + Hosts + Auto-refresh for maximum protection
 
 ---
 
 ## Next Steps
 
-1. **v1.1**: Add notifications, improve stability
-2. **v1.2**: Add import/export, launch at login
-3. **v1.3**: Implement license system (Gumroad)
-4. **v1.4**: Add app-based routing (Premium)
-5. **v1.5**: Add kill switch (Premium)
+1. ✅ **v1.1**: Completed - notifications, helper, DNS refresh, loading states
+2. 🔲 **v1.2**: Config migration, ASN routing, Homebrew tap
+3. 🔲 **v1.3**: Implement license system (Gumroad)
+4. 🔲 **v1.4**: Add app-based routing (Premium)
+5. 🔲 **v1.5**: Add kill switch + leak protection (Premium)
 
 ---
 
-*Last updated: January 2026*
+## Technical Debt / Known Issues
+
+- [ ] Config migration: new default services don't auto-merge into existing user config
+- [ ] Helper installation can fail silently on some systems
+- [ ] Route verification unreliable (many servers block ICMP)
+- [ ] Homebrew Cask not published to a tap yet
+
+---
+
+*Last updated: January 17, 2026*

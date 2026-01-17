@@ -4,6 +4,7 @@
 import Foundation
 import Network
 import AppKit
+import UniformTypeIdentifiers
 
 @MainActor
 final class RouteManager: ObservableObject {
@@ -13,69 +14,207 @@ final class RouteManager: ObservableObject {
     
     @Published var isVPNConnected = false
     @Published var vpnInterface: String?
+    @Published var vpnType: VPNType?
     @Published var localGateway: String?
     @Published var activeRoutes: [ActiveRoute] = []
     @Published var lastUpdate: Date?
     @Published var config: Config = Config()
     @Published var recentLogs: [LogEntry] = []
+    @Published var currentNetworkSSID: String?
+    @Published var routeVerificationResults: [String: RouteVerificationResult] = [:]
+    @Published var isLoading = true
+    @Published var isApplyingRoutes = false  // True during incremental route changes (blocks UI)
+    @Published var lastDNSRefresh: Date?
+    @Published var nextDNSRefresh: Date?
+    
+    // MARK: - Private
+    
+    private var dnsRefreshTimer: Timer?
+    private var detectedDNSServer: String?  // User's real DNS (pre-VPN), detected at startup
     
     // MARK: - Types
+    
+    enum VPNType: String, Codable {
+        case globalProtect = "GlobalProtect"
+        case ciscoAnyConnect = "Cisco AnyConnect"
+        case openVPN = "OpenVPN"
+        case wireGuard = "WireGuard"
+        case tailscale = "Tailscale (Exit Node)"
+        case fortinet = "Fortinet FortiClient"
+        case zscaler = "Zscaler"
+        case cloudflareWARP = "Cloudflare WARP"
+        case paloAlto = "Palo Alto"
+        case pulseSecure = "Pulse Secure"
+        case unknown = "Unknown VPN"
+        
+        var icon: String {
+            switch self {
+            case .globalProtect, .paloAlto: return "shield.lefthalf.filled"
+            case .ciscoAnyConnect: return "network.badge.shield.half.filled"
+            case .openVPN: return "lock.shield"
+            case .wireGuard: return "key.fill"
+            case .tailscale: return "link.circle.fill"
+            case .fortinet: return "shield.checkered"
+            case .zscaler: return "cloud.fill"
+            case .cloudflareWARP: return "cloud.bolt.fill"
+            case .pulseSecure: return "bolt.shield.fill"
+            case .unknown: return "shield.fill"
+            }
+        }
+    }
+    
+    struct RouteVerificationResult: Identifiable {
+        let id = UUID()
+        let destination: String
+        let isReachable: Bool
+        let latency: Double? // in milliseconds
+        let timestamp: Date
+        let error: String?
+    }
     
     struct Config: Codable {
         var domains: [DomainEntry] = defaultDomains
         var services: [ServiceEntry] = defaultServices
-        
-        static var defaultDomains: [DomainEntry] {
-            [
-                DomainEntry(domain: "lynxprompt.com"),
-                DomainEntry(domain: "www.lynxprompt.com"),
-                DomainEntry(domain: "hd-olimpo.club"),
-                DomainEntry(domain: "torrentland.li"),
-                DomainEntry(domain: "divteam.com")
-            ]
-        }
         var autoApplyOnVPN: Bool = true
         var manageHostsFile: Bool = true
         var checkInterval: TimeInterval = 300 // 5 minutes
+        var verifyRoutesAfterApply: Bool = false  // Disabled by default - many servers block ping
+        var autoDNSRefresh: Bool = true  // Periodically re-resolve DNS and update routes
+        var dnsRefreshInterval: TimeInterval = 3600  // 1 hour default
+        
+        static var defaultDomains: [DomainEntry] {
+            []  // User adds their own domains in Settings
+        }
         
         static var defaultServices: [ServiceEntry] {
             [
-                ServiceEntry(id: "telegram", name: "Telegram", enabled: true, domains: [
-                    "telegram.org", "t.me", "telegram.me",
-                    "core.telegram.org", "api.telegram.org",
-                    "web.telegram.org"
-                ], ipRanges: [
-                    "91.108.56.0/22", "91.108.4.0/22", "91.108.8.0/22",
-                    "91.108.16.0/22", "91.108.12.0/22", "149.154.160.0/20",
-                    "91.105.192.0/23", "185.76.151.0/24"
-                ]),
-                ServiceEntry(id: "youtube", name: "YouTube", enabled: false, domains: [
-                    "youtube.com", "www.youtube.com", "m.youtube.com",
-                    "youtu.be", "youtube-nocookie.com",
-                    "googlevideo.com", "ytimg.com"
-                ], ipRanges: []),
+                // Messaging
+                ServiceEntry(id: "telegram", name: "Telegram", enabled: false, domains: [
+                    "telegram.org", "t.me", "telegram.me", "core.telegram.org", "api.telegram.org", "web.telegram.org"
+                ], ipRanges: ["91.108.56.0/22", "91.108.4.0/22", "91.108.8.0/22", "91.108.16.0/22", "91.108.12.0/22", "149.154.160.0/20", "91.105.192.0/23", "185.76.151.0/24"]),
                 ServiceEntry(id: "whatsapp", name: "WhatsApp", enabled: false, domains: [
-                    "whatsapp.com", "web.whatsapp.com", "whatsapp.net"
-                ], ipRanges: [
-                    "3.33.221.0/24", "15.197.206.0/24",
-                    "52.26.198.0/24", "169.45.71.0/24"
-                ]),
-                ServiceEntry(id: "spotify", name: "Spotify", enabled: false, domains: [
-                    "spotify.com", "scdn.co", "spotifycdn.com"
+                    "whatsapp.com", "web.whatsapp.com", "whatsapp.net", "wa.me"
+                ], ipRanges: ["3.33.221.0/24", "15.197.206.0/24", "52.26.198.0/24"]),
+                ServiceEntry(id: "signal", name: "Signal", enabled: false, domains: [
+                    "signal.org", "www.signal.org", "updates.signal.org", "api.signal.org"
                 ], ipRanges: []),
-                ServiceEntry(id: "tailscale", name: "Tailscale", enabled: true, domains: [
-                    "login.tailscale.com", "controlplane.tailscale.com",
-                    "tailscale.com", "pkgs.tailscale.com"
+                
+                // Streaming - Video
+                ServiceEntry(id: "youtube", name: "YouTube", enabled: false, domains: [
+                    "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "youtube-nocookie.com", "www.googlevideo.com", "i.ytimg.com", "s.ytimg.com"
                 ], ipRanges: []),
-                ServiceEntry(id: "slack", name: "Slack", enabled: false, domains: [
-                    "slack.com", "slack-edge.com", "slack-imgs.com"
+                ServiceEntry(id: "netflix", name: "Netflix", enabled: false, domains: [
+                    "netflix.com", "www.netflix.com", "assets.nflxext.com", "api-global.netflix.com"
                 ], ipRanges: []),
-                ServiceEntry(id: "discord", name: "Discord", enabled: false, domains: [
-                    "discord.com", "discord.gg", "discordapp.com",
-                    "discord.media", "discordcdn.com"
+                ServiceEntry(id: "primevideo", name: "Amazon Prime Video", enabled: false, domains: [
+                    "primevideo.com", "www.primevideo.com", "amazon.com", "www.amazon.com", "atv-ps.amazon.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "disneyplus", name: "Disney+", enabled: false, domains: [
+                    "disneyplus.com", "www.disneyplus.com", "disney-plus.net", "bamgrid.com", "dssott.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "hbomax", name: "HBO Max", enabled: false, domains: [
+                    "max.com", "www.max.com", "hbomax.com", "www.hbomax.com"
                 ], ipRanges: []),
                 ServiceEntry(id: "twitch", name: "Twitch", enabled: false, domains: [
-                    "twitch.tv", "twitchcdn.net", "jtvnw.net"
+                    "twitch.tv", "www.twitch.tv", "static.twitchcdn.net", "vod-secure.twitch.tv", "usher.ttvnw.net"
+                ], ipRanges: []),
+                
+                // Streaming - Music
+                ServiceEntry(id: "spotify", name: "Spotify", enabled: false, domains: [
+                    "spotify.com", "www.spotify.com", "open.spotify.com", "i.scdn.co"
+                ], ipRanges: []),
+                ServiceEntry(id: "applemusic", name: "Apple Music", enabled: false, domains: [
+                    "music.apple.com", "itunes.apple.com", "amp-api.music.apple.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "soundcloud", name: "SoundCloud", enabled: false, domains: [
+                    "soundcloud.com", "www.soundcloud.com", "api.soundcloud.com"
+                ], ipRanges: []),
+                
+                // Social Media
+                ServiceEntry(id: "twitter", name: "X (Twitter)", enabled: false, domains: [
+                    "twitter.com", "x.com", "www.twitter.com", "api.twitter.com", "t.co", "twimg.com", "pbs.twimg.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "instagram", name: "Instagram", enabled: false, domains: [
+                    "instagram.com", "www.instagram.com", "i.instagram.com", "cdninstagram.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "tiktok", name: "TikTok", enabled: false, domains: [
+                    "tiktok.com", "www.tiktok.com", "vm.tiktok.com", "m.tiktok.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "reddit", name: "Reddit", enabled: false, domains: [
+                    "reddit.com", "www.reddit.com", "old.reddit.com", "i.redd.it", "v.redd.it"
+                ], ipRanges: []),
+                ServiceEntry(id: "facebook", name: "Facebook", enabled: false, domains: [
+                    "facebook.com", "www.facebook.com", "m.facebook.com", "fb.com", "fbcdn.net"
+                ], ipRanges: []),
+                ServiceEntry(id: "linkedin", name: "LinkedIn", enabled: false, domains: [
+                    "linkedin.com", "www.linkedin.com", "media.licdn.com"
+                ], ipRanges: []),
+                
+                // Work & Communication
+                ServiceEntry(id: "slack", name: "Slack", enabled: false, domains: [
+                    "slack.com", "www.slack.com", "app.slack.com", "files.slack.com", "a.slack-edge.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "discord", name: "Discord", enabled: false, domains: [
+                    "discord.com", "discord.gg", "discordapp.com", "discord.media", "cdn.discordapp.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "zoom", name: "Zoom", enabled: false, domains: [
+                    "zoom.us", "www.zoom.us", "us02web.zoom.us", "us04web.zoom.us", "us05web.zoom.us"
+                ], ipRanges: []),
+                ServiceEntry(id: "teams", name: "Microsoft Teams", enabled: false, domains: [
+                    "teams.microsoft.com", "teams.live.com", "statics.teams.cdn.office.net"
+                ], ipRanges: []),
+                ServiceEntry(id: "googlemeet", name: "Google Meet", enabled: false, domains: [
+                    "meet.google.com", "meet.google.com.br"
+                ], ipRanges: []),
+                
+                // Cloud & Storage
+                ServiceEntry(id: "dropbox", name: "Dropbox", enabled: false, domains: [
+                    "dropbox.com", "www.dropbox.com", "dl.dropboxusercontent.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "gdrive", name: "Google Drive", enabled: false, domains: [
+                    "drive.google.com", "docs.google.com", "sheets.google.com", "slides.google.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "icloud", name: "iCloud", enabled: false, domains: [
+                    "icloud.com", "www.icloud.com", "apple-cloudkit.com"
+                ], ipRanges: []),
+                
+                // Gaming
+                ServiceEntry(id: "steam", name: "Steam", enabled: false, domains: [
+                    "steampowered.com", "store.steampowered.com", "steamcommunity.com", "steamcdn-a.akamaihd.net"
+                ], ipRanges: []),
+                ServiceEntry(id: "epicgames", name: "Epic Games", enabled: false, domains: [
+                    "epicgames.com", "www.epicgames.com", "launcher-public-service-prod.ol.epicgames.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "playstation", name: "PlayStation Network", enabled: false, domains: [
+                    "playstation.com", "www.playstation.com", "store.playstation.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "xbox", name: "Xbox Live", enabled: false, domains: [
+                    "xbox.com", "www.xbox.com", "xboxlive.com"
+                ], ipRanges: []),
+                
+                // Developer & Utilities
+                ServiceEntry(id: "github", name: "GitHub", enabled: false, domains: [
+                    "github.com", "www.github.com", "api.github.com", "raw.githubusercontent.com", "gist.github.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "gitlab", name: "GitLab", enabled: false, domains: [
+                    "gitlab.com", "www.gitlab.com", "registry.gitlab.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "stackoverflow", name: "Stack Overflow", enabled: false, domains: [
+                    "stackoverflow.com", "www.stackoverflow.com", "stackexchange.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "tailscale", name: "Tailscale", enabled: false, domains: [
+                    "login.tailscale.com", "controlplane.tailscale.com", "tailscale.com", "pkgs.tailscale.com"
+                ], ipRanges: []),
+                
+                // AI Services
+                ServiceEntry(id: "openai", name: "OpenAI / ChatGPT", enabled: false, domains: [
+                    "openai.com", "chat.openai.com", "api.openai.com", "platform.openai.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "anthropic", name: "Anthropic / Claude", enabled: false, domains: [
+                    "anthropic.com", "www.anthropic.com", "claude.ai", "api.anthropic.com"
+                ], ipRanges: []),
+                ServiceEntry(id: "perplexity", name: "Perplexity", enabled: false, domains: [
+                    "perplexity.ai", "www.perplexity.ai"
                 ], ipRanges: [])
             ]
         }
@@ -155,47 +294,73 @@ final class RouteManager: ObservableObject {
         log(.info, "Config saved")
     }
     
-    func updateNetworkStatus(_ path: NWPath) {
-        Task {
-            await checkVPNStatus()
+    // MARK: - Import/Export Config
+    
+    func exportConfig() -> URL? {
+        let exportData = ExportData(
+            version: "1.1",
+            exportDate: Date(),
+            config: config
+        )
+        
+        guard let data = try? JSONEncoder().encode(exportData) else {
+            log(.error, "Failed to encode config for export")
+            return nil
+        }
+        
+        let tempDir = FileManager.default.temporaryDirectory
+        let exportURL = tempDir.appendingPathComponent("VPNBypass-Config-\(formattedDate()).json")
+        
+        do {
+            try data.write(to: exportURL)
+            log(.success, "Config exported successfully")
+            return exportURL
+        } catch {
+            log(.error, "Failed to write export file: \(error.localizedDescription)")
+            return nil
         }
     }
     
-    func checkVPNStatus() async {
-        let wasVPNConnected = isVPNConnected
-        let oldInterface = vpnInterface
-        
-        // Use scutil to detect VPN interfaces with IPv4 addresses
-        let (connected, interface) = await detectVPNInterface()
-        
-        isVPNConnected = connected
-        vpnInterface = connected ? interface : nil
-        
-        // Detect local gateway
-        localGateway = await detectLocalGateway()
-        
-        // Auto-apply routes when VPN connects
-        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN {
-            log(.success, "VPN connected via \(interface ?? "unknown"), applying routes...")
-            await applyAllRoutes()
-        }
-        
-        // Log disconnection
-        if !isVPNConnected && wasVPNConnected {
-            log(.warning, "VPN disconnected (was: \(oldInterface ?? "unknown"))")
-            // Clear routes when VPN disconnects
-            activeRoutes.removeAll()
+    func importConfig(from url: URL) -> Bool {
+        do {
+            let data = try Data(contentsOf: url)
+            let exportData = try JSONDecoder().decode(ExportData.self, from: data)
+            
+            // Merge or replace config
+            config = exportData.config
+            saveConfig()
+            
+            log(.success, "Config imported: \(exportData.config.domains.count) domains, \(exportData.config.services.filter { $0.enabled }.count) services enabled")
+            return true
+        } catch {
+            log(.error, "Failed to import config: \(error.localizedDescription)")
+            return false
         }
     }
     
-    private func detectVPNInterface() async -> (connected: Bool, interface: String?) {
-        // Use ifconfig to detect VPN - more reliable for checking UP flag and IP ranges
-        return await detectVPNViaIfconfig()
+    struct ExportData: Codable {
+        let version: String
+        let exportDate: Date
+        let config: Config
     }
     
-    private func detectVPNViaIfconfig() async -> (connected: Bool, interface: String?) {
+    private func formattedDate() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd-HHmm"
+        return formatter.string(from: Date())
+    }
+    
+    // MARK: - Process Helper
+    
+    /// Runs a process with a timeout to prevent UI freezing
+    private nonisolated func runProcessWithTimeout(
+        _ executablePath: String,
+        arguments: [String] = [],
+        timeout: TimeInterval = 5.0
+    ) -> (output: String, exitCode: Int32)? {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/sbin/ifconfig")
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
         
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -203,59 +368,227 @@ final class RouteManager: ObservableObject {
         
         do {
             try process.run()
-            process.waitUntilExit()
-            
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            
-            // Parse ifconfig output looking for utun interfaces with inet addresses
-            var currentInterface: String?
-            var hasValidIP = false
-            var hasUpFlag = false
-            
-            for line in output.components(separatedBy: "\n") {
-                // New interface starts with interface name (no leading whitespace)
-                if !line.hasPrefix("\t") && !line.hasPrefix(" ") && line.contains(":") {
-                    // Check if previous interface was a corporate VPN
-                    if let iface = currentInterface, hasValidIP, hasUpFlag,
-                       (iface.hasPrefix("utun") || iface.hasPrefix("ipsec") || 
-                        iface.hasPrefix("ppp") || iface.hasPrefix("gpd")) {
-                        return (true, iface)
+        } catch {
+            return nil
+        }
+        
+        // Wait with timeout
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        
+        if process.isRunning {
+            process.terminate()
+            return nil // Timeout
+        }
+        
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: data, encoding: .utf8) ?? ""
+        return (output, process.terminationStatus)
+    }
+    
+    // MARK: - Network Status
+    
+    func updateNetworkStatus(_ path: NWPath) {
+        Task {
+            await checkVPNStatus()
+        }
+    }
+    
+    func detectCurrentNetwork() {
+        // Get current WiFi SSID using helper with timeout
+        guard let result = runProcessWithTimeout(
+            "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport",
+            arguments: ["-I"],
+            timeout: 3.0
+        ) else {
+            return
+        }
+        
+        let output = result.output
+        
+        for line in output.components(separatedBy: "\n") {
+            if line.contains("SSID:") && !line.contains("BSSID") {
+                let ssid = line.components(separatedBy: ":").dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
+                if ssid != currentNetworkSSID {
+                    let oldSSID = currentNetworkSSID
+                    currentNetworkSSID = ssid
+                    if oldSSID != nil {
+                        log(.info, "Network changed: \(oldSSID ?? "none") → \(ssid)")
                     }
-                    // Start new interface
-                    currentInterface = line.components(separatedBy: ":").first
-                    hasValidIP = false
-                    // Check for UP flag in the flags line
-                    hasUpFlag = line.contains("<UP,") || line.contains(",UP,") || line.contains(",UP>")
                 }
-                
-                // Check for inet (IPv4) address - indicates active VPN
-                if line.contains("inet ") && !line.contains("inet6") {
-                    let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    if trimmed.hasPrefix("inet ") {
-                        // Extract IP to verify it's a corporate VPN address
-                        let parts = trimmed.components(separatedBy: " ")
-                        if parts.count >= 2 {
-                            let ip = parts[1]
-                            // Check if it's a corporate VPN IP (10.x.x.x typically)
-                            // Exclude: localhost, link-local, Tailscale CGNAT (100.64.0.0/10)
-                            if isCorporateVPNIP(ip) {
-                                hasValidIP = true
-                            }
+                return
+            }
+        }
+        
+        // No WiFi connected
+        if currentNetworkSSID != nil {
+            currentNetworkSSID = nil
+            log(.info, "WiFi disconnected")
+        }
+    }
+    
+    func checkVPNStatus() async {
+        let wasVPNConnected = isVPNConnected
+        let oldInterface = vpnInterface
+        
+        // Detect current network first
+        detectCurrentNetwork()
+        
+        // Use scutil to detect VPN interfaces with IPv4 addresses
+        let (connected, interface, detectedType) = await detectVPNInterface()
+        
+        isVPNConnected = connected
+        vpnInterface = connected ? interface : nil
+        vpnType = connected ? detectedType : nil
+        
+        // Detect local gateway
+        localGateway = await detectLocalGateway()
+        
+        // Auto-apply routes when VPN connects
+        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN {
+            log(.success, "VPN connected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type")), applying routes...")
+            NotificationManager.shared.notifyVPNConnected(interface: interface ?? "unknown")
+            await applyAllRoutes()
+        }
+        
+        // Log disconnection
+        if !isVPNConnected && wasVPNConnected {
+            log(.warning, "VPN disconnected (was: \(oldInterface ?? "unknown"))")
+            NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface)
+            // Clear routes when VPN disconnects
+            activeRoutes.removeAll()
+            routeVerificationResults.removeAll()
+        }
+    }
+    
+    private func detectVPNInterface() async -> (connected: Bool, interface: String?, type: VPNType?) {
+        // First check for specific VPN processes to help identify type
+        let runningVPNType = detectRunningVPNProcess()
+        
+        // Use ifconfig to detect VPN
+        return await detectVPNViaIfconfig(hintType: runningVPNType)
+    }
+    
+    /// Detect which VPN client process is running
+    private func detectRunningVPNProcess() -> VPNType? {
+        guard let result = runProcessWithTimeout("/bin/ps", arguments: ["-eo", "comm"], timeout: 3.0) else {
+            return nil
+        }
+        
+        let output = result.output.lowercased()
+        
+        // Check for known VPN processes
+        if output.contains("globalprotect") || output.contains("pangpa") || output.contains("pangps") {
+            return .globalProtect
+        }
+        if output.contains("vpnagent") || output.contains("cisco") || output.contains("anyconnect") {
+            return .ciscoAnyConnect
+        }
+        if output.contains("openvpn") {
+            return .openVPN
+        }
+        if output.contains("wireguard") || output.contains("wg-go") {
+            return .wireGuard
+        }
+        if output.contains("forticlient") || output.contains("fortitray") || output.contains("fctservctl") {
+            return .fortinet
+        }
+        if output.contains("zscaler") || output.contains("zstunnel") || output.contains("zsatunnel") {
+            return .zscaler
+        }
+        if output.contains("cloudflare") || output.contains("warp-cli") || output.contains("warp-svc") {
+            return .cloudflareWARP
+        }
+        if output.contains("pulsesecure") || output.contains("dsaccessservice") || output.contains("pulseuisvc") {
+            return .pulseSecure
+        }
+        // Tailscale is handled separately via exit node detection
+        
+        return nil
+    }
+    
+    private func detectVPNViaIfconfig(hintType: VPNType?) async -> (connected: Bool, interface: String?, type: VPNType?) {
+        guard let result = runProcessWithTimeout("/sbin/ifconfig", timeout: 3.0) else {
+            return (false, nil, nil)
+        }
+        
+        let output = result.output
+        
+        // Parse ifconfig output looking for VPN interfaces with inet addresses
+        var currentInterface: String?
+        var hasValidIP = false
+        var hasUpFlag = false
+        
+        for line in output.components(separatedBy: "\n") {
+            // New interface starts with interface name (no leading whitespace)
+            if !line.hasPrefix("\t") && !line.hasPrefix(" ") && line.contains(":") {
+                // Check if previous interface was a VPN
+                if let iface = currentInterface, hasValidIP, hasUpFlag,
+                   isVPNInterface(iface) {
+                    let vpnType = hintType ?? detectVPNTypeFromInterface(iface)
+                    return (true, iface, vpnType)
+                }
+                // Start new interface
+                currentInterface = line.components(separatedBy: ":").first
+                hasValidIP = false
+                // Check for UP flag in the flags line
+                hasUpFlag = line.contains("<UP,") || line.contains(",UP,") || line.contains(",UP>")
+            }
+            
+            // Check for inet (IPv4) address - indicates active VPN
+            if line.contains("inet ") && !line.contains("inet6") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("inet ") {
+                    // Extract IP to verify it's a corporate VPN address
+                    let parts = trimmed.components(separatedBy: " ")
+                    if parts.count >= 2 {
+                        let ip = parts[1]
+                        if isCorporateVPNIP(ip) {
+                            hasValidIP = true
                         }
                     }
                 }
             }
-            
-            // Check last interface
-            if let iface = currentInterface, hasValidIP, hasUpFlag,
-               (iface.hasPrefix("utun") || iface.hasPrefix("ipsec") || 
-                iface.hasPrefix("ppp") || iface.hasPrefix("gpd")) {
-                return (true, iface)
-            }
-        } catch {}
+        }
         
-        return (false, nil)
+        // Check last interface
+        if let iface = currentInterface, hasValidIP, hasUpFlag,
+           isVPNInterface(iface) {
+            let vpnType = hintType ?? detectVPNTypeFromInterface(iface)
+            return (true, iface, vpnType)
+        }
+        
+        return (false, nil, nil)
+    }
+    
+    /// Check if interface name suggests it's a VPN interface
+    private func isVPNInterface(_ iface: String) -> Bool {
+        // Common VPN interface prefixes
+        let vpnPrefixes = [
+            "utun",      // Universal TUN - used by most VPNs on macOS
+            "ipsec",     // IPSec VPN
+            "ppp",       // Point-to-Point Protocol
+            "gpd",       // GlobalProtect specific
+            "tun",       // Generic TUN
+            "tap",       // TAP interface
+            "feth",      // Fortinet ethernet
+            "zt"         // ZeroTier (sometimes used with VPNs)
+        ]
+        
+        return vpnPrefixes.contains { iface.hasPrefix($0) }
+    }
+    
+    /// Try to detect VPN type from interface characteristics
+    private func detectVPNTypeFromInterface(_ iface: String) -> VPNType {
+        // GlobalProtect typically uses gpd0 or specific utun
+        if iface.hasPrefix("gpd") {
+            return .globalProtect
+        }
+        
+        // Generic fallback
+        return .unknown
     }
     
     /// Check if IP is likely a corporate VPN (not Tailscale mesh, not localhost, etc.)
@@ -279,6 +612,15 @@ final class RouteManager: ObservableObject {
             return isTailscaleExitNodeActive()
         }
         
+        // Cloudflare WARP range (check for WARP-specific IPs)
+        // WARP uses 100.96.0.0/12 range
+        if first == 100 && second >= 96 && second <= 111 {
+            return true // WARP is active
+        }
+        
+        // Zscaler typically uses 100.64.x.x or custom ranges
+        // Already covered by CGNAT check above
+        
         // Corporate VPNs typically use private ranges
         // 10.0.0.0/8 - Most corporate VPNs use this
         if first == 10 { return true }
@@ -293,67 +635,90 @@ final class RouteManager: ObservableObject {
     }
     
     /// Check if Tailscale is using an exit node (routing all traffic through Tailscale)
-    /// When exit node is active, Tailscale acts as a full VPN
-    /// When exit node is inactive, Tailscale is just mesh networking (not VPN)
     private func isTailscaleExitNodeActive() -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/local/bin/tailscale")
-        process.arguments = ["status", "--json"]
+        // Try multiple paths for tailscale CLI
+        let tailscalePaths = [
+            "/usr/local/bin/tailscale",
+            "/opt/homebrew/bin/tailscale",
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+        ]
         
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        
-        do {
-            try process.run()
-            process.waitUntilExit()
-            
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            
-            // Check for "ExitNode": true at the top level (Self status)
-            // This indicates we are using an exit node to route all traffic
-            if let jsonData = output.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-               let selfStatus = json["Self"] as? [String: Any],
-               let exitNode = selfStatus["ExitNode"] as? Bool {
-                return exitNode
-            }
-            
-            // Alternative: check if ExitNodeStatus exists and is active
-            if output.contains("\"ExitNode\": true") || output.contains("\"ExitNode\":true") {
-                // Double-check it's for Self, not a peer
-                let lines = output.components(separatedBy: "\n")
-                var inSelfSection = false
-                for line in lines {
-                    if line.contains("\"Self\":") {
-                        inSelfSection = true
-                    } else if inSelfSection && line.contains("\"ExitNode\": true") {
+        for path in tailscalePaths {
+            if FileManager.default.fileExists(atPath: path) {
+                guard let result = runProcessWithTimeout(path, arguments: ["status", "--json"], timeout: 3.0) else {
+                    continue
+                }
+                
+                let output = result.output
+                if let jsonData = output.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                    // Check ExitNodeStatus - if present and has IP, we're using exit node
+                    if let exitNodeStatus = json["ExitNodeStatus"] as? [String: Any],
+                       exitNodeStatus["Online"] as? Bool == true {
                         return true
-                    } else if inSelfSection && line.contains("}") && !line.contains("{") {
-                        inSelfSection = false
                     }
                 }
             }
-        } catch {
-            // Tailscale CLI not available, assume not using exit node
         }
         
         return false
     }
     
+    /// Called from startup - no notification
     func detectAndApplyRoutes() {
         Task {
-            // First check VPN status
-            await checkVPNStatus()
-            
-            localGateway = await detectLocalGateway()
-            if localGateway != nil {
-                await applyAllRoutes()
-            } else {
-                log(.error, "Could not detect local gateway")
-            }
+            await detectAndApplyRoutesAsync(sendNotification: false)
         }
+    }
+    
+    /// Called from Refresh button - sends notification
+    func refreshRoutes() {
+        Task {
+            await detectAndApplyRoutesAsync(sendNotification: true)
+        }
+    }
+    
+    func detectAndApplyRoutesAsync(sendNotification: Bool = false) async {
+        isLoading = true
+        log(.info, "Starting VPN detection and route application...")
+        
+        // Detect user's DNS server (respects pre-VPN DNS configuration)
+        detectUserDNSServer()
+        
+        // Detect current network
+        detectCurrentNetwork()
+        
+        // Detect VPN interface
+        let (connected, interface, detectedType) = await detectVPNInterface()
+        isVPNConnected = connected
+        vpnInterface = connected ? interface : nil
+        vpnType = connected ? detectedType : nil
+        
+        log(.info, "VPN detection result: connected=\(connected), interface=\(interface ?? "none")")
+        
+        // Detect local gateway
+        localGateway = await detectLocalGateway()
+        log(.info, "Gateway detected: \(localGateway ?? "none")")
+        
+        // Check helper status
+        log(.info, "Helper installed: \(HelperManager.shared.isHelperInstalled)")
+        
+        // Apply routes if VPN is connected
+        if isVPNConnected && localGateway != nil {
+            log(.success, "VPN detected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown")), applying routes...")
+            if sendNotification {
+                await applyAllRoutesWithNotification()
+            } else {
+                await applyAllRoutes()
+            }
+        } else if !isVPNConnected {
+            log(.info, "No VPN connection detected")
+        } else if localGateway == nil {
+            log(.error, "Could not detect local gateway")
+        }
+        
+        isLoading = false
+        log(.info, "Startup complete. Routes: \(activeRoutes.count)")
     }
     
     func refreshStatus() {
@@ -362,18 +727,31 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Apply all routes (internal, no notification)
     func applyAllRoutes() async {
+        await applyAllRoutesInternal(sendNotification: false)
+    }
+    
+    /// Apply all routes and send notification (called from Refresh button)
+    func applyAllRoutesWithNotification() async {
+        await applyAllRoutesInternal(sendNotification: true)
+    }
+    
+    private func applyAllRoutesInternal(sendNotification: Bool) async {
         guard let gateway = localGateway else {
             log(.error, "No local gateway available")
             return
         }
         
         var newRoutes: [ActiveRoute] = []
+        var failedCount = 0
         
         // Apply domain routes
         for domain in config.domains where domain.enabled {
             if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
                 newRoutes.append(contentsOf: routes)
+            } else {
+                failedCount += 1
             }
         }
         
@@ -406,13 +784,24 @@ final class RouteManager: ObservableObject {
         }
         
         log(.success, "Applied \(newRoutes.count) routes")
+        
+        // Only send notification when explicitly requested (Refresh button)
+        if sendNotification && newRoutes.count > 0 {
+            NotificationManager.shared.notifyRoutesApplied(count: newRoutes.count, failedCount: failedCount)
+        }
+        
+        // Verify routes if enabled
+        if config.verifyRoutesAfterApply {
+            await verifyRoutes()
+        }
     }
     
     func removeAllRoutes() async {
         for route in activeRoutes {
-            await removeRoute(route.destination)
+            _ = await removeRoute(route.destination)
         }
         activeRoutes.removeAll()
+        routeVerificationResults.removeAll()
         lastUpdate = Date()
         
         if config.manageHostsFile {
@@ -420,6 +809,117 @@ final class RouteManager: ObservableObject {
         }
         
         log(.info, "All routes removed")
+    }
+    
+    // MARK: - Auto DNS Refresh
+    
+    /// Start or restart the DNS refresh timer based on config
+    func startDNSRefreshTimer() {
+        stopDNSRefreshTimer()
+        
+        guard config.autoDNSRefresh else {
+            log(.info, "Auto DNS refresh disabled")
+            nextDNSRefresh = nil
+            return
+        }
+        
+        let interval = config.dnsRefreshInterval
+        log(.info, "Auto DNS refresh enabled: every \(Int(interval / 60)) minutes")
+        
+        nextDNSRefresh = Date().addingTimeInterval(interval)
+        
+        dnsRefreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.performDNSRefresh()
+            }
+        }
+    }
+    
+    /// Stop the DNS refresh timer
+    func stopDNSRefreshTimer() {
+        dnsRefreshTimer?.invalidate()
+        dnsRefreshTimer = nil
+    }
+    
+    /// Perform DNS refresh - re-resolve all domains and update routes
+    private func performDNSRefresh() async {
+        guard isVPNConnected, let gateway = localGateway else {
+            log(.info, "DNS refresh skipped: VPN not connected")
+            nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
+            return
+        }
+        
+        log(.info, "Auto DNS refresh: re-resolving domains...")
+        isApplyingRoutes = true
+        
+        var updatedCount = 0
+        var newIPs: Set<String> = []
+        let oldIPs = Set(activeRoutes.map { $0.destination })
+        
+        // Collect all domains to refresh
+        var domainsToResolve: [(domain: String, source: String)] = []
+        
+        for domain in config.domains where domain.enabled {
+            domainsToResolve.append((domain.domain, domain.domain))
+        }
+        
+        for service in config.services where service.enabled {
+            for domain in service.domains {
+                domainsToResolve.append((domain, service.name))
+            }
+        }
+        
+        // Re-resolve and check for changes
+        for (domain, source) in domainsToResolve {
+            if let ips = await resolveIPs(for: domain) {
+                for ip in ips {
+                    newIPs.insert(ip)
+                    if !oldIPs.contains(ip) {
+                        // New IP found - add route
+                        if await addRoute(ip, gateway: gateway) {
+                            activeRoutes.append(ActiveRoute(
+                                destination: ip,
+                                gateway: gateway,
+                                source: source,
+                                timestamp: Date()
+                            ))
+                            updatedCount += 1
+                            log(.success, "DNS refresh: added new IP \(ip) for \(domain)")
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Also add IP ranges (these don't change via DNS but ensure they're present)
+        for service in config.services where service.enabled {
+            for range in service.ipRanges {
+                newIPs.insert(range)
+            }
+        }
+        
+        // Always update hosts file if enabled - keeps IPs fresh even if routes didn't change
+        if config.manageHostsFile {
+            await updateHostsFile()
+            log(.info, "DNS refresh: hosts file updated")
+        }
+        
+        lastDNSRefresh = Date()
+        nextDNSRefresh = Date().addingTimeInterval(config.dnsRefreshInterval)
+        isApplyingRoutes = false
+        
+        if updatedCount > 0 {
+            log(.success, "DNS refresh complete: \(updatedCount) new routes added")
+        } else {
+            log(.info, "DNS refresh complete: routes up to date")
+        }
+    }
+    
+    /// Force an immediate DNS refresh
+    func forceDNSRefresh() {
+        Task {
+            await performDNSRefresh()
+        }
     }
     
     func addDomain(_ domain: String) {
@@ -436,20 +936,120 @@ final class RouteManager: ObservableObject {
         
         // Apply route immediately if VPN connected
         if isVPNConnected, let gateway = localGateway {
+            isApplyingRoutes = true
             Task {
-                _ = await applyRoutesForDomain(cleaned, gateway: gateway)
+                if let routes = await applyRoutesForDomain(cleaned, gateway: gateway) {
+                    await MainActor.run {
+                        activeRoutes.append(contentsOf: routes)
+                    }
+                }
+                await MainActor.run {
+                    isApplyingRoutes = false
+                }
             }
         }
     }
     
     func removeDomain(_ domain: DomainEntry) {
-        config.domains.removeAll { $0.id == domain.id }
+        isApplyingRoutes = true
+        
+        // Actually remove system routes for this domain
+        Task {
+            await removeRoutesForSource(domain.domain)
+            
+            await MainActor.run {
+                config.domains.removeAll { $0.id == domain.id }
+                saveConfig()
+                log(.info, "Removed domain: \(domain.domain)")
+                isApplyingRoutes = false
+            }
+        }
+    }
+    
+    /// Toggle a domain's enabled state and update routes
+    func toggleDomain(_ domainId: UUID) {
+        guard let index = config.domains.firstIndex(where: { $0.id == domainId }) else { return }
+        config.domains[index].enabled.toggle()
         saveConfig()
         
-        // Remove active routes for this domain
-        activeRoutes.removeAll { $0.source == domain.domain }
+        let domain = config.domains[index]
+        log(.info, "\(domain.domain) \(domain.enabled ? "enabled" : "disabled")")
         
-        log(.info, "Removed domain: \(domain.domain)")
+        // Apply or remove routes
+        if isVPNConnected, let gateway = localGateway {
+            isApplyingRoutes = true
+            Task {
+                if domain.enabled {
+                    // Domain was just enabled - add its routes
+                    if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
+                        await MainActor.run {
+                            activeRoutes.append(contentsOf: routes)
+                        }
+                    }
+                } else {
+                    // Domain was just disabled - remove its routes
+                    await removeRoutesForSource(domain.domain)
+                }
+                await MainActor.run {
+                    isApplyingRoutes = false
+                }
+            }
+        }
+    }
+    
+    /// Bulk enable/disable all domains with loading state (incremental)
+    func setAllDomainsEnabled(_ enabled: Bool) {
+        isApplyingRoutes = true
+        
+        // Get domains that need to change
+        let domainsToChange = config.domains.filter { $0.enabled != enabled }
+        
+        // Update config
+        for i in config.domains.indices {
+            config.domains[i].enabled = enabled
+        }
+        saveConfig()
+        
+        log(.info, enabled ? "Enabled all domains" : "Disabled all domains")
+        
+        // Incrementally apply/remove routes for changed domains only
+        if isVPNConnected, let gateway = localGateway {
+            Task {
+                for domain in domainsToChange {
+                    if enabled {
+                        if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
+                            await MainActor.run {
+                                activeRoutes.append(contentsOf: routes)
+                            }
+                        }
+                    } else {
+                        await removeRoutesForSource(domain.domain)
+                    }
+                }
+                await MainActor.run {
+                    isApplyingRoutes = false
+                }
+            }
+        } else {
+            isApplyingRoutes = false
+        }
+    }
+    
+    /// Remove all routes matching a source (domain name or service name)
+    private func removeRoutesForSource(_ source: String) async {
+        let routesToRemove = activeRoutes.filter { $0.source == source }
+        
+        for route in routesToRemove {
+            _ = await removeRoute(route.destination)
+        }
+        
+        await MainActor.run {
+            activeRoutes.removeAll { $0.source == source }
+        }
+        
+        if !routesToRemove.isEmpty {
+            log(.info, "Removed \(routesToRemove.count) routes for \(source)")
+        }
     }
     
     func toggleService(_ serviceId: String) {
@@ -460,19 +1060,170 @@ final class RouteManager: ObservableObject {
         let service = config.services[index]
         log(.info, "\(service.name) \(service.enabled ? "enabled" : "disabled")")
         
-        // Apply or remove routes
-        if isVPNConnected {
+        // Incremental route apply/remove
+        if isVPNConnected, let gateway = localGateway {
+            isApplyingRoutes = true
             Task {
-                await applyAllRoutes()
+                if service.enabled {
+                    // Service was just enabled - add its routes
+                    await applyRoutesForService(service, gateway: gateway)
+                } else {
+                    // Service was just disabled - remove its routes
+                    await removeRoutesForSource(service.name)
+                }
+                await MainActor.run {
+                    isApplyingRoutes = false
+                }
             }
         }
+    }
+    
+    /// Apply routes for a single service (incremental add)
+    private func applyRoutesForService(_ service: ServiceEntry, gateway: String) async {
+        var newRoutes: [ActiveRoute] = []
+        
+        // Apply domain routes
+        for domain in service.domains {
+            if let routes = await applyRoutesForDomain(domain, gateway: gateway, source: service.name) {
+                newRoutes.append(contentsOf: routes)
+            }
+        }
+        
+        // Apply IP ranges
+        for range in service.ipRanges {
+            if await applyRouteForRange(range, gateway: gateway) {
+                newRoutes.append(ActiveRoute(
+                    destination: range,
+                    gateway: gateway,
+                    source: service.name,
+                    timestamp: Date()
+                ))
+            }
+        }
+        
+        await MainActor.run {
+            activeRoutes.append(contentsOf: newRoutes)
+        }
+        
+        if !newRoutes.isEmpty {
+            log(.success, "Added \(newRoutes.count) routes for \(service.name)")
+        }
+    }
+    
+    /// Bulk enable/disable all services with loading state (incremental)
+    func setAllServicesEnabled(_ enabled: Bool) {
+        isApplyingRoutes = true
+        
+        // Get services that need to change
+        let servicesToChange = config.services.filter { $0.enabled != enabled }
+        
+        // Update config
+        for i in config.services.indices {
+            config.services[i].enabled = enabled
+        }
+        saveConfig()
+        
+        log(.info, enabled ? "Enabled all services" : "Disabled all services")
+        
+        // Incrementally apply/remove routes for changed services only
+        if isVPNConnected, let gateway = localGateway {
+            Task {
+                for service in servicesToChange {
+                    if enabled {
+                        await applyRoutesForService(service, gateway: gateway)
+                    } else {
+                        await removeRoutesForSource(service.name)
+                    }
+                }
+                await MainActor.run {
+                    isApplyingRoutes = false
+                }
+            }
+        } else {
+            isApplyingRoutes = false
+        }
+    }
+    
+    // MARK: - Route Verification
+    
+    func verifyRoutes() async {
+        log(.info, "Verifying routes...")
+        routeVerificationResults.removeAll()
+        
+        // Get unique destinations to verify
+        var destinationsToVerify: Set<String> = []
+        for route in activeRoutes {
+            // Only verify actual IPs, not CIDR ranges
+            if isValidIP(route.destination) {
+                destinationsToVerify.insert(route.destination)
+            }
+        }
+        
+        var failedCount = 0
+        
+        for destination in destinationsToVerify.prefix(10) { // Limit to 10 to avoid too many pings
+            let result = await verifyRoute(destination)
+            routeVerificationResults[destination] = result
+            
+            if !result.isReachable {
+                failedCount += 1
+                NotificationManager.shared.notifyRouteVerificationFailed(
+                    route: destination,
+                    reason: result.error ?? "Unreachable"
+                )
+            }
+        }
+        
+        if failedCount > 0 {
+            log(.warning, "Route verification: \(failedCount) of \(destinationsToVerify.count) routes failed")
+        } else if !destinationsToVerify.isEmpty {
+            log(.success, "Route verification: All \(min(destinationsToVerify.count, 10)) tested routes are reachable")
+        }
+    }
+    
+    func verifyRoute(_ destination: String) async -> RouteVerificationResult {
+        let startTime = Date()
+        
+        // Use helper with timeout - ping itself has 3s timeout, we add 1s buffer
+        guard let result = runProcessWithTimeout("/sbin/ping", arguments: ["-c", "1", "-t", "3", destination], timeout: 4.0) else {
+            return RouteVerificationResult(
+                destination: destination,
+                isReachable: false,
+                latency: nil,
+                timestamp: Date(),
+                error: "Ping timed out"
+            )
+        }
+        
+        let elapsed = Date().timeIntervalSince(startTime) * 1000 // Convert to ms
+        let output = result.output
+        
+        // Parse ping output for round-trip time
+        var latency: Double? = nil
+        if let timeRange = output.range(of: "time=") {
+            let timeStr = output[timeRange.upperBound...]
+            if let endRange = timeStr.range(of: " ms") {
+                let msStr = String(timeStr[..<endRange.lowerBound])
+                latency = Double(msStr)
+            }
+        }
+        
+        let isReachable = result.exitCode == 0
+        
+        return RouteVerificationResult(
+            destination: destination,
+            isReachable: isReachable,
+            latency: latency ?? (isReachable ? elapsed : nil),
+            timestamp: Date(),
+            error: isReachable ? nil : "Host unreachable"
+        )
     }
     
     // MARK: - Private Methods
     
     private func detectLocalGateway() async -> String? {
         // Try common network services
-        let services = ["Wi-Fi", "Ethernet", "USB 10/100/1000 LAN", "Thunderbolt Ethernet"]
+        let services = ["Wi-Fi", "Ethernet", "USB 10/100/1000 LAN", "Thunderbolt Ethernet", "USB-C LAN"]
         
         for service in services {
             if let gateway = await getGatewayForService(service) {
@@ -485,59 +1236,96 @@ final class RouteManager: ObservableObject {
     }
     
     private func getGatewayForService(_ service: String) async -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
-        process.arguments = ["-getinfo", service]
+        guard let result = runProcessWithTimeout("/usr/sbin/networksetup", arguments: ["-getinfo", service], timeout: 3.0) else {
+            return nil
+        }
         
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        
-        do {
-            try process.run()
-            process.waitUntilExit()
-            
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            
-            for line in output.components(separatedBy: "\n") {
-                if line.hasPrefix("Router:") {
-                    let gateway = line.replacingOccurrences(of: "Router:", with: "").trimmingCharacters(in: .whitespaces)
-                    if gateway != "none" && !gateway.isEmpty {
-                        return gateway
-                    }
+        for line in result.output.components(separatedBy: "\n") {
+            if line.hasPrefix("Router:") {
+                let gateway = line.replacingOccurrences(of: "Router:", with: "").trimmingCharacters(in: .whitespaces)
+                if gateway != "none" && !gateway.isEmpty {
+                    return gateway
                 }
             }
-        } catch {}
+        }
         
         return nil
     }
     
-    private func parseDefaultGateway() async -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/sbin/route")
-        process.arguments = ["-n", "get", "default"]
+    /// Detect user's real DNS server (from primary non-VPN interface)
+    /// This respects whatever DNS the user had configured before VPN connected
+    private func detectUserDNSServer() {
+        guard let result = runProcessWithTimeout("/usr/sbin/scutil", arguments: ["--dns"], timeout: 3.0) else {
+            log(.warning, "Could not detect DNS configuration")
+            return
+        }
         
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+        // Parse scutil --dns output to find DNS servers on non-VPN interfaces
+        // VPN interfaces are typically utun*, ppp*, gpd*, ipsec*
+        let vpnInterfacePrefixes = ["utun", "ppp", "gpd", "ipsec", "tun", "tap"]
         
-        do {
-            try process.run()
-            process.waitUntilExit()
+        var currentResolver: (nameserver: String?, interface: String?) = (nil, nil)
+        var foundDNS: String? = nil
+        
+        for line in result.output.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
             
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
+            // Track interface for current resolver
+            if trimmed.hasPrefix("if_index") {
+                // Extract interface name: "if_index : 13 (en8)"
+                if let match = trimmed.range(of: "\\(([^)]+)\\)", options: .regularExpression) {
+                    let iface = String(trimmed[match]).dropFirst().dropLast()
+                    currentResolver.interface = String(iface)
+                }
+            }
             
-            for line in output.components(separatedBy: "\n") {
-                if line.contains("gateway:") {
-                    let parts = line.components(separatedBy: ":")
-                    if parts.count >= 2 {
-                        return parts[1].trimmingCharacters(in: .whitespaces)
+            // Track nameserver
+            if trimmed.hasPrefix("nameserver[0]") {
+                // Extract IP: "nameserver[0] : 192.168.10.102"
+                let parts = trimmed.components(separatedBy: ":")
+                if parts.count >= 2 {
+                    let dns = parts[1].trimmingCharacters(in: .whitespaces)
+                    if isValidIP(dns) {
+                        currentResolver.nameserver = dns
                     }
                 }
             }
-        } catch {}
+            
+            // End of resolver block - check if this is a non-VPN interface
+            if trimmed.isEmpty || trimmed.hasPrefix("resolver #") {
+                if let dns = currentResolver.nameserver,
+                   let iface = currentResolver.interface {
+                    // Check if this is NOT a VPN interface
+                    let isVPNInterface = vpnInterfacePrefixes.contains { iface.hasPrefix($0) }
+                    if !isVPNInterface && foundDNS == nil {
+                        foundDNS = dns
+                    }
+                }
+                currentResolver = (nil, nil)
+            }
+        }
+        
+        if let dns = foundDNS {
+            detectedDNSServer = dns
+            log(.info, "Detected user's DNS server: \(dns)")
+        } else {
+            log(.warning, "Could not detect user's DNS server, will use system default")
+        }
+    }
+    
+    private func parseDefaultGateway() async -> String? {
+        guard let result = runProcessWithTimeout("/sbin/route", arguments: ["-n", "get", "default"], timeout: 3.0) else {
+            return nil
+        }
+        
+        for line in result.output.components(separatedBy: "\n") {
+            if line.contains("gateway:") {
+                let parts = line.components(separatedBy: ":")
+                if parts.count >= 2 {
+                    return parts[1].trimmingCharacters(in: .whitespaces)
+                }
+            }
+        }
         
         return nil
     }
@@ -570,70 +1358,58 @@ final class RouteManager: ObservableObject {
     }
     
     private func resolveIPs(for domain: String) async -> [String]? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/dig")
-        process.arguments = ["+short", domain]
+        // Use user's detected DNS server if available, otherwise system default
+        var args = ["+short", domain]
+        if let dnsServer = detectedDNSServer {
+            args = ["@\(dnsServer)", "+short", domain]
+        }
         
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        
-        do {
-            try process.run()
-            process.waitUntilExit()
-            
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            
-            let ips = output.components(separatedBy: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { isValidIP($0) }
-            
-            return ips.isEmpty ? nil : ips
-        } catch {
+        guard let result = runProcessWithTimeout("/usr/bin/dig", arguments: args, timeout: 5.0) else {
             return nil
         }
+        
+        let ips = result.output.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { isValidIP($0) }
+        
+        return ips.isEmpty ? nil : ips
     }
     
     private func addRoute(_ destination: String, gateway: String, isNetwork: Bool = false) async -> Bool {
+        // Use privileged helper if installed
+        if HelperManager.shared.isHelperInstalled {
+            let result = await HelperManager.shared.addRoute(destination: destination, gateway: gateway, isNetwork: isNetwork)
+            if !result.success {
+                log(.warning, "Helper route add failed: \(result.error ?? "unknown")")
+            }
+            return result.success
+        }
+        
+        // Fallback: direct command (may require sudo)
         // First try to delete existing route
         _ = await removeRoute(destination)
         
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/sbin/route")
+        let args = isNetwork 
+            ? ["-n", "add", "-net", destination, gateway]
+            : ["-n", "add", "-host", destination, gateway]
         
-        if isNetwork {
-            process.arguments = ["-n", "add", "-net", destination, gateway]
-        } else {
-            process.arguments = ["-n", "add", "-host", destination, gateway]
-        }
-        
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
+        guard let result = runProcessWithTimeout("/sbin/route", arguments: args, timeout: 5.0) else {
             return false
         }
+        
+        return result.exitCode == 0
     }
     
     private func removeRoute(_ destination: String) async -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/sbin/route")
-        process.arguments = ["-n", "delete", destination]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return true
-        } catch {
-            return false
+        // Use privileged helper if installed
+        if HelperManager.shared.isHelperInstalled {
+            let result = await HelperManager.shared.removeRoute(destination: destination)
+            return result.success
         }
+        
+        // Fallback: direct command with timeout
+        _ = runProcessWithTimeout("/sbin/route", arguments: ["-n", "delete", destination], timeout: 3.0)
+        return true // Route delete can fail if route doesn't exist, that's ok
     }
     
     private func updateHostsFile() async {
@@ -663,6 +1439,16 @@ final class RouteManager: ObservableObject {
     }
     
     private func modifyHostsFile(entries: [(domain: String, ip: String)]) async {
+        // Use privileged helper if installed
+        if HelperManager.shared.isHelperInstalled {
+            let result = await HelperManager.shared.updateHostsFile(entries: entries)
+            if !result.success {
+                log(.error, "Helper hosts update failed: \(result.error ?? "unknown")")
+            }
+            return
+        }
+        
+        // Fallback: AppleScript with admin privileges (prompts each time)
         let marker = "# VPN-BYPASS-MANAGED"
         let hostsPath = "/etc/hosts"
         
@@ -743,12 +1529,26 @@ final class RouteManager: ObservableObject {
         return parts.allSatisfy { Int($0) != nil && Int($0)! >= 0 && Int($0)! <= 255 }
     }
     
-    private func log(_ level: LogEntry.LogLevel, _ message: String) {
+    func log(_ level: LogEntry.LogLevel, _ message: String) {
         let entry = LogEntry(timestamp: Date(), level: level, message: message)
         recentLogs.insert(entry, at: 0)
-        if recentLogs.count > 100 {
+        if recentLogs.count > 200 {
             recentLogs.removeLast()
         }
-        print("[\(level.rawValue)] \(message)")
+        
+        // Log to file
+        let logLine = "[\(ISO8601DateFormatter().string(from: Date()))] [\(level.rawValue)] \(message)\n"
+        let logPath = "/tmp/vpnbypass.log"
+        if let data = logLine.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logPath) {
+                if let handle = FileHandle(forWritingAtPath: logPath) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                try? data.write(to: URL(fileURLWithPath: logPath))
+            }
+        }
     }
 }
