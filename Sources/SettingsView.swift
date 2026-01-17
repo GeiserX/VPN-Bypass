@@ -1124,10 +1124,12 @@ struct SettingsCard<Content: View>: View {
                     .tracking(1)
             }
             
-            VStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
                 content
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity)
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 14)
