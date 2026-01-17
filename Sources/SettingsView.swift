@@ -44,7 +44,7 @@ struct SettingsView: View {
             
             // Tab bar with pill selector
             HStack(spacing: 4) {
-                ForEach(0..<4) { index in
+                ForEach(0..<5) { index in
                     TabItem(
                         index: index,
                         title: tabTitle(for: index),
@@ -80,6 +80,7 @@ struct SettingsView: View {
                 case 1: ServicesTab()
                 case 2: GeneralTab()
                 case 3: LogsTab()
+                case 4: InfoTab()
                 default: EmptyView()
                 }
             }
@@ -88,11 +89,11 @@ struct SettingsView: View {
     }
     
     private func tabTitle(for index: Int) -> String {
-        ["Domains", "Services", "General", "Logs"][index]
+        ["Domains", "Services", "General", "Logs", "Info"][index]
     }
     
     private func tabIcon(for index: Int) -> String {
-        ["globe", "square.grid.2x2.fill", "gearshape.fill", "list.bullet.rectangle"][index]
+        ["globe", "square.grid.2x2.fill", "gearshape.fill", "list.bullet.rectangle", "info.circle.fill"][index]
     }
 }
 
@@ -1416,6 +1417,222 @@ struct LogsTab: View {
         
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(logText, forType: .string)
+    }
+}
+
+// MARK: - Info Tab
+
+struct InfoTab: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            // App info header
+            appInfoSection
+            
+            // Author section
+            authorSection
+            
+            // Support section
+            supportSection
+            
+            // Links section
+            linksSection
+            
+            // License section
+            licenseSection
+            
+            Spacer()
+        }
+    }
+    
+    private var appInfoSection: some View {
+        VStack(alignment: .center, spacing: 12) {
+            // App icon
+            Image(systemName: "shield.checkered")
+                .font(.system(size: 48))
+                .foregroundStyle(
+                    LinearGradient(colors: [Color(hex: "10B981"), Color(hex: "34D399")], startPoint: .top, endPoint: .bottom)
+                )
+            
+            Text("VPN Bypass")
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+            
+            Text("v1.2.0")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Color(hex: "6B7280"))
+            
+            Text("Route specific traffic around your corporate VPN")
+                .font(.system(size: 13))
+                .foregroundColor(Color(hex: "9CA3AF"))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+    }
+    
+    private var authorSection: some View {
+        SettingsCard(title: "Author", icon: "person.fill", iconColor: Color(hex: "8B5CF6")) {
+            HStack(spacing: 16) {
+                // Avatar placeholder
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(colors: [Color(hex: "8B5CF6"), Color(hex: "A78BFA")], startPoint: .top, endPoint: .bottom)
+                        )
+                        .frame(width: 50, height: 50)
+                    
+                    Text("SF")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sergio Fernández")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Text("Sr. Cloud DevOps Engineer")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(hex: "9CA3AF"))
+                    
+                    Text("Murcia, Spain 🇪🇸")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(hex: "6B7280"))
+                }
+                
+                Spacer()
+            }
+        }
+    }
+    
+    private var supportSection: some View {
+        SettingsCard(title: "Support the Project", icon: "heart.fill", iconColor: Color(hex: "EF4444")) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("If you find VPN Bypass useful, consider supporting its development!")
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(hex: "9CA3AF"))
+                
+                HStack(spacing: 12) {
+                    // GitHub Sponsors button
+                    LinkButton(
+                        title: "GitHub Sponsors",
+                        icon: "heart.fill",
+                        color: Color(hex: "DB61A2"),
+                        url: "https://github.com/sponsors/GeiserX"
+                    )
+                    
+                    // Buy Me a Coffee
+                    LinkButton(
+                        title: "Buy Me a Coffee",
+                        icon: "cup.and.saucer.fill",
+                        color: Color(hex: "FFDD00"),
+                        url: "https://buymeacoffee.com/geiserx"
+                    )
+                }
+            }
+        }
+    }
+    
+    private var linksSection: some View {
+        SettingsCard(title: "Links", icon: "link", iconColor: Color(hex: "3B82F6")) {
+            VStack(spacing: 8) {
+                LinkRow(icon: "globe", title: "Blog", subtitle: "geiser.cloud", url: "https://geiser.cloud")
+                Divider().background(Color.white.opacity(0.1))
+                LinkRow(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub", subtitle: "github.com/GeiserX", url: "https://github.com/GeiserX")
+                Divider().background(Color.white.opacity(0.1))
+                LinkRow(icon: "doc.text", title: "Source Code", subtitle: "vpn-macos-bypass", url: "https://github.com/GeiserX/vpn-macos-bypass")
+                Divider().background(Color.white.opacity(0.1))
+                LinkRow(icon: "exclamationmark.bubble", title: "Report Issue", subtitle: "GitHub Issues", url: "https://github.com/GeiserX/vpn-macos-bypass/issues")
+            }
+        }
+    }
+    
+    private var licenseSection: some View {
+        SettingsCard(title: "License", icon: "doc.badge.gearshape", iconColor: Color(hex: "F59E0B")) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Source Available License")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white)
+                
+                Text("This software is source-available. You may view and study the code, but commercial use is restricted. See LICENSE file for details.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(hex: "9CA3AF"))
+                
+                Text("© 2026 Sergio Fernández (GeiserX)")
+                    .font(.system(size: 10))
+                    .foregroundColor(Color(hex: "6B7280"))
+            }
+        }
+    }
+}
+
+// MARK: - Info Tab Components
+
+struct LinkButton: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let url: String
+    
+    var body: some View {
+        Button {
+            if let url = URL(string: url) {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundColor(color == Color(hex: "FFDD00") ? .black : .white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(color)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct LinkRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let url: String
+    
+    var body: some View {
+        Button {
+            if let url = URL(string: url) {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(hex: "3B82F6"))
+                    .frame(width: 20)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white)
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundColor(Color(hex: "6B7280"))
+                }
+                
+                Spacer()
+                
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10))
+                    .foregroundColor(Color(hex: "6B7280"))
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

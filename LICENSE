@@ -1,17 +1,28 @@
-MIT License
+# VPN Bypass - Source Available License
 
-Copyright (c) 2026 GeiserX
+Copyright (c) 2026 Sergio Fernández (GeiserX)
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+## Terms
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+### Permitted Uses
+You are permitted to:
+- View, study, and learn from the source code
+- Use the software for personal, non-commercial purposes
+- Modify the software for personal use
+- Contribute improvements back to the project
 
+### Restrictions
+You are NOT permitted to:
+- Use the software or derivatives for commercial purposes
+- Sell, sublicense, or distribute the software for profit
+- Offer the software as a service (SaaS) without explicit written permission
+- Remove or alter this license notice
+
+### Commercial Use
+Commercial use of this software is exclusively reserved for Sergio Fernández (GeiserX).
+For commercial licensing inquiries, contact: sergio@geiser.cloud
+
+### No Warranty
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -19,3 +30,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+This is a source-available license, not open source. The source code is publicly
+viewable for transparency and educational purposes, but commercial rights are reserved.
