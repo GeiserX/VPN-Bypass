@@ -224,8 +224,10 @@ Please read the issue templates before submitting.
 If you find VPN Bypass useful, consider supporting its development:
 
 - ⭐ **Star this repo** - It helps others discover the project
-- ☕ [**Buy me a coffee**](https://buymeacoffee.com/geiser)
 - 💖 [**GitHub Sponsors**](https://github.com/sponsors/GeiserX)
+- ☕ [**Buy Me a Coffee**](https://buymeacoffee.com/geiser)
+- 🎨 [**Patreon**](https://patreon.com/geiser)
+- 🙏 [**Thanks.dev**](https://thanks.dev/u/gh/geiserx)
 
 ## License
 

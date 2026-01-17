@@ -31,15 +31,6 @@ struct SettingsView: View {
     
     private var headerView: some View {
         VStack(spacing: 0) {
-            // Title bar area
-            HStack {
-                BrandedAppName(fontSize: 13)
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-            
             // Tab bar with pill selector
             HStack(spacing: 4) {
                 ForEach(0..<5) { index in
@@ -54,6 +45,7 @@ struct SettingsView: View {
                 }
             }
             .padding(.horizontal, 16)
+            .padding(.top, 8)
             .padding(.bottom, 16)
             
             // Subtle separator
@@ -1763,12 +1755,15 @@ final class SettingsWindowController {
         )
         
         panel.contentView = hostingView
-        panel.title = "VPN Bypass Settings"
+        panel.title = "" // Empty title, we use custom view
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
         panel.backgroundColor = NSColor(Color(hex: "0F0F14"))
         panel.isReleasedWhenClosed = false
         panel.center()
+        
+        // Add branded title to titlebar
+        addBrandedTitlebar(to: panel)
         
         // Make it float above EVERYTHING - use screenSaver level (highest)
         panel.level = .screenSaver
@@ -1780,5 +1775,44 @@ final class SettingsWindowController {
         NSApp.activate(ignoringOtherApps: true)
         
         self.panel = panel
+    }
+    
+    private func addBrandedTitlebar(to window: NSWindow) {
+        // Create the branded title view
+        let titleView = NSHostingView(rootView: BrandedTitlebarView())
+        titleView.frame = NSRect(x: 0, y: 0, width: 200, height: 28)
+        
+        // Create accessory view controller
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.view = titleView
+        accessory.layoutAttribute = .leading
+        
+        window.addTitlebarAccessoryViewController(accessory)
+    }
+}
+
+// MARK: - Branded Titlebar View
+
+struct BrandedTitlebarView: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            // Shield icon
+            Image(systemName: "shield.checkered")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(BrandColors.blueGradient)
+            
+            // Branded name
+            HStack(spacing: 0) {
+                Text("VPN")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(BrandColors.blueGradient)
+                
+                Text("Bypass")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(BrandColors.silverGradient)
+            }
+        }
+        .padding(.leading, 8)
+        .padding(.top, 4)
     }
 }
