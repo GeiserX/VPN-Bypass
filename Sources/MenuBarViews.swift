@@ -40,144 +40,51 @@ struct MenuBarLabel: View {
     @State private var isAnimating = false
     
     var body: some View {
-        HStack(spacing: 4) {
-            // Custom shield+arrow icon
+        HStack(spacing: 3) {
+            // Shield icon - simple and clear at menu bar size
             ZStack {
-                ShieldArrowIcon(isLoading: routeManager.isLoading || routeManager.isApplyingRoutes)
-                    .fill(Color.primary)
-                    .frame(width: 18, height: 18)
-                
-                // Pulsing arrow overlay when loading
                 if routeManager.isLoading || routeManager.isApplyingRoutes {
-                    ArrowOnlyIcon()
-                        .fill(Color.primary)
-                        .frame(width: 18, height: 18)
-                        .opacity(isAnimating ? 0.3 : 1.0)
+                    // Pulsing shield when loading
+                    Image(systemName: "shield.fill")
+                        .font(.system(size: 15))
+                        .opacity(isAnimating ? 0.4 : 1.0)
                         .animation(
-                            Animation.easeInOut(duration: 0.6)
+                            Animation.easeInOut(duration: 0.5)
                                 .repeatForever(autoreverses: true),
                             value: isAnimating
                         )
                         .onAppear { isAnimating = true }
                         .onDisappear { isAnimating = false }
+                } else {
+                    Image(systemName: routeManager.isVPNConnected ? "shield.checkered" : "shield")
+                        .font(.system(size: 15))
                 }
             }
             
-            // Active routes count when VPN connected
+            // Active routes count when VPN connected and not loading
             if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty && !routeManager.isLoading && !routeManager.isApplyingRoutes {
                 Text("\(routeManager.activeRoutes.count)")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(.secondary)
             }
         }
     }
 }
 
-// MARK: - Shield with Arrow Icon (Menu Bar Template)
+// MARK: - Branded App Name View (for use in dropdowns/settings)
 
-struct ShieldArrowIcon: Shape {
-    var isLoading: Bool = false
+struct BrandedAppName: View {
+    var fontSize: CGFloat = 15
     
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let w = rect.width
-        let h = rect.height
-        
-        // Shield outline (with hollow center)
-        // Outer shield
-        path.move(to: CGPoint(x: w * 0.5, y: h * 0.08))
-        path.addLine(to: CGPoint(x: w * 0.12, y: h * 0.22))
-        path.addLine(to: CGPoint(x: w * 0.12, y: h * 0.55))
-        path.addQuadCurve(
-            to: CGPoint(x: w * 0.5, y: h * 0.95),
-            control: CGPoint(x: w * 0.12, y: h * 0.80)
-        )
-        path.addQuadCurve(
-            to: CGPoint(x: w * 0.88, y: h * 0.55),
-            control: CGPoint(x: w * 0.88, y: h * 0.80)
-        )
-        path.addLine(to: CGPoint(x: w * 0.88, y: h * 0.22))
-        path.closeSubpath()
-        
-        // Inner shield cutout (to create outline effect)
-        path.move(to: CGPoint(x: w * 0.5, y: h * 0.18))
-        path.addLine(to: CGPoint(x: w * 0.78, y: h * 0.28))
-        path.addLine(to: CGPoint(x: w * 0.78, y: h * 0.52))
-        path.addQuadCurve(
-            to: CGPoint(x: w * 0.5, y: h * 0.85),
-            control: CGPoint(x: w * 0.78, y: h * 0.72)
-        )
-        path.addQuadCurve(
-            to: CGPoint(x: w * 0.22, y: h * 0.52),
-            control: CGPoint(x: w * 0.22, y: h * 0.72)
-        )
-        path.addLine(to: CGPoint(x: w * 0.22, y: h * 0.28))
-        path.closeSubpath()
-        
-        // Arrow breaking through (diagonal, lower-left to upper-right)
-        if !isLoading {
-            addArrow(to: &path, in: rect)
+    var body: some View {
+        HStack(spacing: 0) {
+            Text("VPN")
+                .font(.system(size: fontSize, weight: .black, design: .rounded))
+                .foregroundStyle(BrandColors.blueGradient)
+            
+            Text("Bypass")
+                .font(.system(size: fontSize, weight: .bold, design: .rounded))
+                .foregroundStyle(BrandColors.silverGradient)
         }
-        
-        return path
-    }
-    
-    private func addArrow(to path: inout Path, in rect: CGRect) {
-        let w = rect.width
-        let h = rect.height
-        
-        // Arrow shaft and head
-        path.move(to: CGPoint(x: w * 0.18, y: h * 0.72))
-        path.addLine(to: CGPoint(x: w * 0.45, y: h * 0.45))
-        path.addLine(to: CGPoint(x: w * 0.45, y: h * 0.52))
-        path.addLine(to: CGPoint(x: w * 0.58, y: h * 0.52))
-        path.addLine(to: CGPoint(x: w * 0.58, y: h * 0.38))
-        path.addLine(to: CGPoint(x: w * 0.50, y: h * 0.38))
-        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.12))  // Arrow tip
-        path.addLine(to: CGPoint(x: w * 0.94, y: h * 0.38))
-        path.addLine(to: CGPoint(x: w * 0.86, y: h * 0.38))
-        path.addLine(to: CGPoint(x: w * 0.86, y: h * 0.52))
-        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.52))
-        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.60))
-        path.addLine(to: CGPoint(x: w * 0.30, y: h * 0.78))
-        path.closeSubpath()
-        
-        // Debris particles
-        path.addEllipse(in: CGRect(x: w * 0.78, y: h * 0.20, width: w * 0.06, height: w * 0.06))
-        path.addEllipse(in: CGRect(x: w * 0.85, y: h * 0.28, width: w * 0.04, height: w * 0.04))
-        path.addEllipse(in: CGRect(x: w * 0.70, y: h * 0.08, width: w * 0.03, height: w * 0.03))
-    }
-}
-
-// Arrow only (for loading animation overlay)
-struct ArrowOnlyIcon: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let w = rect.width
-        let h = rect.height
-        
-        // Arrow shaft and head
-        path.move(to: CGPoint(x: w * 0.18, y: h * 0.72))
-        path.addLine(to: CGPoint(x: w * 0.45, y: h * 0.45))
-        path.addLine(to: CGPoint(x: w * 0.45, y: h * 0.52))
-        path.addLine(to: CGPoint(x: w * 0.58, y: h * 0.52))
-        path.addLine(to: CGPoint(x: w * 0.58, y: h * 0.38))
-        path.addLine(to: CGPoint(x: w * 0.50, y: h * 0.38))
-        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.12))
-        path.addLine(to: CGPoint(x: w * 0.94, y: h * 0.38))
-        path.addLine(to: CGPoint(x: w * 0.86, y: h * 0.38))
-        path.addLine(to: CGPoint(x: w * 0.86, y: h * 0.52))
-        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.52))
-        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.60))
-        path.addLine(to: CGPoint(x: w * 0.30, y: h * 0.78))
-        path.closeSubpath()
-        
-        // Debris
-        path.addEllipse(in: CGRect(x: w * 0.78, y: h * 0.20, width: w * 0.06, height: w * 0.06))
-        path.addEllipse(in: CGRect(x: w * 0.85, y: h * 0.28, width: w * 0.04, height: w * 0.04))
-        path.addEllipse(in: CGRect(x: w * 0.70, y: h * 0.08, width: w * 0.03, height: w * 0.03))
-        
-        return path
     }
 }
 
@@ -235,23 +142,13 @@ struct MenuContent: View {
     
     private var titleHeader: some View {
         HStack(spacing: 8) {
-            // Mini logo icon with brand colors
-            ZStack {
-                ShieldArrowIcon(isLoading: false)
-                    .fill(BrandColors.blueGradient)
-                    .frame(width: 20, height: 20)
-            }
+            // Shield icon with brand color
+            Image(systemName: "shield.checkered")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(BrandColors.blueGradient)
             
-            // App name with branded colors: "VPN" in blue, "Bypass" in silver
-            HStack(spacing: 0) {
-                Text("VPN")
-                    .font(.system(size: 15, weight: .black, design: .rounded))
-                    .foregroundStyle(BrandColors.blueGradient)
-                
-                Text("Bypass")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(BrandColors.silverGradient)
-            }
+            // App name with branded colors
+            BrandedAppName(fontSize: 15)
             
             Spacer()
             
