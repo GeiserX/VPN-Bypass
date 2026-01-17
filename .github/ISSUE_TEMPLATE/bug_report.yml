@@ -1,0 +1,108 @@
+name: 🐛 Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the form below.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: What version of VPN Bypass are you using?
+      placeholder: "e.g., v1.2.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation Method
+      description: How did you install VPN Bypass?
+      options:
+        - Homebrew (brew install --cask vpn-bypass)
+        - DMG Download
+        - Built from source
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: vpn_type
+    attributes:
+      label: VPN Type
+      description: What VPN are you using?
+      options:
+        - GlobalProtect (Palo Alto)
+        - Cisco AnyConnect
+        - OpenVPN
+        - WireGuard
+        - Tailscale
+        - Fortinet FortiClient
+        - Zscaler
+        - Cloudflare WARP
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe what happened...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: Describe what you expected...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Enable service '...'
+        2. Connect to VPN
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Please copy logs from Settings → Logs tab (use the Copy button)
+      render: shell
+      placeholder: |
+        Paste logs here (Settings → Logs → Copy)
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Any additional environment details
+      placeholder: |
+        - macOS version: Ventura 13.x / Sonoma 14.x / Sequoia 15.x
+        - Mac type: Intel / Apple Silicon
+        - Helper installed: Yes / No
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues to ensure this isn't a duplicate
+          required: true
+        - label: I have tried restarting the app
+          required: false

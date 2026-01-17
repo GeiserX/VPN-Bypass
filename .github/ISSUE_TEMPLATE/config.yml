@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation
+    url: https://github.com/GeiserX/vpn-macos-bypass#readme
+    about: Check the README for setup instructions and configuration options
+  - name: 🗺️ Roadmap
+    url: https://github.com/GeiserX/vpn-macos-bypass/blob/main/ROADMAP.md
+    about: See planned features before requesting
+  - name: 🍺 Homebrew Installation
+    url: https://github.com/GeiserX/homebrew-vpn-bypass
+    about: Install via Homebrew
