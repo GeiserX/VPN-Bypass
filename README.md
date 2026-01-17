@@ -33,15 +33,13 @@ VPN Bypass intelligently routes selected services directly to the internet while
 - 🔄 **Auto-apply** - Routes are applied automatically when VPN connects
 - 📋 **Hosts file management** - Optional DNS bypass via `/etc/hosts`
 - 🪵 **Activity logs** - See what's happening in real-time
-
-### New in v1.1.0
-
-- 🔍 **Extended VPN Detection** - Now supports Fortinet FortiClient, Zscaler, Cloudflare WARP, Pulse Secure, and Palo Alto
-- 📶 **Better Network Monitoring** - Improved detection when switching WiFi networks
+- 🔍 **Extended VPN Detection** - Supports GlobalProtect, Cisco, Fortinet, Zscaler, Cloudflare WARP, and more
+- 📶 **Network Monitoring** - Detects VPN and network changes automatically
 - 🔔 **Notifications** - Alerts when VPN connects/disconnects and routes are applied
 - ✅ **Route Verification** - Ping tests to verify routes are actually working
 - 💾 **Import/Export Config** - Backup and restore your domains and services
-- 🚀 **Launch at Login** - Option to start automatically when you log in
+- 🚀 **Launch at Login** - Start automatically when you log in
+- 🔄 **Auto DNS Refresh** - Periodically re-resolves domains and updates routes
 
 ## Installation
 
