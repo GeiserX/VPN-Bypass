@@ -1,0 +1,64 @@
+name: ❓ Question / Support
+description: Ask a question or get help with setup
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have a question? We're here to help! Please provide as much detail as possible.
+
+  - type: dropdown
+    id: topic
+    attributes:
+      label: Topic
+      description: What is your question about?
+      options:
+        - Installation / Setup
+        - Configuration
+        - VPN Detection
+        - Services not working
+        - DNS / Hosts file
+        - Helper installation
+        - Performance
+        - Homebrew
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your Question
+      description: What would you like to know?
+      placeholder: "How do I..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Describe what you've already attempted
+      placeholder: "I've tried..."
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Current Setup
+      description: Share relevant details about your setup
+      placeholder: |
+        - macOS version: ...
+        - VPN type: ...
+        - Services enabled: ...
+        - Helper installed: Yes/No
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have read the [README](https://github.com/GeiserX/vpn-macos-bypass#readme)
+          required: true
+        - label: I have searched existing issues for similar questions
+          required: true

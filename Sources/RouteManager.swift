@@ -455,7 +455,11 @@ final class RouteManager: ObservableObject {
         if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN {
             log(.success, "VPN connected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type")), applying routes...")
             NotificationManager.shared.notifyVPNConnected(interface: interface ?? "unknown")
+            
+            // Show loading indicator while applying routes
+            isLoading = true
             await applyAllRoutes()
+            isLoading = false
         }
         
         // Log disconnection
