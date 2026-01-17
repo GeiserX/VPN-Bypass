@@ -33,9 +33,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             // Title bar area
             HStack {
-                Text("VPN Bypass")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Color(hex: "71717A"))
+                BrandedAppName(fontSize: 13)
                 Spacer()
             }
             .padding(.horizontal, 20)
@@ -1004,10 +1002,8 @@ struct GeneralTab: View {
             // About section
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("VPN Bypass")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                    Text("Version 1.1.0")
+                    BrandedAppName(fontSize: 13)
+                    Text("Version 1.2.0")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
                 }
@@ -1446,27 +1442,13 @@ struct InfoTab: View {
     
     private var appInfoSection: some View {
         VStack(alignment: .center, spacing: 12) {
-            // App icon - custom shield with arrow
-            ShieldArrowIcon(isLoading: false)
-                .fill(
-                    LinearGradient(
-                        colors: [BrandColors.blueLight, BrandColors.blue, BrandColors.blueDark],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 64, height: 64)
+            // App icon - shield with checkered pattern
+            Image(systemName: "shield.checkered")
+                .font(.system(size: 48))
+                .foregroundStyle(BrandColors.blueGradient)
             
             // App name with branded colors
-            HStack(spacing: 0) {
-                Text("VPN")
-                    .font(.system(size: 24, weight: .black, design: .rounded))
-                    .foregroundStyle(BrandColors.blueGradient)
-                
-                Text("Bypass")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundStyle(BrandColors.silverGradient)
-            }
+            BrandedAppName(fontSize: 24)
             
             Text("v1.2.0")
                 .font(.system(size: 12, design: .monospaced))
