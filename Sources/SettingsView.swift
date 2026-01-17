@@ -1511,8 +1511,8 @@ struct InfoTab: View {
                     .font(.system(size: 12))
                     .foregroundColor(Color(hex: "9CA3AF"))
                 
-                HStack(spacing: 12) {
-                    // GitHub Sponsors button
+                // First row
+                HStack(spacing: 10) {
                     LinkButton(
                         title: "GitHub Sponsors",
                         icon: "heart.fill",
@@ -1520,12 +1520,28 @@ struct InfoTab: View {
                         url: "https://github.com/sponsors/GeiserX"
                     )
                     
-                    // Buy Me a Coffee
                     LinkButton(
                         title: "Buy Me a Coffee",
                         icon: "cup.and.saucer.fill",
                         color: Color(hex: "FFDD00"),
-                        url: "https://buymeacoffee.com/geiserx"
+                        url: "https://buymeacoffee.com/geiser"
+                    )
+                }
+                
+                // Second row
+                HStack(spacing: 10) {
+                    LinkButton(
+                        title: "Patreon",
+                        icon: "paintpalette.fill",
+                        color: Color(hex: "FF424D"),
+                        url: "https://patreon.com/geiser"
+                    )
+                    
+                    LinkButton(
+                        title: "Thanks.dev",
+                        icon: "hands.clap.fill",
+                        color: Color(hex: "10B981"),
+                        url: "https://thanks.dev/u/gh/geiserx"
                     )
                 }
             }
@@ -1539,9 +1555,9 @@ struct InfoTab: View {
                 Divider().background(Color.white.opacity(0.1))
                 LinkRow(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub", subtitle: "github.com/GeiserX", url: "https://github.com/GeiserX")
                 Divider().background(Color.white.opacity(0.1))
-                LinkRow(icon: "doc.text", title: "Source Code", subtitle: "vpn-macos-bypass", url: "https://github.com/GeiserX/vpn-macos-bypass")
+                LinkRow(icon: "doc.text", title: "Source Code", subtitle: "VPNBypass", url: "https://github.com/GeiserX/VPNBypass")
                 Divider().background(Color.white.opacity(0.1))
-                LinkRow(icon: "exclamationmark.bubble", title: "Report Issue", subtitle: "GitHub Issues", url: "https://github.com/GeiserX/vpn-macos-bypass/issues")
+                LinkRow(icon: "exclamationmark.bubble", title: "Report Issue", subtitle: "GitHub Issues", url: "https://github.com/GeiserX/VPNBypass/issues")
             }
         }
     }
