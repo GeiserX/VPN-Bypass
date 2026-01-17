@@ -1778,14 +1778,14 @@ final class SettingsWindowController {
     }
     
     private func addBrandedTitlebar(to window: NSWindow) {
-        // Create the branded title view
+        // Create the branded title view - full width to allow centering
         let titleView = NSHostingView(rootView: BrandedTitlebarView())
-        titleView.frame = NSRect(x: 0, y: 0, width: 200, height: 28)
+        titleView.frame = NSRect(x: 0, y: 0, width: window.frame.width, height: 38)
         
         // Create accessory view controller
         let accessory = NSTitlebarAccessoryViewController()
         accessory.view = titleView
-        accessory.layoutAttribute = .leading
+        accessory.layoutAttribute = .bottom // Places it below the traffic lights but in titlebar area
         
         window.addTitlebarAccessoryViewController(accessory)
     }
@@ -1795,24 +1795,29 @@ final class SettingsWindowController {
 
 struct BrandedTitlebarView: View {
     var body: some View {
-        HStack(spacing: 4) {
-            // Shield icon
-            Image(systemName: "shield.checkered")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(BrandColors.blueGradient)
+        HStack {
+            Spacer()
             
-            // Branded name
-            HStack(spacing: 0) {
-                Text("VPN")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+            HStack(spacing: 6) {
+                // Shield icon
+                Image(systemName: "shield.checkered")
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(BrandColors.blueGradient)
                 
-                Text("Bypass")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(BrandColors.silverGradient)
+                // Branded name
+                HStack(spacing: 0) {
+                    Text("VPN")
+                        .font(.system(size: 14, weight: .black, design: .rounded))
+                        .foregroundStyle(BrandColors.blueGradient)
+                    
+                    Text("Bypass")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(BrandColors.silverGradient)
+                }
             }
+            
+            Spacer()
         }
-        .padding(.leading, 8)
-        .padding(.top, 4)
+        .frame(height: 38)
     }
 }
