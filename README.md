@@ -211,12 +211,24 @@ If routes are applied but verification fails:
 - Try accessing the service directly - it may still work
 - Check if the service is actually accessible from your network
 
-## Acknowledgments
+## Contributing
 
-Inspired by:
-- [vpn-route-manager](https://github.com/btriapitsyn/vpn-route-manager) - Go-based VPN route manager
-- Original shell script implementation in `vpn-bypass`
+Contributions are welcome! Here's how you can help:
+
+1. **Report bugs** - Open an [issue](https://github.com/GeiserX/VPNBypass/issues) with details
+2. **Suggest features** - Use the feature request template
+3. **Submit PRs** - Fork, create a branch, and submit a pull request
+
+Please read the issue templates before submitting.
+
+## Support
+
+If you find VPN Bypass useful, consider supporting its development:
+
+- ⭐ **Star this repo** - It helps others discover the project
+- ☕ [**Buy me a coffee**](https://buymeacoffee.com/geiser)
+- 💖 [**GitHub Sponsors**](https://github.com/sponsors/GeiserX)
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+This project is source-available. See [LICENSE](LICENSE) for details.
