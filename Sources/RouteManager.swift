@@ -357,8 +357,22 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Process Helper
     
-    /// Runs a process with a timeout to prevent UI freezing
-    private nonisolated func runProcessWithTimeout(
+    /// Runs a process asynchronously on a background thread with timeout to prevent UI freezing
+    private func runProcessAsync(
+        _ executablePath: String,
+        arguments: [String] = [],
+        timeout: TimeInterval = 5.0
+    ) async -> (output: String, exitCode: Int32)? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = Self.runProcessSync(executablePath, arguments: arguments, timeout: timeout)
+                continuation.resume(returning: result)
+            }
+        }
+    }
+    
+    /// Synchronous process execution - ONLY call from background thread
+    private static nonisolated func runProcessSync(
         _ executablePath: String,
         arguments: [String] = [],
         timeout: TimeInterval = 5.0
@@ -377,15 +391,23 @@ final class RouteManager: ObservableObject {
             return nil
         }
         
-        // Wait with timeout
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
+        // Use DispatchSemaphore for proper timeout handling
+        let semaphore = DispatchSemaphore(value: 0)
+        var didTimeout = false
+        
+        DispatchQueue.global().async {
+            process.waitUntilExit()
+            semaphore.signal()
         }
         
-        if process.isRunning {
+        let result = semaphore.wait(timeout: .now() + timeout)
+        if result == .timedOut {
             process.terminate()
-            return nil // Timeout
+            didTimeout = true
+        }
+        
+        if didTimeout {
+            return nil
         }
         
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -401,9 +423,9 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    func detectCurrentNetwork() {
+    func detectCurrentNetwork() async {
         // Get current WiFi SSID using helper with timeout
-        guard let result = runProcessWithTimeout(
+        guard let result = await runProcessAsync(
             "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport",
             arguments: ["-I"],
             timeout: 3.0
@@ -439,7 +461,7 @@ final class RouteManager: ObservableObject {
         let oldInterface = vpnInterface
         
         // Detect current network first
-        detectCurrentNetwork()
+        await detectCurrentNetwork()
         
         // Use scutil to detect VPN interfaces with IPv4 addresses
         let (connected, interface, detectedType) = await detectVPNInterface()
@@ -474,15 +496,15 @@ final class RouteManager: ObservableObject {
     
     private func detectVPNInterface() async -> (connected: Bool, interface: String?, type: VPNType?) {
         // First check for specific VPN processes to help identify type
-        let runningVPNType = detectRunningVPNProcess()
+        let runningVPNType = await detectRunningVPNProcess()
         
         // Use ifconfig to detect VPN
         return await detectVPNViaIfconfig(hintType: runningVPNType)
     }
     
     /// Detect which VPN client process is running
-    private func detectRunningVPNProcess() -> VPNType? {
-        guard let result = runProcessWithTimeout("/bin/ps", arguments: ["-eo", "comm"], timeout: 3.0) else {
+    private func detectRunningVPNProcess() async -> VPNType? {
+        guard let result = await runProcessAsync("/bin/ps", arguments: ["-eo", "comm"], timeout: 3.0) else {
             return nil
         }
         
@@ -519,7 +541,7 @@ final class RouteManager: ObservableObject {
     }
     
     private func detectVPNViaIfconfig(hintType: VPNType?) async -> (connected: Bool, interface: String?, type: VPNType?) {
-        guard let result = runProcessWithTimeout("/sbin/ifconfig", timeout: 3.0) else {
+        guard let result = await runProcessAsync("/sbin/ifconfig", timeout: 3.0) else {
             return (false, nil, nil)
         }
         
@@ -554,7 +576,7 @@ final class RouteManager: ObservableObject {
                     let parts = trimmed.components(separatedBy: " ")
                     if parts.count >= 2 {
                         let ip = parts[1]
-                        if isCorporateVPNIP(ip) {
+                        if await isCorporateVPNIP(ip) {
                             hasValidIP = true
                         }
                     }
@@ -601,7 +623,7 @@ final class RouteManager: ObservableObject {
     }
     
     /// Check if IP is likely a corporate VPN (not Tailscale mesh, not localhost, etc.)
-    private func isCorporateVPNIP(_ ip: String) -> Bool {
+    private func isCorporateVPNIP(_ ip: String) async -> Bool {
         let parts = ip.components(separatedBy: ".")
         guard parts.count == 4,
               let first = Int(parts[0]),
@@ -618,7 +640,7 @@ final class RouteManager: ObservableObject {
         // Tailscale CGNAT range (100.64.0.0/10 = 100.64-127.x.x)
         // Only consider Tailscale as VPN if it's using an exit node (routing all traffic)
         if first == 100 && second >= 64 && second <= 127 {
-            return isTailscaleExitNodeActive()
+            return await isTailscaleExitNodeActive()
         }
         
         // Cloudflare WARP range (check for WARP-specific IPs)
@@ -644,7 +666,7 @@ final class RouteManager: ObservableObject {
     }
     
     /// Check if Tailscale is using an exit node (routing all traffic through Tailscale)
-    private func isTailscaleExitNodeActive() -> Bool {
+    private func isTailscaleExitNodeActive() async -> Bool {
         // Try multiple paths for tailscale CLI
         let tailscalePaths = [
             "/usr/local/bin/tailscale",
@@ -654,7 +676,7 @@ final class RouteManager: ObservableObject {
         
         for path in tailscalePaths {
             if FileManager.default.fileExists(atPath: path) {
-                guard let result = runProcessWithTimeout(path, arguments: ["status", "--json"], timeout: 3.0) else {
+                guard let result = await runProcessAsync(path, arguments: ["status", "--json"], timeout: 3.0) else {
                     continue
                 }
                 
@@ -692,10 +714,10 @@ final class RouteManager: ObservableObject {
         log(.info, "Starting VPN detection and route application...")
         
         // Detect user's DNS server (respects pre-VPN DNS configuration)
-        detectUserDNSServer()
+        await detectUserDNSServer()
         
         // Detect current network
-        detectCurrentNetwork()
+        await detectCurrentNetwork()
         
         // Detect VPN interface
         let (connected, interface, detectedType) = await detectVPNInterface()
@@ -1194,7 +1216,7 @@ final class RouteManager: ObservableObject {
         let startTime = Date()
         
         // Use helper with timeout - ping itself has 3s timeout, we add 1s buffer
-        guard let result = runProcessWithTimeout("/sbin/ping", arguments: ["-c", "1", "-t", "3", destination], timeout: 4.0) else {
+        guard let result = await runProcessAsync("/sbin/ping", arguments: ["-c", "1", "-t", "3", destination], timeout: 4.0) else {
             return RouteVerificationResult(
                 destination: destination,
                 isReachable: false,
@@ -1245,7 +1267,7 @@ final class RouteManager: ObservableObject {
     }
     
     private func getGatewayForService(_ service: String) async -> String? {
-        guard let result = runProcessWithTimeout("/usr/sbin/networksetup", arguments: ["-getinfo", service], timeout: 3.0) else {
+        guard let result = await runProcessAsync("/usr/sbin/networksetup", arguments: ["-getinfo", service], timeout: 3.0) else {
             return nil
         }
         
@@ -1263,8 +1285,8 @@ final class RouteManager: ObservableObject {
     
     /// Detect user's real DNS server (from primary non-VPN interface)
     /// This respects whatever DNS the user had configured before VPN connected
-    private func detectUserDNSServer() {
-        guard let result = runProcessWithTimeout("/usr/sbin/scutil", arguments: ["--dns"], timeout: 3.0) else {
+    private func detectUserDNSServer() async {
+        guard let result = await runProcessAsync("/usr/sbin/scutil", arguments: ["--dns"], timeout: 3.0) else {
             log(.warning, "Could not detect DNS configuration")
             return
         }
@@ -1323,7 +1345,7 @@ final class RouteManager: ObservableObject {
     }
     
     private func parseDefaultGateway() async -> String? {
-        guard let result = runProcessWithTimeout("/sbin/route", arguments: ["-n", "get", "default"], timeout: 3.0) else {
+        guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", "default"], timeout: 3.0) else {
             return nil
         }
         
@@ -1373,7 +1395,7 @@ final class RouteManager: ObservableObject {
             args = ["@\(dnsServer)", "+short", domain]
         }
         
-        guard let result = runProcessWithTimeout("/usr/bin/dig", arguments: args, timeout: 5.0) else {
+        guard let result = await runProcessAsync("/usr/bin/dig", arguments: args, timeout: 5.0) else {
             return nil
         }
         
@@ -1402,7 +1424,7 @@ final class RouteManager: ObservableObject {
             ? ["-n", "add", "-net", destination, gateway]
             : ["-n", "add", "-host", destination, gateway]
         
-        guard let result = runProcessWithTimeout("/sbin/route", arguments: args, timeout: 5.0) else {
+        guard let result = await runProcessAsync("/sbin/route", arguments: args, timeout: 5.0) else {
             return false
         }
         
@@ -1417,7 +1439,7 @@ final class RouteManager: ObservableObject {
         }
         
         // Fallback: direct command with timeout
-        _ = runProcessWithTimeout("/sbin/route", arguments: ["-n", "delete", destination], timeout: 3.0)
+        _ = await runProcessAsync("/sbin/route", arguments: ["-n", "delete", destination], timeout: 3.0)
         return true // Route delete can fail if route doesn't exist, that's ok
     }
     

@@ -1442,10 +1442,19 @@ struct InfoTab: View {
     
     private var appInfoSection: some View {
         VStack(alignment: .center, spacing: 12) {
-            // App icon - shield with checkered pattern
-            Image(systemName: "shield.checkered")
-                .font(.system(size: 48))
-                .foregroundStyle(BrandColors.blueGradient)
+            // App logo from bundle
+            if let logoPath = Bundle.main.path(forResource: "VPNBypass", ofType: "png"),
+               let nsImage = NSImage(contentsOfFile: logoPath) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 80, height: 80)
+            } else {
+                // Fallback to SF Symbol if logo not found
+                Image(systemName: "shield.checkered")
+                    .font(.system(size: 48))
+                    .foregroundStyle(BrandColors.blueGradient)
+            }
             
             // App name with branded colors
             BrandedAppName(fontSize: 24)
