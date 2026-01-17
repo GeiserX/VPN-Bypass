@@ -1,10 +1,18 @@
-# VPN Bypass
+<p align="center">
+  <img src="assets/VPNBypass.png" alt="VPN Bypass" width="128" height="128">
+</p>
 
-A macOS menu bar app that automatically routes specific domains and services around your VPN, ensuring they use your regular internet connection.
+<h1 align="center">VPN Bypass</h1>
 
-![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue)
-![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
-[![Version](https://img.shields.io/badge/version-1.1.0-green)](https://github.com/GeiserX/vpn-macos-bypass/releases)
+<p align="center">
+  A macOS menu bar app that automatically routes specific domains and services around your VPN, ensuring they use your regular internet connection.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/macOS-13%2B-blue" alt="macOS 13+">
+  <img src="https://img.shields.io/badge/Swift-5.9-orange" alt="Swift 5.9">
+  <a href="https://github.com/GeiserX/vpn-macos-bypass/releases"><img src="https://img.shields.io/badge/version-1.2.0-green" alt="Version"></a>
+</p>
 
 ## Why?
 
