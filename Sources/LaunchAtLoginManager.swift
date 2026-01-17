@@ -119,12 +119,12 @@ final class LaunchAtLoginManager: ObservableObject {
             )
             try data.write(to: launchAgentURL)
             
-            // Load the agent
+            // Load the agent asynchronously to avoid UI blocking
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
             process.arguments = ["load", launchAgentURL.path]
             try process.run()
-            process.waitUntilExit()
+            // Don't wait - launchctl load is fast and we don't need the result
             
             isEnabled = true
             print("Launch at login enabled via LaunchAgent")
@@ -134,12 +134,12 @@ final class LaunchAtLoginManager: ObservableObject {
     }
     
     private func disableViaLaunchAgent() {
-        // Unload the agent first
+        // Unload the agent first - don't wait to avoid UI blocking
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = ["unload", launchAgentURL.path]
         try? process.run()
-        process.waitUntilExit()
+        // Don't wait - launchctl unload is fast
         
         // Remove the plist file
         try? FileManager.default.removeItem(at: launchAgentURL)
