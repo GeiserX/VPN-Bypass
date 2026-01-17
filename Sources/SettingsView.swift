@@ -1475,17 +1475,26 @@ struct InfoTab: View {
     private var authorSection: some View {
         SettingsCard(title: "Author", icon: "person.fill", iconColor: Color(hex: "8B5CF6")) {
             HStack(spacing: 16) {
-                // Avatar placeholder
-                ZStack {
+                // Avatar from GitHub
+                if let avatarPath = Bundle.main.path(forResource: "author-avatar", ofType: "png"),
+                   let nsImage = NSImage(contentsOfFile: avatarPath) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 50, height: 50)
+                        .clipShape(Circle())
+                } else {
+                    // Fallback
                     Circle()
                         .fill(
                             LinearGradient(colors: [Color(hex: "8B5CF6"), Color(hex: "A78BFA")], startPoint: .top, endPoint: .bottom)
                         )
                         .frame(width: 50, height: 50)
-                    
-                    Text("SF")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
+                        .overlay(
+                            Text("SF")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(.white)
+                        )
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -1493,13 +1502,9 @@ struct InfoTab: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white)
                     
-                    Text("Sr. Cloud DevOps Engineer")
+                    Text("DevOps Engineer")
                         .font(.system(size: 12))
                         .foregroundColor(Color(hex: "9CA3AF"))
-                    
-                    Text("Murcia, Spain 🇪🇸")
-                        .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "6B7280"))
                 }
                 
                 Spacer()
