@@ -11,14 +11,22 @@ struct MenuBarLabel: View {
     var body: some View {
         HStack(spacing: 4) {
             // Shield icon with status color
-            Image(systemName: routeManager.isVPNConnected ? "shield.checkered" : "shield")
-                .renderingMode(.template)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 16, height: 16)
+            if routeManager.isLoading {
+                Image(systemName: "ellipsis.circle")
+                    .renderingMode(.template)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 16, height: 16)
+            } else {
+                Image(systemName: routeManager.isVPNConnected ? "shield.checkered" : "shield")
+                    .renderingMode(.template)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 16, height: 16)
+            }
             
             // Active routes count when VPN connected
-            if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty {
+            if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty && !routeManager.isLoading {
                 Text("\(routeManager.activeRoutes.count)")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .foregroundColor(.secondary)
@@ -31,8 +39,11 @@ struct MenuBarLabel: View {
 
 struct MenuContent: View {
     @EnvironmentObject var routeManager: RouteManager
+    @EnvironmentObject var notificationManager: NotificationManager
+    @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
     @State private var newDomain = ""
     @State private var isAddingDomain = false
+    @State private var isVerifying = false
     
     private let accentGradient = LinearGradient(
         colors: [Color(hex: "10B981"), Color(hex: "059669")],
@@ -52,7 +63,9 @@ struct MenuContent: View {
                 .padding(.vertical, 8)
             
             // Main content
-            if routeManager.isVPNConnected {
+            if routeManager.isLoading {
+                loadingContent
+            } else if routeManager.isVPNConnected {
                 connectedContent
             } else {
                 disconnectedContent
@@ -123,13 +136,13 @@ struct MenuContent: View {
     
     private var headerSection: some View {
         HStack(spacing: 10) {
-            // Status icon
+            // Status icon - use VPN type icon if available
             ZStack {
                 Circle()
                     .fill(statusColor.opacity(0.15))
                     .frame(width: 36, height: 36)
                 
-                Image(systemName: routeManager.isVPNConnected ? "checkmark.shield.fill" : "shield.slash.fill")
+                Image(systemName: routeManager.isVPNConnected ? (routeManager.vpnType?.icon ?? "checkmark.shield.fill") : "shield.slash.fill")
                     .font(.system(size: 16))
                     .foregroundColor(statusColor)
             }
@@ -139,10 +152,16 @@ struct MenuContent: View {
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundColor(statusColor)
                 
-                if routeManager.isVPNConnected, let vpnIface = routeManager.vpnInterface {
-                    Text("via \(vpnIface)")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                if routeManager.isVPNConnected {
+                    if let vpnType = routeManager.vpnType {
+                        Text(vpnType.rawValue)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    } else if let vpnIface = routeManager.vpnInterface {
+                        Text("via \(vpnIface)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
                 } else if let gateway = routeManager.localGateway {
                     Text("Gateway: \(gateway)")
                         .font(.system(size: 10))
@@ -236,10 +255,15 @@ struct MenuContent: View {
                 recentRoutesSection
             }
             
+            // Route verification status
+            if !routeManager.routeVerificationResults.isEmpty {
+                routeVerificationSection
+            }
+            
             // Action buttons
             HStack(spacing: 8) {
                 Button {
-                    routeManager.detectAndApplyRoutes()
+                    routeManager.refreshRoutes()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.clockwise")
@@ -274,7 +298,58 @@ struct MenuContent: View {
                 }
                 .buttonStyle(.plain)
             }
+            
+            // Verify routes button
+            if !routeManager.activeRoutes.isEmpty {
+                Button {
+                    isVerifying = true
+                    Task {
+                        await routeManager.verifyRoutes()
+                        isVerifying = false
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isVerifying {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .frame(width: 14, height: 14)
+                        } else {
+                            Image(systemName: "checkmark.circle")
+                                .font(.system(size: 11))
+                        }
+                        Text(isVerifying ? "Verifying..." : "Verify Routes")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color.primary.opacity(0.05))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .disabled(isVerifying)
+            }
         }
+    }
+    
+    // MARK: - Loading Content
+    
+    private var loadingContent: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .scaleEffect(1.2)
+                .progressViewStyle(CircularProgressViewStyle())
+            
+            VStack(spacing: 4) {
+                Text("Setting Up...")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                
+                Text("Detecting VPN and applying routes")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
     }
     
     // MARK: - Disconnected Content
@@ -302,6 +377,18 @@ struct MenuContent: View {
             HStack(spacing: 16) {
                 StatBadge(value: "\(enabledServices.count)", label: "Services")
                 StatBadge(value: "\(enabledDomains.count)", label: "Domains")
+            }
+            
+            // Network info
+            if let ssid = routeManager.currentNetworkSSID {
+                HStack(spacing: 6) {
+                    Image(systemName: "wifi")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    Text(ssid)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
         .padding(.vertical, 8)
@@ -385,6 +472,59 @@ struct MenuContent: View {
         .cornerRadius(8)
     }
     
+    // MARK: - Route Verification Section
+    
+    private var routeVerificationSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "checkmark.circle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text("Route Verification")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                
+                let passedCount = routeManager.routeVerificationResults.values.filter { $0.isReachable }.count
+                let totalCount = routeManager.routeVerificationResults.count
+                
+                Text("\(passedCount)/\(totalCount)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(passedCount == totalCount ? Color(hex: "10B981") : Color(hex: "F59E0B"))
+            }
+            
+            // Show verification results
+            ForEach(Array(routeManager.routeVerificationResults.values.prefix(3))) { result in
+                HStack(spacing: 6) {
+                    Image(systemName: result.isReachable ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(result.isReachable ? Color(hex: "10B981") : Color(hex: "EF4444"))
+                    
+                    Text(result.destination)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    
+                    Spacer()
+                    
+                    if let latency = result.latency {
+                        Text("\(Int(latency))ms")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    } else if let error = result.error {
+                        Text(error)
+                            .font(.system(size: 9))
+                            .foregroundColor(Color(hex: "EF4444"))
+                            .lineLimit(1)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.primary.opacity(0.03))
+        .cornerRadius(8)
+    }
+    
     // MARK: - Footer
     
     private var footerActions: some View {
@@ -419,6 +559,7 @@ struct MenuContent: View {
         }
     }
     
+    
     // MARK: - Helpers
     
     private var statusColor: Color {
@@ -433,7 +574,16 @@ struct MenuContent: View {
     }
     
     private func openSettings() {
-        SettingsWindowController.shared.show()
+        // Close the MenuBarExtra dropdown window
+        // The dropdown is the current key window when clicking inside it
+        if let menuWindow = NSApp.keyWindow {
+            menuWindow.close()
+        }
+        
+        // Show settings after dropdown closes
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            SettingsWindowController.shared.show()
+        }
     }
 }
 
