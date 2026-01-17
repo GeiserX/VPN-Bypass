@@ -438,7 +438,12 @@ struct MenuContent: View {
     // MARK: - Active Services Summary
     
     private var activeServicesSummary: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let enabledServices = routeManager.config.services.filter { $0.enabled }
+        let maxVisible = 3
+        let visibleServices = Array(enabledServices.prefix(maxVisible))
+        let remainingCount = enabledServices.count - maxVisible
+        
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "app.connected.to.app.below.fill")
                     .font(.system(size: 10))
@@ -449,8 +454,6 @@ struct MenuContent: View {
                 Spacer()
             }
             
-            let enabledServices = routeManager.config.services.filter { $0.enabled }
-            
             if enabledServices.isEmpty {
                 Text("No services enabled")
                     .font(.system(size: 11))
@@ -458,8 +461,18 @@ struct MenuContent: View {
                     .italic()
             } else {
                 FlowLayout(spacing: 6) {
-                    ForEach(enabledServices) { service in
+                    ForEach(visibleServices) { service in
                         ServiceChip(service: service)
+                    }
+                    
+                    if remainingCount > 0 {
+                        Text("+\(remainingCount) more")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.primary.opacity(0.05))
+                            .cornerRadius(4)
                     }
                 }
             }
