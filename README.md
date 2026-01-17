@@ -4,6 +4,7 @@ A macOS menu bar app that automatically routes specific domains and services aro
 
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue)
 ![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
+[![Version](https://img.shields.io/badge/version-1.1.0-green)](https://github.com/GeiserX/vpn-macos-bypass/releases)
 
 ## Why?
 
@@ -25,7 +26,36 @@ VPN Bypass intelligently routes selected services directly to the internet while
 - 📋 **Hosts file management** - Optional DNS bypass via `/etc/hosts`
 - 🪵 **Activity logs** - See what's happening in real-time
 
+### New in v1.1.0
+
+- 🔍 **Extended VPN Detection** - Now supports Fortinet FortiClient, Zscaler, Cloudflare WARP, Pulse Secure, and Palo Alto
+- 📶 **Better Network Monitoring** - Improved detection when switching WiFi networks
+- 🔔 **Notifications** - Alerts when VPN connects/disconnects and routes are applied
+- ✅ **Route Verification** - Ping tests to verify routes are actually working
+- 💾 **Import/Export Config** - Backup and restore your domains and services
+- 🚀 **Launch at Login** - Option to start automatically when you log in
+
 ## Installation
+
+### Homebrew (Recommended)
+
+```bash
+# Add the tap (first time only)
+brew tap geiserx/tap
+
+# Install VPN Bypass
+brew install --cask vpn-bypass
+```
+
+Or install directly from the repository:
+
+```bash
+brew install --cask --no-quarantine https://raw.githubusercontent.com/GeiserX/vpn-macos-bypass/main/Casks/vpn-bypass.rb
+```
+
+### Manual Download
+
+Download the latest `.dmg` from [Releases](https://github.com/GeiserX/vpn-macos-bypass/releases), open it, and drag **VPN Bypass** to your Applications folder.
 
 ### Build from Source
 
@@ -34,11 +64,11 @@ VPN Bypass intelligently routes selected services directly to the internet while
 git clone https://github.com/GeiserX/vpn-macos-bypass.git
 cd vpn-macos-bypass
 
-# Build
-swift build -c release
+# Build and create release DMG
+make release
 
-# Run
-.build/release/VPNBypass
+# Or just build and run
+make run
 ```
 
 ### Xcode
@@ -50,10 +80,11 @@ Open `Package.swift` in Xcode and run the project.
 ### Menu Bar
 
 Click the shield icon in the menu bar to:
-- See VPN connection status
+- See VPN connection status and type
 - View active bypass routes
 - Quick-add domains to bypass
 - Refresh or clear routes
+- Verify routes are working
 
 ### Settings
 
@@ -69,12 +100,32 @@ Click the gear icon to access settings:
 - Each service includes known domains and IP ranges
 
 **General Tab**
+- Launch at Login toggle
 - Auto-apply routes when VPN connects
 - Manage `/etc/hosts` entries
+- Enable route verification after apply
+- Notification preferences (connect, disconnect, routes, failures)
+- Import/Export configuration backup
+- Network status display (VPN type, interface, gateway, WiFi SSID)
 
 **Logs Tab**
 - View recent activity
 - Debug connection issues
+
+## Supported VPN Types
+
+| VPN Client | Detection | Status |
+|------------|-----------|--------|
+| GlobalProtect | ✅ Full | Supported |
+| Cisco AnyConnect | ✅ Full | Supported |
+| OpenVPN | ✅ Full | Supported |
+| WireGuard | ✅ Full | Supported |
+| **Fortinet FortiClient** | ✅ Full | **New in v1.1** |
+| **Zscaler** | ✅ Full | **New in v1.1** |
+| **Cloudflare WARP** | ✅ Full | **New in v1.1** |
+| **Pulse Secure** | ✅ Full | **New in v1.1** |
+| Tailscale (exit node) | ✅ Full | Supported |
+| Tailscale (mesh only) | ❌ Not VPN | Expected |
 
 ## Pre-configured Services
 
@@ -91,10 +142,11 @@ Click the gear icon to access settings:
 
 ## How It Works
 
-1. **VPN Detection**: Monitors network interfaces for VPN tunnels (utun, ipsec, ppp, gpd)
+1. **VPN Detection**: Monitors network interfaces and running processes to detect VPN type
 2. **Gateway Detection**: Identifies your local gateway (Wi-Fi/Ethernet router)
 3. **Route Management**: Adds host routes to send specific traffic through local gateway instead of VPN
-4. **DNS Bypass**: Optionally adds entries to `/etc/hosts` to bypass VPN DNS
+4. **Route Verification**: Optionally pings routes to verify they're working
+5. **DNS Bypass**: Optionally adds entries to `/etc/hosts` to bypass VPN DNS
 
 ### VPN Detection Logic
 
@@ -103,6 +155,7 @@ The app intelligently detects corporate VPNs while avoiding false positives:
 | Interface Type | IP Range | Detection |
 |---------------|----------|-----------|
 | **Corporate VPN** (GlobalProtect, Cisco, etc.) | `10.x.x.x`, `172.16-31.x.x` | ✅ Detected as VPN |
+| **Cloudflare WARP** | `100.96-111.x.x` | ✅ Detected as VPN |
 | **Tailscale** (mesh networking) | `100.64-127.x.x` | ❌ Not detected* |
 | **Tailscale** (exit node active) | `100.64-127.x.x` | ✅ Detected as VPN |
 
@@ -122,6 +175,7 @@ The detection also requires:
 The app requires:
 - **Network access**: To detect VPN connections and resolve domains
 - **Admin privileges**: To add routes and modify `/etc/hosts` (prompted when needed)
+- **Notifications**: Optional, for VPN status alerts (prompted on first launch)
 
 ## Troubleshooting
 
@@ -130,6 +184,7 @@ The app requires:
 1. Check if VPN is actually connected (look for utun interface)
 2. Verify local gateway is detected in Settings → General
 3. Check Logs tab for errors
+4. Use "Verify Routes" button to test connectivity
 
 ### Hosts file not updating
 
@@ -140,6 +195,13 @@ The app will prompt for admin password when modifying `/etc/hosts`. If you deny,
 Some VPNs force DNS through the tunnel. The hosts file entries help bypass this, but you may also need to:
 - Disable "Route all DNS through VPN" in your VPN client
 - Use a local DNS resolver
+
+### Route verification failing
+
+If routes are applied but verification fails:
+- The destination host may be blocking ping (ICMP)
+- Try accessing the service directly - it may still work
+- Check if the service is actually accessible from your network
 
 ## Acknowledgments
 
