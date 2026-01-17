@@ -221,4 +221,4 @@ Please read the issue templates before submitting.
 
 ## License
 
-This project is source-available. See [LICENSE](LICENSE) for details.
+This project is licensed under the [GPL-3.0 License](LICENSE).
