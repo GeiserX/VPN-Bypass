@@ -1796,14 +1796,14 @@ final class SettingsWindowController {
     }
     
     private func addBrandedTitlebar(to window: NSWindow) {
-        // Create the branded title view - full width to allow centering
+        // Create the branded title view - positioned to align with traffic lights
         let titleView = NSHostingView(rootView: BrandedTitlebarView())
-        titleView.frame = NSRect(x: 0, y: 0, width: window.frame.width, height: 38)
+        titleView.frame = NSRect(x: 0, y: 0, width: window.frame.width - 80, height: 22)
         
         // Create accessory view controller
         let accessory = NSTitlebarAccessoryViewController()
         accessory.view = titleView
-        accessory.layoutAttribute = .bottom // Places it below the traffic lights but in titlebar area
+        accessory.layoutAttribute = .trailing // Places it in the titlebar, to the right of traffic lights
         
         window.addTitlebarAccessoryViewController(accessory)
     }
@@ -1816,26 +1816,26 @@ struct BrandedTitlebarView: View {
         HStack {
             Spacer()
             
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 // Shield icon
                 Image(systemName: "shield.checkered")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(BrandColors.blueGradient)
                 
                 // Branded name
                 HStack(spacing: 0) {
                     Text("VPN")
-                        .font(.system(size: 14, weight: .black, design: .rounded))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(BrandColors.blueGradient)
                     
                     Text("Bypass")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(BrandColors.silverGradient)
                 }
             }
             
             Spacer()
         }
-        .frame(height: 38)
+        .frame(height: 22)
     }
 }
