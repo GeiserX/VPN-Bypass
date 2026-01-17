@@ -219,16 +219,6 @@ Contributions are welcome! Here's how you can help:
 
 Please read the issue templates before submitting.
 
-## Support
-
-If you find VPN Bypass useful, consider supporting its development:
-
-- ⭐ **Star this repo** - It helps others discover the project
-- 💖 [**GitHub Sponsors**](https://github.com/sponsors/GeiserX)
-- ☕ [**Buy Me a Coffee**](https://buymeacoffee.com/geiser)
-- 🎨 [**Patreon**](https://patreon.com/geiser)
-- 🙏 [**Thanks.dev**](https://thanks.dev/u/gh/geiserx)
-
 ## License
 
 This project is source-available. See [LICENSE](LICENSE) for details.
