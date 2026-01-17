@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" fill="black">
+  <!-- VPN Bypass: Shield with arrow - optimized for 18x18 menu bar -->
+  
+  <!-- Shield outline -->
+  <path d="
+    M11 2
+    L3 5
+    L3 11
+    Q3 17 11 20
+    Q19 17 19 11
+    L19 5
+    L11 2
+    Z
+    M11 4
+    L17 6.5
+    L17 11
+    Q17 15.5 11 18
+    Q5 15.5 5 11
+    L5 6.5
+    L11 4
+    Z
+  " fill-rule="evenodd"/>
+  
+  <!-- Arrow breaking through diagonally (bottom-left to upper-right) -->
+  <path d="
+    M5 15
+    L10 10
+    L10 12
+    L14 12
+    L14 8
+    L12 8
+    L17 3
+    L19 5
+    L14 10
+    L16 10
+    L16 14
+    L12 14
+    L12 17
+    Z
+  " fill="black"/>
+</svg>

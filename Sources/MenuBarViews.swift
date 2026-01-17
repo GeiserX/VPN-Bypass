@@ -3,35 +3,181 @@
 
 import SwiftUI
 
+// MARK: - Brand Colors
+
+struct BrandColors {
+    // Blue from the shield (left side of logo)
+    static let blue = Color(red: 0.15, green: 0.40, blue: 0.85)
+    static let blueLight = Color(red: 0.25, green: 0.55, blue: 0.95)
+    static let blueDark = Color(red: 0.05, green: 0.20, blue: 0.55)
+    
+    // Silver from the shield (right side - metallic)
+    static let silver = Color(red: 0.75, green: 0.78, blue: 0.82)
+    static let silverLight = Color(red: 0.88, green: 0.90, blue: 0.92)
+    static let silverDark = Color(red: 0.45, green: 0.48, blue: 0.52)
+    
+    // Arrow blue (cyan-ish)
+    static let arrowBlue = Color(red: 0.20, green: 0.65, blue: 0.95)
+    
+    // Gradients
+    static let blueGradient = LinearGradient(
+        colors: [blueLight, blue, blueDark],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+    
+    static let silverGradient = LinearGradient(
+        colors: [silverLight, silver, silverDark],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+}
+
 // MARK: - Menu Bar Label
 
 struct MenuBarLabel: View {
     @EnvironmentObject var routeManager: RouteManager
+    @State private var isAnimating = false
     
     var body: some View {
         HStack(spacing: 4) {
-            // Shield icon with status color
-            if routeManager.isLoading {
-                Image(systemName: "ellipsis.circle")
-                    .renderingMode(.template)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 16, height: 16)
-            } else {
-                Image(systemName: routeManager.isVPNConnected ? "shield.checkered" : "shield")
-                    .renderingMode(.template)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 16, height: 16)
+            // Custom shield+arrow icon
+            ZStack {
+                ShieldArrowIcon(isLoading: routeManager.isLoading || routeManager.isApplyingRoutes)
+                    .fill(Color.primary)
+                    .frame(width: 18, height: 18)
+                
+                // Pulsing arrow overlay when loading
+                if routeManager.isLoading || routeManager.isApplyingRoutes {
+                    ArrowOnlyIcon()
+                        .fill(Color.primary)
+                        .frame(width: 18, height: 18)
+                        .opacity(isAnimating ? 0.3 : 1.0)
+                        .animation(
+                            Animation.easeInOut(duration: 0.6)
+                                .repeatForever(autoreverses: true),
+                            value: isAnimating
+                        )
+                        .onAppear { isAnimating = true }
+                        .onDisappear { isAnimating = false }
+                }
             }
             
             // Active routes count when VPN connected
-            if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty && !routeManager.isLoading {
+            if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty && !routeManager.isLoading && !routeManager.isApplyingRoutes {
                 Text("\(routeManager.activeRoutes.count)")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .foregroundColor(.secondary)
             }
         }
+    }
+}
+
+// MARK: - Shield with Arrow Icon (Menu Bar Template)
+
+struct ShieldArrowIcon: Shape {
+    var isLoading: Bool = false
+    
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let w = rect.width
+        let h = rect.height
+        
+        // Shield outline (with hollow center)
+        // Outer shield
+        path.move(to: CGPoint(x: w * 0.5, y: h * 0.08))
+        path.addLine(to: CGPoint(x: w * 0.12, y: h * 0.22))
+        path.addLine(to: CGPoint(x: w * 0.12, y: h * 0.55))
+        path.addQuadCurve(
+            to: CGPoint(x: w * 0.5, y: h * 0.95),
+            control: CGPoint(x: w * 0.12, y: h * 0.80)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: w * 0.88, y: h * 0.55),
+            control: CGPoint(x: w * 0.88, y: h * 0.80)
+        )
+        path.addLine(to: CGPoint(x: w * 0.88, y: h * 0.22))
+        path.closeSubpath()
+        
+        // Inner shield cutout (to create outline effect)
+        path.move(to: CGPoint(x: w * 0.5, y: h * 0.18))
+        path.addLine(to: CGPoint(x: w * 0.78, y: h * 0.28))
+        path.addLine(to: CGPoint(x: w * 0.78, y: h * 0.52))
+        path.addQuadCurve(
+            to: CGPoint(x: w * 0.5, y: h * 0.85),
+            control: CGPoint(x: w * 0.78, y: h * 0.72)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: w * 0.22, y: h * 0.52),
+            control: CGPoint(x: w * 0.22, y: h * 0.72)
+        )
+        path.addLine(to: CGPoint(x: w * 0.22, y: h * 0.28))
+        path.closeSubpath()
+        
+        // Arrow breaking through (diagonal, lower-left to upper-right)
+        if !isLoading {
+            addArrow(to: &path, in: rect)
+        }
+        
+        return path
+    }
+    
+    private func addArrow(to path: inout Path, in rect: CGRect) {
+        let w = rect.width
+        let h = rect.height
+        
+        // Arrow shaft and head
+        path.move(to: CGPoint(x: w * 0.18, y: h * 0.72))
+        path.addLine(to: CGPoint(x: w * 0.45, y: h * 0.45))
+        path.addLine(to: CGPoint(x: w * 0.45, y: h * 0.52))
+        path.addLine(to: CGPoint(x: w * 0.58, y: h * 0.52))
+        path.addLine(to: CGPoint(x: w * 0.58, y: h * 0.38))
+        path.addLine(to: CGPoint(x: w * 0.50, y: h * 0.38))
+        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.12))  // Arrow tip
+        path.addLine(to: CGPoint(x: w * 0.94, y: h * 0.38))
+        path.addLine(to: CGPoint(x: w * 0.86, y: h * 0.38))
+        path.addLine(to: CGPoint(x: w * 0.86, y: h * 0.52))
+        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.52))
+        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.60))
+        path.addLine(to: CGPoint(x: w * 0.30, y: h * 0.78))
+        path.closeSubpath()
+        
+        // Debris particles
+        path.addEllipse(in: CGRect(x: w * 0.78, y: h * 0.20, width: w * 0.06, height: w * 0.06))
+        path.addEllipse(in: CGRect(x: w * 0.85, y: h * 0.28, width: w * 0.04, height: w * 0.04))
+        path.addEllipse(in: CGRect(x: w * 0.70, y: h * 0.08, width: w * 0.03, height: w * 0.03))
+    }
+}
+
+// Arrow only (for loading animation overlay)
+struct ArrowOnlyIcon: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let w = rect.width
+        let h = rect.height
+        
+        // Arrow shaft and head
+        path.move(to: CGPoint(x: w * 0.18, y: h * 0.72))
+        path.addLine(to: CGPoint(x: w * 0.45, y: h * 0.45))
+        path.addLine(to: CGPoint(x: w * 0.45, y: h * 0.52))
+        path.addLine(to: CGPoint(x: w * 0.58, y: h * 0.52))
+        path.addLine(to: CGPoint(x: w * 0.58, y: h * 0.38))
+        path.addLine(to: CGPoint(x: w * 0.50, y: h * 0.38))
+        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.12))
+        path.addLine(to: CGPoint(x: w * 0.94, y: h * 0.38))
+        path.addLine(to: CGPoint(x: w * 0.86, y: h * 0.38))
+        path.addLine(to: CGPoint(x: w * 0.86, y: h * 0.52))
+        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.52))
+        path.addLine(to: CGPoint(x: w * 0.72, y: h * 0.60))
+        path.addLine(to: CGPoint(x: w * 0.30, y: h * 0.78))
+        path.closeSubpath()
+        
+        // Debris
+        path.addEllipse(in: CGRect(x: w * 0.78, y: h * 0.20, width: w * 0.06, height: w * 0.06))
+        path.addEllipse(in: CGRect(x: w * 0.85, y: h * 0.28, width: w * 0.04, height: w * 0.04))
+        path.addEllipse(in: CGRect(x: w * 0.70, y: h * 0.08, width: w * 0.03, height: w * 0.03))
+        
+        return path
     }
 }
 
@@ -89,25 +235,23 @@ struct MenuContent: View {
     
     private var titleHeader: some View {
         HStack(spacing: 8) {
-            Image(systemName: "shield.checkered")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color(hex: "10B981"), Color(hex: "34D399")],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+            // Mini logo icon with brand colors
+            ZStack {
+                ShieldArrowIcon(isLoading: false)
+                    .fill(BrandColors.blueGradient)
+                    .frame(width: 20, height: 20)
+            }
             
-            Text("VPN Bypass")
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color.white, Color(hex: "E5E7EB")],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+            // App name with branded colors: "VPN" in blue, "Bypass" in silver
+            HStack(spacing: 0) {
+                Text("VPN")
+                    .font(.system(size: 15, weight: .black, design: .rounded))
+                    .foregroundStyle(BrandColors.blueGradient)
+                
+                Text("Bypass")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(BrandColors.silverGradient)
+            }
             
             Spacer()
             

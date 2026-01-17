@@ -1446,16 +1446,27 @@ struct InfoTab: View {
     
     private var appInfoSection: some View {
         VStack(alignment: .center, spacing: 12) {
-            // App icon
-            Image(systemName: "shield.checkered")
-                .font(.system(size: 48))
-                .foregroundStyle(
-                    LinearGradient(colors: [Color(hex: "10B981"), Color(hex: "34D399")], startPoint: .top, endPoint: .bottom)
+            // App icon - custom shield with arrow
+            ShieldArrowIcon(isLoading: false)
+                .fill(
+                    LinearGradient(
+                        colors: [BrandColors.blueLight, BrandColors.blue, BrandColors.blueDark],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
                 )
+                .frame(width: 64, height: 64)
             
-            Text("VPN Bypass")
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
+            // App name with branded colors
+            HStack(spacing: 0) {
+                Text("VPN")
+                    .font(.system(size: 24, weight: .black, design: .rounded))
+                    .foregroundStyle(BrandColors.blueGradient)
+                
+                Text("Bypass")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundStyle(BrandColors.silverGradient)
+            }
             
             Text("v1.2.0")
                 .font(.system(size: 12, design: .monospaced))
