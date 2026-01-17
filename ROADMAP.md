@@ -31,14 +31,14 @@
 
 ## Roadmap
 
-### Phase 1.2: DNS & Distribution (v1.2)
-**Timeline: 1-2 weeks**
+### Phase 1.2: DNS & Distribution (v1.2) ✅ COMPLETE
+**Completed: January 2026**
 
-| Feature | Description | Priority |
-|---------|-------------|----------|
-| **Respect User's DNS** | Use pre-VPN DNS servers (detected from primary interface) instead of hardcoded Google/Cloudflare | High |
-| **Homebrew Tap** | Publish to homebrew for easy installation | High |
-| **Route Health Dashboard** | Show which routes are active, last verified, issues | Medium |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Respect User's DNS** | ✅ Done | Detects pre-VPN DNS from primary interface, uses for all resolution |
+| **Homebrew Tap** | ✅ Done | `brew tap geiserx/vpn-bypass && brew install --cask vpn-bypass` |
+| **Route Health Dashboard** | ✅ Done | Shows active routes, services, domains, DNS server, timing info in Logs tab |
 
 **Note**: ASN-based routing considered but deferred - current hardcoded IP ranges + DNS resolution is sufficient.
 

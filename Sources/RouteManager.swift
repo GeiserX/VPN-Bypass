@@ -32,6 +32,11 @@ final class RouteManager: ObservableObject {
     private var dnsRefreshTimer: Timer?
     private var detectedDNSServer: String?  // User's real DNS (pre-VPN), detected at startup
     
+    /// Public accessor for UI to display detected DNS server
+    var detectedDNSServerDisplay: String? {
+        detectedDNSServer
+    }
+    
     // MARK: - Types
     
     enum VPNType: String, Codable {

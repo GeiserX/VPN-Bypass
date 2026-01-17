@@ -1218,6 +1218,9 @@ struct LogsTab: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
+            // Route Health Dashboard
+            routeHealthSection
+            
             // Header
             HStack {
                 HStack(spacing: 8) {
@@ -1301,6 +1304,108 @@ struct LogsTab: View {
         }
     }
     
+    // MARK: - Route Health Dashboard
+    
+    private var routeHealthSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack(spacing: 8) {
+                Image(systemName: "heart.text.square.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(
+                        LinearGradient(colors: [Color(hex: "10B981"), Color(hex: "34D399")], startPoint: .top, endPoint: .bottom)
+                    )
+                Text("Route Health")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+            }
+            
+            // Stats grid
+            HStack(spacing: 12) {
+                // Active routes
+                RouteStatCard(
+                    icon: "arrow.triangle.branch",
+                    title: "Active Routes",
+                    value: "\(routeManager.activeRoutes.count)",
+                    color: Color(hex: "10B981")
+                )
+                
+                // Enabled services
+                RouteStatCard(
+                    icon: "square.grid.2x2",
+                    title: "Services",
+                    value: "\(routeManager.config.services.filter { $0.enabled }.count)",
+                    color: Color(hex: "8B5CF6")
+                )
+                
+                // Enabled domains
+                RouteStatCard(
+                    icon: "globe",
+                    title: "Domains",
+                    value: "\(routeManager.config.domains.filter { $0.enabled }.count)",
+                    color: Color(hex: "3B82F6")
+                )
+            }
+            
+            // DNS and timing info
+            VStack(alignment: .leading, spacing: 8) {
+                if let dnsServer = routeManager.detectedDNSServerDisplay {
+                    HStack(spacing: 6) {
+                        Image(systemName: "server.rack")
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(hex: "06B6D4"))
+                        Text("DNS: \(dnsServer)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(hex: "9CA3AF"))
+                    }
+                }
+                
+                if let lastUpdate = routeManager.lastUpdate {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(hex: "6B7280"))
+                        Text("Last update: ")
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "6B7280"))
+                        Text(lastUpdate, style: .relative)
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "9CA3AF"))
+                    }
+                }
+                
+                if routeManager.config.autoDNSRefresh, let nextRefresh = routeManager.nextDNSRefresh {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(hex: "10B981"))
+                        Text("Next refresh: ")
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "6B7280"))
+                        Text(nextRefresh, style: .relative)
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "10B981"))
+                    }
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.black.opacity(0.2))
+            )
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.white.opacity(0.03))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                )
+        )
+    }
+    
     private func copyLogsToClipboard() {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -1311,6 +1416,37 @@ struct LogsTab: View {
         
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(logText, forType: .string)
+    }
+}
+
+// MARK: - Route Stat Card
+
+struct RouteStatCard: View {
+    let icon: String
+    let title: String
+    let value: String
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(color)
+            
+            Text(value)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+            
+            Text(title)
+                .font(.system(size: 10))
+                .foregroundColor(Color(hex: "6B7280"))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(color.opacity(0.1))
+        )
     }
 }
 
