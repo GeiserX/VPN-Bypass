@@ -1796,14 +1796,19 @@ final class SettingsWindowController {
     }
     
     private func addBrandedTitlebar(to window: NSWindow) {
-        // Create the branded title view - full width for proper centering
-        let titleView = NSHostingView(rootView: BrandedTitlebarView())
-        titleView.frame = NSRect(x: 0, y: 0, width: window.frame.width, height: 25)
+        // Create a container view that spans the full titlebar width
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: window.frame.width, height: 28))
         
-        // Create accessory view controller
+        // Create the branded title view
+        let titleView = NSHostingView(rootView: BrandedTitlebarView())
+        titleView.frame = containerView.bounds
+        titleView.autoresizingMask = [.width, .height]
+        containerView.addSubview(titleView)
+        
+        // Create accessory view controller - use .right to stay in titlebar row
         let accessory = NSTitlebarAccessoryViewController()
-        accessory.view = titleView
-        accessory.layoutAttribute = .bottom
+        accessory.view = containerView
+        accessory.layoutAttribute = .right
         
         window.addTitlebarAccessoryViewController(accessory)
     }
@@ -1813,8 +1818,9 @@ final class SettingsWindowController {
 
 struct BrandedTitlebarView: View {
     var body: some View {
-        // Use GeometryReader to properly center accounting for traffic lights (~70px on left)
-        GeometryReader { geometry in
+        HStack {
+            Spacer()
+            
             HStack(spacing: 5) {
                 // Shield icon
                 Image(systemName: "shield.checkered")
@@ -1832,8 +1838,9 @@ struct BrandedTitlebarView: View {
                         .foregroundStyle(BrandColors.silverGradient)
                 }
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
+            
+            Spacer()
         }
-        .frame(height: 25)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
