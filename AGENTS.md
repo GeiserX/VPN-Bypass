@@ -43,6 +43,26 @@ Before making changes, read these files to understand the project:
 ### CI/CD & Infrastructure
 - **CI/CD Platform**: GitHub Actions
 
+### Releasing New Versions
+Use the version bump script to update all version locations:
+
+```bash
+# Bump version (updates Info.plist, SettingsView.swift, README.md, Casks/)
+./scripts/bump-version.sh 1.3.0
+
+# Update CHANGELOG.md manually with release notes
+
+# Commit and tag
+git add -A && git commit -m "chore: release v1.3.0"
+git tag v1.3.0
+git push && git push origin v1.3.0
+```
+
+The tag push triggers GitHub Actions which:
+1. Builds the app and creates DMG
+2. Creates a GitHub Release with the DMG
+3. Updates the Homebrew cask in `homebrew-vpn-bypass` repo automatically
+
 ## Best Practices
 
 - **Write clean code**: Prioritize readability and maintainability
