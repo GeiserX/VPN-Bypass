@@ -1,0 +1,14 @@
+# Default owner for all files
+* @GeiserX
+
+# Source code
+/Sources/ @GeiserX
+/Helper/ @GeiserX
+
+# Infrastructure and CI
+/.github/ @GeiserX
+/Makefile @GeiserX
+
+# Documentation
+/docs/ @GeiserX
+/*.md @GeiserX

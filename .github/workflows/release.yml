@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Building version: $VERSION"
+
+      - name: Update Info.plist version
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ steps.version.outputs.version }}" Info.plist
+
+      - name: Build release
+        run: make release
+
+      - name: Calculate SHA256
+        id: sha
+        run: |
+          SHA256=$(shasum -a 256 dist/VPNBypass-${{ steps.version.outputs.version }}.dmg | awk '{print $1}')
+          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+          echo "📝 SHA256: $SHA256"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="v${{ steps.version.outputs.version }}"
+          PREV_TAG=$(git tag -l "v*" --sort=-version:refname | sed -n '2p')
+          
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+          
+          echo "📝 Generating changelog from $PREV_TAG to $VERSION"
+          
+          {
+            echo "## What's Changed"
+            echo ""
+            
+            # Features
+            FEATURES=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --grep="^feat" 2>/dev/null || true)
+            if [ -n "$FEATURES" ]; then
+              echo "### ✨ Features"
+              echo "$FEATURES" | head -20
+              echo ""
+            fi
+            
+            # Fixes
+            FIXES=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --grep="^fix" 2>/dev/null || true)
+            if [ -n "$FIXES" ]; then
+              echo "### 🐛 Bug Fixes"
+              echo "$FIXES" | head -20
+              echo ""
+            fi
+            
+            # Other changes
+            OTHERS=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --invert-grep --grep="^feat" --invert-grep --grep="^fix" 2>/dev/null | head -10 || true)
+            if [ -n "$OTHERS" ]; then
+              echo "### 🔧 Other Changes"
+              echo "$OTHERS"
+              echo ""
+            fi
+            
+            echo "---"
+            echo ""
+            echo "## Installation"
+            echo ""
+            echo "### Homebrew (recommended)"
+            echo '```bash'
+            echo "brew tap GeiserX/vpn-bypass"
+            echo "brew install --cask vpn-bypass"
+            echo '```'
+            echo ""
+            echo "### Manual Download"
+            echo "Download \`VPNBypass-${{ steps.version.outputs.version }}.dmg\` from the assets below."
+            echo ""
+            echo "---"
+            echo ""
+            echo "**SHA256:** \`${{ steps.sha.outputs.sha256 }}\`"
+            echo ""
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREV_TAG...$VERSION"
+          } > changelog.md
+          
+          cat changelog.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: "VPNBypass v${{ steps.version.outputs.version }}"
+          body_path: changelog.md
+          draft: false
+          prerelease: false
+          files: |
+            dist/VPNBypass-${{ steps.version.outputs.version }}.dmg
+
+      - name: Update Homebrew Cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "⚠️ HOMEBREW_TAP_TOKEN not set, skipping Homebrew update"
+            echo "To enable automatic Homebrew updates, add a PAT with repo scope as HOMEBREW_TAP_TOKEN secret"
+            exit 0
+          fi
+          
+          VERSION="${{ steps.version.outputs.version }}"
+          SHA256="${{ steps.sha.outputs.sha256 }}"
+          
+          # Clone homebrew tap
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/GeiserX/homebrew-vpn-bypass.git" homebrew-tap
+          cd homebrew-tap
+          
+          # Update cask file
+          sed -i '' "s/version \".*\"/version \"$VERSION\"/" Casks/vpn-bypass.rb
+          sed -i '' "s/sha256 \".*\"/sha256 \"$SHA256\"/" Casks/vpn-bypass.rb
+          
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/vpn-bypass.rb
+          git commit -m "Update vpn-bypass to v$VERSION"
+          git push
+          
+          echo "✅ Homebrew cask updated to v$VERSION"
