@@ -129,32 +129,13 @@ jobs:
           files: |
             dist/VPNBypass-${{ steps.version.outputs.version }}.dmg
 
-      - name: Update Homebrew Cask
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - name: Homebrew Update Instructions
         run: |
-          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
-            echo "⚠️ HOMEBREW_TAP_TOKEN not set, skipping Homebrew update"
-            echo "To enable automatic Homebrew updates, add a PAT with repo scope as HOMEBREW_TAP_TOKEN secret"
-            exit 0
-          fi
-          
-          VERSION="${{ steps.version.outputs.version }}"
-          SHA256="${{ steps.sha.outputs.sha256 }}"
-          
-          # Clone homebrew tap
-          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/GeiserX/homebrew-vpn-bypass.git" homebrew-tap
-          cd homebrew-tap
-          
-          # Update cask file
-          sed -i '' "s/version \".*\"/version \"$VERSION\"/" Casks/vpn-bypass.rb
-          sed -i '' "s/sha256 \".*\"/sha256 \"$SHA256\"/" Casks/vpn-bypass.rb
-          
-          # Commit and push
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/vpn-bypass.rb
-          git commit -m "Update vpn-bypass to v$VERSION"
-          git push
-          
-          echo "✅ Homebrew cask updated to v$VERSION"
+          echo "## 🍺 Homebrew Cask Update" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The homebrew-vpn-bypass repo will auto-update within 15 minutes," >> $GITHUB_STEP_SUMMARY
+          echo "or manually trigger the workflow at:" >> $GITHUB_STEP_SUMMARY
+          echo "https://github.com/GeiserX/homebrew-vpn-bypass/actions/workflows/update-cask.yml" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**SHA256:** ${{ steps.sha.outputs.sha256 }}" >> $GITHUB_STEP_SUMMARY
