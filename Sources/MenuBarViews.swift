@@ -634,8 +634,10 @@ struct MenuContent: View {
             menuWindow.close()
         }
         
-        // Show settings after dropdown closes
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        // Activate the app first, then show settings
+        // Longer delay on first open helps with initialization
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             SettingsWindowController.shared.show()
         }
     }

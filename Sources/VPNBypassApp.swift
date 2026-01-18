@@ -51,6 +51,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize NotificationManager (it sets itself as delegate)
         _ = NotificationManager.shared
         
+        // Pre-warm SettingsWindowController so first click is instant
+        _ = SettingsWindowController.shared
+        
         // Load config and apply routes on startup
         Task { @MainActor in
             RouteManager.shared.loadConfig()
