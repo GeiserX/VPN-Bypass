@@ -856,6 +856,21 @@ struct GeneralTab: View {
                 if notificationManager.notificationsEnabled {
                     Divider().background(Color.white.opacity(0.1))
                     
+                    SettingsToggleRow(
+                        icon: "speaker.slash.fill",
+                        title: "Silent",
+                        subtitle: "No sound",
+                        isOn: Binding(
+                            get: { notificationManager.silentNotifications },
+                            set: { 
+                                notificationManager.silentNotifications = $0
+                                notificationManager.savePreferences()
+                            }
+                        )
+                    )
+                    
+                    Divider().background(Color.white.opacity(0.1))
+                    
                     HStack(spacing: 12) {
                         NotificationChip(
                             label: "Connect",
@@ -886,6 +901,10 @@ struct GeneralTab: View {
                             )
                         )
                     }
+                    
+                    Text("Routes: services, domains, DNS refresh")
+                        .font(.system(size: 10))
+                        .foregroundColor(Color(hex: "6B7280"))
                 }
             }
             
@@ -995,7 +1014,7 @@ struct GeneralTab: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     BrandedAppName(fontSize: 13)
-                    Text("Version 1.2.1")
+                    Text("Version 1.3.0")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
                 }
@@ -1453,7 +1472,7 @@ struct InfoTab: View {
             // App name with branded colors
             BrandedAppName(fontSize: 24)
             
-            Text("v1.2.1")
+            Text("v1.3.0")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(Color(hex: "6B7280"))
             

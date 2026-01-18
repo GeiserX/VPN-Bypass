@@ -10,9 +10,10 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     static let shared = NotificationManager()
     
     @Published var notificationsEnabled = true
+    @Published var silentNotifications = false  // No sound when true
     @Published var notifyOnVPNConnect = true
     @Published var notifyOnVPNDisconnect = true
-    @Published var notifyOnRoutesApplied = true
+    @Published var notifyOnRoutesApplied = false  // Default OFF - user can enable for verbose feedback
     @Published var notifyOnRouteFailure = true
     @Published var isAuthorized = false
     
@@ -41,7 +42,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         // Show notifications even when app is in foreground
-        completionHandler([.banner, .sound, .list])
+        // Sound is controlled per-notification via content.sound
+        completionHandler([.banner, .list])
     }
     
     nonisolated func userNotificationCenter(
@@ -179,7 +181,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+        content.sound = silentNotifications ? nil : .default
         
         // Use a unique identifier to allow multiple notifications
         let uniqueId = "\(identifier)-\(Date().timeIntervalSince1970)"
@@ -199,15 +201,38 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     
     struct Preferences: Codable {
         var notificationsEnabled: Bool
+        var silentNotifications: Bool
         var notifyOnVPNConnect: Bool
         var notifyOnVPNDisconnect: Bool
         var notifyOnRoutesApplied: Bool
         var notifyOnRouteFailure: Bool
+        
+        // Migration: provide defaults for new fields
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            notificationsEnabled = try container.decode(Bool.self, forKey: .notificationsEnabled)
+            silentNotifications = try container.decodeIfPresent(Bool.self, forKey: .silentNotifications) ?? false
+            notifyOnVPNConnect = try container.decode(Bool.self, forKey: .notifyOnVPNConnect)
+            notifyOnVPNDisconnect = try container.decode(Bool.self, forKey: .notifyOnVPNDisconnect)
+            notifyOnRoutesApplied = try container.decode(Bool.self, forKey: .notifyOnRoutesApplied)
+            notifyOnRouteFailure = try container.decode(Bool.self, forKey: .notifyOnRouteFailure)
+        }
+        
+        init(notificationsEnabled: Bool, silentNotifications: Bool, notifyOnVPNConnect: Bool,
+             notifyOnVPNDisconnect: Bool, notifyOnRoutesApplied: Bool, notifyOnRouteFailure: Bool) {
+            self.notificationsEnabled = notificationsEnabled
+            self.silentNotifications = silentNotifications
+            self.notifyOnVPNConnect = notifyOnVPNConnect
+            self.notifyOnVPNDisconnect = notifyOnVPNDisconnect
+            self.notifyOnRoutesApplied = notifyOnRoutesApplied
+            self.notifyOnRouteFailure = notifyOnRouteFailure
+        }
     }
     
     func savePreferences() {
         let prefs = Preferences(
             notificationsEnabled: notificationsEnabled,
+            silentNotifications: silentNotifications,
             notifyOnVPNConnect: notifyOnVPNConnect,
             notifyOnVPNDisconnect: notifyOnVPNDisconnect,
             notifyOnRoutesApplied: notifyOnRoutesApplied,
@@ -220,10 +245,10 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     }
     
     private func loadPreferences() {
-        // Check if this is first launch - if so, use defaults (all enabled)
+        // Check if this is first launch - if so, use defaults
         let hasLaunched = UserDefaults.standard.bool(forKey: hasLaunchedKey)
         if !hasLaunched {
-            print("🔔 First launch - using default notification settings (all enabled)")
+            print("🔔 First launch - using default notification settings (routes OFF)")
             UserDefaults.standard.set(true, forKey: hasLaunchedKey)
             savePreferences()
             return
@@ -235,9 +260,52 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         }
         
         notificationsEnabled = prefs.notificationsEnabled
+        silentNotifications = prefs.silentNotifications
         notifyOnVPNConnect = prefs.notifyOnVPNConnect
         notifyOnVPNDisconnect = prefs.notifyOnVPNDisconnect
         notifyOnRoutesApplied = prefs.notifyOnRoutesApplied
         notifyOnRouteFailure = prefs.notifyOnRouteFailure
+    }
+    
+    // MARK: - Additional Notifications
+    
+    func notifyServiceToggled(service: String, enabled: Bool) {
+        guard notificationsEnabled && notifyOnRoutesApplied else { return }
+        
+        sendNotification(
+            title: enabled ? "Service Enabled" : "Service Disabled",
+            body: service,
+            identifier: "service-toggled"
+        )
+    }
+    
+    func notifyDomainAdded(domain: String) {
+        guard notificationsEnabled && notifyOnRoutesApplied else { return }
+        
+        sendNotification(
+            title: "Domain Added",
+            body: domain,
+            identifier: "domain-added"
+        )
+    }
+    
+    func notifyDomainRemoved(domain: String) {
+        guard notificationsEnabled && notifyOnRoutesApplied else { return }
+        
+        sendNotification(
+            title: "Domain Removed",
+            body: domain,
+            identifier: "domain-removed"
+        )
+    }
+    
+    func notifyDNSRefreshCompleted(updatedCount: Int) {
+        guard notificationsEnabled && notifyOnRoutesApplied else { return }
+        
+        sendNotification(
+            title: "DNS Refresh Complete",
+            body: "\(updatedCount) route\(updatedCount == 1 ? "" : "s") updated",
+            identifier: "dns-refresh"
+        )
     }
 }
