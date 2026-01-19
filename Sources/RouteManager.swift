@@ -88,6 +88,23 @@ final class RouteManager: ObservableObject {
         var dnsRefreshInterval: TimeInterval = 3600  // 1 hour default
         var fallbackDNS: [String] = ["1.1.1.1", "8.8.8.8"]  // Fallback DNS servers (IP or DoH URL)
         
+        // Custom decoder for backward compatibility with configs missing new fields
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            domains = try container.decodeIfPresent([DomainEntry].self, forKey: .domains) ?? Config.defaultDomains
+            services = try container.decodeIfPresent([ServiceEntry].self, forKey: .services) ?? Config.defaultServices
+            autoApplyOnVPN = try container.decodeIfPresent(Bool.self, forKey: .autoApplyOnVPN) ?? true
+            manageHostsFile = try container.decodeIfPresent(Bool.self, forKey: .manageHostsFile) ?? true
+            checkInterval = try container.decodeIfPresent(TimeInterval.self, forKey: .checkInterval) ?? 300
+            verifyRoutesAfterApply = try container.decodeIfPresent(Bool.self, forKey: .verifyRoutesAfterApply) ?? false
+            autoDNSRefresh = try container.decodeIfPresent(Bool.self, forKey: .autoDNSRefresh) ?? true
+            dnsRefreshInterval = try container.decodeIfPresent(TimeInterval.self, forKey: .dnsRefreshInterval) ?? 3600
+            fallbackDNS = try container.decodeIfPresent([String].self, forKey: .fallbackDNS) ?? ["1.1.1.1", "8.8.8.8"]
+        }
+        
+        // Default initializer
+        init() {}
+        
         static var defaultDomains: [DomainEntry] {
             []  // User adds their own domains in Settings
         }
