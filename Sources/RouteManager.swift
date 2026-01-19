@@ -852,9 +852,10 @@ final class RouteManager: ObservableObject {
         }
         
         if failedCount > 0 {
-            let sampleFailed = failedDomains.prefix(5).joined(separator: ", ")
-            let moreText = failedDomains.count > 5 ? " and \(failedDomains.count - 5) more" : ""
-            log(.warning, "Applied \(newRoutes.count) routes (\(failedCount) failed: \(sampleFailed)\(moreText))")
+            log(.warning, "Applied \(newRoutes.count) routes (\(failedCount) domains failed)")
+            for domain in failedDomains {
+                log(.warning, "  ✗ \(domain)")
+            }
             failedDomains.removeAll()
         } else {
             log(.success, "Applied \(newRoutes.count) routes")
