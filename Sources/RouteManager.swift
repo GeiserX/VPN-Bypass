@@ -484,8 +484,8 @@ final class RouteManager: ObservableObject {
             isLoading = false
         }
         
-        // Log disconnection
-        if !isVPNConnected && wasVPNConnected {
+        // Log disconnection - only if we're confident (interface actually changed)
+        if !isVPNConnected && wasVPNConnected && vpnInterface != oldInterface {
             log(.warning, "VPN disconnected (was: \(oldInterface ?? "unknown"))")
             NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface)
             // Clear routes when VPN disconnects
@@ -504,8 +504,8 @@ final class RouteManager: ObservableObject {
     
     /// Detect which VPN client process is running
     private func detectRunningVPNProcess() async -> VPNType? {
-        guard let result = await runProcessAsync("/bin/ps", arguments: ["-eo", "comm"], timeout: 3.0) else {
-            return nil
+        guard let result = await runProcessAsync("/bin/ps", arguments: ["-eo", "comm"], timeout: 5.0) else {
+            return vpnType  // Keep existing type if command fails
         }
         
         let output = result.output.lowercased()
@@ -541,8 +541,9 @@ final class RouteManager: ObservableObject {
     }
     
     private func detectVPNViaIfconfig(hintType: VPNType?) async -> (connected: Bool, interface: String?, type: VPNType?) {
-        guard let result = await runProcessAsync("/sbin/ifconfig", timeout: 3.0) else {
-            return (false, nil, nil)
+        guard let result = await runProcessAsync("/sbin/ifconfig", timeout: 5.0) else {
+            // Command failed/timed out - don't change VPN status (return current state)
+            return (isVPNConnected, vpnInterface, vpnType)
         }
         
         let output = result.output
