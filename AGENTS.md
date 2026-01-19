@@ -29,11 +29,19 @@ For technologies beyond those listed, analyze the codebase and suggest appropria
 - Skill level: Senior
 
 ### Workflow Rules
-- Always run and test locally after making changes
+- Always install and test via Homebrew (never swift build for testing)
 - Check logs when build or commit finishes
-- Ensure all tests pass before committing
 - Match the codebase's existing style and patterns
 - Confirm before making significant changes
+
+### Testing Changes
+After releasing, wait for workflow then install via Homebrew:
+```bash
+cd /opt/homebrew/Library/Taps/geiserx/homebrew-vpn-bypass && git pull
+pkill -9 "VPN Bypass" 2>/dev/null || true
+brew reinstall --cask vpn-bypass
+open "/Applications/VPN Bypass.app"
+```
 
 ### Important Files to Read First
 Before making changes, read these files to understand the project:
