@@ -792,30 +792,41 @@ final class RouteManager: ObservableObject {
             }
         }
         
-        // Resolve domains in parallel (much faster than sequential)
+        // Resolve domains in batches to avoid overwhelming DNS server through VPN
         log(.info, "Resolving \(allDomains.count) domains...")
         
-        let routeResults = await withTaskGroup(of: [ActiveRoute]?.self, returning: [[ActiveRoute]?].self) { group in
-            for item in allDomains {
-                group.addTask {
-                    await self.applyRoutesForDomain(item.domain, gateway: gateway, source: item.source)
+        let batchSize = 5  // Process 5 domains at a time to avoid DNS rate limiting
+        var index = 0
+        
+        while index < allDomains.count {
+            let endIndex = min(index + batchSize, allDomains.count)
+            let batch = Array(allDomains[index..<endIndex])
+            
+            // Process batch in parallel
+            let batchResults = await withTaskGroup(of: [ActiveRoute]?.self, returning: [[ActiveRoute]?].self) { group in
+                for item in batch {
+                    group.addTask {
+                        await self.applyRoutesForDomain(item.domain, gateway: gateway, source: item.source)
+                    }
+                }
+                
+                var results: [[ActiveRoute]?] = []
+                for await result in group {
+                    results.append(result)
+                }
+                return results
+            }
+            
+            // Collect batch results
+            for result in batchResults {
+                if let routes = result {
+                    newRoutes.append(contentsOf: routes)
+                } else {
+                    failedCount += 1
                 }
             }
             
-            var results: [[ActiveRoute]?] = []
-            for await result in group {
-                results.append(result)
-            }
-            return results
-        }
-        
-        // Collect results
-        for result in routeResults {
-            if let routes = result {
-                newRoutes.append(contentsOf: routes)
-            } else {
-                failedCount += 1
-            }
+            index += batchSize
         }
         
         // Apply IP ranges (these don't need DNS resolution)
