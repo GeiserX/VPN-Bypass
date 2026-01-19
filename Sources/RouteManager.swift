@@ -26,6 +26,13 @@ final class RouteManager: ObservableObject {
     @Published var isApplyingRoutes = false  // True during incremental route changes (blocks UI)
     @Published var lastDNSRefresh: Date?
     @Published var nextDNSRefresh: Date?
+    @Published var isTestingProxy = false
+    @Published var proxyTestResult: ProxyTestResult?
+    
+    struct ProxyTestResult {
+        let success: Bool
+        let message: String
+    }
     
     // MARK: - Private
     
@@ -77,6 +84,20 @@ final class RouteManager: ObservableObject {
         let error: String?
     }
     
+    // SOCKS5 Proxy configuration for aggressive VPN bypass (corporate VPNs that block UDP)
+    struct ProxyConfig: Codable, Equatable {
+        var enabled: Bool = false
+        var server: String = ""
+        var port: Int = 1080
+        var username: String = ""
+        var password: String = ""
+        var useForServices: [String] = []  // Service IDs that should use proxy (empty = all enabled services)
+        
+        var isConfigured: Bool {
+            !server.isEmpty && port > 0 && port < 65536
+        }
+    }
+    
     struct Config: Codable {
         var domains: [DomainEntry] = defaultDomains
         var services: [ServiceEntry] = defaultServices
@@ -87,6 +108,7 @@ final class RouteManager: ObservableObject {
         var autoDNSRefresh: Bool = true  // Periodically re-resolve DNS and update routes
         var dnsRefreshInterval: TimeInterval = 3600  // 1 hour default
         var fallbackDNS: [String] = ["1.1.1.1", "8.8.8.8"]  // Fallback DNS servers (IP or DoH URL)
+        var proxyConfig: ProxyConfig = ProxyConfig()  // SOCKS5 proxy for aggressive bypass mode
         
         // Custom decoder for backward compatibility with configs missing new fields
         init(from decoder: Decoder) throws {
@@ -100,6 +122,7 @@ final class RouteManager: ObservableObject {
             autoDNSRefresh = try container.decodeIfPresent(Bool.self, forKey: .autoDNSRefresh) ?? true
             dnsRefreshInterval = try container.decodeIfPresent(TimeInterval.self, forKey: .dnsRefreshInterval) ?? 3600
             fallbackDNS = try container.decodeIfPresent([String].self, forKey: .fallbackDNS) ?? ["1.1.1.1", "8.8.8.8"]
+            proxyConfig = try container.decodeIfPresent(ProxyConfig.self, forKey: .proxyConfig) ?? ProxyConfig()
         }
         
         // Default initializer
@@ -178,7 +201,11 @@ final class RouteManager: ObservableObject {
                     "slack.com", "www.slack.com", "app.slack.com", "files.slack.com", "a.slack-edge.com"
                 ], ipRanges: []),
                 ServiceEntry(id: "discord", name: "Discord", enabled: false, domains: [
-                    "discord.com", "discord.gg", "discordapp.com", "discord.media", "cdn.discordapp.com"
+                    // Main domains
+                    "discord.com", "discord.gg", "discordapp.com", "discord.media", "cdn.discordapp.com",
+                    // Voice/WebRTC specific
+                    "discordapp.net", "gateway.discord.gg", "router.discordapp.net",
+                    "media.discordapp.net", "images-ext-1.discordapp.net", "images-ext-2.discordapp.net"
                 ], ipRanges: []),
                 ServiceEntry(id: "zoom", name: "Zoom", enabled: false, domains: [
                     "zoom.us", "www.zoom.us", "us02web.zoom.us", "us04web.zoom.us", "us05web.zoom.us"
@@ -1036,6 +1063,52 @@ final class RouteManager: ObservableObject {
     func forceDNSRefresh() {
         Task {
             await performDNSRefresh()
+        }
+    }
+    
+    /// Test SOCKS5 proxy connection
+    func testProxyConnection() async {
+        guard config.proxyConfig.isConfigured else {
+            await MainActor.run {
+                proxyTestResult = ProxyTestResult(success: false, message: "Proxy not configured")
+            }
+            return
+        }
+        
+        await MainActor.run {
+            isTestingProxy = true
+            proxyTestResult = nil
+        }
+        
+        defer {
+            Task { @MainActor in
+                isTestingProxy = false
+            }
+        }
+        
+        // Test TCP connection to proxy server
+        let server = config.proxyConfig.server
+        let port = config.proxyConfig.port
+        
+        // Use nc (netcat) to test connection
+        let args = ["-z", "-w", "5", server, String(port)]
+        guard let result = await runProcessAsync("/usr/bin/nc", arguments: args, timeout: 6.0) else {
+            await MainActor.run {
+                proxyTestResult = ProxyTestResult(success: false, message: "Connection timeout")
+            }
+            return
+        }
+        
+        if result.exitCode == 0 {
+            await MainActor.run {
+                proxyTestResult = ProxyTestResult(success: true, message: "Connected to \(server):\(port)")
+                log(.success, "SOCKS5 proxy test successful: \(server):\(port)")
+            }
+        } else {
+            await MainActor.run {
+                proxyTestResult = ProxyTestResult(success: false, message: "Cannot connect to \(server):\(port)")
+                log(.warning, "SOCKS5 proxy test failed: \(server):\(port)")
+            }
         }
     }
     

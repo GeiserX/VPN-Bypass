@@ -989,6 +989,174 @@ struct GeneralTab: View {
                 }
             }
             
+            // SOCKS5 Proxy section (Aggressive Bypass Mode)
+            SettingsCard(title: "SOCKS5 Proxy", icon: "network.badge.shield.half.filled", iconColor: Color(hex: "F59E0B")) {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Warning/info box
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(Color(hex: "F59E0B"))
+                            .font(.system(size: 12))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Aggressive Bypass Mode")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(Color(hex: "F59E0B"))
+                            Text("For corporate VPNs (Cisco, Zscaler) that block UDP. Requires external SOCKS5 proxy server with UDP support.")
+                                .font(.system(size: 10))
+                                .foregroundColor(Color(hex: "9CA3AF"))
+                        }
+                    }
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(hex: "F59E0B").opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color(hex: "F59E0B").opacity(0.3), lineWidth: 1)
+                            )
+                    )
+                    
+                    SettingsToggleRow(
+                        icon: "shield.lefthalf.filled",
+                        title: "Enable SOCKS5 Proxy",
+                        subtitle: "Route traffic through proxy to bypass UDP blocking",
+                        isOn: Binding(
+                            get: { routeManager.config.proxyConfig.enabled },
+                            set: { 
+                                routeManager.config.proxyConfig.enabled = $0
+                                routeManager.saveConfig()
+                            }
+                        )
+                    )
+                    
+                    if routeManager.config.proxyConfig.enabled {
+                        Divider().background(Color.white.opacity(0.1))
+                        
+                        // Server and port
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Proxy Server")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(Color(hex: "9CA3AF"))
+                            
+                            HStack(spacing: 8) {
+                                TextField("Server address", text: Binding(
+                                    get: { routeManager.config.proxyConfig.server },
+                                    set: { 
+                                        routeManager.config.proxyConfig.server = $0
+                                        routeManager.saveConfig()
+                                    }
+                                ))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .monospaced))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(Color(hex: "1F2937"))
+                                .cornerRadius(6)
+                                
+                                TextField("Port", value: Binding(
+                                    get: { routeManager.config.proxyConfig.port },
+                                    set: { 
+                                        routeManager.config.proxyConfig.port = $0
+                                        routeManager.saveConfig()
+                                    }
+                                ), format: .number)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .monospaced))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(Color(hex: "1F2937"))
+                                .cornerRadius(6)
+                                .frame(width: 80)
+                            }
+                        }
+                        
+                        // Authentication (optional)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Authentication (optional)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(Color(hex: "9CA3AF"))
+                            
+                            HStack(spacing: 8) {
+                                TextField("Username", text: Binding(
+                                    get: { routeManager.config.proxyConfig.username },
+                                    set: { 
+                                        routeManager.config.proxyConfig.username = $0
+                                        routeManager.saveConfig()
+                                    }
+                                ))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(Color(hex: "1F2937"))
+                                .cornerRadius(6)
+                                
+                                SecureField("Password", text: Binding(
+                                    get: { routeManager.config.proxyConfig.password },
+                                    set: { 
+                                        routeManager.config.proxyConfig.password = $0
+                                        routeManager.saveConfig()
+                                    }
+                                ))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(Color(hex: "1F2937"))
+                                .cornerRadius(6)
+                            }
+                        }
+                        
+                        // Test connection button
+                        HStack {
+                            Button {
+                                Task {
+                                    await routeManager.testProxyConnection()
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if routeManager.isTestingProxy {
+                                        ProgressView()
+                                            .scaleEffect(0.6)
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    } else {
+                                        Image(systemName: "antenna.radiowaves.left.and.right")
+                                            .font(.system(size: 11))
+                                    }
+                                    Text(routeManager.isTestingProxy ? "Testing..." : "Test Connection")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(
+                                    routeManager.config.proxyConfig.isConfigured 
+                                        ? Color(hex: "F59E0B") 
+                                        : Color(hex: "4B5563")
+                                )
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!routeManager.config.proxyConfig.isConfigured || routeManager.isTestingProxy)
+                            
+                            if let result = routeManager.proxyTestResult {
+                                HStack(spacing: 4) {
+                                    Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                        .foregroundColor(result.success ? Color(hex: "10B981") : Color(hex: "EF4444"))
+                                    Text(result.message)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(result.success ? Color(hex: "10B981") : Color(hex: "EF4444"))
+                                }
+                            }
+                        }
+                        
+                        Text("Proxy will be used for services that need UDP (Discord voice, gaming, etc.) when corporate VPN blocks direct UDP traffic.")
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(hex: "6B7280"))
+                    }
+                }
+            }
+            
             // Import/Export section
             SettingsCard(title: "Configuration", icon: "doc.badge.arrow.up.fill", iconColor: Color(hex: "3B82F6")) {
                 HStack(spacing: 12) {
@@ -1095,7 +1263,7 @@ struct GeneralTab: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     BrandedAppName(fontSize: 13)
-                    Text("Version 1.4.5")
+                    Text("Version 1.5.0")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
                 }
@@ -1553,7 +1721,7 @@ struct InfoTab: View {
             // App name with branded colors
             BrandedAppName(fontSize: 24)
             
-            Text("v1.4.5")
+            Text("v1.5.0")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(Color(hex: "6B7280"))
             
