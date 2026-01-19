@@ -85,6 +85,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTimer?.invalidate()
         networkDebounceWorkItem?.cancel()
         RouteManager.shared.stopDNSRefreshTimer()
+        
+        // Clean up /etc/hosts entries on quit
+        if RouteManager.shared.config.manageHostsFile {
+            Task {
+                await RouteManager.shared.cleanupOnQuit()
+            }
+        }
     }
     
     // MARK: - Network Monitoring
