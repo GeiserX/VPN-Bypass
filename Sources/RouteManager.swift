@@ -1522,6 +1522,12 @@ final class RouteManager: ObservableObject {
         await modifyHostsFile(entries: [])
     }
     
+    /// Called when app is quitting - clean up hosts file
+    func cleanupOnQuit() async {
+        log(.info, "Cleaning up /etc/hosts on quit...")
+        await cleanHostsFile()
+    }
+    
     private func modifyHostsFile(entries: [(domain: String, ip: String)]) async {
         // Use privileged helper if installed
         if HelperManager.shared.isHelperInstalled {
