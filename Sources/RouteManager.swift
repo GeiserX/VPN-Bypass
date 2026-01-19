@@ -840,7 +840,11 @@ final class RouteManager: ObservableObject {
             await updateHostsFile()
         }
         
-        log(.success, "Applied \(newRoutes.count) routes")
+        if failedCount > 0 {
+            log(.warning, "Applied \(newRoutes.count) routes (\(failedCount) domains failed to resolve)")
+        } else {
+            log(.success, "Applied \(newRoutes.count) routes")
+        }
         
         // Only send notification when explicitly requested (Refresh button)
         if sendNotification && newRoutes.count > 0 {
@@ -1390,7 +1394,7 @@ final class RouteManager: ObservableObject {
     private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil) async -> [ActiveRoute]? {
         // Resolve domain IPs
         guard let ips = await resolveIPs(for: domain) else {
-            log(.warning, "Could not resolve IPs for \(domain)")
+            // Don't spam logs - resolution failures are common for some domains
             return nil
         }
         
@@ -1415,13 +1419,22 @@ final class RouteManager: ObservableObject {
     }
     
     private func resolveIPs(for domain: String) async -> [String]? {
-        // Use user's detected DNS server if available, otherwise system default
-        var args = ["+short", domain]
+        // Try with detected DNS server first, fall back to system default
         if let dnsServer = detectedDNSServer {
-            args = ["@\(dnsServer)", "+short", domain]
+            let args = ["@\(dnsServer)", "+short", "+time=2", "+tries=1", domain]
+            if let result = await runProcessAsync("/usr/bin/dig", arguments: args, timeout: 3.0) {
+                let ips = result.output.components(separatedBy: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { isValidIP($0) }
+                if !ips.isEmpty {
+                    return ips
+                }
+            }
         }
         
-        guard let result = await runProcessAsync("/usr/bin/dig", arguments: args, timeout: 5.0) else {
+        // Fallback: use system default DNS
+        let fallbackArgs = ["+short", "+time=2", "+tries=1", domain]
+        guard let result = await runProcessAsync("/usr/bin/dig", arguments: fallbackArgs, timeout: 3.0) else {
             return nil
         }
         
