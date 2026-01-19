@@ -284,7 +284,6 @@ final class RouteManager: ObservableObject {
             case success = "SUCCESS"
             case warning = "WARNING"
             case error = "ERROR"
-            case highlight = "HIGHLIGHT"  // For important info like DNS detection
         }
     }
     
@@ -1425,7 +1424,7 @@ final class RouteManager: ObservableObject {
         
         if let dns = foundDNS {
             detectedDNSServer = dns
-            log(.highlight, "🔍 Detected non-VPN DNS: \(dns)")
+            log(.info, "🔍 Detected non-VPN DNS: \(dns)")
         } else {
             log(.warning, "Could not detect user's DNS server, will use fallback DNS")
         }
@@ -1538,8 +1537,8 @@ final class RouteManager: ObservableObject {
         }
         
         guard let kdig = kdigPath else {
-            // kdig not installed, log once and fall back
-            log(.warning, "DoT requires kdig (brew install knot). Skipping \(server)")
+            // kdig not installed, fall back to other DNS methods
+            log(.warning, "DoT requires kdig (brew install knot)")
             return nil
         }
         

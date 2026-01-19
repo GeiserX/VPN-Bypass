@@ -840,8 +840,35 @@ struct GeneralTab: View {
             
             // Fallback DNS section
             SettingsCard(title: "Fallback DNS", icon: "server.rack", iconColor: Color(hex: "8B5CF6")) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("DNS servers to use when your original DNS is unavailable. Supports IP addresses (1.1.1.1) or DoH URLs (https://dns.google/dns-query).")
+                VStack(alignment: .leading, spacing: 12) {
+                    // Detected DNS - prominent display
+                    if let detected = routeManager.detectedDNSServerDisplay {
+                        HStack(spacing: 10) {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .foregroundColor(Color(hex: "06B6D4"))
+                                .font(.system(size: 14))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Detected Non-VPN DNS")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(Color(hex: "9CA3AF"))
+                                Text(detected)
+                                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                    .foregroundColor(Color(hex: "06B6D4"))
+                            }
+                            Spacer()
+                        }
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(hex: "06B6D4").opacity(0.1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color(hex: "06B6D4").opacity(0.3), lineWidth: 1)
+                                )
+                        )
+                    }
+                    
+                    Text("Fallback DNS servers when detected DNS is unavailable.\nSupported formats: IP (1.1.1.1), DoH (https://...), DoT (tls://... or IP:853)")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
                     
@@ -889,18 +916,6 @@ struct GeneralTab: View {
                         .foregroundColor(Color(hex: "10B981"))
                     }
                     .buttonStyle(.plain)
-                    
-                    if let detected = routeManager.detectedDNSServerDisplay {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(Color(hex: "10B981"))
-                                .font(.system(size: 10))
-                            Text("Detected non-VPN DNS: \(detected)")
-                                .font(.system(size: 10))
-                                .foregroundColor(Color(hex: "10B981"))
-                        }
-                        .padding(.top, 4)
-                    }
                 }
             }
             
@@ -1080,7 +1095,7 @@ struct GeneralTab: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     BrandedAppName(fontSize: 13)
-                    Text("Version 1.4.3")
+                    Text("Version 1.4.4")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
                 }
@@ -1538,7 +1553,7 @@ struct InfoTab: View {
             // App name with branded colors
             BrandedAppName(fontSize: 24)
             
-            Text("v1.4.3")
+            Text("v1.4.4")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(Color(hex: "6B7280"))
             
@@ -1778,7 +1793,6 @@ struct LogRow: View {
         case .success: return Color(hex: "10B981")
         case .warning: return Color(hex: "F59E0B")
         case .error: return Color(hex: "EF4444")
-        case .highlight: return Color(hex: "06B6D4")  // Cyan for important info
         }
     }
     
@@ -1788,7 +1802,6 @@ struct LogRow: View {
         case .success: return "checkmark.circle.fill"
         case .warning: return "exclamationmark.triangle.fill"
         case .error: return "xmark.circle.fill"
-        case .highlight: return "star.circle.fill"
         }
     }
     
@@ -1805,15 +1818,13 @@ struct LogRow: View {
             
             Text(entry.message)
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(entry.level == .highlight ? levelColor : .white)
-                .fontWeight(entry.level == .highlight ? .semibold : .regular)
+                .foregroundColor(.white)
                 .lineLimit(1)
             
             Spacer()
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(entry.level == .highlight ? levelColor.opacity(0.1) : Color.clear)
     }
 }
 
