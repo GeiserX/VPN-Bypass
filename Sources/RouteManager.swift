@@ -1438,22 +1438,24 @@ final class RouteManager: ObservableObject {
     }
     
     private func resolveIPs(for domain: String) async -> [String]? {
-        // Try system DNS (more reliable through VPN)
-        let args = ["+short", "+time=3", "+tries=2", domain]
-        if let result = await runProcessAsync("/usr/bin/dig", arguments: args, timeout: 5.0) {
-            let lines = result.output.components(separatedBy: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            
-            // Filter valid IPs (dig can return CNAMEs too)
-            let ips = lines.filter { isValidIP($0) }
-            
-            if !ips.isEmpty {
-                return ips
+        // Use public DNS to bypass VPN's DNS (the whole point of this app!)
+        // Try Cloudflare first, then Google as fallback
+        let bypassDNS = ["1.1.1.1", "8.8.8.8"]
+        
+        for dns in bypassDNS {
+            let args = ["@\(dns)", "+short", "+time=2", "+tries=1", domain]
+            if let result = await runProcessAsync("/usr/bin/dig", arguments: args, timeout: 4.0) {
+                let lines = result.output.components(separatedBy: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                
+                // Filter valid IPs (dig can return CNAMEs too)
+                let ips = lines.filter { isValidIP($0) }
+                
+                if !ips.isEmpty {
+                    return ips
+                }
             }
-            
-            // If we got CNAME but no IPs, the domain exists but has no A record
-            // This is not an error - some domains only have AAAA or other records
         }
         
         return nil
