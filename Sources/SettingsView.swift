@@ -838,6 +838,72 @@ struct GeneralTab: View {
                     .foregroundColor(Color(hex: "6B7280"))
             }
             
+            // Fallback DNS section
+            SettingsCard(title: "Fallback DNS", icon: "server.rack", iconColor: Color(hex: "8B5CF6")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("DNS servers to use when your original DNS is unavailable. Supports IP addresses (1.1.1.1) or DoH URLs (https://dns.google/dns-query).")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(hex: "6B7280"))
+                    
+                    ForEach(Array(routeManager.config.fallbackDNS.enumerated()), id: \.offset) { index, dns in
+                        HStack(spacing: 8) {
+                            Text("\(index + 1).")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(Color(hex: "6B7280"))
+                                .frame(width: 20)
+                            
+                            TextField("DNS server", text: Binding(
+                                get: { routeManager.config.fallbackDNS[index] },
+                                set: { 
+                                    routeManager.config.fallbackDNS[index] = $0
+                                    routeManager.saveConfig()
+                                }
+                            ))
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color(hex: "1F2937"))
+                            .cornerRadius(6)
+                            
+                            Button {
+                                routeManager.config.fallbackDNS.remove(at: index)
+                                routeManager.saveConfig()
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundColor(Color(hex: "EF4444"))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    
+                    Button {
+                        routeManager.config.fallbackDNS.append("")
+                        routeManager.saveConfig()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Add DNS Server")
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(Color(hex: "10B981"))
+                    }
+                    .buttonStyle(.plain)
+                    
+                    if let detected = routeManager.detectedDNSServerDisplay {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(Color(hex: "10B981"))
+                                .font(.system(size: 10))
+                            Text("Detected non-VPN DNS: \(detected)")
+                                .font(.system(size: 10))
+                                .foregroundColor(Color(hex: "10B981"))
+                        }
+                        .padding(.top, 4)
+                    }
+                }
+            }
+            
             // Notifications section
             SettingsCard(title: "Notifications", icon: "bell.fill", iconColor: Color(hex: "8B5CF6")) {
                 SettingsToggleRow(
@@ -1014,7 +1080,7 @@ struct GeneralTab: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     BrandedAppName(fontSize: 13)
-                    Text("Version 1.3.13")
+                    Text("Version 1.4.0")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
                 }
@@ -1472,7 +1538,7 @@ struct InfoTab: View {
             // App name with branded colors
             BrandedAppName(fontSize: 24)
             
-            Text("v1.3.13")
+            Text("v1.4.0")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(Color(hex: "6B7280"))
             

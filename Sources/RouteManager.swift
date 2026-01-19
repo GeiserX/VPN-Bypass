@@ -86,6 +86,7 @@ final class RouteManager: ObservableObject {
         var verifyRoutesAfterApply: Bool = false  // Disabled by default - many servers block ping
         var autoDNSRefresh: Bool = true  // Periodically re-resolve DNS and update routes
         var dnsRefreshInterval: TimeInterval = 3600  // 1 hour default
+        var fallbackDNS: [String] = ["1.1.1.1", "8.8.8.8"]  // Fallback DNS servers (IP or DoH URL)
         
         static var defaultDomains: [DomainEntry] {
             []  // User adds their own domains in Settings
@@ -1438,27 +1439,70 @@ final class RouteManager: ObservableObject {
     }
     
     private func resolveIPs(for domain: String) async -> [String]? {
-        // Use public DNS to bypass VPN's DNS (the whole point of this app!)
-        // Try Cloudflare first, then Google as fallback
-        let bypassDNS = ["1.1.1.1", "8.8.8.8"]
+        // 1. Try detected non-VPN DNS first (user's original DNS before VPN)
+        if let userDNS = detectedDNSServer {
+            if let ips = await resolveWithDNS(domain, dns: userDNS) {
+                return ips
+            }
+        }
         
-        for dns in bypassDNS {
-            let args = ["@\(dns)", "+short", "+time=2", "+tries=1", domain]
-            if let result = await runProcessAsync("/usr/bin/dig", arguments: args, timeout: 4.0) {
-                let lines = result.output.components(separatedBy: "\n")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
-                
-                // Filter valid IPs (dig can return CNAMEs too)
-                let ips = lines.filter { isValidIP($0) }
-                
-                if !ips.isEmpty {
-                    return ips
-                }
+        // 2. Fall back to configured DNS servers
+        for dns in config.fallbackDNS {
+            if let ips = await resolveWithDNS(domain, dns: dns) {
+                return ips
             }
         }
         
         return nil
+    }
+    
+    private func resolveWithDNS(_ domain: String, dns: String) async -> [String]? {
+        // Check if it's a DoH URL
+        if dns.hasPrefix("https://") {
+            return await resolveWithDoH(domain, dohURL: dns)
+        }
+        
+        // Regular DNS via dig
+        let args = ["@\(dns)", "+short", "+time=2", "+tries=1", domain]
+        guard let result = await runProcessAsync("/usr/bin/dig", arguments: args, timeout: 4.0) else {
+            return nil
+        }
+        
+        let ips = result.output.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && isValidIP($0) }
+        
+        return ips.isEmpty ? nil : ips
+    }
+    
+    private func resolveWithDoH(_ domain: String, dohURL: String) async -> [String]? {
+        // DNS-over-HTTPS using JSON API (works with Cloudflare, Google, etc.)
+        let url = "\(dohURL)?name=\(domain)&type=A"
+        let args = ["-s", "-H", "accept: application/dns-json", url]
+        
+        guard let result = await runProcessAsync("/usr/bin/curl", arguments: args, timeout: 5.0),
+              result.exitCode == 0 else {
+            return nil
+        }
+        
+        // Parse JSON response for A records
+        // Format: {"Answer":[{"data":"1.2.3.4"},...]}
+        guard let data = result.output.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let answers = json["Answer"] as? [[String: Any]] else {
+            return nil
+        }
+        
+        let ips = answers.compactMap { answer -> String? in
+            guard let type = answer["type"] as? Int, type == 1,  // Type 1 = A record
+                  let ip = answer["data"] as? String,
+                  isValidIP(ip) else {
+                return nil
+            }
+            return ip
+        }
+        
+        return ips.isEmpty ? nil : ips
     }
     
     private func addRoute(_ destination: String, gateway: String, isNetwork: Bool = false) async -> Bool {
