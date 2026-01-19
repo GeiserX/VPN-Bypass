@@ -37,6 +37,7 @@ bundle: build build-helper
 	@cp Helper/Launchd.plist "$(APP_BUNDLE)/Contents/Library/LaunchDaemons/$(HELPER_ID).plist"
 	@echo "APPL????" > "$(APP_BUNDLE)/Contents/PkgInfo"
 	@# Copy assets
+	@cp assets/AppIcon.icns "$(APP_BUNDLE)/Contents/Resources/"
 	@cp assets/VPNBypass.png "$(APP_BUNDLE)/Contents/Resources/"
 	@cp assets/author-avatar.png "$(APP_BUNDLE)/Contents/Resources/"
 	@echo "App bundle created: $(APP_BUNDLE)"
