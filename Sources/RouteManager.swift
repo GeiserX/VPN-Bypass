@@ -169,7 +169,7 @@ final class RouteManager: ObservableObject {
                     "teams.microsoft.com", "teams.live.com", "statics.teams.cdn.office.net"
                 ], ipRanges: []),
                 ServiceEntry(id: "googlemeet", name: "Google Meet", enabled: false, domains: [
-                    "meet.google.com", "meet.google.com.br"
+                    "meet.google.com"
                 ], ipRanges: []),
                 
                 // Cloud & Storage
