@@ -312,9 +312,30 @@ final class RouteManager: ObservableObject {
     }
     
     func saveConfig() {
+        // Daily backup - overwrite if older than 24 hours
+        createDailyBackupIfNeeded()
+        
         guard let data = try? JSONEncoder().encode(config) else { return }
         try? data.write(to: configURL)
         log(.info, "Config saved")
+    }
+    
+    private func createDailyBackupIfNeeded() {
+        let backupURL = configURL.deletingLastPathComponent().appendingPathComponent("config.json.bak")
+        
+        // Check if backup exists and is less than 24 hours old
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: backupURL.path),
+           let modDate = attrs[.modificationDate] as? Date,
+           Date().timeIntervalSince(modDate) < 86400 {
+            return // Backup is recent enough
+        }
+        
+        // Create/overwrite backup
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            try? FileManager.default.removeItem(at: backupURL)
+            try? FileManager.default.copyItem(at: configURL, to: backupURL)
+            log(.info, "Daily config backup created")
+        }
     }
     
     // MARK: - Import/Export Config
