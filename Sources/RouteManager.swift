@@ -777,23 +777,49 @@ final class RouteManager: ObservableObject {
         var newRoutes: [ActiveRoute] = []
         var failedCount = 0
         
-        // Apply domain routes
+        // Collect all domains to resolve (for parallel resolution)
+        var allDomains: [(domain: String, source: String)] = []
+        
+        // Add custom domains
         for domain in config.domains where domain.enabled {
-            if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
+            allDomains.append((domain.domain, domain.domain))
+        }
+        
+        // Add service domains
+        for service in config.services where service.enabled {
+            for domain in service.domains {
+                allDomains.append((domain, service.name))
+            }
+        }
+        
+        // Resolve domains in parallel (much faster than sequential)
+        log(.info, "Resolving \(allDomains.count) domains...")
+        
+        let routeResults = await withTaskGroup(of: [ActiveRoute]?.self, returning: [[ActiveRoute]?].self) { group in
+            for item in allDomains {
+                group.addTask {
+                    await self.applyRoutesForDomain(item.domain, gateway: gateway, source: item.source)
+                }
+            }
+            
+            var results: [[ActiveRoute]?] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
+        }
+        
+        // Collect results
+        for result in routeResults {
+            if let routes = result {
                 newRoutes.append(contentsOf: routes)
             } else {
                 failedCount += 1
             }
         }
         
-        // Apply service routes
+        // Apply IP ranges (these don't need DNS resolution)
         for service in config.services where service.enabled {
-            for domain in service.domains {
-                if let routes = await applyRoutesForDomain(domain, gateway: gateway, source: service.name) {
-                    newRoutes.append(contentsOf: routes)
-                }
-            }
-            // Apply IP ranges
             for range in service.ipRanges {
                 if await applyRouteForRange(range, gateway: gateway) {
                     newRoutes.append(ActiveRoute(
