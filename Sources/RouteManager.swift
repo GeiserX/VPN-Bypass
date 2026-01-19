@@ -841,9 +841,13 @@ final class RouteManager: ObservableObject {
         }
         
         if failedCount > 0 {
-            log(.warning, "Applied \(newRoutes.count) routes (\(failedCount) domains failed to resolve)")
+            let sampleFailed = failedDomains.prefix(5).joined(separator: ", ")
+            let moreText = failedDomains.count > 5 ? " and \(failedDomains.count - 5) more" : ""
+            log(.warning, "Applied \(newRoutes.count) routes (\(failedCount) failed: \(sampleFailed)\(moreText))")
+            failedDomains.removeAll()
         } else {
             log(.success, "Applied \(newRoutes.count) routes")
+            failedDomains.removeAll()
         }
         
         // Only send notification when explicitly requested (Refresh button)
@@ -1391,10 +1395,12 @@ final class RouteManager: ObservableObject {
         return nil
     }
     
+    private var failedDomains: [String] = []  // Track failed domains for debugging
+    
     private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil) async -> [ActiveRoute]? {
         // Resolve domain IPs
         guard let ips = await resolveIPs(for: domain) else {
-            // Don't spam logs - resolution failures are common for some domains
+            failedDomains.append(domain)
             return nil
         }
         
@@ -1419,30 +1425,25 @@ final class RouteManager: ObservableObject {
     }
     
     private func resolveIPs(for domain: String) async -> [String]? {
-        // Try with detected DNS server first, fall back to system default
-        if let dnsServer = detectedDNSServer {
-            let args = ["@\(dnsServer)", "+short", "+time=2", "+tries=1", domain]
-            if let result = await runProcessAsync("/usr/bin/dig", arguments: args, timeout: 3.0) {
-                let ips = result.output.components(separatedBy: "\n")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { isValidIP($0) }
-                if !ips.isEmpty {
-                    return ips
-                }
+        // Try system DNS (more reliable through VPN)
+        let args = ["+short", "+time=3", "+tries=2", domain]
+        if let result = await runProcessAsync("/usr/bin/dig", arguments: args, timeout: 5.0) {
+            let lines = result.output.components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            
+            // Filter valid IPs (dig can return CNAMEs too)
+            let ips = lines.filter { isValidIP($0) }
+            
+            if !ips.isEmpty {
+                return ips
             }
+            
+            // If we got CNAME but no IPs, the domain exists but has no A record
+            // This is not an error - some domains only have AAAA or other records
         }
         
-        // Fallback: use system default DNS
-        let fallbackArgs = ["+short", "+time=2", "+tries=1", domain]
-        guard let result = await runProcessAsync("/usr/bin/dig", arguments: fallbackArgs, timeout: 3.0) else {
-            return nil
-        }
-        
-        let ips = result.output.components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { isValidIP($0) }
-        
-        return ips.isEmpty ? nil : ips
+        return nil
     }
     
     private func addRoute(_ destination: String, gateway: String, isNetwork: Bool = false) async -> Bool {
