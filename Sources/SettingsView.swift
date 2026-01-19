@@ -1080,7 +1080,7 @@ struct GeneralTab: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     BrandedAppName(fontSize: 13)
-                    Text("Version 1.4.2")
+                    Text("Version 1.4.3")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
                 }
@@ -1538,7 +1538,7 @@ struct InfoTab: View {
             // App name with branded colors
             BrandedAppName(fontSize: 24)
             
-            Text("v1.4.2")
+            Text("v1.4.3")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(Color(hex: "6B7280"))
             
@@ -1778,6 +1778,7 @@ struct LogRow: View {
         case .success: return Color(hex: "10B981")
         case .warning: return Color(hex: "F59E0B")
         case .error: return Color(hex: "EF4444")
+        case .highlight: return Color(hex: "06B6D4")  // Cyan for important info
         }
     }
     
@@ -1787,6 +1788,7 @@ struct LogRow: View {
         case .success: return "checkmark.circle.fill"
         case .warning: return "exclamationmark.triangle.fill"
         case .error: return "xmark.circle.fill"
+        case .highlight: return "star.circle.fill"
         }
     }
     
@@ -1803,13 +1805,15 @@ struct LogRow: View {
             
             Text(entry.message)
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.white)
+                .foregroundColor(entry.level == .highlight ? levelColor : .white)
+                .fontWeight(entry.level == .highlight ? .semibold : .regular)
                 .lineLimit(1)
             
             Spacer()
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        .background(entry.level == .highlight ? levelColor.opacity(0.1) : Color.clear)
     }
 }
 

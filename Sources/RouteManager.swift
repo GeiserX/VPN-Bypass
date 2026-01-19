@@ -284,6 +284,7 @@ final class RouteManager: ObservableObject {
             case success = "SUCCESS"
             case warning = "WARNING"
             case error = "ERROR"
+            case highlight = "HIGHLIGHT"  // For important info like DNS detection
         }
     }
     
@@ -1424,9 +1425,9 @@ final class RouteManager: ObservableObject {
         
         if let dns = foundDNS {
             detectedDNSServer = dns
-            log(.info, "Detected user's DNS server: \(dns)")
+            log(.highlight, "🔍 Detected non-VPN DNS: \(dns)")
         } else {
-            log(.warning, "Could not detect user's DNS server, will use system default")
+            log(.warning, "Could not detect user's DNS server, will use fallback DNS")
         }
     }
     
@@ -1495,14 +1496,56 @@ final class RouteManager: ObservableObject {
     }
     
     private func resolveWithDNS(_ domain: String, dns: String) async -> [String]? {
-        // Check if it's a DoH URL
+        // Check protocol type
         if dns.hasPrefix("https://") {
+            // DoH (DNS over HTTPS)
             return await resolveWithDoH(domain, dohURL: dns)
+        } else if dns.hasPrefix("tls://") {
+            // DoT (DNS over TLS) - requires kdig from knot-dns
+            let server = String(dns.dropFirst(6)) // Remove "tls://"
+            return await resolveWithDoT(domain, server: server)
+        } else if dns.contains(":853") {
+            // DoT with explicit port
+            let server = dns.replacingOccurrences(of: ":853", with: "")
+            return await resolveWithDoT(domain, server: server)
         }
         
         // Regular DNS via dig
         let args = ["@\(dns)", "+short", "+time=2", "+tries=1", domain]
         guard let result = await runProcessAsync("/usr/bin/dig", arguments: args, timeout: 4.0) else {
+            return nil
+        }
+        
+        let ips = result.output.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && isValidIP($0) }
+        
+        return ips.isEmpty ? nil : ips
+    }
+    
+    private func resolveWithDoT(_ domain: String, server: String) async -> [String]? {
+        // DNS-over-TLS using kdig (from knot-dns package)
+        // Install with: brew install knot
+        
+        // Check if kdig is available
+        let kdigPaths = ["/opt/homebrew/bin/kdig", "/usr/local/bin/kdig"]
+        var kdigPath: String?
+        for path in kdigPaths {
+            if FileManager.default.fileExists(atPath: path) {
+                kdigPath = path
+                break
+            }
+        }
+        
+        guard let kdig = kdigPath else {
+            // kdig not installed, log once and fall back
+            log(.warning, "DoT requires kdig (brew install knot). Skipping \(server)")
+            return nil
+        }
+        
+        let args = ["+tls", "+short", "@\(server)", domain]
+        guard let result = await runProcessAsync(kdig, arguments: args, timeout: 5.0),
+              result.exitCode == 0 else {
             return nil
         }
         
