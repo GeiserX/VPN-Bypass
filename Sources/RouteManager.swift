@@ -39,6 +39,12 @@ final class RouteManager: ObservableObject {
     private var dnsRefreshTimer: Timer?
     private var detectedDNSServer: String?  // User's real DNS (pre-VPN), detected at startup
     private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
+    private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
+    
+    private var dnsCacheURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("VPNBypass/dns-cache.json")
+    }
     
     /// Public accessor for UI to display detected DNS server
     var detectedDNSServerDisplay: String? {
@@ -330,6 +336,9 @@ final class RouteManager: ObservableObject {
     // MARK: - Public API
     
     func loadConfig() {
+        // Load DNS cache for faster startup / fallback
+        loadDNSCache()
+        
         guard let data = try? Data(contentsOf: configURL),
               let loaded = try? JSONDecoder().decode(Config.self, from: data) else {
             log(.info, "Using default config")
@@ -364,6 +373,21 @@ final class RouteManager: ObservableObject {
             try? FileManager.default.copyItem(at: configURL, to: backupURL)
             log(.info, "Daily config backup created")
         }
+    }
+    
+    // MARK: - DNS Disk Cache
+    
+    private func loadDNSCache() {
+        guard let data = try? Data(contentsOf: dnsCacheURL),
+              let cache = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+            return
+        }
+        dnsDiskCache = cache
+    }
+    
+    private func saveDNSCache() {
+        guard let data = try? JSONEncoder().encode(dnsDiskCache) else { return }
+        try? data.write(to: dnsCacheURL)
     }
     
     // MARK: - Import/Export Config
@@ -824,19 +848,35 @@ final class RouteManager: ObservableObject {
         // Apply routes if VPN is connected
         if isVPNConnected && localGateway != nil {
             log(.success, "VPN detected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown")), applying routes...")
-            if sendNotification {
-                await applyAllRoutesWithNotification()
+            
+            // Fast path: if we have DNS cache, apply instantly then refresh in background
+            if !dnsDiskCache.isEmpty {
+                log(.info, "Using cached DNS for instant startup...")
+                await applyRoutesFromCache()
+                isLoading = false
+                log(.info, "Routes applied from cache. Refreshing DNS in background...")
+                
+                // Background refresh: re-resolve DNS and update routes if changed
+                Task.detached { [weak self] in
+                    await self?.backgroundDNSRefresh(sendNotification: sendNotification)
+                }
             } else {
-                await applyAllRoutes()
+                // No cache: do full DNS resolution (first run)
+                if sendNotification {
+                    await applyAllRoutesWithNotification()
+                } else {
+                    await applyAllRoutes()
+                }
+                isLoading = false
+                log(.info, "Startup complete. Routes: \(activeRoutes.count)")
             }
         } else if !isVPNConnected {
             log(.info, "No VPN connection detected")
+            isLoading = false
         } else if localGateway == nil {
             log(.error, "Could not detect local gateway")
+            isLoading = false
         }
-        
-        isLoading = false
-        log(.info, "Startup complete. Routes: \(activeRoutes.count)")
     }
     
     func refreshStatus() {
@@ -917,24 +957,37 @@ final class RouteManager: ObservableObject {
             
             // Collect routes from DNS results and cache for hosts file
             for result in dnsResults {
-                guard let ips = result.ips else {
+                if let ips = result.ips, !ips.isEmpty {
+                    // DNS succeeded - use fresh IPs and update disk cache
+                    if let firstIP = ips.first {
+                        dnsCache[result.domain] = firstIP
+                    }
+                    dnsDiskCache[result.domain] = ips  // Update persistent cache
+                    
+                    for ip in ips {
+                        routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: result.source))
+                    }
+                } else if let cachedIPs = dnsDiskCache[result.domain], !cachedIPs.isEmpty {
+                    // DNS failed but we have cached IPs - use them as fallback
+                    log(.info, "Using cached IPs for \(result.domain)")
+                    if let firstIP = cachedIPs.first {
+                        dnsCache[result.domain] = firstIP
+                    }
+                    for ip in cachedIPs {
+                        routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: result.source))
+                    }
+                } else {
+                    // DNS failed and no cache - domain truly failed
                     failedDomains.append(result.domain)
                     failedCount += 1
-                    continue
-                }
-                
-                // Cache first IP for hosts file (avoids re-resolution later)
-                if let firstIP = ips.first {
-                    dnsCache[result.domain] = firstIP
-                }
-                
-                for ip in ips {
-                    routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: result.source))
                 }
             }
             
             index += batchSize
         }
+        
+        // Save updated DNS cache to disk
+        saveDNSCache()
         
         // Collect IP ranges (these don't need DNS resolution)
         for service in config.services where service.enabled {
@@ -1031,6 +1084,181 @@ final class RouteManager: ObservableObject {
         }
         
         log(.info, "All routes removed")
+    }
+    
+    // MARK: - Instant Startup (Cache-based)
+    
+    /// Apply routes using cached IPs only (no DNS resolution) - used for instant startup
+    private func applyRoutesFromCache() async {
+        guard let gateway = localGateway else { return }
+        
+        var newRoutes: [ActiveRoute] = []
+        var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
+        
+        // Build routes from DNS cache
+        for service in config.services where service.enabled {
+            for domain in service.domains {
+                if let cachedIPs = dnsDiskCache[domain] {
+                    for ip in cachedIPs {
+                        routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: service.name))
+                    }
+                    if let firstIP = cachedIPs.first {
+                        dnsCache[domain] = firstIP
+                    }
+                }
+            }
+            // IP ranges don't need DNS
+            for range in service.ipRanges {
+                routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
+            }
+        }
+        
+        // Custom domains
+        for domain in config.domains where domain.enabled {
+            if let cachedIPs = dnsDiskCache[domain.domain] {
+                for ip in cachedIPs {
+                    routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: domain.domain))
+                }
+                if let firstIP = cachedIPs.first {
+                    dnsCache[domain.domain] = firstIP
+                }
+            }
+        }
+        
+        log(.info, "Applying \(routesToAdd.count) routes from cache...")
+        
+        // Apply routes in batch
+        if HelperManager.shared.isHelperInstalled && !routesToAdd.isEmpty {
+            let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
+            _ = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
+            
+            for route in routesToAdd {
+                newRoutes.append(ActiveRoute(
+                    destination: route.destination,
+                    gateway: route.gateway,
+                    source: route.source,
+                    timestamp: Date()
+                ))
+            }
+        }
+        
+        activeRoutes = newRoutes
+        lastUpdate = Date()
+        
+        // Update hosts file
+        if config.manageHostsFile {
+            await updateHostsFile()
+        }
+        
+        log(.success, "Applied \(newRoutes.count) routes from cache")
+    }
+    
+    /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
+    private func backgroundDNSRefresh(sendNotification: Bool) async {
+        guard let gateway = localGateway else { return }
+        
+        // Collect domains to resolve
+        var domainsToResolve: [(domain: String, source: String)] = []
+        for service in config.services where service.enabled {
+            for domain in service.domains {
+                domainsToResolve.append((domain, service.name))
+            }
+        }
+        for domain in config.domains where domain.enabled {
+            domainsToResolve.append((domain.domain, domain.domain))
+        }
+        
+        // Resolve DNS in parallel
+        let userDNS = detectedDNSServer
+        let fallbackDNS = config.fallbackDNS
+        
+        var newIPs: [String: [String]] = [:]
+        var routeChanges: [(add: Bool, destination: String, gateway: String, isNetwork: Bool, source: String)] = []
+        
+        let results = await withTaskGroup(of: (String, String, [String]?).self) { group in
+            for (domain, source) in domainsToResolve {
+                group.addTask {
+                    let ips = await Self.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
+                    return (domain, source, ips)
+                }
+            }
+            
+            var results: [(String, String, [String]?)] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
+        }
+        
+        // Compare with cache and build route changes
+        for (domain, source, ips) in results {
+            guard let ips = ips, !ips.isEmpty else { continue }
+            
+            let oldIPs = Set(dnsDiskCache[domain] ?? [])
+            let newIPSet = Set(ips)
+            
+            // Find IPs to add (new) and remove (old)
+            let toAdd = newIPSet.subtracting(oldIPs)
+            let toRemove = oldIPs.subtracting(newIPSet)
+            
+            for ip in toAdd {
+                routeChanges.append((add: true, destination: ip, gateway: gateway, isNetwork: false, source: source))
+            }
+            for ip in toRemove {
+                routeChanges.append((add: false, destination: ip, gateway: gateway, isNetwork: false, source: source))
+            }
+            
+            newIPs[domain] = ips
+            if let firstIP = ips.first {
+                await MainActor.run { dnsCache[domain] = firstIP }
+            }
+        }
+        
+        // Update disk cache
+        await MainActor.run {
+            for (domain, ips) in newIPs {
+                dnsDiskCache[domain] = ips
+            }
+            saveDNSCache()
+        }
+        
+        // Apply route changes if any
+        if !routeChanges.isEmpty {
+            let additions = routeChanges.filter { $0.add }
+            let removals = routeChanges.filter { !$0.add }
+            
+            if !removals.isEmpty {
+                let destinations = removals.map { $0.destination }
+                _ = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
+                await MainActor.run {
+                    activeRoutes.removeAll { route in destinations.contains(route.destination) }
+                }
+            }
+            
+            if !additions.isEmpty && HelperManager.shared.isHelperInstalled {
+                let routes = additions.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
+                _ = await HelperManager.shared.addRoutesBatch(routes: routes)
+                
+                await MainActor.run {
+                    for add in additions {
+                        activeRoutes.append(ActiveRoute(
+                            destination: add.destination,
+                            gateway: add.gateway,
+                            source: add.source,
+                            timestamp: Date()
+                        ))
+                    }
+                }
+            }
+            
+            await MainActor.run {
+                log(.info, "Background refresh: \(additions.count) routes added, \(removals.count) removed")
+            }
+        } else {
+            await MainActor.run {
+                log(.info, "Background refresh complete (no changes)")
+            }
+        }
     }
     
     // MARK: - Auto DNS Refresh
@@ -1346,26 +1574,57 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    /// Apply routes for a single service (incremental add)
+    /// Apply routes for a single service (incremental add) - parallel DNS + batch routes
     private func applyRoutesForService(_ service: ServiceEntry, gateway: String) async {
         var newRoutes: [ActiveRoute] = []
+        var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool)] = []
         
-        // Apply domain routes
-        for domain in service.domains {
-            if let routes = await applyRoutesForDomain(domain, gateway: gateway, source: service.name) {
-                newRoutes.append(contentsOf: routes)
+        // Capture DNS settings for parallel resolution
+        let userDNS = detectedDNSServer
+        let fallbackDNS = config.fallbackDNS
+        
+        // Resolve ALL domains in parallel (not sequentially)
+        let domainResults = await withTaskGroup(of: (String, [String]?).self) { group in
+            for domain in service.domains {
+                group.addTask {
+                    let ips = await Self.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
+                    return (domain, ips)
+                }
+            }
+            
+            var results: [(String, [String]?)] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
+        }
+        
+        // Collect routes from resolved domains
+        for (domain, ips) in domainResults {
+            guard let ips = ips else { continue }
+            
+            // Cache first IP for hosts file
+            if let firstIP = ips.first {
+                dnsCache[domain] = firstIP
+            }
+            
+            for ip in ips {
+                routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false))
+                newRoutes.append(ActiveRoute(destination: ip, gateway: gateway, source: service.name, timestamp: Date()))
             }
         }
         
-        // Apply IP ranges
+        // Add IP ranges (no DNS needed)
         for range in service.ipRanges {
-            if await applyRouteForRange(range, gateway: gateway) {
-                newRoutes.append(ActiveRoute(
-                    destination: range,
-                    gateway: gateway,
-                    source: service.name,
-                    timestamp: Date()
-                ))
+            routesToAdd.append((destination: range, gateway: gateway, isNetwork: true))
+            newRoutes.append(ActiveRoute(destination: range, gateway: gateway, source: service.name, timestamp: Date()))
+        }
+        
+        // Apply ALL routes in single batch (one XPC call instead of many)
+        if !routesToAdd.isEmpty && HelperManager.shared.isHelperInstalled {
+            let result = await HelperManager.shared.addRoutesBatch(routes: routesToAdd)
+            if result.failureCount > 0 {
+                log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed")
             }
         }
         
@@ -1669,8 +1928,11 @@ final class RouteManager: ObservableObject {
         }
         
         // Regular DNS via dig - uses async dispatch to GCD for true parallelism
+        // Shorter timeout for local DNS (should respond in <100ms), longer for external
+        let isLocalDNS = dns.hasPrefix("192.168.") || dns.hasPrefix("10.") || dns.hasPrefix("172.16.") || dns.hasPrefix("172.17.") || dns.hasPrefix("172.18.") || dns.hasPrefix("172.19.") || dns.hasPrefix("172.2") || dns.hasPrefix("172.30.") || dns.hasPrefix("172.31.")
+        let timeout: TimeInterval = isLocalDNS ? 1.0 : 1.5
         let args = ["@\(dns)", "+short", "+time=1", "+tries=1", domain]
-        guard let result = await runProcessParallel("/usr/bin/dig", arguments: args, timeout: 2.0) else {
+        guard let result = await runProcessParallel("/usr/bin/dig", arguments: args, timeout: timeout) else {
             return nil
         }
         
