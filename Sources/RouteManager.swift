@@ -1356,6 +1356,25 @@ final class RouteManager: ObservableObject {
             }
         }
         
+        // Remove stale IPs that are no longer resolved
+        let staleIPs = oldIPs.subtracting(newIPs)
+        var removedCount = 0
+        if !staleIPs.isEmpty {
+            // Remove from routing table
+            if HelperManager.shared.isHelperInstalled {
+                _ = await HelperManager.shared.removeRoutesBatch(destinations: Array(staleIPs))
+            }
+            // Remove from activeRoutes
+            activeRoutes.removeAll { staleIPs.contains($0.destination) }
+            removedCount = staleIPs.count
+            for ip in staleIPs.prefix(5) {  // Log first 5
+                log(.info, "DNS refresh: removed stale IP \(ip)")
+            }
+            if staleIPs.count > 5 {
+                log(.info, "DNS refresh: ... and \(staleIPs.count - 5) more stale IPs removed")
+            }
+        }
+        
         // Always update hosts file if enabled - keeps IPs fresh even if routes didn't change
         if config.manageHostsFile {
             await updateHostsFile()
@@ -1366,8 +1385,8 @@ final class RouteManager: ObservableObject {
         nextDNSRefresh = Date().addingTimeInterval(config.dnsRefreshInterval)
         isApplyingRoutes = false
         
-        if updatedCount > 0 {
-            log(.success, "DNS refresh complete: \(updatedCount) new routes added")
+        if updatedCount > 0 || removedCount > 0 {
+            log(.success, "DNS refresh complete: \(updatedCount) added, \(removedCount) removed")
         } else {
             log(.info, "DNS refresh complete: routes up to date")
         }
