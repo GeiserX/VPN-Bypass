@@ -35,6 +35,30 @@ final class HelperManager: ObservableObject {
             Task {
                 _ = await installHelper()
             }
+        } else if isHelperInstalled {
+            // Check for version mismatch and auto-update if needed
+            checkAndUpdateHelperVersion()
+        }
+    }
+    
+    private func checkAndUpdateHelperVersion() {
+        connectToHelper { [weak self] helper in
+            helper.getVersion { installedVersion in
+                Task { @MainActor in
+                    guard let self = self else { return }
+                    self.helperVersion = installedVersion
+                    
+                    // Compare with expected version
+                    let expectedVersion = HelperConstants.helperVersion
+                    if installedVersion != expectedVersion {
+                        print("🔐 Helper version mismatch: installed=\(installedVersion), expected=\(expectedVersion)")
+                        print("🔐 Auto-updating privileged helper...")
+                        Task {
+                            _ = await self.installHelper()
+                        }
+                    }
+                }
+            }
         }
     }
     

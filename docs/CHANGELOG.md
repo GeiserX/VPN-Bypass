@@ -5,6 +5,15 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-01-21
+
+### Fixed
+- **True Parallel DNS** - Fixed thread blocking in DNS resolution (was using sync calls that blocked cooperative threads)
+- **Auto-Update Helper** - App now detects helper version mismatch and auto-updates (was only installing on first launch)
+
+### Changed
+- DNS resolution now uses `DispatchQueue.global()` for true GCD parallelism
+
 ## [1.5.1] - 2026-01-21
 
 ### Fixed

@@ -438,6 +438,20 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Async process execution for parallel DNS - dispatches to GCD thread pool
+    private nonisolated static func runProcessParallel(
+        _ executablePath: String,
+        arguments: [String] = [],
+        timeout: TimeInterval = 5.0
+    ) async -> (output: String, exitCode: Int32)? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = runProcessSync(executablePath, arguments: arguments, timeout: timeout)
+                continuation.resume(returning: result)
+            }
+        }
+    }
+    
     /// Synchronous process execution - ONLY call from background thread
     private static nonisolated func runProcessSync(
         _ executablePath: String,
@@ -1649,9 +1663,9 @@ final class RouteManager: ObservableObject {
             return await resolveWithDoTParallel(domain, server: server)
         }
         
-        // Regular DNS via dig
+        // Regular DNS via dig - uses async dispatch to GCD for true parallelism
         let args = ["@\(dns)", "+short", "+time=2", "+tries=1", domain]
-        guard let result = runProcessSync("/usr/bin/dig", arguments: args, timeout: 4.0) else {
+        guard let result = await runProcessParallel("/usr/bin/dig", arguments: args, timeout: 4.0) else {
             return nil
         }
         
@@ -1682,7 +1696,7 @@ final class RouteManager: ObservableObject {
         }
         
         let args = ["+tls", "+short", "@\(server)", domain]
-        guard let result = runProcessSync(kdig, arguments: args, timeout: 5.0),
+        guard let result = await runProcessParallel(kdig, arguments: args, timeout: 5.0),
               result.exitCode == 0 else {
             return nil
         }
@@ -1699,7 +1713,7 @@ final class RouteManager: ObservableObject {
         let url = "\(dohURL)?name=\(domain)&type=A"
         let args = ["-s", "-H", "accept: application/dns-json", url]
         
-        guard let result = runProcessSync("/usr/bin/curl", arguments: args, timeout: 5.0),
+        guard let result = await runProcessParallel("/usr/bin/curl", arguments: args, timeout: 5.0),
               result.exitCode == 0 else {
             return nil
         }
