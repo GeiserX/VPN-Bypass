@@ -934,6 +934,7 @@ final class RouteManager: ObservableObject {
         
         // Collect all routes to add (for batch operation)
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
+        var seenDestinations: Set<String> = []  // Deduplicate by destination IP
         
         while index < allDomains.count {
             let endIndex = min(index + batchSize, allDomains.count)
@@ -964,7 +965,8 @@ final class RouteManager: ObservableObject {
                     }
                     dnsDiskCache[result.domain] = ips  // Update persistent cache
                     
-                    for ip in ips {
+                    for ip in ips where !seenDestinations.contains(ip) {
+                        seenDestinations.insert(ip)
                         routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: result.source))
                     }
                 } else if let cachedIPs = dnsDiskCache[result.domain], !cachedIPs.isEmpty {
@@ -973,7 +975,8 @@ final class RouteManager: ObservableObject {
                     if let firstIP = cachedIPs.first {
                         dnsCache[result.domain] = firstIP
                     }
-                    for ip in cachedIPs {
+                    for ip in cachedIPs where !seenDestinations.contains(ip) {
+                        seenDestinations.insert(ip)
                         routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: result.source))
                     }
                 } else {
@@ -991,7 +994,8 @@ final class RouteManager: ObservableObject {
         
         // Collect IP ranges (these don't need DNS resolution)
         for service in config.services where service.enabled {
-            for range in service.ipRanges {
+            for range in service.ipRanges where !seenDestinations.contains(range) {
+                seenDestinations.insert(range)
                 routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
             }
         }
@@ -1094,12 +1098,14 @@ final class RouteManager: ObservableObject {
         
         var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
+        var seenDestinations: Set<String> = []  // Deduplicate by destination IP
         
         // Build routes from DNS cache
         for service in config.services where service.enabled {
             for domain in service.domains {
                 if let cachedIPs = dnsDiskCache[domain] {
-                    for ip in cachedIPs {
+                    for ip in cachedIPs where !seenDestinations.contains(ip) {
+                        seenDestinations.insert(ip)
                         routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: service.name))
                     }
                     if let firstIP = cachedIPs.first {
@@ -1108,7 +1114,8 @@ final class RouteManager: ObservableObject {
                 }
             }
             // IP ranges don't need DNS
-            for range in service.ipRanges {
+            for range in service.ipRanges where !seenDestinations.contains(range) {
+                seenDestinations.insert(range)
                 routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
             }
         }
@@ -1116,7 +1123,8 @@ final class RouteManager: ObservableObject {
         // Custom domains
         for domain in config.domains where domain.enabled {
             if let cachedIPs = dnsDiskCache[domain.domain] {
-                for ip in cachedIPs {
+                for ip in cachedIPs where !seenDestinations.contains(ip) {
+                    seenDestinations.insert(ip)
                     routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: domain.domain))
                 }
                 if let firstIP = cachedIPs.first {
@@ -1579,6 +1587,10 @@ final class RouteManager: ObservableObject {
         var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool)] = []
         
+        // Track existing routes to avoid duplicates
+        let existingDestinations = Set(activeRoutes.map { $0.destination })
+        var seenDestinations: Set<String> = existingDestinations
+        
         // Capture DNS settings for parallel resolution
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
@@ -1608,14 +1620,16 @@ final class RouteManager: ObservableObject {
                 dnsCache[domain] = firstIP
             }
             
-            for ip in ips {
+            for ip in ips where !seenDestinations.contains(ip) {
+                seenDestinations.insert(ip)
                 routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false))
                 newRoutes.append(ActiveRoute(destination: ip, gateway: gateway, source: service.name, timestamp: Date()))
             }
         }
         
         // Add IP ranges (no DNS needed)
-        for range in service.ipRanges {
+        for range in service.ipRanges where !seenDestinations.contains(range) {
+            seenDestinations.insert(range)
             routesToAdd.append((destination: range, gateway: gateway, isNetwork: true))
             newRoutes.append(ActiveRoute(destination: range, gateway: gateway, source: service.name, timestamp: Date()))
         }

@@ -5,6 +5,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-01-21
+
+### Fixed
+- **Deduplicate Routes** - Multiple domains resolving to the same IP no longer create duplicate routes
+
 ## [1.6.0] - 2026-01-21
 
 ### Added
