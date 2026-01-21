@@ -143,7 +143,7 @@ final class RouteManager: ObservableObject {
                     "whatsapp.com", "web.whatsapp.com", "whatsapp.net", "wa.me"
                 ], ipRanges: ["3.33.221.0/24", "15.197.206.0/24", "52.26.198.0/24"]),
                 ServiceEntry(id: "signal", name: "Signal", enabled: false, domains: [
-                    "signal.org", "www.signal.org", "updates.signal.org", "api.signal.org"
+                    "signal.org", "www.signal.org", "updates.signal.org", "chat.signal.org"
                 ], ipRanges: []),
                 
                 // Streaming - Video
@@ -179,10 +179,10 @@ final class RouteManager: ObservableObject {
                 
                 // Social Media
                 ServiceEntry(id: "twitter", name: "X (Twitter)", enabled: false, domains: [
-                    "twitter.com", "x.com", "www.twitter.com", "api.twitter.com", "t.co", "twimg.com", "pbs.twimg.com"
+                    "twitter.com", "x.com", "www.twitter.com", "api.twitter.com", "t.co", "pbs.twimg.com", "abs.twimg.com"
                 ], ipRanges: []),
                 ServiceEntry(id: "instagram", name: "Instagram", enabled: false, domains: [
-                    "instagram.com", "www.instagram.com", "i.instagram.com", "cdninstagram.com"
+                    "instagram.com", "www.instagram.com", "i.instagram.com", "scontent.cdninstagram.com"
                 ], ipRanges: []),
                 ServiceEntry(id: "tiktok", name: "TikTok", enabled: false, domains: [
                     "tiktok.com", "www.tiktok.com", "vm.tiktok.com", "m.tiktok.com"
@@ -554,15 +554,20 @@ final class RouteManager: ObservableObject {
         // Detect local gateway
         localGateway = await detectLocalGateway()
         
-        // Auto-apply routes when VPN connects
-        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN {
-            log(.success, "VPN connected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type")), applying routes...")
-            NotificationManager.shared.notifyVPNConnected(interface: interface ?? "unknown")
-            
-            // Show loading indicator while applying routes
-            isLoading = true
-            await applyAllRoutes()
-            isLoading = false
+        // Auto-apply routes when VPN connects (skip if already applying or recently applied)
+        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes {
+            // Skip if routes were applied very recently (within 5 seconds) - prevents double-triggering
+            if let lastUpdate = lastUpdate, Date().timeIntervalSince(lastUpdate) < 5 {
+                log(.info, "Skipping duplicate route application (applied \(Int(Date().timeIntervalSince(lastUpdate)))s ago)")
+            } else {
+                log(.success, "VPN connected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type")), applying routes...")
+                NotificationManager.shared.notifyVPNConnected(interface: interface ?? "unknown")
+                
+                // Show loading indicator while applying routes
+                isLoading = true
+                await applyAllRoutes()
+                isLoading = false
+            }
         }
         
         // Log disconnection - only if we're confident (interface actually changed)
@@ -880,7 +885,7 @@ final class RouteManager: ObservableObject {
         // Resolve domains in parallel batches (truly parallel now with nonisolated DNS)
         log(.info, "Resolving \(allDomains.count) domains...")
         
-        let batchSize = 50  // Large batch size since DNS resolution is now truly parallel
+        let batchSize = 100  // Large batch size - DNS resolution is truly parallel via GCD
         var index = 0
         
         // Capture values for nonisolated access
@@ -1664,8 +1669,8 @@ final class RouteManager: ObservableObject {
         }
         
         // Regular DNS via dig - uses async dispatch to GCD for true parallelism
-        let args = ["@\(dns)", "+short", "+time=2", "+tries=1", domain]
-        guard let result = await runProcessParallel("/usr/bin/dig", arguments: args, timeout: 4.0) else {
+        let args = ["@\(dns)", "+short", "+time=1", "+tries=1", domain]
+        guard let result = await runProcessParallel("/usr/bin/dig", arguments: args, timeout: 2.0) else {
             return nil
         }
         
@@ -1696,7 +1701,7 @@ final class RouteManager: ObservableObject {
         }
         
         let args = ["+tls", "+short", "@\(server)", domain]
-        guard let result = await runProcessParallel(kdig, arguments: args, timeout: 5.0),
+        guard let result = await runProcessParallel(kdig, arguments: args, timeout: 3.0),
               result.exitCode == 0 else {
             return nil
         }
@@ -1713,7 +1718,7 @@ final class RouteManager: ObservableObject {
         let url = "\(dohURL)?name=\(domain)&type=A"
         let args = ["-s", "-H", "accept: application/dns-json", url]
         
-        guard let result = await runProcessParallel("/usr/bin/curl", arguments: args, timeout: 5.0),
+        guard let result = await runProcessParallel("/usr/bin/curl", arguments: args, timeout: 3.0),
               result.exitCode == 0 else {
             return nil
         }

@@ -5,6 +5,17 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-01-21
+
+### Fixed
+- **Prevent Double Route Application** - Added guard to skip duplicate route application within 5 seconds
+- **Fixed Invalid Default Domains** - Removed non-resolving domains: `twimg.com` → `pbs.twimg.com`, `cdninstagram.com` → `scontent.cdninstagram.com`, `api.signal.org` → `chat.signal.org`
+
+### Changed
+- **Faster DNS Timeouts** - Reduced DNS timeout from 4s to 2s (1s dig timeout)
+- **Larger Batch Size** - Increased from 50 to 100 domains per parallel batch
+- **Faster DoH/DoT** - Reduced timeout from 5s to 3s
+
 ## [1.5.2] - 2026-01-21
 
 ### Fixed
