@@ -5,6 +5,19 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-01-21
+
+### Fixed
+- **Massive Performance Improvement** - Route application reduced from 3-5 minutes to ~10 seconds
+- **True Parallel DNS Resolution** - Fixed `@MainActor` serialization that was blocking parallel execution
+- **Batch Route Operations** - Routes now added/removed via single XPC call instead of 300+ individual calls
+- **DNS Cache for Hosts File** - Eliminated duplicate DNS resolution (was resolving all domains twice)
+- **Increased DNS Batch Size** - From 5 to 50 domains per parallel batch
+
+### Changed
+- Helper version bumped to 1.2.0 (will auto-reinstall on first launch)
+- DNS resolution functions now `nonisolated static` for true concurrency
+
 ## [1.3.4] - 2026-01-19
 
 ### Fixed

@@ -65,6 +65,74 @@ class HelperTool: NSObject, HelperProtocol {
         reply(result.success, result.error)
     }
     
+    // MARK: - Batch Route Management (for startup/stop performance)
+    
+    func addRoutesBatch(routes: [[String: Any]], withReply reply: @escaping (Int, Int, String?) -> Void) {
+        var successCount = 0
+        var failureCount = 0
+        var lastError: String?
+        
+        for route in routes {
+            guard let destination = route["destination"] as? String,
+                  let gateway = route["gateway"] as? String else {
+                failureCount += 1
+                continue
+            }
+            
+            let isNetwork = route["isNetwork"] as? Bool ?? false
+            
+            // Validate inputs
+            guard isValidDestination(destination), isValidIP(gateway) else {
+                failureCount += 1
+                continue
+            }
+            
+            // First try to delete existing route (ignore result)
+            _ = executeRoute(args: ["-n", "delete", destination])
+            
+            // Add the new route
+            var args = ["-n", "add"]
+            if isNetwork {
+                args.append(contentsOf: ["-net", destination, gateway])
+            } else {
+                args.append(contentsOf: ["-host", destination, gateway])
+            }
+            
+            let result = executeRoute(args: args)
+            if result.success {
+                successCount += 1
+            } else {
+                failureCount += 1
+                lastError = result.error
+            }
+        }
+        
+        reply(successCount, failureCount, lastError)
+    }
+    
+    func removeRoutesBatch(destinations: [String], withReply reply: @escaping (Int, Int, String?) -> Void) {
+        var successCount = 0
+        var failureCount = 0
+        var lastError: String?
+        
+        for destination in destinations {
+            guard isValidDestination(destination) else {
+                failureCount += 1
+                continue
+            }
+            
+            let result = executeRoute(args: ["-n", "delete", destination])
+            if result.success {
+                successCount += 1
+            } else {
+                failureCount += 1
+                lastError = result.error
+            }
+        }
+        
+        reply(successCount, failureCount, lastError)
+    }
+    
     private func executeRoute(args: [String]) -> (success: Bool, error: String?) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/sbin/route")

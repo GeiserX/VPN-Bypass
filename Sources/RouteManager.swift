@@ -38,6 +38,7 @@ final class RouteManager: ObservableObject {
     
     private var dnsRefreshTimer: Timer?
     private var detectedDNSServer: String?  // User's real DNS (pre-VPN), detected at startup
+    private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
     
     /// Public accessor for UI to display detected DNS server
     var detectedDNSServerDisplay: String? {
@@ -844,6 +845,9 @@ final class RouteManager: ObservableObject {
         var newRoutes: [ActiveRoute] = []
         var failedCount = 0
         
+        // Clear DNS cache for fresh resolution
+        dnsCache.removeAll()
+        
         // Collect all domains to resolve (for parallel resolution)
         var allDomains: [(domain: String, source: String)] = []
         
@@ -859,51 +863,95 @@ final class RouteManager: ObservableObject {
             }
         }
         
-        // Resolve domains in batches to avoid overwhelming DNS server through VPN
+        // Resolve domains in parallel batches (truly parallel now with nonisolated DNS)
         log(.info, "Resolving \(allDomains.count) domains...")
         
-        let batchSize = 5  // Process 5 domains at a time to avoid DNS rate limiting
+        let batchSize = 50  // Large batch size since DNS resolution is now truly parallel
         var index = 0
+        
+        // Capture values for nonisolated access
+        let userDNS = detectedDNSServer
+        let fallbackDNS = config.fallbackDNS
+        
+        // Collect all routes to add (for batch operation)
+        var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
         
         while index < allDomains.count {
             let endIndex = min(index + batchSize, allDomains.count)
             let batch = Array(allDomains[index..<endIndex])
             
-            // Process batch in parallel
-            let batchResults = await withTaskGroup(of: [ActiveRoute]?.self, returning: [[ActiveRoute]?].self) { group in
+            // Resolve DNS in parallel (truly parallel - nonisolated)
+            let dnsResults = await withTaskGroup(of: (domain: String, source: String, ips: [String]?).self) { group in
                 for item in batch {
                     group.addTask {
-                        await self.applyRoutesForDomain(item.domain, gateway: gateway, source: item.source)
+                        let ips = await Self.resolveIPsParallel(for: item.domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
+                        return (item.domain, item.source, ips)
                     }
                 }
                 
-                var results: [[ActiveRoute]?] = []
+                var results: [(domain: String, source: String, ips: [String]?)] = []
                 for await result in group {
                     results.append(result)
                 }
                 return results
             }
             
-            // Collect batch results
-            for result in batchResults {
-                if let routes = result {
-                    newRoutes.append(contentsOf: routes)
-                } else {
+            // Collect routes from DNS results and cache for hosts file
+            for result in dnsResults {
+                guard let ips = result.ips else {
+                    failedDomains.append(result.domain)
                     failedCount += 1
+                    continue
+                }
+                
+                // Cache first IP for hosts file (avoids re-resolution later)
+                if let firstIP = ips.first {
+                    dnsCache[result.domain] = firstIP
+                }
+                
+                for ip in ips {
+                    routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: result.source))
                 }
             }
             
             index += batchSize
         }
         
-        // Apply IP ranges (these don't need DNS resolution)
+        // Collect IP ranges (these don't need DNS resolution)
         for service in config.services where service.enabled {
             for range in service.ipRanges {
-                if await applyRouteForRange(range, gateway: gateway) {
+                routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
+            }
+        }
+        
+        log(.info, "Adding \(routesToAdd.count) routes via batch operation...")
+        
+        // Apply all routes in batch (single XPC call for massive speedup)
+        if HelperManager.shared.isHelperInstalled {
+            let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
+            let result = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
+            
+            // Build ActiveRoute entries for successful routes
+            for route in routesToAdd {
+                newRoutes.append(ActiveRoute(
+                    destination: route.destination,
+                    gateway: route.gateway,
+                    source: route.source,
+                    timestamp: Date()
+                ))
+            }
+            
+            if result.failureCount > 0 {
+                log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed")
+            }
+        } else {
+            // Fallback: add routes one by one (slower but works without helper)
+            for route in routesToAdd {
+                if await addRoute(route.destination, gateway: route.gateway, isNetwork: route.isNetwork) {
                     newRoutes.append(ActiveRoute(
-                        destination: range,
-                        gateway: gateway,
-                        source: service.name,
+                        destination: route.destination,
+                        gateway: route.gateway,
+                        source: route.source,
                         timestamp: Date()
                     ))
                 }
@@ -941,11 +989,22 @@ final class RouteManager: ObservableObject {
     }
     
     func removeAllRoutes() async {
-        for route in activeRoutes {
-            _ = await removeRoute(route.destination)
+        let destinations = activeRoutes.map { $0.destination }
+        
+        if HelperManager.shared.isHelperInstalled && !destinations.isEmpty {
+            // Use batch removal for speed
+            let result = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
+            log(.info, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed")
+        } else {
+            // Fallback: remove routes one by one
+            for route in activeRoutes {
+                _ = await removeRoute(route.destination)
+            }
         }
+        
         activeRoutes.removeAll()
         routeVerificationResults.removeAll()
+        dnsCache.removeAll()  // Clear DNS cache
         lastUpdate = Date()
         
         if config.manageHostsFile {
@@ -1550,16 +1609,24 @@ final class RouteManager: ObservableObject {
     }
     
     private func resolveIPs(for domain: String) async -> [String]? {
+        // Use nonisolated static method for true parallelism
+        let userDNS = detectedDNSServer
+        let fallbackDNS = config.fallbackDNS
+        return await Self.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
+    }
+    
+    /// Nonisolated DNS resolution - runs truly in parallel without MainActor serialization
+    private nonisolated static func resolveIPsParallel(for domain: String, userDNS: String?, fallbackDNS: [String]) async -> [String]? {
         // 1. Try detected non-VPN DNS first (user's original DNS before VPN)
-        if let userDNS = detectedDNSServer {
-            if let ips = await resolveWithDNS(domain, dns: userDNS) {
+        if let userDNS = userDNS {
+            if let ips = await resolveWithDNSParallel(domain, dns: userDNS) {
                 return ips
             }
         }
         
         // 2. Fall back to configured DNS servers
-        for dns in config.fallbackDNS {
-            if let ips = await resolveWithDNS(domain, dns: dns) {
+        for dns in fallbackDNS {
+            if let ips = await resolveWithDNSParallel(domain, dns: dns) {
                 return ips
             }
         }
@@ -1567,35 +1634,35 @@ final class RouteManager: ObservableObject {
         return nil
     }
     
-    private func resolveWithDNS(_ domain: String, dns: String) async -> [String]? {
+    private nonisolated static func resolveWithDNSParallel(_ domain: String, dns: String) async -> [String]? {
         // Check protocol type
         if dns.hasPrefix("https://") {
             // DoH (DNS over HTTPS)
-            return await resolveWithDoH(domain, dohURL: dns)
+            return await resolveWithDoHParallel(domain, dohURL: dns)
         } else if dns.hasPrefix("tls://") {
             // DoT (DNS over TLS) - requires kdig from knot-dns
             let server = String(dns.dropFirst(6)) // Remove "tls://"
-            return await resolveWithDoT(domain, server: server)
+            return await resolveWithDoTParallel(domain, server: server)
         } else if dns.contains(":853") {
             // DoT with explicit port
             let server = dns.replacingOccurrences(of: ":853", with: "")
-            return await resolveWithDoT(domain, server: server)
+            return await resolveWithDoTParallel(domain, server: server)
         }
         
         // Regular DNS via dig
         let args = ["@\(dns)", "+short", "+time=2", "+tries=1", domain]
-        guard let result = await runProcessAsync("/usr/bin/dig", arguments: args, timeout: 4.0) else {
+        guard let result = runProcessSync("/usr/bin/dig", arguments: args, timeout: 4.0) else {
             return nil
         }
         
         let ips = result.output.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && isValidIP($0) }
+            .filter { !$0.isEmpty && isValidIPStatic($0) }
         
         return ips.isEmpty ? nil : ips
     }
     
-    private func resolveWithDoT(_ domain: String, server: String) async -> [String]? {
+    private nonisolated static func resolveWithDoTParallel(_ domain: String, server: String) async -> [String]? {
         // DNS-over-TLS using kdig (from knot-dns package)
         // Install with: brew install knot
         
@@ -1611,29 +1678,28 @@ final class RouteManager: ObservableObject {
         
         guard let kdig = kdigPath else {
             // kdig not installed, fall back to other DNS methods
-            log(.warning, "DoT requires kdig (brew install knot)")
             return nil
         }
         
         let args = ["+tls", "+short", "@\(server)", domain]
-        guard let result = await runProcessAsync(kdig, arguments: args, timeout: 5.0),
+        guard let result = runProcessSync(kdig, arguments: args, timeout: 5.0),
               result.exitCode == 0 else {
             return nil
         }
         
         let ips = result.output.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && isValidIP($0) }
+            .filter { !$0.isEmpty && isValidIPStatic($0) }
         
         return ips.isEmpty ? nil : ips
     }
     
-    private func resolveWithDoH(_ domain: String, dohURL: String) async -> [String]? {
+    private nonisolated static func resolveWithDoHParallel(_ domain: String, dohURL: String) async -> [String]? {
         // DNS-over-HTTPS using JSON API (works with Cloudflare, Google, etc.)
         let url = "\(dohURL)?name=\(domain)&type=A"
         let args = ["-s", "-H", "accept: application/dns-json", url]
         
-        guard let result = await runProcessAsync("/usr/bin/curl", arguments: args, timeout: 5.0),
+        guard let result = runProcessSync("/usr/bin/curl", arguments: args, timeout: 5.0),
               result.exitCode == 0 else {
             return nil
         }
@@ -1649,13 +1715,20 @@ final class RouteManager: ObservableObject {
         let ips = answers.compactMap { answer -> String? in
             guard let type = answer["type"] as? Int, type == 1,  // Type 1 = A record
                   let ip = answer["data"] as? String,
-                  isValidIP(ip) else {
+                  isValidIPStatic(ip) else {
                 return nil
             }
             return ip
         }
         
         return ips.isEmpty ? nil : ips
+    }
+    
+    /// Static version of isValidIP for use in nonisolated methods
+    private nonisolated static func isValidIPStatic(_ string: String) -> Bool {
+        let parts = string.components(separatedBy: ".")
+        guard parts.count == 4 else { return false }
+        return parts.allSatisfy { Int($0) != nil && Int($0)! >= 0 && Int($0)! <= 255 }
     }
     
     private func addRoute(_ destination: String, gateway: String, isNetwork: Bool = false) async -> Bool {
@@ -1696,19 +1769,20 @@ final class RouteManager: ObservableObject {
     }
     
     private func updateHostsFile() async {
-        // Collect all domain -> IP mappings
+        // Collect all domain -> IP mappings from cache (populated during route application)
+        // This avoids re-resolving all domains which was causing duplicate DNS lookups
         var entries: [(domain: String, ip: String)] = []
         
         for domain in config.domains where domain.enabled {
-            if let ips = await resolveIPs(for: domain.domain), let firstIP = ips.first {
-                entries.append((domain.domain, firstIP))
+            if let cachedIP = dnsCache[domain.domain] {
+                entries.append((domain.domain, cachedIP))
             }
         }
         
         for service in config.services where service.enabled {
             for domain in service.domains {
-                if let ips = await resolveIPs(for: domain), let firstIP = ips.first {
-                    entries.append((domain, firstIP))
+                if let cachedIP = dnsCache[domain] {
+                    entries.append((domain, cachedIP))
                 }
             }
         }

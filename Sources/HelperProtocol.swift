@@ -32,6 +32,24 @@ protocol HelperProtocol {
         withReply reply: @escaping (Bool, String?) -> Void
     )
     
+    /// Add multiple routes in batch (faster for startup/VPN connect)
+    /// - Parameters:
+    ///   - routes: Array of dictionaries with "destination", "gateway", and "isNetwork" keys
+    ///   - reply: Callback with success count, failure count, and optional error message
+    func addRoutesBatch(
+        routes: [[String: Any]],
+        withReply reply: @escaping (Int, Int, String?) -> Void
+    )
+    
+    /// Remove multiple routes in batch (faster for cleanup/VPN disconnect)
+    /// - Parameters:
+    ///   - destinations: Array of IP addresses or CIDR ranges to remove
+    ///   - reply: Callback with success count, failure count, and optional error message
+    func removeRoutesBatch(
+        destinations: [String],
+        withReply reply: @escaping (Int, Int, String?) -> Void
+    )
+    
     /// Update the hosts file with VPN bypass entries
     /// - Parameters:
     ///   - entries: Array of dictionaries with "domain" and "ip" keys
@@ -60,7 +78,7 @@ protocol HelperProgressProtocol {
 // MARK: - Helper Constants
 
 struct HelperConstants {
-    static let helperVersion = "1.1.0"
+    static let helperVersion = "1.2.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

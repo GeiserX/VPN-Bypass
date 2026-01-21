@@ -262,6 +262,44 @@ final class HelperManager: ObservableObject {
         }
     }
     
+    // MARK: - Batch Route Operations (for startup/stop performance)
+    
+    func addRoutesBatch(routes: [(destination: String, gateway: String, isNetwork: Bool)]) async -> (successCount: Int, failureCount: Int, error: String?) {
+        guard isHelperInstalled else {
+            return (0, routes.count, "Helper not installed")
+        }
+        
+        let dictRoutes = routes.map { route -> [String: Any] in
+            return [
+                "destination": route.destination,
+                "gateway": route.gateway,
+                "isNetwork": route.isNetwork
+            ]
+        }
+        
+        return await withCheckedContinuation { continuation in
+            connectToHelper { helper in
+                helper.addRoutesBatch(routes: dictRoutes) { successCount, failureCount, error in
+                    continuation.resume(returning: (successCount, failureCount, error))
+                }
+            }
+        }
+    }
+    
+    func removeRoutesBatch(destinations: [String]) async -> (successCount: Int, failureCount: Int, error: String?) {
+        guard isHelperInstalled else {
+            return (0, destinations.count, "Helper not installed")
+        }
+        
+        return await withCheckedContinuation { continuation in
+            connectToHelper { helper in
+                helper.removeRoutesBatch(destinations: destinations) { successCount, failureCount, error in
+                    continuation.resume(returning: (successCount, failureCount, error))
+                }
+            }
+        }
+    }
+    
     // MARK: - Hosts File Operations
     
     func updateHostsFile(entries: [(domain: String, ip: String)]) async -> (success: Bool, error: String?) {
