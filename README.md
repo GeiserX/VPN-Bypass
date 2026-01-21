@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-13%2B-blue" alt="macOS 13+">
   <img src="https://img.shields.io/badge/Swift-5.9-orange" alt="Swift 5.9">
-  <a href="https://github.com/GeiserX/vpn-macos-bypass/releases"><img src="https://img.shields.io/badge/version-1.5.4-green" alt="Version"></a>
+  <a href="https://github.com/GeiserX/vpn-macos-bypass/releases"><img src="https://img.shields.io/badge/version-1.5.5-green" alt="Version"></a>
 </p>
 
 ## Why?
