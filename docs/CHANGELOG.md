@@ -5,6 +5,17 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-01-21
+
+### Added
+- **Instant Startup** - If DNS cache exists, applies routes immediately (~2-3s) then refreshes DNS in background
+- **DNS Disk Cache** - Resolved IPs are saved to disk and used as fallback when DNS fails
+- **Faster Service Toggle** - Enabling a service now resolves all domains in parallel + batch route addition
+
+### Changed
+- **Smarter DNS Timeouts** - Local DNS (192.168.x.x, 10.x.x.x): 1s timeout; External DNS: 1.5s timeout
+- DNS cache stored at `~/Library/Application Support/VPNBypass/dns-cache.json`
+
 ## [1.5.5] - 2026-01-21
 
 ### Fixed
