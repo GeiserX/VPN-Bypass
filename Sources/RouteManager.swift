@@ -1636,12 +1636,6 @@ final class RouteManager: ObservableObject {
     
     /// Nonisolated DNS resolution - runs truly in parallel without MainActor serialization
     private nonisolated static func resolveIPsParallel(for domain: String, userDNS: String?, fallbackDNS: [String]) async -> [String]? {
-        // Debug for specific domains
-        let debugDomain = domain.contains("lynxprompt") || domain.contains("test.com")
-        if debugDomain {
-            debugLog("[DNS] \(domain): userDNS=\(userDNS ?? "nil"), fallbackDNS=\(fallbackDNS)")
-        }
-        
         // 1. Try detected non-VPN DNS first (user's original DNS before VPN)
         if let userDNS = userDNS {
             if let ips = await resolveWithDNSParallel(domain, dns: userDNS) {
@@ -1656,28 +1650,7 @@ final class RouteManager: ObservableObject {
             }
         }
         
-        if debugDomain {
-            debugLog("[DNS] \(domain): ALL DNS FAILED")
-        }
         return nil
-    }
-    
-    /// Debug logging to file (for nonisolated contexts)
-    private nonisolated static func debugLog(_ message: String) {
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let line = "[\(timestamp)] \(message)\n"
-        let path = "/tmp/vpnbypass-debug.log"
-        if let data = line.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: path) {
-                if let handle = FileHandle(forWritingAtPath: path) {
-                    handle.seekToEndOfFile()
-                    handle.write(data)
-                    handle.closeFile()
-                }
-            } else {
-                FileManager.default.createFile(atPath: path, contents: data)
-            }
-        }
     }
     
     private nonisolated static func resolveWithDNSParallel(_ domain: String, dns: String) async -> [String]? {
@@ -1698,21 +1671,12 @@ final class RouteManager: ObservableObject {
         // Regular DNS via dig - uses async dispatch to GCD for true parallelism
         let args = ["@\(dns)", "+short", "+time=1", "+tries=1", domain]
         guard let result = await runProcessParallel("/usr/bin/dig", arguments: args, timeout: 2.0) else {
-            // Debug: log timeout/failure for specific domains
-            if domain.contains("lynxprompt") || domain.contains("test.com") {
-                debugLog("[DNS] \(domain) @ \(dns): process failed/timeout")
-            }
             return nil
         }
         
         let ips = result.output.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && isValidIPStatic($0) }
-        
-        // Debug: log results for specific domains
-        if domain.contains("lynxprompt") || domain.contains("test.com") {
-            debugLog("[DNS] \(domain) @ \(dns): output='\(result.output.replacingOccurrences(of: "\n", with: "\\n"))' -> ips=\(ips)")
-        }
         
         return ips.isEmpty ? nil : ips
     }
