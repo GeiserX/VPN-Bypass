@@ -1267,6 +1267,16 @@ final class RouteManager: ObservableObject {
                 log(.info, "Background refresh complete (no changes)")
             }
         }
+        
+        // Update hosts file with any newly resolved domains
+        await MainActor.run {
+            if config.manageHostsFile {
+                Task {
+                    await updateHostsFile()
+                    log(.info, "Background refresh: hosts file updated")
+                }
+            }
+        }
     }
     
     // MARK: - Auto DNS Refresh
@@ -1927,22 +1937,79 @@ final class RouteManager: ObservableObject {
     }
     
     /// Nonisolated DNS resolution - runs truly in parallel without MainActor serialization
+    /// Includes retry logic and system resolver fallback for robustness
     private nonisolated static func resolveIPsParallel(for domain: String, userDNS: String?, fallbackDNS: [String]) async -> [String]? {
-        // 1. Try detected non-VPN DNS first (user's original DNS before VPN)
-        if let userDNS = userDNS {
-            if let ips = await resolveWithDNSParallel(domain, dns: userDNS) {
-                return ips
+        // Try up to 2 attempts with all DNS servers
+        for attempt in 1...2 {
+            // 1. Try detected non-VPN DNS first (user's original DNS before VPN)
+            if let userDNS = userDNS {
+                if let ips = await resolveWithDNSParallel(domain, dns: userDNS) {
+                    return ips
+                }
+            }
+            
+            // 2. Fall back to configured DNS servers
+            for dns in fallbackDNS {
+                if let ips = await resolveWithDNSParallel(domain, dns: dns) {
+                    return ips
+                }
+            }
+            
+            // Wait before retry (only if not last attempt)
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
             }
         }
         
-        // 2. Fall back to configured DNS servers
-        for dns in fallbackDNS {
-            if let ips = await resolveWithDNSParallel(domain, dns: dns) {
-                return ips
-            }
+        // 3. Last resort: use system resolver (getaddrinfo) which may use different DNS path
+        if let ips = await resolveWithSystemResolver(domain) {
+            return ips
         }
         
         return nil
+    }
+    
+    /// Resolve using system's getaddrinfo - uses OS-level DNS which may work when dig fails
+    private nonisolated static func resolveWithSystemResolver(_ domain: String) async -> [String]? {
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var hints = addrinfo()
+                hints.ai_family = AF_INET  // IPv4 only for routing
+                hints.ai_socktype = SOCK_STREAM
+                
+                var result: UnsafeMutablePointer<addrinfo>?
+                let status = getaddrinfo(domain, nil, &hints, &result)
+                
+                guard status == 0, let addrInfo = result else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                
+                defer { freeaddrinfo(addrInfo) }
+                
+                var ips: [String] = []
+                var current: UnsafeMutablePointer<addrinfo>? = addrInfo
+                
+                while let info = current {
+                    if info.pointee.ai_family == AF_INET,
+                       let sockaddr = info.pointee.ai_addr {
+                        sockaddr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { addr in
+                            var ipBuffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                            var inAddr = addr.pointee.sin_addr
+                            if inet_ntop(AF_INET, &inAddr, &ipBuffer, socklen_t(INET_ADDRSTRLEN)) != nil {
+                                let ip = String(cString: ipBuffer)
+                                if !ips.contains(ip) {
+                                    ips.append(ip)
+                                }
+                            }
+                        }
+                    }
+                    current = info.pointee.ai_next
+                }
+                
+                continuation.resume(returning: ips.isEmpty ? nil : ips)
+            }
+        }
     }
     
     private nonisolated static func resolveWithDNSParallel(_ domain: String, dns: String) async -> [String]? {
