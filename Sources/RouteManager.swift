@@ -1961,8 +1961,18 @@ final class RouteManager: ObservableObject {
             }
         }
         
-        // 3. Last resort: use system resolver (getaddrinfo) which may use different DNS path
-        if let ips = await resolveWithSystemResolver(domain) {
+        // 3. Try DoH (DNS over HTTPS) - bypasses VPN DNS hijacking since it uses HTTPS
+        // This is more reliable than getaddrinfo when VPN intercepts DNS
+        let dohServers = ["https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"]
+        for doh in dohServers {
+            if let ips = await resolveWithDoHParallel(domain, dohURL: doh) {
+                return ips
+            }
+        }
+        
+        // 4. Last resort: use system resolver (getaddrinfo) with timeout
+        // Note: This uses VPN's DNS when connected, so may not bypass VPN restrictions
+        if let ips = await resolveWithSystemResolver(domain, timeout: 3.0) {
             return ips
         }
         
@@ -1970,45 +1980,67 @@ final class RouteManager: ObservableObject {
     }
     
     /// Resolve using system's getaddrinfo - uses OS-level DNS which may work when dig fails
-    private nonisolated static func resolveWithSystemResolver(_ domain: String) async -> [String]? {
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                var hints = addrinfo()
-                hints.ai_family = AF_INET  // IPv4 only for routing
-                hints.ai_socktype = SOCK_STREAM
-                
-                var result: UnsafeMutablePointer<addrinfo>?
-                let status = getaddrinfo(domain, nil, &hints, &result)
-                
-                guard status == 0, let addrInfo = result else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                
-                defer { freeaddrinfo(addrInfo) }
-                
-                var ips: [String] = []
-                var current: UnsafeMutablePointer<addrinfo>? = addrInfo
-                
-                while let info = current {
-                    if info.pointee.ai_family == AF_INET,
-                       let sockaddr = info.pointee.ai_addr {
-                        sockaddr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { addr in
-                            var ipBuffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-                            var inAddr = addr.pointee.sin_addr
-                            if inet_ntop(AF_INET, &inAddr, &ipBuffer, socklen_t(INET_ADDRSTRLEN)) != nil {
-                                let ip = String(cString: ipBuffer)
-                                if !ips.contains(ip) {
-                                    ips.append(ip)
+    /// Note: When VPN is active, this typically uses VPN's DNS servers
+    private nonisolated static func resolveWithSystemResolver(_ domain: String, timeout: TimeInterval) async -> [String]? {
+        // Race between getaddrinfo and timeout
+        return await withTaskGroup(of: [String]?.self) { group in
+            // Actual resolution task
+            group.addTask {
+                await withCheckedContinuation { continuation in
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        var hints = addrinfo()
+                        hints.ai_family = AF_INET  // IPv4 only for routing
+                        hints.ai_socktype = SOCK_STREAM
+                        
+                        var result: UnsafeMutablePointer<addrinfo>?
+                        let status = getaddrinfo(domain, nil, &hints, &result)
+                        
+                        guard status == 0, let addrInfo = result else {
+                            continuation.resume(returning: nil)
+                            return
+                        }
+                        
+                        defer { freeaddrinfo(addrInfo) }
+                        
+                        var ips: [String] = []
+                        var current: UnsafeMutablePointer<addrinfo>? = addrInfo
+                        
+                        while let info = current {
+                            if info.pointee.ai_family == AF_INET,
+                               let sockaddr = info.pointee.ai_addr {
+                                sockaddr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { addr in
+                                    var ipBuffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                                    var inAddr = addr.pointee.sin_addr
+                                    if inet_ntop(AF_INET, &inAddr, &ipBuffer, socklen_t(INET_ADDRSTRLEN)) != nil {
+                                        let ip = String(cString: ipBuffer)
+                                        if !ips.contains(ip) {
+                                            ips.append(ip)
+                                        }
+                                    }
                                 }
                             }
+                            current = info.pointee.ai_next
                         }
+                        
+                        continuation.resume(returning: ips.isEmpty ? nil : ips)
                     }
-                    current = info.pointee.ai_next
                 }
-                
-                continuation.resume(returning: ips.isEmpty ? nil : ips)
             }
+            
+            // Timeout task
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            
+            // Return first result (either success or timeout)
+            if let result = await group.next(), let ips = result {
+                group.cancelAll()
+                return ips
+            }
+            
+            group.cancelAll()
+            return nil
         }
     }
     
