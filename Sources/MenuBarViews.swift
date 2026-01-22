@@ -242,7 +242,7 @@ struct MenuContent: View {
                         .font(.system(size: 12))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
-                        .background(Color.primary.opacity(0.05))
+                        .background(Color.secondary.opacity(0.12))
                         .cornerRadius(6)
                         .onSubmit {
                             addDomainAndClose()
@@ -282,7 +282,7 @@ struct MenuContent: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
-                    .background(Color.primary.opacity(0.05))
+                    .background(Color.secondary.opacity(0.12))
                     .cornerRadius(6)
                 }
                 .buttonStyle(.plain)
@@ -363,7 +363,7 @@ struct MenuContent: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
-                    .background(Color.primary.opacity(0.05))
+                    .background(Color.secondary.opacity(0.12))
                     .cornerRadius(6)
                 }
                 .buttonStyle(.plain)
@@ -471,14 +471,14 @@ struct MenuContent: View {
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.primary.opacity(0.05))
+                            .background(Color.secondary.opacity(0.12))
                             .cornerRadius(4)
                     }
                 }
             }
         }
         .padding(10)
-        .background(Color.primary.opacity(0.03))
+        .background(Color.secondary.opacity(0.08))
         .cornerRadius(8)
     }
     
@@ -522,7 +522,7 @@ struct MenuContent: View {
             }
         }
         .padding(10)
-        .background(Color.primary.opacity(0.03))
+        .background(Color.secondary.opacity(0.08))
         .cornerRadius(8)
     }
     
@@ -575,7 +575,7 @@ struct MenuContent: View {
             }
         }
         .padding(10)
-        .background(Color.primary.opacity(0.03))
+        .background(Color.secondary.opacity(0.08))
         .cornerRadius(8)
     }
     
@@ -660,7 +660,7 @@ struct StatBadge: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color.primary.opacity(0.03))
+        .background(Color.secondary.opacity(0.08))
         .cornerRadius(8)
     }
 }

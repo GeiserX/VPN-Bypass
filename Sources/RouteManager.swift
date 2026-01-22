@@ -2084,12 +2084,15 @@ final class RouteManager: ObservableObject {
     
     private func updateHostsFile() async {
         // Collect all domain -> IP mappings from cache (populated during route application)
-        // This avoids re-resolving all domains which was causing duplicate DNS lookups
+        // Falls back to disk cache if memory cache doesn't have an entry (e.g., DNS failed at startup)
         var entries: [(domain: String, ip: String)] = []
         
         for domain in config.domains where domain.enabled {
             if let cachedIP = dnsCache[domain.domain] {
                 entries.append((domain.domain, cachedIP))
+            } else if let diskCachedIPs = dnsDiskCache[domain.domain], let firstIP = diskCachedIPs.first {
+                // Fallback to disk cache when DNS failed at startup
+                entries.append((domain.domain, firstIP))
             }
         }
         
@@ -2097,6 +2100,9 @@ final class RouteManager: ObservableObject {
             for domain in service.domains {
                 if let cachedIP = dnsCache[domain] {
                     entries.append((domain, cachedIP))
+                } else if let diskCachedIPs = dnsDiskCache[domain], let firstIP = diskCachedIPs.first {
+                    // Fallback to disk cache when DNS failed at startup
+                    entries.append((domain, firstIP))
                 }
             }
         }
