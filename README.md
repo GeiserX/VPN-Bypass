@@ -41,6 +41,17 @@ VPN Bypass intelligently routes selected services directly to the internet while
 - 🚀 **Launch at Login** - Start automatically when you log in
 - 🔄 **Auto DNS Refresh** - Periodically re-resolves domains and updates routes
 
+<details>
+<summary><strong>📸 Screenshots</strong></summary>
+
+<p align="center">
+  <img src="assets/screenshot-dropdown.png" alt="Menu Bar Dropdown" width="300">
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/screenshot-settings.png" alt="Settings Window" width="400">
+</p>
+
+</details>
+
 ## Installation
 
 ### Homebrew (Recommended)
