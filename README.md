@@ -42,7 +42,7 @@ VPN Bypass intelligently routes selected services directly to the internet while
 - 🔄 **Auto DNS Refresh** - Periodically re-resolves domains and updates routes
 
 <details>
-<summary><strong>📸 Screenshots</strong></summary>
+<summary><h3>📸 Screenshots</h3></summary>
 
 <p align="center">
   <img src="assets/screenshot-dropdown.png" alt="Menu Bar Dropdown" width="300">
