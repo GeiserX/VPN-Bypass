@@ -52,7 +52,7 @@ jobs:
       - name: Calculate SHA256
         id: sha
         run: |
-          SHA256=$(shasum -a 256 dist/VPNBypass-${{ steps.version.outputs.version }}.dmg | awk '{print $1}')
+          SHA256=$(shasum -a 256 dist/VPN-Bypass-${{ steps.version.outputs.version }}.dmg | awk '{print $1}')
           echo "sha256=$SHA256" >> $GITHUB_OUTPUT
           echo "📝 SHA256: $SHA256"
 
@@ -107,7 +107,7 @@ jobs:
             echo '```'
             echo ""
             echo "### Manual Download"
-            echo "Download \`VPNBypass-${{ steps.version.outputs.version }}.dmg\` from the assets below."
+            echo "Download \`VPN-Bypass-${{ steps.version.outputs.version }}.dmg\` from the assets below."
             echo ""
             echo "---"
             echo ""
@@ -122,12 +122,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
-          name: "VPNBypass v${{ steps.version.outputs.version }}"
+          name: "VPN Bypass v${{ steps.version.outputs.version }}"
           body_path: changelog.md
           draft: false
           prerelease: false
           files: |
-            dist/VPNBypass-${{ steps.version.outputs.version }}.dmg
+            dist/VPN-Bypass-${{ steps.version.outputs.version }}.dmg
 
       - name: Update Homebrew Cask
         run: |

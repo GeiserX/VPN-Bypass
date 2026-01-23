@@ -1263,7 +1263,7 @@ struct GeneralTab: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     BrandedAppName(fontSize: 13)
-                    Text("Version 1.6.5")
+                    Text("Version 1.6.6")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
                 }
@@ -1721,7 +1721,7 @@ struct InfoTab: View {
             // App name with branded colors
             BrandedAppName(fontSize: 24)
             
-            Text("v1.6.5")
+            Text("v1.6.6")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(Color(hex: "6B7280"))
             
@@ -1825,9 +1825,9 @@ struct InfoTab: View {
                 Divider().background(Color.white.opacity(0.1))
                 LinkRow(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub", subtitle: "github.com/GeiserX", url: "https://github.com/GeiserX")
                 Divider().background(Color.white.opacity(0.1))
-                LinkRow(icon: "doc.text", title: "Source Code", subtitle: "VPNBypass", url: "https://github.com/GeiserX/VPNBypass")
+                LinkRow(icon: "doc.text", title: "Source Code", subtitle: "VPN Bypass", url: "https://github.com/GeiserX/VPN-Bypass")
                 Divider().background(Color.white.opacity(0.1))
-                LinkRow(icon: "exclamationmark.bubble", title: "Report Issue", subtitle: "GitHub Issues", url: "https://github.com/GeiserX/VPNBypass/issues")
+                LinkRow(icon: "exclamationmark.bubble", title: "Report Issue", subtitle: "GitHub Issues", url: "https://github.com/GeiserX/VPN-Bypass/issues")
             }
         }
     }

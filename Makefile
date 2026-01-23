@@ -88,24 +88,24 @@ release: bundle
 	@$(MAKE) dmg
 	@echo ""
 	@echo "✅ Release created!"
-	@echo "   DMG: dist/VPNBypass-$(VERSION).dmg"
-	@echo "   SHA256: $$(shasum -a 256 dist/VPNBypass-$(VERSION).dmg | awk '{print $$1}')"
+	@echo "   DMG: dist/VPN-Bypass-$(VERSION).dmg"
+	@echo "   SHA256: $$(shasum -a 256 dist/VPN-Bypass-$(VERSION).dmg | awk '{print $$1}')"
 
 # Create DMG
 dmg:
 	@echo "Creating DMG..."
 	@mkdir -p dist
-	@rm -f dist/VPNBypass-$(VERSION).dmg
+	@rm -f dist/VPN-Bypass-$(VERSION).dmg
 	@DMG_DIR=$$(mktemp -d) && \
 		cp -R "$(APP_BUNDLE)" "$$DMG_DIR/" && \
 		ln -s /Applications "$$DMG_DIR/Applications" && \
-		hdiutil create -volname "VPN Bypass" -srcfolder "$$DMG_DIR" -ov -format UDZO "dist/VPNBypass-$(VERSION).dmg" && \
+		hdiutil create -volname "VPN Bypass" -srcfolder "$$DMG_DIR" -ov -format UDZO "dist/VPN-Bypass-$(VERSION).dmg" && \
 		rm -rf "$$DMG_DIR"
-	@echo "DMG created: dist/VPNBypass-$(VERSION).dmg"
+	@echo "DMG created: dist/VPN-Bypass-$(VERSION).dmg"
 
 # Update Homebrew cask SHA
 update-cask:
-	@SHA256=$$(shasum -a 256 dist/VPNBypass-$(VERSION).dmg | awk '{print $$1}') && \
+	@SHA256=$$(shasum -a 256 dist/VPN-Bypass-$(VERSION).dmg | awk '{print $$1}') && \
 		sed -i '' "s/sha256 \".*\"/sha256 \"$$SHA256\"/" Casks/vpn-bypass.rb && \
 		sed -i '' "s/version \".*\"/version \"$(VERSION)\"/" Casks/vpn-bypass.rb
 	@echo "Updated Casks/vpn-bypass.rb with SHA256 and version"
@@ -119,6 +119,6 @@ full-release: release update-cask
 	@echo ""
 	@echo "🎉 Full release complete!"
 	@echo "Next steps:"
-	@echo "  1. Upload dist/VPNBypass-$(VERSION).dmg to GitHub releases"
+	@echo "  1. Upload dist/VPN-Bypass-$(VERSION).dmg to GitHub releases"
 	@echo "  2. Create git tag: git tag v$(VERSION)"
 	@echo "  3. Push to GitHub: git push origin v$(VERSION)"

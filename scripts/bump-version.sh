@@ -1,5 +1,5 @@
 #!/bin/bash
-# Version bump script for VPNBypass
+# Version bump script for VPN Bypass
 # Usage: ./scripts/bump-version.sh 1.2.1
 
 set -e

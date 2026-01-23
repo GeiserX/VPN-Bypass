@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-13%2B-blue" alt="macOS 13+">
   <img src="https://img.shields.io/badge/Swift-5.9-orange" alt="Swift 5.9">
-  <a href="https://github.com/GeiserX/vpn-macos-bypass/releases"><img src="https://img.shields.io/badge/version-1.6.5-green" alt="Version"></a>
+  <a href="https://github.com/GeiserX/vpn-macos-bypass/releases"><img src="https://img.shields.io/badge/version-1.6.6-green" alt="Version"></a>
 </p>
 
 ## Why?
@@ -213,7 +213,7 @@ If routes are applied but verification fails:
 
 Contributions are welcome! Here's how you can help:
 
-1. **Report bugs** - Open an [issue](https://github.com/GeiserX/VPNBypass/issues) with details
+1. **Report bugs** - Open an [issue](https://github.com/GeiserX/VPN-Bypass/issues) with details
 2. **Suggest features** - Use the feature request template
 3. **Submit PRs** - Fork, create a branch, and submit a pull request
 

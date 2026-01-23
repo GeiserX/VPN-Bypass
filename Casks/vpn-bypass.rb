@@ -3,13 +3,13 @@
 # Or if using local tap: brew install --cask --no-quarantine ./Casks/vpn-bypass.rb
 
 cask "vpn-bypass" do
-  version "1.6.5"
+  version "1.6.6"
   sha256 "37b127a55aec0bdb80e824e59e840ce5b529c09086aac7fc24dc4616abb817bd"
 
-  url "https://github.com/GeiserX/VPNBypass/releases/download/v#{version}/VPNBypass-#{version}.dmg"
+  url "https://github.com/GeiserX/VPN-Bypass/releases/download/v#{version}/VPN-Bypass-#{version}.dmg"
   name "VPN Bypass"
   desc "macOS menu bar app to route specific traffic around VPN"
-  homepage "https://github.com/GeiserX/VPNBypass"
+  homepage "https://github.com/GeiserX/VPN-Bypass"
 
   depends_on macos: ">= :ventura"
 

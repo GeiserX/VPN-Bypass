@@ -1,4 +1,4 @@
-# VPNBypass - AI Agent Instructions
+# VPN Bypass - AI Agent Instructions
 
 ## Project Overview
 
