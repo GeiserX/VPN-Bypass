@@ -39,10 +39,13 @@ struct VPNBypassApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var networkMonitor: NWPathMonitor?
     private var refreshTimer: Timer?
+    private var watchdogTimer: Timer?
     private var lastPathStatus: NWPath.Status?
     private var lastInterfaceTypes: Set<NWInterface.InterfaceType> = []
     private var networkDebounceWorkItem: DispatchWorkItem?
     private var hasCompletedInitialStartup = false
+    private var appStartTime = Date()
+    private var lastSuccessfulVPNCheck = Date()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide dock icon (menu bar only)
@@ -69,6 +72,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             // Mark startup as complete
             hasCompletedInitialStartup = true
+            lastSuccessfulVPNCheck = Date()
         }
         
         // Start network monitoring for changes (after a delay to avoid duplicate startup)
@@ -78,11 +82,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Also check periodically (every 30 seconds) as backup
         startPeriodicRefresh()
+        
+        // Start watchdog timer (every 12 hours) to ensure long-term stability
+        startWatchdog()
     }
     
     func applicationWillTerminate(_ notification: Notification) {
         networkMonitor?.cancel()
         refreshTimer?.invalidate()
+        watchdogTimer?.invalidate()
         networkDebounceWorkItem?.cancel()
         RouteManager.shared.stopDNSRefreshTimer()
         
@@ -154,10 +162,63 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func startPeriodicRefresh() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 RouteManager.shared.refreshStatus()
+                self?.lastSuccessfulVPNCheck = Date()
             }
+        }
+    }
+    
+    // MARK: - Watchdog (Long-term Stability)
+    
+    /// Watchdog timer runs every 12 hours to ensure app stays healthy during long uptimes
+    private func startWatchdog() {
+        let twelveHours: TimeInterval = 12 * 60 * 60  // 43200 seconds
+        
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: twelveHours, repeats: true) { [weak self] _ in
+            self?.runWatchdog()
+        }
+    }
+    
+    private func runWatchdog() {
+        Task { @MainActor in
+            let uptime = Date().timeIntervalSince(appStartTime)
+            let uptimeHours = Int(uptime / 3600)
+            let uptimeDays = uptimeHours / 24
+            let remainingHours = uptimeHours % 24
+            
+            let uptimeStr = uptimeDays > 0 ? "\(uptimeDays)d \(remainingHours)h" : "\(uptimeHours)h"
+            
+            RouteManager.shared.log(.info, "🐕 Watchdog: App uptime \(uptimeStr), restarting network monitor...")
+            
+            // Restart network monitor to prevent stale state
+            restartNetworkMonitor()
+            
+            // Force a fresh VPN detection
+            await RouteManager.shared.checkVPNStatus()
+            
+            // Log current state
+            let vpnStatus = RouteManager.shared.isVPNConnected ? "connected via \(RouteManager.shared.vpnInterface ?? "?")" : "not connected"
+            let routeCount = RouteManager.shared.activeRoutes.count
+            RouteManager.shared.log(.info, "🐕 Watchdog complete: VPN \(vpnStatus), \(routeCount) active routes")
+        }
+    }
+    
+    private func restartNetworkMonitor() {
+        // Cancel existing monitor
+        networkMonitor?.cancel()
+        networkMonitor = nil
+        
+        // Reset state
+        lastPathStatus = nil
+        lastInterfaceTypes = []
+        networkDebounceWorkItem?.cancel()
+        networkDebounceWorkItem = nil
+        
+        // Small delay then restart
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.startNetworkMonitoring()
         }
     }
 }
