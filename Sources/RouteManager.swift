@@ -653,6 +653,7 @@ final class RouteManager: ObservableObject {
     private func detectVPNViaIfconfig(hintType: VPNType?) async -> (connected: Bool, interface: String?, type: VPNType?) {
         guard let result = await runProcessAsync("/sbin/ifconfig", timeout: 5.0) else {
             // Command failed/timed out - don't change VPN status (return current state)
+            await MainActor.run { log(.warning, "ifconfig command failed/timed out") }
             return (isVPNConnected, vpnInterface, vpnType)
         }
         
@@ -662,6 +663,7 @@ final class RouteManager: ObservableObject {
         var currentInterface: String?
         var hasValidIP = false
         var hasUpFlag = false
+        var debugInfo: [(iface: String, ip: String?, isVPN: Bool, validIP: Bool)] = []
         
         for line in output.components(separatedBy: "\n") {
             // New interface starts with interface name (no leading whitespace)
@@ -687,7 +689,11 @@ final class RouteManager: ObservableObject {
                     let parts = trimmed.components(separatedBy: " ")
                     if parts.count >= 2 {
                         let ip = parts[1]
-                        if await isCorporateVPNIP(ip) {
+                        let isValidCorporateIP = await isCorporateVPNIP(ip)
+                        if let iface = currentInterface {
+                            debugInfo.append((iface: iface, ip: ip, isVPN: isVPNInterface(iface), validIP: isValidCorporateIP))
+                        }
+                        if isValidCorporateIP {
                             hasValidIP = true
                         }
                     }
@@ -700,6 +706,12 @@ final class RouteManager: ObservableObject {
            isVPNInterface(iface) {
             let vpnType = hintType ?? detectVPNTypeFromInterface(iface)
             return (true, iface, vpnType)
+        }
+        
+        // Debug: log what we found
+        if !debugInfo.isEmpty {
+            let summary = debugInfo.map { "\($0.iface):\($0.ip ?? "?") vpn=\($0.isVPN) valid=\($0.validIP)" }.joined(separator: ", ")
+            await MainActor.run { log(.info, "VPN scan: \(summary)") }
         }
         
         return (false, nil, nil)
