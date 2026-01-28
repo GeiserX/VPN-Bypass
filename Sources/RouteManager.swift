@@ -6,6 +6,10 @@ import Network
 import AppKit
 import UniformTypeIdentifiers
 
+/// Dedicated queue for process execution to avoid GCD thread pool exhaustion
+/// Global to ensure it's accessible from nonisolated contexts
+private let vpnBypassProcessQueue = DispatchQueue(label: "com.vpnbypass.process", qos: .userInitiated, attributes: .concurrent)
+
 @MainActor
 final class RouteManager: ObservableObject {
     static let shared = RouteManager()
@@ -40,6 +44,7 @@ final class RouteManager: ObservableObject {
     private var detectedDNSServer: String?  // User's real DNS (pre-VPN), detected at startup
     private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
+    
     
     private var dnsCacheURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -454,30 +459,31 @@ final class RouteManager: ObservableObject {
         arguments: [String] = [],
         timeout: TimeInterval = 5.0
     ) async -> (output: String, exitCode: Int32)? {
+        // Use dedicated queue to avoid GCD thread pool exhaustion
         await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = Self.runProcessSync(executablePath, arguments: arguments, timeout: timeout)
+            vpnBypassProcessQueue.async {
+                let result = Self.runProcessSyncSafe(executablePath, arguments: arguments, timeout: timeout)
                 continuation.resume(returning: result)
             }
         }
     }
     
-    /// Async process execution for parallel DNS - dispatches to GCD thread pool
+    /// Async process execution for parallel DNS - uses dedicated queue
     private nonisolated static func runProcessParallel(
         _ executablePath: String,
         arguments: [String] = [],
         timeout: TimeInterval = 5.0
     ) async -> (output: String, exitCode: Int32)? {
         await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = runProcessSync(executablePath, arguments: arguments, timeout: timeout)
+            vpnBypassProcessQueue.async {
+                let result = runProcessSyncSafe(executablePath, arguments: arguments, timeout: timeout)
                 continuation.resume(returning: result)
             }
         }
     }
     
-    /// Synchronous process execution - ONLY call from background thread
-    private static nonisolated func runProcessSync(
+    /// Safe synchronous process execution - avoids semaphore deadlock by using runloop
+    private static nonisolated func runProcessSyncSafe(
         _ executablePath: String,
         arguments: [String] = [],
         timeout: TimeInterval = 5.0
@@ -496,22 +502,19 @@ final class RouteManager: ObservableObject {
             return nil
         }
         
-        // Use DispatchSemaphore for proper timeout handling
-        let semaphore = DispatchSemaphore(value: 0)
-        var didTimeout = false
+        // Use a simple polling approach with deadline instead of nested GCD + semaphore
+        // This avoids thread pool exhaustion issues
+        let deadline = Date().addingTimeInterval(timeout)
         
-        DispatchQueue.global().async {
-            process.waitUntilExit()
-            semaphore.signal()
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.01) // 10ms poll interval
         }
         
-        let result = semaphore.wait(timeout: .now() + timeout)
-        if result == .timedOut {
+        if process.isRunning {
+            // Timeout - terminate the process
             process.terminate()
-            didTimeout = true
-        }
-        
-        if didTimeout {
+            // Give it a moment to clean up
+            Thread.sleep(forTimeInterval: 0.05)
             return nil
         }
         

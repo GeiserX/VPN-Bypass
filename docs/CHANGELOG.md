@@ -5,6 +5,15 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.9] - 2026-01-28
+
+### Fixed
+- **Critical: GCD Thread Pool Exhaustion** - Fixed ifconfig timeouts after extended runtime
+  - Replaced nested GCD dispatch + semaphore pattern that caused thread starvation
+  - Uses dedicated process queue to isolate process execution
+  - Uses polling-based timeout instead of nested dispatch
+  - Prevents the "ifconfig command failed/timed out" issue that blocked VPN detection
+
 ## [1.6.8] - 2026-01-26
 
 ### Added
