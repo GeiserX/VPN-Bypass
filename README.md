@@ -28,16 +28,16 @@ VPN Bypass intelligently routes selected services directly to the internet while
 ## Features
 
 - 🎯 **Menu bar app** - Quick access to status and controls
-- 🔧 **Pre-configured services** - Telegram, YouTube, WhatsApp, Spotify, Tailscale, and more
 - 🌐 **Custom domains** - Add any domain you want to bypass
+- 🔧 **Built-in services** - Telegram, YouTube, WhatsApp, Spotify, Tailscale, and more
 - 🔄 **Auto-apply** - Routes are applied automatically when VPN connects
 - 📋 **Hosts file management** - Optional DNS bypass via `/etc/hosts`
 - 🪵 **Activity logs** - See what's happening in real-time
-- 🔍 **Extended VPN Detection** - Supports GlobalProtect, Cisco, Fortinet, Zscaler, Cloudflare WARP, and more
+- 🔍 **VPN Detection** - Supports GlobalProtect, Cisco, Fortinet, Zscaler, Cloudflare WARP, and more
 - 📶 **Network Monitoring** - Detects VPN and network changes automatically
 - 🔔 **Notifications** - Alerts when VPN connects/disconnects and routes are applied
 - ✅ **Route Verification** - Ping tests to verify routes are actually working
-- 💾 **Import/Export Config** - Backup and restore your domains and services
+- 💾 **Import/Export Config** - Backup and restore your configuration
 - 🚀 **Launch at Login** - Start automatically when you log in
 - 🔄 **Auto DNS Refresh** - Periodically re-resolves domains and updates routes
 
@@ -113,7 +113,7 @@ Click the gear icon to access settings:
 - See resolved IPs
 
 **Services Tab**
-- Toggle pre-configured services
+- Toggle built-in services (Telegram, YouTube, Spotify, etc.)
 - Each service includes known domains and IP ranges
 
 **General Tab**
@@ -131,31 +131,18 @@ Click the gear icon to access settings:
 
 ## Supported VPN Types
 
-| VPN Client | Detection | Status |
-|------------|-----------|--------|
-| GlobalProtect | ✅ Full | Supported |
-| Cisco AnyConnect | ✅ Full | Supported |
-| OpenVPN | ✅ Full | Supported |
-| WireGuard | ✅ Full | Supported |
-| **Fortinet FortiClient** | ✅ Full | **New in v1.1** |
-| **Zscaler** | ✅ Full | **New in v1.1** |
-| **Cloudflare WARP** | ✅ Full | **New in v1.1** |
-| **Pulse Secure** | ✅ Full | **New in v1.1** |
-| Tailscale (exit node) | ✅ Full | Supported |
-| Tailscale (mesh only) | ❌ Not VPN | Expected |
-
-## Pre-configured Services
-
-| Service | Domains | Status |
-|---------|---------|--------|
-| Telegram | telegram.org, t.me, etc. | Enabled by default |
-| Tailscale | login.tailscale.com, etc. | Enabled by default |
-| YouTube | youtube.com, googlevideo.com, etc. | Disabled |
-| WhatsApp | whatsapp.com, web.whatsapp.com | Disabled |
-| Spotify | spotify.com, scdn.co | Disabled |
-| Slack | slack.com, slack-edge.com | Disabled |
-| Discord | discord.com, discordcdn.com | Disabled |
-| Twitch | twitch.tv, twitchcdn.net | Disabled |
+| VPN Client | Detection |
+|------------|-----------|
+| GlobalProtect | ✅ Full |
+| Cisco AnyConnect | ✅ Full |
+| OpenVPN | ✅ Full |
+| WireGuard | ✅ Full |
+| Fortinet FortiClient | ✅ Full |
+| Zscaler | ✅ Full |
+| Cloudflare WARP | ✅ Full |
+| Pulse Secure | ✅ Full |
+| Tailscale (exit node) | ✅ Full |
+| Tailscale (mesh only) | ❌ Not VPN |
 
 ## How It Works
 
