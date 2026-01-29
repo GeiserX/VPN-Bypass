@@ -662,59 +662,69 @@ final class RouteManager: ObservableObject {
         
         let output = result.output
         
-        // Parse ifconfig output looking for VPN interfaces with inet addresses
-        var currentInterface: String?
-        var hasValidIP = false
-        var hasUpFlag = false
-        var debugInfo: [(iface: String, ip: String?, isVPN: Bool, validIP: Bool)] = []
+        // Two-pass approach: collect ALL interfaces first, then find VPN
+        // This is more robust than the single-pass approach that could miss interfaces
+        struct InterfaceInfo {
+            let name: String
+            let ip: String
+            let hasUpFlag: Bool
+            let isVPN: Bool
+            var isValidCorporateIP: Bool = false
+        }
         
+        var interfaces: [InterfaceInfo] = []
+        var currentInterface: String?
+        var currentHasUpFlag = false
+        
+        // First pass: collect interface info
         for line in output.components(separatedBy: "\n") {
             // New interface starts with interface name (no leading whitespace)
             if !line.hasPrefix("\t") && !line.hasPrefix(" ") && line.contains(":") {
-                // Check if previous interface was a VPN
-                if let iface = currentInterface, hasValidIP, hasUpFlag,
-                   isVPNInterface(iface) {
-                    let vpnType = hintType ?? detectVPNTypeFromInterface(iface)
-                    return (true, iface, vpnType)
-                }
-                // Start new interface
                 currentInterface = line.components(separatedBy: ":").first
-                hasValidIP = false
-                // Check for UP flag in the flags line
-                hasUpFlag = line.contains("<UP,") || line.contains(",UP,") || line.contains(",UP>")
+                currentHasUpFlag = line.contains("<UP,") || line.contains(",UP,") || line.contains(",UP>")
             }
             
-            // Check for inet (IPv4) address - indicates active VPN
+            // Check for inet (IPv4) address
             if line.contains("inet ") && !line.contains("inet6") {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("inet ") {
-                    // Extract IP to verify it's a corporate VPN address
+                if trimmed.hasPrefix("inet "), let iface = currentInterface {
                     let parts = trimmed.components(separatedBy: " ")
                     if parts.count >= 2 {
                         let ip = parts[1]
-                        let isValidCorporateIP = await isCorporateVPNIP(ip)
-                        if let iface = currentInterface {
-                            debugInfo.append((iface: iface, ip: ip, isVPN: isVPNInterface(iface), validIP: isValidCorporateIP))
-                        }
-                        if isValidCorporateIP {
-                            hasValidIP = true
-                        }
+                        interfaces.append(InterfaceInfo(
+                            name: iface,
+                            ip: ip,
+                            hasUpFlag: currentHasUpFlag,
+                            isVPN: isVPNInterface(iface)
+                        ))
                     }
                 }
             }
         }
         
-        // Check last interface
-        if let iface = currentInterface, hasValidIP, hasUpFlag,
-           isVPNInterface(iface) {
-            let vpnType = hintType ?? detectVPNTypeFromInterface(iface)
-            return (true, iface, vpnType)
+        // Second pass: check corporate VPN IPs (async) and find valid VPN
+        var vpnCandidates: [(name: String, ip: String, isValid: Bool)] = []
+        
+        for i in interfaces.indices {
+            let isValid = await isCorporateVPNIP(interfaces[i].ip)
+            interfaces[i].isValidCorporateIP = isValid
+            
+            // Track VPN candidates for debugging
+            if interfaces[i].isVPN {
+                vpnCandidates.append((interfaces[i].name, interfaces[i].ip, isValid))
+            }
+            
+            // Check if this is our VPN
+            if interfaces[i].isVPN && interfaces[i].hasUpFlag && isValid {
+                let vpnType = hintType ?? detectVPNTypeFromInterface(interfaces[i].name)
+                return (true, interfaces[i].name, vpnType)
+            }
         }
         
-        // Debug: log what we found
-        if !debugInfo.isEmpty {
-            let summary = debugInfo.map { "\($0.iface):\($0.ip ?? "?") vpn=\($0.isVPN) valid=\($0.validIP)" }.joined(separator: ", ")
-            await MainActor.run { log(.info, "VPN scan: \(summary)") }
+        // Debug: log what we found if no VPN detected
+        if !vpnCandidates.isEmpty {
+            let summary = vpnCandidates.map { "\($0.name):\($0.ip) valid=\($0.isValid)" }.joined(separator: ", ")
+            await MainActor.run { log(.info, "VPN candidates (none matched): \(summary)") }
         }
         
         return (false, nil, nil)
