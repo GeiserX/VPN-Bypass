@@ -5,6 +5,16 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.11] - 2026-02-05
+
+### Improved
+- **Better URL Cleaning** - Enhanced domain input parsing when adding custom domains
+  - Strips any protocol scheme (http, https, ssh, ftp, and any other `scheme://` format)
+  - Removes port numbers (e.g., `:443`, `:8080`)
+  - Removes authentication info (e.g., `user:pass@`)
+  - Removes paths and query strings
+  - Now you can paste full URLs and the domain will be extracted correctly
+
 ## [1.6.10] - 2026-01-29
 
 ### Fixed

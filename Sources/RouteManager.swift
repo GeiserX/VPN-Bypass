@@ -2315,18 +2315,30 @@ final class RouteManager: ObservableObject {
     
     private func cleanDomain(_ input: String) -> String {
         var domain = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Remove protocol
-        if let url = URL(string: domain), let host = url.host {
-            domain = host
-        } else {
-            domain = domain
-                .replacingOccurrences(of: "https://", with: "")
-                .replacingOccurrences(of: "http://", with: "")
+        
+        // Remove any protocol scheme (http, https, ssh, ftp, etc.) using regex
+        if let schemeRange = domain.range(of: "^[a-zA-Z][a-zA-Z0-9+.-]*://", options: .regularExpression) {
+            domain = String(domain[schemeRange.upperBound...])
         }
-        // Remove path
+        
+        // Remove userinfo (user:pass@) if present
+        if let atIndex = domain.firstIndex(of: "@") {
+            domain = String(domain[domain.index(after: atIndex)...])
+        }
+        
+        // Remove port number if present (e.g., :443, :8080)
+        if let colonIndex = domain.firstIndex(of: ":") {
+            domain = String(domain[..<colonIndex])
+        }
+        
+        // Remove path and query string
         if let slashIndex = domain.firstIndex(of: "/") {
             domain = String(domain[..<slashIndex])
         }
+        if let queryIndex = domain.firstIndex(of: "?") {
+            domain = String(domain[..<queryIndex])
+        }
+        
         return domain.lowercased()
     }
     
