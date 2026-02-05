@@ -143,6 +143,7 @@ struct TabItem: View {
 struct DomainsTab: View {
     @EnvironmentObject var routeManager: RouteManager
     @State private var newDomain = ""
+    @State private var includeSubdomains = true
     @FocusState private var isInputFocused: Bool
     
     var body: some View {
@@ -165,57 +166,83 @@ struct DomainsTab: View {
             }
             
             // Add domain input
-            HStack(spacing: 10) {
-                HStack {
-                    Image(systemName: "link")
-                        .font(.system(size: 12))
-                        .foregroundColor(Color(hex: "6B7280"))
-                    
-                    TextField("Enter domain (e.g., example.com)", text: $newDomain)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .focused($isInputFocused)
-                        .onSubmit { addDomain() }
-                        .disabled(routeManager.isApplyingRoutes)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.white.opacity(0.06))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(isInputFocused ? Color(hex: "10B981").opacity(0.5) : Color.clear, lineWidth: 1)
-                        )
-                )
-                
-                // Loading indicator or add button
-                if routeManager.isApplyingRoutes {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "10B981")))
-                        .frame(width: 42, height: 42)
-                        .background(Color(hex: "374151"))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                } else {
-                    Button(action: addDomain) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 42, height: 42)
-                            .background(
-                                LinearGradient(
-                                    colors: newDomain.isEmpty ? [Color(hex: "374151"), Color(hex: "374151")] : [Color(hex: "10B981"), Color(hex: "059669")],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .shadow(color: newDomain.isEmpty ? .clear : Color(hex: "10B981").opacity(0.3), radius: 6, y: 2)
+            VStack(spacing: 8) {
+                HStack(spacing: 10) {
+                    HStack {
+                        Image(systemName: "link")
+                            .font(.system(size: 12))
+                            .foregroundColor(Color(hex: "6B7280"))
+                        
+                        TextField("Enter domain (e.g., example.com)", text: $newDomain)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13))
+                            .focused($isInputFocused)
+                            .onSubmit { addDomain() }
+                            .disabled(routeManager.isApplyingRoutes)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(newDomain.isEmpty)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.white.opacity(0.06))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(isInputFocused ? Color(hex: "10B981").opacity(0.5) : Color.clear, lineWidth: 1)
+                            )
+                    )
+                    
+                    // Loading indicator or add button
+                    if routeManager.isApplyingRoutes {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "10B981")))
+                            .frame(width: 42, height: 42)
+                            .background(Color(hex: "374151"))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    } else {
+                        Button(action: addDomain) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 42, height: 42)
+                                .background(
+                                    LinearGradient(
+                                        colors: newDomain.isEmpty ? [Color(hex: "374151"), Color(hex: "374151")] : [Color(hex: "10B981"), Color(hex: "059669")],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .shadow(color: newDomain.isEmpty ? .clear : Color(hex: "10B981").opacity(0.3), radius: 6, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(newDomain.isEmpty)
+                    }
                 }
+                
+                // Include subdomains toggle
+                HStack(spacing: 8) {
+                    Toggle(isOn: $includeSubdomains) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "rectangle.stack")
+                                .font(.system(size: 11))
+                                .foregroundColor(includeSubdomains ? Color(hex: "10B981") : Color(hex: "6B7280"))
+                            Text("Include www. subdomain")
+                                .font(.system(size: 12))
+                                .foregroundColor(includeSubdomains ? Color(hex: "E5E7EB") : Color(hex: "9CA3AF"))
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .tint(Color(hex: "10B981"))
+                    .scaleEffect(0.8)
+                    
+                    Spacer()
+                    
+                    Text("Recommended for sites that redirect to www")
+                        .font(.system(size: 10))
+                        .foregroundColor(Color(hex: "6B7280"))
+                }
+                .padding(.horizontal, 4)
             }
             
             // Domain list
@@ -319,7 +346,7 @@ struct DomainsTab: View {
     
     private func addDomain() {
         guard !newDomain.isEmpty else { return }
-        routeManager.addDomain(newDomain)
+        routeManager.addDomain(newDomain, includeSubdomains: includeSubdomains)
         newDomain = ""
     }
 }
@@ -338,9 +365,22 @@ struct DomainRow: View {
                 .shadow(color: domain.enabled ? Color(hex: "10B981").opacity(0.5) : .clear, radius: 4)
             
             VStack(alignment: .leading, spacing: 2) {
-                Text(domain.domain)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(domain.enabled ? .white : Color(hex: "9CA3AF"))
+                HStack(spacing: 6) {
+                    Text(domain.domain)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(domain.enabled ? .white : Color(hex: "9CA3AF"))
+                    
+                    // Subdomain indicator
+                    if domain.includeSubdomains && !domain.domain.hasPrefix("www.") {
+                        Text("+www")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(Color(hex: "10B981"))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color(hex: "10B981").opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+                }
             }
             
             Spacer()
@@ -1263,7 +1303,7 @@ struct GeneralTab: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     BrandedAppName(fontSize: 13)
-                    Text("Version 1.6.10")
+                    Text("Version 1.6.11")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
                 }
@@ -1721,7 +1761,7 @@ struct InfoTab: View {
             // App name with branded colors
             BrandedAppName(fontSize: 24)
             
-            Text("v1.6.10")
+            Text("v1.6.11")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(Color(hex: "6B7280"))
             

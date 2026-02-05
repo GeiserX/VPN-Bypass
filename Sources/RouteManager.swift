@@ -286,13 +286,26 @@ final class RouteManager: ObservableObject {
         let id: UUID
         var domain: String
         var enabled: Bool
+        var includeSubdomains: Bool
         var resolvedIP: String?
         var lastResolved: Date?
         
-        init(domain: String, enabled: Bool = true) {
+        init(domain: String, enabled: Bool = true, includeSubdomains: Bool = true) {
             self.id = UUID()
             self.domain = domain
             self.enabled = enabled
+            self.includeSubdomains = includeSubdomains
+        }
+        
+        // Custom decoder for backward compatibility with configs missing includeSubdomains
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(UUID.self, forKey: .id)
+            domain = try container.decode(String.self, forKey: .domain)
+            enabled = try container.decode(Bool.self, forKey: .enabled)
+            includeSubdomains = try container.decodeIfPresent(Bool.self, forKey: .includeSubdomains) ?? false
+            resolvedIP = try container.decodeIfPresent(String.self, forKey: .resolvedIP)
+            lastResolved = try container.decodeIfPresent(Date.self, forKey: .lastResolved)
         }
     }
     
@@ -935,9 +948,13 @@ final class RouteManager: ObservableObject {
         // Collect all domains to resolve (for parallel resolution)
         var allDomains: [(domain: String, source: String)] = []
         
-        // Add custom domains
+        // Add custom domains (and www. subdomains if includeSubdomains is enabled)
         for domain in config.domains where domain.enabled {
             allDomains.append((domain.domain, domain.domain))
+            // Also add www. subdomain if includeSubdomains is enabled
+            if domain.includeSubdomains && !domain.domain.hasPrefix("www.") {
+                allDomains.append(("www.\(domain.domain)", domain.domain))
+            }
         }
         
         // Add service domains
@@ -1145,7 +1162,7 @@ final class RouteManager: ObservableObject {
             }
         }
         
-        // Custom domains
+        // Custom domains (and www. subdomains if includeSubdomains is enabled)
         for domain in config.domains where domain.enabled {
             if let cachedIPs = dnsDiskCache[domain.domain] {
                 for ip in cachedIPs where !seenDestinations.contains(ip) {
@@ -1154,6 +1171,19 @@ final class RouteManager: ObservableObject {
                 }
                 if let firstIP = cachedIPs.first {
                     dnsCache[domain.domain] = firstIP
+                }
+            }
+            // Also add www. subdomain if includeSubdomains is enabled
+            if domain.includeSubdomains && !domain.domain.hasPrefix("www.") {
+                let wwwDomain = "www.\(domain.domain)"
+                if let cachedIPs = dnsDiskCache[wwwDomain] {
+                    for ip in cachedIPs where !seenDestinations.contains(ip) {
+                        seenDestinations.insert(ip)
+                        routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: domain.domain))
+                    }
+                    if let firstIP = cachedIPs.first {
+                        dnsCache[wwwDomain] = firstIP
+                    }
                 }
             }
         }
@@ -1199,6 +1229,10 @@ final class RouteManager: ObservableObject {
         }
         for domain in config.domains where domain.enabled {
             domainsToResolve.append((domain.domain, domain.domain))
+            // Also add www. subdomain if includeSubdomains is enabled
+            if domain.includeSubdomains && !domain.domain.hasPrefix("www.") {
+                domainsToResolve.append(("www.\(domain.domain)", domain.domain))
+            }
         }
         
         // Resolve DNS in parallel
@@ -1354,6 +1388,10 @@ final class RouteManager: ObservableObject {
         
         for domain in config.domains where domain.enabled {
             domainsToResolve.append((domain.domain, domain.domain))
+            // Also add www. subdomain if includeSubdomains is enabled
+            if domain.includeSubdomains && !domain.domain.hasPrefix("www.") {
+                domainsToResolve.append(("www.\(domain.domain)", domain.domain))
+            }
         }
         
         for service in config.services where service.enabled {
@@ -1480,7 +1518,7 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    func addDomain(_ domain: String) {
+    func addDomain(_ domain: String, includeSubdomains: Bool = true) {
         let cleaned = cleanDomain(domain)
         guard !cleaned.isEmpty else { return }
         guard !config.domains.contains(where: { $0.domain == cleaned }) else {
@@ -1488,17 +1526,28 @@ final class RouteManager: ObservableObject {
             return
         }
         
-        config.domains.append(DomainEntry(domain: cleaned))
+        config.domains.append(DomainEntry(domain: cleaned, includeSubdomains: includeSubdomains))
         saveConfig()
-        log(.success, "Added domain: \(cleaned)")
+        let subdomainNote = includeSubdomains ? " (+www)" : ""
+        log(.success, "Added domain: \(cleaned)\(subdomainNote)")
         
         // Apply route immediately if VPN connected
         if isVPNConnected, let gateway = localGateway {
             isApplyingRoutes = true
             Task {
+                // Apply routes for main domain
                 if let routes = await applyRoutesForDomain(cleaned, gateway: gateway) {
                     await MainActor.run {
                         activeRoutes.append(contentsOf: routes)
+                    }
+                }
+                // Also apply routes for www. subdomain if includeSubdomains is enabled
+                if includeSubdomains && !cleaned.hasPrefix("www.") {
+                    let wwwDomain = "www.\(cleaned)"
+                    if let wwwRoutes = await applyRoutesForDomain(wwwDomain, gateway: gateway, source: cleaned) {
+                        await MainActor.run {
+                            activeRoutes.append(contentsOf: wwwRoutes)
+                        }
                     }
                 }
                 await MainActor.run {
@@ -1544,6 +1593,15 @@ final class RouteManager: ObservableObject {
                             activeRoutes.append(contentsOf: routes)
                         }
                     }
+                    // Also add www. subdomain routes if includeSubdomains is enabled
+                    if domain.includeSubdomains && !domain.domain.hasPrefix("www.") {
+                        let wwwDomain = "www.\(domain.domain)"
+                        if let wwwRoutes = await applyRoutesForDomain(wwwDomain, gateway: gateway, source: domain.domain) {
+                            await MainActor.run {
+                                activeRoutes.append(contentsOf: wwwRoutes)
+                            }
+                        }
+                    }
                 } else {
                     // Domain was just disabled - remove its routes
                     await removeRoutesForSource(domain.domain)
@@ -1578,6 +1636,15 @@ final class RouteManager: ObservableObject {
                         if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
                             await MainActor.run {
                                 activeRoutes.append(contentsOf: routes)
+                            }
+                        }
+                        // Also add www. subdomain routes if includeSubdomains is enabled
+                        if domain.includeSubdomains && !domain.domain.hasPrefix("www.") {
+                            let wwwDomain = "www.\(domain.domain)"
+                            if let wwwRoutes = await applyRoutesForDomain(wwwDomain, gateway: gateway, source: domain.domain) {
+                                await MainActor.run {
+                                    activeRoutes.append(contentsOf: wwwRoutes)
+                                }
                             }
                         }
                     } else {
@@ -2218,6 +2285,15 @@ final class RouteManager: ObservableObject {
                 // Fallback to disk cache when DNS failed at startup
                 entries.append((domain.domain, firstIP))
             }
+            // Also add www. subdomain if includeSubdomains is enabled
+            if domain.includeSubdomains && !domain.domain.hasPrefix("www.") {
+                let wwwDomain = "www.\(domain.domain)"
+                if let cachedIP = dnsCache[wwwDomain] {
+                    entries.append((wwwDomain, cachedIP))
+                } else if let diskCachedIPs = dnsDiskCache[wwwDomain], let firstIP = diskCachedIPs.first {
+                    entries.append((wwwDomain, firstIP))
+                }
+            }
         }
         
         for service in config.services where service.enabled {
@@ -2315,18 +2391,35 @@ final class RouteManager: ObservableObject {
     
     private func cleanDomain(_ input: String) -> String {
         var domain = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Remove protocol
-        if let url = URL(string: domain), let host = url.host {
-            domain = host
-        } else {
-            domain = domain
-                .replacingOccurrences(of: "https://", with: "")
-                .replacingOccurrences(of: "http://", with: "")
+        
+        // Remove any protocol scheme (https://, http://, ssh://, ftp://, etc.)
+        // Pattern: starts with letter, followed by letters/digits/+/./-, then ://
+        if let range = domain.range(of: "^[a-zA-Z][a-zA-Z0-9+.-]*://", options: .regularExpression) {
+            domain = String(domain[range.upperBound...])
         }
-        // Remove path
+        
+        // Remove userinfo (user:pass@) if present
+        if let atIndex = domain.firstIndex(of: "@") {
+            domain = String(domain[domain.index(after: atIndex)...])
+        }
+        
+        // Remove path and query string
         if let slashIndex = domain.firstIndex(of: "/") {
             domain = String(domain[..<slashIndex])
         }
+        if let queryIndex = domain.firstIndex(of: "?") {
+            domain = String(domain[..<queryIndex])
+        }
+        
+        // Remove port number
+        if let colonIndex = domain.lastIndex(of: ":") {
+            // Make sure it's actually a port (after hostname, not in IPv6)
+            let afterColon = String(domain[domain.index(after: colonIndex)...])
+            if Int(afterColon) != nil {
+                domain = String(domain[..<colonIndex])
+            }
+        }
+        
         return domain.lowercased()
     }
     

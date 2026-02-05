@@ -5,6 +5,18 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.11] - 2026-02-05
+
+### Added
+- **Subdomain Toggle** - New "Include www. subdomain" toggle when adding custom domains
+  - Automatically adds routes for both `example.com` and `www.example.com`
+  - Prevents common issue where sites redirect to www but only the bare domain was bypassed
+  - Default ON for new domains, with visual indicator (+www badge) in domain list
+- **Better URL Cleaning** - Improved domain input parsing
+  - Strips any protocol scheme (not just http/https, now also handles ssh://, ftp://, etc.)
+  - Removes port numbers and authentication info from pasted URLs
+  - Handles more edge cases when pasting full URLs
+
 ## [1.6.10] - 2026-01-29
 
 ### Fixed
