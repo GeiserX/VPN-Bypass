@@ -1263,14 +1263,14 @@ struct GeneralTab: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     BrandedAppName(fontSize: 13)
-                    Text("Version 1.6.11")
+                    Text("Version 1.7.0")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
                 }
                 
                 Spacer()
                 
-                Link(destination: URL(string: "https://github.com/GeiserX/vpn-macos-bypass")!) {
+                Link(destination: URL(string: "https://github.com/GeiserX/VPN-Bypass")!) {
                     HStack(spacing: 6) {
                         Image(systemName: "star.fill")
                             .font(.system(size: 10))
@@ -1721,7 +1721,7 @@ struct InfoTab: View {
             // App name with branded colors
             BrandedAppName(fontSize: 24)
             
-            Text("v1.6.11")
+            Text("v1.7.0")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(Color(hex: "6B7280"))
             

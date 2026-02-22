@@ -1,9 +1,9 @@
 # Homebrew Cask for VPN Bypass
-# Install: brew install --cask geiserx/tap/vpn-bypass
+# Install: brew install --cask geiserx/vpn-bypass/vpn-bypass
 # Or if using local tap: brew install --cask --no-quarantine ./Casks/vpn-bypass.rb
 
 cask "vpn-bypass" do
-  version "1.6.10"
+  version "1.7.0"
   sha256 "37b127a55aec0bdb80e824e59e840ce5b529c09086aac7fc24dc4616abb817bd"
 
   url "https://github.com/GeiserX/VPN-Bypass/releases/download/v#{version}/VPN-Bypass-#{version}.dmg"

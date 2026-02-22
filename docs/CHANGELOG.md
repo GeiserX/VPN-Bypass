@@ -5,6 +5,15 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-02-22
+
+### Added
+- **Check Point VPN Detection** - Detects Check Point Endpoint Security VPN via process signatures (`Endpoint_Security_VPN`, `TracSrvWrapper`, `cpdaApp`, `cpefrd`)
+
+### Fixed
+- **Homebrew Tap Command** - Fixed `brew tap geiserx/tap` (repo doesn't exist) to `brew tap geiserx/vpn-bypass`
+- **Stale Repository URLs** - Updated all remaining `vpn-macos-bypass` references to `VPN-Bypass` across README, issue templates, cask, and settings
+
 ## [1.6.11] - 2026-02-05
 
 ### Improved

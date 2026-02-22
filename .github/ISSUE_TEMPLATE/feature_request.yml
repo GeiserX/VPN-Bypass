@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for suggesting a feature! Please check the [Roadmap](https://github.com/GeiserX/vpn-macos-bypass/blob/main/ROADMAP.md) first to see if it's already planned.
+        Thanks for suggesting a feature! Please check the [Roadmap](https://github.com/GeiserX/VPN-Bypass/blob/main/ROADMAP.md) first to see if it's already planned.
 
   - type: dropdown
     id: category
