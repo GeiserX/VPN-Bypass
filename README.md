@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-13%2B-blue" alt="macOS 13+">
   <img src="https://img.shields.io/badge/Swift-5.9-orange" alt="Swift 5.9">
-  <a href="https://github.com/GeiserX/vpn-macos-bypass/releases"><img src="https://img.shields.io/badge/version-1.6.11-green" alt="Version"></a>
+  <a href="https://github.com/GeiserX/VPN-Bypass/releases"><img src="https://img.shields.io/badge/version-1.6.11-green" alt="Version"></a>
 </p>
 
 ## Why?
@@ -58,7 +58,7 @@ VPN Bypass intelligently routes selected services directly to the internet while
 
 ```bash
 # Add the tap (first time only)
-brew tap geiserx/tap
+brew tap geiserx/vpn-bypass
 
 # Install VPN Bypass
 brew install --cask vpn-bypass
@@ -67,19 +67,19 @@ brew install --cask vpn-bypass
 Or install directly from the repository:
 
 ```bash
-brew install --cask --no-quarantine https://raw.githubusercontent.com/GeiserX/vpn-macos-bypass/main/Casks/vpn-bypass.rb
+brew install --cask --no-quarantine https://raw.githubusercontent.com/GeiserX/VPN-Bypass/main/Casks/vpn-bypass.rb
 ```
 
 ### Manual Download
 
-Download the latest `.dmg` from [Releases](https://github.com/GeiserX/vpn-macos-bypass/releases), open it, and drag **VPN Bypass** to your Applications folder.
+Download the latest `.dmg` from [Releases](https://github.com/GeiserX/VPN-Bypass/releases), open it, and drag **VPN Bypass** to your Applications folder.
 
 ### Build from Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/GeiserX/vpn-macos-bypass.git
-cd vpn-macos-bypass
+git clone https://github.com/GeiserX/VPN-Bypass.git
+cd VPN-Bypass
 
 # Build and create release DMG
 make release
@@ -141,6 +141,7 @@ Click the gear icon to access settings:
 | Zscaler | ✅ Full |
 | Cloudflare WARP | ✅ Full |
 | Pulse Secure | ✅ Full |
+| Check Point | ✅ Full |
 | Tailscale (exit node) | ✅ Full |
 | Tailscale (mesh only) | ❌ Not VPN |
 

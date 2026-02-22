@@ -58,7 +58,7 @@ body:
     attributes:
       label: Checklist
       options:
-        - label: I have read the [README](https://github.com/GeiserX/vpn-macos-bypass#readme)
+        - label: I have read the [README](https://github.com/GeiserX/VPN-Bypass#readme)
           required: true
         - label: I have searched existing issues for similar questions
           required: true

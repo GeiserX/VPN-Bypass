@@ -1270,7 +1270,7 @@ struct GeneralTab: View {
                 
                 Spacer()
                 
-                Link(destination: URL(string: "https://github.com/GeiserX/vpn-macos-bypass")!) {
+                Link(destination: URL(string: "https://github.com/GeiserX/VPN-Bypass")!) {
                     HStack(spacing: 6) {
                         Image(systemName: "star.fill")
                             .font(.system(size: 10))

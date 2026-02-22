@@ -69,6 +69,7 @@ final class RouteManager: ObservableObject {
         case cloudflareWARP = "Cloudflare WARP"
         case paloAlto = "Palo Alto"
         case pulseSecure = "Pulse Secure"
+        case checkPoint = "Check Point"
         case unknown = "Unknown VPN"
         
         var icon: String {
@@ -82,6 +83,7 @@ final class RouteManager: ObservableObject {
             case .zscaler: return "cloud.fill"
             case .cloudflareWARP: return "cloud.bolt.fill"
             case .pulseSecure: return "bolt.shield.fill"
+            case .checkPoint: return "checkmark.shield.fill"
             case .unknown: return "shield.fill"
             }
         }
@@ -647,6 +649,10 @@ final class RouteManager: ObservableObject {
         }
         if output.contains("pulsesecure") || output.contains("dsaccessservice") || output.contains("pulseuisvc") {
             return .pulseSecure
+        }
+        if output.contains("endpoint_security_vpn") || output.contains("tracsrvwrapper") ||
+           output.contains("cpdaapp") || output.contains("cpefrd") {
+            return .checkPoint
         }
         // Tailscale is handled separately via exit node detection
         
