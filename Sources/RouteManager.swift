@@ -712,7 +712,7 @@ final class RouteManager: ObservableObject {
         var vpnCandidates: [(name: String, ip: String, isValid: Bool)] = []
         
         for i in interfaces.indices {
-            let isValid = await isCorporateVPNIP(interfaces[i].ip)
+            let isValid = await isCorporateVPNIP(interfaces[i].ip, hintType: hintType)
             interfaces[i].isValidCorporateIP = isValid
             
             // Track VPN candidates for debugging
@@ -765,7 +765,8 @@ final class RouteManager: ObservableObject {
     }
     
     /// Check if IP is likely a corporate VPN (not Tailscale mesh, not localhost, etc.)
-    private func isCorporateVPNIP(_ ip: String) async -> Bool {
+    /// hintType comes from process detection -- used to distinguish Zscaler/WARP from Tailscale in the shared CGNAT range.
+    private func isCorporateVPNIP(_ ip: String, hintType: VPNType?) async -> Bool {
         let parts = ip.components(separatedBy: ".")
         guard parts.count == 4,
               let first = Int(parts[0]),
@@ -779,29 +780,20 @@ final class RouteManager: ObservableObject {
         // Skip link-local
         if first == 169 && second == 254 { return false }
         
-        // Tailscale CGNAT range (100.64.0.0/10 = 100.64-127.x.x)
-        // Only consider Tailscale as VPN if it's using an exit node (routing all traffic)
+        // CGNAT range (100.64.0.0/10 = 100.64-127.x.x)
+        // Shared by Tailscale, Zscaler, Cloudflare WARP, and other VPNs.
+        // If a known non-Tailscale VPN process was detected, trust it.
+        // Otherwise fall back to Tailscale exit-node check.
         if first == 100 && second >= 64 && second <= 127 {
+            if let hint = hintType, hint != .tailscale, hint != .unknown {
+                return true
+            }
             return await isTailscaleExitNodeActive()
         }
         
-        // Cloudflare WARP range (check for WARP-specific IPs)
-        // WARP uses 100.96.0.0/12 range
-        if first == 100 && second >= 96 && second <= 111 {
-            return true // WARP is active
-        }
-        
-        // Zscaler typically uses 100.64.x.x or custom ranges
-        // Already covered by CGNAT check above
-        
         // Corporate VPNs typically use private ranges
-        // 10.0.0.0/8 - Most corporate VPNs use this
         if first == 10 { return true }
-        
-        // 172.16.0.0/12 (172.16-31.x.x)
         if first == 172 && second >= 16 && second <= 31 { return true }
-        
-        // 192.168.0.0/16 - Less common for VPN but possible
         if first == 192 && second == 168 { return true }
         
         return false
