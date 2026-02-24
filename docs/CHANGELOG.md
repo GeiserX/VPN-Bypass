@@ -5,6 +5,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-02-24
+
+### Fixed
+- **Zscaler Detection** - Zscaler (and Cloudflare WARP) use CGNAT IPs (`100.64.x.x`) which were incorrectly treated as Tailscale-only, causing `valid=false` rejection. Now trusts the process-detection hint to distinguish Zscaler/WARP from Tailscale in the shared CGNAT range.
+
 ## [1.7.0] - 2026-02-22
 
 ### Added
