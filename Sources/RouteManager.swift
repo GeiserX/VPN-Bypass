@@ -803,19 +803,50 @@ final class RouteManager: ObservableObject {
         
         // CGNAT range (100.64.0.0/10 = 100.64-127.x.x)
         // Shared by Tailscale, Zscaler, Cloudflare WARP, and other VPNs.
-        // If a known non-Tailscale VPN process was detected, trust it.
-        // Otherwise fall back to Tailscale exit-node check.
+        // Always check if this specific IP belongs to Tailscale first — the
+        // process hint alone isn't enough because GlobalProtect's process can
+        // stay running after its tunnel goes down, causing Tailscale's CGNAT IP
+        // on a different utun to be misidentified as corporate VPN.
         if first == 100 && second >= 64 && second <= 127 {
+            if await isTailscaleIP(ip) {
+                return await isTailscaleExitNodeActive()
+            }
             if let hint = hintType, hint != .tailscale, hint != .unknown {
                 return true
             }
-            return await isTailscaleExitNodeActive()
+            return false
         }
         
         // Corporate VPNs typically use private ranges
         if first == 10 { return true }
         if first == 172 && second >= 16 && second <= 31 { return true }
         if first == 192 && second == 168 { return true }
+        
+        return false
+    }
+    
+    /// Check if this IP is the local Tailscale node's address
+    private func isTailscaleIP(_ ip: String) async -> Bool {
+        let tailscalePaths = [
+            "/usr/local/bin/tailscale",
+            "/opt/homebrew/bin/tailscale",
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+        ]
+        
+        for path in tailscalePaths {
+            if FileManager.default.fileExists(atPath: path) {
+                guard let result = await runProcessAsync(path, arguments: ["status", "--json"], timeout: 3.0) else {
+                    continue
+                }
+                
+                if let jsonData = result.output.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                   let selfStatus = json["Self"] as? [String: Any],
+                   let tsIPs = selfStatus["TailscaleIPs"] as? [String] {
+                    return tsIPs.contains(ip)
+                }
+            }
+        }
         
         return false
     }
