@@ -42,6 +42,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var watchdogTimer: Timer?
     private var lastPathStatus: NWPath.Status?
     private var lastInterfaceTypes: Set<NWInterface.InterfaceType> = []
+    private var lastInterfaceNames: Set<String> = []
     private var networkDebounceWorkItem: DispatchWorkItem?
     private var hasCompletedInitialStartup = false
     private var appStartTime = Date()
@@ -129,22 +130,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleNetworkChange(_ path: NWPath) {
         let statusChanged = path.status != lastPathStatus
         let interfaceTypes = Set(path.availableInterfaces.map { $0.type })
-        let interfacesChanged = interfaceTypes != lastInterfaceTypes
+        let interfaceNames = Set(path.availableInterfaces.map { $0.name })
+        let typesChanged = interfaceTypes != lastInterfaceTypes
+        let namesChanged = interfaceNames != lastInterfaceNames
         
-        // Detect significant network changes
-        let isSignificantChange = statusChanged || interfacesChanged
+        let isSignificantChange = statusChanged || typesChanged || namesChanged
         
         if isSignificantChange {
             lastPathStatus = path.status
             lastInterfaceTypes = interfaceTypes
+            lastInterfaceNames = interfaceNames
             
             Task { @MainActor in
-                // Log the network change
                 let statusStr = path.status == .satisfied ? "connected" : "disconnected"
-                let interfaceStr = interfaceTypes.map { interfaceTypeName($0) }.joined(separator: ", ")
+                let interfaceStr = interfaceNames.sorted().joined(separator: ", ")
                 RouteManager.shared.log(.info, "Network change detected: \(statusStr) via \(interfaceStr)")
                 
-                // Refresh VPN status
                 RouteManager.shared.refreshStatus()
             }
         }
