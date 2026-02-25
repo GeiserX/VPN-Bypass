@@ -599,11 +599,10 @@ final class RouteManager: ObservableObject {
             }
         }
         
-        // Log disconnection - only if we're confident (interface actually changed)
         if !isVPNConnected && wasVPNConnected && vpnInterface != oldInterface {
             log(.warning, "VPN disconnected (was: \(oldInterface ?? "unknown"))")
             NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface)
-            // Clear routes when VPN disconnects
+            cancelAllRetries()
             activeRoutes.removeAll()
             routeVerificationResults.removeAll()
         }
@@ -1003,8 +1002,7 @@ final class RouteManager: ObservableObject {
                         routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: result.source))
                     }
                 } else {
-                    // DNS failed and no cache - domain truly failed
-                    failedDomains.append(result.domain)
+                    failedDomains.insert(result.domain)
                     failedCount += 1
                 }
             }
@@ -1101,9 +1099,10 @@ final class RouteManager: ObservableObject {
             }
         }
         
+        cancelAllRetries()
         activeRoutes.removeAll()
         routeVerificationResults.removeAll()
-        dnsCache.removeAll()  // Clear DNS cache
+        dnsCache.removeAll()
         lastUpdate = Date()
         
         if config.manageHostsFile {
@@ -1490,35 +1489,78 @@ final class RouteManager: ObservableObject {
         saveConfig()
         log(.success, "Added domain: \(cleaned)")
         
-        // Apply route immediately if VPN connected
         if isVPNConnected, let gateway = localGateway {
             isApplyingRoutes = true
             Task {
                 if let routes = await applyRoutesForDomain(cleaned, gateway: gateway) {
-                    await MainActor.run {
-                        activeRoutes.append(contentsOf: routes)
+                    activeRoutes.append(contentsOf: routes)
+                    if config.manageHostsFile {
+                        await updateHostsFile()
                     }
+                } else {
+                    log(.warning, "DNS resolution failed for \(cleaned), retrying in 15s...")
+                    scheduleRetry(for: cleaned)
                 }
-                await MainActor.run {
-                    isApplyingRoutes = false
-                }
+                isApplyingRoutes = false
             }
         }
     }
     
+    private func scheduleRetry(for domain: String) {
+        pendingRetryTasks[domain]?.cancel()
+        pendingRetryTasks[domain] = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.retryDelayNs)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            await self.retryFailedDomain(domain)
+            self.pendingRetryTasks.removeValue(forKey: domain)
+        }
+    }
+    
+    private func retryFailedDomain(_ domain: String) async {
+        guard config.domains.contains(where: { $0.domain == domain && $0.enabled }) else { return }
+        guard isVPNConnected, let gateway = localGateway else { return }
+        guard !activeRoutes.contains(where: { $0.source == domain }) else {
+            log(.info, "Skipping retry for \(domain) — routes already exist")
+            return
+        }
+        
+        isApplyingRoutes = true
+        defer { isApplyingRoutes = false }
+        
+        log(.info, "Retrying DNS for \(domain)...")
+        if let routes = await applyRoutesForDomain(domain, gateway: gateway) {
+            activeRoutes.append(contentsOf: routes)
+            if config.manageHostsFile {
+                await updateHostsFile()
+            }
+            log(.success, "Retry succeeded for \(domain): \(routes.count) routes added")
+        } else {
+            log(.warning, "Retry failed for \(domain) — will resolve on next DNS refresh")
+        }
+    }
+    
+    private func cancelAllRetries() {
+        pendingRetryTasks.values.forEach { $0.cancel() }
+        pendingRetryTasks.removeAll()
+    }
+    
     func removeDomain(_ domain: DomainEntry) {
+        pendingRetryTasks[domain.domain]?.cancel()
+        pendingRetryTasks.removeValue(forKey: domain.domain)
+        
         isApplyingRoutes = true
         
-        // Actually remove system routes for this domain
         Task {
             await removeRoutesForSource(domain.domain)
             
-            await MainActor.run {
-                config.domains.removeAll { $0.id == domain.id }
-                saveConfig()
-                log(.info, "Removed domain: \(domain.domain)")
-                isApplyingRoutes = false
-            }
+            config.domains.removeAll { $0.id == domain.id }
+            saveConfig()
+            log(.info, "Removed domain: \(domain.domain)")
+            isApplyingRoutes = false
         }
     }
     
@@ -1531,24 +1573,20 @@ final class RouteManager: ObservableObject {
         let domain = config.domains[index]
         log(.info, "\(domain.domain) \(domain.enabled ? "enabled" : "disabled")")
         
-        // Apply or remove routes
         if isVPNConnected, let gateway = localGateway {
             isApplyingRoutes = true
             Task {
                 if domain.enabled {
-                    // Domain was just enabled - add its routes
                     if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
-                        await MainActor.run {
-                            activeRoutes.append(contentsOf: routes)
+                        activeRoutes.append(contentsOf: routes)
+                        if config.manageHostsFile {
+                            await updateHostsFile()
                         }
                     }
                 } else {
-                    // Domain was just disabled - remove its routes
                     await removeRoutesForSource(domain.domain)
                 }
-                await MainActor.run {
-                    isApplyingRoutes = false
-                }
+                isApplyingRoutes = false
             }
         }
     }
@@ -1568,23 +1606,22 @@ final class RouteManager: ObservableObject {
         
         log(.info, enabled ? "Enabled all domains" : "Disabled all domains")
         
-        // Incrementally apply/remove routes for changed domains only
         if isVPNConnected, let gateway = localGateway {
             Task {
                 for domain in domainsToChange {
                     if enabled {
-                        if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
-                            await MainActor.run {
-                                activeRoutes.append(contentsOf: routes)
-                            }
+                        if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway, persistCache: false) {
+                            activeRoutes.append(contentsOf: routes)
                         }
                     } else {
                         await removeRoutesForSource(domain.domain)
                     }
                 }
-                await MainActor.run {
-                    isApplyingRoutes = false
+                saveDNSCache()
+                if enabled && config.manageHostsFile {
+                    await updateHostsFile()
                 }
+                isApplyingRoutes = false
             }
         } else {
             isApplyingRoutes = false
@@ -1923,13 +1960,24 @@ final class RouteManager: ObservableObject {
         return nil
     }
     
-    private var failedDomains: [String] = []  // Track failed domains for debugging
+    private var failedDomains: Set<String> = []
     
-    private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil) async -> [ActiveRoute]? {
-        // Resolve domain IPs
+    private static let retryDelayNs: UInt64 = 15_000_000_000 // 15 seconds
+    
+    private var pendingRetryTasks: [String: Task<Void, Never>] = [:]
+    
+    private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil, persistCache: Bool = true) async -> [ActiveRoute]? {
         guard let ips = await resolveIPs(for: domain) else {
-            failedDomains.append(domain)
+            failedDomains.insert(domain)
             return nil
+        }
+        
+        if let firstIP = ips.first {
+            dnsCache[domain] = firstIP
+        }
+        dnsDiskCache[domain] = ips
+        if persistCache {
+            saveDNSCache()
         }
         
         var routes: [ActiveRoute] = []
@@ -1959,47 +2007,51 @@ final class RouteManager: ObservableObject {
         return await Self.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
     }
     
-    /// Nonisolated DNS resolution - runs truly in parallel without MainActor serialization
-    /// Includes retry logic and system resolver fallback for robustness
+    /// Nonisolated DNS resolution - races dig and DoH in parallel with trust hierarchy.
+    /// Dig-based resolvers fire immediately (trusted); DoH fires after a 200ms grace period
+    /// so it only wins when VPN blocks UDP DNS. Resolves in ~2s on VPN instead of 8+.
     private nonisolated static func resolveIPsParallel(for domain: String, userDNS: String?, fallbackDNS: [String]) async -> [String]? {
-        // Try up to 2 attempts with all DNS servers
+        let dohGraceNs: UInt64 = 200_000_000 // 200ms head start for trusted dig resolvers
+        let hardcodedDoH = ["https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"]
+        
         for attempt in 1...2 {
-            // 1. Try detected non-VPN DNS first (user's original DNS before VPN)
-            if let userDNS = userDNS {
-                if let ips = await resolveWithDNSParallel(domain, dns: userDNS) {
-                    return ips
+            let result: [String]? = await withTaskGroup(of: [String]?.self) { group in
+                // Tier 1: dig-based resolvers fire immediately (trusted, local/fast)
+                if let userDNS = userDNS {
+                    group.addTask { await resolveWithDNSParallel(domain, dns: userDNS) }
                 }
+                for dns in fallbackDNS {
+                    group.addTask { await resolveWithDNSParallel(domain, dns: dns) }
+                }
+                
+                // Tier 2: DoH fires after grace period — only wins when dig is blocked by VPN
+                for doh in hardcodedDoH where !fallbackDNS.contains(doh) {
+                    group.addTask {
+                        do { try await Task.sleep(nanoseconds: dohGraceNs) } catch { return nil }
+                        return await resolveWithDoHParallel(domain, dohURL: doh)
+                    }
+                }
+                
+                for await result in group {
+                    if let ips = result, !ips.isEmpty {
+                        group.cancelAll()
+                        return ips
+                    }
+                }
+                return nil
             }
             
-            // 2. Fall back to configured DNS servers
-            for dns in fallbackDNS {
-                if let ips = await resolveWithDNSParallel(domain, dns: dns) {
-                    return ips
-                }
+            if let result = result {
+                return result
             }
             
-            // Wait before retry (only if not last attempt)
             if attempt < 2 {
-                try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+                do { try await Task.sleep(nanoseconds: 500_000_000) } catch { return nil }
             }
         }
         
-        // 3. Try DoH (DNS over HTTPS) - bypasses VPN DNS hijacking since it uses HTTPS
-        // This is more reliable than getaddrinfo when VPN intercepts DNS
-        let dohServers = ["https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"]
-        for doh in dohServers {
-            if let ips = await resolveWithDoHParallel(domain, dohURL: doh) {
-                return ips
-            }
-        }
-        
-        // 4. Last resort: use system resolver (getaddrinfo) with timeout
-        // Note: This uses VPN's DNS when connected, so may not bypass VPN restrictions
-        if let ips = await resolveWithSystemResolver(domain, timeout: 3.0) {
-            return ips
-        }
-        
-        return nil
+        // System resolver as absolute last resort (uses VPN's DNS, may not bypass)
+        return await resolveWithSystemResolver(domain, timeout: 3.0)
     }
     
     /// Resolve using system's getaddrinfo - uses OS-level DNS which may work when dig fails
