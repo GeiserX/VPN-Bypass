@@ -5,6 +5,23 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-02-25
+
+### Added
+- **Parallel DNS Resolution** - Dig and DoH now race simultaneously instead of running sequentially. When VPN blocks UDP DNS, DoH wins in ~2s instead of waiting 8+ seconds for dig timeouts first
+- **Auto-Retry on DNS Failure** - When adding a domain fails DNS resolution, a 15-second auto-retry is scheduled with cancellation support
+- **Immediate Hosts File Update** - Adding or toggling a domain now updates `/etc/hosts` immediately instead of waiting for the periodic refresh
+
+### Fixed
+- **Domain Addition Not Bypassing VPN** - Adding a custom domain while connected to VPN now works instantly: DNS cache, disk cache, and hosts file are all populated immediately on success
+- **Stale Gateway in Retries** - DNS retry now reads the current gateway instead of using a potentially stale captured value
+- **Bulk Enable Disk Thrashing** - "Enable All" no longer writes the DNS cache to disk once per domain; saves once at the end
+
+### Improved
+- **DNS Trust Hierarchy** - Trusted dig-based resolvers get a 200ms head start over DoH, preserving CDN locality when local DNS works while still falling back fast on VPN
+- **Tracked Retry Tasks** - Retry tasks are now tracked and cancelled on domain removal, VPN disconnect, or route cleanup
+- **Consistent State Management** - Removed redundant `MainActor.run` wrappers inside already-MainActor tasks; `isApplyingRoutes` properly set during retries
+
 ## [1.7.1] - 2026-02-24
 
 ### Fixed
