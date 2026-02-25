@@ -109,19 +109,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         networkMonitor = NWPathMonitor()
         
         networkMonitor?.pathUpdateHandler = { [weak self] path in
-            guard let self = self else { return }
-            
-            // Debounce rapid network changes
-            self.networkDebounceWorkItem?.cancel()
-            
-            let workItem = DispatchWorkItem { [weak self] in
-                self?.handleNetworkChange(path)
+            // All access to networkDebounceWorkItem must happen on the main thread
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                
+                self.networkDebounceWorkItem?.cancel()
+                
+                let workItem = DispatchWorkItem { [weak self] in
+                    self?.handleNetworkChange(path)
+                }
+                
+                self.networkDebounceWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: workItem)
             }
-            
-            self.networkDebounceWorkItem = workItem
-            
-            // Wait 1 second before processing to avoid rapid fire during network transitions
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: workItem)
         }
         
         networkMonitor?.start(queue: DispatchQueue(label: "NetworkMonitor"))
@@ -214,6 +214,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Reset state
         lastPathStatus = nil
         lastInterfaceTypes = []
+        lastInterfaceNames = []
         networkDebounceWorkItem?.cancel()
         networkDebounceWorkItem = nil
         
