@@ -42,6 +42,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var watchdogTimer: Timer?
     private var lastPathStatus: NWPath.Status?
     private var lastInterfaceTypes: Set<NWInterface.InterfaceType> = []
+    private var lastInterfaceNames: Set<String> = []
     private var networkDebounceWorkItem: DispatchWorkItem?
     private var hasCompletedInitialStartup = false
     private var appStartTime = Date()
@@ -108,19 +109,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         networkMonitor = NWPathMonitor()
         
         networkMonitor?.pathUpdateHandler = { [weak self] path in
-            guard let self = self else { return }
-            
-            // Debounce rapid network changes
-            self.networkDebounceWorkItem?.cancel()
-            
-            let workItem = DispatchWorkItem { [weak self] in
-                self?.handleNetworkChange(path)
+            // All access to networkDebounceWorkItem must happen on the main thread
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                
+                self.networkDebounceWorkItem?.cancel()
+                
+                let workItem = DispatchWorkItem { [weak self] in
+                    self?.handleNetworkChange(path)
+                }
+                
+                self.networkDebounceWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: workItem)
             }
-            
-            self.networkDebounceWorkItem = workItem
-            
-            // Wait 1 second before processing to avoid rapid fire during network transitions
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: workItem)
         }
         
         networkMonitor?.start(queue: DispatchQueue(label: "NetworkMonitor"))
@@ -129,22 +130,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleNetworkChange(_ path: NWPath) {
         let statusChanged = path.status != lastPathStatus
         let interfaceTypes = Set(path.availableInterfaces.map { $0.type })
-        let interfacesChanged = interfaceTypes != lastInterfaceTypes
+        let interfaceNames = Set(path.availableInterfaces.map { $0.name })
+        let typesChanged = interfaceTypes != lastInterfaceTypes
+        let namesChanged = interfaceNames != lastInterfaceNames
         
-        // Detect significant network changes
-        let isSignificantChange = statusChanged || interfacesChanged
+        let isSignificantChange = statusChanged || typesChanged || namesChanged
         
         if isSignificantChange {
             lastPathStatus = path.status
             lastInterfaceTypes = interfaceTypes
+            lastInterfaceNames = interfaceNames
             
             Task { @MainActor in
-                // Log the network change
                 let statusStr = path.status == .satisfied ? "connected" : "disconnected"
-                let interfaceStr = interfaceTypes.map { interfaceTypeName($0) }.joined(separator: ", ")
+                let interfaceStr = interfaceNames.sorted().joined(separator: ", ")
                 RouteManager.shared.log(.info, "Network change detected: \(statusStr) via \(interfaceStr)")
                 
-                // Refresh VPN status
                 RouteManager.shared.refreshStatus()
             }
         }
@@ -213,6 +214,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Reset state
         lastPathStatus = nil
         lastInterfaceTypes = []
+        lastInterfaceNames = []
         networkDebounceWorkItem?.cancel()
         networkDebounceWorkItem = nil
         

@@ -5,6 +5,17 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-02-25
+
+### Fixed
+- **Stale Gateway on Domain Addition** - Adding/toggling domains now re-detects the local gateway if stale, instead of silently failing when VPN switches interfaces
+- **VPN Interface Switch Not Handled** - Routes are now automatically re-applied when VPN hops interfaces (e.g., utun4 → utun5) while staying connected
+- **Network Monitor Missing VPN Changes** - NWPathMonitor now tracks individual interface names, catching VPN interface switches that type-only comparison missed
+
+### Improved
+- **No More Silent Failures** - All gateway-dependent actions now log explicit errors when no gateway is available, instead of silently skipping route application
+- **Fresh Gateway in All User Actions** - `addDomain`, `toggleDomain`, `toggleService`, `setAllDomainsEnabled`, `setAllServicesEnabled`, and DNS retry all use fresh gateway detection
+
 ## [1.8.0] - 2026-02-25
 
 ### Added

@@ -27,7 +27,8 @@ final class RouteManager: ObservableObject {
     @Published var currentNetworkSSID: String?
     @Published var routeVerificationResults: [String: RouteVerificationResult] = [:]
     @Published var isLoading = true
-    @Published var isApplyingRoutes = false  // True during incremental route changes (blocks UI)
+    @Published private(set) var isApplyingRoutes = false
+    private var applyingRoutesCount = 0
     @Published var lastDNSRefresh: Date?
     @Published var nextDNSRefresh: Date?
     @Published var isTestingProxy = false
@@ -44,6 +45,8 @@ final class RouteManager: ObservableObject {
     private var detectedDNSServer: String?  // User's real DNS (pre-VPN), detected at startup
     private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
+    private var gatewayDetectedAt: Date?
+    private var lastInterfaceReroute: Date?
     
     
     private var dnsCacheURL: URL {
@@ -582,6 +585,7 @@ final class RouteManager: ObservableObject {
         
         // Detect local gateway
         localGateway = await detectLocalGateway()
+        gatewayDetectedAt = localGateway != nil ? Date() : nil
         
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
         if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes {
@@ -599,7 +603,25 @@ final class RouteManager: ObservableObject {
             }
         }
         
-        if !isVPNConnected && wasVPNConnected && vpnInterface != oldInterface {
+        // VPN interface switched while still connected — re-route through new gateway
+        if isVPNConnected && wasVPNConnected && interface != oldInterface && oldInterface != nil && interface != nil && !isLoading && !isApplyingRoutes {
+            if let last = lastInterfaceReroute, Date().timeIntervalSince(last) < 10 {
+                log(.info, "Skipping interface re-route (cooldown, last was \(Int(Date().timeIntervalSince(last)))s ago)")
+            } else {
+                log(.warning, "VPN interface changed: \(oldInterface ?? "?") → \(interface ?? "?")")
+                lastInterfaceReroute = Date()
+                if localGateway != nil {
+                    isLoading = true
+                    await removeAllRoutes()
+                    await applyAllRoutes()
+                    isLoading = false
+                } else {
+                    log(.error, "VPN interface changed but no gateway detected")
+                }
+            }
+        }
+        
+        if !isVPNConnected && wasVPNConnected {
             log(.warning, "VPN disconnected (was: \(oldInterface ?? "unknown"))")
             NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface)
             cancelAllRetries()
@@ -1116,7 +1138,10 @@ final class RouteManager: ObservableObject {
     
     /// Apply routes using cached IPs only (no DNS resolution) - used for instant startup
     private func applyRoutesFromCache() async {
-        guard let gateway = localGateway else { return }
+        guard let gateway = localGateway else {
+            log(.error, "Cannot apply cached routes: no local gateway")
+            return
+        }
         
         var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
@@ -1185,7 +1210,10 @@ final class RouteManager: ObservableObject {
     
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
     private func backgroundDNSRefresh(sendNotification: Bool) async {
-        guard let gateway = localGateway else { return }
+        guard let gateway = localGateway else {
+            log(.warning, "Background DNS refresh skipped: no local gateway")
+            return
+        }
         
         // Collect domains to resolve
         var domainsToResolve: [(domain: String, source: String)] = []
@@ -1334,13 +1362,13 @@ final class RouteManager: ObservableObject {
     /// Perform DNS refresh - re-resolve all domains and update routes
     private func performDNSRefresh() async {
         guard isVPNConnected, let gateway = localGateway else {
-            log(.info, "DNS refresh skipped: VPN not connected")
+            log(.info, "DNS refresh skipped: \(!isVPNConnected ? "VPN not connected" : "no local gateway")")
             nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
             return
         }
         
         log(.info, "Auto DNS refresh: re-resolving domains...")
-        isApplyingRoutes = true
+        beginApplyingRoutes()
         
         var updatedCount = 0
         var newIPs: Set<String> = []
@@ -1415,7 +1443,7 @@ final class RouteManager: ObservableObject {
         
         lastDNSRefresh = Date()
         nextDNSRefresh = Date().addingTimeInterval(config.dnsRefreshInterval)
-        isApplyingRoutes = false
+        endApplyingRoutes()
         
         if updatedCount > 0 || removedCount > 0 {
             log(.success, "DNS refresh complete: \(updatedCount) added, \(removedCount) removed")
@@ -1489,9 +1517,14 @@ final class RouteManager: ObservableObject {
         saveConfig()
         log(.success, "Added domain: \(cleaned)")
         
-        if isVPNConnected, let gateway = localGateway {
-            isApplyingRoutes = true
+        if isVPNConnected {
+            beginApplyingRoutes()
             Task {
+                guard let gateway = await ensureGateway() else {
+                    log(.error, "Cannot route \(cleaned): no local gateway detected. Try Refresh Routes.")
+                    endApplyingRoutes()
+                    return
+                }
                 if let routes = await applyRoutesForDomain(cleaned, gateway: gateway) {
                     activeRoutes.append(contentsOf: routes)
                     if config.manageHostsFile {
@@ -1501,7 +1534,7 @@ final class RouteManager: ObservableObject {
                     log(.warning, "DNS resolution failed for \(cleaned), retrying in 15s...")
                     scheduleRetry(for: cleaned)
                 }
-                isApplyingRoutes = false
+                endApplyingRoutes()
             }
         }
     }
@@ -1522,14 +1555,18 @@ final class RouteManager: ObservableObject {
     
     private func retryFailedDomain(_ domain: String) async {
         guard config.domains.contains(where: { $0.domain == domain && $0.enabled }) else { return }
-        guard isVPNConnected, let gateway = localGateway else { return }
+        guard isVPNConnected else { return }
+        guard let gateway = await ensureGateway() else {
+            log(.error, "Retry skipped for \(domain): no local gateway detected")
+            return
+        }
         guard !activeRoutes.contains(where: { $0.source == domain }) else {
             log(.info, "Skipping retry for \(domain) — routes already exist")
             return
         }
         
-        isApplyingRoutes = true
-        defer { isApplyingRoutes = false }
+        beginApplyingRoutes()
+        defer { endApplyingRoutes() }
         
         log(.info, "Retrying DNS for \(domain)...")
         if let routes = await applyRoutesForDomain(domain, gateway: gateway) {
@@ -1552,7 +1589,7 @@ final class RouteManager: ObservableObject {
         pendingRetryTasks[domain.domain]?.cancel()
         pendingRetryTasks.removeValue(forKey: domain.domain)
         
-        isApplyingRoutes = true
+        beginApplyingRoutes()
         
         Task {
             await removeRoutesForSource(domain.domain)
@@ -1560,7 +1597,7 @@ final class RouteManager: ObservableObject {
             config.domains.removeAll { $0.id == domain.id }
             saveConfig()
             log(.info, "Removed domain: \(domain.domain)")
-            isApplyingRoutes = false
+            endApplyingRoutes()
         }
     }
     
@@ -1573,10 +1610,15 @@ final class RouteManager: ObservableObject {
         let domain = config.domains[index]
         log(.info, "\(domain.domain) \(domain.enabled ? "enabled" : "disabled")")
         
-        if isVPNConnected, let gateway = localGateway {
-            isApplyingRoutes = true
+        if isVPNConnected {
+            beginApplyingRoutes()
             Task {
                 if domain.enabled {
+                    guard let gateway = await ensureGateway() else {
+                        log(.error, "Cannot route \(domain.domain): no local gateway detected")
+                        endApplyingRoutes()
+                        return
+                    }
                     if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
                         activeRoutes.append(contentsOf: routes)
                         if config.manageHostsFile {
@@ -1586,14 +1628,14 @@ final class RouteManager: ObservableObject {
                 } else {
                     await removeRoutesForSource(domain.domain)
                 }
-                isApplyingRoutes = false
+                endApplyingRoutes()
             }
         }
     }
     
     /// Bulk enable/disable all domains with loading state (incremental)
     func setAllDomainsEnabled(_ enabled: Bool) {
-        isApplyingRoutes = true
+        beginApplyingRoutes()
         
         // Get domains that need to change
         let domainsToChange = config.domains.filter { $0.enabled != enabled }
@@ -1606,14 +1648,20 @@ final class RouteManager: ObservableObject {
         
         log(.info, enabled ? "Enabled all domains" : "Disabled all domains")
         
-        if isVPNConnected, let gateway = localGateway {
+        if isVPNConnected {
             Task {
+                let gateway: String? = enabled ? await ensureGateway() : nil
+                if enabled && gateway == nil {
+                    log(.error, "Cannot enable domains: no local gateway detected")
+                    endApplyingRoutes()
+                    return
+                }
                 for domain in domainsToChange {
-                    if enabled {
-                        if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway, persistCache: false) {
+                    if enabled, let gw = gateway {
+                        if let routes = await applyRoutesForDomain(domain.domain, gateway: gw, persistCache: false) {
                             activeRoutes.append(contentsOf: routes)
                         }
-                    } else {
+                    } else if !enabled {
                         await removeRoutesForSource(domain.domain)
                     }
                 }
@@ -1621,10 +1669,10 @@ final class RouteManager: ObservableObject {
                 if enabled && config.manageHostsFile {
                     await updateHostsFile()
                 }
-                isApplyingRoutes = false
+                endApplyingRoutes()
             }
         } else {
-            isApplyingRoutes = false
+            endApplyingRoutes()
         }
     }
     
@@ -1654,19 +1702,20 @@ final class RouteManager: ObservableObject {
         log(.info, "\(service.name) \(service.enabled ? "enabled" : "disabled")")
         
         // Incremental route apply/remove
-        if isVPNConnected, let gateway = localGateway {
-            isApplyingRoutes = true
+        if isVPNConnected {
+            beginApplyingRoutes()
             Task {
                 if service.enabled {
-                    // Service was just enabled - add its routes
+                    guard let gateway = await ensureGateway() else {
+                        log(.error, "Cannot route \(service.name): no local gateway detected")
+                        endApplyingRoutes()
+                        return
+                    }
                     await applyRoutesForService(service, gateway: gateway)
                 } else {
-                    // Service was just disabled - remove its routes
                     await removeRoutesForSource(service.name)
                 }
-                await MainActor.run {
-                    isApplyingRoutes = false
-                }
+                endApplyingRoutes()
             }
         }
     }
@@ -1742,7 +1791,7 @@ final class RouteManager: ObservableObject {
     
     /// Bulk enable/disable all services with loading state (incremental)
     func setAllServicesEnabled(_ enabled: Bool) {
-        isApplyingRoutes = true
+        beginApplyingRoutes()
         
         // Get services that need to change
         let servicesToChange = config.services.filter { $0.enabled != enabled }
@@ -1756,21 +1805,25 @@ final class RouteManager: ObservableObject {
         log(.info, enabled ? "Enabled all services" : "Disabled all services")
         
         // Incrementally apply/remove routes for changed services only
-        if isVPNConnected, let gateway = localGateway {
+        if isVPNConnected {
             Task {
+                let gateway: String? = enabled ? await ensureGateway() : nil
+                if enabled && gateway == nil {
+                    log(.error, "Cannot enable services: no local gateway detected")
+                    endApplyingRoutes()
+                    return
+                }
                 for service in servicesToChange {
-                    if enabled {
-                        await applyRoutesForService(service, gateway: gateway)
-                    } else {
+                    if enabled, let gw = gateway {
+                        await applyRoutesForService(service, gateway: gw)
+                    } else if !enabled {
                         await removeRoutesForSource(service.name)
                     }
                 }
-                await MainActor.run {
-                    isApplyingRoutes = false
-                }
+                endApplyingRoutes()
             }
         } else {
-            isApplyingRoutes = false
+            endApplyingRoutes()
         }
     }
     
@@ -1851,6 +1904,30 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Private Methods
     
+    private func beginApplyingRoutes() {
+        applyingRoutesCount += 1
+        if !isApplyingRoutes { isApplyingRoutes = true }
+    }
+    
+    private func endApplyingRoutes() {
+        applyingRoutesCount = max(0, applyingRoutesCount - 1)
+        if applyingRoutesCount == 0 { isApplyingRoutes = false }
+    }
+    
+    private func ensureGateway() async -> String? {
+        if let gw = localGateway,
+           let detected = gatewayDetectedAt,
+           Date().timeIntervalSince(detected) < 10 {
+            return gw
+        }
+        localGateway = await detectLocalGateway()
+        gatewayDetectedAt = localGateway != nil ? Date() : nil
+        if let gw = localGateway {
+            log(.info, "Gateway re-detected: \(gw)")
+        }
+        return localGateway
+    }
+    
     private func detectLocalGateway() async -> String? {
         // Try common network services
         let services = ["Wi-Fi", "Ethernet", "USB 10/100/1000 LAN", "Thunderbolt Ethernet", "USB-C LAN"]
@@ -1873,7 +1950,7 @@ final class RouteManager: ObservableObject {
         for line in result.output.components(separatedBy: "\n") {
             if line.hasPrefix("Router:") {
                 let gateway = line.replacingOccurrences(of: "Router:", with: "").trimmingCharacters(in: .whitespaces)
-                if gateway != "none" && !gateway.isEmpty {
+                if gateway != "none" && !gateway.isEmpty && isValidIP(gateway) {
                     return gateway
                 }
             }
@@ -1952,7 +2029,10 @@ final class RouteManager: ObservableObject {
             if line.contains("gateway:") {
                 let parts = line.components(separatedBy: ":")
                 if parts.count >= 2 {
-                    return parts[1].trimmingCharacters(in: .whitespaces)
+                    let gateway = parts[1].trimmingCharacters(in: .whitespaces)
+                    if isValidIP(gateway) {
+                        return gateway
+                    }
                 }
             }
         }
