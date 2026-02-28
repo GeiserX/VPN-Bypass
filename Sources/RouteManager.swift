@@ -377,7 +377,58 @@ final class RouteManager: ObservableObject {
             return
         }
         config = loaded
+        mergeBuiltInServices()
         log(.info, "Config loaded")
+    }
+    
+    /// Merge built-in service definitions with the user's saved config.
+    /// Preserves the user's enabled/disabled state while updating domains,
+    /// ipRanges, and names from the latest source code definitions.
+    /// Also adds any new built-in services that didn't exist when the user last saved.
+    private func mergeBuiltInServices() {
+        let defaults = Config.defaultServices
+        let savedById = Dictionary(uniqueKeysWithValues: config.services.map { ($0.id, $0) })
+        let defaultById = Dictionary(uniqueKeysWithValues: defaults.map { ($0.id, $0) })
+        
+        var merged: [ServiceEntry] = []
+        var updated = 0
+        var added = 0
+        
+        // Walk the default list to preserve ordering from source code
+        for builtIn in defaults {
+            if let saved = savedById[builtIn.id] {
+                let domainsChanged = Set(saved.domains) != Set(builtIn.domains)
+                let ipRangesChanged = Set(saved.ipRanges) != Set(builtIn.ipRanges)
+                if domainsChanged || ipRangesChanged || saved.name != builtIn.name {
+                    updated += 1
+                }
+                merged.append(ServiceEntry(
+                    id: builtIn.id,
+                    name: builtIn.name,
+                    enabled: saved.enabled,
+                    domains: builtIn.domains,
+                    ipRanges: builtIn.ipRanges
+                ))
+            } else {
+                added += 1
+                merged.append(builtIn)
+            }
+        }
+        
+        // Keep any services from the saved config that aren't in defaults (future-proofing)
+        for saved in config.services where defaultById[saved.id] == nil {
+            merged.append(saved)
+        }
+        
+        if updated > 0 || added > 0 {
+            config.services = merged
+            saveConfig()
+            if updated > 0 { log(.info, "Updated \(updated) built-in service(s) with latest definitions") }
+            if added > 0 { log(.info, "Added \(added) new built-in service(s)") }
+        } else if config.services.count != merged.count {
+            config.services = merged
+            saveConfig()
+        }
     }
     
     func saveConfig() {
