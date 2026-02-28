@@ -197,7 +197,7 @@ For teams and organizations:
 
 ## Technical Debt / Known Issues
 
-- [ ] Config migration: new default services don't auto-merge into existing user config
+- [x] Config migration: new default services don't auto-merge into existing user config
 - [ ] Helper installation can fail silently on some systems
 - [ ] Route verification unreliable (many servers block ICMP)
 - [ ] Homebrew Cask not published to a tap yet
