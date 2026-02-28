@@ -276,7 +276,7 @@ final class RouteManager: ObservableObject {
                 // AI Services
                 ServiceEntry(id: "openai", name: "OpenAI / ChatGPT", enabled: false, domains: [
                     // Core domains
-                    "openai.com", "chatgpt.com", "chat.com", "sora.com", "crixet.com",
+                    "openai.com", "www.openai.com", "chatgpt.com", "www.chatgpt.com", "chat.com", "sora.com", "crixet.com",
                     // OpenAI subdomains
                     "chat.openai.com", "api.openai.com", "platform.openai.com", "platform.api.openai.com",
                     "beta.api.openai.com", "auth.openai.com", "external.auth.openai.com", "auth0.openai.com", "cdn.openai.com",
@@ -295,7 +295,7 @@ final class RouteManager: ObservableObject {
                     // Voice features (LiveKit)
                     "chatgpt.livekit.cloud", "host.livekit.cloud", "turn.livekit.cloud",
                     // Anti-bot (required for login)
-                    "openai-api.arkoselabs.com", "client-api.arkoselabs.com",
+                    "openai-api.arkoselabs.com",
                     // Analytics
                     "o33249.ingest.sentry.io"
                 ], ipRanges: []),
