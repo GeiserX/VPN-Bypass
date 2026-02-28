@@ -5,6 +5,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Improved
+- **OpenAI / ChatGPT Service** - Added all relevant OpenAI and ChatGPT domains
+
 ## [1.8.1] - 2026-02-25
 
 ### Fixed

@@ -275,7 +275,29 @@ final class RouteManager: ObservableObject {
                 
                 // AI Services
                 ServiceEntry(id: "openai", name: "OpenAI / ChatGPT", enabled: false, domains: [
-                    "openai.com", "chat.openai.com", "api.openai.com", "platform.openai.com"
+                    // Core domains
+                    "openai.com", "chatgpt.com", "chat.com", "sora.com", "crixet.com",
+                    // OpenAI subdomains
+                    "chat.openai.com", "api.openai.com", "platform.openai.com", "platform.api.openai.com",
+                    "beta.api.openai.com", "auth.openai.com", "external.auth.openai.com", "auth0.openai.com", "cdn.openai.com",
+                    "help.openai.com", "blog.openai.com", "community.openai.com", "labs.openai.com",
+                    "arena.openai.com", "beta.openai.com", "sentinel.openai.com", "ab.chatgpt.com", "ws.chatgpt.com", "pay.openai.com",
+                    // Static assets and user content CDN
+                    "oaistatic.com", "cdn.oaistatic.com", "auth-cdn.oaistatic.com",
+                    "oaiusercontent.com", "files.oaiusercontent.com",
+                    "openaicom.imgix.net",
+                    // Azure CDN infrastructure
+                    "openaiapi-site.azureedge.net", "production-openaicom-storage.azureedge.net",
+                    "openaicomproductionae4b.blob.core.windows.net",
+                    "openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net",
+                    // Cloudflare infrastructure
+                    "chat.openai.com.cdn.cloudflare.net", "openai.com.cdn.cloudflare.net",
+                    // Voice features (LiveKit)
+                    "chatgpt.livekit.cloud", "host.livekit.cloud", "turn.livekit.cloud",
+                    // Anti-bot (required for login)
+                    "openai-api.arkoselabs.com", "client-api.arkoselabs.com",
+                    // Analytics
+                    "o33249.ingest.sentry.io"
                 ], ipRanges: []),
                 ServiceEntry(id: "anthropic", name: "Anthropic / Claude", enabled: false, domains: [
                     "anthropic.com", "www.anthropic.com", "claude.ai", "api.anthropic.com"
