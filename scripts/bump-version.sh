@@ -23,16 +23,11 @@ echo "  → Info.plist"
 sed -i '' "s/<string>[0-9]*\.[0-9]*\.[0-9]*<\/string><!-- VERSION -->/<string>$NEW_VERSION<\/string><!-- VERSION -->/" Info.plist 2>/dev/null || \
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $NEW_VERSION" Info.plist
 
-# 2. SettingsView.swift - Version display
-echo "  → Sources/SettingsView.swift"
-sed -i '' "s/Text(\"Version [0-9]*\.[0-9]*\.[0-9]*\")/Text(\"Version $NEW_VERSION\")/" Sources/SettingsView.swift
-sed -i '' "s/Text(\"v[0-9]*\.[0-9]*\.[0-9]*\")/Text(\"v$NEW_VERSION\")/" Sources/SettingsView.swift
-
-# 3. README.md - Badge
+# 2. README.md - Badge
 echo "  → README.md"
 sed -i '' "s/version-[0-9]*\.[0-9]*\.[0-9]*-green/version-$NEW_VERSION-green/" README.md
 
-# 4. Casks/vpn-bypass.rb (optional - usually auto-updated by release workflow)
+# 3. Casks/vpn-bypass.rb (optional - usually auto-updated by release workflow)
 if [ -f "Casks/vpn-bypass.rb" ]; then
     echo "  → Casks/vpn-bypass.rb"
     sed -i '' "s/version \"[0-9]*\.[0-9]*\.[0-9]*\"/version \"$NEW_VERSION\"/" Casks/vpn-bypass.rb
