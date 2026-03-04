@@ -52,24 +52,30 @@ Before making changes, read these files to understand the project:
 - **CI/CD Platform**: GitHub Actions
 
 ### Releasing New Versions
-Use the version bump script to update all version locations:
+
+**Pre-release checklist** (MUST complete ALL steps before tagging):
+1. Run `./scripts/bump-version.sh <version>` — updates Info.plist, README.md badge, and Casks/
+2. Update `docs/CHANGELOG.md` with release notes
+3. Commit all changes: `git add -A && git commit -m "chore: release v<version>"`
+4. Tag: `git tag v<version>`
+5. Push: `git push && git push origin v<version>`
 
 ```bash
-# Bump version (updates Info.plist, SettingsView.swift, README.md, Casks/)
-./scripts/bump-version.sh 1.3.0
-
-# Update CHANGELOG.md manually with release notes
-
-# Commit and tag
-git add -A && git commit -m "chore: release v1.3.0"
-git tag v1.3.0
-git push && git push origin v1.3.0
+# Example release flow
+./scripts/bump-version.sh 1.10.0
+# Edit docs/CHANGELOG.md with release notes
+git add -A && git commit -m "chore: release v1.10.0"
+git tag v1.10.0
+git push && git push origin v1.10.0
 ```
 
 The tag push triggers GitHub Actions which:
-1. Builds the app and creates DMG
-2. Creates a GitHub Release with the DMG
-3. Updates the Homebrew cask in `homebrew-vpn-bypass` repo automatically
+1. Updates `Info.plist` version from the git tag (safety net)
+2. Builds the app and creates DMG
+3. Creates a GitHub Release with the DMG
+4. Updates the Homebrew cask in `homebrew-vpn-bypass` repo automatically
+
+**Version architecture**: The app reads its version from `CFBundleShortVersionString` at runtime (not hardcoded). The CI workflow sets this from the git tag. The `bump-version.sh` script keeps `Info.plist` and `README.md` badge in sync for local builds and the repo display.
 
 ## Best Practices
 
@@ -78,6 +84,12 @@ The tag push triggers GitHub Actions which:
 - **Consider security**: Review code for potential security vulnerabilities
 - **Conventional commits**: Use conventional commit messages (feat:, fix:, docs:, chore:, refactor:, test:, style:)
 - **Semantic versioning**: Follow semver (MAJOR.MINOR.PATCH) for version numbers
+
+## Learned Patterns
+
+- **Never skip `bump-version.sh`** before tagging a release. Forgetting it caused version desync in v1.8.2–v1.9.0 (#15).
+- **Version display is dynamic** — do NOT hardcode version strings in Swift code. The app reads from the bundle's `CFBundleShortVersionString` at runtime.
+- **Always test via Homebrew** after releasing, never trust `swift build` alone.
 
 ## Self-Improving Configuration
 
