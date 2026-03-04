@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Improved
 - **OpenAI / ChatGPT Service** - Added all relevant OpenAI and ChatGPT domains including core properties, auth, CDN, Azure/Cloudflare infrastructure, LiveKit voice, anti-bot, and analytics endpoints
 
+### Fixed
+- **Version Display** - App now reads version from the bundle at runtime instead of a hardcoded string, ensuring the displayed version always matches the release (#15)
+
 ## [1.8.1] - 2026-02-25
 
 ### Fixed
