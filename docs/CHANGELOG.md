@@ -5,6 +5,15 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] - 2026-03-05
+
+### Fixed
+- **Tailscale Profile Switch Detection** - Routes are now automatically refreshed when switching Tailscale accounts/profiles while the VPN stays on the same `utun` interface. Previously, stale bypass routes from the old profile would persist until manual refresh (#16)
+
+### Improved
+- **Tailscale CLI Performance** - All Tailscale status queries now use `--self --peers=false`, fetching only the local node's data instead of the entire peer list. Significantly reduces JSON payload and parsing time on large tailnets
+- **DRY Tailscale JSON Reading** - Deduplicated Tailscale CLI invocations into a single `readTailscaleStatusJSON()` helper shared across exit node detection, IP checking, and profile fingerprinting
+
 ## [1.9.0] - 2026-02-28
 
 ### Added
