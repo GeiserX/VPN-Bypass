@@ -47,6 +47,7 @@ final class RouteManager: ObservableObject {
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
     private var gatewayDetectedAt: Date?
     private var lastInterfaceReroute: Date?
+    private var lastTailscaleSelfFingerprint: String?
     
     
     private var dnsCacheURL: URL {
@@ -645,6 +646,7 @@ final class RouteManager: ObservableObject {
     func checkVPNStatus() async {
         let wasVPNConnected = isVPNConnected
         let oldInterface = vpnInterface
+        let oldTailscaleFingerprint = lastTailscaleSelfFingerprint
         
         // Detect current network first
         await detectCurrentNetwork()
@@ -655,6 +657,10 @@ final class RouteManager: ObservableObject {
         isVPNConnected = connected
         vpnInterface = connected ? interface : nil
         vpnType = connected ? detectedType : nil
+        let fetchedTailscaleFingerprint = isVPNConnected ? await currentTailscaleSelfFingerprintIfExitNode() : nil
+        // Preserve last fingerprint if a single CLI read fails while VPN remains connected.
+        let newTailscaleFingerprint = fetchedTailscaleFingerprint ?? (isVPNConnected ? oldTailscaleFingerprint : nil)
+        lastTailscaleSelfFingerprint = newTailscaleFingerprint
         
         // Detect local gateway
         localGateway = await detectLocalGateway()
@@ -693,6 +699,29 @@ final class RouteManager: ObservableObject {
                 }
             }
         }
+
+        // Tailscale account/profile can change while utun interface stays the same.
+        // Re-apply routes when active local Tailscale identity changes.
+        if isVPNConnected && wasVPNConnected &&
+           interface == oldInterface &&
+           oldTailscaleFingerprint != nil && newTailscaleFingerprint != nil &&
+           oldTailscaleFingerprint != newTailscaleFingerprint &&
+           !isLoading && !isApplyingRoutes {
+            if let last = lastInterfaceReroute, Date().timeIntervalSince(last) < 10 {
+                log(.info, "Skipping Tailscale profile re-route (cooldown, last was \(Int(Date().timeIntervalSince(last)))s ago)")
+            } else {
+                log(.warning, "Tailscale active account changed, refreshing routes")
+                lastInterfaceReroute = Date()
+                if localGateway != nil {
+                    isLoading = true
+                    await removeAllRoutes()
+                    await applyAllRoutes()
+                    isLoading = false
+                } else {
+                    log(.error, "Tailscale account changed but no gateway detected")
+                }
+            }
+        }
         
         if !isVPNConnected && wasVPNConnected {
             log(.warning, "VPN disconnected (was: \(oldInterface ?? "unknown"))")
@@ -700,6 +729,7 @@ final class RouteManager: ObservableObject {
             cancelAllRetries()
             activeRoutes.removeAll()
             routeVerificationResults.removeAll()
+            lastTailscaleSelfFingerprint = nil
         }
     }
     
@@ -897,28 +927,44 @@ final class RouteManager: ObservableObject {
         
         return false
     }
+
+    /// Returns a stable fingerprint of the active local Tailscale identity.
+    /// Fingerprint is available only when Tailscale exit node is online.
+    private func currentTailscaleSelfFingerprintIfExitNode() async -> String? {
+        guard let json = await readTailscaleStatusJSON() else {
+            return nil
+        }
+        
+        guard let exitNodeStatus = json["ExitNodeStatus"] as? [String: Any],
+              exitNodeStatus["Online"] as? Bool == true,
+              let selfStatus = json["Self"] as? [String: Any] else {
+            return nil
+        }
+        
+        let id = String(describing: selfStatus["ID"] ?? "")
+        let userID = String(describing: selfStatus["UserID"] ?? "")
+        let dnsName = String(describing: selfStatus["DNSName"] ?? "")
+        let ips = (selfStatus["TailscaleIPs"] as? [String] ?? []).sorted().joined(separator: ",")
+        let fingerprint = [id, userID, dnsName, ips].joined(separator: "|")
+        
+        return fingerprint == "|||" ? nil : fingerprint
+    }
     
     /// Check if this IP is the local Tailscale node's address
     private func isTailscaleIP(_ ip: String) async -> Bool {
-        let tailscalePaths = [
-            "/usr/local/bin/tailscale",
-            "/opt/homebrew/bin/tailscale",
-            "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
-        ]
+        guard let json = await readTailscaleStatusJSON() else {
+            return false
+        }
         
-        for path in tailscalePaths {
-            if FileManager.default.fileExists(atPath: path) {
-                guard let result = await runProcessAsync(path, arguments: ["status", "--json"], timeout: 3.0) else {
-                    continue
-                }
-                
-                if let jsonData = result.output.data(using: .utf8),
-                   let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                   let selfStatus = json["Self"] as? [String: Any],
-                   let tsIPs = selfStatus["TailscaleIPs"] as? [String] {
-                    return tsIPs.contains(ip)
-                }
-            }
+        if let selfStatus = json["Self"] as? [String: Any],
+           let selfIPs = selfStatus["TailscaleIPs"] as? [String],
+           selfIPs.contains(ip) {
+            return true
+        }
+        
+        if let topLevelIPs = json["TailscaleIPs"] as? [String],
+           topLevelIPs.contains(ip) {
+            return true
         }
         
         return false
@@ -926,7 +972,21 @@ final class RouteManager: ObservableObject {
     
     /// Check if Tailscale is using an exit node (routing all traffic through Tailscale)
     private func isTailscaleExitNodeActive() async -> Bool {
-        // Try multiple paths for tailscale CLI
+        guard let json = await readTailscaleStatusJSON() else {
+            return false
+        }
+        
+        // Check ExitNodeStatus - if present and online, we're using exit node
+        if let exitNodeStatus = json["ExitNodeStatus"] as? [String: Any],
+           exitNodeStatus["Online"] as? Bool == true {
+            return true
+        }
+        
+        return false
+    }
+    
+    /// Read tailscale status JSON from any known CLI path.
+    private func readTailscaleStatusJSON() async -> [String: Any]? {
         let tailscalePaths = [
             "/usr/local/bin/tailscale",
             "/opt/homebrew/bin/tailscale",
@@ -935,23 +995,18 @@ final class RouteManager: ObservableObject {
         
         for path in tailscalePaths {
             if FileManager.default.fileExists(atPath: path) {
-                guard let result = await runProcessAsync(path, arguments: ["status", "--json"], timeout: 3.0) else {
+                guard let result = await runProcessAsync(path, arguments: ["status", "--json", "--self", "--peers=false"], timeout: 3.0) else {
                     continue
                 }
                 
-                let output = result.output
-                if let jsonData = output.data(using: .utf8),
+                if let jsonData = result.output.data(using: .utf8),
                    let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                    // Check ExitNodeStatus - if present and has IP, we're using exit node
-                    if let exitNodeStatus = json["ExitNodeStatus"] as? [String: Any],
-                       exitNodeStatus["Online"] as? Bool == true {
-                        return true
-                    }
+                    return json
                 }
             }
         }
         
-        return false
+        return nil
     }
     
     /// Called from startup - no notification
