@@ -11,6 +11,7 @@ Thanks to [@karle0wne](https://github.com/karle0wne) for contributing this relea
 
 ### Fixed
 - **Tailscale Profile Switch Detection** - Routes are now automatically refreshed when switching Tailscale accounts/profiles while the VPN stays on the same `utun` interface. Previously, stale bypass routes from the old profile would persist until manual refresh (#16)
+- **Info Page Version Display** - The About/Info page header showed a hardcoded version instead of reading from the bundle. Now uses `CFBundleShortVersionString` like the rest of the app
 
 ### Improved
 - **Tailscale CLI Performance** - All Tailscale status queries now use `--self --peers=false`, fetching only the local node's data instead of the entire peer list. Significantly reduces JSON payload and parsing time on large tailnets
