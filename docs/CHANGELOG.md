@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.9.1] - 2026-03-05
 
+Thanks to [@karle0wne](https://github.com/karle0wne) for contributing this release (#16).
+
 ### Fixed
 - **Tailscale Profile Switch Detection** - Routes are now automatically refreshed when switching Tailscale accounts/profiles while the VPN stays on the same `utun` interface. Previously, stale bypass routes from the old profile would persist until manual refresh (#16)
 
