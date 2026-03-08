@@ -25,38 +25,56 @@
     <line x1="750" y1="0" x2="750" y2="200"/>
   </g>
 
-  <!-- Shield with bypass arrow -->
-  <g transform="translate(100, 100)">
-    <!-- Shield shape -->
-    <path d="M0,-50 L42,-34 L42,10 C42,40 22,56 0,64 C-22,56 -42,40 -42,10 L-42,-34 Z"
-          fill="url(#glow)" stroke="#ffffff" stroke-width="2.5" opacity="0.9"/>
-    <!-- Bypass arrow curving around shield -->
-    <path d="M-55,-10 C-55,-40 -20,-55 10,-55" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
-    <polygon points="10,-62 22,-55 10,-48" fill="#ffffff" opacity="0.6"/>
-    <path d="M55,10 C55,40 20,55 -10,55" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
-    <polygon points="-10,48 -22,55 -10,62" fill="#ffffff" opacity="0.6"/>
-    <!-- Split line through shield -->
-    <line x1="-20" y1="-20" x2="20" y2="20" stroke="#ffffff" stroke-width="2" stroke-dasharray="4,3" opacity="0.5"/>
+  <!-- Route split: traffic from device splits into VPN tunnel and bypass route -->
+  <g transform="translate(55, 100)">
+    <!-- Source: laptop silhouette -->
+    <rect x="0" y="-18" width="28" height="18" rx="3" fill="url(#glow)" stroke="#ffffff" stroke-width="1.8" opacity="0.8"/>
+    <rect x="-3" y="2" width="34" height="4" rx="2" fill="url(#glow)" stroke="#ffffff" stroke-width="1.2" opacity="0.6"/>
+
+    <!-- VPN tunnel (dashed line, straight through) -->
+    <line x1="36" y1="-9" x2="148" y2="-9" stroke="#ffffff" stroke-width="2" stroke-dasharray="6,4" opacity="0.25"/>
+    <text x="92" y="-16" text-anchor="middle" font-family="monospace" font-size="8" fill="#ffffff" opacity="0.25">VPN</text>
+
+    <!-- Bypass route (solid green curve going below) -->
+    <path d="M36,-5 C60,35 128,35 148,-5" fill="none" stroke="#4CAF50" stroke-width="2.5" stroke-linecap="round" opacity="0.7"/>
+    <!-- Arrow at end of bypass -->
+    <polygon points="144,-9 152,-5 144,-1" fill="#4CAF50" opacity="0.7"/>
+
+    <!-- Destination: globe -->
+    <circle cx="166" cy="-9" r="16" fill="url(#glow)" stroke="#ffffff" stroke-width="1.8" opacity="0.7"/>
+    <ellipse cx="166" cy="-9" rx="16" ry="8" fill="none" stroke="#ffffff" stroke-width="0.8" opacity="0.3"/>
+    <line x1="166" y1="-25" x2="166" y2="7" stroke="#ffffff" stroke-width="0.8" opacity="0.3"/>
+    <line x1="150" y1="-9" x2="182" y2="-9" stroke="#ffffff" stroke-width="0.8" opacity="0.3"/>
   </g>
 
   <!-- Title -->
-  <text x="200" y="95" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="48" font-weight="700" fill="#ffffff" letter-spacing="-1">
+  <text x="260" y="90" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="48" font-weight="700" fill="#ffffff" letter-spacing="-1">
     VPN Bypass
   </text>
 
   <!-- Subtitle -->
-  <text x="202" y="130" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="16" fill="#ffffff" opacity="0.65" letter-spacing="0.3">
+  <text x="262" y="126" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="16" fill="#ffffff" opacity="0.65" letter-spacing="0.3">
     macOS menu bar app to route traffic around your VPN
   </text>
 
-  <!-- Decorative: network nodes on right -->
-  <g transform="translate(760, 50)" opacity="0.15">
-    <circle cx="20" cy="10" r="10" fill="#ffffff"/>
-    <circle cx="60" cy="50" r="10" fill="#ffffff"/>
-    <circle cx="15" cy="90" r="10" fill="#ffffff"/>
-    <circle cx="75" cy="100" r="8" fill="#ffffff"/>
-    <line x1="20" y1="20" x2="60" y2="40" stroke="#ffffff" stroke-width="2"/>
-    <line x1="60" y1="60" x2="15" y2="80" stroke="#ffffff" stroke-width="2"/>
-    <line x1="60" y1="60" x2="75" y2="92" stroke="#ffffff" stroke-width="2"/>
+  <!-- Decorative: macOS menu bar hint on right -->
+  <g transform="translate(745, 65)" opacity="0.15">
+    <!-- Menu bar -->
+    <rect x="0" y="0" width="115" height="20" rx="5" fill="#ffffff"/>
+    <!-- Shield in menu bar -->
+    <path d="M16,4 L26,2 L26,11 C26,16 22,18 21,19 C20,18 16,16 16,11 Z" fill="#1565C0" opacity="0.8"/>
+    <!-- Status dot -->
+    <circle cx="38" cy="10" r="3" fill="#4CAF50"/>
+    <rect x="48" y="7" width="22" height="6" rx="3" fill="#1565C0" opacity="0.5"/>
+    <rect x="76" y="7" width="16" height="6" rx="3" fill="#1565C0" opacity="0.3"/>
+
+    <!-- Dropdown -->
+    <rect x="0" y="26" width="115" height="55" rx="5" fill="#ffffff" opacity="0.6"/>
+    <circle cx="14" cy="40" r="3" fill="#4CAF50" opacity="0.8"/>
+    <rect x="24" y="37" width="46" height="6" rx="2" fill="#1565C0" opacity="0.4"/>
+    <circle cx="14" cy="54" r="3" fill="#4CAF50" opacity="0.6"/>
+    <rect x="24" y="51" width="36" height="6" rx="2" fill="#1565C0" opacity="0.3"/>
+    <circle cx="14" cy="68" r="3" fill="#4CAF50" opacity="0.4"/>
+    <rect x="24" y="65" width="54" height="6" rx="2" fill="#1565C0" opacity="0.2"/>
   </g>
 </svg>
