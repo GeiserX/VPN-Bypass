@@ -8,6 +8,11 @@
       <stop offset="0%" stop-color="#ffffff" stop-opacity="0.2"/>
       <stop offset="100%" stop-color="#ffffff" stop-opacity="0.05"/>
     </linearGradient>
+    <linearGradient id="bypassGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4CAF50" stop-opacity="0.1"/>
+      <stop offset="50%" stop-color="#4CAF50" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#4CAF50" stop-opacity="0.1"/>
+    </linearGradient>
   </defs>
 
   <!-- Background -->
@@ -25,50 +30,75 @@
     <line x1="750" y1="0" x2="750" y2="200"/>
   </g>
 
-  <!-- Route split: traffic from device splits into VPN tunnel and bypass route -->
-  <g transform="translate(55, 100)">
-    <!-- Source: laptop silhouette -->
-    <rect x="0" y="-18" width="28" height="18" rx="3" fill="url(#glow)" stroke="#ffffff" stroke-width="1.8" opacity="0.8"/>
-    <rect x="-3" y="2" width="34" height="4" rx="2" fill="url(#glow)" stroke="#ffffff" stroke-width="1.2" opacity="0.6"/>
+  <!-- Route-split diagram — bigger, more refined -->
+  <g transform="translate(38, 100)">
 
-    <!-- VPN tunnel (dashed line, straight through) -->
-    <line x1="36" y1="-9" x2="148" y2="-9" stroke="#ffffff" stroke-width="2" stroke-dasharray="6,4" opacity="0.25"/>
-    <text x="92" y="-16" text-anchor="middle" font-family="monospace" font-size="8" fill="#ffffff" opacity="0.25">VPN</text>
+    <!-- Laptop — clean, proportional -->
+    <g opacity="0.85">
+      <!-- Screen -->
+      <rect x="0" y="-30" width="40" height="28" rx="3" fill="url(#glow)" stroke="#ffffff" stroke-width="1.8"/>
+      <!-- Screen content hint (two lines) -->
+      <rect x="7" y="-23" width="18" height="2.5" rx="1" fill="#ffffff" opacity="0.25"/>
+      <rect x="7" y="-17" width="12" height="2.5" rx="1" fill="#ffffff" opacity="0.15"/>
+      <!-- Base -->
+      <path d="M-4,0 L44,0 L40,5 L0,5 Z" fill="url(#glow)" stroke="#ffffff" stroke-width="1.2" opacity="0.7"/>
+    </g>
 
-    <!-- Bypass route (solid green curve going below) -->
-    <path d="M36,-5 C60,35 128,35 148,-5" fill="none" stroke="#4CAF50" stroke-width="2.5" stroke-linecap="round" opacity="0.7"/>
-    <!-- Arrow at end of bypass -->
-    <polygon points="144,-9 152,-5 144,-1" fill="#4CAF50" opacity="0.7"/>
+    <!-- VPN tunnel path (dimmed, dashed — the "blocked" route) -->
+    <g opacity="0.2">
+      <!-- Tunnel pipe outline -->
+      <path d="M48,-16 L180,-16" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" opacity="0.15"/>
+      <!-- Dashed center line -->
+      <line x1="48" y1="-16" x2="180" y2="-16" stroke="#ffffff" stroke-width="1.5" stroke-dasharray="8,5"/>
+      <!-- Lock icon on tunnel -->
+      <rect x="104" y="-24" width="12" height="10" rx="2" fill="#ffffff" opacity="0.6"/>
+      <path d="M107,-24 L107,-28 A3,3 0 0,1 113,-28 L113,-24" fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0.6"/>
+    </g>
+    <text x="114" y="-30" text-anchor="middle" font-family="monospace" font-size="9" fill="#ffffff" opacity="0.18" letter-spacing="2">VPN</text>
 
-    <!-- Destination: globe -->
-    <circle cx="166" cy="-9" r="16" fill="url(#glow)" stroke="#ffffff" stroke-width="1.8" opacity="0.7"/>
-    <ellipse cx="166" cy="-9" rx="16" ry="8" fill="none" stroke="#ffffff" stroke-width="0.8" opacity="0.3"/>
-    <line x1="166" y1="-25" x2="166" y2="7" stroke="#ffffff" stroke-width="0.8" opacity="0.3"/>
-    <line x1="150" y1="-9" x2="182" y2="-9" stroke="#ffffff" stroke-width="0.8" opacity="0.3"/>
+    <!-- Bypass route — the hero path, smooth green arc -->
+    <!-- Glow underneath -->
+    <path d="M48,-10 C75,50 155,50 182,-10" fill="none" stroke="#4CAF50" stroke-width="12" stroke-linecap="round" opacity="0.06"/>
+    <!-- Main bypass curve -->
+    <path d="M48,-10 C75,50 155,50 182,-10" fill="none" stroke="#4CAF50" stroke-width="2.8" stroke-linecap="round" opacity="0.75"/>
+    <!-- Traffic flow dots along the curve -->
+    <circle cx="68" cy="12" r="2.5" fill="#4CAF50" opacity="0.9"/>
+    <circle cx="92" cy="28" r="2" fill="#4CAF50" opacity="0.7"/>
+    <circle cx="114" cy="32" r="2.5" fill="#4CAF50" opacity="0.55"/>
+    <circle cx="138" cy="28" r="2" fill="#4CAF50" opacity="0.4"/>
+    <circle cx="162" cy="12" r="2.5" fill="#4CAF50" opacity="0.3"/>
+    <!-- Arrow tip at destination -->
+    <polygon points="178,-14 188,-10 178,-6" fill="#4CAF50" opacity="0.75"/>
+
+    <!-- Globe destination — refined -->
+    <g transform="translate(202, -16)" opacity="0.8">
+      <circle cx="0" cy="0" r="20" fill="url(#glow)" stroke="#ffffff" stroke-width="1.8"/>
+      <!-- Meridians -->
+      <ellipse cx="0" cy="0" rx="20" ry="10" fill="none" stroke="#ffffff" stroke-width="0.7" opacity="0.35"/>
+      <ellipse cx="0" cy="0" rx="10" ry="20" fill="none" stroke="#ffffff" stroke-width="0.7" opacity="0.25"/>
+      <!-- Equator + prime meridian -->
+      <line x1="-20" y1="0" x2="20" y2="0" stroke="#ffffff" stroke-width="0.7" opacity="0.3"/>
+      <line x1="0" y1="-20" x2="0" y2="20" stroke="#ffffff" stroke-width="0.7" opacity="0.3"/>
+    </g>
   </g>
 
   <!-- Title -->
-  <text x="260" y="90" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="48" font-weight="700" fill="#ffffff" letter-spacing="-1">
+  <text x="290" y="90" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="48" font-weight="700" fill="#ffffff" letter-spacing="-1">
     VPN Bypass
   </text>
 
   <!-- Subtitle -->
-  <text x="262" y="126" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="16" fill="#ffffff" opacity="0.65" letter-spacing="0.3">
+  <text x="292" y="126" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="16" fill="#ffffff" opacity="0.65" letter-spacing="0.3">
     macOS menu bar app to route traffic around your VPN
   </text>
 
   <!-- Decorative: macOS menu bar hint on right -->
   <g transform="translate(745, 65)" opacity="0.15">
-    <!-- Menu bar -->
     <rect x="0" y="0" width="115" height="20" rx="5" fill="#ffffff"/>
-    <!-- Shield in menu bar -->
     <path d="M16,4 L26,2 L26,11 C26,16 22,18 21,19 C20,18 16,16 16,11 Z" fill="#1565C0" opacity="0.8"/>
-    <!-- Status dot -->
     <circle cx="38" cy="10" r="3" fill="#4CAF50"/>
     <rect x="48" y="7" width="22" height="6" rx="3" fill="#1565C0" opacity="0.5"/>
     <rect x="76" y="7" width="16" height="6" rx="3" fill="#1565C0" opacity="0.3"/>
-
-    <!-- Dropdown -->
     <rect x="0" y="26" width="115" height="55" rx="5" fill="#ffffff" opacity="0.6"/>
     <circle cx="14" cy="40" r="3" fill="#4CAF50" opacity="0.8"/>
     <rect x="24" y="37" width="46" height="6" rx="2" fill="#1565C0" opacity="0.4"/>
