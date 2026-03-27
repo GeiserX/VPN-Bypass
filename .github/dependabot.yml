@@ -1,34 +1,39 @@
 version: 2
-
 updates:
-  # GitHub Actions - keep workflows up to date
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "monthly"
-    commit-message:
-      prefix: "ci"
-    labels:
-      - "ci"
-      - "automated"
-    groups:
-      github-actions:
-        patterns:
-          - "*"
-    ignore:
-      # Ignore major version updates - review manually
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-
-  # Swift Package Manager dependencies
-  - package-ecosystem: "swift"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    commit-message:
-      prefix: "deps"
-    labels:
-      - "dependencies"
-      - "automated"
-    open-pull-requests-limit: 5
+- package-ecosystem: github-actions
+  directory: /
+  schedule:
+    interval: monthly
+  commit-message:
+    prefix: ci
+  labels:
+  - ci
+  - automated
+  groups:
+    github-actions:
+      patterns:
+      - '*'
+    github_actions_security:
+      applies-to: security-updates
+      patterns:
+      - '*'
+  ignore:
+  - dependency-name: '*'
+    update-types:
+    - version-update:semver-major
+- package-ecosystem: swift
+  directory: /
+  schedule:
+    interval: weekly
+    day: monday
+  commit-message:
+    prefix: deps
+  labels:
+  - dependencies
+  - automated
+  open-pull-requests-limit: 5
+  groups:
+    swift_security:
+      applies-to: security-updates
+      patterns:
+      - '*'
