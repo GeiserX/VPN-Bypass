@@ -736,7 +736,11 @@ final class RouteManager: ObservableObject {
     private func detectVPNInterface() async -> (connected: Bool, interface: String?, type: VPNType?) {
         // First check for specific VPN processes to help identify type
         let runningVPNType = await detectRunningVPNProcess()
-        
+
+        if let hint = runningVPNType {
+            await MainActor.run { log(.info, "VPN process hint: \(hint.rawValue)") }
+        }
+
         // Use ifconfig to detect VPN
         return await detectVPNViaIfconfig(hintType: runningVPNType)
     }
@@ -765,7 +769,8 @@ final class RouteManager: ObservableObject {
         if output.contains("forticlient") || output.contains("fortitray") || output.contains("fctservctl") {
             return .fortinet
         }
-        if output.contains("zscaler") || output.contains("zstunnel") || output.contains("zsatunnel") {
+        if output.contains("zscaler") || output.contains("zstunnel") || output.contains("zsatunnel") ||
+           output.contains("trptunnel") || output.contains("upmservicecontroller") {
             return .zscaler
         }
         if output.contains("cloudflare") || output.contains("warp-cli") || output.contains("warp-svc") {
@@ -906,18 +911,17 @@ final class RouteManager: ObservableObject {
         
         // CGNAT range (100.64.0.0/10 = 100.64-127.x.x)
         // Shared by Tailscale, Zscaler, Cloudflare WARP, and other VPNs.
-        // Always check if this specific IP belongs to Tailscale first — the
-        // process hint alone isn't enough because GlobalProtect's process can
-        // stay running after its tunnel goes down, causing Tailscale's CGNAT IP
-        // on a different utun to be misidentified as corporate VPN.
+        // Always check if this specific IP belongs to Tailscale first —
+        // Tailscale mesh-only (no exit node) should NOT be treated as corporate VPN.
+        // Any non-Tailscale CGNAT IP on a utun interface is virtually always a VPN
+        // (Zscaler, WARP, etc.) so we accept it without requiring a process hint.
+        // This fixes detection when VPN process names don't match known patterns (#18).
         if first == 100 && second >= 64 && second <= 127 {
             if await isTailscaleIP(ip) {
                 return await isTailscaleExitNodeActive()
             }
-            if let hint = hintType, hint != .tailscale, hint != .unknown {
-                return true
-            }
-            return false
+            // Non-Tailscale CGNAT IP on a VPN interface → accept as corporate VPN
+            return true
         }
         
         // Corporate VPNs typically use private ranges
