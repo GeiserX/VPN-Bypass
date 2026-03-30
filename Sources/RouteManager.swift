@@ -2105,14 +2105,15 @@ final class RouteManager: ObservableObject {
     func removeDomain(_ domain: DomainEntry) {
         pendingRetryTasks[domain.domain]?.cancel()
         pendingRetryTasks.removeValue(forKey: domain.domain)
-        
+
         beginApplyingRoutes()
-        
+
         Task {
             await removeRoutesForSource(domain.domain)
-            
+
             config.domains.removeAll { $0.id == domain.id }
             saveConfig()
+            if config.manageHostsFile { await updateHostsFile() }
             log(.info, "Removed domain: \(domain.domain)")
             endApplyingRoutes()
         }
@@ -2144,12 +2145,13 @@ final class RouteManager: ObservableObject {
                     }
                 } else {
                     await removeRoutesForSource(domain.domain)
+                    if config.manageHostsFile { await updateHostsFile() }
                 }
                 endApplyingRoutes()
             }
         }
     }
-    
+
     /// Bulk enable/disable all domains with loading state (incremental)
     func setAllDomainsEnabled(_ enabled: Bool) {
         beginApplyingRoutes()
@@ -2183,7 +2185,7 @@ final class RouteManager: ObservableObject {
                     }
                 }
                 saveDNSCache()
-                if enabled && config.manageHostsFile {
+                if config.manageHostsFile {
                     await updateHostsFile()
                 }
                 endApplyingRoutes()
@@ -2269,6 +2271,7 @@ final class RouteManager: ObservableObject {
             await removeRoutesForSource(domain.domain)
             config.inverseDomains.removeAll { $0.id == domain.id }
             saveConfig()
+            if config.manageHostsFile { await updateHostsFile() }
             log(.info, "Removed VPN Only domain: \(domain.domain)")
             endApplyingRoutes()
         }
@@ -2296,6 +2299,7 @@ final class RouteManager: ObservableObject {
                     }
                 } else {
                     await removeRoutesForSource(domain.domain)
+                    if config.manageHostsFile { await updateHostsFile() }
                 }
                 endApplyingRoutes()
             }
@@ -2361,6 +2365,7 @@ final class RouteManager: ObservableObject {
             beginApplyingRoutes()
             Task {
                 await applyRoutesForService(service)
+                if config.manageHostsFile { await updateHostsFile() }
                 endApplyingRoutes()
             }
         }
@@ -2380,6 +2385,7 @@ final class RouteManager: ObservableObject {
             Task {
                 await removeRoutesForSource(oldName)
                 await applyRoutesForService(config.services[index])
+                if config.manageHostsFile { await updateHostsFile() }
                 endApplyingRoutes()
             }
         }
@@ -2393,6 +2399,7 @@ final class RouteManager: ObservableObject {
             await removeRoutesForSource(name)
             config.services.remove(at: index)
             saveConfig()
+            if config.manageHostsFile { await updateHostsFile() }
             log(.info, "Removed custom service: \(name)")
             endApplyingRoutes()
         }
@@ -2420,6 +2427,7 @@ final class RouteManager: ObservableObject {
                 } else {
                     await removeRoutesForSource(service.name)
                 }
+                if config.manageHostsFile { await updateHostsFile() }
                 endApplyingRoutes()
             }
         }
@@ -3069,16 +3077,15 @@ final class RouteManager: ObservableObject {
     private func updateHostsFile() async {
         // Collect domain -> IP mappings, filtered against activeRoutes so hosts
         // only contains entries for domains that actually have installed kernel routes.
+        // Checks all cached IPs (not just first) to find a routed one.
         let routedDestinations = Set(activeRoutes.map { $0.destination })
         var entries: [(domain: String, ip: String)] = []
 
         let activeDomains: [DomainEntry] = config.routingMode == .vpnOnly ? config.inverseDomains : config.domains
 
         for domain in activeDomains where domain.enabled {
-            if let cachedIP = dnsCache[domain.domain], routedDestinations.contains(cachedIP) {
-                entries.append((domain.domain, cachedIP))
-            } else if let diskCachedIPs = dnsDiskCache[domain.domain], let firstIP = diskCachedIPs.first, routedDestinations.contains(firstIP) {
-                entries.append((domain.domain, firstIP))
+            if let ip = firstRoutedIP(for: domain.domain, in: routedDestinations) {
+                entries.append((domain.domain, ip))
             }
         }
 
@@ -3086,10 +3093,8 @@ final class RouteManager: ObservableObject {
         if config.routingMode == .bypass {
             for service in config.services where service.enabled {
                 for domain in service.domains {
-                    if let cachedIP = dnsCache[domain], routedDestinations.contains(cachedIP) {
-                        entries.append((domain, cachedIP))
-                    } else if let diskCachedIPs = dnsDiskCache[domain], let firstIP = diskCachedIPs.first, routedDestinations.contains(firstIP) {
-                        entries.append((domain, firstIP))
+                    if let ip = firstRoutedIP(for: domain, in: routedDestinations) {
+                        entries.append((domain, ip))
                     }
                 }
             }
@@ -3097,6 +3102,23 @@ final class RouteManager: ObservableObject {
 
         // Update /etc/hosts (requires sudo)
         await modifyHostsFile(entries: entries)
+    }
+
+    /// Find the first cached IP for a domain that has a confirmed kernel route
+    private func firstRoutedIP(for domain: String, in routedDestinations: Set<String>) -> String? {
+        // Check memory cache first
+        if let cachedIP = dnsCache[domain], routedDestinations.contains(cachedIP) {
+            return cachedIP
+        }
+        // Fall back to disk cache — check ALL IPs, not just first
+        if let diskCachedIPs = dnsDiskCache[domain] {
+            for ip in diskCachedIPs {
+                if routedDestinations.contains(ip) {
+                    return ip
+                }
+            }
+        }
+        return nil
     }
     
     private func cleanHostsFile() async {
