@@ -90,6 +90,7 @@ The tag push triggers GitHub Actions which:
 - **Never skip `bump-version.sh`** before tagging a release. Forgetting it caused version desync in v1.8.2–v1.9.0 (#15).
 - **Version display is dynamic** — do NOT hardcode version strings in Swift code. The app reads from the bundle's `CFBundleShortVersionString` at runtime.
 - **Always test via Homebrew** after releasing, never trust `swift build` alone.
+- **Helperless mode is not supported.** The privileged helper is auto-installed on first launch and auto-updated on version mismatch. AppleScript/direct-route fallbacks exist only as emergency safety nets — do not treat them as a tested path or write new features against them.
 
 ## Self-Improving Configuration
 
