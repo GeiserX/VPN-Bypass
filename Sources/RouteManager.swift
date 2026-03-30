@@ -1360,6 +1360,30 @@ final class RouteManager: ObservableObject {
             ))
         }
 
+        // Clean up stale kernel routes from deleted/changed sources that are
+        // no longer represented in current config
+        let newDestinations = Set(newRoutes.map { $0.destination })
+        let staleDestinations = Array(Set(activeRoutes.map { $0.destination }).subtracting(newDestinations))
+        if !staleDestinations.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: staleDestinations)
+                if result.failureCount > 0 {
+                    log(.warning, "Stale route cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining failed entries")
+                    // Retain tracking for routes we couldn't remove from kernel
+                    let failedSet = Set(result.failedDestinations)
+                    for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
+                        newRoutes.append(route)
+                    }
+                } else if result.successCount > 0 {
+                    log(.info, "Stale route cleanup: \(result.successCount) orphaned kernel routes removed")
+                }
+            } else {
+                for dest in staleDestinations {
+                    _ = await removeRoute(dest)
+                }
+            }
+        }
+
         activeRoutes = newRoutes
         lastUpdate = Date()
         
@@ -1578,6 +1602,28 @@ final class RouteManager: ObservableObject {
             ))
         }
 
+        // Clean up stale kernel routes not in current config
+        let newDestinations = Set(newRoutes.map { $0.destination })
+        let staleDestinations = Array(Set(activeRoutes.map { $0.destination }).subtracting(newDestinations))
+        if !staleDestinations.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: staleDestinations)
+                if result.failureCount > 0 {
+                    log(.warning, "Cache stale cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
+                    let failedSet = Set(result.failedDestinations)
+                    for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
+                        newRoutes.append(route)
+                    }
+                } else if result.successCount > 0 {
+                    log(.info, "Cache stale cleanup: \(result.successCount) orphaned kernel routes removed")
+                }
+            } else {
+                for dest in staleDestinations {
+                    _ = await removeRoute(dest)
+                }
+            }
+        }
+
         activeRoutes = newRoutes
         lastUpdate = Date()
 
@@ -1595,6 +1641,9 @@ final class RouteManager: ObservableObject {
     
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
     private func backgroundDNSRefresh(sendNotification: Bool) async {
+        beginApplyingRoutes()
+        defer { endApplyingRoutes() }
+
         guard let gateway = localGateway else {
             log(.warning, "Background DNS refresh skipped: no local gateway")
             return
