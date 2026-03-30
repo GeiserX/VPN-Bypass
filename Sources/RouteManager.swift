@@ -1870,11 +1870,43 @@ final class RouteManager: ObservableObject {
             }
         }
         
+        // Repair missing CIDR routes for service ipRanges (bypass mode only)
+        if !isInverse && stillConnected {
+            let existingDests = await MainActor.run { Set(activeRoutes.map { $0.destination }) }
+            var cidrRepaired = 0
+            for service in config.services where service.enabled {
+                for range in service.ipRanges {
+                    if !existingDests.contains(range) {
+                        if await addRoute(range, gateway: routeGateway, isNetwork: true) {
+                            await MainActor.run {
+                                activeRoutes.append(ActiveRoute(
+                                    destination: range,
+                                    gateway: routeGateway,
+                                    source: service.name,
+                                    timestamp: Date()
+                                ))
+                            }
+                            cidrRepaired += 1
+                        }
+                    }
+                }
+            }
+            if cidrRepaired > 0 {
+                await MainActor.run { log(.info, "Background refresh: repaired \(cidrRepaired) missing CIDR route(s)") }
+            }
+        }
+
         // Update hosts file with any newly resolved domains (only if still connected)
         let shouldUpdateHosts = await MainActor.run { config.manageHostsFile && isVPNConnected }
         if shouldUpdateHosts {
             await updateHostsFile()
             await MainActor.run { log(.info, "Background refresh: hosts file updated") }
+        }
+
+        // Send notification if requested
+        let totalChanges = routeChanges.count
+        if sendNotification && totalChanges > 0 {
+            NotificationManager.shared.notifyDNSRefreshCompleted(updatedCount: totalChanges)
         }
     }
     
@@ -3270,21 +3302,15 @@ final class RouteManager: ObservableObject {
         }()
         var coveredDomains = Set(entries.map { $0.domain })
         for route in activeRoutes where !configSources.contains(route.source) {
-            // Try direct lookup first (source is a domain name)
-            if !coveredDomains.contains(route.source) {
-                if let ip = firstRoutedIP(for: route.source, in: routedDestinations) {
-                    entries.append((route.source, ip))
-                    coveredDomains.insert(route.source)
-                    continue
-                }
-            }
-            // Reverse lookup: source is likely a service name — find domains in DNS
-            // cache whose IPs match this route's destination
-            for (domain, cachedIPs) in dnsDiskCache {
-                if cachedIPs.contains(route.destination) && !coveredDomains.contains(domain) {
-                    entries.append((domain, route.destination))
-                    coveredDomains.insert(domain)
-                }
+            // Only handle domain-name sources (direct DNS cache lookup).
+            // Service-name sources can't be resolved to domains without the
+            // deleted config, and a global reverse lookup would be too broad
+            // (matching unrelated domains that share the same cached IP).
+            // Orphaned service routes heal on next full apply.
+            guard !coveredDomains.contains(route.source) else { continue }
+            if let ip = firstRoutedIP(for: route.source, in: routedDestinations) {
+                entries.append((route.source, ip))
+                coveredDomains.insert(route.source)
             }
         }
 
