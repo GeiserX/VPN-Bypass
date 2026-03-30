@@ -1410,10 +1410,15 @@ final class RouteManager: ObservableObject {
         lastUpdate = Date()
 
         if config.manageHostsFile {
-            await cleanHostsFile()
+            if activeRoutes.isEmpty {
+                await cleanHostsFile()
+            } else {
+                // Some routes retained due to failed removal — keep hosts in sync
+                await updateHostsFile()
+            }
         }
 
-        log(.info, "All routes removed")
+        log(.info, activeRoutes.isEmpty ? "All routes removed" : "Routes removed (\(activeRoutes.count) entries retained from failed kernel removals)")
     }
     
     // MARK: - Instant Startup (Cache-based)
@@ -1670,7 +1675,21 @@ final class RouteManager: ObservableObject {
 
                 if !kernelRemovalDests.isEmpty {
                     if HelperManager.shared.isHelperInstalled {
-                        _ = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovalDests)
+                        let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovalDests)
+                        if result.failureCount > 0 {
+                            // Re-add activeRoute entries for destinations that failed kernel removal
+                            let failedSet = Set(result.failedDestinations)
+                            await MainActor.run {
+                                for removal in removals where failedSet.contains(removal.destination) {
+                                    activeRoutes.append(ActiveRoute(
+                                        destination: removal.destination,
+                                        gateway: removal.gateway,
+                                        source: removal.source,
+                                        timestamp: Date()
+                                    ))
+                                }
+                            }
+                        }
                     } else {
                         for dest in kernelRemovalDests {
                             _ = await removeRoute(dest)
@@ -1680,17 +1699,20 @@ final class RouteManager: ObservableObject {
             }
 
             if !additions.isEmpty {
+                var addFailedDests: Set<String> = []
                 if HelperManager.shared.isHelperInstalled {
                     let routes = additions.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
-                    _ = await HelperManager.shared.addRoutesBatch(routes: routes)
+                    let result = await HelperManager.shared.addRoutesBatch(routes: routes)
+                    addFailedDests = Set(result.failedDestinations)
                 } else {
                     for add in additions {
                         _ = await addRoute(add.destination, gateway: add.gateway, isNetwork: add.isNetwork)
                     }
                 }
 
+                // Only record ownership for destinations the kernel accepted
                 await MainActor.run {
-                    for add in additions {
+                    for add in additions where !addFailedDests.contains(add.destination) {
                         activeRoutes.append(ActiveRoute(
                             destination: add.destination,
                             gateway: add.gateway,
@@ -2182,27 +2204,7 @@ final class RouteManager: ObservableObject {
     /// Apply routes for a single service (used when adding/editing custom services while VPN is connected)
     private func applyRoutesForService(_ service: ServiceEntry) async {
         guard let gateway = localGateway else { return }
-        var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool)] = []
-        var newRoutes: [ActiveRoute] = []
-
-        for domain in service.domains {
-            if let ips = await resolveIPs(for: domain) {
-                for ip in ips {
-                    routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false))
-                    newRoutes.append(ActiveRoute(destination: ip, gateway: gateway, source: service.name, timestamp: Date()))
-                }
-            }
-        }
-        for range in service.ipRanges {
-            routesToAdd.append((destination: range, gateway: gateway, isNetwork: true))
-            newRoutes.append(ActiveRoute(destination: range, gateway: gateway, source: service.name, timestamp: Date()))
-        }
-
-        if !routesToAdd.isEmpty && HelperManager.shared.isHelperInstalled {
-            _ = await HelperManager.shared.addRoutesBatch(routes: routesToAdd)
-            activeRoutes.append(contentsOf: newRoutes)
-            log(.success, "Applied \(newRoutes.count) routes for service \(service.name)")
-        }
+        await applyRoutesForService(service, gateway: gateway)
     }
 
     // MARK: - Inverse Domain Management
