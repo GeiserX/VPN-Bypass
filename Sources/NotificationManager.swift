@@ -103,12 +103,15 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         )
     }
     
-    func notifyVPNDisconnected(wasInterface: String?) {
+    func notifyVPNDisconnected(wasInterface: String?, routesRemaining: Int = 0) {
         guard notificationsEnabled && notifyOnVPNDisconnect else { return }
-        
-        let body = wasInterface != nil 
-            ? "Disconnected from \(wasInterface!). Routes cleared."
-            : "VPN connection lost. Routes cleared."
+
+        let suffix = routesRemaining > 0
+            ? "\(routesRemaining) route(s) could not be removed."
+            : "Routes cleared."
+        let body = wasInterface != nil
+            ? "Disconnected from \(wasInterface!). \(suffix)"
+            : "VPN connection lost. \(suffix)"
         
         sendNotification(
             title: "VPN Disconnected",

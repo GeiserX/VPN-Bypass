@@ -783,7 +783,7 @@ final class RouteManager: ObservableObject {
             lastTailscaleSelfFingerprint = nil
             vpnGateway = nil
             // Notify after cleanup so notification reflects actual state
-            NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface)
+            NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface, routesRemaining: activeRoutes.count)
         }
     }
     
@@ -1635,6 +1635,7 @@ final class RouteManager: ObservableObject {
         
         var newIPs: [String: [String]] = [:]
         var routeChanges: [(add: Bool, destination: String, gateway: String, isNetwork: Bool, source: String)] = []
+        var seenChanges: Set<String> = []
         
         let results = await withTaskGroup(of: (String, String, [String]?).self) { group in
             for (domain, source) in domainsToResolve {
@@ -1663,10 +1664,14 @@ final class RouteManager: ObservableObject {
             let toRemove = oldIPs.subtracting(newIPSet)
             
             for ip in toAdd {
-                routeChanges.append((add: true, destination: ip, gateway: routeGateway, isNetwork: false, source: source))
+                if seenChanges.insert("+:\(ip):\(source)").inserted {
+                    routeChanges.append((add: true, destination: ip, gateway: routeGateway, isNetwork: false, source: source))
+                }
             }
             for ip in toRemove {
-                routeChanges.append((add: false, destination: ip, gateway: routeGateway, isNetwork: false, source: source))
+                if seenChanges.insert("-:\(ip):\(source)").inserted {
+                    routeChanges.append((add: false, destination: ip, gateway: routeGateway, isNetwork: false, source: source))
+                }
             }
             
             newIPs[domain] = ips
@@ -2145,6 +2150,9 @@ final class RouteManager: ObservableObject {
 
         Task {
             await removeRoutesForSource(domain.domain)
+            // Force-purge any retained entries — source is being deleted, orphaned
+            // kernel routes will be overwritten on next full apply (delete-before-add)
+            activeRoutes.removeAll { $0.source == domain.domain }
 
             config.domains.removeAll { $0.id == domain.id }
             saveConfig()
@@ -2307,6 +2315,9 @@ final class RouteManager: ObservableObject {
         beginApplyingRoutes()
         Task {
             await removeRoutesForSource(domain.domain)
+            // Force-purge any retained entries — source is being deleted
+            activeRoutes.removeAll { $0.source == domain.domain }
+
             config.inverseDomains.removeAll { $0.id == domain.id }
             saveConfig()
             if config.manageHostsFile { await updateHostsFile() }
@@ -2422,6 +2433,14 @@ final class RouteManager: ObservableObject {
             beginApplyingRoutes()
             Task {
                 await removeRoutesForSource(oldName)
+                // Re-tag any retained entries from failed kernel removals to new name,
+                // so they don't orphan under the old source and block future cleanup
+                if oldName != name {
+                    activeRoutes = activeRoutes.map { route in
+                        guard route.source == oldName else { return route }
+                        return ActiveRoute(destination: route.destination, gateway: route.gateway, source: name, timestamp: route.timestamp)
+                    }
+                }
                 await applyRoutesForService(config.services[index])
                 if config.manageHostsFile { await updateHostsFile() }
                 endApplyingRoutes()
@@ -2435,6 +2454,9 @@ final class RouteManager: ObservableObject {
         beginApplyingRoutes()
         Task {
             await removeRoutesForSource(name)
+            // Force-purge any retained entries — source is being deleted
+            activeRoutes.removeAll { $0.source == name }
+
             config.services.remove(at: index)
             saveConfig()
             if config.manageHostsFile { await updateHostsFile() }
@@ -3146,6 +3168,24 @@ final class RouteManager: ObservableObject {
                         entries.append((domain, ip))
                     }
                 }
+            }
+        }
+
+        // Defense in depth: scan activeRoutes for orphaned sources (deleted/renamed)
+        // that aren't in config but still have live kernel routes
+        let configSources: Set<String> = {
+            var sources = Set(activeDomains.map { $0.domain })
+            if config.routingMode == .bypass {
+                sources.formUnion(config.services.map { $0.name })
+            }
+            return sources
+        }()
+        let entryDomains = Set(entries.map { $0.domain })
+        for route in activeRoutes where !configSources.contains(route.source) {
+            // Source is a domain name — try DNS cache lookup if not already covered
+            guard !entryDomains.contains(route.source) else { continue }
+            if let ip = firstRoutedIP(for: route.source, in: routedDestinations) {
+                entries.append((route.source, ip))
             }
         }
 
