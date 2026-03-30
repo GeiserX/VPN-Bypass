@@ -1647,7 +1647,7 @@ struct GeneralTab: View {
                     StatusRow(label: "WiFi Network", value: ssid)
                 }
                 
-                StatusRow(label: "Active Routes", value: "\(routeManager.activeRoutes.count)")
+                StatusRow(label: "Active Routes", value: "\(routeManager.uniqueRouteCount)")
                 
                 // Route verification results
                 if !routeManager.routeVerificationResults.isEmpty {
@@ -2001,7 +2001,7 @@ struct LogsTab: View {
                 RouteStatCard(
                     icon: "arrow.triangle.branch",
                     title: "Active Routes",
-                    value: "\(routeManager.activeRoutes.count)",
+                    value: "\(routeManager.uniqueRouteCount)",
                     color: Color(hex: "10B981")
                 )
                 

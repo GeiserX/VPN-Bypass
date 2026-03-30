@@ -204,7 +204,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             // Log current state
             let vpnStatus = RouteManager.shared.isVPNConnected ? "connected via \(RouteManager.shared.vpnInterface ?? "?")" : "not connected"
-            let routeCount = RouteManager.shared.activeRoutes.count
+            let routeCount = RouteManager.shared.uniqueRouteCount
             RouteManager.shared.log(.info, "🐕 Watchdog complete: VPN \(vpnStatus), \(routeCount) active routes")
         }
     }

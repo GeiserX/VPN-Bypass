@@ -63,7 +63,7 @@ struct MenuBarLabel: View {
             
             // Active routes count when VPN connected and not loading
             if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty && !routeManager.isLoading && !routeManager.isApplyingRoutes {
-                Text("\(routeManager.activeRoutes.count)")
+                Text("\(routeManager.uniqueRouteCount)")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
             }
         }
@@ -218,7 +218,7 @@ struct MenuContent: View {
             // Active routes badge
             if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty {
                 VStack(spacing: 1) {
-                    Text("\(routeManager.activeRoutes.count)")
+                    Text("\(routeManager.uniqueRouteCount)")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundColor(Color(hex: "10B981"))
                     Text("routes")
@@ -505,7 +505,7 @@ struct MenuContent: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("\(routeManager.activeRoutes.count)")
+                Text("\(routeManager.uniqueRouteCount)")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .foregroundColor(Color(hex: "10B981"))
             }
@@ -526,8 +526,8 @@ struct MenuContent: View {
                 }
             }
             
-            if routeManager.activeRoutes.count > 4 {
-                Text("+ \(routeManager.activeRoutes.count - 4) more")
+            if routeManager.uniqueRouteCount > 4 {
+                Text("+ \(routeManager.uniqueRouteCount - 4) more")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
