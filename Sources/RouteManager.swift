@@ -1635,7 +1635,6 @@ final class RouteManager: ObservableObject {
         
         var newIPs: [String: [String]] = [:]
         var routeChanges: [(add: Bool, destination: String, gateway: String, isNetwork: Bool, source: String)] = []
-        var seenChanges: Set<String> = []
         
         let results = await withTaskGroup(of: (String, String, [String]?).self) { group in
             for (domain, source) in domainsToResolve {
@@ -1652,31 +1651,43 @@ final class RouteManager: ObservableObject {
             return results
         }
         
-        // Compare with cache and build route changes
-        for (domain, source, ips) in results {
+        // Update per-domain caches first
+        for (domain, _, ips) in results {
             guard let ips = ips, !ips.isEmpty else { continue }
-            
-            let oldIPs = Set(dnsDiskCache[domain] ?? [])
-            let newIPSet = Set(ips)
-            
-            // Find IPs to add (new) and remove (old)
-            let toAdd = newIPSet.subtracting(oldIPs)
-            let toRemove = oldIPs.subtracting(newIPSet)
-            
-            for ip in toAdd {
-                if seenChanges.insert("+:\(ip):\(source)").inserted {
-                    routeChanges.append((add: true, destination: ip, gateway: routeGateway, isNetwork: false, source: source))
-                }
-            }
-            for ip in toRemove {
-                if seenChanges.insert("-:\(ip):\(source)").inserted {
-                    routeChanges.append((add: false, destination: ip, gateway: routeGateway, isNetwork: false, source: source))
-                }
-            }
-            
             newIPs[domain] = ips
             if let firstIP = ips.first {
                 await MainActor.run { dnsCache[domain] = firstIP }
+            }
+        }
+
+        // Build route changes at the SOURCE level, not per-domain, so that
+        // when two domains in the same service share an IP and one drops it
+        // while the other keeps it, we don't incorrectly remove the route.
+        let resultsBySource = Dictionary(grouping: results, by: { $0.1 })
+        for (source, sourceResults) in resultsBySource {
+            var aggregateOldIPs: Set<String> = []
+            var aggregateNewIPs: Set<String> = []
+
+            for (domain, _, ips) in sourceResults {
+                let oldCached = Set(dnsDiskCache[domain] ?? [])
+                aggregateOldIPs.formUnion(oldCached)
+
+                if let ips = ips, !ips.isEmpty {
+                    aggregateNewIPs.formUnion(ips)
+                } else {
+                    // Failed resolution — treat old cached IPs as unchanged
+                    aggregateNewIPs.formUnion(oldCached)
+                }
+            }
+
+            let toAdd = aggregateNewIPs.subtracting(aggregateOldIPs)
+            let toRemove = aggregateOldIPs.subtracting(aggregateNewIPs)
+
+            for ip in toAdd {
+                routeChanges.append((add: true, destination: ip, gateway: routeGateway, isNetwork: false, source: source))
+            }
+            for ip in toRemove {
+                routeChanges.append((add: false, destination: ip, gateway: routeGateway, isNetwork: false, source: source))
             }
         }
         
@@ -2150,10 +2161,6 @@ final class RouteManager: ObservableObject {
 
         Task {
             await removeRoutesForSource(domain.domain)
-            // Force-purge any retained entries — source is being deleted, orphaned
-            // kernel routes will be overwritten on next full apply (delete-before-add)
-            activeRoutes.removeAll { $0.source == domain.domain }
-
             config.domains.removeAll { $0.id == domain.id }
             saveConfig()
             if config.manageHostsFile { await updateHostsFile() }
@@ -2315,9 +2322,6 @@ final class RouteManager: ObservableObject {
         beginApplyingRoutes()
         Task {
             await removeRoutesForSource(domain.domain)
-            // Force-purge any retained entries — source is being deleted
-            activeRoutes.removeAll { $0.source == domain.domain }
-
             config.inverseDomains.removeAll { $0.id == domain.id }
             saveConfig()
             if config.manageHostsFile { await updateHostsFile() }
@@ -2454,9 +2458,6 @@ final class RouteManager: ObservableObject {
         beginApplyingRoutes()
         Task {
             await removeRoutesForSource(name)
-            // Force-purge any retained entries — source is being deleted
-            activeRoutes.removeAll { $0.source == name }
-
             config.services.remove(at: index)
             saveConfig()
             if config.manageHostsFile { await updateHostsFile() }
