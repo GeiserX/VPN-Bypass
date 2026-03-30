@@ -535,12 +535,21 @@ final class RouteManager: ObservableObject {
         do {
             let data = try Data(contentsOf: url)
             let exportData = try JSONDecoder().decode(ExportData.self, from: data)
-            
+
             // Merge or replace config
             config = exportData.config
             saveConfig()
-            
+
             log(.success, "Config imported: \(exportData.config.domains.count) domains, \(exportData.config.services.filter { $0.enabled }.count) services enabled")
+
+            // Reconcile live routes if VPN is connected
+            if isVPNConnected {
+                Task {
+                    await removeAllRoutes()
+                    await applyAllRoutes()
+                }
+            }
+
             return true
         } catch {
             log(.error, "Failed to import config: \(error.localizedDescription)")
@@ -1453,10 +1462,16 @@ final class RouteManager: ObservableObject {
 
         log(.info, "Applying \(routesToAdd.count) routes from cache (\(isInverse ? "VPN Only" : "Bypass") mode)...")
 
-        // Apply routes in batch
-        if HelperManager.shared.isHelperInstalled && !routesToAdd.isEmpty {
-            let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
-            _ = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
+        // Apply routes in batch (with fallback for helperless mode)
+        if !routesToAdd.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
+                _ = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
+            } else {
+                for route in routesToAdd {
+                    _ = await addRoute(route.destination, gateway: route.gateway, isNetwork: route.isNetwork)
+                }
+            }
 
             for route in routesToAdd {
                 newRoutes.append(ActiveRoute(
@@ -1576,16 +1591,28 @@ final class RouteManager: ObservableObject {
             
             if !removals.isEmpty {
                 let destinations = removals.map { $0.destination }
-                _ = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
+                if HelperManager.shared.isHelperInstalled {
+                    _ = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
+                } else {
+                    for dest in destinations {
+                        _ = await removeRoute(dest)
+                    }
+                }
                 await MainActor.run {
                     activeRoutes.removeAll { route in destinations.contains(route.destination) }
                 }
             }
-            
-            if !additions.isEmpty && HelperManager.shared.isHelperInstalled {
-                let routes = additions.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
-                _ = await HelperManager.shared.addRoutesBatch(routes: routes)
-                
+
+            if !additions.isEmpty {
+                if HelperManager.shared.isHelperInstalled {
+                    let routes = additions.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
+                    _ = await HelperManager.shared.addRoutesBatch(routes: routes)
+                } else {
+                    for add in additions {
+                        _ = await addRoute(add.destination, gateway: add.gateway, isNetwork: add.isNetwork)
+                    }
+                }
+
                 await MainActor.run {
                     for add in additions {
                         activeRoutes.append(ActiveRoute(
@@ -1701,8 +1728,10 @@ final class RouteManager: ObservableObject {
         }
 
         // Re-resolve and check for changes
+        var resolvedDomainIPs: [String: [String]] = [:]
         for (domain, source) in domainsToResolve {
             if let ips = await resolveIPs(for: domain) {
+                resolvedDomainIPs[domain] = ips
                 for ip in ips {
                     newIPs.insert(ip)
                     if !oldIPs.contains(ip) {
@@ -1720,6 +1749,17 @@ final class RouteManager: ObservableObject {
                     }
                 }
             }
+        }
+
+        // Update DNS caches so hosts file and next startup use fresh IPs
+        for (domain, ips) in resolvedDomainIPs {
+            dnsDiskCache[domain] = ips
+            if let firstIP = ips.first {
+                dnsCache[domain] = firstIP
+            }
+        }
+        if !resolvedDomainIPs.isEmpty {
+            saveDNSCache()
         }
 
         // Also add IP ranges (bypass mode only — these don't change via DNS but ensure they're present)
