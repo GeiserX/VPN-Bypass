@@ -1123,11 +1123,9 @@ final class RouteManager: ObservableObject {
             // Fast path: if we have DNS cache, apply instantly then refresh in background
             if !dnsDiskCache.isEmpty {
                 log(.info, "Using cached DNS for instant startup...")
-                let cacheApplied = await applyRoutesFromCache()
+                await applyRoutesFromCache()
                 isLoading = false
-                if cacheApplied {
-                    log(.info, "Routes applied from cache. Refreshing DNS in background...")
-                }
+                log(.info, "Routes applied from cache. Refreshing DNS in background...")
                 
                 // Background refresh: re-resolve DNS and update routes if changed
                 Task.detached { [weak self] in
@@ -1168,13 +1166,8 @@ final class RouteManager: ObservableObject {
         await applyAllRoutesInternal(sendNotification: true)
     }
     
+    /// Internal — callers must provide serialization (beginApplyingRoutes or VPN connect guard)
     private func applyAllRoutesInternal(sendNotification: Bool) async {
-        guard !isRouteOperationInProgress else {
-            log(.info, "Full apply skipped: another route operation is in progress")
-            return
-        }
-        beginApplyingRoutes()
-        defer { endApplyingRoutes() }
 
         guard let gateway = localGateway else {
             log(.error, "No local gateway available")
@@ -1499,18 +1492,12 @@ final class RouteManager: ObservableObject {
     // MARK: - Instant Startup (Cache-based)
     
     /// Apply routes using cached IPs only (no DNS resolution) - used for instant startup
-    @discardableResult
-    private func applyRoutesFromCache() async -> Bool {
-        guard !isRouteOperationInProgress else {
-            log(.info, "Cache apply skipped: another route operation is in progress")
-            return false
-        }
-        beginApplyingRoutes()
-        defer { endApplyingRoutes() }
+    /// Internal — called from detectAndApplyRoutesAsync which manages loading state
+    private func applyRoutesFromCache() async {
 
         guard let gateway = localGateway else {
             log(.error, "Cannot apply cached routes: no local gateway")
-            return false
+            return
         }
 
         let isInverse = config.routingMode == .vpnOnly
@@ -1519,7 +1506,7 @@ final class RouteManager: ObservableObject {
         if isInverse {
             guard let _ = vpnGateway else {
                 log(.error, "Cannot apply cached routes in VPN Only mode: no VPN gateway")
-                return false
+                return
             }
         }
 
@@ -1698,7 +1685,6 @@ final class RouteManager: ObservableObject {
         } else {
             log(.success, "Applied \(uniqueRouteCount) unique routes from cache")
         }
-        return true
     }
     
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
