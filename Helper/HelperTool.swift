@@ -90,29 +90,31 @@ class HelperTool: NSObject, HelperProtocol {
     
     // MARK: - Batch Route Management (for startup/stop performance)
     
-    func addRoutesBatch(routes: [[String: Any]], withReply reply: @escaping (Int, Int, String?) -> Void) {
+    func addRoutesBatch(routes: [[String: Any]], withReply reply: @escaping (Int, Int, [String], String?) -> Void) {
         var successCount = 0
         var failureCount = 0
+        var failedDestinations: [String] = []
         var lastError: String?
-        
+
         for route in routes {
             guard let destination = route["destination"] as? String,
                   let gateway = route["gateway"] as? String else {
                 failureCount += 1
                 continue
             }
-            
+
             let isNetwork = route["isNetwork"] as? Bool ?? false
-            
+
             // Validate inputs
             guard isValidDestination(destination), isValidIP(gateway) else {
                 failureCount += 1
+                failedDestinations.append(destination)
                 continue
             }
-            
+
             // First try to delete existing route (ignore result)
             _ = executeRoute(args: ["-n", "delete", destination])
-            
+
             // Add the new route
             var args = ["-n", "add"]
             if isNetwork {
@@ -120,40 +122,44 @@ class HelperTool: NSObject, HelperProtocol {
             } else {
                 args.append(contentsOf: ["-host", destination, gateway])
             }
-            
+
             let result = executeRoute(args: args)
             if result.success {
                 successCount += 1
             } else {
                 failureCount += 1
+                failedDestinations.append(destination)
                 lastError = result.error
             }
         }
-        
-        reply(successCount, failureCount, lastError)
+
+        reply(successCount, failureCount, failedDestinations, lastError)
     }
-    
-    func removeRoutesBatch(destinations: [String], withReply reply: @escaping (Int, Int, String?) -> Void) {
+
+    func removeRoutesBatch(destinations: [String], withReply reply: @escaping (Int, Int, [String], String?) -> Void) {
         var successCount = 0
         var failureCount = 0
+        var failedDestinations: [String] = []
         var lastError: String?
-        
+
         for destination in destinations {
             guard isValidDestination(destination) else {
                 failureCount += 1
+                failedDestinations.append(destination)
                 continue
             }
-            
+
             let result = executeRoute(args: ["-n", "delete", destination])
             if result.success {
                 successCount += 1
             } else {
                 failureCount += 1
+                failedDestinations.append(destination)
                 lastError = result.error
             }
         }
-        
-        reply(successCount, failureCount, lastError)
+
+        reply(successCount, failureCount, failedDestinations, lastError)
     }
     
     private func executeRoute(args: [String]) -> (success: Bool, error: String?) {

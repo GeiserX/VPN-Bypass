@@ -1315,13 +1315,15 @@ final class RouteManager: ObservableObject {
         // Apply all routes in batch (single XPC call for massive speedup)
         let routeGwForEntries = routeGateway  // capture for source entries
         var batchFailureCount = 0
+        var batchFailedDests: Set<String> = []
         if HelperManager.shared.isHelperInstalled {
             let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
             let result = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
             batchFailureCount = result.failureCount
+            batchFailedDests = Set(result.failedDestinations)
 
             if result.failureCount > 0 {
-                log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed — state may drift until next DNS refresh or verification")
+                log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed (\(result.failedDestinations.prefix(3).joined(separator: ", "))...)")
             }
         } else {
             // Fallback: add routes one by one (slower but works without helper)
@@ -1330,9 +1332,8 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        // Build activeRoutes from allSourceEntries (multi-source tracking)
-        // This records every (destination, source) pair, not just deduped kernel operations
-        let appliedDestinations = Set(routesToAdd.map { $0.destination })
+        // Build activeRoutes from allSourceEntries, excluding destinations that failed kernel add
+        let appliedDestinations = Set(routesToAdd.map { $0.destination }).subtracting(batchFailedDests)
         for entry in allSourceEntries where appliedDestinations.contains(entry.destination) {
             let gw = routesToAdd.first(where: { $0.destination == entry.destination })?.gateway ?? routeGwForEntries
             newRoutes.append(ActiveRoute(
@@ -1382,10 +1383,12 @@ final class RouteManager: ObservableObject {
     func removeAllRoutes() async {
         let destinations = Array(Set(activeRoutes.map { $0.destination }))
 
+        var failedDests: Set<String> = []
         if HelperManager.shared.isHelperInstalled && !destinations.isEmpty {
             let result = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
+            failedDests = Set(result.failedDestinations)
             if result.failureCount > 0 {
-                log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — orphan kernel routes will be overwritten on next apply (delete-before-add)")
+                log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
             } else {
                 log(.info, "Batch route removal: \(result.successCount) routes removed")
             }
@@ -1395,11 +1398,13 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        // Clear local state unconditionally — intent is fresh start.
-        // Any orphan kernel routes from failed removals will be handled by the
-        // next applyAllRoutes (helper does delete-before-add for each route).
         cancelAllRetries()
-        activeRoutes.removeAll()
+        if !failedDests.isEmpty {
+            // Retain entries for destinations that failed kernel removal — they're still live
+            activeRoutes.removeAll { !failedDests.contains($0.destination) }
+        } else {
+            activeRoutes.removeAll()
+        }
         routeVerificationResults.removeAll()
         dnsCache.removeAll()
         lastUpdate = Date()
@@ -1506,11 +1511,13 @@ final class RouteManager: ObservableObject {
 
         // Apply routes in batch (with fallback for helperless mode)
         var batchFailureCount = 0
+        var batchFailedDests: Set<String> = []
         if !routesToAdd.isEmpty {
             if HelperManager.shared.isHelperInstalled {
                 let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
                 let result = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
                 batchFailureCount = result.failureCount
+                batchFailedDests = Set(result.failedDestinations)
                 if result.failureCount > 0 {
                     log(.warning, "Cache route batch: \(result.successCount) succeeded, \(result.failureCount) failed — will reconcile on DNS refresh")
                 }
@@ -1521,8 +1528,8 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        // Build activeRoutes from all source entries (multi-source tracking)
-        for entry in allSourceEntries {
+        // Build activeRoutes from all source entries, excluding failed kernel adds
+        for entry in allSourceEntries where !batchFailedDests.contains(entry.destination) {
             newRoutes.append(ActiveRoute(
                 destination: entry.destination,
                 gateway: entry.gateway,
@@ -1810,16 +1817,22 @@ final class RouteManager: ObservableObject {
                     expectedEntries.insert(entry)
 
                     // Add kernel route if destination is completely new
+                    let kernelHasRoute: Bool
                     if !existingDestinations.contains(ip) && !addedKernelRoutes.contains(ip) {
                         if await addRoute(ip, gateway: routeGateway) {
                             addedKernelRoutes.insert(ip)
                             updatedCount += 1
+                            kernelHasRoute = true
                             log(.success, "DNS refresh: added new IP \(ip) for \(domain)")
+                        } else {
+                            kernelHasRoute = false
                         }
+                    } else {
+                        kernelHasRoute = true  // already exists in kernel
                     }
 
-                    // Add source entry to activeRoutes if this (source, dest) pair is new
-                    if !existingSourceDests.contains(entry) {
+                    // Only record source entry if kernel actually has the route
+                    if kernelHasRoute && !existingSourceDests.contains(entry) {
                         activeRoutes.append(ActiveRoute(
                             destination: ip,
                             gateway: routeGateway,
@@ -2282,7 +2295,6 @@ final class RouteManager: ObservableObject {
     /// Switch routing mode and re-apply routes
     func setRoutingMode(_ mode: RoutingMode) {
         guard config.routingMode != mode else { return }
-        let oldMode = config.routingMode
 
         // Pre-check: VPN Only requires vpnGateway
         if mode == .vpnOnly && isVPNConnected && vpnGateway == nil {
@@ -2299,19 +2311,8 @@ final class RouteManager: ObservableObject {
             Task {
                 await removeAllRoutes()
                 await applyAllRoutes()
-                // If no routes were applied but we expected some, revert
-                let expectedRoutes: Bool
-                if mode == .vpnOnly {
-                    // VPN Only always has catch-all routes
-                    expectedRoutes = true
-                } else {
-                    expectedRoutes = config.domains.contains { $0.enabled } || config.services.contains { $0.enabled }
-                }
-                if activeRoutes.isEmpty && expectedRoutes {
-                    log(.warning, "No routes applied after mode switch, reverting to \(oldMode == .bypass ? "Bypass" : "VPN Only")")
-                    config.routingMode = oldMode
-                    saveConfig()
-                    await applyAllRoutes()
+                if activeRoutes.isEmpty {
+                    log(.warning, "No routes applied after mode switch — DNS refresh will retry")
                 }
                 endApplyingRoutes()
             }
@@ -2400,15 +2401,16 @@ final class RouteManager: ObservableObject {
     private func applyRoutesForService(_ service: ServiceEntry, gateway: String) async {
         var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool)] = []
-        
-        // Track existing routes to avoid duplicates
+
+        // Track existing destinations (for kernel-add dedup) and existing ownership (for source dedup)
         let existingDestinations = Set(activeRoutes.map { $0.destination })
-        var seenDestinations: Set<String> = existingDestinations
-        
+        let existingOwnership = Set(activeRoutes.map { "\($0.source)|\($0.destination)" })
+        var kernelAddedDests: Set<String> = []
+
         // Capture DNS settings for parallel resolution
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
-        
+
         // Resolve ALL domains in parallel (not sequentially)
         let domainResults = await withTaskGroup(of: (String, [String]?).self) { group in
             for domain in service.domains {
@@ -2417,51 +2419,74 @@ final class RouteManager: ObservableObject {
                     return (domain, ips)
                 }
             }
-            
+
             var results: [(String, [String]?)] = []
             for await result in group {
                 results.append(result)
             }
             return results
         }
-        
+
         // Collect routes from resolved domains
         for (domain, ips) in domainResults {
             guard let ips = ips else { continue }
-            
+
             // Cache first IP for hosts file
             if let firstIP = ips.first {
                 dnsCache[domain] = firstIP
             }
-            
-            for ip in ips where !seenDestinations.contains(ip) {
-                seenDestinations.insert(ip)
-                routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false))
-                newRoutes.append(ActiveRoute(destination: ip, gateway: gateway, source: service.name, timestamp: Date()))
+
+            for ip in ips {
+                // Only add kernel route if destination is new (not already in kernel)
+                if !existingDestinations.contains(ip) && !kernelAddedDests.contains(ip) {
+                    kernelAddedDests.insert(ip)
+                    routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false))
+                }
+                // Always record ownership entry if this service doesn't already own this destination
+                let ownershipKey = "\(service.name)|\(ip)"
+                if !existingOwnership.contains(ownershipKey) {
+                    newRoutes.append(ActiveRoute(destination: ip, gateway: gateway, source: service.name, timestamp: Date()))
+                }
             }
         }
-        
+
         // Add IP ranges (no DNS needed)
-        for range in service.ipRanges where !seenDestinations.contains(range) {
-            seenDestinations.insert(range)
-            routesToAdd.append((destination: range, gateway: gateway, isNetwork: true))
-            newRoutes.append(ActiveRoute(destination: range, gateway: gateway, source: service.name, timestamp: Date()))
+        for range in service.ipRanges {
+            if !existingDestinations.contains(range) && !kernelAddedDests.contains(range) {
+                kernelAddedDests.insert(range)
+                routesToAdd.append((destination: range, gateway: gateway, isNetwork: true))
+            }
+            let ownershipKey = "\(service.name)|\(range)"
+            if !existingOwnership.contains(ownershipKey) {
+                newRoutes.append(ActiveRoute(destination: range, gateway: gateway, source: service.name, timestamp: Date()))
+            }
         }
-        
-        // Apply ALL routes in single batch (one XPC call instead of many)
+
+        // Apply new kernel routes in single batch, exclude failed destinations from ownership
+        var failedDests: Set<String> = []
         if !routesToAdd.isEmpty && HelperManager.shared.isHelperInstalled {
             let result = await HelperManager.shared.addRoutesBatch(routes: routesToAdd)
+            failedDests = Set(result.failedDestinations)
             if result.failureCount > 0 {
-                log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed")
+                log(.warning, "Batch route add for \(service.name): \(result.successCount) succeeded, \(result.failureCount) failed")
             }
         }
-        
-        await MainActor.run {
-            activeRoutes.append(contentsOf: newRoutes)
+
+        // Only record ownership for destinations confirmed in kernel
+        let confirmedRoutes = newRoutes.filter { route in
+            // If it was a new kernel route that failed, exclude it
+            if failedDests.contains(route.destination) && !existingDestinations.contains(route.destination) {
+                return false
+            }
+            return true
         }
-        
-        if !newRoutes.isEmpty {
-            log(.success, "Added \(newRoutes.count) routes for \(service.name)")
+
+        await MainActor.run {
+            activeRoutes.append(contentsOf: confirmedRoutes)
+        }
+
+        if !confirmedRoutes.isEmpty {
+            log(.success, "Added \(confirmedRoutes.count) route entries for \(service.name) (\(routesToAdd.count - failedDests.count) kernel routes)")
         }
     }
     
@@ -2533,10 +2558,11 @@ final class RouteManager: ObservableObject {
             }
         }
         
+        let testedCount = min(destinationsToVerify.count, 10)
         if failedCount > 0 {
-            log(.warning, "Route verification: \(failedCount) of \(destinationsToVerify.count) routes failed")
-        } else if !destinationsToVerify.isEmpty {
-            log(.success, "Route verification: All \(min(destinationsToVerify.count, 10)) tested routes are reachable")
+            log(.warning, "Route verification: \(failedCount) of \(testedCount) tested routes failed\(destinationsToVerify.count > 10 ? " (\(destinationsToVerify.count) total, sampled 10)" : "")")
+        } else if testedCount > 0 {
+            log(.success, "Route verification: All \(testedCount) tested routes are reachable\(destinationsToVerify.count > 10 ? " (\(destinationsToVerify.count) total)" : "")")
         }
     }
     
