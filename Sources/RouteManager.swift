@@ -49,7 +49,7 @@ final class RouteManager: ObservableObject {
     private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
     private var orphanedServiceDomains: [String: [String]] = [:]  // Deleted service name -> its domains (for hosts reconstruction)
-    private var isRefreshingDNS = false  // Serialization guard — prevents concurrent refresh operations
+    private var isRouteOperationInProgress = false  // Serialization guard — prevents concurrent route mutations
     private var gatewayDetectedAt: Date?
     private var lastInterfaceReroute: Date?
     private var lastTailscaleSelfFingerprint: String?
@@ -1167,6 +1167,14 @@ final class RouteManager: ObservableObject {
     }
     
     private func applyAllRoutesInternal(sendNotification: Bool) async {
+        guard !isRouteOperationInProgress else {
+            log(.info, "Full apply skipped: another route operation is in progress")
+            return
+        }
+        isRouteOperationInProgress = true
+        beginApplyingRoutes()
+        defer { endApplyingRoutes(); isRouteOperationInProgress = false }
+
         guard let gateway = localGateway else {
             log(.error, "No local gateway available")
             return
@@ -1491,6 +1499,14 @@ final class RouteManager: ObservableObject {
     
     /// Apply routes using cached IPs only (no DNS resolution) - used for instant startup
     private func applyRoutesFromCache() async {
+        guard !isRouteOperationInProgress else {
+            log(.info, "Cache apply skipped: another route operation is in progress")
+            return
+        }
+        isRouteOperationInProgress = true
+        beginApplyingRoutes()
+        defer { endApplyingRoutes(); isRouteOperationInProgress = false }
+
         guard let gateway = localGateway else {
             log(.error, "Cannot apply cached routes: no local gateway")
             return
@@ -1685,13 +1701,13 @@ final class RouteManager: ObservableObject {
     
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
     private func backgroundDNSRefresh(sendNotification: Bool) async {
-        guard !isRefreshingDNS else {
-            log(.info, "Background DNS refresh skipped: another refresh is in progress")
+        guard !isRouteOperationInProgress else {
+            log(.info, "Background DNS refresh skipped: another route operation is in progress")
             return
         }
-        isRefreshingDNS = true
+        isRouteOperationInProgress = true
         beginApplyingRoutes()
-        defer { endApplyingRoutes(); isRefreshingDNS = false }
+        defer { endApplyingRoutes(); isRouteOperationInProgress = false }
 
         guard let gateway = localGateway else {
             log(.warning, "Background DNS refresh skipped: no local gateway")
@@ -1982,12 +1998,12 @@ final class RouteManager: ObservableObject {
     
     /// Perform DNS refresh - re-resolve all domains and update routes
     private func performDNSRefresh() async {
-        guard !isRefreshingDNS else {
-            log(.info, "DNS refresh skipped: another refresh is in progress")
+        guard !isRouteOperationInProgress else {
+            log(.info, "DNS refresh skipped: another route operation is in progress")
             return
         }
-        isRefreshingDNS = true
-        defer { isRefreshingDNS = false }
+        isRouteOperationInProgress = true
+        defer { isRouteOperationInProgress = false }
 
         guard isVPNConnected, let gateway = localGateway else {
             log(.info, "DNS refresh skipped: \(!isVPNConnected ? "VPN not connected" : "no local gateway")")
@@ -2185,7 +2201,7 @@ final class RouteManager: ObservableObject {
         }
 
         lastDNSRefresh = Date()
-        nextDNSRefresh = Date().addingTimeInterval(config.dnsRefreshInterval)
+        nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
         endApplyingRoutes()
 
         if updatedCount > 0 || removedCount > 0 {
