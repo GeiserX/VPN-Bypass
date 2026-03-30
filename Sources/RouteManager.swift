@@ -1911,29 +1911,44 @@ final class RouteManager: ObservableObject {
         let staleEntries = currentEntries.subtracting(expectedEntries)
         var removedCount = 0
         if !staleEntries.isEmpty {
-            // Remove stale source entries from activeRoutes
-            activeRoutes.removeAll { route in
-                staleEntries.contains(SourceDest(source: route.source, destination: route.destination))
-            }
-            // Only remove kernel routes for destinations no longer needed by any source
+            // Compute kernel removals BEFORE mutating activeRoutes
             let staleDestinations = Set(staleEntries.map { $0.destination })
-            let stillNeeded = Set(activeRoutes.map { $0.destination })
+            let remainingAfterRemoval = activeRoutes.filter { route in
+                !staleEntries.contains(SourceDest(source: route.source, destination: route.destination))
+            }
+            let stillNeeded = Set(remainingAfterRemoval.map { $0.destination })
             let kernelRemovals = Array(staleDestinations.subtracting(stillNeeded))
+
+            // Attempt kernel removal first
+            var failedKernelRemovals: Set<String> = []
             if !kernelRemovals.isEmpty {
                 if HelperManager.shared.isHelperInstalled {
-                    _ = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovals)
+                    let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovals)
+                    failedKernelRemovals = Set(result.failedDestinations)
                 } else {
                     for ip in kernelRemovals {
                         _ = await removeRoute(ip)
                     }
                 }
             }
-            removedCount = kernelRemovals.count
+
+            // Now remove stale entries, but retain those whose kernel removal failed
+            activeRoutes.removeAll { route in
+                let entry = SourceDest(source: route.source, destination: route.destination)
+                guard staleEntries.contains(entry) else { return false }  // not stale, keep
+                if failedKernelRemovals.contains(route.destination) { return false }  // kernel removal failed, keep
+                return true
+            }
+
+            removedCount = kernelRemovals.count - failedKernelRemovals.count
             for entry in staleEntries.prefix(5) {
                 log(.info, "DNS refresh: removed stale \(entry.destination) (source: \(entry.source))")
             }
             if staleEntries.count > 5 {
                 log(.info, "DNS refresh: ... and \(staleEntries.count - 5) more stale entries removed")
+            }
+            if !failedKernelRemovals.isEmpty {
+                log(.warning, "DNS refresh: \(failedKernelRemovals.count) kernel removals failed — entries retained")
             }
         }
 
@@ -2185,19 +2200,30 @@ final class RouteManager: ObservableObject {
         let destinationsStillNeeded = Set(activeRoutes.filter { $0.source != source }.map { $0.destination })
 
         var kernelRemoved = 0
+        var failedKernelRemovals: Set<String> = []
         for route in routesToRemove {
             if !destinationsStillNeeded.contains(route.destination) {
-                _ = await removeRoute(route.destination)
-                kernelRemoved += 1
+                if await removeRoute(route.destination) {
+                    kernelRemoved += 1
+                } else {
+                    failedKernelRemovals.insert(route.destination)
+                }
             }
         }
 
         await MainActor.run {
-            activeRoutes.removeAll { $0.source == source }
+            // Remove entries for this source, but retain entries whose kernel removal failed
+            activeRoutes.removeAll { route in
+                route.source == source && !failedKernelRemovals.contains(route.destination)
+            }
         }
 
         if !routesToRemove.isEmpty {
-            log(.info, "Removed \(routesToRemove.count) route entries for \(source) (\(kernelRemoved) kernel routes)")
+            if failedKernelRemovals.isEmpty {
+                log(.info, "Removed \(routesToRemove.count) route entries for \(source) (\(kernelRemoved) kernel routes)")
+            } else {
+                log(.warning, "Removed routes for \(source): \(kernelRemoved) kernel routes removed, \(failedKernelRemovals.count) retained (kernel removal failed)")
+            }
         }
     }
     
@@ -3041,16 +3067,17 @@ final class RouteManager: ObservableObject {
     }
     
     private func updateHostsFile() async {
-        // Collect all domain -> IP mappings from cache (populated during route application)
-        // Falls back to disk cache if memory cache doesn't have an entry (e.g., DNS failed at startup)
+        // Collect domain -> IP mappings, filtered against activeRoutes so hosts
+        // only contains entries for domains that actually have installed kernel routes.
+        let routedDestinations = Set(activeRoutes.map { $0.destination })
         var entries: [(domain: String, ip: String)] = []
 
         let activeDomains: [DomainEntry] = config.routingMode == .vpnOnly ? config.inverseDomains : config.domains
 
         for domain in activeDomains where domain.enabled {
-            if let cachedIP = dnsCache[domain.domain] {
+            if let cachedIP = dnsCache[domain.domain], routedDestinations.contains(cachedIP) {
                 entries.append((domain.domain, cachedIP))
-            } else if let diskCachedIPs = dnsDiskCache[domain.domain], let firstIP = diskCachedIPs.first {
+            } else if let diskCachedIPs = dnsDiskCache[domain.domain], let firstIP = diskCachedIPs.first, routedDestinations.contains(firstIP) {
                 entries.append((domain.domain, firstIP))
             }
         }
@@ -3059,9 +3086,9 @@ final class RouteManager: ObservableObject {
         if config.routingMode == .bypass {
             for service in config.services where service.enabled {
                 for domain in service.domains {
-                    if let cachedIP = dnsCache[domain] {
+                    if let cachedIP = dnsCache[domain], routedDestinations.contains(cachedIP) {
                         entries.append((domain, cachedIP))
-                    } else if let diskCachedIPs = dnsDiskCache[domain], let firstIP = diskCachedIPs.first {
+                    } else if let diskCachedIPs = dnsDiskCache[domain], let firstIP = diskCachedIPs.first, routedDestinations.contains(firstIP) {
                         entries.append((domain, firstIP))
                     }
                 }
