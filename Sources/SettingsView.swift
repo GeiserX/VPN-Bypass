@@ -144,24 +144,56 @@ struct DomainsTab: View {
     @EnvironmentObject var routeManager: RouteManager
     @State private var newDomain = ""
     @FocusState private var isInputFocused: Bool
-    
+
+    private var isInverse: Bool { routeManager.config.routingMode == .vpnOnly }
+    private var activeDomains: [RouteManager.DomainEntry] {
+        isInverse ? routeManager.config.inverseDomains : routeManager.config.domains
+    }
+    private var enabledCount: Int { activeDomains.filter { $0.enabled }.count }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             // Header
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Image(systemName: "globe.americas.fill")
+                    Image(systemName: isInverse ? "lock.shield.fill" : "globe.americas.fill")
                         .font(.system(size: 20))
                         .foregroundStyle(
-                            LinearGradient(colors: [Color(hex: "10B981"), Color(hex: "34D399")], startPoint: .top, endPoint: .bottom)
+                            LinearGradient(
+                                colors: isInverse ? [Color(hex: "F59E0B"), Color(hex: "FBBF24")] : [Color(hex: "10B981"), Color(hex: "34D399")],
+                                startPoint: .top, endPoint: .bottom
+                            )
                         )
-                    Text("Custom Domains")
+                    Text(isInverse ? "VPN Only Domains" : "Custom Domains")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                 }
-                Text("Add domains that should bypass VPN and use your regular connection.")
+                Text(isInverse
+                    ? "Only these domains will use the VPN. Everything else bypasses it."
+                    : "Add domains that should bypass VPN and use your regular connection.")
                     .font(.system(size: 13))
                     .foregroundColor(Color(hex: "9CA3AF"))
+            }
+
+            // Routing mode selector
+            SettingsCard(title: "Routing Mode", icon: "arrow.triangle.swap", iconColor: Color(hex: "8B5CF6")) {
+                HStack(spacing: 12) {
+                    RoutingModeButton(
+                        title: "Bypass",
+                        subtitle: "Domains skip VPN",
+                        icon: "globe",
+                        isSelected: !isInverse,
+                        color: Color(hex: "10B981")
+                    ) { routeManager.setRoutingMode(.bypass) }
+
+                    RoutingModeButton(
+                        title: "VPN Only",
+                        subtitle: "Only domains use VPN",
+                        icon: "lock.shield",
+                        isSelected: isInverse,
+                        color: Color(hex: "F59E0B")
+                    ) { routeManager.setRoutingMode(.vpnOnly) }
+                }
             }
             
             // Add domain input
@@ -238,10 +270,11 @@ struct DomainsTab: View {
                                 .font(.system(size: 9))
                                 .foregroundColor(Color(hex: "6B7280"))
                         }
-                    } else if !routeManager.config.domains.isEmpty {
+                    } else if !activeDomains.isEmpty {
                         HStack(spacing: 6) {
                             Button {
-                                routeManager.setAllDomainsEnabled(true)
+                                if isInverse { routeManager.setAllInverseDomainsEnabled(true) }
+                                else { routeManager.setAllDomainsEnabled(true) }
                             } label: {
                                 Text("All")
                                     .font(.system(size: 9, weight: .medium))
@@ -252,9 +285,10 @@ struct DomainsTab: View {
                                     .cornerRadius(4)
                             }
                             .buttonStyle(.plain)
-                            
+
                             Button {
-                                routeManager.setAllDomainsEnabled(false)
+                                if isInverse { routeManager.setAllInverseDomainsEnabled(false) }
+                                else { routeManager.setAllDomainsEnabled(false) }
                             } label: {
                                 Text("None")
                                     .font(.system(size: 9, weight: .medium))
@@ -267,22 +301,22 @@ struct DomainsTab: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    
-                    Text("\(routeManager.config.domains.filter { $0.enabled }.count)/\(routeManager.config.domains.count)")
+
+                    Text("\(enabledCount)/\(activeDomains.count)")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundColor(Color(hex: "10B981"))
+                        .foregroundColor(isInverse ? Color(hex: "F59E0B") : Color(hex: "10B981"))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Color(hex: "10B981").opacity(0.15))
+                        .background((isInverse ? Color(hex: "F59E0B") : Color(hex: "10B981")).opacity(0.15))
                         .clipShape(Capsule())
                 }
-                
-                if routeManager.config.domains.isEmpty {
+
+                if activeDomains.isEmpty {
                     emptyState
                 } else {
                     VStack(spacing: 6) {
-                        ForEach(routeManager.config.domains) { domain in
-                            DomainRow(domain: domain)
+                        ForEach(activeDomains) { domain in
+                            DomainRow(domain: domain, isInverse: isInverse)
                         }
                     }
                 }
@@ -303,23 +337,27 @@ struct DomainsTab: View {
     
     private var emptyState: some View {
         VStack(spacing: 12) {
-            Image(systemName: "globe")
+            Image(systemName: isInverse ? "lock.shield" : "globe")
                 .font(.system(size: 28))
                 .foregroundColor(Color(hex: "374151"))
             Text("No domains configured")
                 .font(.system(size: 13))
                 .foregroundColor(Color(hex: "6B7280"))
-            Text("Add a domain above to bypass VPN")
+            Text(isInverse ? "Add domains that should use VPN" : "Add a domain above to bypass VPN")
                 .font(.system(size: 11))
                 .foregroundColor(Color(hex: "4B5563"))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 30)
     }
-    
+
     private func addDomain() {
         guard !newDomain.isEmpty else { return }
-        routeManager.addDomain(newDomain)
+        if isInverse {
+            routeManager.addInverseDomain(newDomain)
+        } else {
+            routeManager.addDomain(newDomain)
+        }
         newDomain = ""
     }
 }
@@ -327,6 +365,7 @@ struct DomainsTab: View {
 struct DomainRow: View {
     @EnvironmentObject var routeManager: RouteManager
     let domain: RouteManager.DomainEntry
+    var isInverse: Bool = false
     @State private var isHovered = false
     
     var body: some View {
@@ -350,20 +389,22 @@ struct DomainRow: View {
                 get: { domain.enabled },
                 set: { _ in
                     if !routeManager.isApplyingRoutes {
-                        routeManager.toggleDomain(domain.id)
+                        if isInverse { routeManager.toggleInverseDomain(domain.id) }
+                        else { routeManager.toggleDomain(domain.id) }
                     }
                 }
             ))
             .toggleStyle(.switch)
-            .tint(Color(hex: "10B981"))
+            .tint(isInverse ? Color(hex: "F59E0B") : Color(hex: "10B981"))
             .scaleEffect(0.7)
             .disabled(routeManager.isApplyingRoutes)
             .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
-            
+
             // Delete button - disabled during route operations
             Button {
                 withAnimation(.easeOut(duration: 0.2)) {
-                    routeManager.removeDomain(domain)
+                    if isInverse { routeManager.removeInverseDomain(domain) }
+                    else { routeManager.removeDomain(domain) }
                 }
             } label: {
                 Image(systemName: "trash")
@@ -385,26 +426,83 @@ struct DomainRow: View {
     }
 }
 
+// MARK: - Routing Mode Button
+
+struct RoutingModeButton: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let isSelected: Bool
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                // Radio circle
+                Circle()
+                    .fill(isSelected ? color : Color.clear)
+                    .overlay(Circle().stroke(isSelected ? color : Color(hex: "4B5563"), lineWidth: 2))
+                    .frame(width: 16, height: 16)
+                    .shadow(color: isSelected ? color.opacity(0.4) : .clear, radius: 4)
+
+                Image(systemName: icon)
+                    .font(.system(size: 14))
+                    .foregroundColor(isSelected ? color : Color(hex: "6B7280"))
+                    .frame(width: 20)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(isSelected ? .white : Color(hex: "9CA3AF"))
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundColor(Color(hex: "6B7280"))
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? color.opacity(0.1) : Color.white.opacity(0.03))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isSelected ? color.opacity(0.4) : Color.clear, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Services Tab
 
 struct ServicesTab: View {
     @EnvironmentObject var routeManager: RouteManager
     @State private var searchText = ""
-    
+    @State private var showingCustomServiceEditor = false
+    @State private var editingService: RouteManager.ServiceEntry?
+
+    private var isVPNOnly: Bool {
+        routeManager.config.routingMode == .vpnOnly
+    }
+
     private var filteredServices: [RouteManager.ServiceEntry] {
         if searchText.isEmpty {
             return routeManager.config.services
         }
-        return routeManager.config.services.filter { 
+        return routeManager.config.services.filter {
             $0.name.localizedCaseInsensitiveContains(searchText) ||
             $0.domains.contains { $0.localizedCaseInsensitiveContains(searchText) }
         }
     }
-    
+
     private var enabledCount: Int {
         routeManager.config.services.filter { $0.enabled }.count
     }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Header
@@ -419,97 +517,161 @@ struct ServicesTab: View {
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                 }
-                
+
                 Spacer()
-                
-                Text("\(enabledCount)/\(routeManager.config.services.count) enabled")
-                    .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "6B7280"))
-            }
-            
-            // Search and bulk actions
-            HStack(spacing: 10) {
-                // Search box
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12))
+
+                if !isVPNOnly {
+                    Text("\(enabledCount)/\(routeManager.config.services.count) enabled")
+                        .font(.system(size: 11))
                         .foregroundColor(Color(hex: "6B7280"))
-                    
-                    TextField("Search services...", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .disabled(routeManager.isApplyingRoutes)
-                    
-                    if !searchText.isEmpty {
-                        Button {
-                            searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12))
+                }
+            }
+
+            if isVPNOnly {
+                // VPN Only mode banner
+                HStack(spacing: 10) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(Color(hex: "F59E0B"))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Services disabled in VPN Only mode")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Color(hex: "F59E0B"))
+                        Text("Switch to Bypass mode in the Domains tab to manage services.")
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "9CA3AF"))
+                    }
+
+                    Spacer()
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(hex: "F59E0B").opacity(0.08))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color(hex: "F59E0B").opacity(0.2), lineWidth: 1)
+                        )
+                )
+
+                Spacer()
+            } else {
+                // Search and bulk actions
+                HStack(spacing: 10) {
+                    // Search box
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 12))
+                            .foregroundColor(Color(hex: "6B7280"))
+
+                        TextField("Search services...", text: $searchText)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12))
+                            .disabled(routeManager.isApplyingRoutes)
+
+                        if !searchText.isEmpty {
+                            Button {
+                                searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(Color(hex: "6B7280"))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color.white.opacity(0.06))
+                    .cornerRadius(8)
+
+                    // Loading indicator
+                    if routeManager.isApplyingRoutes {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "10B981")))
+                            Text("Applying...")
+                                .font(.system(size: 10))
                                 .foregroundColor(Color(hex: "6B7280"))
+                        }
+                        .frame(width: 80)
+                    } else {
+                        // Select All button
+                        Button {
+                            routeManager.setAllServicesEnabled(true)
+                        } label: {
+                            Text("All")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(Color(hex: "10B981"))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color(hex: "10B981").opacity(0.15))
+                                .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+
+                        // Select None button
+                        Button {
+                            routeManager.setAllServicesEnabled(false)
+                        } label: {
+                            Text("None")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(Color(hex: "EF4444"))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color(hex: "EF4444").opacity(0.15))
+                                .cornerRadius(6)
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Color.white.opacity(0.06))
-                .cornerRadius(8)
-                
-                // Loading indicator
-                if routeManager.isApplyingRoutes {
+
+                // Services list
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(filteredServices) { service in
+                            ServiceRow(service: service, onEdit: service.isCustom ? {
+                                editingService = service
+                                showingCustomServiceEditor = true
+                            } : nil)
+                        }
+                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.black.opacity(0.2))
+                )
+
+                // Add Custom Service button
+                Button {
+                    editingService = nil
+                    showingCustomServiceEditor = true
+                } label: {
                     HStack(spacing: 6) {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                            .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "10B981")))
-                        Text("Applying...")
-                            .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "6B7280"))
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 13))
+                        Text("Create Custom Service")
+                            .font(.system(size: 12, weight: .medium))
                     }
-                    .frame(width: 80)
-                } else {
-                    // Select All button
-                    Button {
-                        routeManager.setAllServicesEnabled(true)
-                    } label: {
-                        Text("All")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Color(hex: "10B981"))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color(hex: "10B981").opacity(0.15))
-                            .cornerRadius(6)
-                    }
-                    .buttonStyle(.plain)
-                    
-                    // Select None button
-                    Button {
-                        routeManager.setAllServicesEnabled(false)
-                    } label: {
-                        Text("None")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Color(hex: "EF4444"))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color(hex: "EF4444").opacity(0.15))
-                            .cornerRadius(6)
-                    }
-                    .buttonStyle(.plain)
+                    .foregroundColor(Color(hex: "8B5CF6"))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(hex: "8B5CF6").opacity(0.1))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color(hex: "8B5CF6").opacity(0.3), lineWidth: 1)
+                    )
                 }
+                .buttonStyle(.plain)
             }
-            
-            // Services list
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(filteredServices) { service in
-                        ServiceRow(service: service)
-                    }
-                }
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.black.opacity(0.2))
-            )
+        }
+        .sheet(isPresented: $showingCustomServiceEditor) {
+            CustomServiceEditor(service: editingService)
+                .environmentObject(routeManager)
         }
     }
 }
@@ -517,8 +679,9 @@ struct ServicesTab: View {
 struct ServiceRow: View {
     @EnvironmentObject var routeManager: RouteManager
     let service: RouteManager.ServiceEntry
+    var onEdit: (() -> Void)?
     @State private var isHovered = false
-    
+
     var body: some View {
         HStack(spacing: 12) {
             // Status dot
@@ -526,24 +689,57 @@ struct ServiceRow: View {
                 .fill(service.enabled ? Color(hex: "10B981") : Color(hex: "4B5563"))
                 .frame(width: 8, height: 8)
                 .shadow(color: service.enabled ? Color(hex: "10B981").opacity(0.5) : .clear, radius: 4)
-            
+
             // Service info
             VStack(alignment: .leading, spacing: 2) {
-                Text(service.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(service.enabled ? .white : Color(hex: "9CA3AF"))
-                
-                Text("\(service.domains.count) domains" + (service.ipRanges.isEmpty ? "" : " • \(service.ipRanges.count) IPs"))
+                HStack(spacing: 6) {
+                    Text(service.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(service.enabled ? .white : Color(hex: "9CA3AF"))
+
+                    if service.isCustom {
+                        Text("Custom")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(Color(hex: "8B5CF6"))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color(hex: "8B5CF6").opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                }
+
+                Text("\(service.domains.count) domains" + (service.ipRanges.isEmpty ? "" : " · \(service.ipRanges.count) IPs"))
                     .font(.system(size: 10))
                     .foregroundColor(Color(hex: "6B7280"))
             }
-            
+
             Spacer()
-            
-            // Toggle - disabled while routes are being applied
+
+            // Edit button for custom services
+            if service.isCustom && isHovered {
+                Button {
+                    onEdit?()
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(hex: "8B5CF6"))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    routeManager.removeCustomService(service.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(hex: "EF4444"))
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Toggle
             Toggle("", isOn: Binding(
                 get: { service.enabled },
-                set: { _ in 
+                set: { _ in
                     if !routeManager.isApplyingRoutes {
                         routeManager.toggleService(service.id)
                     }
@@ -563,6 +759,223 @@ struct ServiceRow: View {
         )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+    }
+}
+
+// MARK: - Custom Service Editor
+
+struct CustomServiceEditor: View {
+    @EnvironmentObject var routeManager: RouteManager
+    @Environment(\.dismiss) private var dismiss
+    let service: RouteManager.ServiceEntry?
+
+    @State private var serviceName = ""
+    @State private var domains: [String] = [""]
+    @State private var ipRanges: [String] = []
+
+    private var isEditing: Bool { service != nil }
+
+    private var canSave: Bool {
+        !serviceName.trimmingCharacters(in: .whitespaces).isEmpty &&
+        domains.contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text(isEditing ? "Edit Service" : "Create Custom Service")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(Color(hex: "6B7280"))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+
+            Divider().background(Color.white.opacity(0.1))
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Service Name
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Service Name")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Color(hex: "9CA3AF"))
+
+                        TextField("e.g. My Company VPN", text: $serviceName)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13))
+                            .padding(10)
+                            .background(Color.white.opacity(0.06))
+                            .cornerRadius(8)
+                    }
+
+                    // Domains
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Domains")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color(hex: "9CA3AF"))
+                            Spacer()
+                            Button {
+                                domains.append("")
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 10, weight: .bold))
+                                    Text("Add")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .foregroundColor(Color(hex: "10B981"))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        ForEach(domains.indices, id: \.self) { index in
+                            HStack(spacing: 8) {
+                                TextField("example.com", text: $domains[index])
+                                    .textFieldStyle(.plain)
+                                    .font(.system(size: 12))
+                                    .padding(8)
+                                    .background(Color.white.opacity(0.06))
+                                    .cornerRadius(6)
+
+                                if domains.count > 1 {
+                                    Button {
+                                        domains.remove(at: index)
+                                    } label: {
+                                        Image(systemName: "minus.circle.fill")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(Color(hex: "EF4444").opacity(0.7))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+
+                    // IP Ranges (optional)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("IP Ranges (optional)")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(Color(hex: "9CA3AF"))
+                                Text("CIDR notation, e.g. 192.168.1.0/24")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(Color(hex: "6B7280"))
+                            }
+                            Spacer()
+                            Button {
+                                ipRanges.append("")
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 10, weight: .bold))
+                                    Text("Add")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .foregroundColor(Color(hex: "10B981"))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        ForEach(ipRanges.indices, id: \.self) { index in
+                            HStack(spacing: 8) {
+                                TextField("10.0.0.0/8", text: $ipRanges[index])
+                                    .textFieldStyle(.plain)
+                                    .font(.system(size: 12))
+                                    .padding(8)
+                                    .background(Color.white.opacity(0.06))
+                                    .cornerRadius(6)
+
+                                Button {
+                                    ipRanges.remove(at: index)
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(Color(hex: "EF4444").opacity(0.7))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
+                        if ipRanges.isEmpty {
+                            Text("No IP ranges added. Only domain-based routing will be used.")
+                                .font(.system(size: 10))
+                                .foregroundColor(Color(hex: "6B7280"))
+                                .italic()
+                        }
+                    }
+                }
+                .padding(16)
+            }
+
+            Divider().background(Color.white.opacity(0.1))
+
+            // Actions
+            HStack {
+                Button("Cancel") {
+                    dismiss()
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(Color(hex: "9CA3AF"))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+
+                Spacer()
+
+                Button {
+                    save()
+                    dismiss()
+                } label: {
+                    Text(isEditing ? "Save Changes" : "Create Service")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(canSave ? Color(hex: "8B5CF6") : Color(hex: "4B5563"))
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSave)
+            }
+            .padding(16)
+        }
+        .frame(width: 440, height: 480)
+        .background(
+            LinearGradient(
+                colors: [Color(hex: "0F0F14"), Color(hex: "1A1B26")],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .onAppear {
+            if let service {
+                serviceName = service.name
+                domains = service.domains.isEmpty ? [""] : service.domains
+                ipRanges = service.ipRanges
+            }
+        }
+    }
+
+    private func save() {
+        let cleanDomains = domains.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let cleanIPs = ipRanges.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let name = serviceName.trimmingCharacters(in: .whitespaces)
+
+        if let service {
+            routeManager.updateCustomService(id: service.id, name: name, domains: cleanDomains, ipRanges: cleanIPs)
+        } else {
+            routeManager.addCustomService(name: name, domains: cleanDomains, ipRanges: cleanIPs)
+        }
     }
 }
 

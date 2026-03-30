@@ -111,10 +111,13 @@ struct MenuContent: View {
             
             // Header with VPN status
             headerSection
-            
+
+            // Routing mode toggle
+            routingModeToggle
+
             Divider()
                 .padding(.vertical, 8)
-            
+
             // Main content
             if routeManager.isLoading {
                 loadingContent
@@ -277,7 +280,7 @@ struct MenuContent: View {
                     HStack {
                         Image(systemName: "plus.circle")
                             .font(.system(size: 12))
-                        Text("Add Domain to Bypass")
+                        Text(routeManager.config.routingMode == .vpnOnly ? "Add Domain to VPN" : "Add Domain to Bypass")
                             .font(.system(size: 12, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
@@ -579,8 +582,52 @@ struct MenuContent: View {
         .cornerRadius(8)
     }
     
+    // MARK: - Routing Mode Toggle
+
+    private var routingModeToggle: some View {
+        HStack(spacing: 8) {
+            Text("Mode")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundColor(Color(hex: "6B7280"))
+
+            Spacer()
+
+            HStack(spacing: 0) {
+                modeButton(title: "Bypass", mode: .bypass)
+                modeButton(title: "VPN Only", mode: .vpnOnly)
+            }
+            .background(Color.secondary.opacity(0.12))
+            .cornerRadius(6)
+        }
+        .padding(.top, 4)
+    }
+
+    private func modeButton(title: String, mode: RouteManager.RoutingMode) -> some View {
+        let isSelected = routeManager.config.routingMode == mode
+        return Button {
+            routeManager.setRoutingMode(mode)
+        } label: {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(isSelected ? Color(hex: "10B981") : Color.clear)
+                    .overlay(
+                        Circle().stroke(isSelected ? Color(hex: "10B981") : Color(hex: "6B7280"), lineWidth: 1.5)
+                    )
+                    .frame(width: 10, height: 10)
+                Text(title)
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                    .foregroundColor(isSelected ? .white : Color(hex: "9CA3AF"))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(isSelected ? Color(hex: "10B981").opacity(0.15) : Color.clear)
+            .cornerRadius(6)
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: - Footer
-    
+
     private var footerActions: some View {
         HStack {
             if let lastUpdate = routeManager.lastUpdate {
@@ -622,7 +669,11 @@ struct MenuContent: View {
     
     private func addDomainAndClose() {
         guard !newDomain.isEmpty else { return }
-        routeManager.addDomain(newDomain)
+        if routeManager.config.routingMode == .vpnOnly {
+            routeManager.addInverseDomain(newDomain)
+        } else {
+            routeManager.addDomain(newDomain)
+        }
         newDomain = ""
         isAddingDomain = false
     }

@@ -5,6 +5,19 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-03-30
+
+### Added
+- **VPN Only Mode (Inverse Routing)** - New dual routing mode: "Bypass" (default, existing behavior) and "VPN Only" where only listed domains use VPN while everything else bypasses it. Uses 0.0.0.0/1 + 128.0.0.0/1 catch-all routes through the local gateway with domain-specific routes through the VPN gateway
+- **Routing Mode Selector** - Radio-button mode selector in both the menu bar dropdown and the Settings Domains tab to switch between Bypass and VPN Only modes
+- **Separate Domain Lists** - Each routing mode maintains its own domain list: bypass domains for Bypass mode, VPN-only domains for VPN Only mode
+- **Custom Services** - Create your own service entries with a name, multiple domains, and optional IP ranges. Custom services are shown with a purple "Custom" badge, can be edited/deleted, and persist across reboots
+- **Custom Service Editor** - Full sheet editor for creating and editing custom services with add/remove buttons for domains and IP ranges
+
+### Changed
+- **Services Tab** - Shows a disabled banner in VPN Only mode (services only apply in Bypass mode). Added "+ Create Custom Service" button for user-defined services
+- **VPN Gateway Detection** - App now detects both local and VPN gateways simultaneously for inverse routing support
+
 ## [1.9.2] - 2026-03-29
 
 ### Fixed

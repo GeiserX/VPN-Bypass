@@ -20,6 +20,7 @@ final class RouteManager: ObservableObject {
     @Published var vpnInterface: String?
     @Published var vpnType: VPNType?
     @Published var localGateway: String?
+    @Published var vpnGateway: String?
     @Published var activeRoutes: [ActiveRoute] = []
     @Published var lastUpdate: Date?
     @Published var config: Config = Config()
@@ -61,7 +62,12 @@ final class RouteManager: ObservableObject {
     }
     
     // MARK: - Types
-    
+
+    enum RoutingMode: String, Codable {
+        case bypass = "bypass"      // Domains bypass VPN (current behavior)
+        case vpnOnly = "vpnOnly"    // Only listed domains use VPN, everything else bypasses
+    }
+
     enum VPNType: String, Codable {
         case globalProtect = "GlobalProtect"
         case ciscoAnyConnect = "Cisco AnyConnect"
@@ -127,7 +133,9 @@ final class RouteManager: ObservableObject {
         var dnsRefreshInterval: TimeInterval = 3600  // 1 hour default
         var fallbackDNS: [String] = ["1.1.1.1", "8.8.8.8"]  // Fallback DNS servers (IP or DoH URL)
         var proxyConfig: ProxyConfig = ProxyConfig()  // SOCKS5 proxy for aggressive bypass mode
-        
+        var routingMode: RoutingMode = .bypass  // Bypass = domains bypass VPN, VPN Only = only listed domains use VPN
+        var inverseDomains: [DomainEntry] = []  // Domains that should use VPN in VPN Only mode
+
         // Custom decoder for backward compatibility with configs missing new fields
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -141,8 +149,10 @@ final class RouteManager: ObservableObject {
             dnsRefreshInterval = try container.decodeIfPresent(TimeInterval.self, forKey: .dnsRefreshInterval) ?? 3600
             fallbackDNS = try container.decodeIfPresent([String].self, forKey: .fallbackDNS) ?? ["1.1.1.1", "8.8.8.8"]
             proxyConfig = try container.decodeIfPresent(ProxyConfig.self, forKey: .proxyConfig) ?? ProxyConfig()
+            routingMode = try container.decodeIfPresent(RoutingMode.self, forKey: .routingMode) ?? .bypass
+            inverseDomains = try container.decodeIfPresent([DomainEntry].self, forKey: .inverseDomains) ?? []
         }
-        
+
         // Default initializer
         init() {}
         
@@ -330,6 +340,26 @@ final class RouteManager: ObservableObject {
         var enabled: Bool
         var domains: [String]
         var ipRanges: [String]
+        var isCustom: Bool = false
+
+        init(id: String, name: String, enabled: Bool, domains: [String], ipRanges: [String], isCustom: Bool = false) {
+            self.id = id
+            self.name = name
+            self.enabled = enabled
+            self.domains = domains
+            self.ipRanges = ipRanges
+            self.isCustom = isCustom
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            name = try container.decode(String.self, forKey: .name)
+            enabled = try container.decode(Bool.self, forKey: .enabled)
+            domains = try container.decode([String].self, forKey: .domains)
+            ipRanges = try container.decode([String].self, forKey: .ipRanges)
+            isCustom = try container.decodeIfPresent(Bool.self, forKey: .isCustom) ?? false
+        }
     }
     
     struct ActiveRoute: Identifiable {
@@ -665,6 +695,13 @@ final class RouteManager: ObservableObject {
         // Detect local gateway
         localGateway = await detectLocalGateway()
         gatewayDetectedAt = localGateway != nil ? Date() : nil
+
+        // Detect VPN gateway (default route when VPN is connected)
+        if connected {
+            vpnGateway = await parseDefaultGateway()
+        } else {
+            vpnGateway = nil
+        }
         
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
         if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes {
@@ -1107,25 +1144,41 @@ final class RouteManager: ObservableObject {
             log(.error, "No local gateway available")
             return
         }
-        
+
+        let isInverse = config.routingMode == .vpnOnly
+
+        // VPN Only mode requires the VPN gateway for domain-specific routes
+        if isInverse {
+            guard let vpnGw = vpnGateway else {
+                log(.error, "VPN Only mode requires a VPN gateway (is VPN connected?)")
+                return
+            }
+            log(.info, "VPN Only mode: bypass-all via \(gateway), VPN domains via \(vpnGw)")
+        }
+
         var newRoutes: [ActiveRoute] = []
         var failedCount = 0
-        
+
         // Clear DNS cache for fresh resolution
         dnsCache.removeAll()
-        
+
         // Collect all domains to resolve (for parallel resolution)
         var allDomains: [(domain: String, source: String)] = []
-        
-        // Add custom domains
-        for domain in config.domains where domain.enabled {
-            allDomains.append((domain.domain, domain.domain))
-        }
-        
-        // Add service domains
-        for service in config.services where service.enabled {
-            for domain in service.domains {
-                allDomains.append((domain, service.name))
+
+        if isInverse {
+            // VPN Only mode: resolve inverse domains (these go through VPN)
+            for domain in config.inverseDomains where domain.enabled {
+                allDomains.append((domain.domain, domain.domain))
+            }
+        } else {
+            // Bypass mode: resolve bypass domains + service domains
+            for domain in config.domains where domain.enabled {
+                allDomains.append((domain.domain, domain.domain))
+            }
+            for service in config.services where service.enabled {
+                for domain in service.domains {
+                    allDomains.append((domain, service.name))
+                }
             }
         }
         
@@ -1139,9 +1192,21 @@ final class RouteManager: ObservableObject {
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
         
+        // In VPN Only mode, domain-specific routes go through VPN gateway
+        let routeGateway = isInverse ? (vpnGateway ?? gateway) : gateway
+
         // Collect all routes to add (for batch operation)
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
         var seenDestinations: Set<String> = []  // Deduplicate by destination IP
+
+        // VPN Only mode: add catch-all routes through local gateway first
+        // 0.0.0.0/1 + 128.0.0.0/1 cover all IPv4 with higher specificity than default route
+        if isInverse {
+            routesToAdd.append((destination: "0.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
+            routesToAdd.append((destination: "128.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
+            seenDestinations.insert("0.0.0.0/1")
+            seenDestinations.insert("128.0.0.0/1")
+        }
         
         while index < allDomains.count {
             let endIndex = min(index + batchSize, allDomains.count)
@@ -1174,7 +1239,7 @@ final class RouteManager: ObservableObject {
                     
                     for ip in ips where !seenDestinations.contains(ip) {
                         seenDestinations.insert(ip)
-                        routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: result.source))
+                        routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: result.source))
                     }
                 } else if let cachedIPs = dnsDiskCache[result.domain], !cachedIPs.isEmpty {
                     // DNS failed but we have cached IPs - use them as fallback
@@ -1184,7 +1249,7 @@ final class RouteManager: ObservableObject {
                     }
                     for ip in cachedIPs where !seenDestinations.contains(ip) {
                         seenDestinations.insert(ip)
-                        routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: result.source))
+                        routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: result.source))
                     }
                 } else {
                     failedDomains.insert(result.domain)
@@ -1198,11 +1263,13 @@ final class RouteManager: ObservableObject {
         // Save updated DNS cache to disk
         saveDNSCache()
         
-        // Collect IP ranges (these don't need DNS resolution)
-        for service in config.services where service.enabled {
-            for range in service.ipRanges where !seenDestinations.contains(range) {
-                seenDestinations.insert(range)
-                routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
+        // Collect IP ranges (bypass mode only — services are not used in VPN Only mode)
+        if !isInverse {
+            for service in config.services where service.enabled {
+                for range in service.ipRanges where !seenDestinations.contains(range) {
+                    seenDestinations.insert(range)
+                    routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
+                }
             }
         }
         
@@ -1856,6 +1923,129 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    // MARK: - Inverse Domain Management
+
+    func addInverseDomain(_ domain: String) {
+        let cleaned = cleanDomain(domain)
+        guard !cleaned.isEmpty else { return }
+        guard !config.inverseDomains.contains(where: { $0.domain == cleaned }) else {
+            log(.warning, "VPN Only domain \(cleaned) already exists")
+            return
+        }
+        config.inverseDomains.append(DomainEntry(domain: cleaned))
+        saveConfig()
+        log(.success, "Added VPN Only domain: \(cleaned)")
+
+        if isVPNConnected && config.routingMode == .vpnOnly {
+            beginApplyingRoutes()
+            Task {
+                guard let gw = vpnGateway else {
+                    log(.error, "Cannot route \(cleaned): no VPN gateway detected")
+                    endApplyingRoutes()
+                    return
+                }
+                if let routes = await applyRoutesForDomain(cleaned, gateway: gw) {
+                    activeRoutes.append(contentsOf: routes)
+                    if config.manageHostsFile { await updateHostsFile() }
+                }
+                endApplyingRoutes()
+            }
+        }
+    }
+
+    func removeInverseDomain(_ domain: DomainEntry) {
+        beginApplyingRoutes()
+        Task {
+            await removeRoutesForSource(domain.domain)
+            config.inverseDomains.removeAll { $0.id == domain.id }
+            saveConfig()
+            log(.info, "Removed VPN Only domain: \(domain.domain)")
+            endApplyingRoutes()
+        }
+    }
+
+    func toggleInverseDomain(_ domainId: UUID) {
+        guard let index = config.inverseDomains.firstIndex(where: { $0.id == domainId }) else { return }
+        config.inverseDomains[index].enabled.toggle()
+        saveConfig()
+
+        let domain = config.inverseDomains[index]
+        log(.info, "VPN Only: \(domain.domain) \(domain.enabled ? "enabled" : "disabled")")
+
+        if isVPNConnected && config.routingMode == .vpnOnly {
+            beginApplyingRoutes()
+            Task {
+                if domain.enabled {
+                    guard let gw = vpnGateway else {
+                        endApplyingRoutes()
+                        return
+                    }
+                    if let routes = await applyRoutesForDomain(domain.domain, gateway: gw) {
+                        activeRoutes.append(contentsOf: routes)
+                        if config.manageHostsFile { await updateHostsFile() }
+                    }
+                } else {
+                    await removeRoutesForSource(domain.domain)
+                }
+                endApplyingRoutes()
+            }
+        }
+    }
+
+    func setAllInverseDomainsEnabled(_ enabled: Bool) {
+        for i in config.inverseDomains.indices {
+            config.inverseDomains[i].enabled = enabled
+        }
+        saveConfig()
+        log(.info, enabled ? "Enabled all VPN Only domains" : "Disabled all VPN Only domains")
+    }
+
+    /// Switch routing mode and re-apply routes
+    func setRoutingMode(_ mode: RoutingMode) {
+        guard config.routingMode != mode else { return }
+        config.routingMode = mode
+        saveConfig()
+        log(.info, "Routing mode changed to \(mode == .bypass ? "Bypass" : "VPN Only")")
+
+        if isVPNConnected {
+            Task {
+                await removeAllRoutes()
+                await applyAllRoutes()
+            }
+        }
+    }
+
+    // MARK: - Custom Service Management
+
+    func addCustomService(name: String, domains: [String], ipRanges: [String]) {
+        let id = "custom_\(UUID().uuidString.prefix(8).lowercased())"
+        let service = ServiceEntry(id: id, name: name, enabled: true, domains: domains, ipRanges: ipRanges, isCustom: true)
+        config.services.append(service)
+        saveConfig()
+        log(.success, "Added custom service: \(name)")
+    }
+
+    func updateCustomService(id: String, name: String, domains: [String], ipRanges: [String]) {
+        guard let index = config.services.firstIndex(where: { $0.id == id && $0.isCustom }) else { return }
+        let wasEnabled = config.services[index].enabled
+        config.services[index] = ServiceEntry(id: id, name: name, enabled: wasEnabled, domains: domains, ipRanges: ipRanges, isCustom: true)
+        saveConfig()
+        log(.info, "Updated custom service: \(name)")
+    }
+
+    func removeCustomService(_ serviceId: String) {
+        guard let index = config.services.firstIndex(where: { $0.id == serviceId && $0.isCustom }) else { return }
+        let name = config.services[index].name
+        beginApplyingRoutes()
+        Task {
+            await removeRoutesForSource(name)
+            config.services.remove(at: index)
+            saveConfig()
+            log(.info, "Removed custom service: \(name)")
+            endApplyingRoutes()
+        }
+    }
+
     func toggleService(_ serviceId: String) {
         guard let index = config.services.firstIndex(where: { $0.id == serviceId }) else { return }
         config.services[index].enabled.toggle()
@@ -2503,27 +2693,30 @@ final class RouteManager: ObservableObject {
         // Collect all domain -> IP mappings from cache (populated during route application)
         // Falls back to disk cache if memory cache doesn't have an entry (e.g., DNS failed at startup)
         var entries: [(domain: String, ip: String)] = []
-        
-        for domain in config.domains where domain.enabled {
+
+        let activeDomains: [DomainEntry] = config.routingMode == .vpnOnly ? config.inverseDomains : config.domains
+
+        for domain in activeDomains where domain.enabled {
             if let cachedIP = dnsCache[domain.domain] {
                 entries.append((domain.domain, cachedIP))
             } else if let diskCachedIPs = dnsDiskCache[domain.domain], let firstIP = diskCachedIPs.first {
-                // Fallback to disk cache when DNS failed at startup
                 entries.append((domain.domain, firstIP))
             }
         }
-        
-        for service in config.services where service.enabled {
-            for domain in service.domains {
-                if let cachedIP = dnsCache[domain] {
-                    entries.append((domain, cachedIP))
-                } else if let diskCachedIPs = dnsDiskCache[domain], let firstIP = diskCachedIPs.first {
-                    // Fallback to disk cache when DNS failed at startup
-                    entries.append((domain, firstIP))
+
+        // Services only apply in bypass mode
+        if config.routingMode == .bypass {
+            for service in config.services where service.enabled {
+                for domain in service.domains {
+                    if let cachedIP = dnsCache[domain] {
+                        entries.append((domain, cachedIP))
+                    } else if let diskCachedIPs = dnsDiskCache[domain], let firstIP = diskCachedIPs.first {
+                        entries.append((domain, firstIP))
+                    }
                 }
             }
         }
-        
+
         // Update /etc/hosts (requires sudo)
         await modifyHostsFile(entries: entries)
     }
@@ -2532,9 +2725,12 @@ final class RouteManager: ObservableObject {
         await modifyHostsFile(entries: [])
     }
     
-    /// Called when app is quitting - clean up hosts file
+    /// Called when app is quitting - clean up hosts file and VPN Only routes
     func cleanupOnQuit() async {
-        log(.info, "Cleaning up /etc/hosts on quit...")
+        log(.info, "Cleaning up on quit...")
+        if config.routingMode == .vpnOnly && !activeRoutes.isEmpty {
+            await removeAllRoutes()
+        }
         await cleanHostsFile()
     }
     

@@ -1,6 +1,6 @@
 # VPN Bypass - Product Roadmap
 
-## Current State (v1.9.0)
+## Current State (v2.0.0)
 
 ### ✅ Phase 1 Complete - Core & Polish (v1.0 - v1.2)
 
@@ -64,7 +64,7 @@
 | Feature | Description |
 |---------|-------------|
 | **App-based Routing** | Bypass VPN for specific apps (Safari, Chrome, Spotify app) |
-| **Inverse Mode** | Route ONLY specific traffic through VPN, bypass everything else |
+| ~~**Inverse Mode**~~ | ✅ Done in v2.0 - Route ONLY specific traffic through VPN, bypass everything else |
 | **Kill Switch** | Block all traffic if VPN disconnects unexpectedly |
 | **DNS Leak Protection** | Ensure DNS queries don't leak through VPN |
 | **IPv6 Leak Protection** | Block IPv6 to prevent leaks |
@@ -171,7 +171,7 @@
 1. ✅ **v1.0 - v1.2**: Core features, notifications, helper, Homebrew
 2. ✅ **v1.3 - v1.6**: Performance overhaul, instant startup, DoH/DoT, DNS cache
 3. ✅ **v1.7 - v1.9**: VPN compatibility (Check Point, Zscaler, Tailscale), gateway robustness, auto-merge
-4. 🔲 **v2.0**: Implement license system + app-based routing (Premium)
+4. ✅ **v2.0**: Inverse mode (VPN Only routing) + custom services
 5. 🔲 **v2.5**: Kill switch + leak protection + connection profiles (Premium)
 6. 🔲 **v3.0**: CLI interface + network profiles + statistics
 
@@ -185,4 +185,4 @@
 
 ---
 
-*Last updated: March 4, 2026*
+*Last updated: March 30, 2026*
