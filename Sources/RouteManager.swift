@@ -48,6 +48,7 @@ final class RouteManager: ObservableObject {
     private var detectedDNSServer: String?  // User's real DNS (pre-VPN), detected at startup
     private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
+    private var orphanedServiceDomains: [String: [String]] = [:]  // Deleted service name -> its domains (for hosts reconstruction)
     private var gatewayDetectedAt: Date?
     private var lastInterfaceReroute: Date?
     private var lastTailscaleSelfFingerprint: String?
@@ -1391,12 +1392,15 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        // Add-failed: best-effort, don't re-attach (delete-before-add already cleaned)
+        // Add-failed: helper's addRoute does delete-before-add, so the old route is
+        // gone after a failed re-add. Don't re-attach — the kernel route doesn't exist.
+        // (The only way delete-before-add's delete could fail is if the route was already
+        // absent, since the helper runs as root and permission errors don't apply.)
         if !addFailedStaleDests.isEmpty {
             if HelperManager.shared.isHelperInstalled {
                 let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
                 if result.failureCount > 0 {
-                    log(.warning, "Add-failed cleanup: \(result.successCount) removed, \(result.failureCount) already gone")
+                    log(.info, "Add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
                 }
             } else {
                 for dest in addFailedStaleDests {
@@ -1649,11 +1653,12 @@ final class RouteManager: ObservableObject {
             }
         }
 
+        // Add-failed: delete-before-add already removed the old route (see full apply comment)
         if !addFailedStaleDests.isEmpty {
             if HelperManager.shared.isHelperInstalled {
                 let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
                 if result.failureCount > 0 {
-                    log(.warning, "Cache add-failed cleanup: \(result.successCount) removed, \(result.failureCount) already gone")
+                    log(.info, "Cache add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
                 }
             } else {
                 for dest in addFailedStaleDests {
@@ -1871,9 +1876,9 @@ final class RouteManager: ObservableObject {
         }
         
         // Repair missing CIDR routes for service ipRanges (bypass mode only)
+        var cidrRepaired = 0
         if !isInverse && stillConnected {
             let existingDests = await MainActor.run { Set(activeRoutes.map { $0.destination }) }
-            var cidrRepaired = 0
             for service in config.services where service.enabled {
                 for range in service.ipRanges {
                     if !existingDests.contains(range) {
@@ -1903,8 +1908,8 @@ final class RouteManager: ObservableObject {
             await MainActor.run { log(.info, "Background refresh: hosts file updated") }
         }
 
-        // Send notification if requested
-        let totalChanges = routeChanges.count
+        // Send notification if requested (include both DNS changes and CIDR repairs)
+        let totalChanges = routeChanges.count + cidrRepaired
         if sendNotification && totalChanges > 0 {
             NotificationManager.shared.notifyDNSRefreshCompleted(updatedCount: totalChanges)
         }
@@ -2574,9 +2579,15 @@ final class RouteManager: ObservableObject {
     func removeCustomService(_ serviceId: String) {
         guard let index = config.services.firstIndex(where: { $0.id == serviceId && $0.isCustom }) else { return }
         let name = config.services[index].name
+        let serviceDomains = config.services[index].domains
         beginApplyingRoutes()
         Task {
             await removeRoutesForSource(name)
+            // If routes were retained (kernel removal failed), save the domain list
+            // so updateHostsFile can reconstruct hosts entries for this orphaned source
+            if activeRoutes.contains(where: { $0.source == name }) {
+                orphanedServiceDomains[name] = serviceDomains
+            }
             config.services.remove(at: index)
             saveConfig()
             if config.manageHostsFile { await updateHostsFile() }
@@ -3301,17 +3312,34 @@ final class RouteManager: ObservableObject {
             return sources
         }()
         var coveredDomains = Set(entries.map { $0.domain })
+        var orphanedSourcesSeen: Set<String> = []
         for route in activeRoutes where !configSources.contains(route.source) {
-            // Only handle domain-name sources (direct DNS cache lookup).
-            // Service-name sources can't be resolved to domains without the
-            // deleted config, and a global reverse lookup would be too broad
-            // (matching unrelated domains that share the same cached IP).
-            // Orphaned service routes heal on next full apply.
-            guard !coveredDomains.contains(route.source) else { continue }
-            if let ip = firstRoutedIP(for: route.source, in: routedDestinations) {
-                entries.append((route.source, ip))
-                coveredDomains.insert(route.source)
+            // Domain-name source: direct DNS cache lookup
+            if !coveredDomains.contains(route.source) {
+                if let ip = firstRoutedIP(for: route.source, in: routedDestinations) {
+                    entries.append((route.source, ip))
+                    coveredDomains.insert(route.source)
+                    continue
+                }
             }
+            // Service-name source: use saved domain list from deletion
+            if !orphanedSourcesSeen.contains(route.source),
+               let domains = orphanedServiceDomains[route.source] {
+                orphanedSourcesSeen.insert(route.source)
+                for domain in domains {
+                    if !coveredDomains.contains(domain) {
+                        if let ip = firstRoutedIP(for: domain, in: routedDestinations) {
+                            entries.append((domain, ip))
+                            coveredDomains.insert(domain)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Clean up orphanedServiceDomains for sources with no remaining routes
+        orphanedServiceDomains = orphanedServiceDomains.filter { name, _ in
+            activeRoutes.contains { $0.source == name }
         }
 
         // Update /etc/hosts (requires sudo)
