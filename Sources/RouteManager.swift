@@ -2315,11 +2315,13 @@ final class RouteManager: ObservableObject {
         if isVPNConnected && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
+                let epoch = routeEpoch
                 guard let gateway = await ensureGateway() else {
                     log(.error, "Cannot route \(cleaned): no local gateway detected. Try Refresh Routes.")
                     return
                 }
                 if let routes = await applyRoutesForDomain(cleaned, gateway: gateway) {
+                    guard routeEpoch == epoch else { return }
                     activeRoutes.append(contentsOf: routes)
                     if config.manageHostsFile {
                         await updateHostsFile()
@@ -2331,7 +2333,7 @@ final class RouteManager: ObservableObject {
             }
         }
     }
-    
+
     private func scheduleRetry(for domain: String) {
         pendingRetryTasks[domain]?.cancel()
         pendingRetryTasks[domain] = Task { [weak self] in
@@ -2363,9 +2365,11 @@ final class RouteManager: ObservableObject {
             return
         }
         defer { releaseRouteOperation() }
+        let epoch = routeEpoch
 
         log(.info, "Retrying DNS for \(domain)...")
         if let routes = await applyRoutesForDomain(domain, gateway: gateway) {
+            guard routeEpoch == epoch else { return }
             activeRoutes.append(contentsOf: routes)
             if config.manageHostsFile {
                 await updateHostsFile()
@@ -2414,12 +2418,14 @@ final class RouteManager: ObservableObject {
         if isVPNConnected && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
+                let epoch = routeEpoch
                 if domain.enabled {
                     guard let gateway = await ensureGateway() else {
                         log(.error, "Cannot route \(domain.domain): no local gateway detected")
                         return
                     }
                     if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
+                        guard routeEpoch == epoch else { return }
                         activeRoutes.append(contentsOf: routes)
                         if config.manageHostsFile {
                             await updateHostsFile()
@@ -2449,12 +2455,14 @@ final class RouteManager: ObservableObject {
         guard isVPNConnected, acquireRouteOperation() else { return }
         Task {
             defer { releaseRouteOperation() }
+            let epoch = routeEpoch
             let gateway: String? = enabled ? await ensureGateway() : nil
             if enabled && gateway == nil {
                 log(.error, "Cannot enable domains: no local gateway detected")
                 return
             }
             for domain in domainsToChange {
+                guard routeEpoch == epoch else { return }
                 if enabled, let gw = gateway {
                     if let routes = await applyRoutesForDomain(domain.domain, gateway: gw, persistCache: false) {
                         activeRoutes.append(contentsOf: routes)
@@ -2529,11 +2537,13 @@ final class RouteManager: ObservableObject {
         if isVPNConnected && config.routingMode == .vpnOnly && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
+                let epoch = routeEpoch
                 guard let gw = vpnGateway else {
                     log(.error, "Cannot route \(cleaned): no VPN gateway detected")
                     return
                 }
                 if let routes = await applyRoutesForDomain(cleaned, gateway: gw) {
+                    guard routeEpoch == epoch else { return }
                     activeRoutes.append(contentsOf: routes)
                     if config.manageHostsFile { await updateHostsFile() }
                 }
@@ -2569,9 +2579,11 @@ final class RouteManager: ObservableObject {
         if isVPNConnected && config.routingMode == .vpnOnly && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
+                let epoch = routeEpoch
                 if domain.enabled {
                     guard let gw = vpnGateway else { return }
                     if let routes = await applyRoutesForDomain(domain.domain, gateway: gw) {
+                        guard routeEpoch == epoch else { return }
                         activeRoutes.append(contentsOf: routes)
                         if config.manageHostsFile { await updateHostsFile() }
                     }
@@ -2726,6 +2738,7 @@ final class RouteManager: ObservableObject {
     
     /// Apply routes for a single service (incremental add) - parallel DNS + batch routes
     private func applyRoutesForService(_ service: ServiceEntry, gateway: String) async {
+        let epoch = routeEpoch
         var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool)] = []
 
@@ -2814,6 +2827,12 @@ final class RouteManager: ObservableObject {
             return true
         }
 
+        // Preemption check before committing
+        guard routeEpoch == epoch else {
+            log(.info, "Service apply aborted for \(service.name): routes were cleared during operation")
+            return
+        }
+
         await MainActor.run {
             activeRoutes.append(contentsOf: confirmedRoutes)
         }
@@ -2839,12 +2858,14 @@ final class RouteManager: ObservableObject {
         guard isVPNConnected, acquireRouteOperation() else { return }
         Task {
             defer { releaseRouteOperation() }
+            let epoch = routeEpoch
             let gateway: String? = enabled ? await ensureGateway() : nil
             if enabled && gateway == nil {
                 log(.error, "Cannot enable services: no local gateway detected")
                 return
             }
             for service in servicesToChange {
+                guard routeEpoch == epoch else { return }
                 if enabled, let gw = gateway {
                     await applyRoutesForService(service, gateway: gw)
                 } else if !enabled {
