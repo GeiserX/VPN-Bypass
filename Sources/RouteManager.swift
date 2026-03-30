@@ -2465,6 +2465,7 @@ final class RouteManager: ObservableObject {
                 guard routeEpoch == epoch else { return }
                 if enabled, let gw = gateway {
                     if let routes = await applyRoutesForDomain(domain.domain, gateway: gw, persistCache: false) {
+                        guard routeEpoch == epoch else { return }
                         activeRoutes.append(contentsOf: routes)
                     }
                 } else if !enabled {
