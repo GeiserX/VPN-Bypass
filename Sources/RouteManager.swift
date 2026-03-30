@@ -1123,9 +1123,11 @@ final class RouteManager: ObservableObject {
             // Fast path: if we have DNS cache, apply instantly then refresh in background
             if !dnsDiskCache.isEmpty {
                 log(.info, "Using cached DNS for instant startup...")
-                await applyRoutesFromCache()
+                let cacheApplied = await applyRoutesFromCache()
                 isLoading = false
-                log(.info, "Routes applied from cache. Refreshing DNS in background...")
+                if cacheApplied {
+                    log(.info, "Routes applied from cache. Refreshing DNS in background...")
+                }
                 
                 // Background refresh: re-resolve DNS and update routes if changed
                 Task.detached { [weak self] in
@@ -1171,9 +1173,8 @@ final class RouteManager: ObservableObject {
             log(.info, "Full apply skipped: another route operation is in progress")
             return
         }
-        isRouteOperationInProgress = true
         beginApplyingRoutes()
-        defer { endApplyingRoutes(); isRouteOperationInProgress = false }
+        defer { endApplyingRoutes() }
 
         guard let gateway = localGateway else {
             log(.error, "No local gateway available")
@@ -1498,18 +1499,18 @@ final class RouteManager: ObservableObject {
     // MARK: - Instant Startup (Cache-based)
     
     /// Apply routes using cached IPs only (no DNS resolution) - used for instant startup
-    private func applyRoutesFromCache() async {
+    @discardableResult
+    private func applyRoutesFromCache() async -> Bool {
         guard !isRouteOperationInProgress else {
             log(.info, "Cache apply skipped: another route operation is in progress")
-            return
+            return false
         }
-        isRouteOperationInProgress = true
         beginApplyingRoutes()
-        defer { endApplyingRoutes(); isRouteOperationInProgress = false }
+        defer { endApplyingRoutes() }
 
         guard let gateway = localGateway else {
             log(.error, "Cannot apply cached routes: no local gateway")
-            return
+            return false
         }
 
         let isInverse = config.routingMode == .vpnOnly
@@ -1518,7 +1519,7 @@ final class RouteManager: ObservableObject {
         if isInverse {
             guard let _ = vpnGateway else {
                 log(.error, "Cannot apply cached routes in VPN Only mode: no VPN gateway")
-                return
+                return false
             }
         }
 
@@ -1697,6 +1698,7 @@ final class RouteManager: ObservableObject {
         } else {
             log(.success, "Applied \(uniqueRouteCount) unique routes from cache")
         }
+        return true
     }
     
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
@@ -1705,9 +1707,8 @@ final class RouteManager: ObservableObject {
             log(.info, "Background DNS refresh skipped: another route operation is in progress")
             return
         }
-        isRouteOperationInProgress = true
         beginApplyingRoutes()
-        defer { endApplyingRoutes(); isRouteOperationInProgress = false }
+        defer { endApplyingRoutes() }
 
         guard let gateway = localGateway else {
             log(.warning, "Background DNS refresh skipped: no local gateway")
@@ -2002,8 +2003,6 @@ final class RouteManager: ObservableObject {
             log(.info, "DNS refresh skipped: another route operation is in progress")
             return
         }
-        isRouteOperationInProgress = true
-        defer { isRouteOperationInProgress = false }
 
         guard isVPNConnected, let gateway = localGateway else {
             log(.info, "DNS refresh skipped: \(!isVPNConnected ? "VPN not connected" : "no local gateway")")
@@ -2910,12 +2909,16 @@ final class RouteManager: ObservableObject {
     
     private func beginApplyingRoutes() {
         applyingRoutesCount += 1
-        if !isApplyingRoutes { isApplyingRoutes = true }
+        isApplyingRoutes = true
+        isRouteOperationInProgress = true
     }
-    
+
     private func endApplyingRoutes() {
         applyingRoutesCount = max(0, applyingRoutesCount - 1)
-        if applyingRoutesCount == 0 { isApplyingRoutes = false }
+        if applyingRoutesCount == 0 {
+            isApplyingRoutes = false
+            isRouteOperationInProgress = false
+        }
     }
     
     private func ensureGateway() async -> String? {
