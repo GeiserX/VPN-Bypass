@@ -48,6 +48,7 @@ final class RouteManager: ObservableObject {
     private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
     private var orphanedServiceDomains: [String: [String]] = [:]  // Deleted service name -> its domains (for hosts reconstruction)
+    private var routeEpoch: UInt64 = 0  // Incremented by removeAllRoutes — lets in-flight applies detect preemption
     private var gatewayDetectedAt: Date?
     private var lastInterfaceReroute: Date?
     private var lastTailscaleSelfFingerprint: String?
@@ -1177,8 +1178,10 @@ final class RouteManager: ObservableObject {
         await applyAllRoutesInternal(sendNotification: true)
     }
 
-    /// Internal — gate-free, callers must hold the route operation lock
+    /// Internal — gate-free, callers must hold the route operation lock.
+    /// Checks routeEpoch before committing to detect preemption by removeAllRoutes.
     private func applyAllRoutesInternal(sendNotification: Bool) async {
+        let epoch = routeEpoch
 
         guard let gateway = localGateway else {
             log(.error, "No local gateway available")
@@ -1423,14 +1426,21 @@ final class RouteManager: ObservableObject {
             }
         }
 
+        // Preemption check: if removeAllRoutes() ran during our awaits, our results are stale.
+        // The epoch check + commit is atomic on @MainActor (no await between them).
+        guard routeEpoch == epoch else {
+            log(.warning, "Apply aborted: routes were cleared during operation")
+            return
+        }
+
         activeRoutes = newRoutes
         lastUpdate = Date()
-        
+
         // Manage hosts file if enabled
         if config.manageHostsFile {
             await updateHostsFile()
         }
-        
+
         let confirmedUniqueCount = uniqueRouteCount
         let totalFailures = failedCount + batchFailureCount
 
@@ -1461,7 +1471,9 @@ final class RouteManager: ObservableObject {
     
     /// Remove all routes — always proceeds (critical teardown for disconnect/quit/clear).
     /// Does NOT acquire the route operation gate so it cannot be blocked by a running operation.
+    /// Increments routeEpoch so in-flight applies detect preemption and abort before committing.
     func removeAllRoutes() async {
+        routeEpoch &+= 1
         let destinations = Array(Set(activeRoutes.map { $0.destination }))
 
         var failedDests: Set<String> = []
@@ -1505,8 +1517,9 @@ final class RouteManager: ObservableObject {
     // MARK: - Instant Startup (Cache-based)
     
     /// Apply routes using cached IPs only (no DNS resolution) - used for instant startup
-    /// Returns false if apply was skipped (no gateway, gate held, etc.)
+    /// Returns false if apply was skipped (no gateway, gate held, preempted, etc.)
     private func applyRoutesFromCache() async -> Bool {
+        let epoch = routeEpoch
         guard acquireRouteOperation() else {
             log(.info, "Cache apply skipped: route operation in progress")
             return false
@@ -1690,6 +1703,12 @@ final class RouteManager: ObservableObject {
             }
         }
 
+        // Preemption check: if removeAllRoutes() ran during our awaits, our results are stale.
+        guard routeEpoch == epoch else {
+            log(.warning, "Cache apply aborted: routes were cleared during operation")
+            return false
+        }
+
         activeRoutes = newRoutes
         lastUpdate = Date()
 
@@ -1708,6 +1727,7 @@ final class RouteManager: ObservableObject {
 
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
     private func backgroundDNSRefresh(sendNotification: Bool) async {
+        let epoch = routeEpoch
         guard acquireRouteOperation() else {
             log(.info, "Background DNS refresh skipped: another route operation is in progress")
             return
@@ -1951,6 +1971,12 @@ final class RouteManager: ObservableObject {
             }
         }
 
+        // Preemption check: if removeAllRoutes() ran during our awaits, skip commits
+        guard routeEpoch == epoch else {
+            await MainActor.run { log(.warning, "Background DNS refresh aborted: routes were cleared during operation") }
+            return
+        }
+
         // Update hosts file with any newly resolved domains (only if still connected)
         let shouldUpdateHosts = await MainActor.run { config.manageHostsFile && isVPNConnected }
         if shouldUpdateHosts {
@@ -2003,6 +2029,7 @@ final class RouteManager: ObservableObject {
     
     /// Perform DNS refresh - re-resolve all domains and update routes
     private func performDNSRefresh() async {
+        let epoch = routeEpoch
         guard acquireRouteOperation() else {
             log(.info, "DNS refresh skipped: another route operation is in progress")
             return
@@ -2195,6 +2222,13 @@ final class RouteManager: ObservableObject {
             if !failedKernelRemovals.isEmpty {
                 log(.warning, "DNS refresh: \(failedKernelRemovals.count) kernel removals failed — entries retained")
             }
+        }
+
+        // Preemption check: if removeAllRoutes() ran during our awaits, skip commits
+        guard routeEpoch == epoch else {
+            log(.warning, "DNS refresh aborted: routes were cleared during operation")
+            nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
+            return
         }
 
         // Update hosts file if enabled and still connected
