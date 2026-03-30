@@ -776,13 +776,14 @@ final class RouteManager: ObservableObject {
         
         if !isVPNConnected && wasVPNConnected {
             log(.warning, "VPN disconnected (was: \(oldInterface ?? "unknown"))")
-            NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface)
             cancelAllRetries()
             // Remove kernel routes before clearing in-memory state
             await removeAllRoutes()
             routeVerificationResults.removeAll()
             lastTailscaleSelfFingerprint = nil
             vpnGateway = nil
+            // Notify after cleanup so notification reflects actual state
+            NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface)
         }
     }
     
@@ -1223,6 +1224,7 @@ final class RouteManager: ObservableObject {
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
         var seenDestinations: Set<String> = []  // Deduplicate kernel operations
         var allSourceEntries: [(destination: String, source: String)] = []  // Track all sources per IP
+        var seenSourceDests: Set<String> = []  // Deduplicate (source, destination) pairs
 
         // VPN Only mode: add catch-all routes through local gateway first
         // 0.0.0.0/1 + 128.0.0.0/1 cover all IPv4 with higher specificity than default route
@@ -1233,6 +1235,8 @@ final class RouteManager: ObservableObject {
             seenDestinations.insert("128.0.0.0/1")
             allSourceEntries.append((destination: "0.0.0.0/1", source: "VPN Only catch-all"))
             allSourceEntries.append((destination: "128.0.0.0/1", source: "VPN Only catch-all"))
+            seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
+            seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
         }
         
         while index < allDomains.count {
@@ -1265,13 +1269,17 @@ final class RouteManager: ObservableObject {
                     dnsDiskCache[result.domain] = ips  // Update persistent cache
 
                     for ip in ips {
-                        // Dedup kernel operations but record all sources
+                        // Dedup kernel operations
                         if !seenDestinations.contains(ip) {
                             seenDestinations.insert(ip)
                             routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: result.source))
                         }
-                        // Always record source ownership for multi-source tracking
-                        allSourceEntries.append((destination: ip, source: result.source))
+                        // Dedup (source, destination) ownership pairs
+                        let key = "\(result.source)|\(ip)"
+                        if !seenSourceDests.contains(key) {
+                            seenSourceDests.insert(key)
+                            allSourceEntries.append((destination: ip, source: result.source))
+                        }
                     }
                 } else if let cachedIPs = dnsDiskCache[result.domain], !cachedIPs.isEmpty {
                     // DNS failed but we have cached IPs - use them as fallback
@@ -1284,7 +1292,11 @@ final class RouteManager: ObservableObject {
                             seenDestinations.insert(ip)
                             routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: result.source))
                         }
-                        allSourceEntries.append((destination: ip, source: result.source))
+                        let key = "\(result.source)|\(ip)"
+                        if !seenSourceDests.contains(key) {
+                            seenSourceDests.insert(key)
+                            allSourceEntries.append((destination: ip, source: result.source))
+                        }
                     }
                 } else {
                     failedDomains.insert(result.domain)
@@ -1302,7 +1314,11 @@ final class RouteManager: ObservableObject {
         if !isInverse {
             for service in config.services where service.enabled {
                 for range in service.ipRanges {
-                    allSourceEntries.append((destination: range, source: service.name))
+                    let key = "\(service.name)|\(range)"
+                    if !seenSourceDests.contains(key) {
+                        seenSourceDests.insert(key)
+                        allSourceEntries.append((destination: range, source: service.name))
+                    }
                     guard !seenDestinations.contains(range) else { continue }
                     seenDestinations.insert(range)
                     routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
@@ -1446,6 +1462,7 @@ final class RouteManager: ObservableObject {
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
         var seenDestinations: Set<String> = []  // Deduplicate kernel operations
         var allSourceEntries: [(destination: String, gateway: String, source: String)] = []
+        var seenSourceDests: Set<String> = []  // Deduplicate (source, destination) pairs
 
         if isInverse {
             // VPN Only mode: catch-all through local gateway, domain routes through VPN
@@ -1455,11 +1472,17 @@ final class RouteManager: ObservableObject {
             seenDestinations.insert("128.0.0.0/1")
             allSourceEntries.append((destination: "0.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
             allSourceEntries.append((destination: "128.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
+            seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
+            seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
 
             for domain in config.inverseDomains where domain.enabled {
                 if let cachedIPs = dnsDiskCache[domain.domain] {
                     for ip in cachedIPs {
-                        allSourceEntries.append((destination: ip, gateway: routeGateway, source: domain.domain))
+                        let key = "\(domain.domain)|\(ip)"
+                        if !seenSourceDests.contains(key) {
+                            seenSourceDests.insert(key)
+                            allSourceEntries.append((destination: ip, gateway: routeGateway, source: domain.domain))
+                        }
                         if !seenDestinations.contains(ip) {
                             seenDestinations.insert(ip)
                             routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: domain.domain))
@@ -1476,7 +1499,11 @@ final class RouteManager: ObservableObject {
                 for domain in service.domains {
                     if let cachedIPs = dnsDiskCache[domain] {
                         for ip in cachedIPs {
-                            allSourceEntries.append((destination: ip, gateway: gateway, source: service.name))
+                            let key = "\(service.name)|\(ip)"
+                            if !seenSourceDests.contains(key) {
+                                seenSourceDests.insert(key)
+                                allSourceEntries.append((destination: ip, gateway: gateway, source: service.name))
+                            }
                             if !seenDestinations.contains(ip) {
                                 seenDestinations.insert(ip)
                                 routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: service.name))
@@ -1488,7 +1515,11 @@ final class RouteManager: ObservableObject {
                     }
                 }
                 for range in service.ipRanges {
-                    allSourceEntries.append((destination: range, gateway: gateway, source: service.name))
+                    let key = "\(service.name)|\(range)"
+                    if !seenSourceDests.contains(key) {
+                        seenSourceDests.insert(key)
+                        allSourceEntries.append((destination: range, gateway: gateway, source: service.name))
+                    }
                     if !seenDestinations.contains(range) {
                         seenDestinations.insert(range)
                         routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
@@ -1499,7 +1530,11 @@ final class RouteManager: ObservableObject {
             for domain in config.domains where domain.enabled {
                 if let cachedIPs = dnsDiskCache[domain.domain] {
                     for ip in cachedIPs {
-                        allSourceEntries.append((destination: ip, gateway: gateway, source: domain.domain))
+                        let key = "\(domain.domain)|\(ip)"
+                        if !seenSourceDests.contains(key) {
+                            seenSourceDests.insert(key)
+                            allSourceEntries.append((destination: ip, gateway: gateway, source: domain.domain))
+                        }
                         if !seenDestinations.contains(ip) {
                             seenDestinations.insert(ip)
                             routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: domain.domain))
@@ -2201,9 +2236,12 @@ final class RouteManager: ObservableObject {
         let routesToRemove = activeRoutes.filter { $0.source == source }
         let destinationsStillNeeded = Set(activeRoutes.filter { $0.source != source }.map { $0.destination })
 
+        // Deduplicate destinations to avoid attempting the same kernel removal twice
+        var seenDestinations: Set<String> = []
         var kernelRemoved = 0
         var failedKernelRemovals: Set<String> = []
         for route in routesToRemove {
+            guard seenDestinations.insert(route.destination).inserted else { continue }
             if !destinationsStillNeeded.contains(route.destination) {
                 if await removeRoute(route.destination) {
                     kernelRemoved += 1
@@ -3091,7 +3129,9 @@ final class RouteManager: ObservableObject {
 
         let activeDomains: [DomainEntry] = config.routingMode == .vpnOnly ? config.inverseDomains : config.domains
 
-        for domain in activeDomains where domain.enabled {
+        for domain in activeDomains {
+            // Include enabled domains AND disabled domains that still have active kernel routes
+            guard domain.enabled || activeRoutes.contains(where: { $0.source == domain.domain }) else { continue }
             if let ip = firstRoutedIP(for: domain.domain, in: routedDestinations) {
                 entries.append((domain.domain, ip))
             }
@@ -3099,7 +3139,8 @@ final class RouteManager: ObservableObject {
 
         // Services only apply in bypass mode
         if config.routingMode == .bypass {
-            for service in config.services where service.enabled {
+            for service in config.services {
+                guard service.enabled || activeRoutes.contains(where: { $0.source == service.name }) else { continue }
                 for domain in service.domains {
                     if let ip = firstRoutedIP(for: domain, in: routedDestinations) {
                         entries.append((domain, ip))
