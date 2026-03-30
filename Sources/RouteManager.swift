@@ -739,12 +739,13 @@ final class RouteManager: ObservableObject {
             } else {
                 log(.warning, "VPN interface changed: \(oldInterface ?? "?") → \(interface ?? "?")")
                 lastInterfaceReroute = Date()
-                if localGateway != nil {
+                if localGateway != nil, acquireRouteOperation() {
                     isLoading = true
                     await removeAllRoutes()
-                    await applyAllRoutes()
+                    await applyAllRoutesInternal(sendNotification: false)
                     isLoading = false
-                } else {
+                    releaseRouteOperation()
+                } else if localGateway == nil {
                     log(.error, "VPN interface changed but no gateway detected")
                 }
             }
@@ -762,12 +763,13 @@ final class RouteManager: ObservableObject {
             } else {
                 log(.warning, "Tailscale active account changed, refreshing routes")
                 lastInterfaceReroute = Date()
-                if localGateway != nil {
+                if localGateway != nil, acquireRouteOperation() {
                     isLoading = true
                     await removeAllRoutes()
-                    await applyAllRoutes()
+                    await applyAllRoutesInternal(sendNotification: false)
                     isLoading = false
-                } else {
+                    releaseRouteOperation()
+                } else if localGateway == nil {
                     log(.error, "Tailscale account changed but no gateway detected")
                 }
             }
