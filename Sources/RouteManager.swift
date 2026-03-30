@@ -1844,16 +1844,26 @@ final class RouteManager: ObservableObject {
             if !additions.isEmpty {
                 var addFailedDests: Set<String> = []
                 if HelperManager.shared.isHelperInstalled {
-                    let routes = additions.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
+                    // Deduplicate by destination for kernel operations — same IP from
+                    // different sources must only be sent once to avoid delete-before-add
+                    // destroying a just-added route on the second pass
+                    var seenAddDests: Set<String> = []
+                    let routes = additions.compactMap { add -> (destination: String, gateway: String, isNetwork: Bool)? in
+                        guard seenAddDests.insert(add.destination).inserted else { return nil }
+                        return (destination: add.destination, gateway: add.gateway, isNetwork: add.isNetwork)
+                    }
                     let result = await HelperManager.shared.addRoutesBatch(routes: routes)
                     addFailedDests = Set(result.failedDestinations)
                 } else {
+                    var seenAddDests: Set<String> = []
                     for add in additions {
-                        _ = await addRoute(add.destination, gateway: add.gateway, isNetwork: add.isNetwork)
+                        if seenAddDests.insert(add.destination).inserted {
+                            _ = await addRoute(add.destination, gateway: add.gateway, isNetwork: add.isNetwork)
+                        }
                     }
                 }
 
-                // Only record ownership for destinations the kernel accepted
+                // Record ownership for ALL sources whose destinations succeeded
                 await MainActor.run {
                     for add in additions where !addFailedDests.contains(add.destination) {
                         activeRoutes.append(ActiveRoute(
@@ -1879,20 +1889,33 @@ final class RouteManager: ObservableObject {
         var cidrRepaired = 0
         if !isInverse && stillConnected {
             let existingDests = await MainActor.run { Set(activeRoutes.map { $0.destination }) }
+            var repairedRanges: Set<String> = []
             for service in config.services where service.enabled {
                 for range in service.ipRanges {
-                    if !existingDests.contains(range) {
-                        if await addRoute(range, gateway: routeGateway, isNetwork: true) {
-                            await MainActor.run {
-                                activeRoutes.append(ActiveRoute(
-                                    destination: range,
-                                    gateway: routeGateway,
-                                    source: service.name,
-                                    timestamp: Date()
-                                ))
-                            }
-                            cidrRepaired += 1
+                    if existingDests.contains(range) { continue }
+                    if repairedRanges.contains(range) {
+                        // Already repaired by another service — just add ownership
+                        await MainActor.run {
+                            activeRoutes.append(ActiveRoute(
+                                destination: range,
+                                gateway: routeGateway,
+                                source: service.name,
+                                timestamp: Date()
+                            ))
                         }
+                        continue
+                    }
+                    if await addRoute(range, gateway: routeGateway, isNetwork: true) {
+                        repairedRanges.insert(range)
+                        await MainActor.run {
+                            activeRoutes.append(ActiveRoute(
+                                destination: range,
+                                gateway: routeGateway,
+                                source: service.name,
+                                timestamp: Date()
+                            ))
+                        }
+                        cidrRepaired += 1
                     }
                 }
             }
@@ -1906,6 +1929,12 @@ final class RouteManager: ObservableObject {
         if shouldUpdateHosts {
             await updateHostsFile()
             await MainActor.run { log(.info, "Background refresh: hosts file updated") }
+        }
+
+        // Update UI refresh timestamps
+        await MainActor.run {
+            lastDNSRefresh = Date()
+            nextDNSRefresh = Date().addingTimeInterval(config.dnsRefreshInterval)
         }
 
         // Send notification if requested (include both DNS changes and CIDR repairs)
