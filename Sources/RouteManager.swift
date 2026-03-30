@@ -1123,9 +1123,11 @@ final class RouteManager: ObservableObject {
             // Fast path: if we have DNS cache, apply instantly then refresh in background
             if !dnsDiskCache.isEmpty {
                 log(.info, "Using cached DNS for instant startup...")
-                await applyRoutesFromCache()
+                let cacheApplied = await applyRoutesFromCache()
                 isLoading = false
-                log(.info, "Routes applied from cache. Refreshing DNS in background...")
+                if cacheApplied {
+                    log(.info, "Routes applied from cache. Refreshing DNS in background...")
+                }
                 
                 // Background refresh: re-resolve DNS and update routes if changed
                 Task.detached { [weak self] in
@@ -1158,11 +1160,15 @@ final class RouteManager: ObservableObject {
     
     /// Apply all routes (internal, no notification)
     func applyAllRoutes() async {
+        beginApplyingRoutes()
+        defer { endApplyingRoutes() }
         await applyAllRoutesInternal(sendNotification: false)
     }
-    
+
     /// Apply all routes and send notification (called from Refresh button)
     func applyAllRoutesWithNotification() async {
+        beginApplyingRoutes()
+        defer { endApplyingRoutes() }
         await applyAllRoutesInternal(sendNotification: true)
     }
     
@@ -1449,6 +1455,8 @@ final class RouteManager: ObservableObject {
     }
     
     func removeAllRoutes() async {
+        beginApplyingRoutes()
+        defer { endApplyingRoutes() }
         let destinations = Array(Set(activeRoutes.map { $0.destination }))
 
         var failedDests: Set<String> = []
@@ -1492,12 +1500,14 @@ final class RouteManager: ObservableObject {
     // MARK: - Instant Startup (Cache-based)
     
     /// Apply routes using cached IPs only (no DNS resolution) - used for instant startup
-    /// Internal — called from detectAndApplyRoutesAsync which manages loading state
-    private func applyRoutesFromCache() async {
+    /// Returns false if apply was skipped (no gateway, etc.)
+    private func applyRoutesFromCache() async -> Bool {
+        beginApplyingRoutes()
+        defer { endApplyingRoutes() }
 
         guard let gateway = localGateway else {
             log(.error, "Cannot apply cached routes: no local gateway")
-            return
+            return false
         }
 
         let isInverse = config.routingMode == .vpnOnly
@@ -1506,7 +1516,7 @@ final class RouteManager: ObservableObject {
         if isInverse {
             guard let _ = vpnGateway else {
                 log(.error, "Cannot apply cached routes in VPN Only mode: no VPN gateway")
-                return
+                return false
             }
         }
 
@@ -1685,8 +1695,9 @@ final class RouteManager: ObservableObject {
         } else {
             log(.success, "Applied \(uniqueRouteCount) unique routes from cache")
         }
+        return true
     }
-    
+
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
     private func backgroundDNSRefresh(sendNotification: Bool) async {
         guard !isRouteOperationInProgress else {
