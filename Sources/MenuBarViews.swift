@@ -291,8 +291,10 @@ struct MenuContent: View {
                 .buttonStyle(.plain)
             }
             
-            // Active services summary
-            activeServicesSummary
+            // Active services summary (bypass mode only)
+            if routeManager.config.routingMode == .bypass {
+                activeServicesSummary
+            }
             
             // Recent activity
             if !routeManager.activeRoutes.isEmpty {
@@ -414,13 +416,19 @@ struct MenuContent: View {
                     .multilineTextAlignment(.center)
             }
             
-            // Show enabled services count
-            let enabledServices = routeManager.config.services.filter { $0.enabled }
-            let enabledDomains = routeManager.config.domains.filter { $0.enabled }
-            
-            HStack(spacing: 16) {
-                StatBadge(value: "\(enabledServices.count)", label: "Services")
-                StatBadge(value: "\(enabledDomains.count)", label: "Domains")
+            // Show enabled counts (mode-aware)
+            if routeManager.config.routingMode == .vpnOnly {
+                let enabledDomains = routeManager.config.inverseDomains.filter { $0.enabled }
+                HStack(spacing: 16) {
+                    StatBadge(value: "\(enabledDomains.count)", label: "VPN Domains")
+                }
+            } else {
+                let enabledServices = routeManager.config.services.filter { $0.enabled }
+                let enabledDomains = routeManager.config.domains.filter { $0.enabled }
+                HStack(spacing: 16) {
+                    StatBadge(value: "\(enabledServices.count)", label: "Services")
+                    StatBadge(value: "\(enabledDomains.count)", label: "Domains")
+                }
             }
             
             // Network info

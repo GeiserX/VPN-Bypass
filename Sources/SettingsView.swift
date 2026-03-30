@@ -967,7 +967,10 @@ struct CustomServiceEditor: View {
     }
 
     private func save() {
-        let cleanDomains = domains.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        // Normalize domains the same way the main domain input does (strips protocols, ports, paths, invalid chars)
+        let cleanDomains = domains
+            .map { routeManager.cleanDomainForService($0) }
+            .filter { !$0.isEmpty }
         let cleanIPs = ipRanges.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let name = serviceName.trimmingCharacters(in: .whitespaces)
 
@@ -2002,19 +2005,21 @@ struct LogsTab: View {
                     color: Color(hex: "10B981")
                 )
                 
-                // Enabled services
+                // Enabled services (only in bypass mode)
                 RouteStatCard(
                     icon: "square.grid.2x2",
                     title: "Services",
-                    value: "\(routeManager.config.services.filter { $0.enabled }.count)",
+                    value: routeManager.config.routingMode == .vpnOnly ? "—" : "\(routeManager.config.services.filter { $0.enabled }.count)",
                     color: Color(hex: "8B5CF6")
                 )
-                
-                // Enabled domains
+
+                // Enabled domains (mode-aware)
                 RouteStatCard(
                     icon: "globe",
                     title: "Domains",
-                    value: "\(routeManager.config.domains.filter { $0.enabled }.count)",
+                    value: routeManager.config.routingMode == .vpnOnly
+                        ? "\(routeManager.config.inverseDomains.filter { $0.enabled }.count)"
+                        : "\(routeManager.config.domains.filter { $0.enabled }.count)",
                     color: Color(hex: "3B82F6")
                 )
             }

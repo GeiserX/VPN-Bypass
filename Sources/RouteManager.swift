@@ -1639,12 +1639,14 @@ final class RouteManager: ObservableObject {
             }
         }
         
-        // Update hosts file with any newly resolved domains
-        await MainActor.run {
-            if config.manageHostsFile {
-                Task {
-                    await updateHostsFile()
-                    log(.info, "Background refresh: hosts file updated")
+        // Update hosts file with any newly resolved domains (only if still connected)
+        if stillConnected {
+            await MainActor.run {
+                if config.manageHostsFile {
+                    Task {
+                        await updateHostsFile()
+                        log(.info, "Background refresh: hosts file updated")
+                    }
                 }
             }
         }
@@ -1740,7 +1742,6 @@ final class RouteManager: ObservableObject {
                 for ip in ips {
                     newIPs.insert(ip)
                     if !oldIPs.contains(ip) {
-                        // New IP found - add route
                         if await addRoute(ip, gateway: routeGateway) {
                             activeRoutes.append(ActiveRoute(
                                 destination: ip,
@@ -1753,10 +1754,15 @@ final class RouteManager: ObservableObject {
                         }
                     }
                 }
+            } else if let cachedIPs = dnsDiskCache[domain] {
+                // DNS failed — preserve cached IPs so they aren't treated as stale
+                for ip in cachedIPs {
+                    newIPs.insert(ip)
+                }
             }
         }
 
-        // Update DNS caches so hosts file and next startup use fresh IPs
+        // Update DNS caches only for successfully resolved domains
         for (domain, ips) in resolvedDomainIPs {
             dnsDiskCache[domain] = ips
             if let firstIP = ips.first {
@@ -1799,8 +1805,8 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        // Always update hosts file if enabled - keeps IPs fresh even if routes didn't change
-        if config.manageHostsFile {
+        // Update hosts file if enabled and still connected
+        if config.manageHostsFile && isVPNConnected {
             await updateHostsFile()
             log(.info, "DNS refresh: hosts file updated")
         }
@@ -2041,19 +2047,25 @@ final class RouteManager: ObservableObject {
     }
     
     /// Remove all routes matching a source (domain name or service name)
+    /// Only removes kernel routes if no other source shares the same destination
     private func removeRoutesForSource(_ source: String) async {
         let routesToRemove = activeRoutes.filter { $0.source == source }
-        
+        let destinationsStillNeeded = Set(activeRoutes.filter { $0.source != source }.map { $0.destination })
+
+        var kernelRemoved = 0
         for route in routesToRemove {
-            _ = await removeRoute(route.destination)
+            if !destinationsStillNeeded.contains(route.destination) {
+                _ = await removeRoute(route.destination)
+                kernelRemoved += 1
+            }
         }
-        
+
         await MainActor.run {
             activeRoutes.removeAll { $0.source == source }
         }
-        
+
         if !routesToRemove.isEmpty {
-            log(.info, "Removed \(routesToRemove.count) routes for \(source)")
+            log(.info, "Removed \(routesToRemove.count) route entries for \(source) (\(kernelRemoved) kernel routes)")
         }
     }
     
@@ -2178,9 +2190,11 @@ final class RouteManager: ObservableObject {
         log(.info, "Routing mode changed to \(mode == .bypass ? "Bypass" : "VPN Only")")
 
         if isVPNConnected {
+            beginApplyingRoutes()
             Task {
                 await removeAllRoutes()
                 await applyAllRoutes()
+                endApplyingRoutes()
             }
         }
     }
@@ -2998,6 +3012,11 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Public domain normalization for custom service editor
+    func cleanDomainForService(_ input: String) -> String {
+        return cleanDomain(input)
+    }
+
     private func cleanDomain(_ input: String) -> String {
         var domain = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
