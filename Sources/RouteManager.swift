@@ -2464,10 +2464,13 @@ final class RouteManager: ObservableObject {
         }
 
         // Collect routes from resolved domains
+        var cacheUpdated = false
         for (domain, ips) in domainResults {
             guard let ips = ips else { continue }
 
-            // Cache first IP for hosts file
+            // Cache all IPs (disk) and first IP (memory) for hosts file and startup
+            dnsDiskCache[domain] = ips
+            cacheUpdated = true
             if let firstIP = ips.first {
                 dnsCache[domain] = firstIP
             }
@@ -2497,6 +2500,9 @@ final class RouteManager: ObservableObject {
                 newRoutes.append(ActiveRoute(destination: range, gateway: gateway, source: service.name, timestamp: Date()))
             }
         }
+
+        // Persist DNS cache so cache-based startup can use these IPs
+        if cacheUpdated { saveDNSCache() }
 
         // Apply new kernel routes in single batch, exclude failed destinations from ownership
         var failedDests: Set<String> = []
@@ -2557,6 +2563,7 @@ final class RouteManager: ObservableObject {
                         await removeRoutesForSource(service.name)
                     }
                 }
+                if config.manageHostsFile { await updateHostsFile() }
                 endApplyingRoutes()
             }
         } else {
@@ -2580,8 +2587,9 @@ final class RouteManager: ObservableObject {
         }
         
         var failedCount = 0
-        
-        for destination in destinationsToVerify.prefix(10) { // Limit to 10 to avoid too many pings
+        let sortedDestinations = destinationsToVerify.sorted()
+
+        for destination in sortedDestinations.prefix(10) { // Limit to 10 to avoid too many pings
             let result = await verifyRoute(destination)
             routeVerificationResults[destination] = result
             
