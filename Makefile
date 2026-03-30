@@ -6,7 +6,7 @@ HELPER_ID = com.geiserx.vpnbypass.helper
 BUILD_DIR = .build/release
 APP_BUNDLE = $(APP_NAME).app
 HELPER_BUILD_DIR = .build/helper
-VERSION = $(shell defaults read "$$(pwd)/$(APP_BUNDLE)/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "1.1.0")
+VERSION = $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0")
 
 # Main app build
 build:
@@ -33,6 +33,9 @@ bundle: build build-helper
 	@mkdir -p "$(APP_BUNDLE)/Contents/Library/LaunchDaemons"
 	@cp $(BUILD_DIR)/VPNBypass "$(APP_BUNDLE)/Contents/MacOS/"
 	@cp Info.plist "$(APP_BUNDLE)/Contents/"
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" "$(APP_BUNDLE)/Contents/Info.plist"
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(VERSION)" "$(APP_BUNDLE)/Contents/Info.plist"
+	@echo "Version stamped: $(VERSION)"
 	@cp $(HELPER_BUILD_DIR)/$(HELPER_ID) "$(APP_BUNDLE)/Contents/MacOS/"
 	@cp Helper/Launchd.plist "$(APP_BUNDLE)/Contents/Library/LaunchDaemons/$(HELPER_ID).plist"
 	@echo "APPL????" > "$(APP_BUNDLE)/Contents/PkgInfo"
