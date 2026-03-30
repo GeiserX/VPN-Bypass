@@ -49,6 +49,7 @@ final class RouteManager: ObservableObject {
     private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
     private var orphanedServiceDomains: [String: [String]] = [:]  // Deleted service name -> its domains (for hosts reconstruction)
+    private var isRefreshingDNS = false  // Serialization guard — prevents concurrent refresh operations
     private var gatewayDetectedAt: Date?
     private var lastInterfaceReroute: Date?
     private var lastTailscaleSelfFingerprint: String?
@@ -1684,8 +1685,13 @@ final class RouteManager: ObservableObject {
     
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
     private func backgroundDNSRefresh(sendNotification: Bool) async {
+        guard !isRefreshingDNS else {
+            log(.info, "Background DNS refresh skipped: another refresh is in progress")
+            return
+        }
+        isRefreshingDNS = true
         beginApplyingRoutes()
-        defer { endApplyingRoutes() }
+        defer { endApplyingRoutes(); isRefreshingDNS = false }
 
         guard let gateway = localGateway else {
             log(.warning, "Background DNS refresh skipped: no local gateway")
@@ -1934,7 +1940,7 @@ final class RouteManager: ObservableObject {
         // Update UI refresh timestamps
         await MainActor.run {
             lastDNSRefresh = Date()
-            nextDNSRefresh = Date().addingTimeInterval(config.dnsRefreshInterval)
+            nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
         }
 
         // Send notification if requested (include both DNS changes and CIDR repairs)
@@ -1976,6 +1982,13 @@ final class RouteManager: ObservableObject {
     
     /// Perform DNS refresh - re-resolve all domains and update routes
     private func performDNSRefresh() async {
+        guard !isRefreshingDNS else {
+            log(.info, "DNS refresh skipped: another refresh is in progress")
+            return
+        }
+        isRefreshingDNS = true
+        defer { isRefreshingDNS = false }
+
         guard isVPNConnected, let gateway = localGateway else {
             log(.info, "DNS refresh skipped: \(!isVPNConnected ? "VPN not connected" : "no local gateway")")
             nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
@@ -2092,19 +2105,28 @@ final class RouteManager: ObservableObject {
                 for range in service.ipRanges {
                     expectedEntries.insert(SourceDest(source: service.name, destination: range))
 
-                    // Repair missing CIDR routes
-                    if !existingDestinations.contains(range) && !addedKernelRoutes.contains(range) {
-                        if await addRoute(range, gateway: routeGateway, isNetwork: true) {
-                            activeRoutes.append(ActiveRoute(
-                                destination: range,
-                                gateway: routeGateway,
-                                source: service.name,
-                                timestamp: Date()
-                            ))
-                            addedKernelRoutes.insert(range)
-                            updatedCount += 1
-                            log(.success, "DNS refresh: repaired missing CIDR route \(range) for \(service.name)")
-                        }
+                    if existingDestinations.contains(range) { continue }
+                    if addedKernelRoutes.contains(range) {
+                        // Already repaired by another service — just add ownership
+                        activeRoutes.append(ActiveRoute(
+                            destination: range,
+                            gateway: routeGateway,
+                            source: service.name,
+                            timestamp: Date()
+                        ))
+                        continue
+                    }
+                    // Repair missing CIDR route
+                    if await addRoute(range, gateway: routeGateway, isNetwork: true) {
+                        activeRoutes.append(ActiveRoute(
+                            destination: range,
+                            gateway: routeGateway,
+                            source: service.name,
+                            timestamp: Date()
+                        ))
+                        addedKernelRoutes.insert(range)
+                        updatedCount += 1
+                        log(.success, "DNS refresh: repaired missing CIDR route \(range) for \(service.name)")
                     }
                 }
             }
