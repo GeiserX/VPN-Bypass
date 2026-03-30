@@ -13,10 +13,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Separate Domain Lists** - Each routing mode maintains its own domain list: bypass domains for Bypass mode, VPN-only domains for VPN Only mode
 - **Custom Services** - Create your own service entries with a name, multiple domains, and optional IP ranges. Custom services are shown with a purple "Custom" badge, can be edited/deleted, and persist across reboots
 - **Custom Service Editor** - Full sheet editor for creating and editing custom services with add/remove buttons for domains and IP ranges
+- **Multi-Source Route Ownership** - Routes now track their origin (service name, domain, or CIDR) via `allSourceEntries`, preventing cross-source conflicts during incremental updates
 
 ### Changed
 - **Services Tab** - Shows a disabled banner in VPN Only mode (services only apply in Bypass mode). Added "+ Create Custom Service" button for user-defined services
 - **VPN Gateway Detection** - App now detects both local and VPN gateways simultaneously for inverse routing support
+- **Route Operation Serialization** - Complete rewrite of concurrency model: exclusive `acquireRouteOperation`/`releaseRouteOperation` gate prevents concurrent route modifications, epoch-based preemption detection (`routeEpoch`) ensures teardown safely cancels in-flight operations, and gate-free teardown guarantees disconnect/quit always proceeds without deadlock
+- **Kernel-Authoritative Route Model** - Route removal now reads kernel state as source of truth instead of relying solely on the in-memory model, preventing model/kernel divergence
+- **Delete-Before-Add Pattern** - Route application now deletes existing entries before adding, eliminating "route already exists" errors during re-application
+- **Background DNS Refresh** - Deduplicates kernel operations by destination, uses source-aggregate diffs to prevent false-positive change counts
+
+### Fixed
+- **Shell Injection in Route Commands** - Sanitized all inputs to shell route commands
+- **XPC Authorization Hardening** - Strengthened privileged helper authorization checks
+- **In-Flight Apply Survives Teardown** - Gate-free teardown could clear routes while a concurrent apply was running, which would then overwrite `activeRoutes` with stale data. Epoch counter now lets in-flight operations detect preemption and abort before committing
+- **Interface/Tailscale Reroute Race** - VPN interface switch and Tailscale reroute now hold the operation gate across the full remove-then-reapply sequence instead of releasing between operations
+- **Mode Switch Safety** - Switching routing modes now holds the gate across the full teardown-and-rebuild cycle with proper precondition checks
+- **Stale Route Cleanup** - Two-population cleanup distinguishes truly orphaned routes (re-attach on failure) from add-failed routes (don't re-attach), preventing phantom route accumulation
+- **Hosts File Sync on All Mutations** - Adding, toggling, or removing domains now immediately syncs `/etc/hosts` instead of waiting for periodic refresh
+- **Multi-IP Hosts Lookup** - Hosts file entries now correctly handle domains that resolve to multiple IPs
+- **Scoped Orphan Host Cleanup** - Orphan detection uses a saved domain list, preventing removal of hosts entries that are still needed
+- **DNS Cache Persistence for Custom Services** - Custom service DNS resolutions are now cached to disk for instant startup
+- **Stale DNS Cache on Import** - Importing a configuration now cleans stale DNS cache entries from removed domains
+- **Batch Failure Tracking** - Route batch operations now report per-route success/failure instead of all-or-nothing, with accurate counts in notifications
+- **Disconnect Notification Accuracy** - VPN disconnect notification now reports the correct count of routes that couldn't be removed
+- **Config Import Reconciliation** - Importing a config now properly reconciles running routes with the new configuration
+- **Quit Cleanup** - App quit now properly removes all routes before exiting
+- **Bulk Toggle Epoch Safety** - "Enable All"/"Disable All" in domains tab now checks for preemption between each domain operation
 
 ## [1.9.2] - 2026-03-29
 
