@@ -6,24 +6,47 @@ import Foundation
 // MARK: - XPC Listener Delegate
 
 class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
-    
+
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
-        // Verify the connecting process
-        // In production, you should verify the code signature of the calling app
-        
+        // Verify the connecting process is our main app by checking its bundle identifier
+        let pid = newConnection.processIdentifier
+        guard verifyCallerIdentity(pid: pid) else {
+            return false
+        }
+
         newConnection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
         newConnection.exportedObject = HelperTool()
-        
+
         newConnection.invalidationHandler = {
             // Connection was invalidated
         }
-        
+
         newConnection.interruptionHandler = {
             // Connection was interrupted
         }
-        
+
         newConnection.resume()
         return true
+    }
+
+    /// Verify the calling process is signed with the expected bundle identifier
+    private func verifyCallerIdentity(pid: pid_t) -> Bool {
+        var code: SecCode?
+        let attrs = [kSecGuestAttributePid: pid] as CFDictionary
+        guard SecCodeCopyGuestWithAttributes(nil, attrs, [], &code) == errSecSuccess,
+              let callerCode = code else {
+            return false
+        }
+
+        // Require: signed by our bundle identifier
+        var requirement: SecRequirement?
+        let requirementString = "identifier \"com.geiserx.vpn-bypass\"" as CFString
+        guard SecRequirementCreateWithString(requirementString, [], &requirement) == errSecSuccess,
+              let req = requirement else {
+            return false
+        }
+
+        return SecCodeCheckValidity(callerCode, [], req) == errSecSuccess
     }
 }
 
@@ -67,29 +90,31 @@ class HelperTool: NSObject, HelperProtocol {
     
     // MARK: - Batch Route Management (for startup/stop performance)
     
-    func addRoutesBatch(routes: [[String: Any]], withReply reply: @escaping (Int, Int, String?) -> Void) {
+    func addRoutesBatch(routes: [[String: Any]], withReply reply: @escaping (Int, Int, [String], String?) -> Void) {
         var successCount = 0
         var failureCount = 0
+        var failedDestinations: [String] = []
         var lastError: String?
-        
+
         for route in routes {
             guard let destination = route["destination"] as? String,
                   let gateway = route["gateway"] as? String else {
                 failureCount += 1
                 continue
             }
-            
+
             let isNetwork = route["isNetwork"] as? Bool ?? false
-            
+
             // Validate inputs
             guard isValidDestination(destination), isValidIP(gateway) else {
                 failureCount += 1
+                failedDestinations.append(destination)
                 continue
             }
-            
+
             // First try to delete existing route (ignore result)
             _ = executeRoute(args: ["-n", "delete", destination])
-            
+
             // Add the new route
             var args = ["-n", "add"]
             if isNetwork {
@@ -97,40 +122,44 @@ class HelperTool: NSObject, HelperProtocol {
             } else {
                 args.append(contentsOf: ["-host", destination, gateway])
             }
-            
+
             let result = executeRoute(args: args)
             if result.success {
                 successCount += 1
             } else {
                 failureCount += 1
+                failedDestinations.append(destination)
                 lastError = result.error
             }
         }
-        
-        reply(successCount, failureCount, lastError)
+
+        reply(successCount, failureCount, failedDestinations, lastError)
     }
-    
-    func removeRoutesBatch(destinations: [String], withReply reply: @escaping (Int, Int, String?) -> Void) {
+
+    func removeRoutesBatch(destinations: [String], withReply reply: @escaping (Int, Int, [String], String?) -> Void) {
         var successCount = 0
         var failureCount = 0
+        var failedDestinations: [String] = []
         var lastError: String?
-        
+
         for destination in destinations {
             guard isValidDestination(destination) else {
                 failureCount += 1
+                failedDestinations.append(destination)
                 continue
             }
-            
+
             let result = executeRoute(args: ["-n", "delete", destination])
             if result.success {
                 successCount += 1
             } else {
                 failureCount += 1
+                failedDestinations.append(destination)
                 lastError = result.error
             }
         }
-        
-        reply(successCount, failureCount, lastError)
+
+        reply(successCount, failureCount, failedDestinations, lastError)
     }
     
     private func executeRoute(args: [String]) -> (success: Bool, error: String?) {

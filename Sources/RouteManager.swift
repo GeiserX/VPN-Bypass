@@ -20,7 +20,10 @@ final class RouteManager: ObservableObject {
     @Published var vpnInterface: String?
     @Published var vpnType: VPNType?
     @Published var localGateway: String?
+    @Published var vpnGateway: String?
     @Published var activeRoutes: [ActiveRoute] = []
+    /// Unique kernel route count (activeRoutes may have multiple entries per destination for multi-source tracking)
+    var uniqueRouteCount: Int { Set(activeRoutes.map { $0.destination }).count }
     @Published var lastUpdate: Date?
     @Published var config: Config = Config()
     @Published var recentLogs: [LogEntry] = []
@@ -28,7 +31,6 @@ final class RouteManager: ObservableObject {
     @Published var routeVerificationResults: [String: RouteVerificationResult] = [:]
     @Published var isLoading = true
     @Published private(set) var isApplyingRoutes = false
-    private var applyingRoutesCount = 0
     @Published var lastDNSRefresh: Date?
     @Published var nextDNSRefresh: Date?
     @Published var isTestingProxy = false
@@ -45,6 +47,8 @@ final class RouteManager: ObservableObject {
     private var detectedDNSServer: String?  // User's real DNS (pre-VPN), detected at startup
     private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
+    private var orphanedServiceDomains: [String: [String]] = [:]  // Deleted service name -> its domains (for hosts reconstruction)
+    private var routeEpoch: UInt64 = 0  // Incremented by removeAllRoutes — lets in-flight applies detect preemption
     private var gatewayDetectedAt: Date?
     private var lastInterfaceReroute: Date?
     private var lastTailscaleSelfFingerprint: String?
@@ -61,7 +65,12 @@ final class RouteManager: ObservableObject {
     }
     
     // MARK: - Types
-    
+
+    enum RoutingMode: String, Codable {
+        case bypass = "bypass"      // Domains bypass VPN (current behavior)
+        case vpnOnly = "vpnOnly"    // Only listed domains use VPN, everything else bypasses
+    }
+
     enum VPNType: String, Codable {
         case globalProtect = "GlobalProtect"
         case ciscoAnyConnect = "Cisco AnyConnect"
@@ -127,7 +136,9 @@ final class RouteManager: ObservableObject {
         var dnsRefreshInterval: TimeInterval = 3600  // 1 hour default
         var fallbackDNS: [String] = ["1.1.1.1", "8.8.8.8"]  // Fallback DNS servers (IP or DoH URL)
         var proxyConfig: ProxyConfig = ProxyConfig()  // SOCKS5 proxy for aggressive bypass mode
-        
+        var routingMode: RoutingMode = .bypass  // Bypass = domains bypass VPN, VPN Only = only listed domains use VPN
+        var inverseDomains: [DomainEntry] = []  // Domains that should use VPN in VPN Only mode
+
         // Custom decoder for backward compatibility with configs missing new fields
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -141,8 +152,10 @@ final class RouteManager: ObservableObject {
             dnsRefreshInterval = try container.decodeIfPresent(TimeInterval.self, forKey: .dnsRefreshInterval) ?? 3600
             fallbackDNS = try container.decodeIfPresent([String].self, forKey: .fallbackDNS) ?? ["1.1.1.1", "8.8.8.8"]
             proxyConfig = try container.decodeIfPresent(ProxyConfig.self, forKey: .proxyConfig) ?? ProxyConfig()
+            routingMode = try container.decodeIfPresent(RoutingMode.self, forKey: .routingMode) ?? .bypass
+            inverseDomains = try container.decodeIfPresent([DomainEntry].self, forKey: .inverseDomains) ?? []
         }
-        
+
         // Default initializer
         init() {}
         
@@ -330,6 +343,26 @@ final class RouteManager: ObservableObject {
         var enabled: Bool
         var domains: [String]
         var ipRanges: [String]
+        var isCustom: Bool = false
+
+        init(id: String, name: String, enabled: Bool, domains: [String], ipRanges: [String], isCustom: Bool = false) {
+            self.id = id
+            self.name = name
+            self.enabled = enabled
+            self.domains = domains
+            self.ipRanges = ipRanges
+            self.isCustom = isCustom
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            name = try container.decode(String.self, forKey: .name)
+            enabled = try container.decode(Bool.self, forKey: .enabled)
+            domains = try container.decode([String].self, forKey: .domains)
+            ipRanges = try container.decode([String].self, forKey: .ipRanges)
+            isCustom = try container.decodeIfPresent(Bool.self, forKey: .isCustom) ?? false
+        }
     }
     
     struct ActiveRoute: Identifiable {
@@ -505,12 +538,23 @@ final class RouteManager: ObservableObject {
         do {
             let data = try Data(contentsOf: url)
             let exportData = try JSONDecoder().decode(ExportData.self, from: data)
-            
-            // Merge or replace config
+
+            // Merge or replace config, then normalize built-in services
             config = exportData.config
+            mergeBuiltInServices()
             saveConfig()
-            
+
             log(.success, "Config imported: \(exportData.config.domains.count) domains, \(exportData.config.services.filter { $0.enabled }.count) services enabled")
+
+            // Reconcile live routes if VPN is connected
+            if isVPNConnected && acquireRouteOperation() {
+                Task {
+                    defer { releaseRouteOperation() }
+                    await removeAllRoutes()
+                    await applyAllRoutesInternal(sendNotification: false)
+                }
+            }
+
             return true
         } catch {
             log(.error, "Failed to import config: \(error.localizedDescription)")
@@ -665,6 +709,13 @@ final class RouteManager: ObservableObject {
         // Detect local gateway
         localGateway = await detectLocalGateway()
         gatewayDetectedAt = localGateway != nil ? Date() : nil
+
+        // Detect VPN gateway (default route when VPN is connected)
+        if connected {
+            vpnGateway = await parseDefaultGateway()
+        } else {
+            vpnGateway = nil
+        }
         
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
         if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes {
@@ -689,12 +740,13 @@ final class RouteManager: ObservableObject {
             } else {
                 log(.warning, "VPN interface changed: \(oldInterface ?? "?") → \(interface ?? "?")")
                 lastInterfaceReroute = Date()
-                if localGateway != nil {
+                if localGateway != nil, acquireRouteOperation() {
                     isLoading = true
                     await removeAllRoutes()
-                    await applyAllRoutes()
+                    await applyAllRoutesInternal(sendNotification: false)
                     isLoading = false
-                } else {
+                    releaseRouteOperation()
+                } else if localGateway == nil {
                     log(.error, "VPN interface changed but no gateway detected")
                 }
             }
@@ -712,12 +764,13 @@ final class RouteManager: ObservableObject {
             } else {
                 log(.warning, "Tailscale active account changed, refreshing routes")
                 lastInterfaceReroute = Date()
-                if localGateway != nil {
+                if localGateway != nil, acquireRouteOperation() {
                     isLoading = true
                     await removeAllRoutes()
-                    await applyAllRoutes()
+                    await applyAllRoutesInternal(sendNotification: false)
                     isLoading = false
-                } else {
+                    releaseRouteOperation()
+                } else if localGateway == nil {
                     log(.error, "Tailscale account changed but no gateway detected")
                 }
             }
@@ -725,11 +778,14 @@ final class RouteManager: ObservableObject {
         
         if !isVPNConnected && wasVPNConnected {
             log(.warning, "VPN disconnected (was: \(oldInterface ?? "unknown"))")
-            NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface)
             cancelAllRetries()
-            activeRoutes.removeAll()
+            // Remove kernel routes before clearing in-memory state
+            await removeAllRoutes()
             routeVerificationResults.removeAll()
             lastTailscaleSelfFingerprint = nil
+            vpnGateway = nil
+            // Notify after cleanup so notification reflects actual state
+            NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface, routesRemaining: activeRoutes.count)
         }
     }
     
@@ -1048,10 +1104,18 @@ final class RouteManager: ObservableObject {
         // Detect local gateway
         localGateway = await detectLocalGateway()
         log(.info, "Gateway detected: \(localGateway ?? "none")")
-        
+
+        // Detect VPN gateway (needed for VPN Only mode)
+        if connected {
+            vpnGateway = await parseDefaultGateway()
+            log(.info, "VPN gateway detected: \(vpnGateway ?? "none")")
+        } else {
+            vpnGateway = nil
+        }
+
         // Check helper status
         log(.info, "Helper installed: \(HelperManager.shared.isHelperInstalled)")
-        
+
         // Apply routes if VPN is connected
         if isVPNConnected && localGateway != nil {
             log(.success, "VPN detected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown")), applying routes...")
@@ -1059,9 +1123,11 @@ final class RouteManager: ObservableObject {
             // Fast path: if we have DNS cache, apply instantly then refresh in background
             if !dnsDiskCache.isEmpty {
                 log(.info, "Using cached DNS for instant startup...")
-                await applyRoutesFromCache()
+                let cacheApplied = await applyRoutesFromCache()
                 isLoading = false
-                log(.info, "Routes applied from cache. Refreshing DNS in background...")
+                if cacheApplied {
+                    log(.info, "Routes applied from cache. Refreshing DNS in background...")
+                }
                 
                 // Background refresh: re-resolve DNS and update routes if changed
                 Task.detached { [weak self] in
@@ -1092,40 +1158,70 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    /// Apply all routes (internal, no notification)
+    /// Apply all routes — acquires exclusive gate, skips if another operation is running
     func applyAllRoutes() async {
+        guard acquireRouteOperation() else {
+            log(.info, "Apply skipped: route operation in progress")
+            return
+        }
+        defer { releaseRouteOperation() }
         await applyAllRoutesInternal(sendNotification: false)
     }
-    
+
     /// Apply all routes and send notification (called from Refresh button)
     func applyAllRoutesWithNotification() async {
+        guard acquireRouteOperation() else {
+            log(.info, "Apply skipped: route operation in progress")
+            return
+        }
+        defer { releaseRouteOperation() }
         await applyAllRoutesInternal(sendNotification: true)
     }
-    
+
+    /// Internal — gate-free, callers must hold the route operation lock.
+    /// Checks routeEpoch before committing to detect preemption by removeAllRoutes.
     private func applyAllRoutesInternal(sendNotification: Bool) async {
+        let epoch = routeEpoch
+
         guard let gateway = localGateway else {
             log(.error, "No local gateway available")
             return
         }
-        
+
+        let isInverse = config.routingMode == .vpnOnly
+
+        // VPN Only mode requires the VPN gateway for domain-specific routes
+        if isInverse {
+            guard let vpnGw = vpnGateway else {
+                log(.error, "VPN Only mode requires a VPN gateway (is VPN connected?)")
+                return
+            }
+            log(.info, "VPN Only mode: bypass-all via \(gateway), VPN domains via \(vpnGw)")
+        }
+
         var newRoutes: [ActiveRoute] = []
         var failedCount = 0
-        
+
         // Clear DNS cache for fresh resolution
         dnsCache.removeAll()
-        
+
         // Collect all domains to resolve (for parallel resolution)
         var allDomains: [(domain: String, source: String)] = []
-        
-        // Add custom domains
-        for domain in config.domains where domain.enabled {
-            allDomains.append((domain.domain, domain.domain))
-        }
-        
-        // Add service domains
-        for service in config.services where service.enabled {
-            for domain in service.domains {
-                allDomains.append((domain, service.name))
+
+        if isInverse {
+            // VPN Only mode: resolve inverse domains (these go through VPN)
+            for domain in config.inverseDomains where domain.enabled {
+                allDomains.append((domain.domain, domain.domain))
+            }
+        } else {
+            // Bypass mode: resolve bypass domains + service domains
+            for domain in config.domains where domain.enabled {
+                allDomains.append((domain.domain, domain.domain))
+            }
+            for service in config.services where service.enabled {
+                for domain in service.domains {
+                    allDomains.append((domain, service.name))
+                }
             }
         }
         
@@ -1139,9 +1235,27 @@ final class RouteManager: ObservableObject {
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
         
+        // In VPN Only mode, domain-specific routes go through VPN gateway
+        let routeGateway = isInverse ? (vpnGateway ?? gateway) : gateway
+
         // Collect all routes to add (for batch operation)
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
-        var seenDestinations: Set<String> = []  // Deduplicate by destination IP
+        var seenDestinations: Set<String> = []  // Deduplicate kernel operations
+        var allSourceEntries: [(destination: String, source: String)] = []  // Track all sources per IP
+        var seenSourceDests: Set<String> = []  // Deduplicate (source, destination) pairs
+
+        // VPN Only mode: add catch-all routes through local gateway first
+        // 0.0.0.0/1 + 128.0.0.0/1 cover all IPv4 with higher specificity than default route
+        if isInverse {
+            routesToAdd.append((destination: "0.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
+            routesToAdd.append((destination: "128.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
+            seenDestinations.insert("0.0.0.0/1")
+            seenDestinations.insert("128.0.0.0/1")
+            allSourceEntries.append((destination: "0.0.0.0/1", source: "VPN Only catch-all"))
+            allSourceEntries.append((destination: "128.0.0.0/1", source: "VPN Only catch-all"))
+            seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
+            seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
+        }
         
         while index < allDomains.count {
             let endIndex = min(index + batchSize, allDomains.count)
@@ -1171,10 +1285,19 @@ final class RouteManager: ObservableObject {
                         dnsCache[result.domain] = firstIP
                     }
                     dnsDiskCache[result.domain] = ips  // Update persistent cache
-                    
-                    for ip in ips where !seenDestinations.contains(ip) {
-                        seenDestinations.insert(ip)
-                        routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: result.source))
+
+                    for ip in ips {
+                        // Dedup kernel operations
+                        if !seenDestinations.contains(ip) {
+                            seenDestinations.insert(ip)
+                            routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: result.source))
+                        }
+                        // Dedup (source, destination) ownership pairs
+                        let key = "\(result.source)|\(ip)"
+                        if !seenSourceDests.contains(key) {
+                            seenSourceDests.insert(key)
+                            allSourceEntries.append((destination: ip, source: result.source))
+                        }
                     }
                 } else if let cachedIPs = dnsDiskCache[result.domain], !cachedIPs.isEmpty {
                     // DNS failed but we have cached IPs - use them as fallback
@@ -1182,9 +1305,16 @@ final class RouteManager: ObservableObject {
                     if let firstIP = cachedIPs.first {
                         dnsCache[result.domain] = firstIP
                     }
-                    for ip in cachedIPs where !seenDestinations.contains(ip) {
-                        seenDestinations.insert(ip)
-                        routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: result.source))
+                    for ip in cachedIPs {
+                        if !seenDestinations.contains(ip) {
+                            seenDestinations.insert(ip)
+                            routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: result.source))
+                        }
+                        let key = "\(result.source)|\(ip)"
+                        if !seenSourceDests.contains(key) {
+                            seenSourceDests.insert(key)
+                            allSourceEntries.append((destination: ip, source: result.source))
+                        }
                     }
                 } else {
                     failedDomains.insert(result.domain)
@@ -1198,195 +1328,444 @@ final class RouteManager: ObservableObject {
         // Save updated DNS cache to disk
         saveDNSCache()
         
-        // Collect IP ranges (these don't need DNS resolution)
-        for service in config.services where service.enabled {
-            for range in service.ipRanges where !seenDestinations.contains(range) {
-                seenDestinations.insert(range)
-                routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
+        // Collect IP ranges (bypass mode only — services are not used in VPN Only mode)
+        if !isInverse {
+            for service in config.services where service.enabled {
+                for range in service.ipRanges {
+                    let key = "\(service.name)|\(range)"
+                    if !seenSourceDests.contains(key) {
+                        seenSourceDests.insert(key)
+                        allSourceEntries.append((destination: range, source: service.name))
+                    }
+                    guard !seenDestinations.contains(range) else { continue }
+                    seenDestinations.insert(range)
+                    routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
+                }
             }
         }
         
         log(.info, "Adding \(routesToAdd.count) routes via batch operation...")
         
         // Apply all routes in batch (single XPC call for massive speedup)
+        let routeGwForEntries = routeGateway  // capture for source entries
+        var batchFailureCount = 0
+        var batchFailedDests: Set<String> = []
         if HelperManager.shared.isHelperInstalled {
             let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
             let result = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
-            
-            // Build ActiveRoute entries for successful routes
-            for route in routesToAdd {
-                newRoutes.append(ActiveRoute(
-                    destination: route.destination,
-                    gateway: route.gateway,
-                    source: route.source,
-                    timestamp: Date()
-                ))
-            }
-            
+            batchFailureCount = result.failureCount
+            batchFailedDests = Set(result.failedDestinations)
+
             if result.failureCount > 0 {
-                log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed")
+                log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed (\(result.failedDestinations.prefix(3).joined(separator: ", "))...)")
             }
         } else {
             // Fallback: add routes one by one (slower but works without helper)
             for route in routesToAdd {
-                if await addRoute(route.destination, gateway: route.gateway, isNetwork: route.isNetwork) {
-                    newRoutes.append(ActiveRoute(
-                        destination: route.destination,
-                        gateway: route.gateway,
-                        source: route.source,
-                        timestamp: Date()
-                    ))
+                _ = await addRoute(route.destination, gateway: route.gateway, isNetwork: route.isNetwork)
+            }
+        }
+
+        // Build activeRoutes from allSourceEntries, excluding destinations that failed kernel add
+        let appliedDestinations = Set(routesToAdd.map { $0.destination }).subtracting(batchFailedDests)
+        for entry in allSourceEntries where appliedDestinations.contains(entry.destination) {
+            let gw = routesToAdd.first(where: { $0.destination == entry.destination })?.gateway ?? routeGwForEntries
+            newRoutes.append(ActiveRoute(
+                destination: entry.destination,
+                gateway: gw,
+                source: entry.source,
+                timestamp: Date()
+            ))
+        }
+
+        // Clean up stale kernel routes. Two populations:
+        // 1. Truly orphaned: not in batch add input — delete-before-add never touched
+        //    them, so a failed delete means the route IS still in the kernel.
+        // 2. Add-failed: were in batch add input but failed — delete-before-add already
+        //    removed the old route, so a failed delete means "already gone."
+        let newDestinations = Set(newRoutes.map { $0.destination })
+        let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
+        let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
+        let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
+        let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
+
+        // Truly orphaned: re-attach on failure (route is genuinely still in kernel)
+        if !trulyOrphanedDests.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
+                if result.failureCount > 0 {
+                    log(.warning, "Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
+                    let failedSet = Set(result.failedDestinations)
+                    for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
+                        newRoutes.append(route)
+                    }
+                } else if result.successCount > 0 {
+                    log(.info, "Orphan cleanup: \(result.successCount) stale kernel routes removed")
+                }
+            } else {
+                for dest in trulyOrphanedDests {
+                    _ = await removeRoute(dest)
                 }
             }
         }
-        
+
+        // Add-failed: helper's addRoute does delete-before-add, so the old route is
+        // gone after a failed re-add. Don't re-attach — the kernel route doesn't exist.
+        // (The only way delete-before-add's delete could fail is if the route was already
+        // absent, since the helper runs as root and permission errors don't apply.)
+        if !addFailedStaleDests.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
+                if result.failureCount > 0 {
+                    log(.info, "Add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
+                }
+            } else {
+                for dest in addFailedStaleDests {
+                    _ = await removeRoute(dest)
+                }
+            }
+        }
+
+        // Preemption check: if removeAllRoutes() ran during our awaits, our results are stale.
+        // The epoch check + commit is atomic on @MainActor (no await between them).
+        guard routeEpoch == epoch else {
+            log(.warning, "Apply aborted: routes were cleared during operation")
+            return
+        }
+
         activeRoutes = newRoutes
         lastUpdate = Date()
-        
+
         // Manage hosts file if enabled
         if config.manageHostsFile {
             await updateHostsFile()
         }
-        
+
+        let confirmedUniqueCount = uniqueRouteCount
+        let totalFailures = failedCount + batchFailureCount
+
         if failedCount > 0 {
-            log(.warning, "Applied \(newRoutes.count) routes (\(failedCount) domains failed)")
+            log(.warning, "Applied \(confirmedUniqueCount) unique routes (\(failedCount) domains failed DNS)")
             for domain in failedDomains {
                 log(.warning, "  ✗ \(domain)")
             }
             failedDomains.removeAll()
+        } else if batchFailureCount > 0 {
+            log(.warning, "Applied routes (\(batchFailureCount) kernel failures — counts approximate until verified)")
+            failedDomains.removeAll()
         } else {
-            log(.success, "Applied \(newRoutes.count) routes")
+            log(.success, "Applied \(confirmedUniqueCount) unique routes")
             failedDomains.removeAll()
         }
-        
+
         // Only send notification when explicitly requested (Refresh button)
-        if sendNotification && newRoutes.count > 0 {
-            NotificationManager.shared.notifyRoutesApplied(count: newRoutes.count, failedCount: failedCount)
+        if sendNotification && confirmedUniqueCount > 0 {
+            NotificationManager.shared.notifyRoutesApplied(count: confirmedUniqueCount, failedCount: totalFailures)
         }
-        
-        // Verify routes if enabled
-        if config.verifyRoutesAfterApply {
+
+        // Verify routes — always when batch had failures, otherwise per config
+        if config.verifyRoutesAfterApply || batchFailureCount > 0 {
             await verifyRoutes()
         }
     }
     
+    /// Remove all routes — always proceeds (critical teardown for disconnect/quit/clear).
+    /// Does NOT acquire the route operation gate so it cannot be blocked by a running operation.
+    /// Increments routeEpoch so in-flight applies detect preemption and abort before committing.
     func removeAllRoutes() async {
-        let destinations = activeRoutes.map { $0.destination }
-        
+        routeEpoch &+= 1
+        let destinations = Array(Set(activeRoutes.map { $0.destination }))
+
+        var failedDests: Set<String> = []
         if HelperManager.shared.isHelperInstalled && !destinations.isEmpty {
-            // Use batch removal for speed
             let result = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
-            log(.info, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed")
+            failedDests = Set(result.failedDestinations)
+            if result.failureCount > 0 {
+                log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
+            } else {
+                log(.info, "Batch route removal: \(result.successCount) routes removed")
+            }
         } else {
-            // Fallback: remove routes one by one
             for route in activeRoutes {
                 _ = await removeRoute(route.destination)
             }
         }
-        
+
         cancelAllRetries()
-        activeRoutes.removeAll()
+        if !failedDests.isEmpty {
+            // Retain entries for destinations that failed kernel removal — they're still live
+            activeRoutes.removeAll { !failedDests.contains($0.destination) }
+        } else {
+            activeRoutes.removeAll()
+        }
         routeVerificationResults.removeAll()
         dnsCache.removeAll()
         lastUpdate = Date()
-        
+
         if config.manageHostsFile {
-            await cleanHostsFile()
+            if activeRoutes.isEmpty {
+                await cleanHostsFile()
+            } else {
+                // Some routes retained due to failed removal — keep hosts in sync
+                await updateHostsFile()
+            }
         }
-        
-        log(.info, "All routes removed")
+
+        log(.info, activeRoutes.isEmpty ? "All routes removed" : "Routes removed (\(activeRoutes.count) entries retained from failed kernel removals)")
     }
     
     // MARK: - Instant Startup (Cache-based)
     
     /// Apply routes using cached IPs only (no DNS resolution) - used for instant startup
-    private func applyRoutesFromCache() async {
+    /// Returns false if apply was skipped (no gateway, gate held, preempted, etc.)
+    private func applyRoutesFromCache() async -> Bool {
+        let epoch = routeEpoch
+        guard acquireRouteOperation() else {
+            log(.info, "Cache apply skipped: route operation in progress")
+            return false
+        }
+        defer { releaseRouteOperation() }
+
         guard let gateway = localGateway else {
             log(.error, "Cannot apply cached routes: no local gateway")
-            return
+            return false
         }
-        
+
+        let isInverse = config.routingMode == .vpnOnly
+
+        // VPN Only mode needs VPN gateway for domain routes
+        if isInverse {
+            guard let _ = vpnGateway else {
+                log(.error, "Cannot apply cached routes in VPN Only mode: no VPN gateway")
+                return false
+            }
+        }
+
+        let routeGateway = isInverse ? vpnGateway! : gateway
+
         var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
-        var seenDestinations: Set<String> = []  // Deduplicate by destination IP
-        
-        // Build routes from DNS cache
-        for service in config.services where service.enabled {
-            for domain in service.domains {
-                if let cachedIPs = dnsDiskCache[domain] {
-                    for ip in cachedIPs where !seenDestinations.contains(ip) {
-                        seenDestinations.insert(ip)
-                        routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: service.name))
+        var seenDestinations: Set<String> = []  // Deduplicate kernel operations
+        var allSourceEntries: [(destination: String, gateway: String, source: String)] = []
+        var seenSourceDests: Set<String> = []  // Deduplicate (source, destination) pairs
+
+        if isInverse {
+            // VPN Only mode: catch-all through local gateway, domain routes through VPN
+            routesToAdd.append((destination: "0.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
+            routesToAdd.append((destination: "128.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
+            seenDestinations.insert("0.0.0.0/1")
+            seenDestinations.insert("128.0.0.0/1")
+            allSourceEntries.append((destination: "0.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
+            allSourceEntries.append((destination: "128.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
+            seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
+            seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
+
+            for domain in config.inverseDomains where domain.enabled {
+                if let cachedIPs = dnsDiskCache[domain.domain] {
+                    for ip in cachedIPs {
+                        let key = "\(domain.domain)|\(ip)"
+                        if !seenSourceDests.contains(key) {
+                            seenSourceDests.insert(key)
+                            allSourceEntries.append((destination: ip, gateway: routeGateway, source: domain.domain))
+                        }
+                        if !seenDestinations.contains(ip) {
+                            seenDestinations.insert(ip)
+                            routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: domain.domain))
+                        }
                     }
                     if let firstIP = cachedIPs.first {
-                        dnsCache[domain] = firstIP
+                        dnsCache[domain.domain] = firstIP
                     }
                 }
             }
-            // IP ranges don't need DNS
-            for range in service.ipRanges where !seenDestinations.contains(range) {
-                seenDestinations.insert(range)
-                routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
-            }
-        }
-        
-        // Custom domains
-        for domain in config.domains where domain.enabled {
-            if let cachedIPs = dnsDiskCache[domain.domain] {
-                for ip in cachedIPs where !seenDestinations.contains(ip) {
-                    seenDestinations.insert(ip)
-                    routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: domain.domain))
+        } else {
+            // Bypass mode: services + domains through local gateway
+            for service in config.services where service.enabled {
+                for domain in service.domains {
+                    if let cachedIPs = dnsDiskCache[domain] {
+                        for ip in cachedIPs {
+                            let key = "\(service.name)|\(ip)"
+                            if !seenSourceDests.contains(key) {
+                                seenSourceDests.insert(key)
+                                allSourceEntries.append((destination: ip, gateway: gateway, source: service.name))
+                            }
+                            if !seenDestinations.contains(ip) {
+                                seenDestinations.insert(ip)
+                                routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: service.name))
+                            }
+                        }
+                        if let firstIP = cachedIPs.first {
+                            dnsCache[domain] = firstIP
+                        }
+                    }
                 }
-                if let firstIP = cachedIPs.first {
-                    dnsCache[domain.domain] = firstIP
+                for range in service.ipRanges {
+                    let key = "\(service.name)|\(range)"
+                    if !seenSourceDests.contains(key) {
+                        seenSourceDests.insert(key)
+                        allSourceEntries.append((destination: range, gateway: gateway, source: service.name))
+                    }
+                    if !seenDestinations.contains(range) {
+                        seenDestinations.insert(range)
+                        routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
+                    }
+                }
+            }
+
+            for domain in config.domains where domain.enabled {
+                if let cachedIPs = dnsDiskCache[domain.domain] {
+                    for ip in cachedIPs {
+                        let key = "\(domain.domain)|\(ip)"
+                        if !seenSourceDests.contains(key) {
+                            seenSourceDests.insert(key)
+                            allSourceEntries.append((destination: ip, gateway: gateway, source: domain.domain))
+                        }
+                        if !seenDestinations.contains(ip) {
+                            seenDestinations.insert(ip)
+                            routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: domain.domain))
+                        }
+                    }
+                    if let firstIP = cachedIPs.first {
+                        dnsCache[domain.domain] = firstIP
+                    }
                 }
             }
         }
-        
-        log(.info, "Applying \(routesToAdd.count) routes from cache...")
-        
-        // Apply routes in batch
-        if HelperManager.shared.isHelperInstalled && !routesToAdd.isEmpty {
-            let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
-            _ = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
-            
-            for route in routesToAdd {
-                newRoutes.append(ActiveRoute(
-                    destination: route.destination,
-                    gateway: route.gateway,
-                    source: route.source,
-                    timestamp: Date()
-                ))
+
+        log(.info, "Applying \(routesToAdd.count) routes from cache (\(isInverse ? "VPN Only" : "Bypass") mode)...")
+
+        // Apply routes in batch (with fallback for helperless mode)
+        var batchFailureCount = 0
+        var batchFailedDests: Set<String> = []
+        if !routesToAdd.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
+                let result = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
+                batchFailureCount = result.failureCount
+                batchFailedDests = Set(result.failedDestinations)
+                if result.failureCount > 0 {
+                    log(.warning, "Cache route batch: \(result.successCount) succeeded, \(result.failureCount) failed — will reconcile on DNS refresh")
+                }
+            } else {
+                for route in routesToAdd {
+                    _ = await addRoute(route.destination, gateway: route.gateway, isNetwork: route.isNetwork)
+                }
             }
         }
-        
+
+        // Build activeRoutes from all source entries, excluding failed kernel adds
+        for entry in allSourceEntries where !batchFailedDests.contains(entry.destination) {
+            newRoutes.append(ActiveRoute(
+                destination: entry.destination,
+                gateway: entry.gateway,
+                source: entry.source,
+                timestamp: Date()
+            ))
+        }
+
+        // Clean up stale routes — same two-population logic as full apply
+        let newDestinations = Set(newRoutes.map { $0.destination })
+        let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
+        let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
+        let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
+        let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
+
+        if !trulyOrphanedDests.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
+                if result.failureCount > 0 {
+                    log(.warning, "Cache orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
+                    let failedSet = Set(result.failedDestinations)
+                    for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
+                        newRoutes.append(route)
+                    }
+                } else if result.successCount > 0 {
+                    log(.info, "Cache orphan cleanup: \(result.successCount) stale kernel routes removed")
+                }
+            } else {
+                for dest in trulyOrphanedDests {
+                    _ = await removeRoute(dest)
+                }
+            }
+        }
+
+        // Add-failed: delete-before-add already removed the old route (see full apply comment)
+        if !addFailedStaleDests.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
+                if result.failureCount > 0 {
+                    log(.info, "Cache add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
+                }
+            } else {
+                for dest in addFailedStaleDests {
+                    _ = await removeRoute(dest)
+                }
+            }
+        }
+
+        // Preemption check: if removeAllRoutes() ran during our awaits, our results are stale.
+        guard routeEpoch == epoch else {
+            log(.warning, "Cache apply aborted: routes were cleared during operation")
+            return false
+        }
+
         activeRoutes = newRoutes
         lastUpdate = Date()
-        
+
         // Update hosts file
         if config.manageHostsFile {
             await updateHostsFile()
         }
-        
-        log(.success, "Applied \(newRoutes.count) routes from cache")
+
+        if batchFailureCount > 0 {
+            log(.warning, "Applied routes from cache (\(batchFailureCount) kernel failures — counts approximate)")
+        } else {
+            log(.success, "Applied \(uniqueRouteCount) unique routes from cache")
+        }
+        return true
     }
-    
+
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
     private func backgroundDNSRefresh(sendNotification: Bool) async {
+        let epoch = routeEpoch
+        guard acquireRouteOperation() else {
+            log(.info, "Background DNS refresh skipped: another route operation is in progress")
+            return
+        }
+        defer { releaseRouteOperation() }
+
         guard let gateway = localGateway else {
             log(.warning, "Background DNS refresh skipped: no local gateway")
             return
         }
-        
-        // Collect domains to resolve
-        var domainsToResolve: [(domain: String, source: String)] = []
-        for service in config.services where service.enabled {
-            for domain in service.domains {
-                domainsToResolve.append((domain, service.name))
+
+        let isInverse = config.routingMode == .vpnOnly
+        let routeGateway: String
+        if isInverse {
+            guard let vpnGw = vpnGateway else {
+                log(.warning, "Background DNS refresh skipped: VPN Only mode but no VPN gateway")
+                return
             }
+            routeGateway = vpnGw
+        } else {
+            routeGateway = gateway
         }
-        for domain in config.domains where domain.enabled {
-            domainsToResolve.append((domain.domain, domain.domain))
+
+        // Collect domains to resolve based on routing mode
+        var domainsToResolve: [(domain: String, source: String)] = []
+        if isInverse {
+            for domain in config.inverseDomains where domain.enabled {
+                domainsToResolve.append((domain.domain, domain.domain))
+            }
+        } else {
+            for service in config.services where service.enabled {
+                for domain in service.domains {
+                    domainsToResolve.append((domain, service.name))
+                }
+            }
+            for domain in config.domains where domain.enabled {
+                domainsToResolve.append((domain.domain, domain.domain))
+            }
         }
         
         // Resolve DNS in parallel
@@ -1411,27 +1790,43 @@ final class RouteManager: ObservableObject {
             return results
         }
         
-        // Compare with cache and build route changes
-        for (domain, source, ips) in results {
+        // Update per-domain caches first
+        for (domain, _, ips) in results {
             guard let ips = ips, !ips.isEmpty else { continue }
-            
-            let oldIPs = Set(dnsDiskCache[domain] ?? [])
-            let newIPSet = Set(ips)
-            
-            // Find IPs to add (new) and remove (old)
-            let toAdd = newIPSet.subtracting(oldIPs)
-            let toRemove = oldIPs.subtracting(newIPSet)
-            
-            for ip in toAdd {
-                routeChanges.append((add: true, destination: ip, gateway: gateway, isNetwork: false, source: source))
-            }
-            for ip in toRemove {
-                routeChanges.append((add: false, destination: ip, gateway: gateway, isNetwork: false, source: source))
-            }
-            
             newIPs[domain] = ips
             if let firstIP = ips.first {
                 await MainActor.run { dnsCache[domain] = firstIP }
+            }
+        }
+
+        // Build route changes at the SOURCE level, not per-domain, so that
+        // when two domains in the same service share an IP and one drops it
+        // while the other keeps it, we don't incorrectly remove the route.
+        let resultsBySource = Dictionary(grouping: results, by: { $0.1 })
+        for (source, sourceResults) in resultsBySource {
+            var aggregateOldIPs: Set<String> = []
+            var aggregateNewIPs: Set<String> = []
+
+            for (domain, _, ips) in sourceResults {
+                let oldCached = Set(dnsDiskCache[domain] ?? [])
+                aggregateOldIPs.formUnion(oldCached)
+
+                if let ips = ips, !ips.isEmpty {
+                    aggregateNewIPs.formUnion(ips)
+                } else {
+                    // Failed resolution — treat old cached IPs as unchanged
+                    aggregateNewIPs.formUnion(oldCached)
+                }
+            }
+
+            let toAdd = aggregateNewIPs.subtracting(aggregateOldIPs)
+            let toRemove = aggregateOldIPs.subtracting(aggregateNewIPs)
+
+            for ip in toAdd {
+                routeChanges.append((add: true, destination: ip, gateway: routeGateway, isNetwork: false, source: source))
+            }
+            for ip in toRemove {
+                routeChanges.append((add: false, destination: ip, gateway: routeGateway, isNetwork: false, source: source))
             }
         }
         
@@ -1443,25 +1838,81 @@ final class RouteManager: ObservableObject {
             saveDNSCache()
         }
         
-        // Apply route changes if any
-        if !routeChanges.isEmpty {
+        // Apply route changes if any (re-check VPN state to avoid racing with disconnect)
+        let stillConnected = await MainActor.run { isVPNConnected }
+        if !routeChanges.isEmpty && stillConnected {
             let additions = routeChanges.filter { $0.add }
             let removals = routeChanges.filter { !$0.add }
             
             if !removals.isEmpty {
-                let destinations = removals.map { $0.destination }
-                _ = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
+                // Only remove kernel routes if no other source still needs the destination
+                let removalSources = Dictionary(grouping: removals, by: { $0.source })
+                var kernelRemovalDests: [String] = []
+
                 await MainActor.run {
-                    activeRoutes.removeAll { route in destinations.contains(route.destination) }
+                    for (source, sourceRemovals) in removalSources {
+                        for removal in sourceRemovals {
+                            // Remove the activeRoute entry for this specific source
+                            activeRoutes.removeAll { $0.destination == removal.destination && $0.source == source }
+                            // Only remove from kernel if no other source still references it
+                            let stillNeeded = activeRoutes.contains { $0.destination == removal.destination }
+                            if !stillNeeded {
+                                kernelRemovalDests.append(removal.destination)
+                            }
+                        }
+                    }
+                }
+
+                if !kernelRemovalDests.isEmpty {
+                    if HelperManager.shared.isHelperInstalled {
+                        let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovalDests)
+                        if result.failureCount > 0 {
+                            // Re-add activeRoute entries for destinations that failed kernel removal
+                            let failedSet = Set(result.failedDestinations)
+                            await MainActor.run {
+                                for removal in removals where failedSet.contains(removal.destination) {
+                                    activeRoutes.append(ActiveRoute(
+                                        destination: removal.destination,
+                                        gateway: removal.gateway,
+                                        source: removal.source,
+                                        timestamp: Date()
+                                    ))
+                                }
+                            }
+                        }
+                    } else {
+                        for dest in kernelRemovalDests {
+                            _ = await removeRoute(dest)
+                        }
+                    }
                 }
             }
-            
-            if !additions.isEmpty && HelperManager.shared.isHelperInstalled {
-                let routes = additions.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
-                _ = await HelperManager.shared.addRoutesBatch(routes: routes)
-                
-                await MainActor.run {
+
+            if !additions.isEmpty {
+                var addFailedDests: Set<String> = []
+                if HelperManager.shared.isHelperInstalled {
+                    // Deduplicate by destination for kernel operations — same IP from
+                    // different sources must only be sent once to avoid delete-before-add
+                    // destroying a just-added route on the second pass
+                    var seenAddDests: Set<String> = []
+                    let routes = additions.compactMap { add -> (destination: String, gateway: String, isNetwork: Bool)? in
+                        guard seenAddDests.insert(add.destination).inserted else { return nil }
+                        return (destination: add.destination, gateway: add.gateway, isNetwork: add.isNetwork)
+                    }
+                    let result = await HelperManager.shared.addRoutesBatch(routes: routes)
+                    addFailedDests = Set(result.failedDestinations)
+                } else {
+                    var seenAddDests: Set<String> = []
                     for add in additions {
+                        if seenAddDests.insert(add.destination).inserted {
+                            _ = await addRoute(add.destination, gateway: add.gateway, isNetwork: add.isNetwork)
+                        }
+                    }
+                }
+
+                // Record ownership for ALL sources whose destinations succeeded
+                await MainActor.run {
+                    for add in additions where !addFailedDests.contains(add.destination) {
                         activeRoutes.append(ActiveRoute(
                             destination: add.destination,
                             gateway: add.gateway,
@@ -1481,14 +1932,68 @@ final class RouteManager: ObservableObject {
             }
         }
         
-        // Update hosts file with any newly resolved domains
-        await MainActor.run {
-            if config.manageHostsFile {
-                Task {
-                    await updateHostsFile()
-                    log(.info, "Background refresh: hosts file updated")
+        // Repair missing CIDR routes for service ipRanges (bypass mode only)
+        var cidrRepaired = 0
+        if !isInverse && stillConnected {
+            let existingDests = await MainActor.run { Set(activeRoutes.map { $0.destination }) }
+            var repairedRanges: Set<String> = []
+            for service in config.services where service.enabled {
+                for range in service.ipRanges {
+                    if existingDests.contains(range) { continue }
+                    if repairedRanges.contains(range) {
+                        // Already repaired by another service — just add ownership
+                        await MainActor.run {
+                            activeRoutes.append(ActiveRoute(
+                                destination: range,
+                                gateway: routeGateway,
+                                source: service.name,
+                                timestamp: Date()
+                            ))
+                        }
+                        continue
+                    }
+                    if await addRoute(range, gateway: routeGateway, isNetwork: true) {
+                        repairedRanges.insert(range)
+                        await MainActor.run {
+                            activeRoutes.append(ActiveRoute(
+                                destination: range,
+                                gateway: routeGateway,
+                                source: service.name,
+                                timestamp: Date()
+                            ))
+                        }
+                        cidrRepaired += 1
+                    }
                 }
             }
+            if cidrRepaired > 0 {
+                await MainActor.run { log(.info, "Background refresh: repaired \(cidrRepaired) missing CIDR route(s)") }
+            }
+        }
+
+        // Preemption check: if removeAllRoutes() ran during our awaits, skip commits
+        guard routeEpoch == epoch else {
+            await MainActor.run { log(.warning, "Background DNS refresh aborted: routes were cleared during operation") }
+            return
+        }
+
+        // Update hosts file with any newly resolved domains (only if still connected)
+        let shouldUpdateHosts = await MainActor.run { config.manageHostsFile && isVPNConnected }
+        if shouldUpdateHosts {
+            await updateHostsFile()
+            await MainActor.run { log(.info, "Background refresh: hosts file updated") }
+        }
+
+        // Update UI refresh timestamps
+        await MainActor.run {
+            lastDNSRefresh = Date()
+            nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
+        }
+
+        // Send notification if requested (include both DNS changes and CIDR repairs)
+        let totalChanges = routeChanges.count + cidrRepaired
+        if sendNotification && totalChanges > 0 {
+            NotificationManager.shared.notifyDNSRefreshCompleted(updatedCount: totalChanges)
         }
     }
     
@@ -1524,90 +2029,217 @@ final class RouteManager: ObservableObject {
     
     /// Perform DNS refresh - re-resolve all domains and update routes
     private func performDNSRefresh() async {
+        let epoch = routeEpoch
+        guard acquireRouteOperation() else {
+            log(.info, "DNS refresh skipped: another route operation is in progress")
+            return
+        }
+        defer { releaseRouteOperation() }
+
         guard isVPNConnected, let gateway = localGateway else {
             log(.info, "DNS refresh skipped: \(!isVPNConnected ? "VPN not connected" : "no local gateway")")
             nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
             return
         }
-        
-        log(.info, "Auto DNS refresh: re-resolving domains...")
-        beginApplyingRoutes()
-        
-        var updatedCount = 0
-        var newIPs: Set<String> = []
-        let oldIPs = Set(activeRoutes.map { $0.destination })
-        
-        // Collect all domains to refresh
-        var domainsToResolve: [(domain: String, source: String)] = []
-        
-        for domain in config.domains where domain.enabled {
-            domainsToResolve.append((domain.domain, domain.domain))
+
+        let isInverse = config.routingMode == .vpnOnly
+        let routeGateway: String
+        if isInverse {
+            guard let vpnGw = vpnGateway else {
+                log(.info, "DNS refresh skipped: VPN Only mode but no VPN gateway")
+                nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
+                return
+            }
+            routeGateway = vpnGw
+        } else {
+            routeGateway = gateway
         }
-        
-        for service in config.services where service.enabled {
-            for domain in service.domains {
-                domainsToResolve.append((domain, service.name))
+
+        log(.info, "Auto DNS refresh (\(isInverse ? "VPN Only" : "Bypass") mode): re-resolving domains...")
+
+        var updatedCount = 0
+
+        // Source-aware tracking: (source, destination) pairs instead of flat IP sets
+        struct SourceDest: Hashable { let source: String; let destination: String }
+        var expectedEntries: Set<SourceDest> = []
+        var addedKernelRoutes: Set<String> = []  // Track new kernel routes added this cycle
+
+        // Preserve catch-all routes in VPN Only mode (they aren't DNS-resolved)
+        if isInverse {
+            expectedEntries.insert(SourceDest(source: "VPN Only catch-all", destination: "0.0.0.0/1"))
+            expectedEntries.insert(SourceDest(source: "VPN Only catch-all", destination: "128.0.0.0/1"))
+        }
+
+        // Collect domains based on routing mode
+        var domainsToResolve: [(domain: String, source: String)] = []
+
+        if isInverse {
+            for domain in config.inverseDomains where domain.enabled {
+                domainsToResolve.append((domain.domain, domain.domain))
+            }
+        } else {
+            for domain in config.domains where domain.enabled {
+                domainsToResolve.append((domain.domain, domain.domain))
+            }
+            for service in config.services where service.enabled {
+                for domain in service.domains {
+                    domainsToResolve.append((domain, service.name))
+                }
             }
         }
-        
+
+        // Snapshot current state for comparison
+        let existingDestinations = Set(activeRoutes.map { $0.destination })
+        let existingSourceDests = Set(activeRoutes.map { SourceDest(source: $0.source, destination: $0.destination) })
+
         // Re-resolve and check for changes
+        var resolvedDomainIPs: [String: [String]] = [:]
         for (domain, source) in domainsToResolve {
             if let ips = await resolveIPs(for: domain) {
+                resolvedDomainIPs[domain] = ips
                 for ip in ips {
-                    newIPs.insert(ip)
-                    if !oldIPs.contains(ip) {
-                        // New IP found - add route
-                        if await addRoute(ip, gateway: gateway) {
-                            activeRoutes.append(ActiveRoute(
-                                destination: ip,
-                                gateway: gateway,
-                                source: source,
-                                timestamp: Date()
-                            ))
+                    let entry = SourceDest(source: source, destination: ip)
+                    expectedEntries.insert(entry)
+
+                    // Add kernel route if destination is completely new
+                    let kernelHasRoute: Bool
+                    if !existingDestinations.contains(ip) && !addedKernelRoutes.contains(ip) {
+                        if await addRoute(ip, gateway: routeGateway) {
+                            addedKernelRoutes.insert(ip)
                             updatedCount += 1
+                            kernelHasRoute = true
                             log(.success, "DNS refresh: added new IP \(ip) for \(domain)")
+                        } else {
+                            kernelHasRoute = false
                         }
+                    } else {
+                        kernelHasRoute = true  // already exists in kernel
+                    }
+
+                    // Only record source entry if kernel actually has the route
+                    if kernelHasRoute && !existingSourceDests.contains(entry) {
+                        activeRoutes.append(ActiveRoute(
+                            destination: ip,
+                            gateway: routeGateway,
+                            source: source,
+                            timestamp: Date()
+                        ))
+                    }
+                }
+            } else if let cachedIPs = dnsDiskCache[domain] {
+                // DNS failed — preserve cached IPs so they aren't treated as stale
+                for ip in cachedIPs {
+                    expectedEntries.insert(SourceDest(source: source, destination: ip))
+                }
+            }
+        }
+
+        // Update DNS caches only for successfully resolved domains
+        for (domain, ips) in resolvedDomainIPs {
+            dnsDiskCache[domain] = ips
+            if let firstIP = ips.first {
+                dnsCache[domain] = firstIP
+            }
+        }
+        if !resolvedDomainIPs.isEmpty {
+            saveDNSCache()
+        }
+
+        // IP ranges (bypass mode): track as expected AND repair missing CIDR routes
+        if !isInverse {
+            for service in config.services where service.enabled {
+                for range in service.ipRanges {
+                    expectedEntries.insert(SourceDest(source: service.name, destination: range))
+
+                    if existingDestinations.contains(range) { continue }
+                    if addedKernelRoutes.contains(range) {
+                        // Already repaired by another service — just add ownership
+                        activeRoutes.append(ActiveRoute(
+                            destination: range,
+                            gateway: routeGateway,
+                            source: service.name,
+                            timestamp: Date()
+                        ))
+                        continue
+                    }
+                    // Repair missing CIDR route
+                    if await addRoute(range, gateway: routeGateway, isNetwork: true) {
+                        activeRoutes.append(ActiveRoute(
+                            destination: range,
+                            gateway: routeGateway,
+                            source: service.name,
+                            timestamp: Date()
+                        ))
+                        addedKernelRoutes.insert(range)
+                        updatedCount += 1
+                        log(.success, "DNS refresh: repaired missing CIDR route \(range) for \(service.name)")
                     }
                 }
             }
         }
-        
-        // Also add IP ranges (these don't change via DNS but ensure they're present)
-        for service in config.services where service.enabled {
-            for range in service.ipRanges {
-                newIPs.insert(range)
-            }
-        }
-        
-        // Remove stale IPs that are no longer resolved
-        let staleIPs = oldIPs.subtracting(newIPs)
+
+        // Source-aware stale entry removal
+        let currentEntries = Set(activeRoutes.map { SourceDest(source: $0.source, destination: $0.destination) })
+        let staleEntries = currentEntries.subtracting(expectedEntries)
         var removedCount = 0
-        if !staleIPs.isEmpty {
-            // Remove from routing table
-            if HelperManager.shared.isHelperInstalled {
-                _ = await HelperManager.shared.removeRoutesBatch(destinations: Array(staleIPs))
+        if !staleEntries.isEmpty {
+            // Compute kernel removals BEFORE mutating activeRoutes
+            let staleDestinations = Set(staleEntries.map { $0.destination })
+            let remainingAfterRemoval = activeRoutes.filter { route in
+                !staleEntries.contains(SourceDest(source: route.source, destination: route.destination))
             }
-            // Remove from activeRoutes
-            activeRoutes.removeAll { staleIPs.contains($0.destination) }
-            removedCount = staleIPs.count
-            for ip in staleIPs.prefix(5) {  // Log first 5
-                log(.info, "DNS refresh: removed stale IP \(ip)")
+            let stillNeeded = Set(remainingAfterRemoval.map { $0.destination })
+            let kernelRemovals = Array(staleDestinations.subtracting(stillNeeded))
+
+            // Attempt kernel removal first
+            var failedKernelRemovals: Set<String> = []
+            if !kernelRemovals.isEmpty {
+                if HelperManager.shared.isHelperInstalled {
+                    let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovals)
+                    failedKernelRemovals = Set(result.failedDestinations)
+                } else {
+                    for ip in kernelRemovals {
+                        _ = await removeRoute(ip)
+                    }
+                }
             }
-            if staleIPs.count > 5 {
-                log(.info, "DNS refresh: ... and \(staleIPs.count - 5) more stale IPs removed")
+
+            // Now remove stale entries, but retain those whose kernel removal failed
+            activeRoutes.removeAll { route in
+                let entry = SourceDest(source: route.source, destination: route.destination)
+                guard staleEntries.contains(entry) else { return false }  // not stale, keep
+                if failedKernelRemovals.contains(route.destination) { return false }  // kernel removal failed, keep
+                return true
+            }
+
+            removedCount = kernelRemovals.count - failedKernelRemovals.count
+            for entry in staleEntries.prefix(5) {
+                log(.info, "DNS refresh: removed stale \(entry.destination) (source: \(entry.source))")
+            }
+            if staleEntries.count > 5 {
+                log(.info, "DNS refresh: ... and \(staleEntries.count - 5) more stale entries removed")
+            }
+            if !failedKernelRemovals.isEmpty {
+                log(.warning, "DNS refresh: \(failedKernelRemovals.count) kernel removals failed — entries retained")
             }
         }
-        
-        // Always update hosts file if enabled - keeps IPs fresh even if routes didn't change
-        if config.manageHostsFile {
+
+        // Preemption check: if removeAllRoutes() ran during our awaits, skip commits
+        guard routeEpoch == epoch else {
+            log(.warning, "DNS refresh aborted: routes were cleared during operation")
+            nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
+            return
+        }
+
+        // Update hosts file if enabled and still connected
+        if config.manageHostsFile && isVPNConnected {
             await updateHostsFile()
             log(.info, "DNS refresh: hosts file updated")
         }
-        
+
         lastDNSRefresh = Date()
-        nextDNSRefresh = Date().addingTimeInterval(config.dnsRefreshInterval)
-        endApplyingRoutes()
-        
+        nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
+
         if updatedCount > 0 || removedCount > 0 {
             log(.success, "DNS refresh complete: \(updatedCount) added, \(removedCount) removed")
         } else {
@@ -1680,15 +2312,16 @@ final class RouteManager: ObservableObject {
         saveConfig()
         log(.success, "Added domain: \(cleaned)")
         
-        if isVPNConnected {
-            beginApplyingRoutes()
+        if isVPNConnected && acquireRouteOperation() {
             Task {
+                defer { releaseRouteOperation() }
+                let epoch = routeEpoch
                 guard let gateway = await ensureGateway() else {
                     log(.error, "Cannot route \(cleaned): no local gateway detected. Try Refresh Routes.")
-                    endApplyingRoutes()
                     return
                 }
                 if let routes = await applyRoutesForDomain(cleaned, gateway: gateway) {
+                    guard routeEpoch == epoch else { return }
                     activeRoutes.append(contentsOf: routes)
                     if config.manageHostsFile {
                         await updateHostsFile()
@@ -1697,11 +2330,10 @@ final class RouteManager: ObservableObject {
                     log(.warning, "DNS resolution failed for \(cleaned), retrying in 15s...")
                     scheduleRetry(for: cleaned)
                 }
-                endApplyingRoutes()
             }
         }
     }
-    
+
     private func scheduleRetry(for domain: String) {
         pendingRetryTasks[domain]?.cancel()
         pendingRetryTasks[domain] = Task { [weak self] in
@@ -1728,11 +2360,16 @@ final class RouteManager: ObservableObject {
             return
         }
         
-        beginApplyingRoutes()
-        defer { endApplyingRoutes() }
-        
+        guard acquireRouteOperation() else {
+            log(.info, "Retry skipped for \(domain): route operation in progress")
+            return
+        }
+        defer { releaseRouteOperation() }
+        let epoch = routeEpoch
+
         log(.info, "Retrying DNS for \(domain)...")
         if let routes = await applyRoutesForDomain(domain, gateway: gateway) {
+            guard routeEpoch == epoch else { return }
             activeRoutes.append(contentsOf: routes)
             if config.manageHostsFile {
                 await updateHostsFile()
@@ -1751,16 +2388,21 @@ final class RouteManager: ObservableObject {
     func removeDomain(_ domain: DomainEntry) {
         pendingRetryTasks[domain.domain]?.cancel()
         pendingRetryTasks.removeValue(forKey: domain.domain)
-        
-        beginApplyingRoutes()
-        
-        Task {
-            await removeRoutesForSource(domain.domain)
-            
+
+        guard acquireRouteOperation() else {
+            // Config still updated even if routes can't be removed right now
             config.domains.removeAll { $0.id == domain.id }
             saveConfig()
+            log(.info, "Removed domain: \(domain.domain) (route cleanup deferred)")
+            return
+        }
+        Task {
+            defer { releaseRouteOperation() }
+            await removeRoutesForSource(domain.domain)
+            config.domains.removeAll { $0.id == domain.id }
+            saveConfig()
+            if config.manageHostsFile { await updateHostsFile() }
             log(.info, "Removed domain: \(domain.domain)")
-            endApplyingRoutes()
         }
     }
     
@@ -1773,16 +2415,17 @@ final class RouteManager: ObservableObject {
         let domain = config.domains[index]
         log(.info, "\(domain.domain) \(domain.enabled ? "enabled" : "disabled")")
         
-        if isVPNConnected {
-            beginApplyingRoutes()
+        if isVPNConnected && acquireRouteOperation() {
             Task {
+                defer { releaseRouteOperation() }
+                let epoch = routeEpoch
                 if domain.enabled {
                     guard let gateway = await ensureGateway() else {
                         log(.error, "Cannot route \(domain.domain): no local gateway detected")
-                        endApplyingRoutes()
                         return
                     }
                     if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
+                        guard routeEpoch == epoch else { return }
                         activeRoutes.append(contentsOf: routes)
                         if config.manageHostsFile {
                             await updateHostsFile()
@@ -1790,72 +2433,284 @@ final class RouteManager: ObservableObject {
                     }
                 } else {
                     await removeRoutesForSource(domain.domain)
+                    if config.manageHostsFile { await updateHostsFile() }
                 }
-                endApplyingRoutes()
             }
         }
     }
-    
+
     /// Bulk enable/disable all domains with loading state (incremental)
     func setAllDomainsEnabled(_ enabled: Bool) {
-        beginApplyingRoutes()
-        
         // Get domains that need to change
         let domainsToChange = config.domains.filter { $0.enabled != enabled }
-        
+
         // Update config
         for i in config.domains.indices {
             config.domains[i].enabled = enabled
         }
         saveConfig()
-        
+
         log(.info, enabled ? "Enabled all domains" : "Disabled all domains")
-        
-        if isVPNConnected {
-            Task {
-                let gateway: String? = enabled ? await ensureGateway() : nil
-                if enabled && gateway == nil {
-                    log(.error, "Cannot enable domains: no local gateway detected")
-                    endApplyingRoutes()
-                    return
-                }
-                for domain in domainsToChange {
-                    if enabled, let gw = gateway {
-                        if let routes = await applyRoutesForDomain(domain.domain, gateway: gw, persistCache: false) {
-                            activeRoutes.append(contentsOf: routes)
-                        }
-                    } else if !enabled {
-                        await removeRoutesForSource(domain.domain)
-                    }
-                }
-                saveDNSCache()
-                if enabled && config.manageHostsFile {
-                    await updateHostsFile()
-                }
-                endApplyingRoutes()
+
+        guard isVPNConnected, acquireRouteOperation() else { return }
+        Task {
+            defer { releaseRouteOperation() }
+            let epoch = routeEpoch
+            let gateway: String? = enabled ? await ensureGateway() : nil
+            if enabled && gateway == nil {
+                log(.error, "Cannot enable domains: no local gateway detected")
+                return
             }
-        } else {
-            endApplyingRoutes()
+            for domain in domainsToChange {
+                guard routeEpoch == epoch else { return }
+                if enabled, let gw = gateway {
+                    if let routes = await applyRoutesForDomain(domain.domain, gateway: gw, persistCache: false) {
+                        guard routeEpoch == epoch else { return }
+                        activeRoutes.append(contentsOf: routes)
+                    }
+                } else if !enabled {
+                    await removeRoutesForSource(domain.domain)
+                }
+            }
+            saveDNSCache()
+            if config.manageHostsFile {
+                await updateHostsFile()
+            }
         }
     }
     
     /// Remove all routes matching a source (domain name or service name)
+    /// Only removes kernel routes if no other source shares the same destination
     private func removeRoutesForSource(_ source: String) async {
         let routesToRemove = activeRoutes.filter { $0.source == source }
-        
+        let destinationsStillNeeded = Set(activeRoutes.filter { $0.source != source }.map { $0.destination })
+
+        // Deduplicate destinations to avoid attempting the same kernel removal twice
+        var seenDestinations: Set<String> = []
+        var kernelRemoved = 0
+        var failedKernelRemovals: Set<String> = []
         for route in routesToRemove {
-            _ = await removeRoute(route.destination)
+            guard seenDestinations.insert(route.destination).inserted else { continue }
+            if !destinationsStillNeeded.contains(route.destination) {
+                if await removeRoute(route.destination) {
+                    kernelRemoved += 1
+                } else {
+                    failedKernelRemovals.insert(route.destination)
+                }
+            }
         }
-        
+
         await MainActor.run {
-            activeRoutes.removeAll { $0.source == source }
+            // Remove entries for this source, but retain entries whose kernel removal failed
+            activeRoutes.removeAll { route in
+                route.source == source && !failedKernelRemovals.contains(route.destination)
+            }
         }
-        
+
         if !routesToRemove.isEmpty {
-            log(.info, "Removed \(routesToRemove.count) routes for \(source)")
+            if failedKernelRemovals.isEmpty {
+                log(.info, "Removed \(routesToRemove.count) route entries for \(source) (\(kernelRemoved) kernel routes)")
+            } else {
+                log(.warning, "Removed routes for \(source): \(kernelRemoved) kernel routes removed, \(failedKernelRemovals.count) retained (kernel removal failed)")
+            }
         }
     }
     
+    /// Apply routes for a single service (used when adding/editing custom services while VPN is connected)
+    private func applyRoutesForService(_ service: ServiceEntry) async {
+        guard let gateway = localGateway else { return }
+        await applyRoutesForService(service, gateway: gateway)
+    }
+
+    // MARK: - Inverse Domain Management
+
+    func addInverseDomain(_ domain: String) {
+        let cleaned = cleanDomain(domain)
+        guard !cleaned.isEmpty else { return }
+        guard !config.inverseDomains.contains(where: { $0.domain == cleaned }) else {
+            log(.warning, "VPN Only domain \(cleaned) already exists")
+            return
+        }
+        config.inverseDomains.append(DomainEntry(domain: cleaned))
+        saveConfig()
+        log(.success, "Added VPN Only domain: \(cleaned)")
+
+        if isVPNConnected && config.routingMode == .vpnOnly && acquireRouteOperation() {
+            Task {
+                defer { releaseRouteOperation() }
+                let epoch = routeEpoch
+                guard let gw = vpnGateway else {
+                    log(.error, "Cannot route \(cleaned): no VPN gateway detected")
+                    return
+                }
+                if let routes = await applyRoutesForDomain(cleaned, gateway: gw) {
+                    guard routeEpoch == epoch else { return }
+                    activeRoutes.append(contentsOf: routes)
+                    if config.manageHostsFile { await updateHostsFile() }
+                }
+            }
+        }
+    }
+
+    func removeInverseDomain(_ domain: DomainEntry) {
+        guard acquireRouteOperation() else {
+            config.inverseDomains.removeAll { $0.id == domain.id }
+            saveConfig()
+            log(.info, "Removed VPN Only domain: \(domain.domain) (route cleanup deferred)")
+            return
+        }
+        Task {
+            defer { releaseRouteOperation() }
+            await removeRoutesForSource(domain.domain)
+            config.inverseDomains.removeAll { $0.id == domain.id }
+            saveConfig()
+            if config.manageHostsFile { await updateHostsFile() }
+            log(.info, "Removed VPN Only domain: \(domain.domain)")
+        }
+    }
+
+    func toggleInverseDomain(_ domainId: UUID) {
+        guard let index = config.inverseDomains.firstIndex(where: { $0.id == domainId }) else { return }
+        config.inverseDomains[index].enabled.toggle()
+        saveConfig()
+
+        let domain = config.inverseDomains[index]
+        log(.info, "VPN Only: \(domain.domain) \(domain.enabled ? "enabled" : "disabled")")
+
+        if isVPNConnected && config.routingMode == .vpnOnly && acquireRouteOperation() {
+            Task {
+                defer { releaseRouteOperation() }
+                let epoch = routeEpoch
+                if domain.enabled {
+                    guard let gw = vpnGateway else { return }
+                    if let routes = await applyRoutesForDomain(domain.domain, gateway: gw) {
+                        guard routeEpoch == epoch else { return }
+                        activeRoutes.append(contentsOf: routes)
+                        if config.manageHostsFile { await updateHostsFile() }
+                    }
+                } else {
+                    await removeRoutesForSource(domain.domain)
+                    if config.manageHostsFile { await updateHostsFile() }
+                }
+            }
+        }
+    }
+
+    func setAllInverseDomainsEnabled(_ enabled: Bool) {
+        for i in config.inverseDomains.indices {
+            config.inverseDomains[i].enabled = enabled
+        }
+        saveConfig()
+        log(.info, enabled ? "Enabled all VPN Only domains" : "Disabled all VPN Only domains")
+
+        if isVPNConnected && config.routingMode == .vpnOnly && acquireRouteOperation() {
+            Task {
+                defer { releaseRouteOperation() }
+                await removeAllRoutes()
+                await applyAllRoutesInternal(sendNotification: false)
+                if config.manageHostsFile { await updateHostsFile() }
+            }
+        }
+    }
+
+    /// Switch routing mode and re-apply routes
+    func setRoutingMode(_ mode: RoutingMode) {
+        guard config.routingMode != mode else { return }
+
+        // Pre-check: VPN Only requires vpnGateway
+        if mode == .vpnOnly && isVPNConnected && vpnGateway == nil {
+            log(.error, "Cannot switch to VPN Only: no VPN gateway detected")
+            return
+        }
+
+        config.routingMode = mode
+        saveConfig()
+        log(.info, "Routing mode changed to \(mode == .bypass ? "Bypass" : "VPN Only")")
+
+        if isVPNConnected && acquireRouteOperation() {
+            Task {
+                defer { releaseRouteOperation() }
+                await removeAllRoutes()
+                await applyAllRoutesInternal(sendNotification: false)
+                if activeRoutes.isEmpty {
+                    log(.warning, "No routes applied after mode switch — DNS refresh will retry")
+                }
+            }
+        }
+    }
+
+    // MARK: - Custom Service Management
+
+    func addCustomService(name: String, domains: [String], ipRanges: [String]) {
+        let id = "custom_\(UUID().uuidString.prefix(8).lowercased())"
+        let service = ServiceEntry(id: id, name: name, enabled: true, domains: domains, ipRanges: ipRanges, isCustom: true)
+        config.services.append(service)
+        saveConfig()
+        log(.success, "Added custom service: \(name)")
+
+        // Apply routes immediately if VPN is connected and in bypass mode
+        if isVPNConnected && config.routingMode == .bypass && acquireRouteOperation() {
+            Task {
+                defer { releaseRouteOperation() }
+                await applyRoutesForService(service)
+                if config.manageHostsFile { await updateHostsFile() }
+            }
+        }
+    }
+
+    func updateCustomService(id: String, name: String, domains: [String], ipRanges: [String]) {
+        guard let index = config.services.firstIndex(where: { $0.id == id && $0.isCustom }) else { return }
+        let oldName = config.services[index].name
+        let wasEnabled = config.services[index].enabled
+        config.services[index] = ServiceEntry(id: id, name: name, enabled: wasEnabled, domains: domains, ipRanges: ipRanges, isCustom: true)
+        saveConfig()
+        log(.info, "Updated custom service: \(name)")
+
+        // Reconcile live routes: remove old, add new if enabled
+        if isVPNConnected && wasEnabled && config.routingMode == .bypass && acquireRouteOperation() {
+            Task {
+                defer { releaseRouteOperation() }
+                await removeRoutesForSource(oldName)
+                // Re-tag any retained entries from failed kernel removals to new name,
+                // so they don't orphan under the old source and block future cleanup
+                if oldName != name {
+                    activeRoutes = activeRoutes.map { route in
+                        guard route.source == oldName else { return route }
+                        return ActiveRoute(destination: route.destination, gateway: route.gateway, source: name, timestamp: route.timestamp)
+                    }
+                }
+                await applyRoutesForService(config.services[index])
+                if config.manageHostsFile { await updateHostsFile() }
+            }
+        }
+    }
+
+    func removeCustomService(_ serviceId: String) {
+        guard let index = config.services.firstIndex(where: { $0.id == serviceId && $0.isCustom }) else { return }
+        let name = config.services[index].name
+        let serviceDomains = config.services[index].domains
+        guard acquireRouteOperation() else {
+            // Config still updated even if routes can't be removed right now
+            config.services.remove(at: index)
+            saveConfig()
+            log(.info, "Removed custom service: \(name) (route cleanup deferred)")
+            return
+        }
+        Task {
+            defer { releaseRouteOperation() }
+            await removeRoutesForSource(name)
+            // If routes were retained (kernel removal failed), save the domain list
+            // so updateHostsFile can reconstruct hosts entries for this orphaned source
+            if activeRoutes.contains(where: { $0.source == name }) {
+                orphanedServiceDomains[name] = serviceDomains
+            }
+            config.services.remove(at: index)
+            saveConfig()
+            if config.manageHostsFile { await updateHostsFile() }
+            log(.info, "Removed custom service: \(name)")
+        }
+    }
+
     func toggleService(_ serviceId: String) {
         guard let index = config.services.firstIndex(where: { $0.id == serviceId }) else { return }
         config.services[index].enabled.toggle()
@@ -1865,37 +2720,38 @@ final class RouteManager: ObservableObject {
         log(.info, "\(service.name) \(service.enabled ? "enabled" : "disabled")")
         
         // Incremental route apply/remove
-        if isVPNConnected {
-            beginApplyingRoutes()
+        if isVPNConnected && acquireRouteOperation() {
             Task {
+                defer { releaseRouteOperation() }
                 if service.enabled {
                     guard let gateway = await ensureGateway() else {
                         log(.error, "Cannot route \(service.name): no local gateway detected")
-                        endApplyingRoutes()
                         return
                     }
                     await applyRoutesForService(service, gateway: gateway)
                 } else {
                     await removeRoutesForSource(service.name)
                 }
-                endApplyingRoutes()
+                if config.manageHostsFile { await updateHostsFile() }
             }
         }
     }
     
     /// Apply routes for a single service (incremental add) - parallel DNS + batch routes
     private func applyRoutesForService(_ service: ServiceEntry, gateway: String) async {
+        let epoch = routeEpoch
         var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool)] = []
-        
-        // Track existing routes to avoid duplicates
+
+        // Track existing destinations (for kernel-add dedup) and existing ownership (for source dedup)
         let existingDestinations = Set(activeRoutes.map { $0.destination })
-        var seenDestinations: Set<String> = existingDestinations
-        
+        let existingOwnership = Set(activeRoutes.map { "\($0.source)|\($0.destination)" })
+        var kernelAddedDests: Set<String> = []
+
         // Capture DNS settings for parallel resolution
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
-        
+
         // Resolve ALL domains in parallel (not sequentially)
         let domainResults = await withTaskGroup(of: (String, [String]?).self) { group in
             for domain in service.domains {
@@ -1904,89 +2760,120 @@ final class RouteManager: ObservableObject {
                     return (domain, ips)
                 }
             }
-            
+
             var results: [(String, [String]?)] = []
             for await result in group {
                 results.append(result)
             }
             return results
         }
-        
+
         // Collect routes from resolved domains
+        var cacheUpdated = false
         for (domain, ips) in domainResults {
             guard let ips = ips else { continue }
-            
-            // Cache first IP for hosts file
+
+            // Cache all IPs (disk) and first IP (memory) for hosts file and startup
+            dnsDiskCache[domain] = ips
+            cacheUpdated = true
             if let firstIP = ips.first {
                 dnsCache[domain] = firstIP
             }
-            
-            for ip in ips where !seenDestinations.contains(ip) {
-                seenDestinations.insert(ip)
-                routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false))
-                newRoutes.append(ActiveRoute(destination: ip, gateway: gateway, source: service.name, timestamp: Date()))
+
+            for ip in ips {
+                // Only add kernel route if destination is new (not already in kernel)
+                if !existingDestinations.contains(ip) && !kernelAddedDests.contains(ip) {
+                    kernelAddedDests.insert(ip)
+                    routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false))
+                }
+                // Always record ownership entry if this service doesn't already own this destination
+                let ownershipKey = "\(service.name)|\(ip)"
+                if !existingOwnership.contains(ownershipKey) {
+                    newRoutes.append(ActiveRoute(destination: ip, gateway: gateway, source: service.name, timestamp: Date()))
+                }
             }
         }
-        
+
         // Add IP ranges (no DNS needed)
-        for range in service.ipRanges where !seenDestinations.contains(range) {
-            seenDestinations.insert(range)
-            routesToAdd.append((destination: range, gateway: gateway, isNetwork: true))
-            newRoutes.append(ActiveRoute(destination: range, gateway: gateway, source: service.name, timestamp: Date()))
+        for range in service.ipRanges {
+            if !existingDestinations.contains(range) && !kernelAddedDests.contains(range) {
+                kernelAddedDests.insert(range)
+                routesToAdd.append((destination: range, gateway: gateway, isNetwork: true))
+            }
+            let ownershipKey = "\(service.name)|\(range)"
+            if !existingOwnership.contains(ownershipKey) {
+                newRoutes.append(ActiveRoute(destination: range, gateway: gateway, source: service.name, timestamp: Date()))
+            }
         }
-        
-        // Apply ALL routes in single batch (one XPC call instead of many)
+
+        // Persist DNS cache so cache-based startup can use these IPs
+        if cacheUpdated { saveDNSCache() }
+
+        // Apply new kernel routes in single batch, exclude failed destinations from ownership
+        var failedDests: Set<String> = []
         if !routesToAdd.isEmpty && HelperManager.shared.isHelperInstalled {
             let result = await HelperManager.shared.addRoutesBatch(routes: routesToAdd)
+            failedDests = Set(result.failedDestinations)
             if result.failureCount > 0 {
-                log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed")
+                log(.warning, "Batch route add for \(service.name): \(result.successCount) succeeded, \(result.failureCount) failed")
             }
         }
-        
-        await MainActor.run {
-            activeRoutes.append(contentsOf: newRoutes)
+
+        // Only record ownership for destinations confirmed in kernel
+        let confirmedRoutes = newRoutes.filter { route in
+            // If it was a new kernel route that failed, exclude it
+            if failedDests.contains(route.destination) && !existingDestinations.contains(route.destination) {
+                return false
+            }
+            return true
         }
-        
-        if !newRoutes.isEmpty {
-            log(.success, "Added \(newRoutes.count) routes for \(service.name)")
+
+        // Preemption check before committing
+        guard routeEpoch == epoch else {
+            log(.info, "Service apply aborted for \(service.name): routes were cleared during operation")
+            return
+        }
+
+        await MainActor.run {
+            activeRoutes.append(contentsOf: confirmedRoutes)
+        }
+
+        if !confirmedRoutes.isEmpty {
+            log(.success, "Added \(confirmedRoutes.count) route entries for \(service.name) (\(routesToAdd.count - failedDests.count) kernel routes)")
         }
     }
     
     /// Bulk enable/disable all services with loading state (incremental)
     func setAllServicesEnabled(_ enabled: Bool) {
-        beginApplyingRoutes()
-        
         // Get services that need to change
         let servicesToChange = config.services.filter { $0.enabled != enabled }
-        
+
         // Update config
         for i in config.services.indices {
             config.services[i].enabled = enabled
         }
         saveConfig()
-        
+
         log(.info, enabled ? "Enabled all services" : "Disabled all services")
-        
-        // Incrementally apply/remove routes for changed services only
-        if isVPNConnected {
-            Task {
-                let gateway: String? = enabled ? await ensureGateway() : nil
-                if enabled && gateway == nil {
-                    log(.error, "Cannot enable services: no local gateway detected")
-                    endApplyingRoutes()
-                    return
-                }
-                for service in servicesToChange {
-                    if enabled, let gw = gateway {
-                        await applyRoutesForService(service, gateway: gw)
-                    } else if !enabled {
-                        await removeRoutesForSource(service.name)
-                    }
-                }
-                endApplyingRoutes()
+
+        guard isVPNConnected, acquireRouteOperation() else { return }
+        Task {
+            defer { releaseRouteOperation() }
+            let epoch = routeEpoch
+            let gateway: String? = enabled ? await ensureGateway() : nil
+            if enabled && gateway == nil {
+                log(.error, "Cannot enable services: no local gateway detected")
+                return
             }
-        } else {
-            endApplyingRoutes()
+            for service in servicesToChange {
+                guard routeEpoch == epoch else { return }
+                if enabled, let gw = gateway {
+                    await applyRoutesForService(service, gateway: gw)
+                } else if !enabled {
+                    await removeRoutesForSource(service.name)
+                }
+            }
+            if config.manageHostsFile { await updateHostsFile() }
         }
     }
     
@@ -2006,8 +2893,9 @@ final class RouteManager: ObservableObject {
         }
         
         var failedCount = 0
-        
-        for destination in destinationsToVerify.prefix(10) { // Limit to 10 to avoid too many pings
+        let sortedDestinations = destinationsToVerify.sorted()
+
+        for destination in sortedDestinations.prefix(10) { // Limit to 10 to avoid too many pings
             let result = await verifyRoute(destination)
             routeVerificationResults[destination] = result
             
@@ -2020,10 +2908,11 @@ final class RouteManager: ObservableObject {
             }
         }
         
+        let testedCount = min(destinationsToVerify.count, 10)
         if failedCount > 0 {
-            log(.warning, "Route verification: \(failedCount) of \(destinationsToVerify.count) routes failed")
-        } else if !destinationsToVerify.isEmpty {
-            log(.success, "Route verification: All \(min(destinationsToVerify.count, 10)) tested routes are reachable")
+            log(.warning, "Route verification: \(failedCount) of \(testedCount) tested routes failed\(destinationsToVerify.count > 10 ? " (\(destinationsToVerify.count) total, sampled 10)" : "")")
+        } else if testedCount > 0 {
+            log(.success, "Route verification: All \(testedCount) tested routes are reachable\(destinationsToVerify.count > 10 ? " (\(destinationsToVerify.count) total)" : "")")
         }
     }
     
@@ -2067,14 +2956,17 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Private Methods
     
-    private func beginApplyingRoutes() {
-        applyingRoutesCount += 1
-        if !isApplyingRoutes { isApplyingRoutes = true }
+    /// Acquire exclusive route operation lock. Returns false if another operation is running.
+    /// @MainActor guarantees atomic check-and-set between await suspension points.
+    private func acquireRouteOperation() -> Bool {
+        guard !isApplyingRoutes else { return false }
+        isApplyingRoutes = true
+        return true
     }
-    
-    private func endApplyingRoutes() {
-        applyingRoutesCount = max(0, applyingRoutesCount - 1)
-        if applyingRoutesCount == 0 { isApplyingRoutes = false }
+
+    /// Release exclusive route operation lock.
+    private func releaseRouteOperation() {
+        isApplyingRoutes = false
     }
     
     private func ensureGateway() async -> String? {
@@ -2500,42 +3392,109 @@ final class RouteManager: ObservableObject {
     }
     
     private func updateHostsFile() async {
-        // Collect all domain -> IP mappings from cache (populated during route application)
-        // Falls back to disk cache if memory cache doesn't have an entry (e.g., DNS failed at startup)
+        // Collect domain -> IP mappings, filtered against activeRoutes so hosts
+        // only contains entries for domains that actually have installed kernel routes.
+        // Checks all cached IPs (not just first) to find a routed one.
+        let routedDestinations = Set(activeRoutes.map { $0.destination })
         var entries: [(domain: String, ip: String)] = []
-        
-        for domain in config.domains where domain.enabled {
-            if let cachedIP = dnsCache[domain.domain] {
-                entries.append((domain.domain, cachedIP))
-            } else if let diskCachedIPs = dnsDiskCache[domain.domain], let firstIP = diskCachedIPs.first {
-                // Fallback to disk cache when DNS failed at startup
-                entries.append((domain.domain, firstIP))
+
+        let activeDomains: [DomainEntry] = config.routingMode == .vpnOnly ? config.inverseDomains : config.domains
+
+        for domain in activeDomains {
+            // Include enabled domains AND disabled domains that still have active kernel routes
+            guard domain.enabled || activeRoutes.contains(where: { $0.source == domain.domain }) else { continue }
+            if let ip = firstRoutedIP(for: domain.domain, in: routedDestinations) {
+                entries.append((domain.domain, ip))
             }
         }
-        
-        for service in config.services where service.enabled {
-            for domain in service.domains {
-                if let cachedIP = dnsCache[domain] {
-                    entries.append((domain, cachedIP))
-                } else if let diskCachedIPs = dnsDiskCache[domain], let firstIP = diskCachedIPs.first {
-                    // Fallback to disk cache when DNS failed at startup
-                    entries.append((domain, firstIP))
+
+        // Services only apply in bypass mode
+        if config.routingMode == .bypass {
+            for service in config.services {
+                guard service.enabled || activeRoutes.contains(where: { $0.source == service.name }) else { continue }
+                for domain in service.domains {
+                    if let ip = firstRoutedIP(for: domain, in: routedDestinations) {
+                        entries.append((domain, ip))
+                    }
                 }
             }
         }
-        
+
+        // Defense in depth: scan activeRoutes for orphaned sources (deleted/renamed)
+        // that aren't in config but still have live kernel routes
+        let configSources: Set<String> = {
+            var sources = Set(activeDomains.map { $0.domain })
+            if config.routingMode == .bypass {
+                sources.formUnion(config.services.map { $0.name })
+            }
+            return sources
+        }()
+        var coveredDomains = Set(entries.map { $0.domain })
+        var orphanedSourcesSeen: Set<String> = []
+        for route in activeRoutes where !configSources.contains(route.source) {
+            // Domain-name source: direct DNS cache lookup
+            if !coveredDomains.contains(route.source) {
+                if let ip = firstRoutedIP(for: route.source, in: routedDestinations) {
+                    entries.append((route.source, ip))
+                    coveredDomains.insert(route.source)
+                    continue
+                }
+            }
+            // Service-name source: use saved domain list from deletion
+            if !orphanedSourcesSeen.contains(route.source),
+               let domains = orphanedServiceDomains[route.source] {
+                orphanedSourcesSeen.insert(route.source)
+                for domain in domains {
+                    if !coveredDomains.contains(domain) {
+                        if let ip = firstRoutedIP(for: domain, in: routedDestinations) {
+                            entries.append((domain, ip))
+                            coveredDomains.insert(domain)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Clean up orphanedServiceDomains for sources with no remaining routes
+        orphanedServiceDomains = orphanedServiceDomains.filter { name, _ in
+            activeRoutes.contains { $0.source == name }
+        }
+
         // Update /etc/hosts (requires sudo)
         await modifyHostsFile(entries: entries)
+    }
+
+    /// Find the first cached IP for a domain that has a confirmed kernel route
+    private func firstRoutedIP(for domain: String, in routedDestinations: Set<String>) -> String? {
+        // Check memory cache first
+        if let cachedIP = dnsCache[domain], routedDestinations.contains(cachedIP) {
+            return cachedIP
+        }
+        // Fall back to disk cache — check ALL IPs, not just first
+        if let diskCachedIPs = dnsDiskCache[domain] {
+            for ip in diskCachedIPs {
+                if routedDestinations.contains(ip) {
+                    return ip
+                }
+            }
+        }
+        return nil
     }
     
     private func cleanHostsFile() async {
         await modifyHostsFile(entries: [])
     }
     
-    /// Called when app is quitting - clean up hosts file
+    /// Called when app is quitting - clean up routes and hosts file
     func cleanupOnQuit() async {
-        log(.info, "Cleaning up /etc/hosts on quit...")
-        await cleanHostsFile()
+        log(.info, "Cleaning up on quit...")
+        // Always remove active routes (especially critical for VPN Only catch-alls)
+        if !activeRoutes.isEmpty {
+            await removeAllRoutes()
+        }
+        if config.manageHostsFile {
+            await cleanHostsFile()
+        }
     }
     
     private func modifyHostsFile(entries: [(domain: String, ip: String)]) async {
@@ -2585,12 +3544,15 @@ final class RouteManager: ObservableObject {
         
         // Write back (this will fail without sudo - user needs to grant permission)
         let newContent = lines.joined(separator: "\n")
-        
+
+        // Use a randomized heredoc delimiter to prevent injection via crafted content
+        let delimiter = "VPNBYPASS_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+
         // Use AppleScript to write with admin privileges
         let script = """
-        do shell script "cat > /etc/hosts << 'VPNBYPASS_EOF'
+        do shell script "cat > /etc/hosts << '\(delimiter)'
         \(newContent)
-        VPNBYPASS_EOF" with administrator privileges
+        \(delimiter)" with administrator privileges
         """
         
         var error: NSDictionary?
@@ -2606,24 +3568,29 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Public domain normalization for custom service editor
+    func cleanDomainForService(_ input: String) -> String {
+        return cleanDomain(input)
+    }
+
     private func cleanDomain(_ input: String) -> String {
         var domain = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        
+
         // Remove any protocol scheme (http, https, ssh, ftp, etc.) using regex
         if let schemeRange = domain.range(of: "^[a-zA-Z][a-zA-Z0-9+.-]*://", options: .regularExpression) {
             domain = String(domain[schemeRange.upperBound...])
         }
-        
+
         // Remove userinfo (user:pass@) if present
         if let atIndex = domain.firstIndex(of: "@") {
             domain = String(domain[domain.index(after: atIndex)...])
         }
-        
+
         // Remove port number if present (e.g., :443, :8080)
         if let colonIndex = domain.firstIndex(of: ":") {
             domain = String(domain[..<colonIndex])
         }
-        
+
         // Remove path and query string
         if let slashIndex = domain.firstIndex(of: "/") {
             domain = String(domain[..<slashIndex])
@@ -2631,7 +3598,11 @@ final class RouteManager: ObservableObject {
         if let queryIndex = domain.firstIndex(of: "?") {
             domain = String(domain[..<queryIndex])
         }
-        
+
+        // Reject characters that are invalid in domain names (prevents shell injection)
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-"))
+        domain = String(domain.unicodeScalars.filter { allowed.contains($0) })
+
         return domain.lowercased()
     }
     

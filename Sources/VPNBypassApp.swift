@@ -95,12 +95,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         networkDebounceWorkItem?.cancel()
         RouteManager.shared.stopDNSRefreshTimer()
         
-        // Clean up /etc/hosts entries on quit
-        if RouteManager.shared.config.manageHostsFile {
-            Task {
-                await RouteManager.shared.cleanupOnQuit()
-            }
+        // Clean up routes and hosts file on quit
+        // Always run: removes VPN Only catch-all routes and /etc/hosts entries
+        let semaphore = DispatchSemaphore(value: 0)
+        Task {
+            await RouteManager.shared.cleanupOnQuit()
+            semaphore.signal()
         }
+        // Block termination until cleanup completes (up to 5s)
+        _ = semaphore.wait(timeout: .now() + 5)
     }
     
     // MARK: - Network Monitoring
@@ -201,7 +204,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             // Log current state
             let vpnStatus = RouteManager.shared.isVPNConnected ? "connected via \(RouteManager.shared.vpnInterface ?? "?")" : "not connected"
-            let routeCount = RouteManager.shared.activeRoutes.count
+            let routeCount = RouteManager.shared.uniqueRouteCount
             RouteManager.shared.log(.info, "🐕 Watchdog complete: VPN \(vpnStatus), \(routeCount) active routes")
         }
     }
