@@ -1360,22 +1360,46 @@ final class RouteManager: ObservableObject {
             ))
         }
 
-        // Best-effort cleanup of stale kernel routes from deleted/changed sources.
-        // Do NOT re-attach failed removals: the helper's delete-before-add in addRoute
-        // may have already removed the old route before a failed re-add, so a failing
-        // delete here does not prove the route is still live in the kernel.
+        // Clean up stale kernel routes. Two populations:
+        // 1. Truly orphaned: not in batch add input — delete-before-add never touched
+        //    them, so a failed delete means the route IS still in the kernel.
+        // 2. Add-failed: were in batch add input but failed — delete-before-add already
+        //    removed the old route, so a failed delete means "already gone."
         let newDestinations = Set(newRoutes.map { $0.destination })
-        let staleDestinations = Array(Set(activeRoutes.map { $0.destination }).subtracting(newDestinations))
-        if !staleDestinations.isEmpty {
+        let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
+        let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
+        let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
+        let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
+
+        // Truly orphaned: re-attach on failure (route is genuinely still in kernel)
+        if !trulyOrphanedDests.isEmpty {
             if HelperManager.shared.isHelperInstalled {
-                let result = await HelperManager.shared.removeRoutesBatch(destinations: staleDestinations)
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
                 if result.failureCount > 0 {
-                    log(.warning, "Stale route cleanup: \(result.successCount) removed, \(result.failureCount) already gone (best-effort)")
+                    log(.warning, "Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
+                    let failedSet = Set(result.failedDestinations)
+                    for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
+                        newRoutes.append(route)
+                    }
                 } else if result.successCount > 0 {
-                    log(.info, "Stale route cleanup: \(result.successCount) orphaned kernel routes removed")
+                    log(.info, "Orphan cleanup: \(result.successCount) stale kernel routes removed")
                 }
             } else {
-                for dest in staleDestinations {
+                for dest in trulyOrphanedDests {
+                    _ = await removeRoute(dest)
+                }
+            }
+        }
+
+        // Add-failed: best-effort, don't re-attach (delete-before-add already cleaned)
+        if !addFailedStaleDests.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
+                if result.failureCount > 0 {
+                    log(.warning, "Add-failed cleanup: \(result.successCount) removed, \(result.failureCount) already gone")
+                }
+            } else {
+                for dest in addFailedStaleDests {
                     _ = await removeRoute(dest)
                 }
             }
@@ -1599,21 +1623,40 @@ final class RouteManager: ObservableObject {
             ))
         }
 
-        // Best-effort cleanup of stale kernel routes not in current config.
-        // Do NOT re-attach failed removals — delete-before-add means the old
-        // route is likely already gone when the re-add failed.
+        // Clean up stale routes — same two-population logic as full apply
         let newDestinations = Set(newRoutes.map { $0.destination })
-        let staleDestinations = Array(Set(activeRoutes.map { $0.destination }).subtracting(newDestinations))
-        if !staleDestinations.isEmpty {
+        let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
+        let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
+        let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
+        let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
+
+        if !trulyOrphanedDests.isEmpty {
             if HelperManager.shared.isHelperInstalled {
-                let result = await HelperManager.shared.removeRoutesBatch(destinations: staleDestinations)
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
                 if result.failureCount > 0 {
-                    log(.warning, "Cache stale cleanup: \(result.successCount) removed, \(result.failureCount) already gone (best-effort)")
+                    log(.warning, "Cache orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
+                    let failedSet = Set(result.failedDestinations)
+                    for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
+                        newRoutes.append(route)
+                    }
                 } else if result.successCount > 0 {
-                    log(.info, "Cache stale cleanup: \(result.successCount) orphaned kernel routes removed")
+                    log(.info, "Cache orphan cleanup: \(result.successCount) stale kernel routes removed")
                 }
             } else {
-                for dest in staleDestinations {
+                for dest in trulyOrphanedDests {
+                    _ = await removeRoute(dest)
+                }
+            }
+        }
+
+        if !addFailedStaleDests.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
+                if result.failureCount > 0 {
+                    log(.warning, "Cache add-failed cleanup: \(result.successCount) removed, \(result.failureCount) already gone")
+                }
+            } else {
+                for dest in addFailedStaleDests {
                     _ = await removeRoute(dest)
                 }
             }
@@ -3225,12 +3268,23 @@ final class RouteManager: ObservableObject {
             }
             return sources
         }()
-        let entryDomains = Set(entries.map { $0.domain })
+        var coveredDomains = Set(entries.map { $0.domain })
         for route in activeRoutes where !configSources.contains(route.source) {
-            // Source is a domain name — try DNS cache lookup if not already covered
-            guard !entryDomains.contains(route.source) else { continue }
-            if let ip = firstRoutedIP(for: route.source, in: routedDestinations) {
-                entries.append((route.source, ip))
+            // Try direct lookup first (source is a domain name)
+            if !coveredDomains.contains(route.source) {
+                if let ip = firstRoutedIP(for: route.source, in: routedDestinations) {
+                    entries.append((route.source, ip))
+                    coveredDomains.insert(route.source)
+                    continue
+                }
+            }
+            // Reverse lookup: source is likely a service name — find domains in DNS
+            // cache whose IPs match this route's destination
+            for (domain, cachedIPs) in dnsDiskCache {
+                if cachedIPs.contains(route.destination) && !coveredDomains.contains(domain) {
+                    entries.append((domain, route.destination))
+                    coveredDomains.insert(domain)
+                }
             }
         }
 
