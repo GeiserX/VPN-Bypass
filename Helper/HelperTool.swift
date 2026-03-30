@@ -6,24 +6,47 @@ import Foundation
 // MARK: - XPC Listener Delegate
 
 class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
-    
+
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
-        // Verify the connecting process
-        // In production, you should verify the code signature of the calling app
-        
+        // Verify the connecting process is our main app by checking its bundle identifier
+        let pid = newConnection.processIdentifier
+        guard verifyCallerIdentity(pid: pid) else {
+            return false
+        }
+
         newConnection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
         newConnection.exportedObject = HelperTool()
-        
+
         newConnection.invalidationHandler = {
             // Connection was invalidated
         }
-        
+
         newConnection.interruptionHandler = {
             // Connection was interrupted
         }
-        
+
         newConnection.resume()
         return true
+    }
+
+    /// Verify the calling process is signed with the expected bundle identifier
+    private func verifyCallerIdentity(pid: pid_t) -> Bool {
+        var code: SecCode?
+        let attrs = [kSecGuestAttributePid: pid] as CFDictionary
+        guard SecCodeCopyGuestWithAttributes(nil, attrs, [], &code) == errSecSuccess,
+              let callerCode = code else {
+            return false
+        }
+
+        // Require: signed by our bundle identifier
+        var requirement: SecRequirement?
+        let requirementString = "identifier \"com.geiserx.vpn-bypass\"" as CFString
+        guard SecRequirementCreateWithString(requirementString, [], &requirement) == errSecSuccess,
+              let req = requirement else {
+            return false
+        }
+
+        return SecCodeCheckValidity(callerCode, [], req) == errSecSuccess
     }
 }
 

@@ -536,17 +536,20 @@ final class RouteManager: ObservableObject {
             let data = try Data(contentsOf: url)
             let exportData = try JSONDecoder().decode(ExportData.self, from: data)
 
-            // Merge or replace config
+            // Merge or replace config, then normalize built-in services
             config = exportData.config
+            mergeBuiltInServices()
             saveConfig()
 
             log(.success, "Config imported: \(exportData.config.domains.count) domains, \(exportData.config.services.filter { $0.enabled }.count) services enabled")
 
             // Reconcile live routes if VPN is connected
             if isVPNConnected {
+                beginApplyingRoutes()
                 Task {
                     await removeAllRoutes()
                     await applyAllRoutes()
+                    endApplyingRoutes()
                 }
             }
 
@@ -1298,8 +1301,9 @@ final class RouteManager: ObservableObject {
         if HelperManager.shared.isHelperInstalled {
             let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
             let result = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
-            
-            // Build ActiveRoute entries for successful routes
+
+            // Track all attempted routes — batch API doesn't report per-route failures,
+            // so we log the count and rely on route verification / next refresh to reconcile
             for route in routesToAdd {
                 newRoutes.append(ActiveRoute(
                     destination: route.destination,
@@ -1308,9 +1312,9 @@ final class RouteManager: ObservableObject {
                     timestamp: Date()
                 ))
             }
-            
+
             if result.failureCount > 0 {
-                log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed")
+                log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed — next DNS refresh will reconcile")
             }
         } else {
             // Fallback: add routes one by one (slower but works without helper)
@@ -1584,8 +1588,9 @@ final class RouteManager: ObservableObject {
             saveDNSCache()
         }
         
-        // Apply route changes if any
-        if !routeChanges.isEmpty {
+        // Apply route changes if any (re-check VPN state to avoid racing with disconnect)
+        let stillConnected = await MainActor.run { isVPNConnected }
+        if !routeChanges.isEmpty && stillConnected {
             let additions = routeChanges.filter { $0.add }
             let removals = routeChanges.filter { !$0.add }
             
@@ -1775,9 +1780,13 @@ final class RouteManager: ObservableObject {
         let staleIPs = oldIPs.subtracting(newIPs)
         var removedCount = 0
         if !staleIPs.isEmpty {
-            // Remove from routing table
+            // Remove from routing table (with helperless fallback)
             if HelperManager.shared.isHelperInstalled {
                 _ = await HelperManager.shared.removeRoutesBatch(destinations: Array(staleIPs))
+            } else {
+                for ip in staleIPs {
+                    _ = await removeRoute(ip)
+                }
             }
             // Remove from activeRoutes
             activeRoutes.removeAll { staleIPs.contains($0.destination) }
@@ -2906,13 +2915,16 @@ final class RouteManager: ObservableObject {
         await modifyHostsFile(entries: [])
     }
     
-    /// Called when app is quitting - clean up hosts file and VPN Only routes
+    /// Called when app is quitting - clean up routes and hosts file
     func cleanupOnQuit() async {
         log(.info, "Cleaning up on quit...")
-        if config.routingMode == .vpnOnly && !activeRoutes.isEmpty {
+        // Always remove active routes (especially critical for VPN Only catch-alls)
+        if !activeRoutes.isEmpty {
             await removeAllRoutes()
         }
-        await cleanHostsFile()
+        if config.manageHostsFile {
+            await cleanHostsFile()
+        }
     }
     
     private func modifyHostsFile(entries: [(domain: String, ip: String)]) async {
@@ -2962,12 +2974,15 @@ final class RouteManager: ObservableObject {
         
         // Write back (this will fail without sudo - user needs to grant permission)
         let newContent = lines.joined(separator: "\n")
-        
+
+        // Use a randomized heredoc delimiter to prevent injection via crafted content
+        let delimiter = "VPNBYPASS_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+
         // Use AppleScript to write with admin privileges
         let script = """
-        do shell script "cat > /etc/hosts << 'VPNBYPASS_EOF'
+        do shell script "cat > /etc/hosts << '\(delimiter)'
         \(newContent)
-        VPNBYPASS_EOF" with administrator privileges
+        \(delimiter)" with administrator privileges
         """
         
         var error: NSDictionary?
@@ -2985,22 +3000,22 @@ final class RouteManager: ObservableObject {
     
     private func cleanDomain(_ input: String) -> String {
         var domain = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        
+
         // Remove any protocol scheme (http, https, ssh, ftp, etc.) using regex
         if let schemeRange = domain.range(of: "^[a-zA-Z][a-zA-Z0-9+.-]*://", options: .regularExpression) {
             domain = String(domain[schemeRange.upperBound...])
         }
-        
+
         // Remove userinfo (user:pass@) if present
         if let atIndex = domain.firstIndex(of: "@") {
             domain = String(domain[domain.index(after: atIndex)...])
         }
-        
+
         // Remove port number if present (e.g., :443, :8080)
         if let colonIndex = domain.firstIndex(of: ":") {
             domain = String(domain[..<colonIndex])
         }
-        
+
         // Remove path and query string
         if let slashIndex = domain.firstIndex(of: "/") {
             domain = String(domain[..<slashIndex])
@@ -3008,7 +3023,11 @@ final class RouteManager: ObservableObject {
         if let queryIndex = domain.firstIndex(of: "?") {
             domain = String(domain[..<queryIndex])
         }
-        
+
+        // Reject characters that are invalid in domain names (prevents shell injection)
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-"))
+        domain = String(domain.unicodeScalars.filter { allowed.contains($0) })
+
         return domain.lowercased()
     }
     
