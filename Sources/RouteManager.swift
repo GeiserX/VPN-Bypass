@@ -1360,20 +1360,17 @@ final class RouteManager: ObservableObject {
             ))
         }
 
-        // Clean up stale kernel routes from deleted/changed sources that are
-        // no longer represented in current config
+        // Best-effort cleanup of stale kernel routes from deleted/changed sources.
+        // Do NOT re-attach failed removals: the helper's delete-before-add in addRoute
+        // may have already removed the old route before a failed re-add, so a failing
+        // delete here does not prove the route is still live in the kernel.
         let newDestinations = Set(newRoutes.map { $0.destination })
         let staleDestinations = Array(Set(activeRoutes.map { $0.destination }).subtracting(newDestinations))
         if !staleDestinations.isEmpty {
             if HelperManager.shared.isHelperInstalled {
                 let result = await HelperManager.shared.removeRoutesBatch(destinations: staleDestinations)
                 if result.failureCount > 0 {
-                    log(.warning, "Stale route cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining failed entries")
-                    // Retain tracking for routes we couldn't remove from kernel
-                    let failedSet = Set(result.failedDestinations)
-                    for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
-                        newRoutes.append(route)
-                    }
+                    log(.warning, "Stale route cleanup: \(result.successCount) removed, \(result.failureCount) already gone (best-effort)")
                 } else if result.successCount > 0 {
                     log(.info, "Stale route cleanup: \(result.successCount) orphaned kernel routes removed")
                 }
@@ -1602,18 +1599,16 @@ final class RouteManager: ObservableObject {
             ))
         }
 
-        // Clean up stale kernel routes not in current config
+        // Best-effort cleanup of stale kernel routes not in current config.
+        // Do NOT re-attach failed removals — delete-before-add means the old
+        // route is likely already gone when the re-add failed.
         let newDestinations = Set(newRoutes.map { $0.destination })
         let staleDestinations = Array(Set(activeRoutes.map { $0.destination }).subtracting(newDestinations))
         if !staleDestinations.isEmpty {
             if HelperManager.shared.isHelperInstalled {
                 let result = await HelperManager.shared.removeRoutesBatch(destinations: staleDestinations)
                 if result.failureCount > 0 {
-                    log(.warning, "Cache stale cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
-                    let failedSet = Set(result.failedDestinations)
-                    for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
-                        newRoutes.append(route)
-                    }
+                    log(.warning, "Cache stale cleanup: \(result.successCount) removed, \(result.failureCount) already gone (best-effort)")
                 } else if result.successCount > 0 {
                     log(.info, "Cache stale cleanup: \(result.successCount) orphaned kernel routes removed")
                 }
