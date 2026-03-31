@@ -2175,19 +2175,11 @@ struct InfoTab: View {
     
     private var appInfoSection: some View {
         VStack(alignment: .center, spacing: 12) {
-            // App logo from bundle
-            if let logoPath = Bundle.main.path(forResource: "VPNBypass", ofType: "png"),
-               let nsImage = NSImage(contentsOfFile: logoPath) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 80, height: 80)
-            } else {
-                // Fallback to SF Symbol if logo not found
-                Image(systemName: "shield.checkered")
-                    .font(.system(size: 48))
-                    .foregroundStyle(BrandColors.blueGradient)
-            }
+            // App icon (macOS renders optimized for size)
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 80, height: 80)
             
             // App name with branded colors
             BrandedAppName(fontSize: 24)
@@ -2556,18 +2548,11 @@ struct BrandedTitlebarView: View {
             Spacer()
 
             HStack(spacing: 6) {
-                // App logo from bundle
-                if let logoPath = Bundle.main.path(forResource: "VPNBypass", ofType: "png"),
-                   let nsImage = NSImage(contentsOfFile: logoPath) {
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 18, height: 18)
-                } else {
-                    Image(systemName: "shield.checkered")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(BrandColors.blueGradient)
-                }
+                // App icon (macOS renders optimized for size)
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 18, height: 18)
 
                 // Branded name
                 HStack(spacing: 0) {

@@ -5,6 +5,12 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2026-03-31
+
+### Fixed
+- **Menu Bar Icon Redesign** - Replaced complex 13-point arrow (unreadable at 18px) with a clean bold right-arrow (7 points). Re-rendered from SVG with proper alpha transparency
+- **Dropdown/Settings Logo Artifacts** - Replaced raw 650x514 PNG (artifact-heavy at small sizes) with `NSApp.applicationIconImage` which macOS renders optimized for each display size
+
 ## [2.1.1] - 2026-03-31
 
 ### Fixed
