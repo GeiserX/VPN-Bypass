@@ -718,7 +718,8 @@ final class RouteManager: ObservableObject {
         }
         
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
-        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes {
+        // Also skip if helper is not ready — no point attempting routes that will all fail
+        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled {
             // Skip if routes were applied very recently (within 5 seconds) - prevents double-triggering
             if let lastUpdate = lastUpdate, Date().timeIntervalSince(lastUpdate) < 5 {
                 log(.info, "Skipping duplicate route application (applied \(Int(Date().timeIntervalSince(lastUpdate)))s ago)")
@@ -3355,40 +3356,24 @@ final class RouteManager: ObservableObject {
     }
     
     private func addRoute(_ destination: String, gateway: String, isNetwork: Bool = false) async -> Bool {
-        // Use privileged helper if installed
-        if HelperManager.shared.isHelperInstalled {
-            let result = await HelperManager.shared.addRoute(destination: destination, gateway: gateway, isNetwork: isNetwork)
-            if !result.success {
-                log(.warning, "Helper route add failed: \(result.error ?? "unknown")")
-            }
-            return result.success
-        }
-        
-        // Fallback: direct command (may require sudo)
-        // First try to delete existing route
-        _ = await removeRoute(destination)
-        
-        let args = isNetwork 
-            ? ["-n", "add", "-net", destination, gateway]
-            : ["-n", "add", "-host", destination, gateway]
-        
-        guard let result = await runProcessAsync("/sbin/route", arguments: args, timeout: 5.0) else {
+        guard HelperManager.shared.isHelperInstalled else {
+            log(.error, "Cannot add route: helper not ready")
             return false
         }
-        
-        return result.exitCode == 0
-    }
-    
-    private func removeRoute(_ destination: String) async -> Bool {
-        // Use privileged helper if installed
-        if HelperManager.shared.isHelperInstalled {
-            let result = await HelperManager.shared.removeRoute(destination: destination)
-            return result.success
+        let result = await HelperManager.shared.addRoute(destination: destination, gateway: gateway, isNetwork: isNetwork)
+        if !result.success {
+            log(.warning, "Helper route add failed: \(result.error ?? "unknown")")
         }
-        
-        // Fallback: direct command with timeout
-        _ = await runProcessAsync("/sbin/route", arguments: ["-n", "delete", destination], timeout: 3.0)
-        return true // Route delete can fail if route doesn't exist, that's ok
+        return result.success
+    }
+
+    private func removeRoute(_ destination: String) async -> Bool {
+        guard HelperManager.shared.isHelperInstalled else {
+            log(.error, "Cannot remove route: helper not ready")
+            return false
+        }
+        let result = await HelperManager.shared.removeRoute(destination: destination)
+        return result.success
     }
     
     private func updateHostsFile() async {

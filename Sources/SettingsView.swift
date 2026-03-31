@@ -1813,8 +1813,9 @@ struct GeneralTab: View {
             if ready && routeManager.isVPNConnected && routeManager.activeRoutes.isEmpty {
                 // Helper just became ready and VPN is connected but no routes —
                 // the initial startup was skipped because helper wasn't ready.
-                // Automatically apply routes now.
+                // Automatically apply routes and start the DNS refresh lifecycle.
                 await routeManager.detectAndApplyRoutesAsync()
+                routeManager.startDNSRefreshTimer()
             }
         }
     }
