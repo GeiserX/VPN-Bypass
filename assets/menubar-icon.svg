@@ -1,10 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" fill="black">
-  <!-- Shield outline (evenodd for hollow center) -->
+  <!-- Shield left portion (gap at upper-right where arrow exits) -->
   <path d="
-    M11 2 L3 5 L3 11 Q3 17 11 20 Q19 17 19 11 L19 5 Z
-    M11 4 L17 6.5 L17 11 Q17 15.5 11 18 Q5 15.5 5 11 L5 6.5 Z
-  " fill-rule="evenodd"/>
+    M11 2 L3 5 L3 11 Q3 17 11 20 Q19 17 19 11 L19 9
+    L17 10 L17 11 Q17 15.5 11 18 Q5 15.5 5 11 L5 6.5 L11 4 L14 5.5
+    Z
+  "/>
+  <!-- Shield top-right fragment (above arrow exit) -->
+  <path d="
+    M16.5 5 L19 5 L19 7 L17 7.5 Z
+  "/>
 
-  <!-- Simple right-pointing arrow (bold, reads at 18px) -->
-  <path d="M6 9.5 L12 9.5 L12 7 L17 11 L12 15 L12 12.5 L6 12.5 Z"/>
+  <!-- Diagonal arrow breaking through (lower-left to upper-right) -->
+  <path d="M3 18 L11 10 L9 10 L16 3 L19 3 L19 6 L12 12 L14 12 L6 20 Z"/>
 </svg>
