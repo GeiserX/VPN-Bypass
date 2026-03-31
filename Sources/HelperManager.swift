@@ -1,296 +1,383 @@
 // HelperManager.swift
 // Manages installation and communication with the privileged helper tool.
 
+import AppKit
 import Foundation
 import ServiceManagement
 import Security
 
+// MARK: - Helper State
+
+enum HelperState: Equatable {
+    case missing
+    case checking
+    case installing
+    case outdated(installed: String, expected: String)
+    case ready
+    case failed(String)
+
+    var isReady: Bool { self == .ready }
+
+    var statusText: String {
+        switch self {
+        case .missing: return "Not Installed"
+        case .checking: return "Checking..."
+        case .installing: return "Installing..."
+        case .outdated(let installed, let expected): return "Update Required (v\(installed) → v\(expected))"
+        case .ready: return "Helper Installed"
+        case .failed(let msg): return "Error: \(msg)"
+        }
+    }
+}
+
 @MainActor
 final class HelperManager: ObservableObject {
     static let shared = HelperManager()
-    
-    @Published var isHelperInstalled = false
+
+    @Published var helperState: HelperState = .checking
     @Published var helperVersion: String?
     @Published var installationError: String?
     @Published var isInstalling = false
-    
+
+    /// Backwards-compatible computed property used by RouteManager
+    var isHelperInstalled: Bool { helperState.isReady }
+
     private var xpcConnection: NSXPCConnection?
     private let hasPromptedKey = "HasPromptedHelperInstall"
-    
+
+    /// XPC timeout for all helper RPCs (seconds)
+    private let xpcTimeout: TimeInterval = 10
+
     private init() {
-        checkHelperStatus()
-        // Auto-install on first launch after a short delay to let UI load
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            Task { @MainActor in
-                self.autoInstallOnFirstLaunch()
-            }
-        }
-    }
-    
-    private func autoInstallOnFirstLaunch() {
-        let hasPrompted = UserDefaults.standard.bool(forKey: hasPromptedKey)
-        if !hasPrompted && !isHelperInstalled {
-            print("🔐 First launch - auto-installing privileged helper")
-            UserDefaults.standard.set(true, forKey: hasPromptedKey)
-            Task {
-                _ = await installHelper()
-            }
-        } else if isHelperInstalled {
-            // Check for version mismatch and auto-update if needed
-            checkAndUpdateHelperVersion()
-        }
-    }
-    
-    private func checkAndUpdateHelperVersion() {
-        connectToHelper { [weak self] helper in
-            helper.getVersion { installedVersion in
-                Task { @MainActor in
-                    guard let self = self else { return }
-                    self.helperVersion = installedVersion
-                    
-                    // Compare with expected version
-                    let expectedVersion = HelperConstants.helperVersion
-                    if installedVersion != expectedVersion {
-                        print("🔐 Helper version mismatch: installed=\(installedVersion), expected=\(expectedVersion)")
-                        print("🔐 Auto-updating privileged helper...")
-                        Task {
-                            _ = await self.installHelper()
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // MARK: - Helper Status
-    
-    func checkHelperStatus() {
-        // Check if helper is installed (file exists means it's registered with launchd)
+        // Only set initial state — do NOT start route application here.
+        // The app must call ensureHelperReady() before using helper RPCs.
         let helperPath = "/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)"
         let plistPath = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
-        
-        // If both files exist, the helper is installed and will be launched on-demand by launchd
-        if FileManager.default.fileExists(atPath: helperPath) && 
+        if FileManager.default.fileExists(atPath: helperPath) &&
            FileManager.default.fileExists(atPath: plistPath) {
-            isHelperInstalled = true
-            
-            // Try to connect and get version (async, non-blocking)
-            connectToHelper { [weak self] helper in
-                helper.getVersion { version in
-                    Task { @MainActor in
-                        self?.helperVersion = version
-                    }
-                }
-            }
+            helperState = .checking
         } else {
-            isHelperInstalled = false
-            helperVersion = nil
+            helperState = .missing
         }
     }
-    
+
+    // MARK: - Preflight (must be awaited before any route application)
+
+    /// Verifies the helper is installed, running, and at the expected version.
+    /// If outdated, attempts an automatic update. Returns true only when helper
+    /// is verified ready. Route application MUST NOT start until this returns true.
+    func ensureHelperReady() async -> Bool {
+        // Fast path: already verified
+        if helperState.isReady { return true }
+
+        let helperPath = "/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)"
+        let plistPath = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
+
+        // Check files exist
+        if !FileManager.default.fileExists(atPath: helperPath) ||
+           !FileManager.default.fileExists(atPath: plistPath) {
+            // First launch or files removed — try to install
+            let hasPrompted = UserDefaults.standard.bool(forKey: hasPromptedKey)
+            if !hasPrompted {
+                UserDefaults.standard.set(true, forKey: hasPromptedKey)
+            }
+            helperState = .missing
+            print("🔐 Helper not found, attempting install...")
+            let installed = await installHelper()
+            if !installed {
+                helperState = .failed(installationError ?? "Installation failed")
+                return false
+            }
+            // Install succeeded — drop stale connection before version check
+            dropXPCConnection()
+        }
+
+        // Files exist — verify version via XPC with timeout
+        helperState = .checking
+        let version = await getVersionWithTimeout()
+
+        guard let version = version else {
+            // XPC connection failed — helper may be corrupted or wrong arch
+            print("🔐 Helper XPC connection failed, attempting reinstall...")
+            helperState = .installing
+            let reinstalled = await installHelper()
+            if reinstalled {
+                // Retry version check after reinstall
+                dropXPCConnection()
+                let retryVersion = await getVersionWithTimeout()
+                if retryVersion == HelperConstants.helperVersion {
+                    helperVersion = retryVersion
+                    helperState = .ready
+                    return true
+                }
+            }
+            helperState = .failed("Cannot connect to helper after reinstall")
+            return false
+        }
+
+        helperVersion = version
+        let expected = HelperConstants.helperVersion
+
+        if version == expected {
+            helperState = .ready
+            return true
+        }
+
+        // Version mismatch — update
+        print("🔐 Helper version mismatch: installed=\(version), expected=\(expected)")
+        helperState = .outdated(installed: version, expected: expected)
+
+        print("🔐 Auto-updating helper...")
+        let updated = await installHelper()
+        if !updated {
+            helperState = .failed("Helper update failed: \(installationError ?? "unknown")")
+            return false
+        }
+
+        // Verify the update succeeded
+        dropXPCConnection()
+        let newVersion = await getVersionWithTimeout()
+        if newVersion == expected {
+            helperVersion = newVersion
+            helperState = .ready
+            return true
+        }
+
+        helperState = .failed("Helper update did not take effect (got \(newVersion ?? "nil"), expected \(expected))")
+        return false
+    }
+
+    // MARK: - XPC Connection
+
+    private func dropXPCConnection() {
+        xpcConnection?.invalidate()
+        xpcConnection = nil
+    }
+
+    private func getOrCreateConnection() -> NSXPCConnection {
+        if let connection = xpcConnection {
+            return connection
+        }
+
+        let connection = NSXPCConnection(machServiceName: kHelperToolMachServiceName, options: .privileged)
+        connection.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
+
+        connection.invalidationHandler = { [weak self] in
+            Task { @MainActor in
+                self?.xpcConnection = nil
+            }
+        }
+
+        connection.interruptionHandler = { [weak self] in
+            Task { @MainActor in
+                self?.xpcConnection = nil
+            }
+        }
+
+        connection.resume()
+        xpcConnection = connection
+        return connection
+    }
+
+    /// Get a proxy with error handler. On XPC error, the errorHandler fires
+    /// instead of the reply block, preventing silent hangs.
+    private nonisolated func getProxyWithErrorHandler(
+        connection: NSXPCConnection,
+        errorHandler: @escaping (Error) -> Void
+    ) -> HelperProtocol? {
+        return connection.remoteObjectProxyWithErrorHandler { error in
+            errorHandler(error)
+        } as? HelperProtocol
+    }
+
+    // MARK: - Version Check with Timeout
+
+    private func getVersionWithTimeout() async -> String? {
+        let connection = getOrCreateConnection()
+        let result: String? = await withTaskTimeout(seconds: xpcTimeout) {
+            await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                    print("🔐 XPC error during getVersion: \(error.localizedDescription)")
+                    continuation.resume(returning: "")
+                } as? HelperProtocol
+
+                guard let helper = proxy else {
+                    continuation.resume(returning: "")
+                    return
+                }
+
+                helper.getVersion { version in
+                    continuation.resume(returning: version)
+                }
+            }
+        }
+        guard let version = result, !version.isEmpty else { return nil }
+        return version
+    }
+
     // MARK: - Helper Installation
-    
+
     func installHelper() async -> Bool {
         print("🔐 Installing privileged helper...")
         isInstalling = true
-        defer { 
-            Task { @MainActor in
-                self.isInstalling = false 
-            }
+        helperState = .installing
+        defer {
+            isInstalling = false
         }
-        
-        // First, try the modern SMAppService API (macOS 13+)
+
+        // Activate the app so the admin prompt appears on top
+        NSApp.activate(ignoringOtherApps: true)
+
         if #available(macOS 13.0, *) {
             return await installHelperModern()
         } else {
             return installHelperLegacy()
         }
     }
-    
+
     @available(macOS 13.0, *)
     private func installHelperModern() async -> Bool {
         do {
-            // The plist must be in Contents/Library/LaunchDaemons/
             let service = SMAppService.daemon(plistName: "\(kHelperToolMachServiceName).plist")
-            
-            print("🔐 Attempting to register daemon service...")
             try await service.register()
-            
-            await MainActor.run {
-                self.isHelperInstalled = true
-                self.installationError = nil
-            }
+
+            installationError = nil
             print("✅ Helper registered successfully via SMAppService")
             return true
         } catch {
             print("⚠️ SMAppService failed: \(error.localizedDescription)")
             print("🔐 Falling back to legacy SMJobBless...")
-            
-            // Fall back to legacy method
-            return await MainActor.run {
-                return self.installHelperLegacy()
-            }
+            return installHelperLegacy()
         }
     }
-    
+
     private func installHelperLegacy() -> Bool {
-        // For unsigned development builds, use AppleScript to install helper manually
         print("🔐 Attempting manual helper installation via AppleScript...")
-        
+
         guard let bundlePath = Bundle.main.bundlePath as String?,
               bundlePath.hasSuffix(".app") else {
             installationError = "Not running from app bundle"
             return false
         }
-        
-        // Path to helper binary in the app bundle
+
         let helperSource = "\(bundlePath)/Contents/MacOS/\(kHelperToolMachServiceName)"
         let plistSource = "\(bundlePath)/Contents/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
-        
         let helperDest = "/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)"
         let plistDest = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
-        
-        // Check if source files exist
+
         guard FileManager.default.fileExists(atPath: helperSource) else {
             installationError = "Helper binary not found in app bundle"
             print("❌ Helper not found at: \(helperSource)")
             return false
         }
-        
+
         guard FileManager.default.fileExists(atPath: plistSource) else {
             installationError = "Helper plist not found in app bundle"
             print("❌ Plist not found at: \(plistSource)")
             return false
         }
-        
-        // Create install script
+
         let script = """
         do shell script "
-            # Create directory if needed
             mkdir -p /Library/PrivilegedHelperTools
-            
-            # Stop existing helper if running
             launchctl bootout system/\(kHelperToolMachServiceName) 2>/dev/null || true
-            
-            # Copy helper binary
             cp '\(helperSource)' '\(helperDest)'
             chmod 544 '\(helperDest)'
             chown root:wheel '\(helperDest)'
-            
-            # Copy launchd plist
             cp '\(plistSource)' '\(plistDest)'
             chmod 644 '\(plistDest)'
             chown root:wheel '\(plistDest)'
-            
-            # Load the helper
             launchctl bootstrap system '\(plistDest)'
         " with administrator privileges
         """
-        
+
         var error: NSDictionary?
         if let appleScript = NSAppleScript(source: script) {
             appleScript.executeAndReturnError(&error)
-            
+
             if let error = error {
                 let errorMessage = error[NSAppleScript.errorMessage] as? String ?? "Unknown error"
                 installationError = errorMessage
                 print("❌ AppleScript error: \(errorMessage)")
                 return false
             }
-            
+
             print("✅ Helper installed successfully via AppleScript")
-            isHelperInstalled = true
             installationError = nil
-            
-            // Verify installation
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self.checkHelperStatus()
-            }
-            
             return true
         }
-        
+
         installationError = "Failed to create AppleScript"
         return false
     }
-    
-    // MARK: - XPC Connection
-    
-    private func connectToHelper(completion: @escaping (HelperProtocol) -> Void) {
-        if let connection = xpcConnection {
-            if let helper = connection.remoteObjectProxy as? HelperProtocol {
-                completion(helper)
-                return
-            }
-        }
-        
-        // Create new connection
-        let connection = NSXPCConnection(machServiceName: kHelperToolMachServiceName, options: .privileged)
-        connection.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
-        
-        connection.invalidationHandler = { [weak self] in
-            Task { @MainActor in
-                self?.xpcConnection = nil
-            }
-        }
-        
-        connection.interruptionHandler = { [weak self] in
-            Task { @MainActor in
-                self?.xpcConnection = nil
-            }
-        }
-        
-        connection.resume()
-        xpcConnection = connection
-        
-        if let helper = connection.remoteObjectProxy as? HelperProtocol {
-            completion(helper)
-        }
-    }
-    
-    private func getHelper() async -> HelperProtocol? {
-        return await withCheckedContinuation { continuation in
-            connectToHelper { helper in
-                continuation.resume(returning: helper)
-            }
-        }
-    }
-    
-    // MARK: - Route Operations
-    
+
+    // MARK: - Route Operations (all with timeout + error handling)
+
     func addRoute(destination: String, gateway: String, isNetwork: Bool = false) async -> (success: Bool, error: String?) {
-        guard isHelperInstalled else {
-            return (false, "Helper not installed")
+        guard helperState.isReady else {
+            return (false, "Helper not ready (\(helperState.statusText))")
         }
-        
-        return await withCheckedContinuation { continuation in
-            connectToHelper { helper in
+
+        let connection = getOrCreateConnection()
+        let result = await withTaskTimeout(seconds: xpcTimeout) {
+            await withCheckedContinuation { (continuation: CheckedContinuation<(Bool, String?), Never>) in
+                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                    continuation.resume(returning: (false, "XPC error: \(error.localizedDescription)"))
+                } as? HelperProtocol
+
+                guard let helper = proxy else {
+                    continuation.resume(returning: (false, "Failed to create XPC proxy"))
+                    return
+                }
+
                 helper.addRoute(destination: destination, gateway: gateway, isNetwork: isNetwork) { success, error in
                     continuation.resume(returning: (success, error))
                 }
             }
         }
-    }
-    
-    func removeRoute(destination: String) async -> (success: Bool, error: String?) {
-        guard isHelperInstalled else {
-            return (false, "Helper not installed")
+
+        if result == nil {
+            dropXPCConnection()
+            return (false, "XPC timeout after \(Int(xpcTimeout))s")
         }
-        
-        return await withCheckedContinuation { continuation in
-            connectToHelper { helper in
+        return result!
+    }
+
+    func removeRoute(destination: String) async -> (success: Bool, error: String?) {
+        guard helperState.isReady else {
+            return (false, "Helper not ready (\(helperState.statusText))")
+        }
+
+        let connection = getOrCreateConnection()
+        let result = await withTaskTimeout(seconds: xpcTimeout) {
+            await withCheckedContinuation { (continuation: CheckedContinuation<(Bool, String?), Never>) in
+                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                    continuation.resume(returning: (false, "XPC error: \(error.localizedDescription)"))
+                } as? HelperProtocol
+
+                guard let helper = proxy else {
+                    continuation.resume(returning: (false, "Failed to create XPC proxy"))
+                    return
+                }
+
                 helper.removeRoute(destination: destination) { success, error in
                     continuation.resume(returning: (success, error))
                 }
             }
         }
+
+        if result == nil {
+            dropXPCConnection()
+            return (false, "XPC timeout after \(Int(xpcTimeout))s")
+        }
+        return result!
     }
-    
-    // MARK: - Batch Route Operations (for startup/stop performance)
-    
+
+    // MARK: - Batch Route Operations
+
     func addRoutesBatch(routes: [(destination: String, gateway: String, isNetwork: Bool)]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
-        guard isHelperInstalled else {
-            return (0, routes.count, routes.map { $0.destination }, "Helper not installed")
+        guard helperState.isReady else {
+            return (0, routes.count, routes.map { $0.destination }, "Helper not ready (\(helperState.statusText))")
         }
 
         let dictRoutes = routes.map { route -> [String: Any] in
@@ -301,40 +388,82 @@ final class HelperManager: ObservableObject {
             ]
         }
 
-        return await withCheckedContinuation { continuation in
-            connectToHelper { helper in
+        let connection = getOrCreateConnection()
+        let result = await withTaskTimeout(seconds: xpcTimeout + Double(routes.count) * 0.1) {
+            await withCheckedContinuation { (continuation: CheckedContinuation<(Int, Int, [String], String?), Never>) in
+                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                    continuation.resume(returning: (0, routes.count, routes.map { $0.destination }, "XPC error: \(error.localizedDescription)"))
+                } as? HelperProtocol
+
+                guard let helper = proxy else {
+                    continuation.resume(returning: (0, routes.count, routes.map { $0.destination }, "Failed to create XPC proxy"))
+                    return
+                }
+
                 helper.addRoutesBatch(routes: dictRoutes) { successCount, failureCount, failedDestinations, error in
                     continuation.resume(returning: (successCount, failureCount, failedDestinations, error))
                 }
             }
         }
+
+        if result == nil {
+            dropXPCConnection()
+            return (0, routes.count, routes.map { $0.destination }, "XPC timeout")
+        }
+        return result!
     }
 
     func removeRoutesBatch(destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
-        guard isHelperInstalled else {
-            return (0, destinations.count, destinations, "Helper not installed")
+        guard helperState.isReady else {
+            return (0, destinations.count, destinations, "Helper not ready (\(helperState.statusText))")
         }
 
-        return await withCheckedContinuation { continuation in
-            connectToHelper { helper in
+        let connection = getOrCreateConnection()
+        let result = await withTaskTimeout(seconds: xpcTimeout + Double(destinations.count) * 0.1) {
+            await withCheckedContinuation { (continuation: CheckedContinuation<(Int, Int, [String], String?), Never>) in
+                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                    continuation.resume(returning: (0, destinations.count, destinations, "XPC error: \(error.localizedDescription)"))
+                } as? HelperProtocol
+
+                guard let helper = proxy else {
+                    continuation.resume(returning: (0, destinations.count, destinations, "Failed to create XPC proxy"))
+                    return
+                }
+
                 helper.removeRoutesBatch(destinations: destinations) { successCount, failureCount, failedDestinations, error in
                     continuation.resume(returning: (successCount, failureCount, failedDestinations, error))
                 }
             }
         }
-    }
-    
-    // MARK: - Hosts File Operations
-    
-    func updateHostsFile(entries: [(domain: String, ip: String)]) async -> (success: Bool, error: String?) {
-        guard isHelperInstalled else {
-            return (false, "Helper not installed")
+
+        if result == nil {
+            dropXPCConnection()
+            return (0, destinations.count, destinations, "XPC timeout")
         }
-        
+        return result!
+    }
+
+    // MARK: - Hosts File Operations
+
+    func updateHostsFile(entries: [(domain: String, ip: String)]) async -> (success: Bool, error: String?) {
+        guard helperState.isReady else {
+            return (false, "Helper not ready (\(helperState.statusText))")
+        }
+
         let dictEntries = entries.map { ["domain": $0.domain, "ip": $0.ip] }
-        
-        return await withCheckedContinuation { continuation in
-            connectToHelper { helper in
+
+        let connection = getOrCreateConnection()
+        let result = await withTaskTimeout(seconds: xpcTimeout) {
+            await withCheckedContinuation { (continuation: CheckedContinuation<(Bool, String?), Never>) in
+                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                    continuation.resume(returning: (false, "XPC error: \(error.localizedDescription)"))
+                } as? HelperProtocol
+
+                guard let helper = proxy else {
+                    continuation.resume(returning: (false, "Failed to create XPC proxy"))
+                    return
+                }
+
                 helper.updateHostsFile(entries: dictEntries) { success, error in
                     if success {
                         helper.flushDNSCache { _ in
@@ -346,9 +475,34 @@ final class HelperManager: ObservableObject {
                 }
             }
         }
+
+        if result == nil {
+            dropXPCConnection()
+            return (false, "XPC timeout after \(Int(xpcTimeout))s")
+        }
+        return result!
     }
-    
+
     func clearHostsFile() async -> (success: Bool, error: String?) {
         return await updateHostsFile(entries: [])
+    }
+}
+
+// MARK: - Task Timeout Helper
+
+/// Runs an async operation with a deadline. Returns nil if the timeout fires first.
+private func withTaskTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async -> T) async -> T? {
+    await withTaskGroup(of: T?.self) { group in
+        group.addTask {
+            await operation()
+        }
+        group.addTask {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            return nil
+        }
+        // Whichever finishes first wins
+        let result = await group.next() ?? nil
+        group.cancelAll()
+        return result
     }
 }

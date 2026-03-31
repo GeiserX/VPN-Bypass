@@ -57,20 +57,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Pre-warm SettingsWindowController so first click is instant
         _ = SettingsWindowController.shared
-        
+
         // Load config and apply routes on startup
         Task { @MainActor in
             RouteManager.shared.loadConfig()
-            
+
+            // Ensure helper is installed, running, and at the correct version
+            // BEFORE any route application. This prevents the "Setting Up" hang
+            // when the helper is outdated after a Homebrew upgrade.
+            let helperReady = await HelperManager.shared.ensureHelperReady()
+            if !helperReady {
+                RouteManager.shared.log(.error, "Helper not ready: \(HelperManager.shared.helperState.statusText)")
+            }
+
             // Small delay to let network interfaces settle
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-            
+
             // Detect VPN and apply routes on startup
             await RouteManager.shared.detectAndApplyRoutesAsync()
-            
+
             // Start the auto DNS refresh timer
             RouteManager.shared.startDNSRefreshTimer()
-            
+
             // Mark startup as complete
             hasCompletedInitialStartup = true
             lastSuccessfulVPNCheck = Date()

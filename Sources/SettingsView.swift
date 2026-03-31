@@ -993,7 +993,59 @@ struct GeneralTab: View {
     @State private var showingImportPicker = false
     @State private var showingImportError = false
     @State private var importErrorMessage = ""
-    
+
+    private var helperStateIcon: String {
+        switch helperManager.helperState {
+        case .ready: return "checkmark.shield.fill"
+        case .checking, .installing: return "shield.fill"
+        case .outdated: return "exclamationmark.shield.fill"
+        case .missing, .failed: return "xmark.shield.fill"
+        }
+    }
+
+    private var helperStateColor: Color {
+        switch helperManager.helperState {
+        case .ready: return Color(hex: "10B981")
+        case .checking, .installing: return Color(hex: "F59E0B")
+        case .outdated: return Color(hex: "F59E0B")
+        case .missing, .failed: return Color(hex: "EF4444")
+        }
+    }
+
+    private var helperStateSubtitle: String {
+        switch helperManager.helperState {
+        case .ready: return "No more password prompts for route changes"
+        case .checking: return "Verifying helper version..."
+        case .installing: return "Admin authorization required..."
+        case .outdated: return "Helper needs updating for this version"
+        case .missing: return "Install to enable route management"
+        case .failed: return "Helper could not be started"
+        }
+    }
+
+    private var helperNeedsAction: Bool {
+        switch helperManager.helperState {
+        case .missing, .outdated, .failed: return true
+        default: return false
+        }
+    }
+
+    private var helperActionIcon: String {
+        switch helperManager.helperState {
+        case .outdated: return "arrow.up.circle.fill"
+        default: return "arrow.down.circle.fill"
+        }
+    }
+
+    private var helperActionLabel: String {
+        if helperManager.isInstalling { return "Installing..." }
+        switch helperManager.helperState {
+        case .outdated: return "Update"
+        case .failed: return "Retry"
+        default: return "Install"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             // Header
@@ -1026,29 +1078,23 @@ struct GeneralTab: View {
             // Privileged Helper section
             SettingsCard(title: "Privileged Helper", icon: "lock.shield.fill", iconColor: Color(hex: "EF4444")) {
                 HStack(spacing: 12) {
-                    Image(systemName: helperManager.isHelperInstalled ? "checkmark.shield.fill" : "xmark.shield.fill")
+                    Image(systemName: helperStateIcon)
                         .font(.system(size: 14))
-                        .foregroundColor(helperManager.isHelperInstalled ? Color(hex: "10B981") : Color(hex: "EF4444"))
+                        .foregroundColor(helperStateColor)
                         .frame(width: 20)
-                    
+
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(helperManager.isHelperInstalled ? "Helper Installed" : "Helper Not Installed")
+                        Text(helperManager.helperState.statusText)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.white)
-                        if helperManager.isHelperInstalled {
-                            Text("No more password prompts for route changes")
-                                .font(.system(size: 11))
-                                .foregroundColor(Color(hex: "6B7280"))
-                        } else {
-                            Text("Install to avoid repeated admin prompts")
-                                .font(.system(size: 11))
-                                .foregroundColor(Color(hex: "6B7280"))
-                        }
+                        Text(helperStateSubtitle)
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "6B7280"))
                     }
-                    
+
                     Spacer()
-                    
-                    if !helperManager.isHelperInstalled {
+
+                    if helperNeedsAction {
                         Button {
                             installHelper()
                         } label: {
@@ -1058,10 +1104,10 @@ struct GeneralTab: View {
                                         .scaleEffect(0.6)
                                         .frame(width: 12, height: 12)
                                 } else {
-                                    Image(systemName: "arrow.down.circle.fill")
+                                    Image(systemName: helperActionIcon)
                                         .font(.system(size: 10))
                                 }
-                                Text(helperManager.isInstalling ? "Installing..." : "Install")
+                                Text(helperActionLabel)
                                     .font(.system(size: 11, weight: .medium))
                             }
                             .foregroundColor(.white)
@@ -1084,7 +1130,7 @@ struct GeneralTab: View {
                             .foregroundColor(Color(hex: "6B7280"))
                     }
                 }
-                
+
                 if let error = helperManager.installationError {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -1096,7 +1142,7 @@ struct GeneralTab: View {
                             .lineLimit(2)
                     }
                 }
-                
+
                 Text("The helper runs as root and handles route/hosts changes without prompting.")
                     .font(.system(size: 11))
                     .foregroundColor(Color(hex: "6B7280"))
