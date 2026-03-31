@@ -235,6 +235,16 @@ final class HelperManager: ObservableObject {
 
     @available(macOS 13.0, *)
     private func installHelperModern() async -> Bool {
+        // SMAppService.register() succeeds even when an older helper is already
+        // installed — it re-registers the service but does NOT replace the on-disk
+        // binary. For updates we must always go through the legacy path which does
+        // the actual file copy. Only use SMAppService for first-time installs.
+        let helperPath = "/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)"
+        if FileManager.default.fileExists(atPath: helperPath) {
+            print("🔐 Helper exists on disk, using legacy path for update...")
+            return installHelperLegacy()
+        }
+
         do {
             let service = SMAppService.daemon(plistName: "\(kHelperToolMachServiceName).plist")
             try await service.register()

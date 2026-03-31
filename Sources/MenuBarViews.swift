@@ -39,11 +39,16 @@ struct MenuBarLabel: View {
     @EnvironmentObject var routeManager: RouteManager
     @State private var isAnimating = false
 
+    private static let templateIcon: NSImage? = {
+        guard let path = Bundle.main.path(forResource: "menubar-icon", ofType: "png"),
+              let img = NSImage(contentsOfFile: path) else { return nil }
+        img.isTemplate = true
+        return img
+    }()
+
     private var menuBarIcon: some View {
         Group {
-            if let iconPath = Bundle.main.path(forResource: "menubar-icon", ofType: "png"),
-               let nsImage = NSImage(contentsOfFile: iconPath) {
-                let _ = nsImage.isTemplate = true
+            if let nsImage = Self.templateIcon {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
