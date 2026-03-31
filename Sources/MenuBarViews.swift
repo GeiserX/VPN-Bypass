@@ -40,8 +40,7 @@ struct MenuBarLabel: View {
     @State private var isAnimating = false
 
     private static let templateIcon: NSImage? = {
-        guard let path = Bundle.main.path(forResource: "menubar-icon", ofType: "png"),
-              let img = NSImage(contentsOfFile: path) else { return nil }
+        guard let img = Bundle.main.image(forResource: "menubar-icon") else { return nil }
         img.isTemplate = true
         return img
     }()
