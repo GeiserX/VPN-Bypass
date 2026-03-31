@@ -5,6 +5,24 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-03-31
+
+### Changed
+- **Native Settings Window** - Replaced persistent `NSPanel` with a standard `NSWindow` featuring minimize, close, and full traffic light controls
+- **Official Logo Everywhere** - Menu bar uses a template icon (`menubar-icon.png`) for proper dark/light mode, dropdown header uses the official 3D logo instead of SF Symbols
+- **Larger Tab Buttons** - Settings tab items enlarged to 13pt with rounded-rectangle styling for better usability
+- **Git-Derived Version** - App version is now stamped from the latest git tag at build time via `PlistBuddy`, eliminating hardcoded version strings
+
+### Fixed
+- **Helper Startup Race** - App no longer hangs at "Setting Up" when the privileged helper is outdated. A new `ensureHelperReady()` preflight verifies the helper is installed, running, and at the expected version before any route application begins
+- **XPC Timeout Protection** - All XPC calls now use a hard wall-clock deadline (`OnceGate` + `DispatchQueue.asyncAfter`) instead of cooperative task cancellation, preventing indefinite hangs when the helper is unresponsive
+- **Helper State Machine** - New `HelperState` enum (`missing`, `checking`, `installing`, `outdated`, `ready`, `failed`) with reactive UI throughout the app
+- **Auto-Update on Version Mismatch** - Helper is automatically reinstalled when version mismatch is detected, with XPC connection reset and post-update verification
+- **Helperless Fallback Removal** - All direct `/sbin/route` and AppleScript fallback paths removed; every route-mutating operation now requires the privileged helper, eliminating silent failures and false state
+- **Settings Recovery** - Install/Update/Retry button in Settings runs full `ensureHelperReady()` preflight and automatically applies routes + restarts DNS timer if VPN is connected
+- **Window Minimize/Reopen** - Minimized settings window is properly restored instead of creating a new instance
+- **Strict Concurrency** - `OnceGate` marked `@unchecked Sendable` with `T: Sendable` constraint, eliminating all strict-concurrency warnings from the XPC deadline infrastructure
+
 ## [2.0.0] - 2026-03-30
 
 ### Added
