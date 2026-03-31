@@ -5,6 +5,12 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-03-31
+
+### Fixed
+- **Menu Bar Black Square** - Converted menu bar icons from 16-bit to 8-bit grayscale+alpha; CoreGraphics `mask_create` rejects 16-bit images as template masks
+- **Helper Update Not Taking Effect** - `SMAppService.register()` silently succeeds without replacing the on-disk binary; helper updates now always use the legacy AppleScript path which does the actual file copy and `launchctl` reload
+
 ## [2.1.0] - 2026-03-31
 
 ### Changed
