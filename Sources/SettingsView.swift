@@ -1809,7 +1809,13 @@ struct GeneralTab: View {
     
     private func installHelper() {
         Task {
-            _ = await helperManager.installHelper()
+            let ready = await helperManager.ensureHelperReady()
+            if ready && routeManager.isVPNConnected && routeManager.activeRoutes.isEmpty {
+                // Helper just became ready and VPN is connected but no routes —
+                // the initial startup was skipped because helper wasn't ready.
+                // Automatically apply routes now.
+                await routeManager.detectAndApplyRoutesAsync()
+            }
         }
     }
 }

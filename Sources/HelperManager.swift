@@ -194,25 +194,23 @@ final class HelperManager: ObservableObject {
 
     private func getVersionWithTimeout() async -> String? {
         let connection = getOrCreateConnection()
-        let result: String? = await withTaskTimeout(seconds: xpcTimeout) {
-            await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
-                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                    print("🔐 XPC error during getVersion: \(error.localizedDescription)")
-                    continuation.resume(returning: "")
-                } as? HelperProtocol
+        let noVersion: String? = nil
+        let result: String? = await withXPCDeadline(seconds: xpcTimeout, fallback: noVersion) { once in
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                print("🔐 XPC error during getVersion: \(error.localizedDescription)")
+                once.complete(noVersion)
+            } as? HelperProtocol
 
-                guard let helper = proxy else {
-                    continuation.resume(returning: "")
-                    return
-                }
+            guard let helper = proxy else {
+                once.complete(noVersion)
+                return
+            }
 
-                helper.getVersion { version in
-                    continuation.resume(returning: version)
-                }
+            helper.getVersion { version in
+                once.complete(version)
             }
         }
-        guard let version = result, !version.isEmpty else { return nil }
-        return version
+        return result
     }
 
     // MARK: - Helper Installation
@@ -311,7 +309,7 @@ final class HelperManager: ObservableObject {
         return false
     }
 
-    // MARK: - Route Operations (all with timeout + error handling)
+    // MARK: - Route Operations (all with hard XPC deadline)
 
     func addRoute(destination: String, gateway: String, isNetwork: Bool = false) async -> (success: Bool, error: String?) {
         guard helperState.isReady else {
@@ -319,28 +317,24 @@ final class HelperManager: ObservableObject {
         }
 
         let connection = getOrCreateConnection()
-        let result = await withTaskTimeout(seconds: xpcTimeout) {
-            await withCheckedContinuation { (continuation: CheckedContinuation<(Bool, String?), Never>) in
-                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                    continuation.resume(returning: (false, "XPC error: \(error.localizedDescription)"))
-                } as? HelperProtocol
+        let fallback: (Bool, String?) = (false, "XPC timeout after \(Int(xpcTimeout))s")
+        let result = await withXPCDeadline(seconds: xpcTimeout, fallback: fallback) { once in
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                once.complete((false, "XPC error: \(error.localizedDescription)"))
+            } as? HelperProtocol
 
-                guard let helper = proxy else {
-                    continuation.resume(returning: (false, "Failed to create XPC proxy"))
-                    return
-                }
+            guard let helper = proxy else {
+                once.complete((false, "Failed to create XPC proxy"))
+                return
+            }
 
-                helper.addRoute(destination: destination, gateway: gateway, isNetwork: isNetwork) { success, error in
-                    continuation.resume(returning: (success, error))
-                }
+            helper.addRoute(destination: destination, gateway: gateway, isNetwork: isNetwork) { success, error in
+                once.complete((success, error))
             }
         }
 
-        if result == nil {
-            dropXPCConnection()
-            return (false, "XPC timeout after \(Int(xpcTimeout))s")
-        }
-        return result!
+        if result == fallback { dropXPCConnection() }
+        return result
     }
 
     func removeRoute(destination: String) async -> (success: Bool, error: String?) {
@@ -349,28 +343,24 @@ final class HelperManager: ObservableObject {
         }
 
         let connection = getOrCreateConnection()
-        let result = await withTaskTimeout(seconds: xpcTimeout) {
-            await withCheckedContinuation { (continuation: CheckedContinuation<(Bool, String?), Never>) in
-                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                    continuation.resume(returning: (false, "XPC error: \(error.localizedDescription)"))
-                } as? HelperProtocol
+        let fallback: (Bool, String?) = (false, "XPC timeout after \(Int(xpcTimeout))s")
+        let result = await withXPCDeadline(seconds: xpcTimeout, fallback: fallback) { once in
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                once.complete((false, "XPC error: \(error.localizedDescription)"))
+            } as? HelperProtocol
 
-                guard let helper = proxy else {
-                    continuation.resume(returning: (false, "Failed to create XPC proxy"))
-                    return
-                }
+            guard let helper = proxy else {
+                once.complete((false, "Failed to create XPC proxy"))
+                return
+            }
 
-                helper.removeRoute(destination: destination) { success, error in
-                    continuation.resume(returning: (success, error))
-                }
+            helper.removeRoute(destination: destination) { success, error in
+                once.complete((success, error))
             }
         }
 
-        if result == nil {
-            dropXPCConnection()
-            return (false, "XPC timeout after \(Int(xpcTimeout))s")
-        }
-        return result!
+        if result == fallback { dropXPCConnection() }
+        return result
     }
 
     // MARK: - Batch Route Operations
@@ -381,36 +371,34 @@ final class HelperManager: ObservableObject {
         }
 
         let dictRoutes = routes.map { route -> [String: Any] in
-            return [
+            [
                 "destination": route.destination,
                 "gateway": route.gateway,
                 "isNetwork": route.isNetwork
             ]
         }
+        let allDests = routes.map { $0.destination }
+        let timeout = xpcTimeout + Double(routes.count) * 0.1
+        let fallback = (0, routes.count, allDests, Optional("XPC timeout"))
 
         let connection = getOrCreateConnection()
-        let result = await withTaskTimeout(seconds: xpcTimeout + Double(routes.count) * 0.1) {
-            await withCheckedContinuation { (continuation: CheckedContinuation<(Int, Int, [String], String?), Never>) in
-                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                    continuation.resume(returning: (0, routes.count, routes.map { $0.destination }, "XPC error: \(error.localizedDescription)"))
-                } as? HelperProtocol
+        let result = await withXPCDeadline(seconds: timeout, fallback: fallback) { once in
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                once.complete((0, routes.count, allDests, Optional("XPC error: \(error.localizedDescription)")))
+            } as? HelperProtocol
 
-                guard let helper = proxy else {
-                    continuation.resume(returning: (0, routes.count, routes.map { $0.destination }, "Failed to create XPC proxy"))
-                    return
-                }
+            guard let helper = proxy else {
+                once.complete((0, routes.count, allDests, Optional("Failed to create XPC proxy")))
+                return
+            }
 
-                helper.addRoutesBatch(routes: dictRoutes) { successCount, failureCount, failedDestinations, error in
-                    continuation.resume(returning: (successCount, failureCount, failedDestinations, error))
-                }
+            helper.addRoutesBatch(routes: dictRoutes) { successCount, failureCount, failedDestinations, error in
+                once.complete((successCount, failureCount, failedDestinations, error))
             }
         }
 
-        if result == nil {
-            dropXPCConnection()
-            return (0, routes.count, routes.map { $0.destination }, "XPC timeout")
-        }
-        return result!
+        if result.3 == "XPC timeout" { dropXPCConnection() }
+        return result
     }
 
     func removeRoutesBatch(destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
@@ -418,29 +406,27 @@ final class HelperManager: ObservableObject {
             return (0, destinations.count, destinations, "Helper not ready (\(helperState.statusText))")
         }
 
+        let timeout = xpcTimeout + Double(destinations.count) * 0.1
+        let fallback = (0, destinations.count, destinations, Optional("XPC timeout"))
+
         let connection = getOrCreateConnection()
-        let result = await withTaskTimeout(seconds: xpcTimeout + Double(destinations.count) * 0.1) {
-            await withCheckedContinuation { (continuation: CheckedContinuation<(Int, Int, [String], String?), Never>) in
-                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                    continuation.resume(returning: (0, destinations.count, destinations, "XPC error: \(error.localizedDescription)"))
-                } as? HelperProtocol
+        let result = await withXPCDeadline(seconds: timeout, fallback: fallback) { once in
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                once.complete((0, destinations.count, destinations, Optional("XPC error: \(error.localizedDescription)")))
+            } as? HelperProtocol
 
-                guard let helper = proxy else {
-                    continuation.resume(returning: (0, destinations.count, destinations, "Failed to create XPC proxy"))
-                    return
-                }
+            guard let helper = proxy else {
+                once.complete((0, destinations.count, destinations, Optional("Failed to create XPC proxy")))
+                return
+            }
 
-                helper.removeRoutesBatch(destinations: destinations) { successCount, failureCount, failedDestinations, error in
-                    continuation.resume(returning: (successCount, failureCount, failedDestinations, error))
-                }
+            helper.removeRoutesBatch(destinations: destinations) { successCount, failureCount, failedDestinations, error in
+                once.complete((successCount, failureCount, failedDestinations, error))
             }
         }
 
-        if result == nil {
-            dropXPCConnection()
-            return (0, destinations.count, destinations, "XPC timeout")
-        }
-        return result!
+        if result.3 == "XPC timeout" { dropXPCConnection() }
+        return result
     }
 
     // MARK: - Hosts File Operations
@@ -453,34 +439,30 @@ final class HelperManager: ObservableObject {
         let dictEntries = entries.map { ["domain": $0.domain, "ip": $0.ip] }
 
         let connection = getOrCreateConnection()
-        let result = await withTaskTimeout(seconds: xpcTimeout) {
-            await withCheckedContinuation { (continuation: CheckedContinuation<(Bool, String?), Never>) in
-                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                    continuation.resume(returning: (false, "XPC error: \(error.localizedDescription)"))
-                } as? HelperProtocol
+        let fallback: (Bool, String?) = (false, "XPC timeout after \(Int(xpcTimeout))s")
+        let result = await withXPCDeadline(seconds: xpcTimeout, fallback: fallback) { once in
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                once.complete((false, "XPC error: \(error.localizedDescription)"))
+            } as? HelperProtocol
 
-                guard let helper = proxy else {
-                    continuation.resume(returning: (false, "Failed to create XPC proxy"))
-                    return
-                }
+            guard let helper = proxy else {
+                once.complete((false, "Failed to create XPC proxy"))
+                return
+            }
 
-                helper.updateHostsFile(entries: dictEntries) { success, error in
-                    if success {
-                        helper.flushDNSCache { _ in
-                            continuation.resume(returning: (true, nil))
-                        }
-                    } else {
-                        continuation.resume(returning: (false, error))
+            helper.updateHostsFile(entries: dictEntries) { success, error in
+                if success {
+                    helper.flushDNSCache { _ in
+                        once.complete((true, nil))
                     }
+                } else {
+                    once.complete((false, error))
                 }
             }
         }
 
-        if result == nil {
-            dropXPCConnection()
-            return (false, "XPC timeout after \(Int(xpcTimeout))s")
-        }
-        return result!
+        if result == fallback { dropXPCConnection() }
+        return result
     }
 
     func clearHostsFile() async -> (success: Bool, error: String?) {
@@ -488,21 +470,46 @@ final class HelperManager: ObservableObject {
     }
 }
 
-// MARK: - Task Timeout Helper
+// MARK: - XPC Deadline (hard timeout via DispatchQueue timer)
 
-/// Runs an async operation with a deadline. Returns nil if the timeout fires first.
-private func withTaskTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async -> T) async -> T? {
-    await withTaskGroup(of: T?.self) { group in
-        group.addTask {
-            await operation()
+/// Ensures exactly-once delivery of a result to a CheckedContinuation.
+/// Either the XPC reply or the DispatchQueue deadline fires — whichever
+/// comes first wins, the other is silently dropped.
+final class OnceGate<T> {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Never>?
+
+    init(continuation: CheckedContinuation<T, Never>) {
+        self.continuation = continuation
+    }
+
+    func complete(_ value: T) {
+        lock.lock()
+        let cont = continuation
+        continuation = nil
+        lock.unlock()
+        cont?.resume(returning: value)
+    }
+}
+
+/// Runs a synchronous XPC call block with a hard deadline. The block receives
+/// a `OnceGate` that it must call `complete()` on when the XPC reply arrives.
+/// If the deadline fires first, the gate delivers `fallback` and subsequent
+/// `complete()` calls from the XPC reply are silently dropped.
+private func withXPCDeadline<T>(
+    seconds: TimeInterval,
+    fallback: T,
+    operation: @escaping (OnceGate<T>) -> Void
+) async -> T {
+    await withCheckedContinuation { continuation in
+        let gate = OnceGate(continuation: continuation)
+
+        // Hard deadline — fires on a background queue, does not depend on
+        // cooperative task cancellation or the XPC reply ever arriving.
+        DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
+            gate.complete(fallback)
         }
-        group.addTask {
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            return nil
-        }
-        // Whichever finishes first wins
-        let result = await group.next() ?? nil
-        group.cancelAll()
-        return result
+
+        operation(gate)
     }
 }

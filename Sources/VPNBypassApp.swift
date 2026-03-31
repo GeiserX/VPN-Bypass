@@ -67,11 +67,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // when the helper is outdated after a Homebrew upgrade.
             let helperReady = await HelperManager.shared.ensureHelperReady()
             if !helperReady {
-                RouteManager.shared.log(.error, "Helper not ready: \(HelperManager.shared.helperState.statusText)")
+                RouteManager.shared.log(.error, "Helper not ready: \(HelperManager.shared.helperState.statusText). Route application skipped.")
             }
 
             // Small delay to let network interfaces settle
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+
+            // Only attempt route application if helper is verified ready.
+            // Without the helper, route operations will fail silently or hang.
+            guard helperReady else { return }
 
             // Detect VPN and apply routes on startup
             await RouteManager.shared.detectAndApplyRoutesAsync()
