@@ -2417,7 +2417,7 @@ struct LogRow: View {
 // MARK: - Settings Window Controller
 
 @MainActor
-final class SettingsWindowController {
+final class SettingsWindowController: NSObject, NSWindowDelegate {
     static let shared = SettingsWindowController()
 
     private var window: NSWindow?
@@ -2431,16 +2431,14 @@ final class SettingsWindowController {
     }
 
     private func showWindow() {
-        // If window exists and is visible, just bring it to front
-        if let window = window, window.isVisible {
+        // If window exists (visible, minimized, or offscreen), reuse it
+        if let window = window {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
-        }
-
-        // If window was closed, remove it so we create a fresh one
-        if window != nil && !window!.isVisible {
-            window = nil
         }
 
         let settingsView = SettingsView()
@@ -2451,7 +2449,7 @@ final class SettingsWindowController {
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 580, height: 620),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -2462,7 +2460,9 @@ final class SettingsWindowController {
         window.titleVisibility = .hidden
         window.backgroundColor = NSColor(Color(hex: "0F0F14"))
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 500, height: 480)
+        window.contentMinSize = NSSize(width: 580, height: 620)
+        window.contentMaxSize = NSSize(width: 580, height: 620)
+        window.delegate = self
         window.center()
 
         // Add branded titlebar accessory
@@ -2473,6 +2473,10 @@ final class SettingsWindowController {
         NSApp.activate(ignoringOtherApps: true)
 
         self.window = window
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        window = nil
     }
 
     private func addBrandedTitlebar(to window: NSWindow) {
