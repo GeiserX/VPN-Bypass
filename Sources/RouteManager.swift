@@ -718,7 +718,8 @@ final class RouteManager: ObservableObject {
         }
         
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
-        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes {
+        // Also skip if helper is not ready — no point attempting routes that will all fail
+        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled {
             // Skip if routes were applied very recently (within 5 seconds) - prevents double-triggering
             if let lastUpdate = lastUpdate, Date().timeIntervalSince(lastUpdate) < 5 {
                 log(.info, "Skipping duplicate route application (applied \(Int(Date().timeIntervalSince(lastUpdate)))s ago)")
@@ -734,7 +735,7 @@ final class RouteManager: ObservableObject {
         }
         
         // VPN interface switched while still connected — re-route through new gateway
-        if isVPNConnected && wasVPNConnected && interface != oldInterface && oldInterface != nil && interface != nil && !isLoading && !isApplyingRoutes {
+        if isVPNConnected && wasVPNConnected && interface != oldInterface && oldInterface != nil && interface != nil && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled {
             if let last = lastInterfaceReroute, Date().timeIntervalSince(last) < 10 {
                 log(.info, "Skipping interface re-route (cooldown, last was \(Int(Date().timeIntervalSince(last)))s ago)")
             } else {
@@ -758,7 +759,7 @@ final class RouteManager: ObservableObject {
            interface == oldInterface &&
            oldTailscaleFingerprint != nil && newTailscaleFingerprint != nil &&
            oldTailscaleFingerprint != newTailscaleFingerprint &&
-           !isLoading && !isApplyingRoutes {
+           !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled {
             if let last = lastInterfaceReroute, Date().timeIntervalSince(last) < 10 {
                 log(.info, "Skipping Tailscale profile re-route (cooldown, last was \(Int(Date().timeIntervalSince(last)))s ago)")
             } else {
@@ -1078,6 +1079,10 @@ final class RouteManager: ObservableObject {
     
     /// Called from Refresh button - sends notification
     func refreshRoutes() {
+        guard HelperManager.shared.isHelperInstalled else {
+            log(.error, "Cannot refresh routes: helper not ready (\(HelperManager.shared.helperState.statusText))")
+            return
+        }
         Task {
             await detectAndApplyRoutesAsync(sendNotification: true)
         }
@@ -1360,10 +1365,8 @@ final class RouteManager: ObservableObject {
                 log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed (\(result.failedDestinations.prefix(3).joined(separator: ", "))...)")
             }
         } else {
-            // Fallback: add routes one by one (slower but works without helper)
-            for route in routesToAdd {
-                _ = await addRoute(route.destination, gateway: route.gateway, isNetwork: route.isNetwork)
-            }
+            log(.error, "Cannot add routes: helper not ready (\(HelperManager.shared.helperState.statusText))")
+            return
         }
 
         // Build activeRoutes from allSourceEntries, excluding destinations that failed kernel add
@@ -1391,38 +1394,24 @@ final class RouteManager: ObservableObject {
 
         // Truly orphaned: re-attach on failure (route is genuinely still in kernel)
         if !trulyOrphanedDests.isEmpty {
-            if HelperManager.shared.isHelperInstalled {
-                let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
-                if result.failureCount > 0 {
-                    log(.warning, "Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
-                    let failedSet = Set(result.failedDestinations)
-                    for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
-                        newRoutes.append(route)
-                    }
-                } else if result.successCount > 0 {
-                    log(.info, "Orphan cleanup: \(result.successCount) stale kernel routes removed")
+            let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
+            if result.failureCount > 0 {
+                log(.warning, "Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
+                let failedSet = Set(result.failedDestinations)
+                for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
+                    newRoutes.append(route)
                 }
-            } else {
-                for dest in trulyOrphanedDests {
-                    _ = await removeRoute(dest)
-                }
+            } else if result.successCount > 0 {
+                log(.info, "Orphan cleanup: \(result.successCount) stale kernel routes removed")
             }
         }
 
         // Add-failed: helper's addRoute does delete-before-add, so the old route is
         // gone after a failed re-add. Don't re-attach — the kernel route doesn't exist.
-        // (The only way delete-before-add's delete could fail is if the route was already
-        // absent, since the helper runs as root and permission errors don't apply.)
         if !addFailedStaleDests.isEmpty {
-            if HelperManager.shared.isHelperInstalled {
-                let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
-                if result.failureCount > 0 {
-                    log(.info, "Add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
-                }
-            } else {
-                for dest in addFailedStaleDests {
-                    _ = await removeRoute(dest)
-                }
+            let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
+            if result.failureCount > 0 {
+                log(.info, "Add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
             }
         }
 
@@ -1477,17 +1466,17 @@ final class RouteManager: ObservableObject {
         let destinations = Array(Set(activeRoutes.map { $0.destination }))
 
         var failedDests: Set<String> = []
-        if HelperManager.shared.isHelperInstalled && !destinations.isEmpty {
-            let result = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
-            failedDests = Set(result.failedDestinations)
-            if result.failureCount > 0 {
-                log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
+        if !destinations.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
+                failedDests = Set(result.failedDestinations)
+                if result.failureCount > 0 {
+                    log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
+                } else {
+                    log(.info, "Batch route removal: \(result.successCount) routes removed")
+                }
             } else {
-                log(.info, "Batch route removal: \(result.successCount) routes removed")
-            }
-        } else {
-            for route in activeRoutes {
-                _ = await removeRoute(route.destination)
+                log(.error, "Cannot remove routes: helper not ready (\(HelperManager.shared.helperState.statusText))")
             }
         }
 
@@ -1634,7 +1623,7 @@ final class RouteManager: ObservableObject {
 
         log(.info, "Applying \(routesToAdd.count) routes from cache (\(isInverse ? "VPN Only" : "Bypass") mode)...")
 
-        // Apply routes in batch (with fallback for helperless mode)
+        // Apply routes in batch via helper
         var batchFailureCount = 0
         var batchFailedDests: Set<String> = []
         if !routesToAdd.isEmpty {
@@ -1647,9 +1636,8 @@ final class RouteManager: ObservableObject {
                     log(.warning, "Cache route batch: \(result.successCount) succeeded, \(result.failureCount) failed — will reconcile on DNS refresh")
                 }
             } else {
-                for route in routesToAdd {
-                    _ = await addRoute(route.destination, gateway: route.gateway, isNetwork: route.isNetwork)
-                }
+                log(.error, "Cannot apply cached routes: helper not ready (\(HelperManager.shared.helperState.statusText))")
+                return false
             }
         }
 
@@ -1671,35 +1659,23 @@ final class RouteManager: ObservableObject {
         let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
 
         if !trulyOrphanedDests.isEmpty {
-            if HelperManager.shared.isHelperInstalled {
-                let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
-                if result.failureCount > 0 {
-                    log(.warning, "Cache orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
-                    let failedSet = Set(result.failedDestinations)
-                    for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
-                        newRoutes.append(route)
-                    }
-                } else if result.successCount > 0 {
-                    log(.info, "Cache orphan cleanup: \(result.successCount) stale kernel routes removed")
+            let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
+            if result.failureCount > 0 {
+                log(.warning, "Cache orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
+                let failedSet = Set(result.failedDestinations)
+                for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
+                    newRoutes.append(route)
                 }
-            } else {
-                for dest in trulyOrphanedDests {
-                    _ = await removeRoute(dest)
-                }
+            } else if result.successCount > 0 {
+                log(.info, "Cache orphan cleanup: \(result.successCount) stale kernel routes removed")
             }
         }
 
         // Add-failed: delete-before-add already removed the old route (see full apply comment)
         if !addFailedStaleDests.isEmpty {
-            if HelperManager.shared.isHelperInstalled {
-                let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
-                if result.failureCount > 0 {
-                    log(.info, "Cache add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
-                }
-            } else {
-                for dest in addFailedStaleDests {
-                    _ = await removeRoute(dest)
-                }
+            let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
+            if result.failureCount > 0 {
+                log(.info, "Cache add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
             }
         }
 
@@ -1864,25 +1840,19 @@ final class RouteManager: ObservableObject {
                 }
 
                 if !kernelRemovalDests.isEmpty {
-                    if HelperManager.shared.isHelperInstalled {
-                        let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovalDests)
-                        if result.failureCount > 0 {
-                            // Re-add activeRoute entries for destinations that failed kernel removal
-                            let failedSet = Set(result.failedDestinations)
-                            await MainActor.run {
-                                for removal in removals where failedSet.contains(removal.destination) {
-                                    activeRoutes.append(ActiveRoute(
-                                        destination: removal.destination,
-                                        gateway: removal.gateway,
-                                        source: removal.source,
-                                        timestamp: Date()
-                                    ))
-                                }
+                    let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovalDests)
+                    if result.failureCount > 0 {
+                        // Re-add activeRoute entries for destinations that failed kernel removal
+                        let failedSet = Set(result.failedDestinations)
+                        await MainActor.run {
+                            for removal in removals where failedSet.contains(removal.destination) {
+                                activeRoutes.append(ActiveRoute(
+                                    destination: removal.destination,
+                                    gateway: removal.gateway,
+                                    source: removal.source,
+                                    timestamp: Date()
+                                ))
                             }
-                        }
-                    } else {
-                        for dest in kernelRemovalDests {
-                            _ = await removeRoute(dest)
                         }
                     }
                 }
@@ -1890,25 +1860,16 @@ final class RouteManager: ObservableObject {
 
             if !additions.isEmpty {
                 var addFailedDests: Set<String> = []
-                if HelperManager.shared.isHelperInstalled {
-                    // Deduplicate by destination for kernel operations — same IP from
-                    // different sources must only be sent once to avoid delete-before-add
-                    // destroying a just-added route on the second pass
-                    var seenAddDests: Set<String> = []
-                    let routes = additions.compactMap { add -> (destination: String, gateway: String, isNetwork: Bool)? in
-                        guard seenAddDests.insert(add.destination).inserted else { return nil }
-                        return (destination: add.destination, gateway: add.gateway, isNetwork: add.isNetwork)
-                    }
-                    let result = await HelperManager.shared.addRoutesBatch(routes: routes)
-                    addFailedDests = Set(result.failedDestinations)
-                } else {
-                    var seenAddDests: Set<String> = []
-                    for add in additions {
-                        if seenAddDests.insert(add.destination).inserted {
-                            _ = await addRoute(add.destination, gateway: add.gateway, isNetwork: add.isNetwork)
-                        }
-                    }
+                // Deduplicate by destination for kernel operations — same IP from
+                // different sources must only be sent once to avoid delete-before-add
+                // destroying a just-added route on the second pass
+                var seenAddDests: Set<String> = []
+                let routes = additions.compactMap { add -> (destination: String, gateway: String, isNetwork: Bool)? in
+                    guard seenAddDests.insert(add.destination).inserted else { return nil }
+                    return (destination: add.destination, gateway: add.gateway, isNetwork: add.isNetwork)
                 }
+                let result = await HelperManager.shared.addRoutesBatch(routes: routes)
+                addFailedDests = Set(result.failedDestinations)
 
                 // Record ownership for ALL sources whose destinations succeeded
                 await MainActor.run {
@@ -2194,14 +2155,8 @@ final class RouteManager: ObservableObject {
             // Attempt kernel removal first
             var failedKernelRemovals: Set<String> = []
             if !kernelRemovals.isEmpty {
-                if HelperManager.shared.isHelperInstalled {
-                    let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovals)
-                    failedKernelRemovals = Set(result.failedDestinations)
-                } else {
-                    for ip in kernelRemovals {
-                        _ = await removeRoute(ip)
-                    }
-                }
+                let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovals)
+                failedKernelRemovals = Set(result.failedDestinations)
             }
 
             // Now remove stale entries, but retain those whose kernel removal failed
@@ -3355,40 +3310,24 @@ final class RouteManager: ObservableObject {
     }
     
     private func addRoute(_ destination: String, gateway: String, isNetwork: Bool = false) async -> Bool {
-        // Use privileged helper if installed
-        if HelperManager.shared.isHelperInstalled {
-            let result = await HelperManager.shared.addRoute(destination: destination, gateway: gateway, isNetwork: isNetwork)
-            if !result.success {
-                log(.warning, "Helper route add failed: \(result.error ?? "unknown")")
-            }
-            return result.success
-        }
-        
-        // Fallback: direct command (may require sudo)
-        // First try to delete existing route
-        _ = await removeRoute(destination)
-        
-        let args = isNetwork 
-            ? ["-n", "add", "-net", destination, gateway]
-            : ["-n", "add", "-host", destination, gateway]
-        
-        guard let result = await runProcessAsync("/sbin/route", arguments: args, timeout: 5.0) else {
+        guard HelperManager.shared.isHelperInstalled else {
+            log(.error, "Cannot add route: helper not ready")
             return false
         }
-        
-        return result.exitCode == 0
-    }
-    
-    private func removeRoute(_ destination: String) async -> Bool {
-        // Use privileged helper if installed
-        if HelperManager.shared.isHelperInstalled {
-            let result = await HelperManager.shared.removeRoute(destination: destination)
-            return result.success
+        let result = await HelperManager.shared.addRoute(destination: destination, gateway: gateway, isNetwork: isNetwork)
+        if !result.success {
+            log(.warning, "Helper route add failed: \(result.error ?? "unknown")")
         }
-        
-        // Fallback: direct command with timeout
-        _ = await runProcessAsync("/sbin/route", arguments: ["-n", "delete", destination], timeout: 3.0)
-        return true // Route delete can fail if route doesn't exist, that's ok
+        return result.success
+    }
+
+    private func removeRoute(_ destination: String) async -> Bool {
+        guard HelperManager.shared.isHelperInstalled else {
+            log(.error, "Cannot remove route: helper not ready")
+            return false
+        }
+        let result = await HelperManager.shared.removeRoute(destination: destination)
+        return result.success
     }
     
     private func updateHostsFile() async {
@@ -3498,73 +3437,13 @@ final class RouteManager: ObservableObject {
     }
     
     private func modifyHostsFile(entries: [(domain: String, ip: String)]) async {
-        // Use privileged helper if installed
-        if HelperManager.shared.isHelperInstalled {
-            let result = await HelperManager.shared.updateHostsFile(entries: entries)
-            if !result.success {
-                log(.error, "Helper hosts update failed: \(result.error ?? "unknown")")
-            }
+        guard HelperManager.shared.isHelperInstalled else {
+            log(.error, "Cannot modify hosts file: helper not ready (\(HelperManager.shared.helperState.statusText))")
             return
         }
-        
-        // Fallback: AppleScript with admin privileges (prompts each time)
-        let marker = "# VPN-BYPASS-MANAGED"
-        let hostsPath = "/etc/hosts"
-        
-        // Read current hosts file
-        guard let currentContent = try? String(contentsOfFile: hostsPath, encoding: .utf8) else {
-            log(.error, "Could not read /etc/hosts")
-            return
-        }
-        
-        // Remove existing VPN-BYPASS section
-        var lines = currentContent.components(separatedBy: "\n")
-        var inSection = false
-        lines = lines.filter { line in
-            if line.contains("\(marker) - START") {
-                inSection = true
-                return false
-            }
-            if line.contains("\(marker) - END") {
-                inSection = false
-                return false
-            }
-            return !inSection
-        }
-        
-        // Add new section if we have entries
-        if !entries.isEmpty {
-            lines.append("")
-            lines.append("\(marker) - START")
-            for entry in entries {
-                lines.append("\(entry.ip) \(entry.domain)")
-            }
-            lines.append("\(marker) - END")
-        }
-        
-        // Write back (this will fail without sudo - user needs to grant permission)
-        let newContent = lines.joined(separator: "\n")
-
-        // Use a randomized heredoc delimiter to prevent injection via crafted content
-        let delimiter = "VPNBYPASS_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
-
-        // Use AppleScript to write with admin privileges
-        let script = """
-        do shell script "cat > /etc/hosts << '\(delimiter)'
-        \(newContent)
-        \(delimiter)" with administrator privileges
-        """
-        
-        var error: NSDictionary?
-        if let appleScript = NSAppleScript(source: script) {
-            appleScript.executeAndReturnError(&error)
-            if error == nil {
-                // Flush DNS cache
-                let flush = Process()
-                flush.executableURL = URL(fileURLWithPath: "/usr/bin/dscacheutil")
-                flush.arguments = ["-flushcache"]
-                try? flush.run()
-            }
+        let result = await HelperManager.shared.updateHostsFile(entries: entries)
+        if !result.success {
+            log(.error, "Helper hosts update failed: \(result.error ?? "unknown")")
         }
     }
     

@@ -32,7 +32,7 @@ struct SettingsView: View {
     private var headerView: some View {
         VStack(spacing: 0) {
             // Tab bar with pill selector
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 ForEach(0..<5) { index in
                     TabItem(
                         index: index,
@@ -45,9 +45,9 @@ struct SettingsView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 8)
+            .padding(.top, 36) // Space for titlebar traffic lights
             .padding(.bottom, 16)
-            
+
             // Subtle separator
             Rectangle()
                 .fill(
@@ -100,19 +100,19 @@ struct TabItem: View {
     
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
             }
             .foregroundColor(isSelected ? .white : Color(hex: "71717A"))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
             .background(
                 Group {
                     if isSelected {
-                        Capsule()
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(
                                 LinearGradient(
                                     colors: [Color(hex: "10B981"), Color(hex: "059669")],
@@ -122,12 +122,12 @@ struct TabItem: View {
                             )
                             .shadow(color: Color(hex: "10B981").opacity(0.4), radius: 8, y: 2)
                     } else if isHovered {
-                        Capsule()
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(Color.white.opacity(0.08))
                     }
                 }
             )
-            .contentShape(Capsule())
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovering in
@@ -993,7 +993,59 @@ struct GeneralTab: View {
     @State private var showingImportPicker = false
     @State private var showingImportError = false
     @State private var importErrorMessage = ""
-    
+
+    private var helperStateIcon: String {
+        switch helperManager.helperState {
+        case .ready: return "checkmark.shield.fill"
+        case .checking, .installing: return "shield.fill"
+        case .outdated: return "exclamationmark.shield.fill"
+        case .missing, .failed: return "xmark.shield.fill"
+        }
+    }
+
+    private var helperStateColor: Color {
+        switch helperManager.helperState {
+        case .ready: return Color(hex: "10B981")
+        case .checking, .installing: return Color(hex: "F59E0B")
+        case .outdated: return Color(hex: "F59E0B")
+        case .missing, .failed: return Color(hex: "EF4444")
+        }
+    }
+
+    private var helperStateSubtitle: String {
+        switch helperManager.helperState {
+        case .ready: return "No more password prompts for route changes"
+        case .checking: return "Verifying helper version..."
+        case .installing: return "Admin authorization required..."
+        case .outdated: return "Helper needs updating for this version"
+        case .missing: return "Install to enable route management"
+        case .failed: return "Helper could not be started"
+        }
+    }
+
+    private var helperNeedsAction: Bool {
+        switch helperManager.helperState {
+        case .missing, .outdated, .failed: return true
+        default: return false
+        }
+    }
+
+    private var helperActionIcon: String {
+        switch helperManager.helperState {
+        case .outdated: return "arrow.up.circle.fill"
+        default: return "arrow.down.circle.fill"
+        }
+    }
+
+    private var helperActionLabel: String {
+        if helperManager.isInstalling { return "Installing..." }
+        switch helperManager.helperState {
+        case .outdated: return "Update"
+        case .failed: return "Retry"
+        default: return "Install"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             // Header
@@ -1026,29 +1078,23 @@ struct GeneralTab: View {
             // Privileged Helper section
             SettingsCard(title: "Privileged Helper", icon: "lock.shield.fill", iconColor: Color(hex: "EF4444")) {
                 HStack(spacing: 12) {
-                    Image(systemName: helperManager.isHelperInstalled ? "checkmark.shield.fill" : "xmark.shield.fill")
+                    Image(systemName: helperStateIcon)
                         .font(.system(size: 14))
-                        .foregroundColor(helperManager.isHelperInstalled ? Color(hex: "10B981") : Color(hex: "EF4444"))
+                        .foregroundColor(helperStateColor)
                         .frame(width: 20)
-                    
+
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(helperManager.isHelperInstalled ? "Helper Installed" : "Helper Not Installed")
+                        Text(helperManager.helperState.statusText)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.white)
-                        if helperManager.isHelperInstalled {
-                            Text("No more password prompts for route changes")
-                                .font(.system(size: 11))
-                                .foregroundColor(Color(hex: "6B7280"))
-                        } else {
-                            Text("Install to avoid repeated admin prompts")
-                                .font(.system(size: 11))
-                                .foregroundColor(Color(hex: "6B7280"))
-                        }
+                        Text(helperStateSubtitle)
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "6B7280"))
                     }
-                    
+
                     Spacer()
-                    
-                    if !helperManager.isHelperInstalled {
+
+                    if helperNeedsAction {
                         Button {
                             installHelper()
                         } label: {
@@ -1058,10 +1104,10 @@ struct GeneralTab: View {
                                         .scaleEffect(0.6)
                                         .frame(width: 12, height: 12)
                                 } else {
-                                    Image(systemName: "arrow.down.circle.fill")
+                                    Image(systemName: helperActionIcon)
                                         .font(.system(size: 10))
                                 }
-                                Text(helperManager.isInstalling ? "Installing..." : "Install")
+                                Text(helperActionLabel)
                                     .font(.system(size: 11, weight: .medium))
                             }
                             .foregroundColor(.white)
@@ -1084,7 +1130,7 @@ struct GeneralTab: View {
                             .foregroundColor(Color(hex: "6B7280"))
                     }
                 }
-                
+
                 if let error = helperManager.installationError {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -1096,7 +1142,7 @@ struct GeneralTab: View {
                             .lineLimit(2)
                     }
                 }
-                
+
                 Text("The helper runs as root and handles route/hosts changes without prompting.")
                     .font(.system(size: 11))
                     .foregroundColor(Color(hex: "6B7280"))
@@ -1763,7 +1809,14 @@ struct GeneralTab: View {
     
     private func installHelper() {
         Task {
-            _ = await helperManager.installHelper()
+            let ready = await helperManager.ensureHelperReady()
+            if ready && routeManager.isVPNConnected && routeManager.activeRoutes.isEmpty {
+                // Helper just became ready and VPN is connected but no routes —
+                // the initial startup was skipped because helper wasn't ready.
+                // Automatically apply routes and start the DNS refresh lifecycle.
+                await routeManager.detectAndApplyRoutesAsync()
+                routeManager.startDNSRefreshTimer()
+            }
         }
     }
 }
@@ -2417,85 +2470,80 @@ struct LogRow: View {
 // MARK: - Settings Window Controller
 
 @MainActor
-final class SettingsWindowController {
+final class SettingsWindowController: NSObject, NSWindowDelegate {
     static let shared = SettingsWindowController()
-    
-    private var panel: NSPanel?
-    
+
+    private var window: NSWindow?
+
     func show() {
-        showPanel()
+        showWindow()
     }
-    
+
     func showOnTop() {
-        showPanel()
+        showWindow()
     }
-    
-    private func showPanel() {
-        // If panel exists and is visible, just bring it to front
-        if let panel = panel, panel.isVisible {
-            panel.level = .screenSaver
-            panel.orderFrontRegardless()
+
+    private func showWindow() {
+        // If window exists (visible, minimized, or offscreen), reuse it
+        if let window = window {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        
-        // If panel was closed, remove it so we create a fresh one
-        if panel != nil && !panel!.isVisible {
-            panel = nil
-        }
-        
+
         let settingsView = SettingsView()
             .environmentObject(RouteManager.shared)
             .environmentObject(NotificationManager.shared)
             .environmentObject(LaunchAtLoginManager.shared)
         let hostingView = NSHostingView(rootView: settingsView)
-        
-        // Use NSPanel which can float above other windows
-        let panel = NSPanel(
+
+        let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 580, height: 620),
-            styleMask: [.titled, .closable, .fullSizeContentView, .utilityWindow],
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        
-        panel.contentView = hostingView
-        panel.title = "" // Empty title, we use custom view
-        panel.titlebarAppearsTransparent = true
-        panel.titleVisibility = .hidden
-        panel.backgroundColor = NSColor(Color(hex: "0F0F14"))
-        panel.isReleasedWhenClosed = false
-        panel.center()
-        
-        // Add branded title to titlebar
-        addBrandedTitlebar(to: panel)
-        
-        // Make it float above EVERYTHING - use screenSaver level (highest)
-        panel.level = .screenSaver
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.isFloatingPanel = true
-        panel.hidesOnDeactivate = false
-        
-        panel.orderFrontRegardless()
+
+        window.contentView = hostingView
+        window.title = "VPN Bypass"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.backgroundColor = NSColor(Color(hex: "0F0F14"))
+        window.isReleasedWhenClosed = false
+        window.contentMinSize = NSSize(width: 580, height: 620)
+        window.contentMaxSize = NSSize(width: 580, height: 620)
+        window.delegate = self
+        window.center()
+
+        // Add branded titlebar accessory
+        addBrandedTitlebar(to: window)
+
+        // Bring to front (normal level — not floating/screenSaver)
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        
-        self.panel = panel
+
+        self.window = window
     }
-    
+
+    func windowWillClose(_ notification: Notification) {
+        window = nil
+    }
+
     private func addBrandedTitlebar(to window: NSWindow) {
-        // Create a container view that spans the full titlebar width
         let containerView = NSView(frame: NSRect(x: 0, y: 0, width: window.frame.width, height: 28))
-        
-        // Create the branded title view
+
         let titleView = NSHostingView(rootView: BrandedTitlebarView())
         titleView.frame = containerView.bounds
         titleView.autoresizingMask = [.width, .height]
         containerView.addSubview(titleView)
-        
-        // Create accessory view controller - use .right to stay in titlebar row
+
         let accessory = NSTitlebarAccessoryViewController()
         accessory.view = containerView
         accessory.layoutAttribute = .right
-        
+
         window.addTitlebarAccessoryViewController(accessory)
     }
 }
@@ -2506,25 +2554,33 @@ struct BrandedTitlebarView: View {
     var body: some View {
         HStack {
             Spacer()
-            
-            HStack(spacing: 5) {
-                // Shield icon
-                Image(systemName: "shield.checkered")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(BrandColors.blueGradient)
-                
+
+            HStack(spacing: 6) {
+                // App logo from bundle
+                if let logoPath = Bundle.main.path(forResource: "VPNBypass", ofType: "png"),
+                   let nsImage = NSImage(contentsOfFile: logoPath) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 18, height: 18)
+                } else {
+                    Image(systemName: "shield.checkered")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(BrandColors.blueGradient)
+                }
+
                 // Branded name
                 HStack(spacing: 0) {
                     Text("VPN")
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(BrandColors.blueGradient)
-                    
+
                     Text("Bypass")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(BrandColors.silverGradient)
                 }
             }
-            
+
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
