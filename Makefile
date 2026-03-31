@@ -43,6 +43,8 @@ bundle: build build-helper
 	@cp assets/AppIcon.icns "$(APP_BUNDLE)/Contents/Resources/"
 	@cp assets/VPNBypass.png "$(APP_BUNDLE)/Contents/Resources/"
 	@cp assets/author-avatar.png "$(APP_BUNDLE)/Contents/Resources/"
+	@cp assets/menubar-icon.png "$(APP_BUNDLE)/Contents/Resources/"
+	@cp assets/menubar-icon@2x.png "$(APP_BUNDLE)/Contents/Resources/"
 	@echo "App bundle created: $(APP_BUNDLE)"
 
 clean:

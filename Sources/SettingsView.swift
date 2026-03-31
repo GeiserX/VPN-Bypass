@@ -32,7 +32,7 @@ struct SettingsView: View {
     private var headerView: some View {
         VStack(spacing: 0) {
             // Tab bar with pill selector
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 ForEach(0..<5) { index in
                     TabItem(
                         index: index,
@@ -45,9 +45,9 @@ struct SettingsView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 8)
+            .padding(.top, 36) // Space for titlebar traffic lights
             .padding(.bottom, 16)
-            
+
             // Subtle separator
             Rectangle()
                 .fill(
@@ -100,19 +100,19 @@ struct TabItem: View {
     
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
             }
             .foregroundColor(isSelected ? .white : Color(hex: "71717A"))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
             .background(
                 Group {
                     if isSelected {
-                        Capsule()
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(
                                 LinearGradient(
                                     colors: [Color(hex: "10B981"), Color(hex: "059669")],
@@ -122,12 +122,12 @@ struct TabItem: View {
                             )
                             .shadow(color: Color(hex: "10B981").opacity(0.4), radius: 8, y: 2)
                     } else if isHovered {
-                        Capsule()
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(Color.white.opacity(0.08))
                     }
                 }
             )
-            .contentShape(Capsule())
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovering in
@@ -2419,83 +2419,74 @@ struct LogRow: View {
 @MainActor
 final class SettingsWindowController {
     static let shared = SettingsWindowController()
-    
-    private var panel: NSPanel?
-    
+
+    private var window: NSWindow?
+
     func show() {
-        showPanel()
+        showWindow()
     }
-    
+
     func showOnTop() {
-        showPanel()
+        showWindow()
     }
-    
-    private func showPanel() {
-        // If panel exists and is visible, just bring it to front
-        if let panel = panel, panel.isVisible {
-            panel.level = .screenSaver
-            panel.orderFrontRegardless()
+
+    private func showWindow() {
+        // If window exists and is visible, just bring it to front
+        if let window = window, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        
-        // If panel was closed, remove it so we create a fresh one
-        if panel != nil && !panel!.isVisible {
-            panel = nil
+
+        // If window was closed, remove it so we create a fresh one
+        if window != nil && !window!.isVisible {
+            window = nil
         }
-        
+
         let settingsView = SettingsView()
             .environmentObject(RouteManager.shared)
             .environmentObject(NotificationManager.shared)
             .environmentObject(LaunchAtLoginManager.shared)
         let hostingView = NSHostingView(rootView: settingsView)
-        
-        // Use NSPanel which can float above other windows
-        let panel = NSPanel(
+
+        let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 580, height: 620),
-            styleMask: [.titled, .closable, .fullSizeContentView, .utilityWindow],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        
-        panel.contentView = hostingView
-        panel.title = "" // Empty title, we use custom view
-        panel.titlebarAppearsTransparent = true
-        panel.titleVisibility = .hidden
-        panel.backgroundColor = NSColor(Color(hex: "0F0F14"))
-        panel.isReleasedWhenClosed = false
-        panel.center()
-        
-        // Add branded title to titlebar
-        addBrandedTitlebar(to: panel)
-        
-        // Make it float above EVERYTHING - use screenSaver level (highest)
-        panel.level = .screenSaver
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.isFloatingPanel = true
-        panel.hidesOnDeactivate = false
-        
-        panel.orderFrontRegardless()
+
+        window.contentView = hostingView
+        window.title = "VPN Bypass"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.backgroundColor = NSColor(Color(hex: "0F0F14"))
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 500, height: 480)
+        window.center()
+
+        // Add branded titlebar accessory
+        addBrandedTitlebar(to: window)
+
+        // Bring to front (normal level — not floating/screenSaver)
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        
-        self.panel = panel
+
+        self.window = window
     }
-    
+
     private func addBrandedTitlebar(to window: NSWindow) {
-        // Create a container view that spans the full titlebar width
         let containerView = NSView(frame: NSRect(x: 0, y: 0, width: window.frame.width, height: 28))
-        
-        // Create the branded title view
+
         let titleView = NSHostingView(rootView: BrandedTitlebarView())
         titleView.frame = containerView.bounds
         titleView.autoresizingMask = [.width, .height]
         containerView.addSubview(titleView)
-        
-        // Create accessory view controller - use .right to stay in titlebar row
+
         let accessory = NSTitlebarAccessoryViewController()
         accessory.view = containerView
         accessory.layoutAttribute = .right
-        
+
         window.addTitlebarAccessoryViewController(accessory)
     }
 }
@@ -2506,25 +2497,33 @@ struct BrandedTitlebarView: View {
     var body: some View {
         HStack {
             Spacer()
-            
-            HStack(spacing: 5) {
-                // Shield icon
-                Image(systemName: "shield.checkered")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(BrandColors.blueGradient)
-                
+
+            HStack(spacing: 6) {
+                // App logo from bundle
+                if let logoPath = Bundle.main.path(forResource: "VPNBypass", ofType: "png"),
+                   let nsImage = NSImage(contentsOfFile: logoPath) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 18, height: 18)
+                } else {
+                    Image(systemName: "shield.checkered")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(BrandColors.blueGradient)
+                }
+
                 // Branded name
                 HStack(spacing: 0) {
                     Text("VPN")
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(BrandColors.blueGradient)
-                    
+
                     Text("Bypass")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(BrandColors.silverGradient)
                 }
             }
-            
+
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

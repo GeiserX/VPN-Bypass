@@ -38,15 +38,28 @@ struct BrandColors {
 struct MenuBarLabel: View {
     @EnvironmentObject var routeManager: RouteManager
     @State private var isAnimating = false
-    
+
+    private var menuBarIcon: some View {
+        Group {
+            if let iconPath = Bundle.main.path(forResource: "menubar-icon", ofType: "png"),
+               let nsImage = NSImage(contentsOfFile: iconPath) {
+                let _ = nsImage.isTemplate = true
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 18, height: 18)
+            } else {
+                Image(systemName: routeManager.isVPNConnected ? "shield.checkered" : "shield")
+                    .font(.system(size: 15))
+            }
+        }
+    }
+
     var body: some View {
         HStack(spacing: 3) {
-            // Shield icon - simple and clear at menu bar size
             ZStack {
                 if routeManager.isLoading || routeManager.isApplyingRoutes {
-                    // Pulsing shield when loading
-                    Image(systemName: "shield.fill")
-                        .font(.system(size: 15))
+                    menuBarIcon
                         .opacity(isAnimating ? 0.4 : 1.0)
                         .animation(
                             Animation.easeInOut(duration: 0.5)
@@ -56,11 +69,10 @@ struct MenuBarLabel: View {
                         .onAppear { isAnimating = true }
                         .onDisappear { isAnimating = false }
                 } else {
-                    Image(systemName: routeManager.isVPNConnected ? "shield.checkered" : "shield")
-                        .font(.system(size: 15))
+                    menuBarIcon
                 }
             }
-            
+
             // Active routes count when VPN connected and not loading
             if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty && !routeManager.isLoading && !routeManager.isApplyingRoutes {
                 Text("\(routeManager.uniqueRouteCount)")
@@ -145,11 +157,19 @@ struct MenuContent: View {
     
     private var titleHeader: some View {
         HStack(spacing: 8) {
-            // Shield icon with brand color
-            Image(systemName: "shield.checkered")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(BrandColors.blueGradient)
-            
+            // App logo from bundle
+            if let logoPath = Bundle.main.path(forResource: "VPNBypass", ofType: "png"),
+               let nsImage = NSImage(contentsOfFile: logoPath) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 22, height: 22)
+            } else {
+                Image(systemName: "shield.checkered")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(BrandColors.blueGradient)
+            }
+
             // App name with branded colors
             BrandedAppName(fontSize: 15)
             
