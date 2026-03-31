@@ -475,7 +475,7 @@ final class HelperManager: ObservableObject {
 /// Ensures exactly-once delivery of a result to a CheckedContinuation.
 /// Either the XPC reply or the DispatchQueue deadline fires — whichever
 /// comes first wins, the other is silently dropped.
-final class OnceGate<T> {
+final class OnceGate<T: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<T, Never>?
 
@@ -483,7 +483,7 @@ final class OnceGate<T> {
         self.continuation = continuation
     }
 
-    func complete(_ value: T) {
+    func complete(_ value: sending T) {
         lock.lock()
         let cont = continuation
         continuation = nil
@@ -496,7 +496,7 @@ final class OnceGate<T> {
 /// a `OnceGate` that it must call `complete()` on when the XPC reply arrives.
 /// If the deadline fires first, the gate delivers `fallback` and subsequent
 /// `complete()` calls from the XPC reply are silently dropped.
-private func withXPCDeadline<T>(
+@MainActor private func withXPCDeadline<T: Sendable>(
     seconds: TimeInterval,
     fallback: T,
     operation: @escaping (OnceGate<T>) -> Void
