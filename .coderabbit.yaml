@@ -1,0 +1,51 @@
+language: "en-US"
+tone_instructions: "Be direct and concise. No fluff."
+
+reviews:
+  profile: "chill"
+  high_level_summary: true
+  collapse_walkthrough: true
+  poem: false
+  sequence_diagrams: false
+  suggested_reviewers: false
+  auto_review:
+    enabled: true
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT REVIEW"
+  path_filters:
+    - "!.build/**"
+    - "!**/*.xcodeproj/**"
+    - "!**/*.xcworkspace/**"
+  path_instructions:
+    - path: "Sources/**"
+      instructions: |
+        Check for proper error handling with Swift Result types or throws.
+        Verify Network Extension API usage follows Apple guidelines.
+        Ensure no hardcoded credentials or server addresses.
+    - path: "Package.swift"
+      instructions: |
+        Verify dependency versions are pinned to exact or minor ranges.
+        Check platform requirements match the project's minimum deployment target.
+  tools:
+    gitleaks:
+      enabled: true
+    actionlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    markdownlint:
+      enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: "local"
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "CLAUDE.md"
