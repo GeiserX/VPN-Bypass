@@ -20,12 +20,12 @@ enum HelperState: Equatable {
 
     var statusText: String {
         switch self {
-        case .missing: return "Not Installed"
-        case .checking: return "Checking..."
-        case .installing: return "Installing..."
-        case .outdated(let installed, let expected): return "Update Required (v\(installed) → v\(expected))"
-        case .ready: return "Helper Installed"
-        case .failed(let msg): return "Error: \(msg)"
+        case .missing: return String(localized: "Not Installed")
+        case .checking: return String(localized: "Checking...")
+        case .installing: return String(localized: "Installing...")
+        case .outdated(let installed, let expected): return String(localized: "Update Required (v\(installed) → v\(expected))")
+        case .ready: return String(localized: "Helper Installed")
+        case .failed(let msg): return String(localized: "Error: \(msg)")
         }
     }
 }
@@ -85,7 +85,7 @@ final class HelperManager: ObservableObject {
             print("🔐 Helper not found, attempting install...")
             let installed = await installHelper()
             if !installed {
-                helperState = .failed(installationError ?? "Installation failed")
+                helperState = .failed(installationError ?? String(localized: "Installation failed"))
                 return false
             }
             // Install succeeded — drop stale connection before version check
@@ -111,7 +111,7 @@ final class HelperManager: ObservableObject {
                     return true
                 }
             }
-            helperState = .failed("Cannot connect to helper after reinstall")
+            helperState = .failed(String(localized: "Cannot connect to helper after reinstall"))
             return false
         }
 
@@ -130,7 +130,7 @@ final class HelperManager: ObservableObject {
         print("🔐 Auto-updating helper...")
         let updated = await installHelper()
         if !updated {
-            helperState = .failed("Helper update failed: \(installationError ?? "unknown")")
+            helperState = .failed(String(localized: "Helper update failed: \(installationError ?? String(localized: "unknown"))"))
             return false
         }
 
@@ -143,7 +143,7 @@ final class HelperManager: ObservableObject {
             return true
         }
 
-        helperState = .failed("Helper update did not take effect (got \(newVersion ?? "nil"), expected \(expected))")
+        helperState = .failed(String(localized: "Helper update did not take effect (got \(newVersion ?? "nil"), expected \(expected))"))
         return false
     }
 

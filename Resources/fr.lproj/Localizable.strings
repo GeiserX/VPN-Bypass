@@ -1,0 +1,225 @@
+/* Localizable.strings — Français */
+
+/* ===== Barre de menus ===== */
+"VPN Connected" = "VPN connecté";
+"VPN Disconnected" = "VPN déconnecté";
+"via %@" = "via %@";
+"Gateway: %@" = "Passerelle : %@";
+"routes" = "routes";
+"Add Domain to VPN" = "Ajouter un domaine au VPN";
+"Add Domain to Bypass" = "Ajouter un domaine au contournement";
+"Refresh Routes" = "Actualiser les routes";
+"Clear" = "Effacer";
+"Verify Routes" = "Vérifier les routes";
+"Verifying..." = "Vérification...";
+"Active Services" = "Services actifs";
+"No services enabled" = "Aucun service activé";
+"+%lld more" = "+%lld de plus";
+"+ %lld more" = "+ %lld de plus";
+"Active Routes" = "Routes actives";
+"Route Verification" = "Vérification des routes";
+"Mode" = "Mode";
+"Bypass" = "Contournement";
+"VPN Only" = "VPN uniquement";
+"Setting Up..." = "Configuration...";
+"Detecting VPN and applying routes" = "Détection du VPN et application des routes";
+"No VPN Connection" = "Pas de connexion VPN";
+"Connect to a VPN to start bypassing\ntraffic for configured services." = "Connectez-vous à un VPN pour commencer\nà contourner le trafic des services configurés.";
+"VPN Domains" = "Domaines VPN";
+"Services" = "Services";
+"Domains" = "Domaines";
+"Updated %@ ago" = "Mis à jour il y a %@";
+"Settings" = "Réglages";
+"Quit VPN Bypass" = "Quitter VPN Bypass";
+"ON" = "ON";
+"OFF" = "OFF";
+
+/* ===== Réglages — Onglets ===== */
+"General" = "Général";
+"Logs" = "Journaux";
+"Info" = "Infos";
+
+/* ===== Réglages — Onglet Domaines ===== */
+"VPN Only Domains" = "Domaines VPN uniquement";
+"Custom Domains" = "Domaines personnalisés";
+"Only these domains will use the VPN. Everything else bypasses it." = "Seuls ces domaines utiliseront le VPN. Tout le reste le contourne.";
+"Add domains that should bypass VPN and use your regular connection." = "Ajoutez les domaines qui doivent contourner le VPN et utiliser votre connexion habituelle.";
+"Routing Mode" = "Mode de routage";
+"Domains skip VPN" = "Les domaines contournent le VPN";
+"Only domains use VPN" = "Seuls les domaines utilisent le VPN";
+"Enter domain (e.g., example.com)" = "Entrez un domaine (ex. : example.com)";
+"CONFIGURED DOMAINS" = "DOMAINES CONFIGURÉS";
+"Applying..." = "Application...";
+"All" = "Tous";
+"None" = "Aucun";
+"No domains configured" = "Aucun domaine configuré";
+"Add domains that should use VPN" = "Ajoutez des domaines qui doivent utiliser le VPN";
+"Add a domain above to bypass VPN" = "Ajoutez un domaine ci-dessus pour contourner le VPN";
+
+/* ===== Réglages — Onglet Services ===== */
+"%lld/%lld enabled" = "%lld/%lld activés";
+"Services disabled in VPN Only mode" = "Services désactivés en mode VPN uniquement";
+"Switch to Bypass mode in the Domains tab to manage services." = "Passez en mode Contournement dans l'onglet Domaines pour gérer les services.";
+"Search services..." = "Rechercher des services...";
+"Create Custom Service" = "Créer un service personnalisé";
+"Custom" = "Personnalisé";
+"%lld domains" = "%lld domaines";
+
+/* ===== Réglages — Éditeur de service ===== */
+"Edit Service" = "Modifier le service";
+"Service Name" = "Nom du service";
+"e.g. My Company VPN" = "ex. : VPN de mon entreprise";
+"Add" = "Ajouter";
+"IP Ranges (optional)" = "Plages IP (optionnel)";
+"CIDR notation, e.g. 192.168.1.0/24" = "Notation CIDR, ex. : 192.168.1.0/24";
+"No IP ranges added. Only domain-based routing will be used." = "Aucune plage IP ajoutée. Seul le routage par domaine sera utilisé.";
+"Cancel" = "Annuler";
+"Save Changes" = "Enregistrer";
+"Create Service" = "Créer le service";
+
+/* ===== Réglages — Onglet Général ===== */
+"Startup" = "Démarrage";
+"Launch at Login" = "Lancer au démarrage";
+"Automatically start VPN Bypass when you log in" = "Démarrer VPN Bypass automatiquement à la connexion";
+"Privileged Helper" = "Assistant privilégié";
+"Not Installed" = "Non installé";
+"Checking..." = "Vérification...";
+"Update Required (v%@ → v%@)" = "Mise à jour requise (v%@ → v%@)";
+"Helper Installed" = "Assistant installé";
+"Error: %@" = "Erreur : %@";
+"Installation failed" = "L'installation a échoué";
+"Cannot connect to helper after reinstall" = "Impossible de se connecter à l'assistant après réinstallation";
+"Helper update failed: %@" = "La mise à jour de l'assistant a échoué : %@";
+"Helper update did not take effect (got %@, expected %@)" = "La mise à jour de l'assistant n'a pas pris effet (obtenu %@, attendu %@)";
+"unknown" = "inconnu";
+"No more password prompts for route changes" = "Plus de demandes de mot de passe pour les changements de routes";
+"Verifying helper version..." = "Vérification de la version de l'assistant...";
+"Admin authorization required..." = "Autorisation administrateur requise...";
+"Helper needs updating for this version" = "L'assistant doit être mis à jour pour cette version";
+"Install to enable route management" = "Installer pour activer la gestion des routes";
+"Helper could not be started" = "L'assistant n'a pas pu démarrer";
+"Installing..." = "Installation...";
+"Update" = "Mettre à jour";
+"Retry" = "Réessayer";
+"Install" = "Installer";
+"The helper runs as root and handles route/hosts changes without prompting." = "L'assistant s'exécute en tant que root et gère les changements de routes et d'hosts sans demander de mot de passe.";
+"Behavior" = "Comportement";
+"Auto-apply on VPN Connect" = "Appliquer automatiquement à la connexion VPN";
+"Automatically apply routes when VPN connects" = "Appliquer les routes automatiquement lorsque le VPN se connecte";
+"Manage /etc/hosts" = "Gérer /etc/hosts";
+"Add DNS bypass entries (requires admin)" = "Ajouter des entrées DNS de contournement (nécessite admin)";
+"Verify Routes After Apply" = "Vérifier les routes après application";
+"Ping test routes to ensure they're working" = "Tester les routes par ping pour vérifier leur fonctionnement";
+"DNS Refresh" = "Actualisation DNS";
+"Auto DNS Refresh" = "Actualisation DNS automatique";
+"Periodically re-resolve domains and update routes" = "Résoudre périodiquement les domaines et mettre à jour les routes";
+"Refresh Interval" = "Intervalle d'actualisation";
+"How often to re-check DNS for changes" = "Fréquence de vérification des changements DNS";
+"15 min" = "15 min";
+"30 min" = "30 min";
+"1 hour" = "1 heure";
+"2 hours" = "2 heures";
+"6 hours" = "6 heures";
+"Last refresh:" = "Dernière actualisation :";
+"Next refresh:" = "Prochaine actualisation :";
+"Refresh Now" = "Actualiser maintenant";
+"Re-resolves all domains to catch IP changes and ensure routes stay up to date." = "Résout à nouveau tous les domaines pour détecter les changements d'IP et maintenir les routes à jour.";
+"Fallback DNS" = "DNS de secours";
+"Detected Non-VPN DNS" = "DNS non-VPN détecté";
+"Fallback DNS servers when detected DNS is unavailable.\nSupported formats: IP (1.1.1.1), DoH (https://...), DoT (tls://... or IP:853)" = "Serveurs DNS de secours lorsque le DNS détecté est indisponible.\nFormats supportés : IP (1.1.1.1), DoH (https://...), DoT (tls://... ou IP:853)";
+"Add DNS Server" = "Ajouter un serveur DNS";
+"Notifications" = "Notifications";
+"Enable Notifications" = "Activer les notifications";
+"Show alerts for VPN events" = "Afficher les alertes pour les événements VPN";
+"Silent" = "Silencieux";
+"No sound" = "Pas de son";
+"Connect" = "Connexion";
+"Disconnect" = "Déconnexion";
+"Routes" = "Routes";
+"Failures" = "Échecs";
+"Routes: services, domains, DNS refresh" = "Routes : services, domaines, actualisation DNS";
+"SOCKS5 Proxy" = "Proxy SOCKS5";
+"Aggressive Bypass Mode" = "Mode contournement agressif";
+"For corporate VPNs (Cisco, Zscaler) that block UDP. Requires external SOCKS5 proxy server with UDP support." = "Pour les VPN d'entreprise (Cisco, Zscaler) qui bloquent l'UDP. Nécessite un serveur proxy SOCKS5 externe avec support UDP.";
+"Enable SOCKS5 Proxy" = "Activer le proxy SOCKS5";
+"Route traffic through proxy to bypass UDP blocking" = "Router le trafic via le proxy pour contourner le blocage UDP";
+"Proxy Server" = "Serveur proxy";
+"Authentication (optional)" = "Authentification (optionnel)";
+"Test Connection" = "Tester la connexion";
+"Testing..." = "Test en cours...";
+"Proxy will be used for services that need UDP (Discord voice, gaming, etc.) when corporate VPN blocks direct UDP traffic." = "Le proxy sera utilisé pour les services nécessitant l'UDP (voix Discord, jeux, etc.) lorsque le VPN d'entreprise bloque le trafic UDP direct.";
+"Configuration" = "Configuration";
+"Export" = "Exporter";
+"Import" = "Importer";
+"Export your domains and services configuration to a file, or import from a backup." = "Exportez la configuration de vos domaines et services dans un fichier, ou importez depuis une sauvegarde.";
+"Import Error" = "Erreur d'importation";
+"OK" = "OK";
+"Failed to import configuration file." = "Impossible d'importer le fichier de configuration.";
+"Network Status" = "État du réseau";
+"VPN Status" = "État du VPN";
+"Connected" = "Connecté";
+"Disconnected" = "Déconnecté";
+"VPN Type" = "Type de VPN";
+"Interface" = "Interface";
+"Gateway" = "Passerelle";
+"WiFi Network" = "Réseau WiFi";
+"%lld/%lld reachable" = "%lld/%lld accessibles";
+"Version %@" = "Version %@";
+"GitHub" = "GitHub";
+
+/* ===== Réglages — Onglet Journaux ===== */
+"Activity Log" = "Journal d'activité";
+"Copy" = "Copier";
+"No activity yet" = "Aucune activité";
+"Logs will appear here when routes are applied" = "Les journaux apparaîtront ici lorsque des routes seront appliquées";
+"Route Health" = "Santé des routes";
+"DNS: %@" = "DNS : %@";
+"Last update: " = "Dernière mise à jour : ";
+"Next refresh: " = "Prochaine actualisation : ";
+
+/* ===== Réglages — Onglet Infos ===== */
+"Route specific traffic around your corporate VPN" = "Routez du trafic spécifique en contournant votre VPN d'entreprise";
+"Author" = "Auteur";
+"DevOps Engineer" = "Ingénieur DevOps";
+"Support the Project" = "Soutenir le projet";
+"If you find VPN Bypass useful, consider supporting its development!" = "Si VPN Bypass vous est utile, pensez à soutenir son développement !";
+"GitHub Sponsors" = "GitHub Sponsors";
+"Buy Me a Coffee" = "Buy Me a Coffee";
+"Links" = "Liens";
+"Blog" = "Blog";
+"Source Code" = "Code source";
+"Report Issue" = "Signaler un problème";
+"License" = "Licence";
+"GPL-3.0 License" = "Licence GPL-3.0";
+"This software is free and open source under the GNU General Public License v3.0. You are free to use, modify, and distribute it under the same license terms." = "Ce logiciel est libre et open source sous la Licence Publique Générale GNU v3.0. Vous êtes libre de l'utiliser, le modifier et le distribuer sous les mêmes termes de licence.";
+
+/* ===== Notifications ===== */
+"Connected via %@. Routes will be applied automatically." = "Connecté via %@. Les routes seront appliquées automatiquement.";
+"Disconnected from %@. %@" = "Déconnecté de %@. %@";
+"VPN connection lost. %@" = "Connexion VPN perdue. %@";
+"%lld route(s) could not be removed." = "%lld route(s) n'ont pas pu être supprimée(s).";
+"Routes cleared." = "Routes supprimées.";
+"Routes Applied" = "Routes appliquées";
+"%lld route(s) applied successfully." = "%lld route(s) appliquée(s) avec succès.";
+"%lld failed." = "%lld échouée(s).";
+"Route Verification Failed" = "Échec de la vérification de route";
+"Network Changed" = "Réseau modifié";
+"Switched to %@. Checking VPN status..." = "Basculé vers %@. Vérification de l'état du VPN...";
+"Network changed. Checking VPN status..." = "Réseau modifié. Vérification de l'état du VPN...";
+"VPN Bypass" = "VPN Bypass";
+"Test notification successful!" = "Notification de test réussie !";
+"Service Enabled" = "Service activé";
+"Service Disabled" = "Service désactivé";
+"Domain Added" = "Domaine ajouté";
+"Domain Removed" = "Domaine supprimé";
+"DNS Refresh Complete" = "Actualisation DNS terminée";
+"%lld route(s) updated" = "%lld route(s) mise(s) à jour";
+
+/* ===== Paramètres de langue ===== */
+"Language" = "Langue";
+"App language (restart required)" = "Langue de l'application (redémarrage nécessaire)";
+"System" = "Système";
+"Restart Required" = "Redémarrage nécessaire";
+"The app needs to restart to apply the language change." = "L'application doit redémarrer pour appliquer le changement de langue.";
+"Restart Now" = "Redémarrer maintenant";
+"Later" = "Plus tard";

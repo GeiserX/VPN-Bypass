@@ -78,7 +78,7 @@ struct SettingsView: View {
         }
     }
     
-    private func tabTitle(for index: Int) -> String {
+    private func tabTitle(for index: Int) -> LocalizedStringKey {
         ["Domains", "Services", "General", "Logs", "Info"][index]
     }
     
@@ -91,7 +91,7 @@ struct SettingsView: View {
 
 struct TabItem: View {
     let index: Int
-    let title: String
+    let title: LocalizedStringKey
     let icon: String
     let isSelected: Bool
     let action: () -> Void
@@ -429,8 +429,8 @@ struct DomainRow: View {
 // MARK: - Routing Mode Button
 
 struct RoutingModeButton: View {
-    let title: String
-    let subtitle: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
     let icon: String
     let isSelected: Bool
     let color: Color
@@ -993,6 +993,8 @@ struct GeneralTab: View {
     @State private var showingImportPicker = false
     @State private var showingImportError = false
     @State private var importErrorMessage = ""
+    @State private var selectedLanguage: String = UserDefaults.standard.string(forKey: "UserLanguageOverride") ?? "system"
+    @State private var showingRestartAlert = false
 
     private var helperStateIcon: String {
         switch helperManager.helperState {
@@ -1014,12 +1016,12 @@ struct GeneralTab: View {
 
     private var helperStateSubtitle: String {
         switch helperManager.helperState {
-        case .ready: return "No more password prompts for route changes"
-        case .checking: return "Verifying helper version..."
-        case .installing: return "Admin authorization required..."
-        case .outdated: return "Helper needs updating for this version"
-        case .missing: return "Install to enable route management"
-        case .failed: return "Helper could not be started"
+        case .ready: return String(localized: "No more password prompts for route changes")
+        case .checking: return String(localized: "Verifying helper version...")
+        case .installing: return String(localized: "Admin authorization required...")
+        case .outdated: return String(localized: "Helper needs updating for this version")
+        case .missing: return String(localized: "Install to enable route management")
+        case .failed: return String(localized: "Helper could not be started")
         }
     }
 
@@ -1038,11 +1040,11 @@ struct GeneralTab: View {
     }
 
     private var helperActionLabel: String {
-        if helperManager.isInstalling { return "Installing..." }
+        if helperManager.isInstalling { return String(localized: "Installing...") }
         switch helperManager.helperState {
-        case .outdated: return "Update"
-        case .failed: return "Retry"
-        default: return "Install"
+        case .outdated: return String(localized: "Update")
+        case .failed: return String(localized: "Retry")
+        default: return String(localized: "Install")
         }
     }
 
@@ -1062,6 +1064,47 @@ struct GeneralTab: View {
                 }
             }
             
+            // Language section
+            SettingsCard(title: "Language", icon: "globe", iconColor: Color(hex: "3B82F6")) {
+                HStack(spacing: 12) {
+                    Image(systemName: "character.bubble.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(Color(hex: "3B82F6"))
+                        .frame(width: 20)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Language")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white)
+                        Text("App language (restart required)")
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "6B7280"))
+                    }
+
+                    Spacer()
+
+                    Picker("Language", selection: $selectedLanguage) {
+                        Text("System").tag("system")
+                        Text("English").tag("en")
+                        Text("Español").tag("es")
+                        Text("Français").tag("fr")
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(width: 120)
+                    .onChange(of: selectedLanguage) { newValue in
+                        if newValue == "system" {
+                            UserDefaults.standard.removeObject(forKey: "UserLanguageOverride")
+                            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+                        } else {
+                            UserDefaults.standard.set(newValue, forKey: "UserLanguageOverride")
+                            UserDefaults.standard.set([newValue], forKey: "AppleLanguages")
+                        }
+                        showingRestartAlert = true
+                    }
+                }
+            }
+
             // Startup section
             SettingsCard(title: "Startup", icon: "power", iconColor: Color(hex: "10B981")) {
                 SettingsToggleRow(
@@ -1672,7 +1715,7 @@ struct GeneralTab: View {
             SettingsCard(title: "Network Status", icon: "network", iconColor: Color(hex: "10B981")) {
                 StatusRow(
                     label: "VPN Status",
-                    value: routeManager.isVPNConnected ? "Connected" : "Disconnected",
+                    value: routeManager.isVPNConnected ? String(localized: "Connected") : String(localized: "Disconnected"),
                     valueColor: routeManager.isVPNConnected ? Color(hex: "10B981") : Color(hex: "EF4444"),
                     showDot: true
                 )
@@ -1787,6 +1830,23 @@ struct GeneralTab: View {
         } message: {
             Text(importErrorMessage)
         }
+        .alert(String(localized: "Restart Required"), isPresented: $showingRestartAlert) {
+            Button(String(localized: "Restart Now")) {
+                let path = Bundle.main.bundlePath
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                task.arguments = ["-n", path]
+                do {
+                    try task.run()
+                    NSApp.terminate(nil)
+                } catch {
+                    // Fall through — app stays open
+                }
+            }
+            Button(String(localized: "Later"), role: .cancel) { }
+        } message: {
+            Text("The app needs to restart to apply the language change.")
+        }
     }
     
     private func exportConfig() {
@@ -1822,7 +1882,7 @@ struct GeneralTab: View {
 }
 
 struct NotificationChip: View {
-    let label: String
+    let label: LocalizedStringKey
     @Binding var isOn: Bool
     
     var body: some View {
@@ -1844,18 +1904,19 @@ struct NotificationChip: View {
 }
 
 struct SettingsCard<Content: View>: View {
-    let title: String
+    let title: LocalizedStringKey
     let icon: String
     let iconColor: Color
     @ViewBuilder let content: Content
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(iconColor)
-                Text(title.uppercased())
+                Text(title)
+                    .textCase(.uppercase)
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .foregroundColor(Color(hex: "6B7280"))
                     .tracking(1)
@@ -1881,8 +1942,8 @@ struct SettingsCard<Content: View>: View {
 
 struct SettingsToggleRow: View {
     let icon: String
-    let title: String
-    let subtitle: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
     @Binding var isOn: Bool
     
     var body: some View {
@@ -1912,7 +1973,7 @@ struct SettingsToggleRow: View {
 }
 
 struct StatusRow: View {
-    let label: String
+    let label: LocalizedStringKey
     let value: String
     var valueColor: Color = .white
     var showDot: Bool = false
@@ -2325,7 +2386,7 @@ struct InfoTab: View {
 // MARK: - Info Tab Components
 
 struct LinkButton: View {
-    let title: String
+    let title: LocalizedStringKey
     let icon: String
     let color: Color
     let url: String
@@ -2354,8 +2415,8 @@ struct LinkButton: View {
 
 struct LinkRow: View {
     let icon: String
-    let title: String
-    let subtitle: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
     let url: String
     
     var body: some View {
@@ -2396,7 +2457,7 @@ struct LinkRow: View {
 
 struct RouteStatCard: View {
     let icon: String
-    let title: String
+    let title: LocalizedStringKey
     let value: String
     let color: Color
     
