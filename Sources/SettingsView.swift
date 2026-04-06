@@ -1083,13 +1083,14 @@ struct GeneralTab: View {
 
                     Spacer()
 
-                    Picker("", selection: $selectedLanguage) {
+                    Picker("Language", selection: $selectedLanguage) {
                         Text("System").tag("system")
                         Text("English").tag("en")
                         Text("Español").tag("es")
                         Text("Français").tag("fr")
                     }
                     .pickerStyle(.menu)
+                    .labelsHidden()
                     .frame(width: 120)
                     .onChange(of: selectedLanguage) { newValue in
                         if newValue == "system" {
@@ -1833,10 +1834,14 @@ struct GeneralTab: View {
             Button(String(localized: "Restart Now")) {
                 let path = Bundle.main.bundlePath
                 let task = Process()
-                task.launchPath = "/bin/sh"
-                task.arguments = ["-c", "sleep 1 && open \"\(path)\""]
-                task.launch()
-                NSApp.terminate(nil)
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                task.arguments = ["-n", path]
+                do {
+                    try task.run()
+                    NSApp.terminate(nil)
+                } catch {
+                    // Fall through — app stays open
+                }
             }
             Button(String(localized: "Later"), role: .cancel) { }
         } message: {
