@@ -3,26 +3,37 @@
 APP_NAME = VPN Bypass
 BUNDLE_ID = com.geiserx.vpn-bypass
 HELPER_ID = com.geiserx.vpnbypass.helper
-BUILD_DIR = .build/release
+BUILD_DIR = .build/apple/Products/Release
 APP_BUNDLE = $(APP_NAME).app
 HELPER_BUILD_DIR = .build/helper
 VERSION = $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0")
 
-# Main app build
+# Main app build (universal binary)
 build:
-	swift build -c release
+	swift build -c release --arch arm64 --arch x86_64
 
-# Helper tool build
+# Helper tool build (universal binary)
 build-helper:
 	@echo "Building privileged helper..."
 	@mkdir -p $(HELPER_BUILD_DIR)
 	@swiftc -O \
 		-target arm64-apple-macos13.0 \
-		-o $(HELPER_BUILD_DIR)/$(HELPER_ID) \
+		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-arm64 \
 		Sources/HelperProtocol.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
-	@echo "Helper built: $(HELPER_BUILD_DIR)/$(HELPER_ID)"
+	@swiftc -O \
+		-target x86_64-apple-macos13.0 \
+		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-x86_64 \
+		Sources/HelperProtocol.swift \
+		Helper/HelperTool.swift \
+		Helper/main.swift
+	@lipo -create \
+		$(HELPER_BUILD_DIR)/$(HELPER_ID)-arm64 \
+		$(HELPER_BUILD_DIR)/$(HELPER_ID)-x86_64 \
+		-output $(HELPER_BUILD_DIR)/$(HELPER_ID)
+	@rm $(HELPER_BUILD_DIR)/$(HELPER_ID)-arm64 $(HELPER_BUILD_DIR)/$(HELPER_ID)-x86_64
+	@echo "Helper built (universal): $(HELPER_BUILD_DIR)/$(HELPER_ID)"
 
 # Create app bundle with helper embedded
 bundle: build build-helper

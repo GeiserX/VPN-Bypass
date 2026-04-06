@@ -5,7 +5,10 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.1.3] - 2026-04-06
+## [2.2.0] - 2026-04-06
+
+### Added
+- **Intel Mac Support** - App and helper are now built as universal binaries (arm64 + x86_64), fixing launch failures on Intel Macs ([#22](https://github.com/GeiserX/VPN-Bypass/issues/22))
 
 ### Fixed
 - **Settings Window Minimize** - Settings window now shows a Dock icon while open, so the minimize button works correctly instead of sending the window to an invisible Dock section
