@@ -100,14 +100,16 @@ struct TabItem: View {
     
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .foregroundColor(isSelected ? .white : Color(hex: "71717A"))
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(
                 Group {
@@ -2296,7 +2298,7 @@ struct InfoTab: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white)
                     
-                    Text("DevOps Engineer")
+                    Text("Your 100x Engineer, with ❤️")
                         .font(.system(size: 12))
                         .foregroundColor(Color(hex: "9CA3AF"))
                 }
