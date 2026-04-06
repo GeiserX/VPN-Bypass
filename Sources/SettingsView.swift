@@ -2381,7 +2381,7 @@ struct InfoTab: View {
 // MARK: - Info Tab Components
 
 struct LinkButton: View {
-    let title: String
+    let title: LocalizedStringKey
     let icon: String
     let color: Color
     let url: String
@@ -2410,8 +2410,8 @@ struct LinkButton: View {
 
 struct LinkRow: View {
     let icon: String
-    let title: String
-    let subtitle: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
     let url: String
     
     var body: some View {
@@ -2452,7 +2452,7 @@ struct LinkRow: View {
 
 struct RouteStatCard: View {
     let icon: String
-    let title: String
+    let title: LocalizedStringKey
     let value: String
     let color: Color
     

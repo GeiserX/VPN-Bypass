@@ -20,12 +20,12 @@ enum HelperState: Equatable {
 
     var statusText: String {
         switch self {
-        case .missing: return "Not Installed"
-        case .checking: return "Checking..."
-        case .installing: return "Installing..."
-        case .outdated(let installed, let expected): return "Update Required (v\(installed) → v\(expected))"
-        case .ready: return "Helper Installed"
-        case .failed(let msg): return "Error: \(msg)"
+        case .missing: return String(localized: "Not Installed")
+        case .checking: return String(localized: "Checking...")
+        case .installing: return String(localized: "Installing...")
+        case .outdated(let installed, let expected): return String(localized: "Update Required (v\(installed) → v\(expected))")
+        case .ready: return String(localized: "Helper Installed")
+        case .failed(let msg): return String(localized: "Error: \(msg)")
         }
     }
 }

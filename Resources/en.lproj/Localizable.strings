@@ -82,6 +82,11 @@
 "Launch at Login" = "Launch at Login";
 "Automatically start VPN Bypass when you log in" = "Automatically start VPN Bypass when you log in";
 "Privileged Helper" = "Privileged Helper";
+"Not Installed" = "Not Installed";
+"Checking..." = "Checking...";
+"Update Required (v%@ → v%@)" = "Update Required (v%@ → v%@)";
+"Helper Installed" = "Helper Installed";
+"Error: %@" = "Error: %@";
 "No more password prompts for route changes" = "No more password prompts for route changes";
 "Verifying helper version..." = "Verifying helper version...";
 "Admin authorization required..." = "Admin authorization required...";

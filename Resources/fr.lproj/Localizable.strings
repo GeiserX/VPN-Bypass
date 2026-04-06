@@ -82,6 +82,11 @@
 "Launch at Login" = "Lancer au démarrage";
 "Automatically start VPN Bypass when you log in" = "Démarrer VPN Bypass automatiquement à la connexion";
 "Privileged Helper" = "Assistant privilégié";
+"Not Installed" = "Non installé";
+"Checking..." = "Vérification...";
+"Update Required (v%@ → v%@)" = "Mise à jour requise (v%@ → v%@)";
+"Helper Installed" = "Assistant installé";
+"Error: %@" = "Erreur : %@";
 "No more password prompts for route changes" = "Plus de demandes de mot de passe pour les changements de routes";
 "Verifying helper version..." = "Vérification de la version de l'assistant...";
 "Admin authorization required..." = "Autorisation administrateur requise...";
