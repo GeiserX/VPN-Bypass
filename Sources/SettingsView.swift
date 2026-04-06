@@ -993,6 +993,8 @@ struct GeneralTab: View {
     @State private var showingImportPicker = false
     @State private var showingImportError = false
     @State private var importErrorMessage = ""
+    @State private var selectedLanguage: String = UserDefaults.standard.stringArray(forKey: "AppleLanguages")?.first ?? "system"
+    @State private var showingRestartAlert = false
 
     private var helperStateIcon: String {
         switch helperManager.helperState {
@@ -1062,6 +1064,44 @@ struct GeneralTab: View {
                 }
             }
             
+            // Language section
+            SettingsCard(title: String(localized: "Language"), icon: "globe", iconColor: Color(hex: "3B82F6")) {
+                HStack(spacing: 12) {
+                    Image(systemName: "character.bubble.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(Color(hex: "3B82F6"))
+                        .frame(width: 20)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Language")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white)
+                        Text("App language (restart required)")
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "6B7280"))
+                    }
+
+                    Spacer()
+
+                    Picker("", selection: $selectedLanguage) {
+                        Text("System").tag("system")
+                        Text("English").tag("en")
+                        Text("Español").tag("es")
+                        Text("Français").tag("fr")
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 120)
+                    .onChange(of: selectedLanguage) { newValue in
+                        if newValue == "system" {
+                            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+                        } else {
+                            UserDefaults.standard.set([newValue], forKey: "AppleLanguages")
+                        }
+                        showingRestartAlert = true
+                    }
+                }
+            }
+
             // Startup section
             SettingsCard(title: "Startup", icon: "power", iconColor: Color(hex: "10B981")) {
                 SettingsToggleRow(
@@ -1786,6 +1826,19 @@ struct GeneralTab: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(importErrorMessage)
+        }
+        .alert(String(localized: "Restart Required"), isPresented: $showingRestartAlert) {
+            Button(String(localized: "Restart Now")) {
+                let path = Bundle.main.bundlePath
+                let task = Process()
+                task.launchPath = "/bin/sh"
+                task.arguments = ["-c", "sleep 1 && open \"\(path)\""]
+                task.launch()
+                NSApp.terminate(nil)
+            }
+            Button(String(localized: "Later"), role: .cancel) { }
+        } message: {
+            Text("The app needs to restart to apply the language change.")
         }
     }
     

@@ -97,8 +97,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         guard notificationsEnabled && notifyOnVPNConnect else { return }
         
         sendNotification(
-            title: "VPN Connected",
-            body: "Connected via \(interface). Routes will be applied automatically.",
+            title: String(localized: "VPN Connected"),
+            body: String(localized: "Connected via \(interface). Routes will be applied automatically."),
             identifier: "vpn-connected"
         )
     }
@@ -107,14 +107,14 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         guard notificationsEnabled && notifyOnVPNDisconnect else { return }
 
         let suffix = routesRemaining > 0
-            ? "\(routesRemaining) route(s) could not be removed."
-            : "Routes cleared."
+            ? String(localized: "\(routesRemaining) route(s) could not be removed.")
+            : String(localized: "Routes cleared.")
         let body = wasInterface != nil
-            ? "Disconnected from \(wasInterface!). \(suffix)"
-            : "VPN connection lost. \(suffix)"
-        
+            ? String(localized: "Disconnected from \(wasInterface!). \(suffix)")
+            : String(localized: "VPN connection lost. \(suffix)")
+
         sendNotification(
-            title: "VPN Disconnected",
+            title: String(localized: "VPN Disconnected"),
             body: body,
             identifier: "vpn-disconnected"
         )
@@ -126,13 +126,13 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         // Don't notify if no routes were successfully applied (likely still initializing)
         guard count > 0 else { return }
         
-        var body = "\(count) route\(count == 1 ? "" : "s") applied successfully."
+        var body = String(localized: "\(count) route(s) applied successfully.")
         if failedCount > 0 {
-            body += " \(failedCount) failed."
+            body += " " + String(localized: "\(failedCount) failed.")
         }
-        
+
         sendNotification(
-            title: "Routes Applied",
+            title: String(localized: "Routes Applied"),
             body: body,
             identifier: "routes-applied"
         )
@@ -142,7 +142,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         guard notificationsEnabled && notifyOnRouteFailure else { return }
         
         sendNotification(
-            title: "Route Verification Failed",
+            title: String(localized: "Route Verification Failed"),
             body: "\(route): \(reason)",
             identifier: "route-failed-\(route.hashValue)"
         )
@@ -151,12 +151,12 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     func notifyNetworkChanged(newNetwork: String?) {
         guard notificationsEnabled else { return }
         
-        let body = newNetwork != nil 
-            ? "Switched to \(newNetwork!). Checking VPN status..."
-            : "Network changed. Checking VPN status..."
-        
+        let body = newNetwork != nil
+            ? String(localized: "Switched to \(newNetwork!). Checking VPN status...")
+            : String(localized: "Network changed. Checking VPN status...")
+
         sendNotification(
-            title: "Network Changed",
+            title: String(localized: "Network Changed"),
             body: body,
             identifier: "network-changed"
         )
@@ -165,8 +165,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// Send a test notification
     func sendTestNotification() {
         sendNotification(
-            title: "VPN Bypass",
-            body: "Test notification successful! 🎉",
+            title: String(localized: "VPN Bypass"),
+            body: String(localized: "Test notification successful!") + " 🎉",
             identifier: "test-notification"
         )
     }
@@ -276,7 +276,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         guard notificationsEnabled && notifyOnRoutesApplied else { return }
         
         sendNotification(
-            title: enabled ? "Service Enabled" : "Service Disabled",
+            title: enabled ? String(localized: "Service Enabled") : String(localized: "Service Disabled"),
             body: service,
             identifier: "service-toggled"
         )
@@ -286,7 +286,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         guard notificationsEnabled && notifyOnRoutesApplied else { return }
         
         sendNotification(
-            title: "Domain Added",
+            title: String(localized: "Domain Added"),
             body: domain,
             identifier: "domain-added"
         )
@@ -296,7 +296,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         guard notificationsEnabled && notifyOnRoutesApplied else { return }
         
         sendNotification(
-            title: "Domain Removed",
+            title: String(localized: "Domain Removed"),
             body: domain,
             identifier: "domain-removed"
         )
@@ -306,8 +306,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         guard notificationsEnabled && notifyOnRoutesApplied else { return }
         
         sendNotification(
-            title: "DNS Refresh Complete",
-            body: "\(updatedCount) route\(updatedCount == 1 ? "" : "s") updated",
+            title: String(localized: "DNS Refresh Complete"),
+            body: String(localized: "\(updatedCount) route(s) updated"),
             identifier: "dns-refresh"
         )
     }

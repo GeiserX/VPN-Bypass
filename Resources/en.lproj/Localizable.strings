@@ -1,0 +1,215 @@
+/* Localizable.strings — English (reference) */
+
+/* ===== Menu Bar ===== */
+"VPN Connected" = "VPN Connected";
+"VPN Disconnected" = "VPN Disconnected";
+"via %@" = "via %@";
+"Gateway: %@" = "Gateway: %@";
+"routes" = "routes";
+"Add Domain to VPN" = "Add Domain to VPN";
+"Add Domain to Bypass" = "Add Domain to Bypass";
+"Refresh Routes" = "Refresh Routes";
+"Clear" = "Clear";
+"Verify Routes" = "Verify Routes";
+"Verifying..." = "Verifying...";
+"Active Services" = "Active Services";
+"No services enabled" = "No services enabled";
+"+%lld more" = "+%lld more";
+"+ %lld more" = "+ %lld more";
+"Active Routes" = "Active Routes";
+"Route Verification" = "Route Verification";
+"Mode" = "Mode";
+"Bypass" = "Bypass";
+"VPN Only" = "VPN Only";
+"Setting Up..." = "Setting Up...";
+"Detecting VPN and applying routes" = "Detecting VPN and applying routes";
+"No VPN Connection" = "No VPN Connection";
+"Connect to a VPN to start bypassing\ntraffic for configured services." = "Connect to a VPN to start bypassing\ntraffic for configured services.";
+"VPN Domains" = "VPN Domains";
+"Services" = "Services";
+"Domains" = "Domains";
+"Updated %@ ago" = "Updated %@ ago";
+"Settings" = "Settings";
+"Quit VPN Bypass" = "Quit VPN Bypass";
+"ON" = "ON";
+"OFF" = "OFF";
+
+/* ===== Settings — Tabs ===== */
+"General" = "General";
+"Logs" = "Logs";
+"Info" = "Info";
+
+/* ===== Settings — Domains Tab ===== */
+"VPN Only Domains" = "VPN Only Domains";
+"Custom Domains" = "Custom Domains";
+"Only these domains will use the VPN. Everything else bypasses it." = "Only these domains will use the VPN. Everything else bypasses it.";
+"Add domains that should bypass VPN and use your regular connection." = "Add domains that should bypass VPN and use your regular connection.";
+"Routing Mode" = "Routing Mode";
+"Domains skip VPN" = "Domains skip VPN";
+"Only domains use VPN" = "Only domains use VPN";
+"Enter domain (e.g., example.com)" = "Enter domain (e.g., example.com)";
+"CONFIGURED DOMAINS" = "CONFIGURED DOMAINS";
+"Applying..." = "Applying...";
+"All" = "All";
+"None" = "None";
+"No domains configured" = "No domains configured";
+"Add domains that should use VPN" = "Add domains that should use VPN";
+"Add a domain above to bypass VPN" = "Add a domain above to bypass VPN";
+
+/* ===== Settings — Services Tab ===== */
+"%lld/%lld enabled" = "%lld/%lld enabled";
+"Services disabled in VPN Only mode" = "Services disabled in VPN Only mode";
+"Switch to Bypass mode in the Domains tab to manage services." = "Switch to Bypass mode in the Domains tab to manage services.";
+"Search services..." = "Search services...";
+"Create Custom Service" = "Create Custom Service";
+"Custom" = "Custom";
+"%lld domains" = "%lld domains";
+
+/* ===== Settings — Custom Service Editor ===== */
+"Edit Service" = "Edit Service";
+"Service Name" = "Service Name";
+"e.g. My Company VPN" = "e.g. My Company VPN";
+"Add" = "Add";
+"IP Ranges (optional)" = "IP Ranges (optional)";
+"CIDR notation, e.g. 192.168.1.0/24" = "CIDR notation, e.g. 192.168.1.0/24";
+"No IP ranges added. Only domain-based routing will be used." = "No IP ranges added. Only domain-based routing will be used.";
+"Cancel" = "Cancel";
+"Save Changes" = "Save Changes";
+"Create Service" = "Create Service";
+
+/* ===== Settings — General Tab ===== */
+"Startup" = "Startup";
+"Launch at Login" = "Launch at Login";
+"Automatically start VPN Bypass when you log in" = "Automatically start VPN Bypass when you log in";
+"Privileged Helper" = "Privileged Helper";
+"No more password prompts for route changes" = "No more password prompts for route changes";
+"Verifying helper version..." = "Verifying helper version...";
+"Admin authorization required..." = "Admin authorization required...";
+"Helper needs updating for this version" = "Helper needs updating for this version";
+"Install to enable route management" = "Install to enable route management";
+"Helper could not be started" = "Helper could not be started";
+"Installing..." = "Installing...";
+"Update" = "Update";
+"Retry" = "Retry";
+"Install" = "Install";
+"The helper runs as root and handles route/hosts changes without prompting." = "The helper runs as root and handles route/hosts changes without prompting.";
+"Behavior" = "Behavior";
+"Auto-apply on VPN Connect" = "Auto-apply on VPN Connect";
+"Automatically apply routes when VPN connects" = "Automatically apply routes when VPN connects";
+"Manage /etc/hosts" = "Manage /etc/hosts";
+"Add DNS bypass entries (requires admin)" = "Add DNS bypass entries (requires admin)";
+"Verify Routes After Apply" = "Verify Routes After Apply";
+"Ping test routes to ensure they're working" = "Ping test routes to ensure they're working";
+"DNS Refresh" = "DNS Refresh";
+"Auto DNS Refresh" = "Auto DNS Refresh";
+"Periodically re-resolve domains and update routes" = "Periodically re-resolve domains and update routes";
+"Refresh Interval" = "Refresh Interval";
+"How often to re-check DNS for changes" = "How often to re-check DNS for changes";
+"15 min" = "15 min";
+"30 min" = "30 min";
+"1 hour" = "1 hour";
+"2 hours" = "2 hours";
+"6 hours" = "6 hours";
+"Last refresh:" = "Last refresh:";
+"Next refresh:" = "Next refresh:";
+"Refresh Now" = "Refresh Now";
+"Re-resolves all domains to catch IP changes and ensure routes stay up to date." = "Re-resolves all domains to catch IP changes and ensure routes stay up to date.";
+"Fallback DNS" = "Fallback DNS";
+"Detected Non-VPN DNS" = "Detected Non-VPN DNS";
+"Fallback DNS servers when detected DNS is unavailable.\nSupported formats: IP (1.1.1.1), DoH (https://...), DoT (tls://... or IP:853)" = "Fallback DNS servers when detected DNS is unavailable.\nSupported formats: IP (1.1.1.1), DoH (https://...), DoT (tls://... or IP:853)";
+"Add DNS Server" = "Add DNS Server";
+"Notifications" = "Notifications";
+"Enable Notifications" = "Enable Notifications";
+"Show alerts for VPN events" = "Show alerts for VPN events";
+"Silent" = "Silent";
+"No sound" = "No sound";
+"Connect" = "Connect";
+"Disconnect" = "Disconnect";
+"Routes" = "Routes";
+"Failures" = "Failures";
+"Routes: services, domains, DNS refresh" = "Routes: services, domains, DNS refresh";
+"SOCKS5 Proxy" = "SOCKS5 Proxy";
+"Aggressive Bypass Mode" = "Aggressive Bypass Mode";
+"For corporate VPNs (Cisco, Zscaler) that block UDP. Requires external SOCKS5 proxy server with UDP support." = "For corporate VPNs (Cisco, Zscaler) that block UDP. Requires external SOCKS5 proxy server with UDP support.";
+"Enable SOCKS5 Proxy" = "Enable SOCKS5 Proxy";
+"Route traffic through proxy to bypass UDP blocking" = "Route traffic through proxy to bypass UDP blocking";
+"Proxy Server" = "Proxy Server";
+"Authentication (optional)" = "Authentication (optional)";
+"Test Connection" = "Test Connection";
+"Testing..." = "Testing...";
+"Proxy will be used for services that need UDP (Discord voice, gaming, etc.) when corporate VPN blocks direct UDP traffic." = "Proxy will be used for services that need UDP (Discord voice, gaming, etc.) when corporate VPN blocks direct UDP traffic.";
+"Configuration" = "Configuration";
+"Export" = "Export";
+"Import" = "Import";
+"Export your domains and services configuration to a file, or import from a backup." = "Export your domains and services configuration to a file, or import from a backup.";
+"Import Error" = "Import Error";
+"OK" = "OK";
+"Failed to import configuration file." = "Failed to import configuration file.";
+"Network Status" = "Network Status";
+"VPN Status" = "VPN Status";
+"Connected" = "Connected";
+"Disconnected" = "Disconnected";
+"VPN Type" = "VPN Type";
+"Interface" = "Interface";
+"Gateway" = "Gateway";
+"WiFi Network" = "WiFi Network";
+"%lld/%lld reachable" = "%lld/%lld reachable";
+"Version %@" = "Version %@";
+"GitHub" = "GitHub";
+
+/* ===== Settings — Logs Tab ===== */
+"Activity Log" = "Activity Log";
+"Copy" = "Copy";
+"No activity yet" = "No activity yet";
+"Logs will appear here when routes are applied" = "Logs will appear here when routes are applied";
+"Route Health" = "Route Health";
+"DNS: %@" = "DNS: %@";
+"Last update: " = "Last update: ";
+"Next refresh: " = "Next refresh: ";
+
+/* ===== Settings — Info Tab ===== */
+"Route specific traffic around your corporate VPN" = "Route specific traffic around your corporate VPN";
+"Author" = "Author";
+"DevOps Engineer" = "DevOps Engineer";
+"Support the Project" = "Support the Project";
+"If you find VPN Bypass useful, consider supporting its development!" = "If you find VPN Bypass useful, consider supporting its development!";
+"GitHub Sponsors" = "GitHub Sponsors";
+"Buy Me a Coffee" = "Buy Me a Coffee";
+"Links" = "Links";
+"Blog" = "Blog";
+"Source Code" = "Source Code";
+"Report Issue" = "Report Issue";
+"License" = "License";
+"GPL-3.0 License" = "GPL-3.0 License";
+"This software is free and open source under the GNU General Public License v3.0. You are free to use, modify, and distribute it under the same license terms." = "This software is free and open source under the GNU General Public License v3.0. You are free to use, modify, and distribute it under the same license terms.";
+
+/* ===== Notifications ===== */
+"Connected via %@. Routes will be applied automatically." = "Connected via %@. Routes will be applied automatically.";
+"Disconnected from %@. %@" = "Disconnected from %@. %@";
+"VPN connection lost. %@" = "VPN connection lost. %@";
+"%lld route(s) could not be removed." = "%lld route(s) could not be removed.";
+"Routes cleared." = "Routes cleared.";
+"Routes Applied" = "Routes Applied";
+"%lld route(s) applied successfully." = "%lld route(s) applied successfully.";
+"%lld failed." = "%lld failed.";
+"Route Verification Failed" = "Route Verification Failed";
+"Network Changed" = "Network Changed";
+"Switched to %@. Checking VPN status..." = "Switched to %@. Checking VPN status...";
+"Network changed. Checking VPN status..." = "Network changed. Checking VPN status...";
+"VPN Bypass" = "VPN Bypass";
+"Test notification successful!" = "Test notification successful!";
+"Service Enabled" = "Service Enabled";
+"Service Disabled" = "Service Disabled";
+"Domain Added" = "Domain Added";
+"Domain Removed" = "Domain Removed";
+"DNS Refresh Complete" = "DNS Refresh Complete";
+"%lld route(s) updated" = "%lld route(s) updated";
+
+/* ===== Language Settings ===== */
+"Language" = "Language";
+"App language (restart required)" = "App language (restart required)";
+"System" = "System";
+"Restart Required" = "Restart Required";
+"The app needs to restart to apply the language change." = "The app needs to restart to apply the language change.";
+"Restart Now" = "Restart Now";
+"Later" = "Later";
