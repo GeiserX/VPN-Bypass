@@ -85,7 +85,7 @@ final class HelperManager: ObservableObject {
             print("🔐 Helper not found, attempting install...")
             let installed = await installHelper()
             if !installed {
-                helperState = .failed(installationError ?? "Installation failed")
+                helperState = .failed(installationError ?? String(localized: "Installation failed"))
                 return false
             }
             // Install succeeded — drop stale connection before version check
@@ -111,7 +111,7 @@ final class HelperManager: ObservableObject {
                     return true
                 }
             }
-            helperState = .failed("Cannot connect to helper after reinstall")
+            helperState = .failed(String(localized: "Cannot connect to helper after reinstall"))
             return false
         }
 
@@ -130,7 +130,7 @@ final class HelperManager: ObservableObject {
         print("🔐 Auto-updating helper...")
         let updated = await installHelper()
         if !updated {
-            helperState = .failed("Helper update failed: \(installationError ?? "unknown")")
+            helperState = .failed(String(localized: "Helper update failed: \(installationError ?? String(localized: "unknown"))"))
             return false
         }
 
@@ -143,7 +143,7 @@ final class HelperManager: ObservableObject {
             return true
         }
 
-        helperState = .failed("Helper update did not take effect (got \(newVersion ?? "nil"), expected \(expected))")
+        helperState = .failed(String(localized: "Helper update did not take effect (got \(newVersion ?? "nil"), expected \(expected))"))
         return false
     }
 

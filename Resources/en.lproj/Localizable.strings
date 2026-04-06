@@ -87,6 +87,11 @@
 "Update Required (v%@ → v%@)" = "Update Required (v%@ → v%@)";
 "Helper Installed" = "Helper Installed";
 "Error: %@" = "Error: %@";
+"Installation failed" = "Installation failed";
+"Cannot connect to helper after reinstall" = "Cannot connect to helper after reinstall";
+"Helper update failed: %@" = "Helper update failed: %@";
+"Helper update did not take effect (got %@, expected %@)" = "Helper update did not take effect (got %@, expected %@)";
+"unknown" = "unknown";
 "No more password prompts for route changes" = "No more password prompts for route changes";
 "Verifying helper version..." = "Verifying helper version...";
 "Admin authorization required..." = "Admin authorization required...";

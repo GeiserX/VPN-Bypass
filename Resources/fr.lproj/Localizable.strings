@@ -87,6 +87,11 @@
 "Update Required (v%@ → v%@)" = "Mise à jour requise (v%@ → v%@)";
 "Helper Installed" = "Assistant installé";
 "Error: %@" = "Erreur : %@";
+"Installation failed" = "L'installation a échoué";
+"Cannot connect to helper after reinstall" = "Impossible de se connecter à l'assistant après réinstallation";
+"Helper update failed: %@" = "La mise à jour de l'assistant a échoué : %@";
+"Helper update did not take effect (got %@, expected %@)" = "La mise à jour de l'assistant n'a pas pris effet (obtenu %@, attendu %@)";
+"unknown" = "inconnu";
 "No more password prompts for route changes" = "Plus de demandes de mot de passe pour les changements de routes";
 "Verifying helper version..." = "Vérification de la version de l'assistant...";
 "Admin authorization required..." = "Autorisation administrateur requise...";
