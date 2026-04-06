@@ -97,19 +97,24 @@ struct TabItem: View {
     let action: () -> Void
     
     @State private var isHovered = false
-    
+
+    // Non-English languages tend to have longer tab labels
+    private var isCompact: Bool {
+        (Bundle.main.preferredLocalizations.first ?? "en") != "en"
+    }
+
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
+            HStack(spacing: isCompact ? 5 : 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: isCompact ? 12 : 13, weight: .medium))
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: isCompact ? 12 : 13, weight: .medium))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
             .foregroundColor(isSelected ? .white : Color(hex: "71717A"))
-            .padding(.horizontal, 10)
+            .padding(.horizontal, isCompact ? 10 : 14)
             .padding(.vertical, 8)
             .background(
                 Group {
