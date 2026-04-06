@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "VPNBypass",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v13)
     ],
@@ -14,7 +15,17 @@ let package = Package(
         .executableTarget(
             name: "VPNBypass",
             dependencies: [],
-            path: "Sources"
+            path: ".",
+            exclude: [
+                "AGENTS.md", "Casks", "Helper", "Info.plist", "LICENSE",
+                "Makefile", "README.md", "ROADMAP.md", "SECURITY.md",
+                "VPN Bypass.app", "VPNBypass.entitlements", "assets",
+                "dist", "docs", "scripts"
+            ],
+            sources: ["Sources"],
+            resources: [
+                .process("Resources")
+            ]
         )
     ]
 )

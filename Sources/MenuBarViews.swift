@@ -187,7 +187,7 @@ struct MenuContent: View {
                     .frame(width: 6, height: 6)
                     .shadow(color: routeManager.isVPNConnected ? Color(hex: "10B981").opacity(0.6) : Color(hex: "EF4444").opacity(0.6), radius: 3)
                 
-                Text(routeManager.isVPNConnected ? "ON" : "OFF")
+                Text(routeManager.isVPNConnected ? String(localized: "ON") : String(localized: "OFF"))
                     .font(.system(size: 9, weight: .bold, design: .rounded))
                     .foregroundColor(routeManager.isVPNConnected ? Color(hex: "10B981") : Color(hex: "EF4444"))
             }
@@ -217,7 +217,7 @@ struct MenuContent: View {
             }
             
             VStack(alignment: .leading, spacing: 2) {
-                Text(routeManager.isVPNConnected ? "VPN Connected" : "VPN Disconnected")
+                Text(routeManager.isVPNConnected ? String(localized: "VPN Connected") : String(localized: "VPN Disconnected"))
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundColor(statusColor)
                 
@@ -305,7 +305,7 @@ struct MenuContent: View {
                     HStack {
                         Image(systemName: "plus.circle")
                             .font(.system(size: 12))
-                        Text(routeManager.config.routingMode == .vpnOnly ? "Add Domain to VPN" : "Add Domain to Bypass")
+                        Text(routeManager.config.routingMode == .vpnOnly ? String(localized: "Add Domain to VPN") : String(localized: "Add Domain to Bypass"))
                             .font(.system(size: 12, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
@@ -388,7 +388,7 @@ struct MenuContent: View {
                             Image(systemName: "checkmark.circle")
                                 .font(.system(size: 11))
                         }
-                        Text(isVerifying ? "Verifying..." : "Verify Routes")
+                        Text(isVerifying ? String(localized: "Verifying...") : String(localized: "Verify Routes"))
                             .font(.system(size: 12, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
@@ -635,7 +635,7 @@ struct MenuContent: View {
         .padding(.top, 4)
     }
 
-    private func modeButton(title: String, mode: RouteManager.RoutingMode) -> some View {
+    private func modeButton(title: LocalizedStringKey, mode: RouteManager.RoutingMode) -> some View {
         let isSelected = routeManager.config.routingMode == mode
         return Button {
             routeManager.setRoutingMode(mode)
@@ -731,7 +731,7 @@ struct MenuContent: View {
 
 struct StatBadge: View {
     let value: String
-    let label: String
+    let label: LocalizedStringKey
     
     var body: some View {
         VStack(spacing: 2) {
