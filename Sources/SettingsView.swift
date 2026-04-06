@@ -2486,6 +2486,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private func showWindow() {
         // If window exists (visible, minimized, or offscreen), reuse it
         if let window = window {
+            NSApp.setActivationPolicy(.regular)
             if window.isMiniaturized {
                 window.deminiaturize(nil)
             }
@@ -2521,6 +2522,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // Add branded titlebar accessory
         addBrandedTitlebar(to: window)
 
+        // Show Dock icon so minimize works
+        NSApp.setActivationPolicy(.regular)
+
         // Bring to front (normal level — not floating/screenSaver)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -2530,6 +2534,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         window = nil
+        // Hide Dock icon when settings window closes
+        NSApp.setActivationPolicy(.accessory)
     }
 
     private func addBrandedTitlebar(to window: NSWindow) {
