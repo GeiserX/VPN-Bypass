@@ -53,29 +53,21 @@ Before making changes, read these files to understand the project:
 
 ### Releasing New Versions
 
-**Pre-release checklist** (MUST complete ALL steps before tagging):
 1. Run `./scripts/bump-version.sh <version>` — updates Info.plist, README.md badge, and Casks/
 2. Update `docs/CHANGELOG.md` with release notes
-3. Commit all changes: `git add -A && git commit -m "chore: release v<version>"`
-4. Tag: `git tag v<version>`
-5. Push: `git push && git push origin v<version>`
+3. Commit: `git add -A && git commit -m "chore: release v<version>"`
+4. Tag and push: `git tag v<version> && git push && git push origin v<version>`
 
-```bash
-# Example release flow
-./scripts/bump-version.sh 1.10.0
-# Edit docs/CHANGELOG.md with release notes
-git add -A && git commit -m "chore: release v1.10.0"
-git tag v1.10.0
-git push && git push origin v1.10.0
-```
+CI (`.github/workflows/release.yml`) does the rest automatically:
+- Builds universal DMG (arm64 + x86_64)
+- Creates GitHub Release with the DMG
+- Updates the Homebrew cask in `homebrew-vpn-bypass` repo
 
-The tag push triggers GitHub Actions which:
-1. Updates `Info.plist` version from the git tag (safety net)
-2. Builds the app and creates DMG
-3. Creates a GitHub Release with the DMG
-4. Updates the Homebrew cask in `homebrew-vpn-bypass` repo automatically
+**Do NOT manually** create GitHub releases, upload DMGs, or update the Homebrew cask — CI will overwrite them.
 
-**Version architecture**: The app reads its version from `CFBundleShortVersionString` at runtime (not hardcoded). The CI workflow sets this from the git tag. The `bump-version.sh` script keeps `Info.plist` and `README.md` badge in sync for local builds and the repo display.
+After CI completes: `brew update && brew upgrade --cask vpn-bypass` to install locally.
+
+**Version architecture**: The app reads its version from `CFBundleShortVersionString` at runtime (not hardcoded). CI stamps it from the git tag. `bump-version.sh` keeps `Info.plist` and `README.md` badge in sync for local builds.
 
 ## Best Practices
 
@@ -90,7 +82,15 @@ The tag push triggers GitHub Actions which:
 - **Never skip `bump-version.sh`** before tagging a release. Forgetting it caused version desync in v1.8.2–v1.9.0 (#15).
 - **Version display is dynamic** — do NOT hardcode version strings in Swift code. The app reads from the bundle's `CFBundleShortVersionString` at runtime.
 - **Always test via Homebrew** after releasing, never trust `swift build` alone.
-- **Helperless mode is not supported.** The privileged helper is auto-installed on first launch and auto-updated on version mismatch. AppleScript/direct-route fallbacks exist only as emergency safety nets — do not treat them as a tested path or write new features against them.
+- **Helperless mode is not supported.** The privileged helper is auto-installed on first launch and auto-updated on version mismatch. All helperless fallbacks (direct `/sbin/route`, AppleScript) have been removed — every route-mutating operation requires the helper.
+- **Helper readiness must be authoritative everywhere** — startup, refresh, reroute, DNS refresh, and hosts file updates must all refuse to proceed when the helper is not verified ready. Do not reintroduce route or hosts fallbacks that bypass the helper state machine.
+- **SMAppService.register() does NOT replace existing helper binaries** — when updating, always route to the legacy AppleScript path that does actual `cp` + `launchctl bootout/bootstrap`.
+- **Homebrew cask has preflight/postflight** — `pkill -x VPNBypass` before upgrade and `open` after. No manual restart needed.
+- **Ship universal binaries** — both the main app and the privileged helper must be universal (`arm64` + `x86_64`) so Intel Macs can launch. `swift build --arch arm64 --arch x86_64` outputs to `.build/apple/Products/Release`, while the helper needs separate arch builds plus `lipo`.
+- **Menu bar template images use ONLY the alpha channel** — luminance/color is ignored. Background alpha=0, shape alpha=255. Must be 8-bit PNG (CoreGraphics rejects 16-bit). Render from SVG via `rsvg-convert`.
+- **Settings window Dock icon** — menu bar-only apps (LSUIElement) have no Dock icon, so minimized windows vanish. Fix: toggle `NSApp.setActivationPolicy(.regular)` when settings opens, `.accessory` when it closes.
+- **CI handles releases end-to-end** — pushing a `v*` tag triggers `.github/workflows/release.yml` which builds the DMG, creates the GitHub release, AND updates the Homebrew cask. Do NOT manually create releases or update the cask — CI will overwrite them. Just commit, tag, push.
+- **Test the stale-helper upgrade path after release** — especially with VPN already connected and an older helper still installed. Expected flow: helper preflight on startup, admin prompt if needed, helper update, route apply, and DNS refresh timer start automatically.
 
 ## Self-Improving Configuration
 
