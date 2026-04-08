@@ -91,7 +91,7 @@ After CI completes: `brew update && brew upgrade --cask vpn-bypass` to install l
 - **Settings window Dock icon** — menu bar-only apps (LSUIElement) have no Dock icon, so minimized windows vanish. Fix: toggle `NSApp.setActivationPolicy(.regular)` when settings opens, `.accessory` when it closes.
 - **CI handles releases end-to-end** — pushing a `v*` tag triggers `.github/workflows/release.yml` which builds the DMG, creates the GitHub release, AND updates the Homebrew cask. Do NOT manually create releases or update the cask — CI will overwrite them. Just commit, tag, push.
 - **Test the stale-helper upgrade path after release** — especially with VPN already connected and an older helper still installed. Expected flow: helper preflight on startup, admin prompt if needed, helper update, route apply, and DNS refresh timer start automatically.
-- **"Password on every boot" is usually a disabled Login Item** — on macOS Sonoma+, users can disable VPN Bypass's background item in System Settings → General → Login Items & Extensions. When disabled, the helper daemon is blocked by macOS, causing the app to re-prompt for admin on every launch. The fix is enabling the toggle, not a code change. See #25.
+- **"Password on every boot" is usually a disabled Login Item** — on macOS Sonoma+, users can disable VPN Bypass's background item in System Settings → General → Login Items & Extensions. When disabled, the helper daemon is blocked by macOS, causing the app to re-prompt for admin on every launch. The fix is enabling the toggle, not a code change. Since v2.3.3, the app detects this via `SMAppService.daemon().status` and shows a helpful error message instead of re-prompting. See #25.
 
 ## Self-Improving Configuration
 
