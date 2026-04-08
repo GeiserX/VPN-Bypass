@@ -89,6 +89,7 @@
 "Error: %@" = "Error: %@";
 "Installation failed" = "Installation failed";
 "Cannot connect to helper after reinstall" = "Cannot connect to helper after reinstall";
+"Please enable VPN Bypass in System Settings → General → Login Items" = "Please enable VPN Bypass in System Settings → General → Login Items";
 "Helper update failed: %@" = "Helper update failed: %@";
 "Helper update did not take effect (got %@, expected %@)" = "Helper update did not take effect (got %@, expected %@)";
 "unknown" = "unknown";

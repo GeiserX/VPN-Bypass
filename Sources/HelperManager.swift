@@ -48,6 +48,18 @@ final class HelperManager: ObservableObject {
     /// XPC timeout for all helper RPCs (seconds)
     private let xpcTimeout: TimeInterval = 10
 
+    /// Check if the helper daemon is disabled in System Settings → Login Items.
+    /// Returns true if the daemon is blocked by the user, meaning we should NOT
+    /// attempt reinstall (it would just prompt again next boot).
+    @available(macOS 13.0, *)
+    private func isDaemonDisabledByUser() -> Bool {
+        let service = SMAppService.daemon(plistName: "\(kHelperToolMachServiceName).plist")
+        let status = service.status
+        // .notRegistered means the user toggled it off in Login Items, or it was never registered
+        // .requiresApproval means macOS is blocking it pending user approval
+        return status == .notRegistered || status == .requiresApproval
+    }
+
     private init() {
         // Only set initial state — do NOT start route application here.
         // The app must call ensureHelperReady() before using helper RPCs.
@@ -97,6 +109,13 @@ final class HelperManager: ObservableObject {
         let version = await getVersionWithTimeout()
 
         guard let version = version else {
+            // Check if the user disabled the background item in System Settings
+            if #available(macOS 13.0, *), isDaemonDisabledByUser() {
+                print("🔐 Helper daemon disabled by user in System Settings")
+                helperState = .failed(String(localized: "Please enable VPN Bypass in System Settings → General → Login Items"))
+                return false
+            }
+
             // XPC connection failed — helper may be corrupted or wrong arch
             print("🔐 Helper XPC connection failed, attempting reinstall...")
             helperState = .installing

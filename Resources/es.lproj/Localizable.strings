@@ -89,6 +89,7 @@
 "Error: %@" = "Error: %@";
 "Installation failed" = "La instalación falló";
 "Cannot connect to helper after reinstall" = "No se puede conectar al asistente tras reinstalar";
+"Please enable VPN Bypass in System Settings → General → Login Items" = "Activa VPN Bypass en Ajustes del Sistema → General → Ítems de inicio";
 "Helper update failed: %@" = "La actualización del asistente falló: %@";
 "Helper update did not take effect (got %@, expected %@)" = "La actualización del asistente no surtió efecto (obtenido %@, esperado %@)";
 "unknown" = "desconocido";
