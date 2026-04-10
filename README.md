@@ -224,6 +224,11 @@ Contributions are welcome! Here's how you can help:
 
 Please read the issue templates before submitting.
 
+## Supporters
+
+> This project is made possible by generous supporters:
+> **Lee**
+
 ## License
 
 This project is licensed under the [GPL-3.0 License](LICENSE).
