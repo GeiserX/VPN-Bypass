@@ -2572,12 +2572,6 @@ final class RouteManager: ObservableObject {
     func setRoutingMode(_ mode: RoutingMode) {
         guard config.routingMode != mode else { return }
 
-        // Pre-check: VPN Only requires vpnGateway
-        if mode == .vpnOnly && isVPNConnected && vpnGateway == nil {
-            log(.error, "Cannot switch to VPN Only: no VPN gateway detected")
-            return
-        }
-
         config.routingMode = mode
         saveConfig()
         log(.info, "Routing mode changed to \(mode == .bypass ? "Bypass" : "VPN Only")")
@@ -2585,6 +2579,11 @@ final class RouteManager: ObservableObject {
         if isVPNConnected && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
+                // Re-detect VPN gateway when switching to VPN Only
+                // (initial detection may be stale if VPN routing wasn't ready yet)
+                if mode == .vpnOnly {
+                    vpnGateway = await detectVPNGateway()
+                }
                 await removeAllRoutes()
                 await applyAllRoutesInternal(sendNotification: false)
                 if activeRoutes.isEmpty {
@@ -3079,8 +3078,9 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        // Prefer IP gateway when available
-        if let gw = gateway { return gw }
+        // Prefer IP gateway when available and different from local gateway
+        // (same IP means route -n get default still shows pre-VPN default — race condition)
+        if let gw = gateway, gw != localGateway { return gw }
 
         // No IP gateway — use interface from route output when it still looks
         // like a VPN/tunnel device. This preserves the multi-VPN fix without
