@@ -5,6 +5,12 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1] - 2026-04-10
+
+### Fixed
+- **Multi-VPN Interface Selection** - VPN Only mode now prefers the `interface:` reported by `route -n get default` instead of the first VPN-looking interface from `ifconfig` when no IP gateway is available, fixing wrong-tunnel selection in multi-VPN setups ([#27](https://github.com/GeiserX/VPN-Bypass/pull/27))
+- **Safer Route Interface Fallback** - Route-derived interface fallback is now accepted only when it still looks like a VPN/tunnel device, preserving the existing ifconfig fallback for odd default-route outputs
+
 ## [2.4.0] - 2026-04-10
 
 ### Added
