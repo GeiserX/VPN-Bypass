@@ -3051,16 +3051,46 @@ final class RouteManager: ObservableObject {
     }
 
     /// Detect VPN gateway for VPN Only mode routing.
+    /// Parses `route -n get default` for both gateway IP and interface.
     /// Falls back to interface-based routing when no IP gateway is available
     /// (e.g., Cisco Secure Client routes via link# without setting an IP gateway).
     private func detectVPNGateway() async -> String? {
-        if let ipGateway = await parseDefaultGateway() {
-            return ipGateway
+        guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", "default"], timeout: 3.0) else {
+            if let iface = vpnInterface { return "iface:\(iface)" }
+            return nil
         }
-        // No IP gateway — fall back to interface-based routing
-        if let iface = vpnInterface {
-            return "iface:\(iface)"
+
+        var gateway: String?
+        var routeInterface: String?
+
+        for line in result.output.components(separatedBy: "\n") {
+            if line.contains("gateway:") {
+                let parts = line.components(separatedBy: ":")
+                if parts.count >= 2 {
+                    let gw = parts[1].trimmingCharacters(in: .whitespaces)
+                    if isValidIP(gw) { gateway = gw }
+                }
+            }
+            if line.contains("interface:") {
+                let parts = line.components(separatedBy: ":")
+                if parts.count >= 2 {
+                    routeInterface = parts[1].trimmingCharacters(in: .whitespaces)
+                }
+            }
         }
+
+        // Prefer IP gateway when available
+        if let gw = gateway { return gw }
+
+        // No IP gateway — use interface from route output when it still looks
+        // like a VPN/tunnel device. This preserves the multi-VPN fix without
+        // turning an odd physical default interface into an invalid helper
+        // gateway like `iface:en0`.
+        if let iface = routeInterface, isVPNInterface(iface) { return "iface:\(iface)" }
+
+        // Last resort: use detected VPN interface from ifconfig
+        if let iface = vpnInterface { return "iface:\(iface)" }
+
         return nil
     }
     
