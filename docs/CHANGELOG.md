@@ -5,6 +5,35 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-04-10
+
+### Added
+- **Cisco Secure Client Support** - VPN Only mode now works with Cisco Secure Client (AnyConnect) which routes via interface link instead of an IP gateway. The helper supports interface-based routing (`-interface utun`) when no gateway IP is available ([#26](https://github.com/GeiserX/VPN-Bypass/issues/26))
+- **Improved Cisco Detection** - Added `secureclient` process name matching for Cisco Secure Client 5.x identification
+
+### Changed
+- **Helper v1.4.0** - Updated privileged helper to support interface-based route addition. Existing users will be prompted once to update the helper on first launch
+
+## [2.3.3] - 2026-04-08
+
+### Added
+- **Login Item Detection** - Detects when users disable VPN Bypass in System Settings → Login Items and shows a helpful error message instead of re-prompting for admin password on every boot ([#25](https://github.com/GeiserX/VPN-Bypass/issues/25))
+
+## [2.3.2] - 2026-04-08
+
+### Fixed
+- **Tab Label Wrapping** - Spanish/French tab labels no longer wrap mid-word; compact sizing applied only for non-English languages while keeping original size for English
+
+## [2.3.1] - 2026-04-08
+
+### Changed
+- **Author Subtitle** - Updated author credit in Info tab
+
+## [2.3.0] - 2026-04-08
+
+### Added
+- **Localization** - Full English, Spanish, and French translations for all UI strings including settings, menu bar, helper status messages, and error states ([#24](https://github.com/GeiserX/VPN-Bypass/pull/24))
+
 ## [2.2.0] - 2026-04-06
 
 ### Added

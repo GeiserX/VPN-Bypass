@@ -58,23 +58,16 @@ class HelperTool: NSObject, HelperProtocol {
     
     func addRoute(destination: String, gateway: String, isNetwork: Bool, withReply reply: @escaping (Bool, String?) -> Void) {
         // Validate inputs
-        guard isValidDestination(destination), isValidIP(gateway) else {
+        guard isValidDestination(destination), isValidGateway(gateway) else {
             reply(false, "Invalid destination or gateway format")
             return
         }
-        
+
         // First try to delete existing route (ignore result)
         _ = executeRoute(args: ["-n", "delete", destination])
-        
+
         // Add the new route
-        var args = ["-n", "add"]
-        if isNetwork {
-            args.append(contentsOf: ["-net", destination, gateway])
-        } else {
-            args.append(contentsOf: ["-host", destination, gateway])
-        }
-        
-        let result = executeRoute(args: args)
+        let result = executeRoute(args: buildRouteAddArgs(destination: destination, gateway: gateway, isNetwork: isNetwork))
         reply(result.success, result.error)
     }
     
@@ -106,7 +99,7 @@ class HelperTool: NSObject, HelperProtocol {
             let isNetwork = route["isNetwork"] as? Bool ?? false
 
             // Validate inputs
-            guard isValidDestination(destination), isValidIP(gateway) else {
+            guard isValidDestination(destination), isValidGateway(gateway) else {
                 failureCount += 1
                 failedDestinations.append(destination)
                 continue
@@ -116,14 +109,7 @@ class HelperTool: NSObject, HelperProtocol {
             _ = executeRoute(args: ["-n", "delete", destination])
 
             // Add the new route
-            var args = ["-n", "add"]
-            if isNetwork {
-                args.append(contentsOf: ["-net", destination, gateway])
-            } else {
-                args.append(contentsOf: ["-host", destination, gateway])
-            }
-
-            let result = executeRoute(args: args)
+            let result = executeRoute(args: buildRouteAddArgs(destination: destination, gateway: gateway, isNetwork: isNetwork))
             if result.success {
                 successCount += 1
             } else {
@@ -278,6 +264,31 @@ class HelperTool: NSObject, HelperProtocol {
     
     // MARK: - Validation
     
+    private func isValidGateway(_ gateway: String) -> Bool {
+        if gateway.hasPrefix("iface:") {
+            return isValidInterfaceName(String(gateway.dropFirst(6)))
+        }
+        return isValidIP(gateway)
+    }
+
+    private func isValidInterfaceName(_ name: String) -> Bool {
+        let validPrefixes = ["utun", "ipsec", "ppp", "gpd", "tun", "tap", "feth", "zt"]
+        guard validPrefixes.contains(where: { name.hasPrefix($0) }) else { return false }
+        return name.allSatisfy { $0.isLetter || $0.isNumber } && name.count <= 16
+    }
+
+    private func buildRouteAddArgs(destination: String, gateway: String, isNetwork: Bool) -> [String] {
+        var args = ["-n", "add"]
+        args.append(isNetwork ? "-net" : "-host")
+        args.append(destination)
+        if gateway.hasPrefix("iface:") {
+            args.append(contentsOf: ["-interface", String(gateway.dropFirst(6))])
+        } else {
+            args.append(gateway)
+        }
+        return args
+    }
+
     private func isValidIP(_ string: String) -> Bool {
         let parts = string.components(separatedBy: ".")
         guard parts.count == 4 else { return false }

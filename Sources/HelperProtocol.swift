@@ -78,7 +78,7 @@ protocol HelperProgressProtocol {
 // MARK: - Helper Constants
 
 struct HelperConstants {
-    static let helperVersion = "1.3.0"
+    static let helperVersion = "1.4.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

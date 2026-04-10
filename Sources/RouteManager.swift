@@ -712,7 +712,7 @@ final class RouteManager: ObservableObject {
 
         // Detect VPN gateway (default route when VPN is connected)
         if connected {
-            vpnGateway = await parseDefaultGateway()
+            vpnGateway = await detectVPNGateway()
         } else {
             vpnGateway = nil
         }
@@ -814,7 +814,7 @@ final class RouteManager: ObservableObject {
         if output.contains("globalprotect") || output.contains("pangpa") || output.contains("pangps") {
             return .globalProtect
         }
-        if output.contains("vpnagent") || output.contains("cisco") || output.contains("anyconnect") {
+        if output.contains("vpnagent") || output.contains("cisco") || output.contains("anyconnect") || output.contains("secureclient") {
             return .ciscoAnyConnect
         }
         if output.contains("openvpn") {
@@ -1112,7 +1112,7 @@ final class RouteManager: ObservableObject {
 
         // Detect VPN gateway (needed for VPN Only mode)
         if connected {
-            vpnGateway = await parseDefaultGateway()
+            vpnGateway = await detectVPNGateway()
             log(.info, "VPN gateway detected: \(vpnGateway ?? "none")")
         } else {
             vpnGateway = nil
@@ -3034,7 +3034,7 @@ final class RouteManager: ObservableObject {
         guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", "default"], timeout: 3.0) else {
             return nil
         }
-        
+
         for line in result.output.components(separatedBy: "\n") {
             if line.contains("gateway:") {
                 let parts = line.components(separatedBy: ":")
@@ -3046,7 +3046,21 @@ final class RouteManager: ObservableObject {
                 }
             }
         }
-        
+
+        return nil
+    }
+
+    /// Detect VPN gateway for VPN Only mode routing.
+    /// Falls back to interface-based routing when no IP gateway is available
+    /// (e.g., Cisco Secure Client routes via link# without setting an IP gateway).
+    private func detectVPNGateway() async -> String? {
+        if let ipGateway = await parseDefaultGateway() {
+            return ipGateway
+        }
+        // No IP gateway — fall back to interface-based routing
+        if let iface = vpnInterface {
+            return "iface:\(iface)"
+        }
         return nil
     }
     
