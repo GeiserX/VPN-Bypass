@@ -3082,8 +3082,11 @@ final class RouteManager: ObservableObject {
         // Prefer IP gateway when available
         if let gw = gateway { return gw }
 
-        // No IP gateway — use interface from route output (authoritative for multi-VPN)
-        if let iface = routeInterface { return "iface:\(iface)" }
+        // No IP gateway — use interface from route output when it still looks
+        // like a VPN/tunnel device. This preserves the multi-VPN fix without
+        // turning an odd physical default interface into an invalid helper
+        // gateway like `iface:en0`.
+        if let iface = routeInterface, isVPNInterface(iface) { return "iface:\(iface)" }
 
         // Last resort: use detected VPN interface from ifconfig
         if let iface = vpnInterface { return "iface:\(iface)" }
