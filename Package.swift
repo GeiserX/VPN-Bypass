@@ -20,12 +20,18 @@ let package = Package(
                 "AGENTS.md", "Casks", "Helper", "Info.plist", "LICENSE",
                 "Makefile", "README.md", "ROADMAP.md", "SECURITY.md",
                 "VPN Bypass.app", "VPNBypass.entitlements", "assets",
-                "dist", "docs", "scripts"
+                "dist", "docs", "scripts", "Tests"
             ],
             sources: ["Sources"],
             resources: [
                 .process("Resources")
             ]
+        ),
+        .testTarget(
+            name: "VPNBypassTests",
+            dependencies: [],
+            path: "Tests/VPNBypassTests",
+            sources: ["VPNBypassTests.swift"]
         )
     ]
 )
