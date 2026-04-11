@@ -18,6 +18,7 @@
   <a href="https://github.com/GeiserX/VPN-Bypass/releases"><img src="https://img.shields.io/github/v/release/GeiserX/VPN-Bypass?style=flat-square&color=green" alt="Version"></a>
   <a href="https://github.com/GeiserX/VPN-Bypass/stargazers"><img src="https://img.shields.io/github/stars/GeiserX/VPN-Bypass?style=flat-square&logo=github" alt="Stars"></a>
   <a href="https://github.com/GeiserX/VPN-Bypass/blob/main/LICENSE"><img src="https://img.shields.io/github/license/GeiserX/VPN-Bypass?style=flat-square" alt="License"></a>
+  <a href="https://codecov.io/gh/GeiserX/VPN-Bypass"><img src="https://codecov.io/gh/GeiserX/VPN-Bypass/graph/badge.svg" alt="codecov"></a>
 </p>
 
 ## Why?

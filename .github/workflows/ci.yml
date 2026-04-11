@@ -1,69 +1,21 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
-# Cancel in-progress runs when a new commit is pushed
-concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  contents: read
-
 jobs:
-  build:
-    name: Build
-    runs-on: macos-14  # macOS Sonoma with Apple Silicon
-    
+  test:
+    runs-on: macos-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Build main app
-        run: swift build -c release
-
-      - name: Build helper
-        run: make build-helper
-
-      - name: Create app bundle
-        run: make bundle
-
-      - name: Verify bundle structure
+      - uses: actions/checkout@v4
+      - run: swift test --enable-code-coverage
+      - name: Convert coverage
         run: |
-          echo "📦 Checking app bundle..."
-          test -d "VPN Bypass.app" || { echo "❌ App bundle not created"; exit 1; }
-          test -f "VPN Bypass.app/Contents/MacOS/VPNBypass" || { echo "❌ Main executable missing"; exit 1; }
-          test -f "VPN Bypass.app/Contents/MacOS/com.geiserx.vpnbypass.helper" || { echo "❌ Helper missing"; exit 1; }
-          test -f "VPN Bypass.app/Contents/Info.plist" || { echo "❌ Info.plist missing"; exit 1; }
-          echo "✅ App bundle structure verified"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+          xcrun llvm-cov export .build/debug/*Tests -instr-profile .build/debug/codecov/default.profdata -format lcov > coverage.lcov
+        continue-on-error: true
+      - uses: codecov/codecov-action@v5
+        if: github.event_name == 'push'
         with:
-          name: VPNBypass-app
-          path: "VPN Bypass.app"
-          retention-days: 7
-
-  summary:
-    name: CI Summary
-    runs-on: ubuntu-latest
-    needs: [build]
-    if: always()
-    
-    steps:
-      - name: Check results
-        run: |
-          if [ "${{ needs.build.result }}" != "success" ]; then
-            echo "❌ CI failed"
-            exit 1
-          fi
-          echo "✅ All checks passed"
+          files: coverage.lcov
+          fail_ci_if_error: false
