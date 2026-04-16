@@ -100,7 +100,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         startWatchdog()
     }
     
-    func applicationWillTerminate(_ notification: Notification) {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Hide all UI immediately so quit feels instant
         NSApp.windows.forEach { $0.orderOut(nil) }
 
@@ -110,15 +110,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         networkDebounceWorkItem?.cancel()
         RouteManager.shared.stopDNSRefreshTimer()
 
-        // Clean up routes and hosts file on quit
-        // Always run: removes VPN Only catch-all routes and /etc/hosts entries
-        let semaphore = DispatchSemaphore(value: 0)
-        Task {
+        // Clean up routes and hosts file on quit, then allow termination
+        Task { @MainActor in
             await RouteManager.shared.cleanupOnQuit()
-            semaphore.signal()
+            NSApp.reply(toApplicationShouldTerminate: true)
         }
-        // Block termination until cleanup completes (up to 5s)
-        _ = semaphore.wait(timeout: .now() + 5)
+        return .terminateLater
     }
     
     // MARK: - Network Monitoring
