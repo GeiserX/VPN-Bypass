@@ -2,10 +2,6 @@
   <img src="docs/images/banner.svg" alt="VPN Bypass banner" width="900"/>
 </p>
 
-<p align="center">
-  <img src="assets/VPNBypass.png" alt="VPN Bypass" width="128" height="128">
-</p>
-
 <h1 align="center">VPN Bypass</h1>
 
 <p align="center">
