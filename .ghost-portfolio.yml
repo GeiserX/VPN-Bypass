@@ -1,0 +1,12 @@
+description: "macOS menu bar app to bypass VPN for specific domains and services. Route traffic intelligently when your corporate VPN is too aggressive."
+personalNote: "Born out of frustration with corporate VPNs that route everything through the tunnel. This lightweight menu bar app lets you selectively bypass the VPN for specific domains — streaming, personal services, whatever you need."
+keyFeatures:
+  - "Native macOS menu bar app"
+  - "Selective domain-based VPN bypass"
+  - "Lightweight and fast — no performance impact"
+  - "Installable via Homebrew"
+techStack: "Swift, macOS"
+badges:
+  - type: platform
+    label: macOS
+    logo: apple
