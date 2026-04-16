@@ -101,12 +101,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
+        // Hide all UI immediately so quit feels instant
+        NSApp.windows.forEach { $0.orderOut(nil) }
+
         networkMonitor?.cancel()
         refreshTimer?.invalidate()
         watchdogTimer?.invalidate()
         networkDebounceWorkItem?.cancel()
         RouteManager.shared.stopDNSRefreshTimer()
-        
+
         // Clean up routes and hosts file on quit
         // Always run: removes VPN Only catch-all routes and /etc/hosts entries
         let semaphore = DispatchSemaphore(value: 0)
