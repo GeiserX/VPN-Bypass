@@ -13,8 +13,7 @@ jobs:
       - run: swift test --enable-code-coverage
       - name: Convert coverage
         run: |
-          BIN=$(find .build -path '*.xctest/Contents/MacOS/*' -type f | head -1)
-          [ -z "$BIN" ] && BIN=$(find .build -name '*PackageTests' -type f ! -name '*.swift' ! -name '*.o' | head -1)
+          BIN=$(find .build -path '*.xctest/Contents/MacOS/*' -type f ! -path '*.dSYM*' | head -1)
           xcrun llvm-cov export "$BIN" -instr-profile .build/debug/codecov/default.profdata -format lcov > coverage.lcov
       - uses: codecov/codecov-action@v5
         if: github.event_name == 'push'
