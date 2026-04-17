@@ -204,19 +204,34 @@ class HelperTool: NSObject, HelperProtocol {
             lines.removeLast()
         }
         
-        // Add new section if we have entries
+        // Collect domains already managed by other tools (outside our block)
+        let externalDomains: Set<String> = Set(lines.compactMap { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
+            let parts = trimmed.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2 else { return nil }
+            return String(parts[1]).trimmingCharacters(in: .whitespaces).lowercased()
+        })
+
+        // Add new section if we have entries (skip domains managed by other tools)
         if !entries.isEmpty {
-            lines.append("")
-            lines.append(HelperConstants.hostMarkerStart)
+            var managedEntries: [String] = []
             for entry in entries {
                 if let domain = entry["domain"], let ip = entry["ip"] {
-                    // Validate entries
                     if isValidIP(ip) && isValidDomain(domain) {
-                        lines.append("\(ip) \(domain)")
+                        if externalDomains.contains(domain.lowercased()) {
+                            continue
+                        }
+                        managedEntries.append("\(ip) \(domain)")
                     }
                 }
             }
-            lines.append(HelperConstants.hostMarkerEnd)
+            if !managedEntries.isEmpty {
+                lines.append("")
+                lines.append(HelperConstants.hostMarkerStart)
+                lines.append(contentsOf: managedEntries)
+                lines.append(HelperConstants.hostMarkerEnd)
+            }
         }
         
         // Write back
