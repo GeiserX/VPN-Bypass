@@ -2232,7 +2232,18 @@ final class RouteManager: ObservableObject {
         // Test TCP connection to proxy server
         let server = config.proxyConfig.server
         let port = config.proxyConfig.port
-        
+
+        // Validate server is a valid hostname/IP (reject flag injection)
+        guard !server.isEmpty,
+              !server.hasPrefix("-"),
+              server.range(of: #"^[a-zA-Z0-9]([a-zA-Z0-9.\-]*[a-zA-Z0-9])?$"#, options: .regularExpression) != nil,
+              port > 0, port < 65536 else {
+            await MainActor.run {
+                proxyTestResult = ProxyTestResult(success: false, message: "Invalid server or port")
+            }
+            return
+        }
+
         // Use nc (netcat) to test connection
         let args = ["-z", "-w", "5", server, String(port)]
         guard let result = await runProcessAsync("/usr/bin/nc", arguments: args, timeout: 6.0) else {
@@ -3254,6 +3265,9 @@ final class RouteManager: ObservableObject {
     }
     
     private nonisolated static func resolveWithDNSParallel(_ domain: String, dns: String) async -> [String]? {
+        // Reject domains that could be interpreted as flags
+        guard !domain.isEmpty, !domain.hasPrefix("-") else { return nil }
+
         // Check protocol type
         if dns.hasPrefix("https://") {
             // DoH (DNS over HTTPS)

@@ -111,8 +111,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         RouteManager.shared.stopDNSRefreshTimer()
 
         // Clean up routes and hosts file on quit, then allow termination
+        var didReply = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            guard !didReply else { return }
+            didReply = true
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
         Task { @MainActor in
             await RouteManager.shared.cleanupOnQuit()
+            guard !didReply else { return }
+            didReply = true
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
