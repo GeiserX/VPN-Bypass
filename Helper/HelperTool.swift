@@ -205,12 +205,16 @@ class HelperTool: NSObject, HelperProtocol {
         }
         
         // Collect domains already managed by other tools (outside our block)
-        let externalDomains: Set<String> = Set(lines.compactMap { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
-            let parts = trimmed.split(separator: " ", maxSplits: 1)
-            guard parts.count == 2 else { return nil }
-            return String(parts[1]).trimmingCharacters(in: .whitespaces).lowercased()
+        let externalDomains: Set<String> = Set(lines.flatMap { line -> [String] in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return [] }
+            var fields = trimmed.split(whereSeparator: { $0.isWhitespace })
+            guard fields.count >= 2 else { return [] }
+            fields.removeFirst() // drop IP
+            if let commentIdx = fields.firstIndex(where: { $0.hasPrefix("#") }) {
+                fields = Array(fields[..<commentIdx])
+            }
+            return fields.map { String($0).lowercased() }
         })
 
         // Add new section if we have entries (skip domains managed by other tools)
