@@ -467,7 +467,7 @@ final class AddInverseDomainLogicTests: XCTestCase {
         guard parts.count == 2,
               isValidIP(parts[0]),
               let mask = Int(parts[1]),
-              mask >= 0 && mask <= 32 else {
+              mask >= 1 && mask <= 32 else {
             return false
         }
         return true

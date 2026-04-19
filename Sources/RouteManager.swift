@@ -2571,6 +2571,9 @@ final class RouteManager: ObservableObject {
         let entry: String
         if cidr {
             entry = trimmed
+        } else if trimmed.contains("/") {
+            log(.warning, "Invalid CIDR notation: \(trimmed)")
+            return
         } else {
             entry = cleanDomain(trimmed)
             guard !entry.isEmpty else { return }
