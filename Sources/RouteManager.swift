@@ -329,11 +329,23 @@ final class RouteManager: ObservableObject {
         var enabled: Bool
         var resolvedIP: String?
         var lastResolved: Date?
-        
-        init(domain: String, enabled: Bool = true) {
+        var isCIDR: Bool
+
+        init(domain: String, enabled: Bool = true, isCIDR: Bool = false) {
             self.id = UUID()
             self.domain = domain
             self.enabled = enabled
+            self.isCIDR = isCIDR
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(UUID.self, forKey: .id)
+            domain = try container.decode(String.self, forKey: .domain)
+            enabled = try container.decode(Bool.self, forKey: .enabled)
+            resolvedIP = try container.decodeIfPresent(String.self, forKey: .resolvedIP)
+            lastResolved = try container.decodeIfPresent(Date.self, forKey: .lastResolved)
+            isCIDR = try container.decodeIfPresent(Bool.self, forKey: .isCIDR) ?? false
         }
     }
     
@@ -1213,10 +1225,18 @@ final class RouteManager: ObservableObject {
         // Collect all domains to resolve (for parallel resolution)
         var allDomains: [(domain: String, source: String)] = []
 
+        // Collect CIDR entries separately (added to route structures after variable declarations)
+        var inverseCIDRs: [String] = []
+
         if isInverse {
             // VPN Only mode: resolve inverse domains (these go through VPN)
+            // CIDR entries are routed directly as network routes, not DNS-resolved
             for domain in config.inverseDomains where domain.enabled {
-                allDomains.append((domain.domain, domain.domain))
+                if domain.isCIDR {
+                    inverseCIDRs.append(domain.domain)
+                } else {
+                    allDomains.append((domain.domain, domain.domain))
+                }
             }
         } else {
             // Bypass mode: resolve bypass domains + service domains
@@ -1260,8 +1280,21 @@ final class RouteManager: ObservableObject {
             allSourceEntries.append((destination: "128.0.0.0/1", source: "VPN Only catch-all"))
             seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
             seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
+
+            // Add CIDR entries as network routes through VPN gateway
+            for cidr in inverseCIDRs {
+                if !seenDestinations.contains(cidr) {
+                    seenDestinations.insert(cidr)
+                    routesToAdd.append((destination: cidr, gateway: routeGateway, isNetwork: true, source: cidr))
+                }
+                let key = "\(cidr)|\(cidr)"
+                if !seenSourceDests.contains(key) {
+                    seenSourceDests.insert(key)
+                    allSourceEntries.append((destination: cidr, source: cidr))
+                }
+            }
         }
-        
+
         while index < allDomains.count {
             let endIndex = min(index + batchSize, allDomains.count)
             let batch = Array(allDomains[index..<endIndex])
@@ -1550,7 +1583,19 @@ final class RouteManager: ObservableObject {
             seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
 
             for domain in config.inverseDomains where domain.enabled {
-                if let cachedIPs = dnsDiskCache[domain.domain] {
+                if domain.isCIDR {
+                    // CIDR entries: route directly as network routes, no DNS cache
+                    let cidr = domain.domain
+                    let key = "\(cidr)|\(cidr)"
+                    if !seenSourceDests.contains(key) {
+                        seenSourceDests.insert(key)
+                        allSourceEntries.append((destination: cidr, gateway: routeGateway, source: cidr))
+                    }
+                    if !seenDestinations.contains(cidr) {
+                        seenDestinations.insert(cidr)
+                        routesToAdd.append((destination: cidr, gateway: routeGateway, isNetwork: true, source: cidr))
+                    }
+                } else if let cachedIPs = dnsDiskCache[domain.domain] {
                     for ip in cachedIPs {
                         let key = "\(domain.domain)|\(ip)"
                         if !seenSourceDests.contains(key) {
@@ -1731,7 +1776,9 @@ final class RouteManager: ObservableObject {
         var domainsToResolve: [(domain: String, source: String)] = []
         if isInverse {
             for domain in config.inverseDomains where domain.enabled {
-                domainsToResolve.append((domain.domain, domain.domain))
+                if !domain.isCIDR {
+                    domainsToResolve.append((domain.domain, domain.domain))
+                }
             }
         } else {
             for service in config.services where service.enabled {
@@ -2036,7 +2083,12 @@ final class RouteManager: ObservableObject {
 
         if isInverse {
             for domain in config.inverseDomains where domain.enabled {
-                domainsToResolve.append((domain.domain, domain.domain))
+                if domain.isCIDR {
+                    // CIDR entries: preserve as static routes, no DNS resolution
+                    expectedEntries.insert(SourceDest(source: domain.domain, destination: domain.domain))
+                } else {
+                    domainsToResolve.append((domain.domain, domain.domain))
+                }
             }
         } else {
             for domain in config.domains where domain.enabled {
@@ -2135,6 +2187,27 @@ final class RouteManager: ObservableObject {
                         updatedCount += 1
                         log(.success, "DNS refresh: repaired missing CIDR route \(range) for \(service.name)")
                     }
+                }
+            }
+        }
+
+        // VPN Only CIDR entries: repair missing network routes
+        if isInverse {
+            for domain in config.inverseDomains where domain.enabled && domain.isCIDR {
+                let cidr = domain.domain
+                // Already tracked in expectedEntries above
+                if existingDestinations.contains(cidr) { continue }
+                if addedKernelRoutes.contains(cidr) { continue }
+                if await addRoute(cidr, gateway: routeGateway, isNetwork: true) {
+                    activeRoutes.append(ActiveRoute(
+                        destination: cidr,
+                        gateway: routeGateway,
+                        source: cidr,
+                        timestamp: Date()
+                    ))
+                    addedKernelRoutes.insert(cidr)
+                    updatedCount += 1
+                    log(.success, "DNS refresh: repaired missing CIDR route \(cidr)")
                 }
             }
         }
@@ -2491,25 +2564,50 @@ final class RouteManager: ObservableObject {
     // MARK: - Inverse Domain Management
 
     func addInverseDomain(_ domain: String) {
-        let cleaned = cleanDomain(domain)
-        guard !cleaned.isEmpty else { return }
-        guard !config.inverseDomains.contains(where: { $0.domain == cleaned }) else {
-            log(.warning, "VPN Only domain \(cleaned) already exists")
+        let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Detect CIDR input (e.g., "192.168.1.0/24") — bypass domain cleaning
+        let cidr = isValidCIDR(trimmed)
+        let entry: String
+        if cidr {
+            entry = trimmed
+        } else if trimmed.contains("/") {
+            log(.warning, "Invalid CIDR notation: \(trimmed)")
+            return
+        } else {
+            entry = cleanDomain(trimmed)
+            guard !entry.isEmpty else { return }
+        }
+
+        guard !config.inverseDomains.contains(where: { $0.domain == entry }) else {
+            log(.warning, "VPN Only entry \(entry) already exists")
             return
         }
-        config.inverseDomains.append(DomainEntry(domain: cleaned))
+        config.inverseDomains.append(DomainEntry(domain: entry, isCIDR: cidr))
         saveConfig()
-        log(.success, "Added VPN Only domain: \(cleaned)")
+        log(.success, "Added VPN Only \(cidr ? "CIDR" : "domain"): \(entry)")
 
         if isVPNConnected && config.routingMode == .vpnOnly && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 let epoch = routeEpoch
                 guard let gw = vpnGateway else {
-                    log(.error, "Cannot route \(cleaned): no VPN gateway detected")
+                    log(.error, "Cannot route \(entry): no VPN gateway detected")
                     return
                 }
-                if let routes = await applyRoutesForDomain(cleaned, gateway: gw) {
+                if cidr {
+                    // CIDR: add network route directly, no DNS resolution needed
+                    if await addRoute(entry, gateway: gw, isNetwork: true) {
+                        guard routeEpoch == epoch else { return }
+                        activeRoutes.append(ActiveRoute(
+                            destination: entry,
+                            gateway: gw,
+                            source: entry,
+                            timestamp: Date()
+                        ))
+                        log(.success, "Routed CIDR \(entry) through VPN")
+                    }
+                } else if let routes = await applyRoutesForDomain(entry, gateway: gw) {
                     guard routeEpoch == epoch else { return }
                     activeRoutes.append(contentsOf: routes)
                     if config.manageHostsFile { await updateHostsFile() }
@@ -2522,7 +2620,7 @@ final class RouteManager: ObservableObject {
         guard acquireRouteOperation() else {
             config.inverseDomains.removeAll { $0.id == domain.id }
             saveConfig()
-            log(.info, "Removed VPN Only domain: \(domain.domain) (route cleanup deferred)")
+            log(.info, "Removed VPN Only \(domain.isCIDR ? "CIDR" : "domain"): \(domain.domain) (route cleanup deferred)")
             return
         }
         Task {
@@ -2531,7 +2629,7 @@ final class RouteManager: ObservableObject {
             config.inverseDomains.removeAll { $0.id == domain.id }
             saveConfig()
             if config.manageHostsFile { await updateHostsFile() }
-            log(.info, "Removed VPN Only domain: \(domain.domain)")
+            log(.info, "Removed VPN Only \(domain.isCIDR ? "CIDR" : "domain"): \(domain.domain)")
         }
     }
 
@@ -2549,7 +2647,18 @@ final class RouteManager: ObservableObject {
                 let epoch = routeEpoch
                 if domain.enabled {
                     guard let gw = vpnGateway else { return }
-                    if let routes = await applyRoutesForDomain(domain.domain, gateway: gw) {
+                    if domain.isCIDR {
+                        // CIDR: add network route directly
+                        if await addRoute(domain.domain, gateway: gw, isNetwork: true) {
+                            guard routeEpoch == epoch else { return }
+                            activeRoutes.append(ActiveRoute(
+                                destination: domain.domain,
+                                gateway: gw,
+                                source: domain.domain,
+                                timestamp: Date()
+                            ))
+                        }
+                    } else if let routes = await applyRoutesForDomain(domain.domain, gateway: gw) {
                         guard routeEpoch == epoch else { return }
                         activeRoutes.append(contentsOf: routes)
                         if config.manageHostsFile { await updateHostsFile() }
@@ -3364,7 +3473,10 @@ final class RouteManager: ObservableObject {
     private nonisolated static func isValidIPStatic(_ string: String) -> Bool {
         let parts = string.components(separatedBy: ".")
         guard parts.count == 4 else { return false }
-        return parts.allSatisfy { Int($0) != nil && Int($0)! >= 0 && Int($0)! <= 255 }
+        return parts.allSatisfy {
+            guard let num = Int($0), num >= 0, num <= 255 else { return false }
+            return String(num) == $0
+        }
     }
     
     private func addRoute(_ destination: String, gateway: String, isNetwork: Bool = false) async -> Bool {
@@ -3398,6 +3510,8 @@ final class RouteManager: ObservableObject {
         let activeDomains: [DomainEntry] = config.routingMode == .vpnOnly ? config.inverseDomains : config.domains
 
         for domain in activeDomains {
+            // CIDR entries don't have domain names to map in hosts file
+            guard !domain.isCIDR else { continue }
             // Include enabled domains AND disabled domains that still have active kernel routes
             guard domain.enabled || activeRoutes.contains(where: { $0.source == domain.domain }) else { continue }
             if let ip = firstRoutedIP(for: domain.domain, in: routedDestinations) {
@@ -3546,7 +3660,24 @@ final class RouteManager: ObservableObject {
     private func isValidIP(_ string: String) -> Bool {
         let parts = string.components(separatedBy: ".")
         guard parts.count == 4 else { return false }
-        return parts.allSatisfy { Int($0) != nil && Int($0)! >= 0 && Int($0)! <= 255 }
+        return parts.allSatisfy {
+            guard let num = Int($0), num >= 0, num <= 255 else { return false }
+            // Reject leading zeros (e.g., "010") — route interprets them as octal
+            return String(num) == $0
+        }
+    }
+
+    /// Validate CIDR notation (e.g., "192.168.1.0/24")
+    /// Rejects /0 which would conflict with VPN Only catch-all routes.
+    private func isValidCIDR(_ string: String) -> Bool {
+        let parts = string.components(separatedBy: "/")
+        guard parts.count == 2,
+              isValidIP(parts[0]),
+              let mask = Int(parts[1]),
+              mask >= 1 && mask <= 32 else {
+            return false
+        }
+        return true
     }
     
     func log(_ level: LogEntry.LogLevel, _ message: String) {

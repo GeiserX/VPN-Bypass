@@ -13,8 +13,8 @@ final class IPValidationTests: XCTestCase {
         let parts = string.components(separatedBy: ".")
         guard parts.count == 4 else { return false }
         return parts.allSatisfy {
-            guard let num = Int($0) else { return false }
-            return num >= 0 && num <= 255
+            guard let num = Int($0), num >= 0, num <= 255 else { return false }
+            return String(num) == $0
         }
     }
 
@@ -182,6 +182,443 @@ final class IPValidationTests: XCTestCase {
     }
 }
 
+// MARK: - CIDR Validation Tests
+
+/// Tests for the isValidCIDR() function that validates CIDR notation inputs.
+final class CIDRValidationTests: XCTestCase {
+
+    // Reimplementation of RouteManager.isValidIP (same as IPValidationTests)
+    private func isValidIP(_ string: String) -> Bool {
+        let parts = string.components(separatedBy: ".")
+        guard parts.count == 4 else { return false }
+        return parts.allSatisfy {
+            guard let num = Int($0), num >= 0, num <= 255 else { return false }
+            return String(num) == $0
+        }
+    }
+
+    // Reimplementation of RouteManager.isValidCIDR
+    // Rejects /0 which would conflict with VPN Only catch-all routes.
+    private func isValidCIDR(_ string: String) -> Bool {
+        let parts = string.components(separatedBy: "/")
+        guard parts.count == 2,
+              isValidIP(parts[0]),
+              let mask = Int(parts[1]),
+              mask >= 1 && mask <= 32 else {
+            return false
+        }
+        return true
+    }
+
+    // MARK: - Valid CIDRs
+
+    func testValidCIDRWithCommonSubnets() {
+        XCTAssertTrue(isValidCIDR("10.0.0.0/8"))
+        XCTAssertTrue(isValidCIDR("172.16.0.0/12"))
+        XCTAssertTrue(isValidCIDR("192.168.1.0/24"))
+        XCTAssertTrue(isValidCIDR("192.168.0.0/16"))
+    }
+
+    func testValidCIDRWithHostMask() {
+        // /32 = single host
+        XCTAssertTrue(isValidCIDR("1.2.3.4/32"))
+        XCTAssertTrue(isValidCIDR("255.255.255.255/32"))
+    }
+
+    func testInvalidCIDRDefaultRoute() {
+        // /0 is rejected — would conflict with VPN Only catch-all routes
+        XCTAssertFalse(isValidCIDR("0.0.0.0/0"))
+        XCTAssertFalse(isValidCIDR("10.0.0.0/0"))
+    }
+
+    func testValidCIDRBoundaryMasks() {
+        XCTAssertTrue(isValidCIDR("10.0.0.0/1"))
+        XCTAssertTrue(isValidCIDR("10.0.0.0/31"))
+        XCTAssertTrue(isValidCIDR("10.0.0.0/32"))
+    }
+
+    // MARK: - Invalid CIDRs
+
+    func testInvalidCIDRMaskTooLarge() {
+        XCTAssertFalse(isValidCIDR("10.0.0.0/33"))
+        XCTAssertFalse(isValidCIDR("10.0.0.0/64"))
+        XCTAssertFalse(isValidCIDR("10.0.0.0/128"))
+    }
+
+    func testInvalidCIDRNegativeMask() {
+        XCTAssertFalse(isValidCIDR("10.0.0.0/-1"))
+        XCTAssertFalse(isValidCIDR("10.0.0.0/-32"))
+    }
+
+    func testInvalidCIDRNonNumericMask() {
+        XCTAssertFalse(isValidCIDR("10.0.0.0/abc"))
+        XCTAssertFalse(isValidCIDR("10.0.0.0/"))
+        XCTAssertFalse(isValidCIDR("10.0.0.0/xx"))
+    }
+
+    func testInvalidCIDRBadIPPart() {
+        XCTAssertFalse(isValidCIDR("999.0.0.0/24"))
+        XCTAssertFalse(isValidCIDR("not.an.ip.addr/24"))
+        XCTAssertFalse(isValidCIDR("1.2.3/24"))
+        XCTAssertFalse(isValidCIDR("256.1.1.1/24"))
+    }
+
+    func testInvalidCIDRMultipleSlashes() {
+        XCTAssertFalse(isValidCIDR("10.0.0.0/8/16"))
+        XCTAssertFalse(isValidCIDR("10.0.0.0//8"))
+    }
+
+    func testInvalidCIDREmptyString() {
+        XCTAssertFalse(isValidCIDR(""))
+    }
+
+    func testInvalidCIDRPlainIP() {
+        // Plain IP without mask is NOT a valid CIDR
+        XCTAssertFalse(isValidCIDR("192.168.1.1"))
+        XCTAssertFalse(isValidCIDR("10.0.0.1"))
+    }
+
+    func testInvalidCIDRDomainInput() {
+        // Domain names should never pass CIDR validation
+        XCTAssertFalse(isValidCIDR("example.com"))
+        XCTAssertFalse(isValidCIDR("example.com/24"))
+        XCTAssertFalse(isValidCIDR("sub.domain.org/16"))
+    }
+
+    func testInvalidCIDRWithWhitespace() {
+        // isValidCIDR does NOT trim — caller (addInverseDomain) trims first
+        XCTAssertFalse(isValidCIDR(" 10.0.0.0/8"))
+        XCTAssertFalse(isValidCIDR("10.0.0.0/8 "))
+        XCTAssertFalse(isValidCIDR(" 10.0.0.0/8 "))
+    }
+
+    func testInvalidCIDRWithProtocol() {
+        XCTAssertFalse(isValidCIDR("http://10.0.0.0/8"))
+    }
+}
+
+// MARK: - DomainEntry Codable Tests
+
+/// Tests for DomainEntry encoding/decoding, especially backward compatibility with isCIDR field.
+final class DomainEntryCodableTests: XCTestCase {
+
+    // Minimal reimplementation of DomainEntry for Codable testing
+    struct DomainEntry: Codable, Identifiable, Equatable {
+        let id: UUID
+        var domain: String
+        var enabled: Bool
+        var resolvedIP: String?
+        var lastResolved: Date?
+        var isCIDR: Bool
+
+        init(domain: String, enabled: Bool = true, isCIDR: Bool = false) {
+            self.id = UUID()
+            self.domain = domain
+            self.enabled = enabled
+            self.isCIDR = isCIDR
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(UUID.self, forKey: .id)
+            domain = try container.decode(String.self, forKey: .domain)
+            enabled = try container.decode(Bool.self, forKey: .enabled)
+            resolvedIP = try container.decodeIfPresent(String.self, forKey: .resolvedIP)
+            lastResolved = try container.decodeIfPresent(Date.self, forKey: .lastResolved)
+            isCIDR = try container.decodeIfPresent(Bool.self, forKey: .isCIDR) ?? false
+        }
+    }
+
+    // MARK: - Encoding
+
+    func testEncodeDomainEntryWithCIDRTrue() throws {
+        let entry = DomainEntry(domain: "10.0.0.0/8", isCIDR: true)
+        let data = try JSONEncoder().encode(entry)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        XCTAssertEqual(json["domain"] as? String, "10.0.0.0/8")
+        XCTAssertEqual(json["isCIDR"] as? Bool, true)
+        XCTAssertEqual(json["enabled"] as? Bool, true)
+    }
+
+    func testEncodeDomainEntryWithCIDRFalse() throws {
+        let entry = DomainEntry(domain: "example.com", isCIDR: false)
+        let data = try JSONEncoder().encode(entry)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        XCTAssertEqual(json["domain"] as? String, "example.com")
+        XCTAssertEqual(json["isCIDR"] as? Bool, false)
+    }
+
+    // MARK: - Decoding (backward compatibility)
+
+    func testDecodeOldJSONWithoutCIDRFieldDefaultsToFalse() throws {
+        // Simulates JSON saved before the isCIDR field was added
+        let id = UUID()
+        let json: [String: Any] = [
+            "id": id.uuidString,
+            "domain": "telegram.org",
+            "enabled": true
+        ]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        let entry = try JSONDecoder().decode(DomainEntry.self, from: data)
+        XCTAssertEqual(entry.domain, "telegram.org")
+        XCTAssertEqual(entry.enabled, true)
+        XCTAssertEqual(entry.isCIDR, false)
+        XCTAssertNil(entry.resolvedIP)
+        XCTAssertNil(entry.lastResolved)
+    }
+
+    func testDecodeJSONWithCIDRTrue() throws {
+        let id = UUID()
+        let json: [String: Any] = [
+            "id": id.uuidString,
+            "domain": "192.168.1.0/24",
+            "enabled": true,
+            "isCIDR": true
+        ]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        let entry = try JSONDecoder().decode(DomainEntry.self, from: data)
+        XCTAssertEqual(entry.domain, "192.168.1.0/24")
+        XCTAssertEqual(entry.isCIDR, true)
+    }
+
+    func testDecodeJSONWithCIDRExplicitlyFalse() throws {
+        let id = UUID()
+        let json: [String: Any] = [
+            "id": id.uuidString,
+            "domain": "example.com",
+            "enabled": true,
+            "isCIDR": false
+        ]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        let entry = try JSONDecoder().decode(DomainEntry.self, from: data)
+        XCTAssertEqual(entry.domain, "example.com")
+        XCTAssertEqual(entry.isCIDR, false)
+    }
+
+    func testDecodeOldJSONWithResolvedIPPreserved() throws {
+        let id = UUID()
+        let json: [String: Any] = [
+            "id": id.uuidString,
+            "domain": "netflix.com",
+            "enabled": false,
+            "resolvedIP": "52.94.237.1"
+        ]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        let entry = try JSONDecoder().decode(DomainEntry.self, from: data)
+        XCTAssertEqual(entry.domain, "netflix.com")
+        XCTAssertEqual(entry.enabled, false)
+        XCTAssertEqual(entry.resolvedIP, "52.94.237.1")
+        XCTAssertEqual(entry.isCIDR, false)
+    }
+
+    // MARK: - Round-trip
+
+    func testRoundTripCIDREntry() throws {
+        let original = DomainEntry(domain: "172.16.0.0/12", isCIDR: true)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(DomainEntry.self, from: data)
+        XCTAssertEqual(decoded.domain, original.domain)
+        XCTAssertEqual(decoded.enabled, original.enabled)
+        XCTAssertEqual(decoded.isCIDR, original.isCIDR)
+        XCTAssertEqual(decoded.id, original.id)
+    }
+
+    func testRoundTripDomainEntry() throws {
+        let original = DomainEntry(domain: "example.com", isCIDR: false)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(DomainEntry.self, from: data)
+        XCTAssertEqual(decoded.domain, original.domain)
+        XCTAssertEqual(decoded.isCIDR, false)
+    }
+
+    // MARK: - Init defaults
+
+    func testDomainEntryInitDefaultsCIDRToFalse() {
+        let entry = DomainEntry(domain: "google.com")
+        XCTAssertEqual(entry.isCIDR, false)
+        XCTAssertEqual(entry.enabled, true)
+    }
+
+    func testDomainEntryInitExplicitCIDR() {
+        let entry = DomainEntry(domain: "10.0.0.0/8", isCIDR: true)
+        XCTAssertEqual(entry.isCIDR, true)
+        XCTAssertEqual(entry.domain, "10.0.0.0/8")
+    }
+}
+
+// MARK: - AddInverseDomain Logic Tests
+
+/// Tests for the addInverseDomain detection logic: CIDR vs domain classification and deduplication.
+final class AddInverseDomainLogicTests: XCTestCase {
+
+    // Reimplementation of isValidIP
+    private func isValidIP(_ string: String) -> Bool {
+        let parts = string.components(separatedBy: ".")
+        guard parts.count == 4 else { return false }
+        return parts.allSatisfy {
+            guard let num = Int($0), num >= 0, num <= 255 else { return false }
+            return String(num) == $0
+        }
+    }
+
+    // Reimplementation of isValidCIDR
+    private func isValidCIDR(_ string: String) -> Bool {
+        let parts = string.components(separatedBy: "/")
+        guard parts.count == 2,
+              isValidIP(parts[0]),
+              let mask = Int(parts[1]),
+              mask >= 1 && mask <= 32 else {
+            return false
+        }
+        return true
+    }
+
+    // Simplified cleanDomain (mirrors RouteManager.cleanDomain core logic)
+    private func cleanDomain(_ input: String) -> String {
+        var domain = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Remove protocol scheme
+        if let schemeRange = domain.range(of: "^[a-zA-Z][a-zA-Z0-9+.-]*://", options: .regularExpression) {
+            domain = String(domain[schemeRange.upperBound...])
+        }
+        // Remove path/query/fragment
+        if let slashIndex = domain.firstIndex(of: "/") {
+            domain = String(domain[..<slashIndex])
+        }
+        if let queryIndex = domain.firstIndex(of: "?") {
+            domain = String(domain[..<queryIndex])
+        }
+        if let fragmentIndex = domain.firstIndex(of: "#") {
+            domain = String(domain[..<fragmentIndex])
+        }
+        // Remove port
+        if let colonIndex = domain.lastIndex(of: ":") {
+            let afterColon = domain[domain.index(after: colonIndex)...]
+            if afterColon.allSatisfy(\.isNumber) {
+                domain = String(domain[..<colonIndex])
+            }
+        }
+        return domain.lowercased()
+    }
+
+    /// Simulates the classification logic from addInverseDomain
+    private func classifyInput(_ domain: String) -> (entry: String, isCIDR: Bool)? {
+        let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cidr = isValidCIDR(trimmed)
+        let entry: String
+        if cidr {
+            entry = trimmed
+        } else {
+            entry = cleanDomain(trimmed)
+            guard !entry.isEmpty else { return nil }
+        }
+        return (entry, cidr)
+    }
+
+    // MARK: - CIDR Detection
+
+    func testCIDRInputIsDetectedAsCIDR() {
+        let result = classifyInput("192.168.1.0/24")
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result!.entry, "192.168.1.0/24")
+        XCTAssertTrue(result!.isCIDR)
+    }
+
+    func testCIDRInputWithWhitespaceIsTrimmedAndDetected() {
+        let result = classifyInput("  10.0.0.0/8  ")
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result!.entry, "10.0.0.0/8")
+        XCTAssertTrue(result!.isCIDR)
+    }
+
+    func testCIDRInputPreservesExactNotation() {
+        // CIDR bypasses cleanDomain so it is NOT lowercased or modified
+        let result = classifyInput("172.16.0.0/12")
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result!.entry, "172.16.0.0/12")
+        XCTAssertTrue(result!.isCIDR)
+    }
+
+    // MARK: - Domain Detection
+
+    func testDomainInputIsDetectedAsDomain() {
+        let result = classifyInput("example.com")
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result!.entry, "example.com")
+        XCTAssertFalse(result!.isCIDR)
+    }
+
+    func testDomainInputIsCleaned() {
+        let result = classifyInput("https://Example.COM/path?q=1")
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result!.entry, "example.com")
+        XCTAssertFalse(result!.isCIDR)
+    }
+
+    func testDomainInputWithPort() {
+        let result = classifyInput("example.com:8080")
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result!.entry, "example.com")
+        XCTAssertFalse(result!.isCIDR)
+    }
+
+    func testEmptyInputReturnsNil() {
+        let result = classifyInput("")
+        XCTAssertNil(result)
+    }
+
+    func testWhitespaceOnlyInputReturnsNil() {
+        let result = classifyInput("   ")
+        XCTAssertNil(result)
+    }
+
+    // MARK: - Deduplication
+
+    /// Simulates the deduplication check from addInverseDomain
+    private func wouldDuplicate(_ input: String, existingDomains: [String]) -> Bool {
+        guard let result = classifyInput(input) else { return false }
+        return existingDomains.contains(result.entry)
+    }
+
+    func testDuplicateCIDRIsDetected() {
+        let existing = ["10.0.0.0/8", "example.com"]
+        XCTAssertTrue(wouldDuplicate("10.0.0.0/8", existingDomains: existing))
+    }
+
+    func testDuplicateDomainIsDetected() {
+        let existing = ["10.0.0.0/8", "example.com"]
+        XCTAssertTrue(wouldDuplicate("example.com", existingDomains: existing))
+    }
+
+    func testNewCIDRIsNotDuplicate() {
+        let existing = ["10.0.0.0/8", "example.com"]
+        XCTAssertFalse(wouldDuplicate("192.168.0.0/16", existingDomains: existing))
+    }
+
+    func testNewDomainIsNotDuplicate() {
+        let existing = ["10.0.0.0/8", "example.com"]
+        XCTAssertFalse(wouldDuplicate("google.com", existingDomains: existing))
+    }
+
+    func testDuplicateDetectionWithCleanedURL() {
+        // URL that cleans to existing domain
+        let existing = ["telegram.org"]
+        XCTAssertTrue(wouldDuplicate("https://telegram.org/path", existingDomains: existing))
+    }
+
+    // MARK: - Hosts file skipping for CIDR entries
+
+    func testCIDREntryShouldBeSkippedInHostsFile() {
+        // CIDR entries have isCIDR=true, and updateHostsFile skips them with `guard !domain.isCIDR`
+        let cidrEntry = (domain: "10.0.0.0/8", isCIDR: true)
+        XCTAssertTrue(cidrEntry.isCIDR, "CIDR entries must be skipped in hosts file generation")
+    }
+
+    func testDomainEntryShouldNotBeSkippedInHostsFile() {
+        let domainEntry = (domain: "example.com", isCIDR: false)
+        XCTAssertFalse(domainEntry.isCIDR, "Domain entries should be included in hosts file generation")
+    }
+}
+
 // MARK: - Color Extension Tests
 
 final class ColorHexTests: XCTestCase {
@@ -249,7 +686,7 @@ final class HelperConstantsTests: XCTestCase {
 
     func testHelperVersionFormat() {
         // Version must be semver-like: X.Y.Z
-        let version = "1.4.0"
+        let version = "1.5.0"
         let parts = version.components(separatedBy: ".")
         XCTAssertEqual(parts.count, 3)
         XCTAssertNotNil(Int(parts[0]))

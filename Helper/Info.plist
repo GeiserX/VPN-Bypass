@@ -9,9 +9,9 @@
     <key>CFBundleName</key>
     <string>VPNBypassHelper</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1.0</string>
+    <string>1.5.0</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>5</string>
     <key>SMAuthorizedClients</key>
     <array>
         <!-- The main app that can communicate with this helper -->
