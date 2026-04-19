@@ -686,7 +686,7 @@ final class HelperConstantsTests: XCTestCase {
 
     func testHelperVersionFormat() {
         // Version must be semver-like: X.Y.Z
-        let version = "1.4.0"
+        let version = "1.5.0"
         let parts = version.components(separatedBy: ".")
         XCTAssertEqual(parts.count, 3)
         XCTAssertNotNil(Int(parts[0]))
