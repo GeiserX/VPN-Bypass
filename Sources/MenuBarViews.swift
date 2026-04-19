@@ -445,7 +445,7 @@ struct MenuContent: View {
             if routeManager.config.routingMode == .vpnOnly {
                 let enabledDomains = routeManager.config.inverseDomains.filter { $0.enabled }
                 HStack(spacing: 16) {
-                    StatBadge(value: "\(enabledDomains.count)", label: "VPN Domains")
+                    StatBadge(value: "\(enabledDomains.count)", label: "VPN Entries")
                 }
             } else {
                 let enabledServices = routeManager.config.services.filter { $0.enabled }

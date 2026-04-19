@@ -311,9 +311,10 @@ class HelperTool: NSObject, HelperProtocol {
     private func isValidIP(_ string: String) -> Bool {
         let parts = string.components(separatedBy: ".")
         guard parts.count == 4 else { return false }
-        return parts.allSatisfy { 
-            guard let num = Int($0) else { return false }
-            return num >= 0 && num <= 255
+        return parts.allSatisfy {
+            guard let num = Int($0), num >= 0, num <= 255 else { return false }
+            // Reject leading zeros (e.g., "010") — route interprets them as octal
+            return String(num) == $0
         }
     }
     

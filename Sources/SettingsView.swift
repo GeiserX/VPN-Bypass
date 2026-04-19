@@ -210,7 +210,7 @@ struct DomainsTab: View {
                         .font(.system(size: 12))
                         .foregroundColor(Color(hex: "6B7280"))
                     
-                    TextField("Enter domain (e.g., example.com)", text: $newDomain)
+                    TextField(isInverse ? "e.g., example.com or 10.0.0.0/24" : "Enter domain (e.g., example.com)", text: $newDomain)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
                         .focused($isInputFocused)
@@ -347,10 +347,10 @@ struct DomainsTab: View {
             Image(systemName: isInverse ? "lock.shield" : "globe")
                 .font(.system(size: 28))
                 .foregroundColor(Color(hex: "374151"))
-            Text("No domains configured")
+            Text("No entries configured")
                 .font(.system(size: 13))
                 .foregroundColor(Color(hex: "6B7280"))
-            Text(isInverse ? "Add domains that should use VPN" : "Add a domain above to bypass VPN")
+            Text(isInverse ? "Add domains or IP ranges that should use VPN" : "Add a domain above to bypass VPN")
                 .font(.system(size: 11))
                 .foregroundColor(Color(hex: "4B5563"))
         }
@@ -384,9 +384,20 @@ struct DomainRow: View {
                 .shadow(color: domain.enabled ? Color(hex: "10B981").opacity(0.5) : .clear, radius: 4)
             
             VStack(alignment: .leading, spacing: 2) {
-                Text(domain.domain)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(domain.enabled ? .white : Color(hex: "9CA3AF"))
+                HStack(spacing: 6) {
+                    Text(domain.domain)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(domain.enabled ? .white : Color(hex: "9CA3AF"))
+                    if domain.isCIDR {
+                        Text("CIDR")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(Color(hex: "F59E0B"))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color(hex: "F59E0B").opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                }
             }
             
             Spacer()
