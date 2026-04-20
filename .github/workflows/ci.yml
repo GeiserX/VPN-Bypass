@@ -1,17 +1,42 @@
 name: CI
+
 on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths:
+      - '**/*.swift'
+      - 'Package.swift'
+      - 'Package.resolved'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [main]
+    paths:
+      - '**/*.swift'
+      - 'Package.swift'
+      - 'Package.resolved'
+      - '.github/workflows/ci.yml'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
+
 jobs:
   test:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache SPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
       - run: swift test --enable-code-coverage
       - name: Convert coverage
         run: |
