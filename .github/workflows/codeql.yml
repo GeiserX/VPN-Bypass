@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   analyze:
-    runs-on: macos-latest
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
       - uses: github/codeql-action/init@v3
