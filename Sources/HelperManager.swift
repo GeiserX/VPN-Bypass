@@ -268,12 +268,21 @@ final class HelperManager: ObservableObject {
             let service = SMAppService.daemon(plistName: "\(kHelperToolMachServiceName).plist")
             try await service.register()
 
-            installationError = nil
             print("✅ Helper registered successfully via SMAppService")
+
+            // SMAppService.register() can report success without actually placing the
+            // binary on disk (observed with enterprise security tools like Zscaler).
+            // Verify the binary exists before trusting the registration.
+            if !FileManager.default.fileExists(atPath: helperPath) {
+                print("⚠️ SMAppService reported success but helper binary not on disk, falling back to legacy install...")
+                return installHelperLegacy()
+            }
+
+            installationError = nil
             return true
         } catch {
             print("⚠️ SMAppService failed: \(error.localizedDescription)")
-            print("🔐 Falling back to legacy SMJobBless...")
+            print("🔐 Falling back to legacy install...")
             return installHelperLegacy()
         }
     }
