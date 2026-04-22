@@ -259,6 +259,7 @@ final class HelperManager: ObservableObject {
         // binary. For updates we must always go through the legacy path which does
         // the actual file copy. Only use SMAppService for first-time installs.
         let helperPath = "/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)"
+        let plistPath = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
         if FileManager.default.fileExists(atPath: helperPath) {
             print("🔐 Helper exists on disk, using legacy path for update...")
             return installHelperLegacy()
@@ -271,10 +272,11 @@ final class HelperManager: ObservableObject {
             print("✅ Helper registered successfully via SMAppService")
 
             // SMAppService.register() can report success without actually placing the
-            // binary on disk (observed with enterprise security tools like Zscaler).
-            // Verify the binary exists before trusting the registration.
-            if !FileManager.default.fileExists(atPath: helperPath) {
-                print("⚠️ SMAppService reported success but helper binary not on disk, falling back to legacy install...")
+            // binary/plist on disk (observed with enterprise security tools like Zscaler).
+            // Verify both files exist before trusting the registration.
+            if !FileManager.default.fileExists(atPath: helperPath) ||
+               !FileManager.default.fileExists(atPath: plistPath) {
+                print("⚠️ SMAppService reported success but helper files missing on disk, falling back to legacy install...")
                 return installHelperLegacy()
             }
 
