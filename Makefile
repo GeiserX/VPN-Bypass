@@ -56,6 +56,10 @@ bundle: build build-helper
 	@cp assets/author-avatar.png "$(APP_BUNDLE)/Contents/Resources/"
 	@cp assets/menubar-icon.png "$(APP_BUNDLE)/Contents/Resources/"
 	@cp assets/menubar-icon@2x.png "$(APP_BUNDLE)/Contents/Resources/"
+	@cp assets/menubar-icon-active.png "$(APP_BUNDLE)/Contents/Resources/"
+	@cp assets/menubar-icon-active@2x.png "$(APP_BUNDLE)/Contents/Resources/"
+	@cp assets/menubar-icon-error.png "$(APP_BUNDLE)/Contents/Resources/"
+	@cp assets/menubar-icon-error@2x.png "$(APP_BUNDLE)/Contents/Resources/"
 	@# Copy localizations
 	@cp -R Resources/*.lproj "$(APP_BUNDLE)/Contents/Resources/"
 	@echo "App bundle created: $(APP_BUNDLE)"

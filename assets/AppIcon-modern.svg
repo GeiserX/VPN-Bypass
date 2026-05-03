@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- macOS squircle clip path (Apple-style continuous corner radius) -->
+    <clipPath id="squircle">
+      <path d="M512 0C221 0 122 0 61 61S0 221 0 512s0 291 61 451 99 61 451 61 291 0 451-61 61-99 61-451 0-291-61-451S803 0 512 0z"/>
+    </clipPath>
+    <!-- Background gradient -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a2744"/>
+      <stop offset="50%" stop-color="#0f1a2e"/>
+      <stop offset="100%" stop-color="#0a1220"/>
+    </linearGradient>
+    <!-- Shield gradient (blue metallic) -->
+    <linearGradient id="shield" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#4a90d9"/>
+      <stop offset="40%" stop-color="#2668b5"/>
+      <stop offset="100%" stop-color="#1a4a8a"/>
+    </linearGradient>
+    <!-- Shield highlight -->
+    <linearGradient id="shieldHighlight" x1="0.3" y1="0" x2="0.7" y2="0.6">
+      <stop offset="0%" stop-color="#6ab0f0" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#2668b5" stop-opacity="0"/>
+    </linearGradient>
+    <!-- Arrow gradient -->
+    <linearGradient id="arrow" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+    <!-- Arrow glow -->
+    <filter id="arrowGlow">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Subtle drop shadow for the icon shape -->
+    <filter id="iconShadow">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Squircle background -->
+  <g clip-path="url(#squircle)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <!-- Subtle grid pattern -->
+    <g opacity="0.04" stroke="white" stroke-width="1">
+      <line x1="0" y1="256" x2="1024" y2="256"/>
+      <line x1="0" y1="512" x2="1024" y2="512"/>
+      <line x1="0" y1="768" x2="1024" y2="768"/>
+      <line x1="256" y1="0" x2="256" y2="1024"/>
+      <line x1="512" y1="0" x2="512" y2="1024"/>
+      <line x1="768" y1="0" x2="768" y2="1024"/>
+    </g>
+  </g>
+
+  <!-- Main icon group (centered) -->
+  <g clip-path="url(#squircle)">
+    <g transform="translate(512, 490)" filter="url(#iconShadow)">
+      <!-- Shield shape (centered at 0,0) -->
+      <path d="M0 -260 L-180 -170 L-180 30 Q-180 200 0 290 Q180 200 180 30 L180 -170 Z"
+            fill="url(#shield)" stroke="rgba(255,255,255,0.15)" stroke-width="3"/>
+      <!-- Shield highlight overlay -->
+      <path d="M0 -260 L-180 -170 L-180 30 Q-180 200 0 290 Q180 200 180 30 L180 -170 Z"
+            fill="url(#shieldHighlight)"/>
+
+      <!-- Shield top-right fragment (broken off) -->
+      <g transform="translate(20, -12) rotate(8)">
+        <path d="M120 -200 L180 -170 L180 -100 L140 -120 Z"
+              fill="url(#shield)" stroke="rgba(255,255,255,0.1)" stroke-width="2" opacity="0.85"/>
+      </g>
+
+      <!-- Arrow breaking through (lower-left to upper-right) -->
+      <g filter="url(#arrowGlow)">
+        <path d="M-200 260 L40 20 L-20 20 L160 -200 L220 -200 L220 -140 L60 60 L120 60 L-120 320 Z"
+              fill="url(#arrow)" transform="scale(0.8) translate(10, -20)"/>
+      </g>
+    </g>
+
+    <!-- Subtle bottom vignette -->
+    <rect y="800" width="1024" height="224" fill="url(#bg)" opacity="0.3"/>
+  </g>
+</svg>

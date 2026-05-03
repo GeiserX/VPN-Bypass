@@ -330,12 +330,18 @@ final class RouteManager: ObservableObject {
         var resolvedIP: String?
         var lastResolved: Date?
         var isCIDR: Bool
+        var isWildcard: Bool
 
-        init(domain: String, enabled: Bool = true, isCIDR: Bool = false) {
+        init(domain: String, enabled: Bool = true, isCIDR: Bool = false, isWildcard: Bool = false) {
             self.id = UUID()
             self.domain = domain
             self.enabled = enabled
             self.isCIDR = isCIDR
+            self.isWildcard = isWildcard
+        }
+
+        var resolvableDomain: String {
+            isWildcard ? String(domain.dropFirst()) : domain
         }
 
         init(from decoder: Decoder) throws {
@@ -346,6 +352,7 @@ final class RouteManager: ObservableObject {
             resolvedIP = try container.decodeIfPresent(String.self, forKey: .resolvedIP)
             lastResolved = try container.decodeIfPresent(Date.self, forKey: .lastResolved)
             isCIDR = try container.decodeIfPresent(Bool.self, forKey: .isCIDR) ?? false
+            isWildcard = try container.decodeIfPresent(Bool.self, forKey: .isWildcard) ?? false
         }
     }
     
@@ -1235,13 +1242,15 @@ final class RouteManager: ObservableObject {
                 if domain.isCIDR {
                     inverseCIDRs.append(domain.domain)
                 } else {
-                    allDomains.append((domain.domain, domain.domain))
+                    let resolvable = domain.resolvableDomain
+                    allDomains.append((resolvable, domain.domain))
                 }
             }
         } else {
             // Bypass mode: resolve bypass domains + service domains
             for domain in config.domains where domain.enabled {
-                allDomains.append((domain.domain, domain.domain))
+                let resolvable = domain.resolvableDomain
+                allDomains.append((resolvable, domain.domain))
             }
             for service in config.services where service.enabled {
                 for domain in service.domains {
@@ -1595,20 +1604,23 @@ final class RouteManager: ObservableObject {
                         seenDestinations.insert(cidr)
                         routesToAdd.append((destination: cidr, gateway: routeGateway, isNetwork: true, source: cidr))
                     }
-                } else if let cachedIPs = dnsDiskCache[domain.domain] {
-                    for ip in cachedIPs {
-                        let key = "\(domain.domain)|\(ip)"
-                        if !seenSourceDests.contains(key) {
-                            seenSourceDests.insert(key)
-                            allSourceEntries.append((destination: ip, gateway: routeGateway, source: domain.domain))
+                } else {
+                    let cacheKey = domain.resolvableDomain
+                    if let cachedIPs = dnsDiskCache[cacheKey] {
+                        for ip in cachedIPs {
+                            let key = "\(domain.domain)|\(ip)"
+                            if !seenSourceDests.contains(key) {
+                                seenSourceDests.insert(key)
+                                allSourceEntries.append((destination: ip, gateway: routeGateway, source: domain.domain))
+                            }
+                            if !seenDestinations.contains(ip) {
+                                seenDestinations.insert(ip)
+                                routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: domain.domain))
+                            }
                         }
-                        if !seenDestinations.contains(ip) {
-                            seenDestinations.insert(ip)
-                            routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: domain.domain))
+                        if let firstIP = cachedIPs.first {
+                            dnsCache[cacheKey] = firstIP
                         }
-                    }
-                    if let firstIP = cachedIPs.first {
-                        dnsCache[domain.domain] = firstIP
                     }
                 }
             }
@@ -1647,7 +1659,8 @@ final class RouteManager: ObservableObject {
             }
 
             for domain in config.domains where domain.enabled {
-                if let cachedIPs = dnsDiskCache[domain.domain] {
+                let cacheKey = domain.resolvableDomain
+                if let cachedIPs = dnsDiskCache[cacheKey] {
                     for ip in cachedIPs {
                         let key = "\(domain.domain)|\(ip)"
                         if !seenSourceDests.contains(key) {
@@ -1660,7 +1673,7 @@ final class RouteManager: ObservableObject {
                         }
                     }
                     if let firstIP = cachedIPs.first {
-                        dnsCache[domain.domain] = firstIP
+                        dnsCache[cacheKey] = firstIP
                     }
                 }
             }
@@ -1777,7 +1790,8 @@ final class RouteManager: ObservableObject {
         if isInverse {
             for domain in config.inverseDomains where domain.enabled {
                 if !domain.isCIDR {
-                    domainsToResolve.append((domain.domain, domain.domain))
+                    let resolvable = domain.resolvableDomain
+                    domainsToResolve.append((resolvable, domain.domain))
                 }
             }
         } else {
@@ -1787,7 +1801,8 @@ final class RouteManager: ObservableObject {
                 }
             }
             for domain in config.domains where domain.enabled {
-                domainsToResolve.append((domain.domain, domain.domain))
+                let resolvable = domain.resolvableDomain
+                domainsToResolve.append((resolvable, domain.domain))
             }
         }
         
@@ -2087,12 +2102,14 @@ final class RouteManager: ObservableObject {
                     // CIDR entries: preserve as static routes, no DNS resolution
                     expectedEntries.insert(SourceDest(source: domain.domain, destination: domain.domain))
                 } else {
-                    domainsToResolve.append((domain.domain, domain.domain))
+                    let resolvable = domain.resolvableDomain
+                    domainsToResolve.append((resolvable, domain.domain))
                 }
             }
         } else {
             for domain in config.domains where domain.enabled {
-                domainsToResolve.append((domain.domain, domain.domain))
+                let resolvable = domain.resolvableDomain
+                domainsToResolve.append((resolvable, domain.domain))
             }
             for service in config.services where service.enabled {
                 for domain in service.domains {
@@ -2340,17 +2357,27 @@ final class RouteManager: ObservableObject {
     }
     
     func addDomain(_ domain: String) {
-        let cleaned = cleanDomain(domain)
+        let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isWildcard = trimmed.hasPrefix("*.")
+        let cleaned: String
+        if isWildcard {
+            let suffix = cleanDomain(String(trimmed.dropFirst(2)))
+            guard !suffix.isEmpty else { return }
+            cleaned = "." + suffix
+        } else {
+            cleaned = cleanDomain(trimmed)
+        }
         guard !cleaned.isEmpty else { return }
         guard !config.domains.contains(where: { $0.domain == cleaned }) else {
             log(.warning, "Domain \(cleaned) already exists")
             return
         }
-        
-        config.domains.append(DomainEntry(domain: cleaned))
+
+        let entry = DomainEntry(domain: cleaned, isWildcard: isWildcard)
+        config.domains.append(entry)
         saveConfig()
-        log(.success, "Added domain: \(cleaned)")
-        
+        log(.success, "Added \(isWildcard ? "wildcard " : "")domain: \(cleaned)")
+
         if isVPNConnected && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
@@ -2359,7 +2386,7 @@ final class RouteManager: ObservableObject {
                     log(.error, "Cannot route \(cleaned): no local gateway detected. Try Refresh Routes.")
                     return
                 }
-                if let routes = await applyRoutesForDomain(cleaned, gateway: gateway) {
+                if let routes = await applyRoutesForDomain(entry.resolvableDomain, gateway: gateway, source: cleaned) {
                     guard routeEpoch == epoch else { return }
                     activeRoutes.append(contentsOf: routes)
                     if config.manageHostsFile {
@@ -2388,7 +2415,7 @@ final class RouteManager: ObservableObject {
     }
     
     private func retryFailedDomain(_ domain: String) async {
-        guard config.domains.contains(where: { $0.domain == domain && $0.enabled }) else { return }
+        guard let entry = config.domains.first(where: { $0.domain == domain && $0.enabled }) else { return }
         guard isVPNConnected else { return }
         guard let gateway = await ensureGateway() else {
             log(.error, "Retry skipped for \(domain): no local gateway detected")
@@ -2398,7 +2425,7 @@ final class RouteManager: ObservableObject {
             log(.info, "Skipping retry for \(domain) — routes already exist")
             return
         }
-        
+
         guard acquireRouteOperation() else {
             log(.info, "Retry skipped for \(domain): route operation in progress")
             return
@@ -2407,7 +2434,7 @@ final class RouteManager: ObservableObject {
         let epoch = routeEpoch
 
         log(.info, "Retrying DNS for \(domain)...")
-        if let routes = await applyRoutesForDomain(domain, gateway: gateway) {
+        if let routes = await applyRoutesForDomain(entry.resolvableDomain, gateway: gateway, source: domain) {
             guard routeEpoch == epoch else { return }
             activeRoutes.append(contentsOf: routes)
             if config.manageHostsFile {
@@ -2463,7 +2490,8 @@ final class RouteManager: ObservableObject {
                         log(.error, "Cannot route \(domain.domain): no local gateway detected")
                         return
                     }
-                    if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
+                    let resolvable = domain.resolvableDomain
+                    if let routes = await applyRoutesForDomain(resolvable, gateway: gateway, source: domain.domain) {
                         guard routeEpoch == epoch else { return }
                         activeRoutes.append(contentsOf: routes)
                         if config.manageHostsFile {
@@ -2503,7 +2531,8 @@ final class RouteManager: ObservableObject {
             for domain in domainsToChange {
                 guard routeEpoch == epoch else { return }
                 if enabled, let gw = gateway {
-                    if let routes = await applyRoutesForDomain(domain.domain, gateway: gw, persistCache: false) {
+                    let resolvable = domain.resolvableDomain
+                    if let routes = await applyRoutesForDomain(resolvable, gateway: gw, source: domain.domain, persistCache: false) {
                         guard routeEpoch == epoch else { return }
                         activeRoutes.append(contentsOf: routes)
                     }
@@ -2568,46 +2597,51 @@ final class RouteManager: ObservableObject {
 
         // Detect CIDR input (e.g., "192.168.1.0/24") — bypass domain cleaning
         let cidr = isValidCIDR(trimmed)
-        let entry: String
+        let isWildcard = trimmed.hasPrefix("*.")
+        let cleaned: String
         if cidr {
-            entry = trimmed
+            cleaned = trimmed
         } else if trimmed.contains("/") {
             log(.warning, "Invalid CIDR notation: \(trimmed)")
             return
+        } else if isWildcard {
+            let suffix = cleanDomain(String(trimmed.dropFirst(2)))
+            guard !suffix.isEmpty else { return }
+            cleaned = "." + suffix
         } else {
-            entry = cleanDomain(trimmed)
-            guard !entry.isEmpty else { return }
+            cleaned = cleanDomain(trimmed)
+            guard !cleaned.isEmpty else { return }
         }
 
-        guard !config.inverseDomains.contains(where: { $0.domain == entry }) else {
-            log(.warning, "VPN Only entry \(entry) already exists")
+        guard !config.inverseDomains.contains(where: { $0.domain == cleaned }) else {
+            log(.warning, "VPN Only entry \(cleaned) already exists")
             return
         }
-        config.inverseDomains.append(DomainEntry(domain: entry, isCIDR: cidr))
+        let inverseEntry = DomainEntry(domain: cleaned, isCIDR: cidr, isWildcard: isWildcard)
+        config.inverseDomains.append(inverseEntry)
         saveConfig()
-        log(.success, "Added VPN Only \(cidr ? "CIDR" : "domain"): \(entry)")
+        log(.success, "Added VPN Only \(cidr ? "CIDR" : isWildcard ? "wildcard " : "")domain: \(cleaned)")
 
         if isVPNConnected && config.routingMode == .vpnOnly && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 let epoch = routeEpoch
                 guard let gw = vpnGateway else {
-                    log(.error, "Cannot route \(entry): no VPN gateway detected")
+                    log(.error, "Cannot route \(cleaned): no VPN gateway detected")
                     return
                 }
                 if cidr {
-                    // CIDR: add network route directly, no DNS resolution needed
-                    if await addRoute(entry, gateway: gw, isNetwork: true) {
+                    if await addRoute(cleaned, gateway: gw, isNetwork: true) {
                         guard routeEpoch == epoch else { return }
                         activeRoutes.append(ActiveRoute(
-                            destination: entry,
+                            destination: cleaned,
                             gateway: gw,
-                            source: entry,
+                            source: cleaned,
                             timestamp: Date()
                         ))
-                        log(.success, "Routed CIDR \(entry) through VPN")
+                        log(.success, "Routed CIDR \(cleaned) through VPN")
                     }
-                } else if let routes = await applyRoutesForDomain(entry, gateway: gw) {
+                } else if let routes = await applyRoutesForDomain(inverseEntry.resolvableDomain, gateway: gw, source: cleaned) {
                     guard routeEpoch == epoch else { return }
                     activeRoutes.append(contentsOf: routes)
                     if config.manageHostsFile { await updateHostsFile() }
@@ -2658,10 +2692,13 @@ final class RouteManager: ObservableObject {
                                 timestamp: Date()
                             ))
                         }
-                    } else if let routes = await applyRoutesForDomain(domain.domain, gateway: gw) {
-                        guard routeEpoch == epoch else { return }
-                        activeRoutes.append(contentsOf: routes)
-                        if config.manageHostsFile { await updateHostsFile() }
+                    } else {
+                        let resolvable = domain.resolvableDomain
+                        if let routes = await applyRoutesForDomain(resolvable, gateway: gw, source: domain.domain) {
+                            guard routeEpoch == epoch else { return }
+                            activeRoutes.append(contentsOf: routes)
+                            if config.manageHostsFile { await updateHostsFile() }
+                        }
                     }
                 } else {
                     await removeRoutesForSource(domain.domain)
@@ -3377,25 +3414,26 @@ final class RouteManager: ObservableObject {
         // Reject domains that could be interpreted as flags
         guard !domain.isEmpty, !domain.hasPrefix("-") else { return nil }
 
+        // Validate DNS server string — reject whitespace, semicolons, and shell metacharacters
+        let dnsStripped = dns.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !dnsStripped.isEmpty,
+              dnsStripped.rangeOfCharacter(from: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ";|&`$"))) == nil
+        else { return nil }
+
         // Check protocol type
-        if dns.hasPrefix("https://") {
-            // DoH (DNS over HTTPS)
-            return await resolveWithDoHParallel(domain, dohURL: dns)
-        } else if dns.hasPrefix("tls://") {
-            // DoT (DNS over TLS) - requires kdig from knot-dns
-            let server = String(dns.dropFirst(6)) // Remove "tls://"
+        if dnsStripped.hasPrefix("https://") {
+            return await resolveWithDoHParallel(domain, dohURL: dnsStripped)
+        } else if dnsStripped.hasPrefix("tls://") {
+            let server = String(dnsStripped.dropFirst(6))
             return await resolveWithDoTParallel(domain, server: server)
-        } else if dns.contains(":853") {
-            // DoT with explicit port
-            let server = dns.replacingOccurrences(of: ":853", with: "")
+        } else if dnsStripped.contains(":853") {
+            let server = dnsStripped.replacingOccurrences(of: ":853", with: "")
             return await resolveWithDoTParallel(domain, server: server)
         }
-        
-        // Regular DNS via dig - uses async dispatch to GCD for true parallelism
-        // Shorter timeout for local DNS (should respond in <100ms), longer for external
-        let isLocalDNS = dns.hasPrefix("192.168.") || dns.hasPrefix("10.") || dns.hasPrefix("172.16.") || dns.hasPrefix("172.17.") || dns.hasPrefix("172.18.") || dns.hasPrefix("172.19.") || dns.hasPrefix("172.2") || dns.hasPrefix("172.30.") || dns.hasPrefix("172.31.")
+
+        let isLocalDNS = dnsStripped.hasPrefix("192.168.") || dnsStripped.hasPrefix("10.") || dnsStripped.hasPrefix("172.16.") || dnsStripped.hasPrefix("172.17.") || dnsStripped.hasPrefix("172.18.") || dnsStripped.hasPrefix("172.19.") || dnsStripped.hasPrefix("172.2") || dnsStripped.hasPrefix("172.30.") || dnsStripped.hasPrefix("172.31.")
         let timeout: TimeInterval = isLocalDNS ? 1.0 : 1.5
-        let args = ["@\(dns)", "+short", "+time=1", "+tries=1", domain]
+        let args = ["@\(dnsStripped)", "+short", "+time=1", "+tries=1", domain]
         guard let result = await runProcessParallel("/usr/bin/dig", arguments: args, timeout: timeout) else {
             return nil
         }
@@ -3514,8 +3552,9 @@ final class RouteManager: ObservableObject {
             guard !domain.isCIDR else { continue }
             // Include enabled domains AND disabled domains that still have active kernel routes
             guard domain.enabled || activeRoutes.contains(where: { $0.source == domain.domain }) else { continue }
-            if let ip = firstRoutedIP(for: domain.domain, in: routedDestinations) {
-                entries.append((domain.domain, ip))
+            let lookupDomain = domain.resolvableDomain
+            if let ip = firstRoutedIP(for: lookupDomain, in: routedDestinations) {
+                entries.append((lookupDomain, ip))
             }
         }
 

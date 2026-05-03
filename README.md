@@ -111,7 +111,7 @@ Click the shield icon in the menu bar to:
 Click the gear icon to access settings:
 
 **Domains Tab**
-- Add custom domains to bypass
+- Add custom domains to bypass (supports wildcards: `*.example.com` matches all subdomains)
 - Enable/disable individual domains
 - See resolved IPs
 
@@ -186,6 +186,22 @@ The app requires:
 - **Notifications**: Optional, for VPN status alerts (prompted on first launch)
 
 ## Troubleshooting
+
+### App won't open / "damaged" error (macOS Gatekeeper)
+
+The app is ad-hoc signed and not notarized with Apple, so macOS Gatekeeper may block it on first launch. You'll see errors like *"VPN Bypass is damaged and can't be opened"* or *"Apple cannot check it for malicious software"*.
+
+**Fix:** Remove the quarantine attribute:
+
+```bash
+xattr -cr /Applications/VPN\ Bypass.app
+```
+
+**Prevention:** Install with the `--no-quarantine` flag:
+
+```bash
+brew install --cask --no-quarantine vpn-bypass
+```
 
 ### Routes not being applied
 
