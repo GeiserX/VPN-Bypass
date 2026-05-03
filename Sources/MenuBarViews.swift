@@ -3,40 +3,12 @@
 
 import SwiftUI
 
-// MARK: - Brand Colors
-
-struct BrandColors {
-    // Blue from the shield (left side of logo)
-    static let blue = Color(red: 0.15, green: 0.40, blue: 0.85)
-    static let blueLight = Color(red: 0.25, green: 0.55, blue: 0.95)
-    static let blueDark = Color(red: 0.05, green: 0.20, blue: 0.55)
-    
-    // Silver from the shield (right side - metallic)
-    static let silver = Color(red: 0.75, green: 0.78, blue: 0.82)
-    static let silverLight = Color(red: 0.88, green: 0.90, blue: 0.92)
-    static let silverDark = Color(red: 0.45, green: 0.48, blue: 0.52)
-    
-    // Arrow blue (cyan-ish)
-    static let arrowBlue = Color(red: 0.20, green: 0.65, blue: 0.95)
-    
-    // Gradients
-    static let blueGradient = LinearGradient(
-        colors: [blueLight, blue, blueDark],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-    
-    static let silverGradient = LinearGradient(
-        colors: [silverLight, silver, silverDark],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-}
-
 // MARK: - Menu Bar Label
 
 struct MenuBarLabel: View {
     @EnvironmentObject var routeManager: RouteManager
+    @ObservedObject private var helperManager = HelperManager.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isAnimating = false
 
     private static let iconDefault: NSImage? = loadTemplateIcon("menubar-icon")
@@ -50,12 +22,23 @@ struct MenuBarLabel: View {
     }
 
     private var currentIcon: NSImage? {
-        if HelperManager.shared.helperState.isFailed {
+        if helperManager.helperState.isFailed {
             return Self.iconError
         } else if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty {
             return Self.iconActive
         }
         return Self.iconDefault
+    }
+
+    private var iconAccessibilityLabel: String {
+        if helperManager.helperState.isFailed {
+            return "VPN Bypass: helper error"
+        } else if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty {
+            return "VPN Bypass: \(routeManager.uniqueRouteCount) active routes"
+        } else if routeManager.isVPNConnected {
+            return "VPN Bypass: VPN connected, no routes"
+        }
+        return "VPN Bypass: inactive"
     }
 
     private var menuBarIcon: some View {
@@ -75,7 +58,7 @@ struct MenuBarLabel: View {
     var body: some View {
         HStack(spacing: 3) {
             ZStack {
-                if routeManager.isLoading || routeManager.isApplyingRoutes {
+                if (routeManager.isLoading || routeManager.isApplyingRoutes) && !reduceMotion {
                     menuBarIcon
                         .opacity(isAnimating ? 0.4 : 1.0)
                         .animation(
@@ -90,12 +73,13 @@ struct MenuBarLabel: View {
                 }
             }
 
-            // Active routes count when VPN connected and not loading
             if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty && !routeManager.isLoading && !routeManager.isApplyingRoutes {
                 Text("\(routeManager.uniqueRouteCount)")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(iconAccessibilityLabel)
     }
 }
 
@@ -108,11 +92,11 @@ struct BrandedAppName: View {
         HStack(spacing: 0) {
             Text("VPN")
                 .font(.system(size: fontSize, weight: .black, design: .rounded))
-                .foregroundStyle(BrandColors.blueGradient)
+                .foregroundStyle(Theme.Brand.blueGradient)
             
             Text("Bypass")
                 .font(.system(size: fontSize, weight: .bold, design: .rounded))
-                .foregroundStyle(BrandColors.silverGradient)
+                .foregroundStyle(Theme.Brand.silverGradient)
         }
     }
 }
@@ -185,7 +169,7 @@ struct MenuContent: View {
             } else {
                 Image(systemName: "shield.checkered")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(BrandColors.blueGradient)
+                    .foregroundStyle(Theme.Brand.blueGradient)
             }
 
             // App name with branded colors

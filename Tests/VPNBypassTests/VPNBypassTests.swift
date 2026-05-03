@@ -312,6 +312,10 @@ final class DomainEntryCodableTests: XCTestCase {
         var isCIDR: Bool
         var isWildcard: Bool
 
+        var resolvableDomain: String {
+            isWildcard ? String(domain.dropFirst()) : domain
+        }
+
         init(domain: String, enabled: Bool = true, isCIDR: Bool = false, isWildcard: Bool = false) {
             self.id = UUID()
             self.domain = domain
@@ -498,14 +502,28 @@ final class DomainEntryCodableTests: XCTestCase {
 
     func testWildcardResolvableDomainStripsLeadingDot() {
         let entry = DomainEntry(domain: ".google.com", isWildcard: true)
-        let resolvable = entry.isWildcard ? String(entry.domain.dropFirst()) : entry.domain
-        XCTAssertEqual(resolvable, "google.com")
+        XCTAssertEqual(entry.resolvableDomain, "google.com")
     }
 
     func testNonWildcardResolvableDomainUnchanged() {
         let entry = DomainEntry(domain: "google.com")
-        let resolvable = entry.isWildcard ? String(entry.domain.dropFirst()) : entry.domain
-        XCTAssertEqual(resolvable, "google.com")
+        XCTAssertEqual(entry.resolvableDomain, "google.com")
+    }
+
+    func testResolvableDomainConsistentAsCacheKey() {
+        let wildcard = DomainEntry(domain: ".example.com", isWildcard: true)
+        let plain = DomainEntry(domain: "example.com")
+        XCTAssertEqual(wildcard.resolvableDomain, plain.resolvableDomain)
+    }
+
+    func testResolvableDomainWithNestedWildcard() {
+        let entry = DomainEntry(domain: ".sub.example.com", isWildcard: true)
+        XCTAssertEqual(entry.resolvableDomain, "sub.example.com")
+    }
+
+    func testCIDREntryResolvableDomainUnchanged() {
+        let entry = DomainEntry(domain: "10.0.0.0/8", isCIDR: true)
+        XCTAssertEqual(entry.resolvableDomain, "10.0.0.0/8")
     }
 }
 

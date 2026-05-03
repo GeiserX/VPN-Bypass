@@ -7,9 +7,9 @@ enum Theme {
     // MARK: - Text Colors (on dark backgrounds ~#0F0F14)
 
     static let textPrimary = Color.white
-    static let textSecondary = Color(hex: "9CA3AF")     // ~5.7:1 contrast
-    static let textTertiary = Color(hex: "6B7280")       // ~4.2:1 - decorative only
-    static let textDisabled = Color(hex: "6B7280")       // was #4B5563 (~2.7:1 FAIL)
+    static let textSecondary = Color(hex: "9CA3AF")     // ~7.2:1 contrast
+    static let textTertiary = Color(hex: "6B7280")       // ~3.8:1 - decorative only
+    static let textDisabled = Color(hex: "7D8491")       // ~4.6:1 WCAG AA compliant
 
     // MARK: - Semantic Status Colors
 
@@ -39,8 +39,10 @@ enum Theme {
         endPoint: .bottom
     )
 
+    static let successLight = Color(hex: "34D399")
+
     static let successGradient = LinearGradient(
-        colors: [success, Color(hex: "34D399")],
+        colors: [success, successLight],
         startPoint: .top,
         endPoint: .bottom
     )
@@ -75,9 +77,35 @@ enum Theme {
     static let border = Color.white.opacity(0.10)
     static let separator = Color.white.opacity(0.08)
 
-    // MARK: - Brand
+    // MARK: - Brand (fundraising)
 
     static let githubSponsors = Color(hex: "DB61A2")
     static let buyMeACoffee = Color(hex: "FFDD00")
     static let patreon = Color(hex: "FF424D")
+
+    // MARK: - Brand Identity
+
+    enum Brand {
+        static let blue = Color(red: 0.15, green: 0.40, blue: 0.85)
+        static let blueLight = Color(red: 0.25, green: 0.55, blue: 0.95)
+        static let blueDark = Color(red: 0.05, green: 0.20, blue: 0.55)
+
+        static let silver = Color(red: 0.75, green: 0.78, blue: 0.82)
+        static let silverLight = Color(red: 0.88, green: 0.90, blue: 0.92)
+        static let silverDark = Color(red: 0.45, green: 0.48, blue: 0.52)
+
+        static let arrowBlue = Color(red: 0.20, green: 0.65, blue: 0.95)
+
+        static let blueGradient = LinearGradient(
+            colors: [blueLight, blue, blueDark],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+
+        static let silverGradient = LinearGradient(
+            colors: [silverLight, silver, silverDark],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
 }

@@ -199,7 +199,7 @@ struct DomainsTab: View {
                         .font(.system(size: 12))
                         .foregroundColor(Theme.textSecondary)
 
-                    TextField(isInverse ? "e.g., example.com or 10.0.0.0/24" : "e.g., example.com or *.example.com", text: $newDomain)
+                    TextField(isInverse ? "e.g., example.com, *.example.com, or 10.0.0.0/24" : "e.g., example.com or *.example.com", text: $newDomain)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
                         .focused($isInputFocused)
@@ -2193,14 +2193,14 @@ struct LogsTab: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color.white.opacity(0.03))
+                .fill(Theme.bgCard)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                        .stroke(Theme.bgCardBorder, lineWidth: 1)
                 )
         )
     }
-    
+
     private func copyLogsToClipboard() {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -2251,7 +2251,7 @@ struct InfoTab: View {
             } else {
                 Image(systemName: "shield.checkered")
                     .font(.system(size: 48))
-                    .foregroundStyle(BrandColors.blueGradient)
+                    .foregroundStyle(Theme.Brand.blueGradient)
             }
             
             // App name with branded colors
@@ -2638,18 +2638,18 @@ struct BrandedTitlebarView: View {
                 } else {
                     Image(systemName: "shield.checkered")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(BrandColors.blueGradient)
+                        .foregroundStyle(Theme.Brand.blueGradient)
                 }
 
                 // Branded name
                 HStack(spacing: 0) {
                     Text("VPN")
                         .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(BrandColors.blueGradient)
+                        .foregroundStyle(Theme.Brand.blueGradient)
 
                     Text("Bypass")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(BrandColors.silverGradient)
+                        .foregroundStyle(Theme.Brand.silverGradient)
                 }
             }
 
