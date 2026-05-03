@@ -199,7 +199,7 @@ struct DomainsTab: View {
                         .font(.system(size: 12))
                         .foregroundColor(Theme.textSecondary)
 
-                    TextField(isInverse ? "e.g., example.com, *.example.com, or 10.0.0.0/24" : "e.g., example.com or *.example.com", text: $newDomain)
+                    TextField(isInverse ? "e.g., example.com or 10.0.0.0/24" : "e.g., example.com", text: $newDomain)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
                         .focused($isInputFocused)
@@ -384,15 +384,6 @@ struct DomainRow: View {
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
                             .background(Theme.warning.opacity(0.15))
-                            .cornerRadius(4)
-                    }
-                    if domain.isWildcard {
-                        Text("Wildcard")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(Theme.cyan)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Theme.cyan.opacity(0.15))
                             .cornerRadius(4)
                     }
                 }

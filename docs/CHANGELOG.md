@@ -5,10 +5,17 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - 2026-05-03
+
+### Removed
+- **Wildcard domain support** — Removed `*.example.com` syntax. macOS routing is IP-based and `/etc/hosts` does not support wildcards, so the feature only resolved the base domain and could not actually route subdomains with different IPs. This was misleading.
+
+### Changed
+- **Simplified `DomainEntry`** — Removed `resolvableDomain` computed property (no longer needed without wildcards)
+
 ## [2.6.0] - 2026-05-03
 
 ### Added
-- **Wildcard domain support** — Use `*.example.com` syntax in both Bypass and VPN Only modes to match all subdomains
 - **Centralized theme system** — New `Theme.swift` with semantic colors, WCAG AA-compliant contrast ratios, and consolidated brand identity (`Theme.Brand`)
 - **Menu bar state icons** — Three distinct template images (default/active/error) for at-a-glance status
 - **Modern app icon** — Redesigned shield icon with gradient and arrow motif
@@ -16,8 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reduced motion support** — Pulse animation respects `accessibilityReduceMotion` system preference
 
 ### Fixed
-- **Wildcard retry bug** — `retryFailedDomain` now strips the leading dot before DNS resolution and passes the `source:` parameter for correct route tracking
-- **VPN Only wildcard input** — `addInverseDomain` now handles `*.domain` input (previously silently dropped the wildcard flag)
+- **Retry DNS tracking** — `retryFailedDomain` now passes the `source:` parameter for correct route tracking
 - **Reactive helper state** — Menu bar icon updates immediately when helper state changes (was reading a static reference)
 - **DNS input validation** — `resolveWithDNSParallel` now rejects whitespace, semicolons, and shell metacharacters in DNS server strings
 - **Theme consistency** — Replaced remaining hardcoded `Color.white.opacity()` values with semantic theme tokens
@@ -25,7 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **250+ hardcoded colors replaced** with semantic `Theme.*` tokens across all views
-- **`DomainEntry.resolvableDomain`** computed property eliminates 13 repeated ternary expressions
 - **`BrandColors` consolidated** into `Theme.Brand` nested enum (single source of truth)
 
 ## [2.4.2] - 2026-04-10

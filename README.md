@@ -111,7 +111,7 @@ Click the shield icon in the menu bar to:
 Click the gear icon to access settings:
 
 **Domains Tab**
-- Add custom domains to bypass (supports wildcards: `*.example.com` matches all subdomains)
+- Add custom domains to bypass
 - Enable/disable individual domains
 - See resolved IPs
 
