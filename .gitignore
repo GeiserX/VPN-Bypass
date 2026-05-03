@@ -40,3 +40,7 @@ Package.resolved
 # Test output
 .test-*
 dist/
+
+# AI tooling state
+.omc/
+.lynxprompt/
