@@ -6,14 +6,15 @@ import SwiftUI
 import Network
 import UserNotifications
 
-@main
-struct VPNBypassApp: App {
+public struct VPNBypassApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var routeManager = RouteManager.shared
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var launchAtLoginManager = LaunchAtLoginManager.shared
-    
-    var body: some Scene {
+
+    public init() {}
+
+    public var body: some Scene {
         MenuBarExtra {
             MenuContent()
                 .environmentObject(routeManager)

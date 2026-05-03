@@ -3661,7 +3661,7 @@ final class RouteManager: ObservableObject {
         return cleanDomain(input)
     }
 
-    private func cleanDomain(_ input: String) -> String {
+    nonisolated func cleanDomain(_ input: String) -> String {
         var domain = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Remove any protocol scheme (http, https, ssh, ftp, etc.) using regex
@@ -3694,7 +3694,7 @@ final class RouteManager: ObservableObject {
         return domain.lowercased()
     }
     
-    private func isValidIP(_ string: String) -> Bool {
+    nonisolated func isValidIP(_ string: String) -> Bool {
         let parts = string.components(separatedBy: ".")
         guard parts.count == 4 else { return false }
         return parts.allSatisfy {
@@ -3706,7 +3706,7 @@ final class RouteManager: ObservableObject {
 
     /// Validate CIDR notation (e.g., "192.168.1.0/24")
     /// Rejects /0 which would conflict with VPN Only catch-all routes.
-    private func isValidCIDR(_ string: String) -> Bool {
+    nonisolated func isValidCIDR(_ string: String) -> Bool {
         let parts = string.components(separatedBy: "/")
         guard parts.count == 2,
               isValidIP(parts[0]),

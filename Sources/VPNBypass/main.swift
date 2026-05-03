@@ -1,0 +1,3 @@
+import VPNBypassCore
+
+VPNBypassApp.main()

@@ -12,24 +12,22 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
-        .executableTarget(
-            name: "VPNBypass",
+        .target(
+            name: "VPNBypassCore",
             dependencies: [],
-            path: ".",
-            exclude: [
-                "AGENTS.md", "Casks", "Helper", "Info.plist", "LICENSE",
-                "Makefile", "README.md", "ROADMAP.md", "SECURITY.md",
-                "VPN Bypass.app", "VPNBypass.entitlements", "assets",
-                "dist", "docs", "scripts", "Tests"
-            ],
-            sources: ["Sources"],
+            path: "Sources/VPNBypassCore",
             resources: [
                 .process("Resources")
             ]
         ),
+        .executableTarget(
+            name: "VPNBypass",
+            dependencies: ["VPNBypassCore"],
+            path: "Sources/VPNBypass"
+        ),
         .testTarget(
             name: "VPNBypassTests",
-            dependencies: [],
+            dependencies: ["VPNBypassCore"],
             path: "Tests/VPNBypassTests",
             sources: ["VPNBypassTests.swift"]
         )

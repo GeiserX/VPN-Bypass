@@ -19,13 +19,13 @@ build-helper:
 	@swiftc -O \
 		-target arm64-apple-macos13.0 \
 		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-arm64 \
-		Sources/HelperProtocol.swift \
+		Sources/VPNBypassCore/HelperProtocol.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
 	@swiftc -O \
 		-target x86_64-apple-macos13.0 \
 		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-x86_64 \
-		Sources/HelperProtocol.swift \
+		Sources/VPNBypassCore/HelperProtocol.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
 	@lipo -create \
