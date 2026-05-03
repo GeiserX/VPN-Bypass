@@ -39,15 +39,28 @@ struct MenuBarLabel: View {
     @EnvironmentObject var routeManager: RouteManager
     @State private var isAnimating = false
 
-    private static let templateIcon: NSImage? = {
-        guard let img = Bundle.main.image(forResource: "menubar-icon") else { return nil }
+    private static let iconDefault: NSImage? = loadTemplateIcon("menubar-icon")
+    private static let iconActive: NSImage? = loadTemplateIcon("menubar-icon-active")
+    private static let iconError: NSImage? = loadTemplateIcon("menubar-icon-error")
+
+    private static func loadTemplateIcon(_ name: String) -> NSImage? {
+        guard let img = Bundle.main.image(forResource: name) else { return nil }
         img.isTemplate = true
         return img
-    }()
+    }
+
+    private var currentIcon: NSImage? {
+        if HelperManager.shared.helperState.isFailed {
+            return Self.iconError
+        } else if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty {
+            return Self.iconActive
+        }
+        return Self.iconDefault
+    }
 
     private var menuBarIcon: some View {
         Group {
-            if let nsImage = Self.templateIcon {
+            if let nsImage = currentIcon ?? Self.iconDefault {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -115,7 +128,7 @@ struct MenuContent: View {
     @State private var isVerifying = false
     
     private let accentGradient = LinearGradient(
-        colors: [Color(hex: "10B981"), Color(hex: "059669")],
+        colors: [Theme.success, Theme.successDark],
         startPoint: .leading,
         endPoint: .trailing
     )
@@ -183,19 +196,19 @@ struct MenuContent: View {
             // Live status indicator
             HStack(spacing: 4) {
                 Circle()
-                    .fill(routeManager.isVPNConnected ? Color(hex: "10B981") : Color(hex: "EF4444"))
+                    .fill(routeManager.isVPNConnected ? Theme.success : Theme.error)
                     .frame(width: 6, height: 6)
-                    .shadow(color: routeManager.isVPNConnected ? Color(hex: "10B981").opacity(0.6) : Color(hex: "EF4444").opacity(0.6), radius: 3)
-                
+                    .shadow(color: routeManager.isVPNConnected ? Theme.success.opacity(0.6) : Theme.error.opacity(0.6), radius: 3)
+
                 Text(routeManager.isVPNConnected ? String(localized: "ON") : String(localized: "OFF"))
                     .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundColor(routeManager.isVPNConnected ? Color(hex: "10B981") : Color(hex: "EF4444"))
+                    .foregroundColor(routeManager.isVPNConnected ? Theme.success : Theme.error)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
                 Capsule()
-                    .fill(routeManager.isVPNConnected ? Color(hex: "10B981").opacity(0.15) : Color(hex: "EF4444").opacity(0.15))
+                    .fill(routeManager.isVPNConnected ? Theme.success.opacity(0.15) : Theme.error.opacity(0.15))
             )
         }
         .padding(.bottom, 12)
@@ -245,14 +258,14 @@ struct MenuContent: View {
                 VStack(spacing: 1) {
                     Text("\(routeManager.uniqueRouteCount)")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(Color(hex: "10B981"))
+                        .foregroundColor(Theme.success)
                     Text("routes")
                         .font(.system(size: 8))
                         .foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Color(hex: "10B981").opacity(0.1))
+                .background(Theme.success.opacity(0.1))
                 .cornerRadius(8)
             }
         }
@@ -532,14 +545,14 @@ struct MenuContent: View {
                 Spacer()
                 Text("\(routeManager.uniqueRouteCount)")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(Color(hex: "10B981"))
+                    .foregroundColor(Theme.success)
             }
             
             // Show first few routes
             ForEach(routeManager.activeRoutes.prefix(4)) { route in
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(Color(hex: "10B981"))
+                        .fill(Theme.success)
                         .frame(width: 4, height: 4)
                     Text(route.destination)
                         .font(.system(size: 10, design: .monospaced))
@@ -580,7 +593,7 @@ struct MenuContent: View {
                 
                 Text("\(passedCount)/\(totalCount)")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(passedCount == totalCount ? Color(hex: "10B981") : Color(hex: "F59E0B"))
+                    .foregroundColor(passedCount == totalCount ? Theme.success : Theme.warning)
             }
             
             // Show verification results
@@ -588,7 +601,7 @@ struct MenuContent: View {
                 HStack(spacing: 6) {
                     Image(systemName: result.isReachable ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .font(.system(size: 10))
-                        .foregroundColor(result.isReachable ? Color(hex: "10B981") : Color(hex: "EF4444"))
+                        .foregroundColor(result.isReachable ? Theme.success : Theme.error)
                     
                     Text(result.destination)
                         .font(.system(size: 10, design: .monospaced))
@@ -604,7 +617,7 @@ struct MenuContent: View {
                     } else if let error = result.error {
                         Text(error)
                             .font(.system(size: 9))
-                            .foregroundColor(Color(hex: "EF4444"))
+                            .foregroundColor(Theme.error)
                             .lineLimit(1)
                     }
                 }
@@ -621,7 +634,7 @@ struct MenuContent: View {
         HStack(spacing: 8) {
             Text("Mode")
                 .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundColor(Color(hex: "6B7280"))
+                .foregroundColor(Theme.textSecondary)
 
             Spacer()
 
@@ -642,18 +655,18 @@ struct MenuContent: View {
         } label: {
             HStack(spacing: 4) {
                 Circle()
-                    .fill(isSelected ? Color(hex: "10B981") : Color.clear)
+                    .fill(isSelected ? Theme.success : Color.clear)
                     .overlay(
-                        Circle().stroke(isSelected ? Color(hex: "10B981") : Color(hex: "6B7280"), lineWidth: 1.5)
+                        Circle().stroke(isSelected ? Theme.success : Theme.textSecondary, lineWidth: 1.5)
                     )
                     .frame(width: 10, height: 10)
                 Text(title)
                     .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                    .foregroundColor(isSelected ? .white : Color(hex: "9CA3AF"))
+                    .foregroundColor(isSelected ? .white : Theme.textSecondary)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(isSelected ? Color(hex: "10B981").opacity(0.15) : Color.clear)
+            .background(isSelected ? Theme.success.opacity(0.15) : Color.clear)
             .cornerRadius(6)
         }
         .buttonStyle(.plain)
@@ -697,7 +710,7 @@ struct MenuContent: View {
     // MARK: - Helpers
     
     private var statusColor: Color {
-        routeManager.isVPNConnected ? Color(hex: "10B981") : Color(hex: "EF4444")
+        routeManager.isVPNConnected ? Theme.success : Theme.error
     }
     
     private func addDomainAndClose() {
@@ -737,7 +750,7 @@ struct StatBadge: View {
         VStack(spacing: 2) {
             Text(value)
                 .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundColor(Color(hex: "10B981"))
+                .foregroundColor(Theme.success)
             Text(label)
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
@@ -775,8 +788,8 @@ struct ServiceChip: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color(hex: "10B981").opacity(0.15))
-        .foregroundColor(Color(hex: "10B981"))
+        .background(Theme.success.opacity(0.15))
+        .foregroundColor(Theme.success)
         .cornerRadius(12)
     }
 }

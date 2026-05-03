@@ -187,6 +187,22 @@ The app requires:
 
 ## Troubleshooting
 
+### App won't open / "damaged" error (macOS Gatekeeper)
+
+The app is ad-hoc signed and not notarized with Apple, so macOS Gatekeeper may block it on first launch. You'll see errors like *"VPN Bypass is damaged and can't be opened"* or *"Apple cannot check it for malicious software"*.
+
+**Fix:** Remove the quarantine attribute:
+
+```bash
+xattr -cr /Applications/VPN\ Bypass.app
+```
+
+**Prevention:** Install with the `--no-quarantine` flag:
+
+```bash
+brew install --cask --no-quarantine vpn-bypass
+```
+
 ### Routes not being applied
 
 1. Check if VPN is actually connected (look for utun interface)

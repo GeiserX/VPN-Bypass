@@ -17,6 +17,7 @@ enum HelperState: Equatable {
     case failed(String)
 
     var isReady: Bool { self == .ready }
+    var isFailed: Bool { if case .failed = self { return true }; return false }
 
     var statusText: String {
         switch self {

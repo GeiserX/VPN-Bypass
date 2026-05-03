@@ -330,12 +330,14 @@ final class RouteManager: ObservableObject {
         var resolvedIP: String?
         var lastResolved: Date?
         var isCIDR: Bool
+        var isWildcard: Bool
 
-        init(domain: String, enabled: Bool = true, isCIDR: Bool = false) {
+        init(domain: String, enabled: Bool = true, isCIDR: Bool = false, isWildcard: Bool = false) {
             self.id = UUID()
             self.domain = domain
             self.enabled = enabled
             self.isCIDR = isCIDR
+            self.isWildcard = isWildcard
         }
 
         init(from decoder: Decoder) throws {
@@ -346,6 +348,7 @@ final class RouteManager: ObservableObject {
             resolvedIP = try container.decodeIfPresent(String.self, forKey: .resolvedIP)
             lastResolved = try container.decodeIfPresent(Date.self, forKey: .lastResolved)
             isCIDR = try container.decodeIfPresent(Bool.self, forKey: .isCIDR) ?? false
+            isWildcard = try container.decodeIfPresent(Bool.self, forKey: .isWildcard) ?? false
         }
     }
     
@@ -1235,13 +1238,15 @@ final class RouteManager: ObservableObject {
                 if domain.isCIDR {
                     inverseCIDRs.append(domain.domain)
                 } else {
-                    allDomains.append((domain.domain, domain.domain))
+                    let resolvable = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+                    allDomains.append((resolvable, domain.domain))
                 }
             }
         } else {
             // Bypass mode: resolve bypass domains + service domains
             for domain in config.domains where domain.enabled {
-                allDomains.append((domain.domain, domain.domain))
+                let resolvable = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+                allDomains.append((resolvable, domain.domain))
             }
             for service in config.services where service.enabled {
                 for domain in service.domains {
@@ -1595,20 +1600,23 @@ final class RouteManager: ObservableObject {
                         seenDestinations.insert(cidr)
                         routesToAdd.append((destination: cidr, gateway: routeGateway, isNetwork: true, source: cidr))
                     }
-                } else if let cachedIPs = dnsDiskCache[domain.domain] {
-                    for ip in cachedIPs {
-                        let key = "\(domain.domain)|\(ip)"
-                        if !seenSourceDests.contains(key) {
-                            seenSourceDests.insert(key)
-                            allSourceEntries.append((destination: ip, gateway: routeGateway, source: domain.domain))
+                } else {
+                    let cacheKey = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+                    if let cachedIPs = dnsDiskCache[cacheKey] {
+                        for ip in cachedIPs {
+                            let key = "\(domain.domain)|\(ip)"
+                            if !seenSourceDests.contains(key) {
+                                seenSourceDests.insert(key)
+                                allSourceEntries.append((destination: ip, gateway: routeGateway, source: domain.domain))
+                            }
+                            if !seenDestinations.contains(ip) {
+                                seenDestinations.insert(ip)
+                                routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: domain.domain))
+                            }
                         }
-                        if !seenDestinations.contains(ip) {
-                            seenDestinations.insert(ip)
-                            routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: domain.domain))
+                        if let firstIP = cachedIPs.first {
+                            dnsCache[cacheKey] = firstIP
                         }
-                    }
-                    if let firstIP = cachedIPs.first {
-                        dnsCache[domain.domain] = firstIP
                     }
                 }
             }
@@ -1647,7 +1655,8 @@ final class RouteManager: ObservableObject {
             }
 
             for domain in config.domains where domain.enabled {
-                if let cachedIPs = dnsDiskCache[domain.domain] {
+                let cacheKey = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+                if let cachedIPs = dnsDiskCache[cacheKey] {
                     for ip in cachedIPs {
                         let key = "\(domain.domain)|\(ip)"
                         if !seenSourceDests.contains(key) {
@@ -1660,7 +1669,7 @@ final class RouteManager: ObservableObject {
                         }
                     }
                     if let firstIP = cachedIPs.first {
-                        dnsCache[domain.domain] = firstIP
+                        dnsCache[cacheKey] = firstIP
                     }
                 }
             }
@@ -1777,7 +1786,8 @@ final class RouteManager: ObservableObject {
         if isInverse {
             for domain in config.inverseDomains where domain.enabled {
                 if !domain.isCIDR {
-                    domainsToResolve.append((domain.domain, domain.domain))
+                    let resolvable = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+                    domainsToResolve.append((resolvable, domain.domain))
                 }
             }
         } else {
@@ -1787,7 +1797,8 @@ final class RouteManager: ObservableObject {
                 }
             }
             for domain in config.domains where domain.enabled {
-                domainsToResolve.append((domain.domain, domain.domain))
+                let resolvable = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+                domainsToResolve.append((resolvable, domain.domain))
             }
         }
         
@@ -2087,12 +2098,14 @@ final class RouteManager: ObservableObject {
                     // CIDR entries: preserve as static routes, no DNS resolution
                     expectedEntries.insert(SourceDest(source: domain.domain, destination: domain.domain))
                 } else {
-                    domainsToResolve.append((domain.domain, domain.domain))
+                    let resolvable = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+                    domainsToResolve.append((resolvable, domain.domain))
                 }
             }
         } else {
             for domain in config.domains where domain.enabled {
-                domainsToResolve.append((domain.domain, domain.domain))
+                let resolvable = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+                domainsToResolve.append((resolvable, domain.domain))
             }
             for service in config.services where service.enabled {
                 for domain in service.domains {
@@ -2340,16 +2353,25 @@ final class RouteManager: ObservableObject {
     }
     
     func addDomain(_ domain: String) {
-        let cleaned = cleanDomain(domain)
+        let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isWildcard = trimmed.hasPrefix("*.")
+        let cleaned: String
+        if isWildcard {
+            let suffix = cleanDomain(String(trimmed.dropFirst(2)))
+            guard !suffix.isEmpty else { return }
+            cleaned = "." + suffix
+        } else {
+            cleaned = cleanDomain(trimmed)
+        }
         guard !cleaned.isEmpty else { return }
         guard !config.domains.contains(where: { $0.domain == cleaned }) else {
             log(.warning, "Domain \(cleaned) already exists")
             return
         }
-        
-        config.domains.append(DomainEntry(domain: cleaned))
+
+        config.domains.append(DomainEntry(domain: cleaned, isWildcard: isWildcard))
         saveConfig()
-        log(.success, "Added domain: \(cleaned)")
+        log(.success, "Added \(isWildcard ? "wildcard " : "")domain: \(cleaned)")
         
         if isVPNConnected && acquireRouteOperation() {
             Task {
@@ -2359,7 +2381,8 @@ final class RouteManager: ObservableObject {
                     log(.error, "Cannot route \(cleaned): no local gateway detected. Try Refresh Routes.")
                     return
                 }
-                if let routes = await applyRoutesForDomain(cleaned, gateway: gateway) {
+                let resolvable = isWildcard ? String(cleaned.dropFirst()) : cleaned
+                if let routes = await applyRoutesForDomain(resolvable, gateway: gateway, source: cleaned) {
                     guard routeEpoch == epoch else { return }
                     activeRoutes.append(contentsOf: routes)
                     if config.manageHostsFile {
@@ -2463,7 +2486,8 @@ final class RouteManager: ObservableObject {
                         log(.error, "Cannot route \(domain.domain): no local gateway detected")
                         return
                     }
-                    if let routes = await applyRoutesForDomain(domain.domain, gateway: gateway) {
+                    let resolvable = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+                    if let routes = await applyRoutesForDomain(resolvable, gateway: gateway, source: domain.domain) {
                         guard routeEpoch == epoch else { return }
                         activeRoutes.append(contentsOf: routes)
                         if config.manageHostsFile {
@@ -2503,7 +2527,8 @@ final class RouteManager: ObservableObject {
             for domain in domainsToChange {
                 guard routeEpoch == epoch else { return }
                 if enabled, let gw = gateway {
-                    if let routes = await applyRoutesForDomain(domain.domain, gateway: gw, persistCache: false) {
+                    let resolvable = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+                    if let routes = await applyRoutesForDomain(resolvable, gateway: gw, source: domain.domain, persistCache: false) {
                         guard routeEpoch == epoch else { return }
                         activeRoutes.append(contentsOf: routes)
                     }
@@ -2658,10 +2683,13 @@ final class RouteManager: ObservableObject {
                                 timestamp: Date()
                             ))
                         }
-                    } else if let routes = await applyRoutesForDomain(domain.domain, gateway: gw) {
-                        guard routeEpoch == epoch else { return }
-                        activeRoutes.append(contentsOf: routes)
-                        if config.manageHostsFile { await updateHostsFile() }
+                    } else {
+                        let resolvable = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+                        if let routes = await applyRoutesForDomain(resolvable, gateway: gw, source: domain.domain) {
+                            guard routeEpoch == epoch else { return }
+                            activeRoutes.append(contentsOf: routes)
+                            if config.manageHostsFile { await updateHostsFile() }
+                        }
                     }
                 } else {
                     await removeRoutesForSource(domain.domain)
@@ -3514,8 +3542,9 @@ final class RouteManager: ObservableObject {
             guard !domain.isCIDR else { continue }
             // Include enabled domains AND disabled domains that still have active kernel routes
             guard domain.enabled || activeRoutes.contains(where: { $0.source == domain.domain }) else { continue }
-            if let ip = firstRoutedIP(for: domain.domain, in: routedDestinations) {
-                entries.append((domain.domain, ip))
+            let lookupDomain = domain.isWildcard ? String(domain.domain.dropFirst()) : domain.domain
+            if let ip = firstRoutedIP(for: lookupDomain, in: routedDestinations) {
+                entries.append((lookupDomain, ip))
             }
         }
 

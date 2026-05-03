@@ -22,13 +22,13 @@ struct SettingsView: View {
         .frame(width: 580, height: 620)
         .background(
             LinearGradient(
-                colors: [Color(hex: "0F0F14"), Color(hex: "1A1B26")],
+                colors: [Theme.bgPrimary, Theme.bgSecondary],
                 startPoint: .top,
                 endPoint: .bottom
             )
         )
     }
-    
+
     private var headerView: some View {
         VStack(spacing: 0) {
             // Tab bar with pill selector
@@ -52,14 +52,14 @@ struct SettingsView: View {
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [Color.clear, Color(hex: "10B981").opacity(0.3), Color.clear],
+                        colors: [Color.clear, Theme.success.opacity(0.3), Color.clear],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
                 .frame(height: 1)
         }
-        .background(Color(hex: "0F0F14").opacity(0.8))
+        .background(Theme.bgPrimary.opacity(0.8))
     }
     
     private var tabContent: some View {
@@ -113,24 +113,18 @@ struct TabItem: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .foregroundColor(isSelected ? .white : Color(hex: "71717A"))
+            .foregroundColor(isSelected ? .white : Theme.textSecondary)
             .padding(.horizontal, isCompact ? 10 : 14)
             .padding(.vertical, 8)
             .background(
                 Group {
                     if isSelected {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color(hex: "10B981"), Color(hex: "059669")],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .shadow(color: Color(hex: "10B981").opacity(0.4), radius: 8, y: 2)
+                            .fill(Theme.accentGradient)
+                            .shadow(color: Theme.success.opacity(0.4), radius: 8, y: 2)
                     } else if isHovered {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
+                            .fill(Theme.bgHover)
                     }
                 }
             )
@@ -165,12 +159,7 @@ struct DomainsTab: View {
                 HStack {
                     Image(systemName: isInverse ? "lock.shield.fill" : "globe.americas.fill")
                         .font(.system(size: 20))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: isInverse ? [Color(hex: "F59E0B"), Color(hex: "FBBF24")] : [Color(hex: "10B981"), Color(hex: "34D399")],
-                                startPoint: .top, endPoint: .bottom
-                            )
-                        )
+                        .foregroundStyle(isInverse ? Theme.warningGradient : Theme.successGradient)
                     Text(isInverse ? "VPN Only Domains" : "Custom Domains")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
@@ -179,18 +168,18 @@ struct DomainsTab: View {
                     ? "Only these domains will use the VPN. Everything else bypasses it."
                     : "Add domains that should bypass VPN and use your regular connection.")
                     .font(.system(size: 13))
-                    .foregroundColor(Color(hex: "9CA3AF"))
+                    .foregroundColor(Theme.textSecondary)
             }
 
             // Routing mode selector
-            SettingsCard(title: "Routing Mode", icon: "arrow.triangle.swap", iconColor: Color(hex: "8B5CF6")) {
+            SettingsCard(title: "Routing Mode", icon: "arrow.triangle.swap", iconColor: Theme.purple) {
                 HStack(spacing: 12) {
                     RoutingModeButton(
                         title: "Bypass",
                         subtitle: "Domains skip VPN",
                         icon: "globe",
                         isSelected: !isInverse,
-                        color: Color(hex: "10B981")
+                        color: Theme.success
                     ) { routeManager.setRoutingMode(.bypass) }
 
                     RoutingModeButton(
@@ -198,7 +187,7 @@ struct DomainsTab: View {
                         subtitle: "Only domains use VPN",
                         icon: "lock.shield",
                         isSelected: isInverse,
-                        color: Color(hex: "F59E0B")
+                        color: Theme.warning
                     ) { routeManager.setRoutingMode(.vpnOnly) }
                 }
             }
@@ -208,9 +197,9 @@ struct DomainsTab: View {
                 HStack {
                     Image(systemName: "link")
                         .font(.system(size: 12))
-                        .foregroundColor(Color(hex: "6B7280"))
-                    
-                    TextField(isInverse ? "e.g., example.com or 10.0.0.0/24" : "Enter domain (e.g., example.com)", text: $newDomain)
+                        .foregroundColor(Theme.textSecondary)
+
+                    TextField(isInverse ? "e.g., example.com or 10.0.0.0/24" : "e.g., example.com or *.example.com", text: $newDomain)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
                         .focused($isInputFocused)
@@ -221,20 +210,20 @@ struct DomainsTab: View {
                 .padding(.vertical, 12)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.white.opacity(0.06))
+                        .fill(Theme.bgInput)
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
-                                .stroke(isInputFocused ? Color(hex: "10B981").opacity(0.5) : Color.clear, lineWidth: 1)
+                                .stroke(isInputFocused ? Theme.success.opacity(0.5) : Color.clear, lineWidth: 1)
                         )
                 )
-                
+
                 // Loading indicator or add button
                 if routeManager.isApplyingRoutes {
                     ProgressView()
                         .scaleEffect(0.7)
-                        .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "10B981")))
+                        .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
                         .frame(width: 42, height: 42)
-                        .background(Color(hex: "374151"))
+                        .background(Theme.bgDisabled)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 } else {
                     Button(action: addDomain) {
@@ -244,13 +233,13 @@ struct DomainsTab: View {
                             .frame(width: 42, height: 42)
                             .background(
                                 LinearGradient(
-                                    colors: newDomain.isEmpty ? [Color(hex: "374151"), Color(hex: "374151")] : [Color(hex: "10B981"), Color(hex: "059669")],
+                                    colors: newDomain.isEmpty ? [Theme.textDisabled, Theme.textDisabled] : [Theme.success, Theme.successDark],
                                     startPoint: .top,
                                     endPoint: .bottom
                                 )
                             )
                             .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .shadow(color: newDomain.isEmpty ? .clear : Color(hex: "10B981").opacity(0.3), radius: 6, y: 2)
+                            .shadow(color: newDomain.isEmpty ? .clear : Theme.success.opacity(0.3), radius: 6, y: 2)
                     }
                     .buttonStyle(.plain)
                     .disabled(newDomain.isEmpty)
@@ -262,20 +251,20 @@ struct DomainsTab: View {
                 HStack {
                     Text("CONFIGURED DOMAINS")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundColor(Color(hex: "6B7280"))
+                        .foregroundColor(Theme.textSecondary)
                         .tracking(1)
-                    
+
                     Spacer()
-                    
+
                     // Loading indicator or All/None buttons
                     if routeManager.isApplyingRoutes {
                         HStack(spacing: 6) {
                             ProgressView()
                                 .scaleEffect(0.5)
-                                .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "10B981")))
+                                .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
                             Text("Applying...")
                                 .font(.system(size: 9))
-                                .foregroundColor(Color(hex: "6B7280"))
+                                .foregroundColor(Theme.textSecondary)
                         }
                     } else if !activeDomains.isEmpty {
                         HStack(spacing: 6) {
@@ -285,10 +274,10 @@ struct DomainsTab: View {
                             } label: {
                                 Text("All")
                                     .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(Color(hex: "10B981"))
+                                    .foregroundColor(Theme.success)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
-                                    .background(Color(hex: "10B981").opacity(0.15))
+                                    .background(Theme.success.opacity(0.15))
                                     .cornerRadius(4)
                             }
                             .buttonStyle(.plain)
@@ -299,10 +288,10 @@ struct DomainsTab: View {
                             } label: {
                                 Text("None")
                                     .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(Color(hex: "EF4444"))
+                                    .foregroundColor(Theme.error)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
-                                    .background(Color(hex: "EF4444").opacity(0.15))
+                                    .background(Theme.error.opacity(0.15))
                                     .cornerRadius(4)
                             }
                             .buttonStyle(.plain)
@@ -311,10 +300,10 @@ struct DomainsTab: View {
 
                     Text("\(enabledCount)/\(activeDomains.count)")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundColor(isInverse ? Color(hex: "F59E0B") : Color(hex: "10B981"))
+                        .foregroundColor(isInverse ? Theme.warning : Theme.success)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background((isInverse ? Color(hex: "F59E0B") : Color(hex: "10B981")).opacity(0.15))
+                        .background((isInverse ? Theme.warning : Theme.success).opacity(0.15))
                         .clipShape(Capsule())
                 }
 
@@ -331,28 +320,28 @@ struct DomainsTab: View {
             .padding(16)
             .background(
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.03))
+                    .fill(Theme.bgCard)
                     .overlay(
                         RoundedRectangle(cornerRadius: 14)
-                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                            .stroke(Theme.bgCardBorder, lineWidth: 1)
                     )
             )
-            
+
             Spacer()
         }
     }
-    
+
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: isInverse ? "lock.shield" : "globe")
                 .font(.system(size: 28))
-                .foregroundColor(Color(hex: "374151"))
+                .foregroundColor(Theme.textDisabled)
             Text("No entries configured")
                 .font(.system(size: 13))
-                .foregroundColor(Color(hex: "6B7280"))
+                .foregroundColor(Theme.textSecondary)
             Text(isInverse ? "Add domains or IP ranges that should use VPN" : "Add a domain above to bypass VPN")
                 .font(.system(size: 11))
-                .foregroundColor(Color(hex: "4B5563"))
+                .foregroundColor(Theme.textDisabled)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 30)
@@ -379,29 +368,38 @@ struct DomainRow: View {
         HStack(spacing: 12) {
             // Status dot
             Circle()
-                .fill(domain.enabled ? Color(hex: "10B981") : Color(hex: "4B5563"))
+                .fill(domain.enabled ? Theme.success : Theme.textDisabled)
                 .frame(width: 8, height: 8)
-                .shadow(color: domain.enabled ? Color(hex: "10B981").opacity(0.5) : .clear, radius: 4)
-            
+                .shadow(color: domain.enabled ? Theme.success.opacity(0.5) : .clear, radius: 4)
+
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(domain.domain)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(domain.enabled ? .white : Color(hex: "9CA3AF"))
+                        .foregroundColor(domain.enabled ? .white : Theme.textSecondary)
                     if domain.isCIDR {
                         Text("CIDR")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(Color(hex: "F59E0B"))
+                            .foregroundColor(Theme.warning)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Color(hex: "F59E0B").opacity(0.15))
+                            .background(Theme.warning.opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                    if domain.isWildcard {
+                        Text("Wildcard")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(Theme.cyan)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Theme.cyan.opacity(0.15))
                             .cornerRadius(4)
                     }
                 }
             }
-            
+
             Spacer()
-            
+
             // Toggle - disabled during route operations
             Toggle("", isOn: Binding(
                 get: { domain.enabled },
@@ -413,7 +411,7 @@ struct DomainRow: View {
                 }
             ))
             .toggleStyle(.switch)
-            .tint(isInverse ? Color(hex: "F59E0B") : Color(hex: "10B981"))
+            .tint(isInverse ? Theme.warning : Theme.success)
             .scaleEffect(0.7)
             .disabled(routeManager.isApplyingRoutes)
             .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
@@ -427,7 +425,7 @@ struct DomainRow: View {
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "EF4444").opacity(isHovered ? 1 : 0.6))
+                    .foregroundColor(Theme.error.opacity(isHovered ? 1 : 0.6))
             }
             .buttonStyle(.plain)
             .disabled(routeManager.isApplyingRoutes)
@@ -437,7 +435,7 @@ struct DomainRow: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(isHovered ? Color.white.opacity(0.05) : Color.clear)
+                .fill(isHovered ? Theme.bgHover : Color.clear)
         )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
@@ -460,22 +458,22 @@ struct RoutingModeButton: View {
                 // Radio circle
                 Circle()
                     .fill(isSelected ? color : Color.clear)
-                    .overlay(Circle().stroke(isSelected ? color : Color(hex: "4B5563"), lineWidth: 2))
+                    .overlay(Circle().stroke(isSelected ? color : Theme.textDisabled, lineWidth: 2))
                     .frame(width: 16, height: 16)
                     .shadow(color: isSelected ? color.opacity(0.4) : .clear, radius: 4)
 
                 Image(systemName: icon)
                     .font(.system(size: 14))
-                    .foregroundColor(isSelected ? color : Color(hex: "6B7280"))
+                    .foregroundColor(isSelected ? color : Theme.textSecondary)
                     .frame(width: 20)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(isSelected ? .white : Color(hex: "9CA3AF"))
+                        .foregroundColor(isSelected ? .white : Theme.textSecondary)
                     Text(subtitle)
                         .font(.system(size: 10))
-                        .foregroundColor(Color(hex: "6B7280"))
+                        .foregroundColor(Theme.textSecondary)
                 }
 
                 Spacer()
@@ -484,7 +482,7 @@ struct RoutingModeButton: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? color.opacity(0.1) : Color.white.opacity(0.03))
+                    .fill(isSelected ? color.opacity(0.1) : Theme.bgCard)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(isSelected ? color.opacity(0.4) : Color.clear, lineWidth: 1)
@@ -528,9 +526,7 @@ struct ServicesTab: View {
                 HStack(spacing: 8) {
                     Image(systemName: "square.grid.2x2.fill")
                         .font(.system(size: 20))
-                        .foregroundStyle(
-                            LinearGradient(colors: [Color(hex: "8B5CF6"), Color(hex: "A78BFA")], startPoint: .top, endPoint: .bottom)
-                        )
+                        .foregroundStyle(Theme.purpleGradient)
                     Text("Services")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
@@ -541,7 +537,7 @@ struct ServicesTab: View {
                 if !isVPNOnly {
                     Text("\(enabledCount)/\(routeManager.config.services.count) enabled")
                         .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "6B7280"))
+                        .foregroundColor(Theme.textSecondary)
                 }
             }
 
@@ -550,15 +546,15 @@ struct ServicesTab: View {
                 HStack(spacing: 10) {
                     Image(systemName: "info.circle.fill")
                         .font(.system(size: 14))
-                        .foregroundColor(Color(hex: "F59E0B"))
+                        .foregroundColor(Theme.warning)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Services disabled in VPN Only mode")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(Color(hex: "F59E0B"))
+                            .foregroundColor(Theme.warning)
                         Text("Switch to Bypass mode in the Domains tab to manage services.")
                             .font(.system(size: 11))
-                            .foregroundColor(Color(hex: "9CA3AF"))
+                            .foregroundColor(Theme.textSecondary)
                     }
 
                     Spacer()
@@ -566,10 +562,10 @@ struct ServicesTab: View {
                 .padding(12)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(hex: "F59E0B").opacity(0.08))
+                        .fill(Theme.warning.opacity(0.08))
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color(hex: "F59E0B").opacity(0.2), lineWidth: 1)
+                                .stroke(Theme.warning.opacity(0.2), lineWidth: 1)
                         )
                 )
 
@@ -581,7 +577,7 @@ struct ServicesTab: View {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 12))
-                            .foregroundColor(Color(hex: "6B7280"))
+                            .foregroundColor(Theme.textSecondary)
 
                         TextField("Search services...", text: $searchText)
                             .textFieldStyle(.plain)
@@ -594,14 +590,14 @@ struct ServicesTab: View {
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 12))
-                                    .foregroundColor(Color(hex: "6B7280"))
+                                    .foregroundColor(Theme.textSecondary)
                             }
                             .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
-                    .background(Color.white.opacity(0.06))
+                    .background(Theme.bgInput)
                     .cornerRadius(8)
 
                     // Loading indicator
@@ -609,10 +605,10 @@ struct ServicesTab: View {
                         HStack(spacing: 6) {
                             ProgressView()
                                 .scaleEffect(0.6)
-                                .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "10B981")))
+                                .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
                             Text("Applying...")
                                 .font(.system(size: 10))
-                                .foregroundColor(Color(hex: "6B7280"))
+                                .foregroundColor(Theme.textSecondary)
                         }
                         .frame(width: 80)
                     } else {
@@ -622,10 +618,10 @@ struct ServicesTab: View {
                         } label: {
                             Text("All")
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Color(hex: "10B981"))
+                                .foregroundColor(Theme.success)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color(hex: "10B981").opacity(0.15))
+                                .background(Theme.success.opacity(0.15))
                                 .cornerRadius(6)
                         }
                         .buttonStyle(.plain)
@@ -636,10 +632,10 @@ struct ServicesTab: View {
                         } label: {
                             Text("None")
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Color(hex: "EF4444"))
+                                .foregroundColor(Theme.error)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color(hex: "EF4444").opacity(0.15))
+                                .background(Theme.error.opacity(0.15))
                                 .cornerRadius(6)
                         }
                         .buttonStyle(.plain)
@@ -659,7 +655,7 @@ struct ServicesTab: View {
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.black.opacity(0.2))
+                        .fill(Theme.bgElevated)
                 )
 
                 // Add Custom Service button
@@ -673,15 +669,15 @@ struct ServicesTab: View {
                         Text("Create Custom Service")
                             .font(.system(size: 12, weight: .medium))
                     }
-                    .foregroundColor(Color(hex: "8B5CF6"))
+                    .foregroundColor(Theme.purple)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity)
-                    .background(Color(hex: "8B5CF6").opacity(0.1))
+                    .background(Theme.purple.opacity(0.1))
                     .cornerRadius(8)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color(hex: "8B5CF6").opacity(0.3), lineWidth: 1)
+                            .stroke(Theme.purple.opacity(0.3), lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)
@@ -704,31 +700,31 @@ struct ServiceRow: View {
         HStack(spacing: 12) {
             // Status dot
             Circle()
-                .fill(service.enabled ? Color(hex: "10B981") : Color(hex: "4B5563"))
+                .fill(service.enabled ? Theme.success : Theme.textDisabled)
                 .frame(width: 8, height: 8)
-                .shadow(color: service.enabled ? Color(hex: "10B981").opacity(0.5) : .clear, radius: 4)
+                .shadow(color: service.enabled ? Theme.success.opacity(0.5) : .clear, radius: 4)
 
             // Service info
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(service.name)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(service.enabled ? .white : Color(hex: "9CA3AF"))
+                        .foregroundColor(service.enabled ? .white : Theme.textSecondary)
 
                     if service.isCustom {
                         Text("Custom")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(Color(hex: "8B5CF6"))
+                            .foregroundColor(Theme.purple)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Color(hex: "8B5CF6").opacity(0.15))
+                            .background(Theme.purple.opacity(0.15))
                             .cornerRadius(4)
                     }
                 }
 
                 Text("\(service.domains.count) domains" + (service.ipRanges.isEmpty ? "" : " · \(service.ipRanges.count) IPs"))
                     .font(.system(size: 10))
-                    .foregroundColor(Color(hex: "6B7280"))
+                    .foregroundColor(Theme.textSecondary)
             }
 
             Spacer()
@@ -740,7 +736,7 @@ struct ServiceRow: View {
                 } label: {
                     Image(systemName: "pencil")
                         .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "8B5CF6"))
+                        .foregroundColor(Theme.purple)
                 }
                 .buttonStyle(.plain)
 
@@ -749,7 +745,7 @@ struct ServiceRow: View {
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "EF4444"))
+                        .foregroundColor(Theme.error)
                 }
                 .buttonStyle(.plain)
             }
@@ -764,7 +760,7 @@ struct ServiceRow: View {
                 }
             ))
             .toggleStyle(.switch)
-            .tint(Color(hex: "10B981"))
+            .tint(Theme.success)
             .scaleEffect(0.7)
             .disabled(routeManager.isApplyingRoutes)
             .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
@@ -773,7 +769,7 @@ struct ServiceRow: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isHovered ? Color.white.opacity(0.05) : Color.clear)
+                .fill(isHovered ? Theme.bgHover : Color.clear)
         )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
@@ -811,13 +807,13 @@ struct CustomServiceEditor: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 18))
-                        .foregroundColor(Color(hex: "6B7280"))
+                        .foregroundColor(Theme.textSecondary)
                 }
                 .buttonStyle(.plain)
             }
             .padding(16)
 
-            Divider().background(Color.white.opacity(0.1))
+            Divider().background(Theme.divider)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -825,13 +821,13 @@ struct CustomServiceEditor: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Service Name")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(Color(hex: "9CA3AF"))
+                            .foregroundColor(Theme.textSecondary)
 
                         TextField("e.g. My Company VPN", text: $serviceName)
                             .textFieldStyle(.plain)
                             .font(.system(size: 13))
                             .padding(10)
-                            .background(Color.white.opacity(0.06))
+                            .background(Theme.bgInput)
                             .cornerRadius(8)
                     }
 
@@ -840,7 +836,7 @@ struct CustomServiceEditor: View {
                         HStack {
                             Text("Domains")
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(Color(hex: "9CA3AF"))
+                                .foregroundColor(Theme.textSecondary)
                             Spacer()
                             Button {
                                 domains.append("")
@@ -851,7 +847,7 @@ struct CustomServiceEditor: View {
                                     Text("Add")
                                         .font(.system(size: 11, weight: .medium))
                                 }
-                                .foregroundColor(Color(hex: "10B981"))
+                                .foregroundColor(Theme.success)
                             }
                             .buttonStyle(.plain)
                         }
@@ -862,7 +858,7 @@ struct CustomServiceEditor: View {
                                     .textFieldStyle(.plain)
                                     .font(.system(size: 12))
                                     .padding(8)
-                                    .background(Color.white.opacity(0.06))
+                                    .background(Theme.bgInput)
                                     .cornerRadius(6)
 
                                 if domains.count > 1 {
@@ -871,7 +867,7 @@ struct CustomServiceEditor: View {
                                     } label: {
                                         Image(systemName: "minus.circle.fill")
                                             .font(.system(size: 14))
-                                            .foregroundColor(Color(hex: "EF4444").opacity(0.7))
+                                            .foregroundColor(Theme.error.opacity(0.7))
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -885,10 +881,10 @@ struct CustomServiceEditor: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("IP Ranges (optional)")
                                     .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(Color(hex: "9CA3AF"))
+                                    .foregroundColor(Theme.textSecondary)
                                 Text("CIDR notation, e.g. 192.168.1.0/24")
                                     .font(.system(size: 10))
-                                    .foregroundColor(Color(hex: "6B7280"))
+                                    .foregroundColor(Theme.textSecondary)
                             }
                             Spacer()
                             Button {
@@ -900,7 +896,7 @@ struct CustomServiceEditor: View {
                                     Text("Add")
                                         .font(.system(size: 11, weight: .medium))
                                 }
-                                .foregroundColor(Color(hex: "10B981"))
+                                .foregroundColor(Theme.success)
                             }
                             .buttonStyle(.plain)
                         }
@@ -911,7 +907,7 @@ struct CustomServiceEditor: View {
                                     .textFieldStyle(.plain)
                                     .font(.system(size: 12))
                                     .padding(8)
-                                    .background(Color.white.opacity(0.06))
+                                    .background(Theme.bgInput)
                                     .cornerRadius(6)
 
                                 Button {
@@ -919,7 +915,7 @@ struct CustomServiceEditor: View {
                                 } label: {
                                     Image(systemName: "minus.circle.fill")
                                         .font(.system(size: 14))
-                                        .foregroundColor(Color(hex: "EF4444").opacity(0.7))
+                                        .foregroundColor(Theme.error.opacity(0.7))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -928,7 +924,7 @@ struct CustomServiceEditor: View {
                         if ipRanges.isEmpty {
                             Text("No IP ranges added. Only domain-based routing will be used.")
                                 .font(.system(size: 10))
-                                .foregroundColor(Color(hex: "6B7280"))
+                                .foregroundColor(Theme.textSecondary)
                                 .italic()
                         }
                     }
@@ -936,7 +932,7 @@ struct CustomServiceEditor: View {
                 .padding(16)
             }
 
-            Divider().background(Color.white.opacity(0.1))
+            Divider().background(Theme.divider)
 
             // Actions
             HStack {
@@ -944,7 +940,7 @@ struct CustomServiceEditor: View {
                     dismiss()
                 }
                 .buttonStyle(.plain)
-                .foregroundColor(Color(hex: "9CA3AF"))
+                .foregroundColor(Theme.textSecondary)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
 
@@ -959,7 +955,7 @@ struct CustomServiceEditor: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(canSave ? Color(hex: "8B5CF6") : Color(hex: "4B5563"))
+                        .background(canSave ? Theme.purple : Theme.textDisabled)
                         .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
@@ -970,7 +966,7 @@ struct CustomServiceEditor: View {
         .frame(width: 440, height: 480)
         .background(
             LinearGradient(
-                colors: [Color(hex: "0F0F14"), Color(hex: "1A1B26")],
+                colors: [Theme.bgPrimary, Theme.bgSecondary],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -1025,10 +1021,10 @@ struct GeneralTab: View {
 
     private var helperStateColor: Color {
         switch helperManager.helperState {
-        case .ready: return Color(hex: "10B981")
-        case .checking, .installing: return Color(hex: "F59E0B")
-        case .outdated: return Color(hex: "F59E0B")
-        case .missing, .failed: return Color(hex: "EF4444")
+        case .ready: return Theme.success
+        case .checking, .installing: return Theme.warning
+        case .outdated: return Theme.warning
+        case .missing, .failed: return Theme.error
         }
     }
 
@@ -1073,9 +1069,7 @@ struct GeneralTab: View {
                 HStack {
                     Image(systemName: "gearshape.fill")
                         .font(.system(size: 20))
-                        .foregroundStyle(
-                            LinearGradient(colors: [Color(hex: "F59E0B"), Color(hex: "FBBF24")], startPoint: .top, endPoint: .bottom)
-                        )
+                        .foregroundStyle(Theme.warningGradient)
                     Text("Settings")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
@@ -1083,11 +1077,11 @@ struct GeneralTab: View {
             }
             
             // Language section
-            SettingsCard(title: "Language", icon: "globe", iconColor: Color(hex: "3B82F6")) {
+            SettingsCard(title: "Language", icon: "globe", iconColor: Theme.blue) {
                 HStack(spacing: 12) {
                     Image(systemName: "character.bubble.fill")
                         .font(.system(size: 14))
-                        .foregroundColor(Color(hex: "3B82F6"))
+                        .foregroundColor(Theme.blue)
                         .frame(width: 20)
 
                     VStack(alignment: .leading, spacing: 2) {
@@ -1096,7 +1090,7 @@ struct GeneralTab: View {
                             .foregroundColor(.white)
                         Text("App language (restart required)")
                             .font(.system(size: 11))
-                            .foregroundColor(Color(hex: "6B7280"))
+                            .foregroundColor(Theme.textSecondary)
                     }
 
                     Spacer()
@@ -1124,7 +1118,7 @@ struct GeneralTab: View {
             }
 
             // Startup section
-            SettingsCard(title: "Startup", icon: "power", iconColor: Color(hex: "10B981")) {
+            SettingsCard(title: "Startup", icon: "power", iconColor: Theme.success) {
                 SettingsToggleRow(
                     icon: "arrow.clockwise",
                     title: "Launch at Login",
@@ -1137,7 +1131,7 @@ struct GeneralTab: View {
             }
             
             // Privileged Helper section
-            SettingsCard(title: "Privileged Helper", icon: "lock.shield.fill", iconColor: Color(hex: "EF4444")) {
+            SettingsCard(title: "Privileged Helper", icon: "lock.shield.fill", iconColor: Theme.error) {
                 HStack(spacing: 12) {
                     Image(systemName: helperStateIcon)
                         .font(.system(size: 14))
@@ -1150,7 +1144,7 @@ struct GeneralTab: View {
                             .foregroundColor(.white)
                         Text(helperStateSubtitle)
                             .font(.system(size: 11))
-                            .foregroundColor(Color(hex: "6B7280"))
+                            .foregroundColor(Theme.textSecondary)
                     }
 
                     Spacer()
@@ -1174,13 +1168,7 @@ struct GeneralTab: View {
                             .foregroundColor(.white)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background(
-                                LinearGradient(
-                                    colors: [Color(hex: "10B981"), Color(hex: "059669")],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
+                            .background(Theme.accentGradient)
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
@@ -1188,7 +1176,7 @@ struct GeneralTab: View {
                     } else if let version = helperManager.helperVersion {
                         Text("v\(version)")
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(Color(hex: "6B7280"))
+                            .foregroundColor(Theme.textSecondary)
                     }
                 }
 
@@ -1196,21 +1184,21 @@ struct GeneralTab: View {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "F59E0B"))
+                            .foregroundColor(Theme.warning)
                         Text(error)
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "F59E0B"))
+                            .foregroundColor(Theme.warning)
                             .lineLimit(2)
                     }
                 }
 
                 Text("The helper runs as root and handles route/hosts changes without prompting.")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "6B7280"))
+                    .foregroundColor(Theme.textSecondary)
             }
             
             // Behavior section
-            SettingsCard(title: "Behavior", icon: "bolt.fill", iconColor: Color(hex: "F59E0B")) {
+            SettingsCard(title: "Behavior", icon: "bolt.fill", iconColor: Theme.warning) {
                 SettingsToggleRow(
                     icon: "play.circle.fill",
                     title: "Auto-apply on VPN Connect",
@@ -1221,7 +1209,7 @@ struct GeneralTab: View {
                     )
                 )
                 
-                Divider().background(Color.white.opacity(0.1))
+                Divider().background(Theme.divider)
                 
                 SettingsToggleRow(
                     icon: "doc.text.fill",
@@ -1233,7 +1221,7 @@ struct GeneralTab: View {
                     )
                 )
                 
-                Divider().background(Color.white.opacity(0.1))
+                Divider().background(Theme.divider)
                 
                 SettingsToggleRow(
                     icon: "checkmark.circle.fill",
@@ -1247,7 +1235,7 @@ struct GeneralTab: View {
             }
             
             // DNS Refresh section
-            SettingsCard(title: "DNS Refresh", icon: "arrow.triangle.2.circlepath", iconColor: Color(hex: "06B6D4")) {
+            SettingsCard(title: "DNS Refresh", icon: "arrow.triangle.2.circlepath", iconColor: Theme.cyan) {
                 SettingsToggleRow(
                     icon: "clock.arrow.circlepath",
                     title: "Auto DNS Refresh",
@@ -1263,22 +1251,22 @@ struct GeneralTab: View {
                 )
                 
                 if routeManager.config.autoDNSRefresh {
-                    Divider().background(Color.white.opacity(0.1))
+                    Divider().background(Theme.divider)
                     
                     // Interval picker
                     HStack(spacing: 12) {
                         Image(systemName: "timer")
                             .font(.system(size: 14))
-                            .foregroundColor(Color(hex: "06B6D4"))
+                            .foregroundColor(Theme.cyan)
                             .frame(width: 20)
-                        
+
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Refresh Interval")
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(.white)
                             Text("How often to re-check DNS for changes")
                                 .font(.system(size: 11))
-                                .foregroundColor(Color(hex: "6B7280"))
+                                .foregroundColor(Theme.textSecondary)
                         }
                         
                         Spacer()
@@ -1301,7 +1289,7 @@ struct GeneralTab: View {
                         .frame(width: 100)
                     }
                     
-                    Divider().background(Color.white.opacity(0.1))
+                    Divider().background(Theme.divider)
                     
                     // Status and manual refresh
                     HStack(spacing: 12) {
@@ -1310,20 +1298,20 @@ struct GeneralTab: View {
                                 HStack(spacing: 4) {
                                     Text("Last refresh:")
                                         .font(.system(size: 10))
-                                        .foregroundColor(Color(hex: "6B7280"))
+                                        .foregroundColor(Theme.textSecondary)
                                     Text(lastRefresh, style: .relative)
                                         .font(.system(size: 10))
-                                        .foregroundColor(Color(hex: "9CA3AF"))
+                                        .foregroundColor(Theme.textSecondary)
                                 }
                             }
                             if let nextRefresh = routeManager.nextDNSRefresh {
                                 HStack(spacing: 4) {
                                     Text("Next refresh:")
                                         .font(.system(size: 10))
-                                        .foregroundColor(Color(hex: "6B7280"))
+                                        .foregroundColor(Theme.textSecondary)
                                     Text(nextRefresh, style: .relative)
                                         .font(.system(size: 10))
-                                        .foregroundColor(Color(hex: "10B981"))
+                                        .foregroundColor(Theme.success)
                                 }
                             }
                         }
@@ -1345,66 +1333,66 @@ struct GeneralTab: View {
                                 Text("Refresh Now")
                                     .font(.system(size: 10, weight: .medium))
                             }
-                            .foregroundColor(Color(hex: "06B6D4"))
+                            .foregroundColor(Theme.cyan)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(Color(hex: "06B6D4").opacity(0.15))
+                            .background(Theme.cyan.opacity(0.15))
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
                         .disabled(routeManager.isApplyingRoutes)
                     }
                 }
-                
+
                 Text("Re-resolves all domains to catch IP changes and ensure routes stay up to date.")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "6B7280"))
+                    .foregroundColor(Theme.textSecondary)
             }
             
             // Fallback DNS section
-            SettingsCard(title: "Fallback DNS", icon: "server.rack", iconColor: Color(hex: "8B5CF6")) {
+            SettingsCard(title: "Fallback DNS", icon: "server.rack", iconColor: Theme.purple) {
                 VStack(alignment: .leading, spacing: 12) {
                     // Detected DNS - prominent display
                     if let detected = routeManager.detectedDNSServerDisplay {
                         HStack(spacing: 10) {
                             Image(systemName: "antenna.radiowaves.left.and.right")
-                                .foregroundColor(Color(hex: "06B6D4"))
+                                .foregroundColor(Theme.cyan)
                                 .font(.system(size: 14))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Detected Non-VPN DNS")
                                     .font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(Color(hex: "9CA3AF"))
+                                    .foregroundColor(Theme.textSecondary)
                                 Text(detected)
                                     .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                    .foregroundColor(Color(hex: "06B6D4"))
+                                    .foregroundColor(Theme.cyan)
                             }
                             Spacer()
                         }
                         .padding(12)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(hex: "06B6D4").opacity(0.1))
+                                .fill(Theme.cyan.opacity(0.1))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color(hex: "06B6D4").opacity(0.3), lineWidth: 1)
+                                        .stroke(Theme.cyan.opacity(0.3), lineWidth: 1)
                                 )
                         )
                     }
-                    
+
                     Text("Fallback DNS servers when detected DNS is unavailable.\nSupported formats: IP (1.1.1.1), DoH (https://...), DoT (tls://... or IP:853)")
                         .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "6B7280"))
+                        .foregroundColor(Theme.textSecondary)
                     
                     ForEach(Array(routeManager.config.fallbackDNS.enumerated()), id: \.offset) { index, dns in
                         HStack(spacing: 8) {
                             Text("\(index + 1).")
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(Color(hex: "6B7280"))
+                                .foregroundColor(Theme.textSecondary)
                                 .frame(width: 20)
-                            
+
                             TextField("DNS server", text: Binding(
                                 get: { routeManager.config.fallbackDNS[index] },
-                                set: { 
+                                set: {
                                     routeManager.config.fallbackDNS[index] = $0
                                     routeManager.saveConfig()
                                 }
@@ -1413,20 +1401,20 @@ struct GeneralTab: View {
                             .font(.system(size: 12, design: .monospaced))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(Color(hex: "1F2937"))
+                            .background(Theme.bgInputAlt)
                             .cornerRadius(6)
-                            
+
                             Button {
                                 routeManager.config.fallbackDNS.remove(at: index)
                                 routeManager.saveConfig()
                             } label: {
                                 Image(systemName: "minus.circle.fill")
-                                    .foregroundColor(Color(hex: "EF4444"))
+                                    .foregroundColor(Theme.error)
                             }
                             .buttonStyle(.plain)
                         }
                     }
-                    
+
                     Button {
                         routeManager.config.fallbackDNS.append("")
                         routeManager.saveConfig()
@@ -1436,14 +1424,14 @@ struct GeneralTab: View {
                             Text("Add DNS Server")
                         }
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Color(hex: "10B981"))
+                        .foregroundColor(Theme.success)
                     }
                     .buttonStyle(.plain)
                 }
             }
             
             // Notifications section
-            SettingsCard(title: "Notifications", icon: "bell.fill", iconColor: Color(hex: "8B5CF6")) {
+            SettingsCard(title: "Notifications", icon: "bell.fill", iconColor: Theme.purple) {
                 SettingsToggleRow(
                     icon: "bell.badge.fill",
                     title: "Enable Notifications",
@@ -1458,7 +1446,7 @@ struct GeneralTab: View {
                 )
                 
                 if notificationManager.notificationsEnabled {
-                    Divider().background(Color.white.opacity(0.1))
+                    Divider().background(Theme.divider)
                     
                     SettingsToggleRow(
                         icon: "speaker.slash.fill",
@@ -1473,7 +1461,7 @@ struct GeneralTab: View {
                         )
                     )
                     
-                    Divider().background(Color.white.opacity(0.1))
+                    Divider().background(Theme.divider)
                     
                     HStack(spacing: 12) {
                         NotificationChip(
@@ -1508,34 +1496,34 @@ struct GeneralTab: View {
                     
                     Text("Routes: services, domains, DNS refresh")
                         .font(.system(size: 10))
-                        .foregroundColor(Color(hex: "6B7280"))
+                        .foregroundColor(Theme.textSecondary)
                 }
             }
             
             // SOCKS5 Proxy section (Aggressive Bypass Mode)
-            SettingsCard(title: "SOCKS5 Proxy", icon: "network.badge.shield.half.filled", iconColor: Color(hex: "F59E0B")) {
+            SettingsCard(title: "SOCKS5 Proxy", icon: "network.badge.shield.half.filled", iconColor: Theme.warning) {
                 VStack(alignment: .leading, spacing: 12) {
                     // Warning/info box
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(Color(hex: "F59E0B"))
+                            .foregroundColor(Theme.warning)
                             .font(.system(size: 12))
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Aggressive Bypass Mode")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(Color(hex: "F59E0B"))
+                                .foregroundColor(Theme.warning)
                             Text("For corporate VPNs (Cisco, Zscaler) that block UDP. Requires external SOCKS5 proxy server with UDP support.")
                                 .font(.system(size: 10))
-                                .foregroundColor(Color(hex: "9CA3AF"))
+                                .foregroundColor(Theme.textSecondary)
                         }
                     }
                     .padding(10)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(hex: "F59E0B").opacity(0.1))
+                            .fill(Theme.warning.opacity(0.1))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color(hex: "F59E0B").opacity(0.3), lineWidth: 1)
+                                    .stroke(Theme.warning.opacity(0.3), lineWidth: 1)
                             )
                     )
                     
@@ -1553,18 +1541,18 @@ struct GeneralTab: View {
                     )
                     
                     if routeManager.config.proxyConfig.enabled {
-                        Divider().background(Color.white.opacity(0.1))
+                        Divider().background(Theme.divider)
                         
                         // Server and port
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Proxy Server")
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Color(hex: "9CA3AF"))
-                            
+                                .foregroundColor(Theme.textSecondary)
+
                             HStack(spacing: 8) {
                                 TextField("Server address", text: Binding(
                                     get: { routeManager.config.proxyConfig.server },
-                                    set: { 
+                                    set: {
                                         routeManager.config.proxyConfig.server = $0
                                         routeManager.saveConfig()
                                     }
@@ -1573,12 +1561,12 @@ struct GeneralTab: View {
                                 .font(.system(size: 12, design: .monospaced))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
-                                .background(Color(hex: "1F2937"))
+                                .background(Theme.bgInputAlt)
                                 .cornerRadius(6)
-                                
+
                                 TextField("Port", value: Binding(
                                     get: { routeManager.config.proxyConfig.port },
-                                    set: { 
+                                    set: {
                                         routeManager.config.proxyConfig.port = $0
                                         routeManager.saveConfig()
                                     }
@@ -1587,22 +1575,22 @@ struct GeneralTab: View {
                                 .font(.system(size: 12, design: .monospaced))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
-                                .background(Color(hex: "1F2937"))
+                                .background(Theme.bgInputAlt)
                                 .cornerRadius(6)
                                 .frame(width: 80)
                             }
                         }
-                        
+
                         // Authentication (optional)
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Authentication (optional)")
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Color(hex: "9CA3AF"))
-                            
+                                .foregroundColor(Theme.textSecondary)
+
                             HStack(spacing: 8) {
                                 TextField("Username", text: Binding(
                                     get: { routeManager.config.proxyConfig.username },
-                                    set: { 
+                                    set: {
                                         routeManager.config.proxyConfig.username = $0
                                         routeManager.saveConfig()
                                     }
@@ -1611,12 +1599,12 @@ struct GeneralTab: View {
                                 .font(.system(size: 12))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
-                                .background(Color(hex: "1F2937"))
+                                .background(Theme.bgInputAlt)
                                 .cornerRadius(6)
-                                
+
                                 SecureField("Password", text: Binding(
                                     get: { routeManager.config.proxyConfig.password },
-                                    set: { 
+                                    set: {
                                         routeManager.config.proxyConfig.password = $0
                                         routeManager.saveConfig()
                                     }
@@ -1625,11 +1613,11 @@ struct GeneralTab: View {
                                 .font(.system(size: 12))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
-                                .background(Color(hex: "1F2937"))
+                                .background(Theme.bgInputAlt)
                                 .cornerRadius(6)
                             }
                         }
-                        
+
                         // Test connection button
                         HStack {
                             Button {
@@ -1653,35 +1641,35 @@ struct GeneralTab: View {
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
                                 .background(
-                                    routeManager.config.proxyConfig.isConfigured 
-                                        ? Color(hex: "F59E0B") 
-                                        : Color(hex: "4B5563")
+                                    routeManager.config.proxyConfig.isConfigured
+                                        ? Theme.warning
+                                        : Theme.textDisabled
                                 )
                                 .clipShape(Capsule())
                             }
                             .buttonStyle(.plain)
                             .disabled(!routeManager.config.proxyConfig.isConfigured || routeManager.isTestingProxy)
-                            
+
                             if let result = routeManager.proxyTestResult {
                                 HStack(spacing: 4) {
                                     Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                        .foregroundColor(result.success ? Color(hex: "10B981") : Color(hex: "EF4444"))
+                                        .foregroundColor(result.success ? Theme.success : Theme.error)
                                     Text(result.message)
                                         .font(.system(size: 10))
-                                        .foregroundColor(result.success ? Color(hex: "10B981") : Color(hex: "EF4444"))
+                                        .foregroundColor(result.success ? Theme.success : Theme.error)
                                 }
                             }
                         }
-                        
+
                         Text("Proxy will be used for services that need UDP (Discord voice, gaming, etc.) when corporate VPN blocks direct UDP traffic.")
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "6B7280"))
+                            .foregroundColor(Theme.textSecondary)
                     }
                 }
             }
             
             // Import/Export section
-            SettingsCard(title: "Configuration", icon: "doc.badge.arrow.up.fill", iconColor: Color(hex: "3B82F6")) {
+            SettingsCard(title: "Configuration", icon: "doc.badge.arrow.up.fill", iconColor: Theme.blue) {
                 HStack(spacing: 12) {
                     Button {
                         exportConfig()
@@ -1697,7 +1685,7 @@ struct GeneralTab: View {
                         .padding(.vertical, 10)
                         .background(
                             LinearGradient(
-                                colors: [Color(hex: "3B82F6"), Color(hex: "2563EB")],
+                                colors: [Theme.blue, Theme.blueDark],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
@@ -1705,7 +1693,7 @@ struct GeneralTab: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
-                    
+
                     Button {
                         showingImportPicker = true
                     } label: {
@@ -1715,26 +1703,26 @@ struct GeneralTab: View {
                             Text("Import")
                                 .font(.system(size: 12, weight: .medium))
                         }
-                        .foregroundColor(Color(hex: "3B82F6"))
+                        .foregroundColor(Theme.blue)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(Color(hex: "3B82F6").opacity(0.15))
+                        .background(Theme.blue.opacity(0.15))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
                 }
-                
+
                 Text("Export your domains and services configuration to a file, or import from a backup.")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "6B7280"))
+                    .foregroundColor(Theme.textSecondary)
             }
             
             // Network status section
-            SettingsCard(title: "Network Status", icon: "network", iconColor: Color(hex: "10B981")) {
+            SettingsCard(title: "Network Status", icon: "network", iconColor: Theme.success) {
                 StatusRow(
                     label: "VPN Status",
                     value: routeManager.isVPNConnected ? String(localized: "Connected") : String(localized: "Disconnected"),
-                    valueColor: routeManager.isVPNConnected ? Color(hex: "10B981") : Color(hex: "EF4444"),
+                    valueColor: routeManager.isVPNConnected ? Theme.success : Theme.error,
                     showDot: true
                 )
                 
@@ -1758,7 +1746,7 @@ struct GeneralTab: View {
                 
                 // Route verification results
                 if !routeManager.routeVerificationResults.isEmpty {
-                    Divider().background(Color.white.opacity(0.1))
+                    Divider().background(Theme.divider)
                     
                     let passedCount = routeManager.routeVerificationResults.values.filter { $0.isReachable }.count
                     let totalCount = routeManager.routeVerificationResults.count
@@ -1766,17 +1754,17 @@ struct GeneralTab: View {
                     HStack {
                         Text("Route Verification")
                             .font(.system(size: 12))
-                            .foregroundColor(Color(hex: "9CA3AF"))
-                        
+                            .foregroundColor(Theme.textSecondary)
+
                         Spacer()
-                        
+
                         HStack(spacing: 4) {
                             Image(systemName: passedCount == totalCount ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                                 .font(.system(size: 10))
-                                .foregroundColor(passedCount == totalCount ? Color(hex: "10B981") : Color(hex: "F59E0B"))
+                                .foregroundColor(passedCount == totalCount ? Theme.success : Theme.warning)
                             Text("\(passedCount)/\(totalCount) reachable")
                                 .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                .foregroundColor(passedCount == totalCount ? Color(hex: "10B981") : Color(hex: "F59E0B"))
+                                .foregroundColor(passedCount == totalCount ? Theme.success : Theme.warning)
                         }
                     }
                 }
@@ -1788,11 +1776,11 @@ struct GeneralTab: View {
                     BrandedAppName(fontSize: 13)
                     Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")")
                         .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "6B7280"))
+                        .foregroundColor(Theme.textSecondary)
                 }
-                
+
                 Spacer()
-                
+
                 Link(destination: URL(string: "https://github.com/GeiserX/VPN-Bypass")!) {
                     HStack(spacing: 6) {
                         Image(systemName: "star.fill")
@@ -1800,17 +1788,17 @@ struct GeneralTab: View {
                         Text("GitHub")
                             .font(.system(size: 12, weight: .medium))
                     }
-                    .foregroundColor(Color(hex: "10B981"))
+                    .foregroundColor(Theme.success)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color(hex: "10B981").opacity(0.15))
+                    .background(Theme.success.opacity(0.15))
                     .clipShape(Capsule())
                 }
             }
             .padding(16)
             .background(
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.03))
+                    .fill(Theme.bgCard)
             )
             
             Spacer()
@@ -1909,12 +1897,12 @@ struct NotificationChip: View {
         } label: {
             Text(label)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(isOn ? .white : Color(hex: "6B7280"))
+                .foregroundColor(isOn ? .white : Theme.textSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(
                     Capsule()
-                        .fill(isOn ? Color(hex: "8B5CF6").opacity(0.3) : Color.white.opacity(0.05))
+                        .fill(isOn ? Theme.purple.opacity(0.3) : Theme.bgCard)
                 )
         }
         .buttonStyle(.plain)
@@ -1936,10 +1924,10 @@ struct SettingsCard<Content: View>: View {
                 Text(title)
                     .textCase(.uppercase)
                     .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(Color(hex: "6B7280"))
+                    .foregroundColor(Theme.textSecondary)
                     .tracking(1)
             }
-            
+
             VStack(alignment: .leading, spacing: 12) {
                 content
             }
@@ -1949,10 +1937,10 @@ struct SettingsCard<Content: View>: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color.white.opacity(0.03))
+                .fill(Theme.bgCard)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                        .stroke(Theme.bgCardBorder, lineWidth: 1)
                 )
         )
     }
@@ -1968,23 +1956,23 @@ struct SettingsToggleRow: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 14))
-                .foregroundColor(Color(hex: "10B981"))
+                .foregroundColor(Theme.success)
                 .frame(width: 20)
-            
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white)
                 Text(subtitle)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "6B7280"))
+                    .foregroundColor(Theme.textSecondary)
             }
-            
+
             Spacer()
-            
+
             Toggle("", isOn: $isOn)
                 .toggleStyle(.switch)
-                .tint(Color(hex: "10B981"))
+                .tint(Theme.success)
                 .scaleEffect(0.8)
         }
     }
@@ -2000,7 +1988,7 @@ struct StatusRow: View {
         HStack {
             Text(label)
                 .font(.system(size: 12))
-                .foregroundColor(Color(hex: "9CA3AF"))
+                .foregroundColor(Theme.textSecondary)
             
             Spacer()
             
@@ -2033,16 +2021,14 @@ struct LogsTab: View {
                 HStack(spacing: 8) {
                     Image(systemName: "list.bullet.rectangle.fill")
                         .font(.system(size: 20))
-                        .foregroundStyle(
-                            LinearGradient(colors: [Color(hex: "3B82F6"), Color(hex: "60A5FA")], startPoint: .top, endPoint: .bottom)
-                        )
+                        .foregroundStyle(Theme.blueGradient)
                     Text("Activity Log")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                 }
-                
+
                 Spacer()
-                
+
                 if !routeManager.recentLogs.isEmpty {
                     Button {
                         copyLogsToClipboard()
@@ -2053,14 +2039,14 @@ struct LogsTab: View {
                             Text("Copy")
                                 .font(.system(size: 11, weight: .medium))
                         }
-                        .foregroundColor(Color(hex: "3B82F6"))
+                        .foregroundColor(Theme.blue)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(Color(hex: "3B82F6").opacity(0.15))
+                        .background(Theme.blue.opacity(0.15))
                         .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    
+
                     Button {
                         withAnimation { routeManager.recentLogs.removeAll() }
                     } label: {
@@ -2070,28 +2056,28 @@ struct LogsTab: View {
                             Text("Clear")
                                 .font(.system(size: 11, weight: .medium))
                         }
-                        .foregroundColor(Color(hex: "EF4444"))
+                        .foregroundColor(Theme.error)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(Color(hex: "EF4444").opacity(0.15))
+                        .background(Theme.error.opacity(0.15))
                         .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            
+
             // Log content
             if routeManager.recentLogs.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "doc.text")
                         .font(.system(size: 36))
-                        .foregroundColor(Color(hex: "374151"))
+                        .foregroundColor(Theme.textDisabled)
                     Text("No activity yet")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(Color(hex: "6B7280"))
+                        .foregroundColor(Theme.textSecondary)
                     Text("Logs will appear here when routes are applied")
                         .font(.system(size: 12))
-                        .foregroundColor(Color(hex: "4B5563"))
+                        .foregroundColor(Theme.textDisabled)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -2105,7 +2091,7 @@ struct LogsTab: View {
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.black.opacity(0.3))
+                        .fill(Theme.bgElevated)
                 )
             }
         }
@@ -2120,7 +2106,7 @@ struct LogsTab: View {
                 Image(systemName: "heart.text.square.fill")
                     .font(.system(size: 20))
                     .foregroundStyle(
-                        LinearGradient(colors: [Color(hex: "10B981"), Color(hex: "34D399")], startPoint: .top, endPoint: .bottom)
+                        Theme.successGradient
                     )
                 Text("Route Health")
                     .font(.system(size: 18, weight: .bold, design: .rounded))
@@ -2134,15 +2120,15 @@ struct LogsTab: View {
                     icon: "arrow.triangle.branch",
                     title: "Active Routes",
                     value: "\(routeManager.uniqueRouteCount)",
-                    color: Color(hex: "10B981")
+                    color: Theme.success
                 )
-                
+
                 // Enabled services (only in bypass mode)
                 RouteStatCard(
                     icon: "square.grid.2x2",
                     title: "Services",
                     value: routeManager.config.routingMode == .vpnOnly ? "—" : "\(routeManager.config.services.filter { $0.enabled }.count)",
-                    color: Color(hex: "8B5CF6")
+                    color: Theme.purple
                 )
 
                 // Enabled domains (mode-aware)
@@ -2152,7 +2138,7 @@ struct LogsTab: View {
                     value: routeManager.config.routingMode == .vpnOnly
                         ? "\(routeManager.config.inverseDomains.filter { $0.enabled }.count)"
                         : "\(routeManager.config.domains.filter { $0.enabled }.count)",
-                    color: Color(hex: "3B82F6")
+                    color: Theme.blue
                 )
             }
             
@@ -2162,10 +2148,10 @@ struct LogsTab: View {
                     HStack(spacing: 6) {
                         Image(systemName: "server.rack")
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "06B6D4"))
+                            .foregroundColor(Theme.cyan)
                         Text("DNS: \(dnsServer)")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(Color(hex: "9CA3AF"))
+                            .foregroundColor(Theme.textSecondary)
                     }
                 }
                 
@@ -2173,13 +2159,13 @@ struct LogsTab: View {
                     HStack(spacing: 6) {
                         Image(systemName: "clock")
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "6B7280"))
+                            .foregroundColor(Theme.textTertiary)
                         Text("Last update: ")
                             .font(.system(size: 11))
-                            .foregroundColor(Color(hex: "6B7280"))
+                            .foregroundColor(Theme.textTertiary)
                         Text(lastUpdate, style: .relative)
                             .font(.system(size: 11))
-                            .foregroundColor(Color(hex: "9CA3AF"))
+                            .foregroundColor(Theme.textSecondary)
                     }
                 }
                 
@@ -2187,13 +2173,13 @@ struct LogsTab: View {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hex: "10B981"))
+                            .foregroundColor(Theme.success)
                         Text("Next refresh: ")
                             .font(.system(size: 11))
-                            .foregroundColor(Color(hex: "6B7280"))
+                            .foregroundColor(Theme.textTertiary)
                         Text(nextRefresh, style: .relative)
                             .font(.system(size: 11))
-                            .foregroundColor(Color(hex: "10B981"))
+                            .foregroundColor(Theme.success)
                     }
                 }
             }
@@ -2201,7 +2187,7 @@ struct LogsTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.black.opacity(0.2))
+                    .fill(Theme.bgElevated)
             )
         }
         .padding(16)
@@ -2273,11 +2259,11 @@ struct InfoTab: View {
             
             Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")")
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(Color(hex: "6B7280"))
-            
+                .foregroundColor(Theme.textTertiary)
+
             Text("Route specific traffic around your corporate VPN")
                 .font(.system(size: 13))
-                .foregroundColor(Color(hex: "9CA3AF"))
+                .foregroundColor(Theme.textSecondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -2285,7 +2271,7 @@ struct InfoTab: View {
     }
     
     private var authorSection: some View {
-        SettingsCard(title: "Author", icon: "person.fill", iconColor: Color(hex: "8B5CF6")) {
+        SettingsCard(title: "Author", icon: "person.fill", iconColor: Theme.purple) {
             HStack(spacing: 16) {
                 // Avatar from GitHub
                 if let avatarPath = Bundle.main.path(forResource: "author-avatar", ofType: "png"),
@@ -2299,7 +2285,7 @@ struct InfoTab: View {
                     // Fallback
                     Circle()
                         .fill(
-                            LinearGradient(colors: [Color(hex: "8B5CF6"), Color(hex: "A78BFA")], startPoint: .top, endPoint: .bottom)
+                            Theme.purpleGradient
                         )
                         .frame(width: 50, height: 50)
                         .overlay(
@@ -2316,7 +2302,7 @@ struct InfoTab: View {
                     
                     Text("Your 100x Engineer, with ❤️")
                         .font(.system(size: 12))
-                        .foregroundColor(Color(hex: "9CA3AF"))
+                        .foregroundColor(Theme.textSecondary)
                 }
                 
                 Spacer()
@@ -2325,42 +2311,42 @@ struct InfoTab: View {
     }
     
     private var supportSection: some View {
-        SettingsCard(title: "Support the Project", icon: "heart.fill", iconColor: Color(hex: "EF4444")) {
+        SettingsCard(title: "Support the Project", icon: "heart.fill", iconColor: Theme.error) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("If you find VPN Bypass useful, consider supporting its development!")
                     .font(.system(size: 12))
-                    .foregroundColor(Color(hex: "9CA3AF"))
+                    .foregroundColor(Theme.textSecondary)
                 
                 // First row
                 HStack(spacing: 10) {
                     LinkButton(
                         title: "GitHub Sponsors",
                         icon: "heart.fill",
-                        color: Color(hex: "DB61A2"),
+                        color: Theme.githubSponsors,
                         url: "https://github.com/sponsors/GeiserX"
                     )
-                    
+
                     LinkButton(
                         title: "Buy Me a Coffee",
                         icon: "cup.and.saucer.fill",
-                        color: Color(hex: "FFDD00"),
+                        color: Theme.buyMeACoffee,
                         url: "https://buymeacoffee.com/geiser"
                     )
                 }
-                
+
                 // Second row
                 HStack(spacing: 10) {
                     LinkButton(
                         title: "Patreon",
                         icon: "paintpalette.fill",
-                        color: Color(hex: "FF424D"),
+                        color: Theme.patreon,
                         url: "https://patreon.com/geiser"
                     )
-                    
+
                     LinkButton(
                         title: "Thanks.dev",
                         icon: "hands.clap.fill",
-                        color: Color(hex: "10B981"),
+                        color: Theme.success,
                         url: "https://thanks.dev/u/gh/geiserx"
                     )
                 }
@@ -2369,33 +2355,33 @@ struct InfoTab: View {
     }
     
     private var linksSection: some View {
-        SettingsCard(title: "Links", icon: "link", iconColor: Color(hex: "3B82F6")) {
+        SettingsCard(title: "Links", icon: "link", iconColor: Theme.blue) {
             VStack(spacing: 8) {
                 LinkRow(icon: "globe", title: "Blog", subtitle: "geiser.cloud", url: "https://geiser.cloud")
-                Divider().background(Color.white.opacity(0.1))
+                Divider().background(Theme.divider)
                 LinkRow(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub", subtitle: "github.com/GeiserX", url: "https://github.com/GeiserX")
-                Divider().background(Color.white.opacity(0.1))
+                Divider().background(Theme.divider)
                 LinkRow(icon: "doc.text", title: "Source Code", subtitle: "VPN Bypass", url: "https://github.com/GeiserX/VPN-Bypass")
-                Divider().background(Color.white.opacity(0.1))
+                Divider().background(Theme.divider)
                 LinkRow(icon: "exclamationmark.bubble", title: "Report Issue", subtitle: "GitHub Issues", url: "https://github.com/GeiserX/VPN-Bypass/issues")
             }
         }
     }
     
     private var licenseSection: some View {
-        SettingsCard(title: "License", icon: "doc.badge.gearshape", iconColor: Color(hex: "F59E0B")) {
+        SettingsCard(title: "License", icon: "doc.badge.gearshape", iconColor: Theme.warning) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("GPL-3.0 License")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white)
-                
+
                 Text("This software is free and open source under the GNU General Public License v3.0. You are free to use, modify, and distribute it under the same license terms.")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "9CA3AF"))
-                
+                    .foregroundColor(Theme.textSecondary)
+
                 Text("© 2026 Sergio Fernández (GeiserX)")
                     .font(.system(size: 10))
-                    .foregroundColor(Color(hex: "6B7280"))
+                    .foregroundColor(Theme.textTertiary)
             }
         }
     }
@@ -2421,7 +2407,7 @@ struct LinkButton: View {
                 Text(title)
                     .font(.system(size: 11, weight: .medium))
             }
-            .foregroundColor(color == Color(hex: "FFDD00") ? .black : .white)
+            .foregroundColor(color == Theme.buyMeACoffee ? .black : .white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
             .background(color)
@@ -2446,23 +2432,23 @@ struct LinkRow: View {
             HStack(spacing: 12) {
                 Image(systemName: icon)
                     .font(.system(size: 12))
-                    .foregroundColor(Color(hex: "3B82F6"))
+                    .foregroundColor(Theme.blue)
                     .frame(width: 20)
-                
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.white)
                     Text(subtitle)
                         .font(.system(size: 10))
-                        .foregroundColor(Color(hex: "6B7280"))
+                        .foregroundColor(Theme.textTertiary)
                 }
-                
+
                 Spacer()
-                
+
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 10))
-                    .foregroundColor(Color(hex: "6B7280"))
+                    .foregroundColor(Theme.textTertiary)
             }
             .padding(.vertical, 4)
             .contentShape(Rectangle())
@@ -2491,7 +2477,7 @@ struct RouteStatCard: View {
             
             Text(title)
                 .font(.system(size: 10))
-                .foregroundColor(Color(hex: "6B7280"))
+                .foregroundColor(Theme.textTertiary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
@@ -2507,10 +2493,10 @@ struct LogRow: View {
     
     private var levelColor: Color {
         switch entry.level {
-        case .info: return Color(hex: "6B7280")
-        case .success: return Color(hex: "10B981")
-        case .warning: return Color(hex: "F59E0B")
-        case .error: return Color(hex: "EF4444")
+        case .info: return Theme.textTertiary
+        case .success: return Theme.success
+        case .warning: return Theme.warning
+        case .error: return Theme.error
         }
     }
     
@@ -2531,7 +2517,7 @@ struct LogRow: View {
             
             Text(entry.timestamp, format: .dateTime.hour().minute().second())
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(Color(hex: "6B7280"))
+                .foregroundColor(Theme.textTertiary)
                 .frame(width: 70, alignment: .leading)
             
             Text(entry.message)
@@ -2591,7 +2577,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.title = "VPN Bypass"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.backgroundColor = NSColor(Color(hex: "0F0F14"))
+        window.backgroundColor = NSColor(Theme.bgPrimary)
         window.isReleasedWhenClosed = false
         window.contentMinSize = NSSize(width: 580, height: 620)
         window.contentMaxSize = NSSize(width: 580, height: 620)

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" fill="black">
+  <!-- Filled shield (solid, representing active bypass) -->
+  <path d="
+    M11 2 L3 5 L3 11 Q3 17 11 20 Q19 17 19 11 L19 5 Z
+  "/>
+  <!-- Checkmark cutout (white/transparent) -->
+  <path d="M7.5 11 L10 13.5 L14.5 8.5 L13 7 L10 10.5 L9 9.5 Z" fill="white"/>
+</svg>
