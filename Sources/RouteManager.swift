@@ -706,13 +706,28 @@ final class RouteManager: ObservableObject {
         let wasVPNConnected = isVPNConnected
         let oldInterface = vpnInterface
         let oldTailscaleFingerprint = lastTailscaleSelfFingerprint
-        
+
         // Detect current network first
         await detectCurrentNetwork()
-        
+
         // Use scutil to detect VPN interfaces with IPv4 addresses
-        let (connected, interface, detectedType) = await detectVPNInterface()
-        
+        var (connected, interface, detectedType) = await detectVPNInterface()
+
+        // Guard against transient VPN interface flaps: if VPN was connected but
+        // now appears disconnected, recheck after a short delay before committing.
+        // NWPathMonitor and ifconfig can momentarily miss the interface during
+        // network transitions, causing spurious disconnect→reconnect notifications.
+        if wasVPNConnected && !connected {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            let (recheckConnected, recheckInterface, recheckType) = await detectVPNInterface()
+            if recheckConnected {
+                log(.info, "VPN flap suppressed — interface reappeared after recheck")
+                connected = recheckConnected
+                interface = recheckInterface
+                detectedType = recheckType
+            }
+        }
+
         isVPNConnected = connected
         vpnInterface = connected ? interface : nil
         vpnType = connected ? detectedType : nil
