@@ -29,3 +29,6 @@ ignore:
   - "Package.swift"
   - "Helper/**"
   - "Sources/VPNBypass/**"
+  - "Sources/VPNBypassCore/SettingsView.swift"
+  - "Sources/VPNBypassCore/MenuBarViews.swift"
+  - "Sources/VPNBypassCore/VPNBypassApp.swift"

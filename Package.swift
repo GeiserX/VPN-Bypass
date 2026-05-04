@@ -28,8 +28,7 @@ let package = Package(
         .testTarget(
             name: "VPNBypassTests",
             dependencies: ["VPNBypassCore"],
-            path: "Tests/VPNBypassTests",
-            sources: ["VPNBypassTests.swift"]
+            path: "Tests/VPNBypassTests"
         )
     ]
 )
