@@ -408,6 +408,8 @@ final class AddInverseDomainLogicTests: XCTestCase {
         let entry: String
         if cidr {
             entry = trimmed
+        } else if trimmed.contains("/") {
+            return nil
         } else {
             entry = rm.cleanDomain(trimmed)
             guard !entry.isEmpty else { return nil }
@@ -447,8 +449,13 @@ final class AddInverseDomainLogicTests: XCTestCase {
         XCTAssertFalse(result!.isCIDR)
     }
 
-    func testDomainInputIsCleaned() {
+    func testURLWithPathIsRejected() {
         let result = classifyInput("https://Example.COM/path?q=1")
+        XCTAssertNil(result)
+    }
+
+    func testDomainInputIsCleaned() {
+        let result = classifyInput("example.COM")
         XCTAssertNotNil(result)
         XCTAssertEqual(result!.entry, "example.com")
         XCTAssertFalse(result!.isCIDR)
@@ -498,9 +505,14 @@ final class AddInverseDomainLogicTests: XCTestCase {
         XCTAssertFalse(wouldDuplicate("google.com", existingDomains: existing))
     }
 
-    func testDuplicateDetectionWithCleanedURL() {
+    func testURLWithPathIsRejectedBeforeDuplicateCheck() {
         let existing = ["telegram.org"]
-        XCTAssertTrue(wouldDuplicate("https://telegram.org/path", existingDomains: existing))
+        XCTAssertFalse(wouldDuplicate("https://telegram.org/path", existingDomains: existing))
+    }
+
+    func testDuplicateDomainWithExactMatchIsDetected() {
+        let existing = ["telegram.org"]
+        XCTAssertTrue(wouldDuplicate("telegram.org", existingDomains: existing))
     }
 
     // MARK: - Hosts file skipping for CIDR entries
