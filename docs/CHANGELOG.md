@@ -5,6 +5,15 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-05-04
+
+### Changed
+- **Library extraction** — Extracted `VPNBypassCore` as a separate SPM library target, enabling unit testing of business logic without launching the full app
+
+### Added
+- **552 unit tests** across 10 new test files covering RouteManager config mutations, domain cleaning, IP/CIDR validation, Codable roundtrips, HelperState, notification preferences, Theme constants, and more
+- **Codecov integration** — Coverage tracking with exclusions for system-dependent code (XPC, VPN detection, SwiftUI views)
+
 ## [2.6.2] - 2026-05-03
 
 ### Fixed
