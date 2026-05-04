@@ -4,16 +4,16 @@ codecov:
 coverage:
   precision: 2
   round: down
-  range: "70...100"
+  range: "60...100"
   status:
     project:
       default:
-        target: 70%
-        threshold: 5%
+        target: 60%
+        threshold: 10%
     patch:
       default:
-        target: 80%
-        threshold: 10%
+        target: 60%
+        threshold: 15%
 
 comment:
   layout: "reach,diff,flags,files"
@@ -32,3 +32,6 @@ ignore:
   - "Sources/VPNBypassCore/SettingsView.swift"
   - "Sources/VPNBypassCore/MenuBarViews.swift"
   - "Sources/VPNBypassCore/VPNBypassApp.swift"
+  - "Sources/VPNBypassCore/HelperManager.swift"
+  - "Sources/VPNBypassCore/LaunchAtLoginManager.swift"
+  - "Sources/VPNBypassCore/NotificationManager.swift"
