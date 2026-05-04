@@ -2,14 +2,42 @@ import XCTest
 @testable import VPNBypassCore
 import Foundation
 
+// Base class that snapshots and restores the real config FILE around each test,
+// preventing tests from corrupting the user's production config.json.
+@MainActor
+class RouteManagerTestCase: XCTestCase {
+
+    var rm: RouteManager { RouteManager.shared }
+
+    private static let configDir: URL = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("VPNBypass", isDirectory: true)
+    }()
+    private static let configURL = configDir.appendingPathComponent("config.json")
+    private static let testBackupURL = configDir.appendingPathComponent("config.json.test-snapshot")
+
+    override func setUp() {
+        super.setUp()
+        try? FileManager.default.copyItem(at: Self.configURL, to: Self.testBackupURL)
+    }
+
+    override func tearDown() {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: Self.testBackupURL.path) {
+            try? fm.removeItem(at: Self.configURL)
+            try? fm.moveItem(at: Self.testBackupURL, to: Self.configURL)
+            rm.loadConfig()
+        }
+        super.tearDown()
+    }
+}
+
 // Tests that exercise RouteManager public methods which modify config state.
 // Since isVPNConnected is false in tests, route application branches are skipped,
 // but config mutations, logging, and validation logic all execute.
 
 @MainActor
-final class AddDomainTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class AddDomainTests: RouteManagerTestCase {
 
     override func setUp() {
         super.setUp()
@@ -53,9 +81,7 @@ final class AddDomainTests: XCTestCase {
 }
 
 @MainActor
-final class RemoveDomainTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class RemoveDomainTests: RouteManagerTestCase {
 
     override func setUp() {
         super.setUp()
@@ -69,16 +95,13 @@ final class RemoveDomainTests: XCTestCase {
             return
         }
         rm.removeDomain(entry)
-        // removeDomain dispatches an async Task; give it time to complete
         try await Task.sleep(nanoseconds: 200_000_000)
         XCTAssertFalse(rm.config.domains.contains(where: { $0.domain == "to-remove.com" }))
     }
 }
 
 @MainActor
-final class ToggleDomainTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class ToggleDomainTests: RouteManagerTestCase {
 
     override func setUp() {
         super.setUp()
@@ -111,9 +134,7 @@ final class ToggleDomainTests: XCTestCase {
 }
 
 @MainActor
-final class SetAllDomainsEnabledTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class SetAllDomainsEnabledTests: RouteManagerTestCase {
 
     override func setUp() {
         super.setUp()
@@ -141,9 +162,7 @@ final class SetAllDomainsEnabledTests: XCTestCase {
 }
 
 @MainActor
-final class AddInverseDomainIntegrationTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class AddInverseDomainIntegrationTests: RouteManagerTestCase {
 
     override func setUp() {
         super.setUp()
@@ -181,9 +200,7 @@ final class AddInverseDomainIntegrationTests: XCTestCase {
 }
 
 @MainActor
-final class ToggleInverseDomainTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class ToggleInverseDomainTests: RouteManagerTestCase {
 
     override func setUp() {
         super.setUp()
@@ -203,9 +220,7 @@ final class ToggleInverseDomainTests: XCTestCase {
 }
 
 @MainActor
-final class SetAllInverseDomainsTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class SetAllInverseDomainsTests: RouteManagerTestCase {
 
     override func setUp() {
         super.setUp()
@@ -232,9 +247,7 @@ final class SetAllInverseDomainsTests: XCTestCase {
 }
 
 @MainActor
-final class CustomServiceTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class CustomServiceTests: RouteManagerTestCase {
 
     override func setUp() {
         super.setUp()
@@ -263,7 +276,6 @@ final class CustomServiceTests: XCTestCase {
             return
         }
         rm.removeCustomService(svc.id)
-        // removeCustomService dispatches an async Task; give it time to complete
         try await Task.sleep(nanoseconds: 200_000_000)
         XCTAssertFalse(rm.config.services.contains(where: { $0.id == svc.id }))
     }
@@ -283,9 +295,7 @@ final class CustomServiceTests: XCTestCase {
 }
 
 @MainActor
-final class ToggleServiceTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class ToggleServiceTests: RouteManagerTestCase {
 
     func testToggleBuiltInService() {
         guard let first = rm.config.services.first else {
@@ -301,9 +311,7 @@ final class ToggleServiceTests: XCTestCase {
 }
 
 @MainActor
-final class SetRoutingModeTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class SetRoutingModeTests: RouteManagerTestCase {
 
     func testSetRoutingModeToVPNOnly() {
         rm.setRoutingMode(.vpnOnly)
@@ -325,9 +333,7 @@ final class SetRoutingModeTests: XCTestCase {
 }
 
 @MainActor
-final class ExportImportConfigTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class ExportImportConfigTests: RouteManagerTestCase {
 
     func testExportConfigReturnsURL() {
         let url = rm.exportConfig()
@@ -372,9 +378,7 @@ final class ExportImportConfigTests: XCTestCase {
 }
 
 @MainActor
-final class SaveLoadConfigTests: XCTestCase {
-
-    private var rm: RouteManager { RouteManager.shared }
+final class SaveLoadConfigTests: RouteManagerTestCase {
 
     func testSaveConfigDoesNotCrash() {
         rm.saveConfig()
@@ -390,8 +394,6 @@ final class SaveLoadConfigTests: XCTestCase {
         rm.config.checkInterval = 0
         rm.loadConfig()
         XCTAssertEqual(rm.config.checkInterval, 999)
-        rm.config.checkInterval = 300
-        rm.saveConfig()
     }
 }
 
@@ -400,7 +402,6 @@ final class DetectedDNSDisplayTests: XCTestCase {
 
     func testDetectedDNSServerDisplayDefaultNil() {
         let display = RouteManager.shared.detectedDNSServerDisplay
-        // May or may not be nil depending on state, just check it doesn't crash
         _ = display
     }
 }
