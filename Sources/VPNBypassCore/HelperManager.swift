@@ -419,7 +419,10 @@ final class HelperManager: ObservableObject {
             ]
         }
         let allDests = routes.map { $0.destination }
-        let timeout = xpcTimeout + Double(routes.count) * 0.1
+        // Budget 0.25s per route: helper does delete-before-add (2 subprocess calls
+        // at ~0.07s each ≈ 0.14s/route). 0.1s/route was too tight and caused timeouts
+        // for batches above ~250 routes, dropping all routes as failed.
+        let timeout = xpcTimeout + Double(routes.count) * 0.25
         let fallback = (0, routes.count, allDests, Optional("XPC timeout"))
 
         let connection = getOrCreateConnection()
@@ -447,7 +450,9 @@ final class HelperManager: ObservableObject {
             return (0, destinations.count, destinations, "Helper not ready (\(helperState.statusText))")
         }
 
-        let timeout = xpcTimeout + Double(destinations.count) * 0.1
+        // Budget 0.25s per route: helper runs one /sbin/route delete per destination
+        // at ~0.07s each. Using same budget as addRoutesBatch for consistency.
+        let timeout = xpcTimeout + Double(destinations.count) * 0.25
         let fallback = (0, destinations.count, destinations, Optional("XPC timeout"))
 
         let connection = getOrCreateConnection()
