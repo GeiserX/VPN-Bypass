@@ -3656,11 +3656,6 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    /// Public domain normalization for custom service editor
-    func cleanDomainForService(_ input: String) -> String {
-        return cleanDomain(input)
-    }
-
     nonisolated func cleanDomain(_ input: String) -> String {
         var domain = input.trimmingCharacters(in: .whitespacesAndNewlines)
 

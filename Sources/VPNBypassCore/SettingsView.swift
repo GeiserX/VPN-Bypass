@@ -974,7 +974,7 @@ struct CustomServiceEditor: View {
     private func save() {
         // Normalize domains the same way the main domain input does (strips protocols, ports, paths, invalid chars)
         let cleanDomains = domains
-            .map { routeManager.cleanDomainForService($0) }
+            .map { routeManager.cleanDomain($0) }
             .filter { !$0.isEmpty }
         let cleanIPs = ipRanges.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let name = serviceName.trimmingCharacters(in: .whitespaces)
