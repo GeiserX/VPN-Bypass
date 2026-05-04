@@ -818,7 +818,14 @@ struct CustomServiceEditor: View {
 
     private var canSave: Bool {
         !serviceName.trimmingCharacters(in: .whitespaces).isEmpty &&
-        domains.contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+        domains.contains(where: { isValidDomainInput($0) })
+    }
+
+    private func isValidDomainInput(_ input: String) -> Bool {
+        let cleaned = routeManager.cleanDomain(input)
+        guard !cleaned.isEmpty else { return false }
+        let parts = cleaned.components(separatedBy: ".")
+        return parts.count >= 2 && parts.allSatisfy { !$0.isEmpty }
     }
 
     var body: some View {
@@ -850,7 +857,7 @@ struct CustomServiceEditor: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(Theme.textSecondary)
 
-                        TextField("e.g. My Company VPN", text: $serviceName)
+                        TextField("e.g. My Service", text: $serviceName)
                             .textFieldStyle(.plain)
                             .font(.system(size: 13))
                             .padding(10)
@@ -1008,10 +1015,9 @@ struct CustomServiceEditor: View {
     }
 
     private func save() {
-        // Normalize domains the same way the main domain input does (strips protocols, ports, paths, invalid chars)
         let cleanDomains = domains
             .map { routeManager.cleanDomain($0) }
-            .filter { !$0.isEmpty }
+            .filter { isValidDomainInput($0) }
         let cleanIPs = ipRanges.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let name = serviceName.trimmingCharacters(in: .whitespaces)
 
