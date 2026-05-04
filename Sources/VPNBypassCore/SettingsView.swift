@@ -506,6 +506,14 @@ struct ServicesTab: View {
         }
     }
 
+    private var customServices: [RouteManager.ServiceEntry] {
+        filteredServices.filter { $0.isCustom }
+    }
+
+    private var builtInServices: [RouteManager.ServiceEntry] {
+        filteredServices.filter { !$0.isCustom }
+    }
+
     private var enabledCount: Int {
         routeManager.config.services.filter { $0.enabled }.count
     }
@@ -529,6 +537,18 @@ struct ServicesTab: View {
                     Text("\(enabledCount)/\(routeManager.config.services.count) enabled")
                         .font(.system(size: 11))
                         .foregroundColor(Theme.textSecondary)
+
+                    Button {
+                        editingService = nil
+                        showingCustomServiceEditor = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(Theme.purpleLight)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Create Custom Service")
                 }
             }
 
@@ -635,43 +655,55 @@ struct ServicesTab: View {
 
                 // Services list
                 ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(filteredServices) { service in
-                            ServiceRow(service: service, onEdit: service.isCustom ? {
-                                editingService = service
-                                showingCustomServiceEditor = true
-                            } : nil)
+                    VStack(spacing: 8) {
+                        // Custom Services section
+                        if !customServices.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("CUSTOM SERVICES")
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                                    .foregroundColor(Theme.textSecondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.top, 8)
+
+                                LazyVStack(spacing: 2) {
+                                    ForEach(customServices) { service in
+                                        ServiceRow(service: service, onEdit: {
+                                            editingService = service
+                                            showingCustomServiceEditor = true
+                                        })
+                                    }
+                                }
+                            }
+                            .padding(.bottom, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Theme.bgElevated)
+                            )
+                        }
+
+                        // Built-in Services section
+                        if !builtInServices.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("BUILT-IN SERVICES")
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                                    .foregroundColor(Theme.textSecondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.top, 8)
+
+                                LazyVStack(spacing: 2) {
+                                    ForEach(builtInServices) { service in
+                                        ServiceRow(service: service, onEdit: nil)
+                                    }
+                                }
+                            }
+                            .padding(.bottom, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Theme.bgElevated)
+                            )
                         }
                     }
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Theme.bgElevated)
-                )
-
-                // Add Custom Service button
-                Button {
-                    editingService = nil
-                    showingCustomServiceEditor = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 13))
-                        Text("Create Custom Service")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundColor(Theme.purple)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity)
-                    .background(Theme.purple.opacity(0.1))
-                    .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Theme.purple.opacity(0.3), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
             }
         }
         .sheet(isPresented: $showingCustomServiceEditor) {
@@ -705,10 +737,10 @@ struct ServiceRow: View {
                     if service.isCustom {
                         Text("Custom")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(Theme.purple)
+                            .foregroundColor(Theme.purpleLight)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Theme.purple.opacity(0.15))
+                            .background(Theme.purple.opacity(0.12))
                             .cornerRadius(4)
                     }
                 }
@@ -720,16 +752,18 @@ struct ServiceRow: View {
 
             Spacer()
 
-            // Edit button for custom services
-            if service.isCustom && isHovered {
+            // Edit/delete buttons for custom services
+            if service.isCustom {
                 Button {
                     onEdit?()
                 } label: {
                     Image(systemName: "pencil")
                         .font(.system(size: 11))
                         .foregroundColor(Theme.purple)
+                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
+                .opacity(isHovered ? 1.0 : 0.4)
 
                 Button {
                     routeManager.removeCustomService(service.id)
@@ -737,8 +771,10 @@ struct ServiceRow: View {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
                         .foregroundColor(Theme.error)
+                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
+                .opacity(isHovered ? 1.0 : 0.4)
             }
 
             // Toggle

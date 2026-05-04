@@ -5,6 +5,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-05-04
+
+### Improved
+- **Services tab UI** — Added "+" button in the header for quick custom service creation. Services list is now split into "Custom Services" (top) and "Built-in Services" sections with clear headers. Custom badge contrast improved for readability. Edit/delete buttons for custom services are always visible (no longer hover-only). Removed the old full-width bottom button that was hidden by scroll.
+
 ## [2.7.2] - 2026-05-04
 
 ### Fixed
