@@ -5,6 +5,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.2] - 2026-05-04
+
+### Fixed
+- **XPC batch timeout** — Increased per-route timeout budget from 0.1s to 0.25s. The helper does delete-before-add (2 subprocess calls at ~0.14s/route), so the old budget caused timeouts for batches above ~250 routes, silently dropping all routes.
+
 ## [2.7.1] - 2026-05-04
 
 ### Fixed
