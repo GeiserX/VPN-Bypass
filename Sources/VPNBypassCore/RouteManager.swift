@@ -1118,6 +1118,20 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Detects VPN/network state for display only, without applying or mutating
+    /// any routes. Used when the privileged helper is not ready so the UI can
+    /// show real status instead of hanging on the "Setting Up..." spinner.
+    func detectVPNStateOnly() async {
+        await detectCurrentNetwork()
+        let (connected, interface, detectedType) = await detectVPNInterface()
+        isVPNConnected = connected
+        vpnInterface = connected ? interface : nil
+        vpnType = connected ? detectedType : nil
+        localGateway = await detectLocalGateway()
+        isLoading = false
+        log(.info, "VPN state detected (display only): connected=\(connected), interface=\(interface ?? "none")")
+    }
+
     func detectAndApplyRoutesAsync(sendNotification: Bool = false) async {
         isLoading = true
         log(.info, "Starting VPN detection and route application...")
