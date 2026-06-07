@@ -29,6 +29,22 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v6
+      - name: Select Xcode toolchain
+        # `swift test` needs XCTest, which ships only with full Xcode — not with
+        # the Command Line Tools. Point the toolchain at an installed Xcode so
+        # XCTest resolves, and fail fast with a clear message if it's missing.
+        run: |
+          XCODE_APP=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$XCODE_APP" ]; then
+            echo "::error::No Xcode found in /Applications. Full Xcode (not just Command Line Tools) is required for 'swift test' because XCTest ships only with Xcode. Install Xcode on this self-hosted runner."
+            exit 1
+          fi
+          DEV_DIR="$XCODE_APP/Contents/Developer"
+          echo "Using Xcode at $XCODE_APP"
+          sudo xcode-select -s "$DEV_DIR"
+          echo "DEVELOPER_DIR=$DEV_DIR" >> "$GITHUB_ENV"
+      - name: Verify XCTest is available
+        run: xcrun --find xctest
       - name: Cache SPM
         uses: actions/cache@v5
         with:

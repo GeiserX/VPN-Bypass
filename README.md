@@ -95,6 +95,8 @@ make run
 
 Open `Package.swift` in Xcode and run the project.
 
+> **CI note:** The `test` job (`swift test`) requires **full Xcode** on the self-hosted macOS runner — XCTest ships only with Xcode, not with the Command Line Tools. The workflow selects Xcode via `DEVELOPER_DIR` automatically and fails with a clear message if it is missing.
+
 ## Usage
 
 ### Menu Bar
