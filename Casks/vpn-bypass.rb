@@ -8,10 +8,10 @@ cask "vpn-bypass" do
 
   url "https://github.com/GeiserX/VPN-Bypass/releases/download/v#{version}/VPN-Bypass-#{version}.dmg"
   name "VPN Bypass"
-  desc "macOS menu bar app to route specific traffic around VPN"
+  desc "Menu bar app to route specific traffic around VPN"
   homepage "https://github.com/GeiserX/VPN-Bypass"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "VPN Bypass.app"
 
@@ -24,7 +24,7 @@ cask "vpn-bypass" do
 
   zap trash: [
     "~/Library/Application Support/VPNBypass",
-    "~/Library/Preferences/com.geiserx.vpn-bypass.plist",
     "~/Library/Caches/com.geiserx.vpn-bypass",
+    "~/Library/Preferences/com.geiserx.vpn-bypass.plist",
   ]
 end

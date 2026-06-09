@@ -5,6 +5,19 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.1] - 2026-06-09
+
+### Fixed
+- **Homebrew cask deprecation** — Replaced the deprecated `depends_on macos: ">= :ventura"` string-comparison form with the modern `depends_on macos: :ventura` symbol form, silencing the `brew` deprecation warning. Semantics are unchanged (macOS Ventura 13 or newer). Thanks to @gcpmusic for the report (#49).
+
+## [2.9.0] - 2026-06-09
+
+### Changed
+- **New app icon & logo** — Refreshed the app icon, in-app logo, and README banner with @Tetonne's community-suggested shield design (dark-navy macOS squircle). See #39.
+
+### Fixed
+- **"Setting Up…" hang** — When the privileged helper is not yet ready, the menu now shows real VPN/network status instead of spinning on "Setting Up…" indefinitely.
+
 ## [2.8.1] - 2026-05-04
 
 ### Fixed
