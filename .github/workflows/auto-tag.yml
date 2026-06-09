@@ -1,0 +1,112 @@
+name: Auto Tag
+
+# Conventional-commit-driven releases (the *versioning* half of the pipeline).
+#
+#   1. Commits land on `main` using Conventional Commits (feat:, fix:, …).
+#   2. On push, this scans every commit since the last `v*` tag and bumps:
+#        breaking (BREAKING CHANGE, or `type!:`) -> MAJOR
+#        feat:                                   -> MINOR
+#        anything else (fix:, chore:, …)         -> PATCH
+#   3. It creates the `vX.Y.Z` tag and then DISPATCHES `release.yml` to build the
+#      universal DMG + update the Homebrew cask.
+#
+# Why dispatch instead of relying on release.yml's own `on: push: tags: ['v*']`:
+# the tag is pushed here with GITHUB_TOKEN, and GitHub deliberately does NOT
+# trigger further workflow runs from GITHUB_TOKEN events (recursion guard). So a
+# tag push from this job lands silently and release.yml never fires. Dispatching
+# it explicitly (needs `actions: write`) closes that gap without a PAT.
+# release.yml keeps its tag trigger for manually-pushed tags.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Sources/**'
+      - 'Helper/**'
+      - 'Package.swift'
+      - 'Info.plist'
+      - 'Makefile'
+      - 'assets/**'
+      - 'VPNBypass.entitlements'
+      - '.github/workflows/auto-tag.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: auto-tag
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # create and push the tag
+  actions: write    # dispatch release.yml
+
+jobs:
+  tag:
+    name: Bump version from conventional commits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: bump
+        run: |
+          LATEST=$(git tag -l "v*" --sort=-version:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            echo "No existing tag; starting at v0.1.0"
+            echo "new_tag=v0.1.0" >> "$GITHUB_OUTPUT"
+            echo "version=0.1.0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERSION="${LATEST#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+          # Conventional-commit bump from $LATEST..HEAD:
+          #   breaking (BREAKING CHANGE in body, or `type!:` e.g. feat!:/fix!:) -> MAJOR
+          #   feat:                                                             -> MINOR
+          #   anything else (fix:, chore:, refactor:, …)                        -> PATCH
+          COMMITS=$(git log --format=%B "${LATEST}..HEAD")
+          if [ -z "$(git log --oneline "${LATEST}..HEAD")" ]; then
+            echo "No commits since $LATEST; nothing to release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if echo "$COMMITS" | grep -qE '(^|[[:space:]])BREAKING CHANGE|^[a-zA-Z]+(\([^)]*\))?!:'; then
+            MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+          elif echo "$COMMITS" | grep -qE '^feat'; then
+            MINOR=$((MINOR + 1)); PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "new_tag=${NEW_TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${MAJOR}.${MINOR}.${PATCH}" >> "$GITHUB_OUTPUT"
+          echo "📦 $LATEST -> $NEW_TAG"
+
+      - name: Create and push tag
+        if: steps.bump.outputs.skip != 'true'
+        run: |
+          NEW_TAG="${{ steps.bump.outputs.new_tag }}"
+          if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+            echo "Tag $NEW_TAG already exists; skipping."
+            exit 0
+          fi
+          git tag "$NEW_TAG"
+          git push origin "$NEW_TAG"
+
+      - name: Dispatch release build
+        if: steps.bump.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${{ steps.bump.outputs.new_tag }}" \
+            -f version="${{ steps.bump.outputs.version }}"
+          echo "🚀 Dispatched release.yml for ${{ steps.bump.outputs.new_tag }}"

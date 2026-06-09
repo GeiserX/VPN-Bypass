@@ -53,17 +53,24 @@ Before making changes, read these files to understand the project:
 
 ### Releasing New Versions
 
-1. Run `./scripts/bump-version.sh <version>` — updates Info.plist, README.md badge, and Casks/
-2. Update `docs/CHANGELOG.md` with release notes
-3. Commit: `git add -A && git commit -m "chore: release v<version>"`
-4. Tag and push: `git tag v<version> && git push && git push origin v<version>`
+**Releases are fully automatic from Conventional Commits — do NOT bump or tag by hand.**
 
-CI (`.github/workflows/release.yml`) does the rest automatically:
-- Builds universal DMG (arm64 + x86_64)
-- Creates GitHub Release with the DMG
+Just merge PRs to `main` with conventional commit messages. On every push to `main`,
+`.github/workflows/auto-tag.yml` scans commits since the last `v*` tag and bumps:
+- `feat:` → **minor** (e.g. 2.8.1 → 2.9.0)
+- `fix:` / `chore:` / anything else → **patch** (2.8.1 → 2.8.2)
+- `type!:` or `BREAKING CHANGE` → **major** (2.8.1 → 3.0.0)
+
+It creates the `vX.Y.Z` tag and dispatches `.github/workflows/release.yml`, which:
+- Builds the universal DMG (arm64 + x86_64) and stamps the version into Info.plist at build time
+- Creates the GitHub Release with the DMG
 - Updates the Homebrew cask in `homebrew-vpn-bypass` repo
 
-**Do NOT manually** create GitHub releases, upload DMGs, or update the Homebrew cask — CI will overwrite them.
+**Do NOT** run `bump-version.sh`, create tags, create GitHub releases, upload DMGs, or
+update the cask manually — `auto-tag.yml` + `release.yml` own the whole pipeline and will
+overwrite manual work. `bump-version.sh` is retained only for the rare manual/local build.
+
+The version badge in README.md is the dynamic `github/v/release` shield, so it needs no bump.
 
 After CI completes: `brew update && brew upgrade --cask vpn-bypass` to install locally.
 
@@ -79,7 +86,7 @@ After CI completes: `brew update && brew upgrade --cask vpn-bypass` to install l
 
 ## Learned Patterns
 
-- **Never skip `bump-version.sh`** before tagging a release. Forgetting it caused version desync in v1.8.2–v1.9.0 (#15).
+- **Releases are auto-tagged from Conventional Commits** — `.github/workflows/auto-tag.yml` computes the next version on every push to `main` (`feat:`→minor, `fix:`/other→patch, `!`/`BREAKING CHANGE`→major), tags `vX.Y.Z`, and dispatches `release.yml`. NEVER hand-tag or run `bump-version.sh` for a normal release; just merge with a conventional commit message. (`bump-version.sh` is kept only for manual/local builds — the old version-desync risk from #15 no longer applies to CI releases.)
 - **Version display is dynamic** — do NOT hardcode version strings in Swift code. The app reads from the bundle's `CFBundleShortVersionString` at runtime.
 - **Always test via Homebrew** after releasing, never trust `swift build` alone.
 - **Helperless mode is not supported.** The privileged helper is auto-installed on first launch and auto-updated on version mismatch. All helperless fallbacks (direct `/sbin/route`, AppleScript) have been removed — every route-mutating operation requires the helper.
@@ -89,7 +96,7 @@ After CI completes: `brew update && brew upgrade --cask vpn-bypass` to install l
 - **Ship universal binaries** — both the main app and the privileged helper must be universal (`arm64` + `x86_64`) so Intel Macs can launch. `swift build --arch arm64 --arch x86_64` outputs to `.build/apple/Products/Release`, while the helper needs separate arch builds plus `lipo`.
 - **Menu bar template images use ONLY the alpha channel** — luminance/color is ignored. Background alpha=0, shape alpha=255. Must be 8-bit PNG (CoreGraphics rejects 16-bit). Render from SVG via `rsvg-convert`.
 - **Settings window Dock icon** — menu bar-only apps (LSUIElement) have no Dock icon, so minimized windows vanish. Fix: toggle `NSApp.setActivationPolicy(.regular)` when settings opens, `.accessory` when it closes.
-- **CI handles releases end-to-end** — pushing a `v*` tag triggers `.github/workflows/release.yml` which builds the DMG, creates the GitHub release, AND updates the Homebrew cask. Do NOT manually create releases or update the cask — CI will overwrite them. Just commit, tag, push.
+- **CI handles releases end-to-end** — merging a Conventional Commit to `main` triggers `auto-tag.yml` (version bump + tag) which chains into `release.yml` (DMG + GitHub release + Homebrew cask). Do NOT manually create tags, releases, or update the cask — CI will overwrite them. Just merge with a `feat:`/`fix:` message. A manually-pushed `v*` tag still triggers `release.yml` directly (escape hatch).
 - **Test the stale-helper upgrade path after release** — especially with VPN already connected and an older helper still installed. Expected flow: helper preflight on startup, admin prompt if needed, helper update, route apply, and DNS refresh timer start automatically.
 - **Some VPNs route via interface link, not IP gateway** — Cisco Secure Client sets the default route to `link#N` (an interface reference) instead of an IP address. `route -n get default` shows `interface: utunX` with no `gateway:` line. VPN Only mode handles this via `iface:<interface>` convention: the helper uses `route add -host <dest> -interface utunX` instead of an IP gateway. See #26.
 - **VPN interface flaps cause spurious notifications.** `NWPathMonitor` and `ifconfig` can momentarily miss the VPN interface during network transitions. `checkVPNStatus()` must recheck after a short delay (1.5s) before committing to a disconnect state, otherwise the app fires false disconnect→reconnect notifications.
