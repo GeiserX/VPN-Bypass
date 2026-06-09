@@ -1,9 +1,39 @@
+#!/usr/bin/env python3
+"""Regenerate the app icon, in-app logo, and README banner logo from the
+community-suggested source art.
+
+Pipeline:
+  assets/AppIcon-source-tetonne.png  (flattened JPEG-style art, baked-in
+                                       checkerboard "transparency")
+    -> detect the colored squircle, crop it, recolor the light fringe to navy,
+       apply a macOS continuous-corner (superellipse) alpha mask
+    -> master_1024.png, AppIcon.iconset/ (16->1024), VPNBypass.png (in-app logo),
+       banner_logo.png + banner_logo.b64.txt
+
+The base64 in banner_logo.b64.txt is pasted into the <image> data URI in
+docs/images/banner.svg. From the generated AppIcon.iconset, build the icns with:
+    iconutil -c icns <out>/AppIcon.iconset -o assets/AppIcon.icns
+
+Usage:
+    python scripts/generate-icon.py [source_image] [output_dir]
+Defaults: source = assets/AppIcon-source-tetonne.png, output = build/icon-gen
+(both resolved relative to the repo root).
+"""
+
+import base64
+import os
+import sys
+
 import numpy as np
 from PIL import Image
-import os
 
-SRC = "/tmp/tetonne1.png"
-OUT = "/tmp/iconout"
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO_ROOT, "assets", "AppIcon-source-tetonne.png")
+OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(REPO_ROOT, "build", "icon-gen")
+
+if not os.path.isfile(SRC):
+    sys.exit(f"Error: source image not found: {SRC}\n"
+             f"Usage: python scripts/generate-icon.py [source_image] [output_dir]")
 os.makedirs(OUT, exist_ok=True)
 
 # Source is a flattened JPEG: the "transparent" checkerboard is baked into the
@@ -22,6 +52,9 @@ bright = mx
 
 core = (sat > 28) | ((bright < 140) & (b >= r))
 ys, xs = np.where(core)
+if xs.size == 0:
+    sys.exit("Error: could not detect a colored squircle in the source image "
+             "(no pixels matched the saturation/brightness heuristic).")
 x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
 cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
 side = max(x1 - x0, y1 - y0)
@@ -74,10 +107,11 @@ print("iconset written")
 # in-app logo (shown .fit in square frames)
 master.resize((512, 512), Image.LANCZOS).save(f"{OUT}/VPNBypass.png")
 
-# banner logo + base64
-import base64
+# banner logo + base64 (paste into docs/images/banner.svg)
 small = master.resize((160, 160), Image.LANCZOS)
 small.save(f"{OUT}/banner_logo.png")
+with open(f"{OUT}/banner_logo.png", "rb") as img:
+    banner_b64 = base64.b64encode(img.read()).decode()
 with open(f"{OUT}/banner_logo.b64.txt", "w") as f:
-    f.write(base64.b64encode(open(f"{OUT}/banner_logo.png", "rb").read()).decode())
+    f.write(banner_b64)
 print("logo + banner assets written")
