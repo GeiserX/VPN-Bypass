@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
 
@@ -78,7 +78,7 @@ jobs:
 
           if echo "$COMMITS" | grep -qE '(^|[[:space:]])BREAKING CHANGE|^[a-zA-Z]+(\([^)]*\))?!:'; then
             MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
-          elif echo "$COMMITS" | grep -qE '^feat'; then
+          elif echo "$COMMITS" | grep -qE '^feat(\([^)]*\))?:'; then
             MINOR=$((MINOR + 1)); PATCH=0
           else
             PATCH=$((PATCH + 1))
