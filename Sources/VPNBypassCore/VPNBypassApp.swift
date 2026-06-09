@@ -69,14 +69,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let helperReady = await HelperManager.shared.ensureHelperReady()
             if !helperReady {
                 RouteManager.shared.log(.error, "Helper not ready: \(HelperManager.shared.helperState.statusText). Route application skipped.")
+                // Detect VPN state for display, but skip route mutations that
+                // require the helper. This clears the "Setting Up..." spinner
+                // instead of hanging on it forever when the helper is absent.
+                await RouteManager.shared.detectVPNStateOnly()
+                return
             }
 
             // Small delay to let network interfaces settle
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-
-            // Only attempt route application if helper is verified ready.
-            // Without the helper, route operations will fail silently or hang.
-            guard helperReady else { return }
 
             // Detect VPN and apply routes on startup
             await RouteManager.shared.detectAndApplyRoutesAsync()

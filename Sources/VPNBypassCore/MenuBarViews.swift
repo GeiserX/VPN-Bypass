@@ -158,20 +158,6 @@ struct MenuContent: View {
     
     private var titleHeader: some View {
         HStack(spacing: 8) {
-            // App logo from bundle
-            if let logoPath = Bundle.main.path(forResource: "VPNBypass", ofType: "png"),
-               let nsImage = NSImage(contentsOfFile: logoPath) {
-                Image(nsImage: nsImage)
-                    .interpolation(.high)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 22, height: 22)
-            } else {
-                Image(systemName: "shield.checkered")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Theme.Brand.blueGradient)
-            }
-
             // App name with branded colors
             BrandedAppName(fontSize: 15)
             
