@@ -9,13 +9,12 @@ on:
       - 'Package.swift'
       - 'Package.resolved'
       - '.github/workflows/ci.yml'
+  # No paths filter on PRs: `test` is a required status check in the "Protect
+  # main" ruleset, so it MUST report on every PR — a path-filtered run that is
+  # skipped never reports and blocks the PR forever. Push to main stays
+  # path-filtered (above) to avoid redundant post-merge runs.
   pull_request:
     branches: [main]
-    paths:
-      - '**/*.swift'
-      - 'Package.swift'
-      - 'Package.resolved'
-      - '.github/workflows/ci.yml'
 
 concurrency:
   group: ci-${{ github.ref }}
