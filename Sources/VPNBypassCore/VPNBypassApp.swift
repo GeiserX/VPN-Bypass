@@ -83,6 +83,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // require the helper. This clears the "Setting Up..." spinner
                 // instead of hanging on it forever when the helper is absent.
                 await RouteManager.shared.detectVPNStateOnly()
+                // Proxy-route listeners are userspace and don't need the helper —
+                // start them regardless so multi-route works even if the helper is down.
+                await RouteManager.shared.reconcileProxyListeners()
                 return
             }
 
