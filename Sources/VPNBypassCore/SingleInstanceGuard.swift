@@ -18,8 +18,9 @@
 import Foundation
 
 enum SingleInstanceGuard {
-    /// Retained for the process lifetime once acquired. The kernel drops the
-    /// flock when this fd is closed at process exit. Never closed deliberately.
+    /// Records the fd of the held lock once acquired. The flock persists because
+    /// this fd is never closed (not because the var retains it — fds are not
+    /// ARC-managed); the kernel releases it when the process exits.
     private static var lockFD: Int32 = -1
 
     /// Default lock file — same directory as config.json.

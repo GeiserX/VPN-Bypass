@@ -1337,6 +1337,17 @@ final class RouteManager: ObservableObject {
         await applyAllRoutesInternal(sendNotification: true, forceReassert: true)
     }
 
+    /// VPN Only mode installs 0.0.0.0/1 + 128.0.0.0/1 catch-all routes that
+    /// structurally defeat a full-tunnel VPN. Under GlobalProtect that trips its
+    /// route monitor and tears the tunnel down (the original incident), so EVERY
+    /// route-applying path must refuse it. Returns true (and logs) when the apply
+    /// should be skipped.
+    private func refuseVPNOnlyUnderGlobalProtect() -> Bool {
+        guard config.routingMode == .vpnOnly, vpnType == .globalProtect else { return false }
+        log(.error, "VPN Only mode is disabled under GlobalProtect — its catch-all routes would tear down the GP tunnel. Use Bypass mode instead.")
+        return true
+    }
+
     /// Internal — gate-free, callers must hold the route operation lock.
     /// Checks routeEpoch before committing to detect preemption by removeAllRoutes.
     private func applyAllRoutesInternal(sendNotification: Bool, forceReassert: Bool = false) async {
@@ -1347,18 +1358,13 @@ final class RouteManager: ObservableObject {
             return
         }
 
+        // Refuse VPN Only under GlobalProtect on every apply path (see method).
+        if refuseVPNOnlyUnderGlobalProtect() { return }
+
         let isInverse = config.routingMode == .vpnOnly
 
         // VPN Only mode requires the VPN gateway for domain-specific routes
         if isInverse {
-            // VPN Only installs 0.0.0.0/1 + 128.0.0.0/1 catch-all routes that
-            // structurally defeat a full-tunnel VPN's coverage. Under
-            // GlobalProtect this reliably trips its route monitor and tears the
-            // tunnel down, so refuse VPN Only when GP is the active VPN.
-            if vpnType == .globalProtect {
-                log(.error, "VPN Only mode is disabled under GlobalProtect — its catch-all routes would tear down the GP tunnel. Use Bypass mode instead.")
-                return
-            }
             guard let vpnGw = vpnGateway else {
                 log(.error, "VPN Only mode requires a VPN gateway (is VPN connected?)")
                 return
@@ -1722,6 +1728,11 @@ final class RouteManager: ObservableObject {
 
         let isInverse = config.routingMode == .vpnOnly
 
+        // Refuse VPN Only under GlobalProtect on this startup fast-path too — it
+        // installs the same 0.0.0.0/1 + 128.0.0.0/1 catch-all and would tear down
+        // the GP tunnel on the common cached-launch path.
+        if refuseVPNOnlyUnderGlobalProtect() { return false }
+
         // VPN Only mode needs VPN gateway for domain routes
         if isInverse {
             guard let _ = vpnGateway else {
@@ -1934,6 +1945,8 @@ final class RouteManager: ObservableObject {
         let isInverse = config.routingMode == .vpnOnly
         let routeGateway: String
         if isInverse {
+            // VPN Only under GlobalProtect is refused on every apply path (see method).
+            if refuseVPNOnlyUnderGlobalProtect() { return }
             guard let vpnGw = vpnGateway else {
                 log(.warning, "Background DNS refresh skipped: VPN Only mode but no VPN gateway")
                 return
@@ -2226,6 +2239,11 @@ final class RouteManager: ObservableObject {
         let isInverse = config.routingMode == .vpnOnly
         let routeGateway: String
         if isInverse {
+            // VPN Only under GlobalProtect is refused on every apply path (see method).
+            if refuseVPNOnlyUnderGlobalProtect() {
+                nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
+                return
+            }
             guard let vpnGw = vpnGateway else {
                 log(.info, "DNS refresh skipped: VPN Only mode but no VPN gateway")
                 nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
