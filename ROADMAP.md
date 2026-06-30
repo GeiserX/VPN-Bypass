@@ -59,6 +59,21 @@
 
 ## Roadmap
 
+### ⭐ Multi-Route Networking (next major architecture)
+
+> The unifying direction: generalize today's *bypass-the-VPN* model into **N named routes** (corporate
+> VPN / proxies incl. residential like Oxylabs / direct) with a **per-destination policy**, plus a clean
+> **hook** so any app (iTerm, shells, browsers) routes through a chosen route. **Generalistic** — any
+> provider, not tied to one. Full design: **[docs/MULTI-ROUTE-DESIGN.md](docs/MULTI-ROUTE-DESIGN.md)**.
+> Subsumes several items below (App-based Routing, Connection Profiles, CLI, per-route Custom DNS).
+
+| Phase | Deliverable |
+|-------|-------------|
+| **P0 — Model** | `Config` → `routes[] + rules[]` (named routes + per-destination selector); back-compat migration of the current bypass-list + single SOCKS5 proxy |
+| **P1 — Proxy routes + hooks** | generalize the one proxy into N proxy routes, each a `127.0.0.1:PORT` local listener (auth-injecting, VPN-escaping); `route-on <name>` shell hook + PAC for browsers — delivers the proven VPN / proxy / direct 3-way, generically |
+| **P2 — OS-level engine** | `NETransparentProxy` (or PF `rdr` + transparent forwarder) for app-agnostic per-destination routing; **per-route DNS**; health-check + failover selectors |
+| **P3 — Providers** | WireGuard / OpenVPN / Tailscale-exit route types; residential-proxy sticky sessions; routes+rules UI |
+
 ### Phase 2: Advanced Routing (v2.0 - v2.5)
 
 | Feature | Description |
