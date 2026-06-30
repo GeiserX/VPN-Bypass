@@ -1307,6 +1307,14 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// True when the desired route set (destination+gateway pairs) already
+    /// matches the active set, so a re-apply would be pure churn. forceReassert
+    /// (the Refresh button) always returns false so it re-asserts; an empty
+    /// desired set never skips.
+    nonisolated static func shouldSkipReapply(desiredPairs: Set<String>, activePairs: Set<String>, forceReassert: Bool) -> Bool {
+        !forceReassert && !desiredPairs.isEmpty && desiredPairs == activePairs
+    }
+
     /// Apply all routes — acquires exclusive gate, skips if another operation is running
     func applyAllRoutes() async {
         guard acquireRouteOperation() else {
@@ -1324,12 +1332,14 @@ final class RouteManager: ObservableObject {
             return
         }
         defer { releaseRouteOperation() }
-        await applyAllRoutesInternal(sendNotification: true)
+        // Refresh button: force a full re-assert (re-install every route) so the
+        // user always has a way to recover from silent kernel-route clobbering.
+        await applyAllRoutesInternal(sendNotification: true, forceReassert: true)
     }
 
     /// Internal — gate-free, callers must hold the route operation lock.
     /// Checks routeEpoch before committing to detect preemption by removeAllRoutes.
-    private func applyAllRoutesInternal(sendNotification: Bool) async {
+    private func applyAllRoutesInternal(sendNotification: Bool, forceReassert: Bool = false) async {
         let epoch = routeEpoch
 
         guard let gateway = localGateway else {
@@ -1524,6 +1534,21 @@ final class RouteManager: ObservableObject {
             }
         }
         
+        // Diff-before-mutate (VPN-Bypass-3sc.2): if the desired route set already
+        // matches what is active (same destination+gateway pairs), re-running
+        // delete-before-add for every route is pure churn that pressures the VPN's
+        // route monitor — the GlobalProtect teardown trigger — for no benefit. Skip
+        // it on automatic applies. The Refresh button forces a re-assert; the
+        // interface-change and import paths clear activeRoutes first, so this never
+        // blocks a genuine change.
+        let desiredPairs = Set(routesToAdd.map { "\($0.destination)|\($0.gateway)" })
+        let activePairs = Set(activeRoutes.map { "\($0.destination)|\($0.gateway)" })
+        if Self.shouldSkipReapply(desiredPairs: desiredPairs, activePairs: activePairs, forceReassert: forceReassert) {
+            log(.info, "Routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
+            lastUpdate = Date()
+            return
+        }
+
         log(.info, "Adding \(routesToAdd.count) routes via batch operation...")
         
         // Apply all routes in batch (single XPC call for massive speedup)
