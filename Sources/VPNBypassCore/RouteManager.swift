@@ -1317,6 +1317,9 @@ final class RouteManager: ObservableObject {
             log(.error, "Could not detect local gateway")
             isLoading = false
         }
+
+        // P1: start/stop proxy-route listeners to match config (no-op without proxy routes).
+        await reconcileProxyListeners()
     }
     
     func refreshStatus() {
@@ -3305,7 +3308,31 @@ final class RouteManager: ObservableObject {
         
         return nil
     }
-    
+
+    /// Start/stop proxy-route listeners to match the current config (P1,
+    /// VPN-Bypass-3sc.8). Safe to call any time; a no-op when there are no
+    /// enabled proxy routes, so it changes nothing for existing users.
+    func reconcileProxyListeners() async {
+        let iface = await detectPhysicalInterface()
+        ProxyListenerManager.shared.reconcile(routes: config.routes, boundInterface: iface)
+    }
+
+    /// The physical interface (e.g. "en0") whose route reaches the local gateway.
+    /// Proxy upstream sockets bind to it so their hop leaves on real Wi-Fi/Ethernet
+    /// instead of a full-tunnel VPN's utun.
+    private func detectPhysicalInterface() async -> String? {
+        guard let gateway = localGateway else { return nil }
+        guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", gateway], timeout: 3.0) else { return nil }
+        for line in result.output.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("interface:") {
+                let iface = trimmed.replacingOccurrences(of: "interface:", with: "").trimmingCharacters(in: .whitespaces)
+                return iface.isEmpty ? nil : iface
+            }
+        }
+        return nil
+    }
+
     /// Detect user's real DNS server (from primary non-VPN interface)
     /// This respects whatever DNS the user had configured before VPN connected
     private func detectUserDNSServer() async {
@@ -3819,6 +3846,7 @@ final class RouteManager: ObservableObject {
     /// Called when app is quitting - clean up routes and hosts file
     func cleanupOnQuit() async {
         log(.info, "Cleaning up on quit...")
+        ProxyListenerManager.shared.stopAll()
         // Always remove active routes (especially critical for VPN Only catch-alls)
         if !activeRoutes.isEmpty {
             await removeAllRoutes()
