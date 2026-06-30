@@ -8,13 +8,49 @@ struct SettingsView: View {
     @EnvironmentObject var routeManager: RouteManager
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
-    @State private var selectedTab = 0
-    
+    @State private var selectedTab: SettingsTab = .domains
+
+    // MARK: - Tab model
+
+    enum SettingsTab: Hashable {
+        case domains, services, routes, general, logs, info
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .domains:  return "Domains"
+            case .services: return "Services"
+            case .routes:   return "Routes"
+            case .general:  return "General"
+            case .logs:     return "Logs"
+            case .info:     return "Info"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .domains:  return "globe"
+            case .services: return "square.grid.2x2.fill"
+            case .routes:   return "arrow.triangle.branch"
+            case .general:  return "gearshape.fill"
+            case .logs:     return "list.bullet.rectangle"
+            case .info:     return "info.circle.fill"
+            }
+        }
+    }
+
+    /// Ordered tabs to display. Routes is present only when multiRouteEnabled is on.
+    private var visibleTabs: [SettingsTab] {
+        var tabs: [SettingsTab] = [.domains, .services]
+        if routeManager.config.multiRouteEnabled { tabs.append(.routes) }
+        tabs += [.general, .logs, .info]
+        return tabs
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Beautiful gradient header
             headerView
-            
+
             // Tab content with animation
             tabContent
                 .animation(.easeInOut(duration: 0.2), value: selectedTab)
@@ -27,20 +63,27 @@ struct SettingsView: View {
                 endPoint: .bottom
             )
         )
+        .onChange(of: routeManager.config.multiRouteEnabled) { enabled in
+            // If Routes was active when the flag turned off, fall back to General
+            // so the view is never left showing a hidden tab.
+            if !enabled && selectedTab == .routes {
+                selectedTab = .general
+            }
+        }
     }
 
     private var headerView: some View {
         VStack(spacing: 0) {
-            // Tab bar with pill selector
+            // Tab bar with pill selector — driven by visibleTabs so indices stay consistent
             HStack(spacing: 6) {
-                ForEach(0..<6) { index in
+                ForEach(Array(visibleTabs.enumerated()), id: \.element) { offset, tab in
                     TabItem(
-                        index: index,
-                        title: tabTitle(for: index),
-                        icon: tabIcon(for: index),
-                        isSelected: selectedTab == index
+                        index: offset,
+                        title: tab.title,
+                        icon: tab.icon,
+                        isSelected: selectedTab == tab
                     ) {
-                        selectedTab = index
+                        selectedTab = tab
                     }
                 }
             }
@@ -61,30 +104,21 @@ struct SettingsView: View {
         }
         .background(Theme.bgPrimary.opacity(0.8))
     }
-    
+
     private var tabContent: some View {
         ScrollView {
             VStack(spacing: 0) {
                 switch selectedTab {
-                case 0: DomainsTab()
-                case 1: ServicesTab()
-                case 2: RoutesTab()
-                case 3: GeneralTab()
-                case 4: LogsTab()
-                case 5: InfoTab()
-                default: EmptyView()
+                case .domains:  DomainsTab()
+                case .services: ServicesTab()
+                case .routes:   RoutesTab()
+                case .general:  GeneralTab()
+                case .logs:     LogsTab()
+                case .info:     InfoTab()
                 }
             }
             .padding(24)
         }
-    }
-    
-    private func tabTitle(for index: Int) -> LocalizedStringKey {
-        ["Domains", "Services", "Routes", "General", "Logs", "Info"][index]
-    }
-    
-    private func tabIcon(for index: Int) -> String {
-        ["globe", "square.grid.2x2.fill", "arrow.triangle.branch", "gearshape.fill", "list.bullet.rectangle", "info.circle.fill"][index]
     }
 }
 
@@ -1804,6 +1838,23 @@ struct GeneralTab: View {
                 }
             }
             
+            // Experimental section
+            SettingsCard(title: "Experimental", icon: "flask.fill", iconColor: Theme.cyan) {
+                SettingsToggleRow(
+                    icon: "arrow.triangle.branch",
+                    title: "Multi-Route (experimental)",
+                    subtitle: "Route specific destinations through proxies (e.g. Oxylabs). Off by default.",
+                    isOn: Binding(
+                        get: { routeManager.config.multiRouteEnabled },
+                        set: { enabled in
+                            routeManager.config.multiRouteEnabled = enabled
+                            routeManager.saveConfig()
+                            Task { await routeManager.reconcileProxyListeners() }
+                        }
+                    )
+                )
+            }
+
             // About section
             HStack {
                 VStack(alignment: .leading, spacing: 2) {

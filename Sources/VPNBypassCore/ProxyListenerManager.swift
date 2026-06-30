@@ -51,11 +51,8 @@ final class ProxyListenerManager: ObservableObject {
             var started: [(id: UUID, forwarder: ProxyForwarder, port: UInt16)] = []
             for route in toStart {
                 guard let upstream = Self.makeUpstream(route: route, boundInterface: boundInterface) else { continue }
-                let forwarder = ProxyForwarder(listenPort: 0, upstream: upstream)
-                if (try? forwarder.start()) != nil, let port = forwarder.boundPort {
-                    started.append((route.id, forwarder, port))
-                } else {
-                    forwarder.stop()
+                if let result = Self.startForwarder(route: route, upstream: upstream) {
+                    started.append((route.id, result.forwarder, result.port))
                 }
             }
             Task { @MainActor [weak self] in
@@ -77,6 +74,36 @@ final class ProxyListenerManager: ObservableObject {
         for (_, forwarder) in forwarders { forwarder.stop() }
         forwarders.removeAll()
         ports.removeAll()
+    }
+
+    /// Start a single proxy forwarder and return it with its bound port.
+    /// Returns nil if start() fails or no ephemeral port is assigned.
+    /// Called from the startQueue background thread — must be nonisolated.
+    nonisolated static func startForwarder(route: Route, upstream: ProxyForwarder.Upstream) -> (forwarder: ProxyForwarder, port: UInt16)? {
+        // Try the route's STABLE preferred port first (so an app's HTTPS_PROXY
+        // config survives restarts), then fall back to an OS-assigned port.
+        for candidate in [preferredPort(for: route), 0] {
+            let forwarder = ProxyForwarder(listenPort: candidate, upstream: upstream)
+            if (try? forwarder.start()) != nil, let port = forwarder.boundPort {
+                return (forwarder, port)
+            }
+            forwarder.stop()
+        }
+        return nil
+    }
+
+    /// The route's persisted port if set, else a stable port derived from its id.
+    nonisolated static func preferredPort(for route: Route) -> UInt16 {
+        if let p = route.localListenPort, let p16 = UInt16(exactly: p), p16 > 0 { return p16 }
+        return derivePort(from: route.id)
+    }
+
+    /// A deterministic port in 18000–18999 from the route id (UUID bytes are
+    /// stable across runs, unlike Swift's per-process-seeded Hasher).
+    nonisolated static func derivePort(from id: UUID) -> UInt16 {
+        let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
+        let value = (UInt16(bytes[0]) << 8) | UInt16(bytes[1])
+        return 18000 + (value % 1000)
     }
 
     /// Build the upstream descriptor for a proxy route, expanding any

@@ -146,6 +146,7 @@ final class RouteManager: ObservableObject {
         var rules: [Rule] = []
         var defaultRouteId: UUID? = nil
         var schemaVersion: Int = 1
+        var multiRouteEnabled: Bool = false  // Opt-in experimental: show Routes tab and start proxy listeners
 
         // Custom decoder for backward compatibility with configs missing new fields
         init(from decoder: Decoder) throws {
@@ -167,6 +168,7 @@ final class RouteManager: ObservableObject {
             rules = try container.decodeIfPresent([Rule].self, forKey: .rules) ?? []
             defaultRouteId = try container.decodeIfPresent(UUID.self, forKey: .defaultRouteId)
             schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+            multiRouteEnabled = try container.decodeIfPresent(Bool.self, forKey: .multiRouteEnabled) ?? false
 
             // One-time migration: derive the routes/rules representation from the
             // legacy bypass list + single proxy so the new model is populated for
@@ -3313,6 +3315,10 @@ final class RouteManager: ObservableObject {
     /// VPN-Bypass-3sc.8). Safe to call any time; a no-op when there are no
     /// enabled proxy routes, so it changes nothing for existing users.
     func reconcileProxyListeners() async {
+        guard config.multiRouteEnabled else {
+            ProxyListenerManager.shared.stopAll()
+            return
+        }
         let iface = await detectPhysicalInterface()
         ProxyListenerManager.shared.reconcile(routes: config.routes, boundInterface: iface)
     }
