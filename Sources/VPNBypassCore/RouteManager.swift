@@ -139,6 +139,14 @@ final class RouteManager: ObservableObject {
         var routingMode: RoutingMode = .bypass  // Bypass = domains bypass VPN, VPN Only = only listed domains use VPN
         var inverseDomains: [DomainEntry] = []  // Domains that should use VPN in VPN Only mode
 
+        // Multi-route model (P0 / VPN-Bypass-3sc.7). Additive + dormant: while
+        // schemaVersion == 1 the bypass/vpnOnly engine above stays authoritative;
+        // P1 flips schemaVersion to 2 and dispatches per rule. See RouteModel.swift.
+        var routes: [Route] = []
+        var rules: [Rule] = []
+        var defaultRouteId: UUID? = nil
+        var schemaVersion: Int = 1
+
         // Custom decoder for backward compatibility with configs missing new fields
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -154,10 +162,94 @@ final class RouteManager: ObservableObject {
             proxyConfig = try container.decodeIfPresent(ProxyConfig.self, forKey: .proxyConfig) ?? ProxyConfig()
             routingMode = try container.decodeIfPresent(RoutingMode.self, forKey: .routingMode) ?? .bypass
             inverseDomains = try container.decodeIfPresent([DomainEntry].self, forKey: .inverseDomains) ?? []
+
+            routes = try container.decodeIfPresent([Route].self, forKey: .routes) ?? []
+            rules = try container.decodeIfPresent([Rule].self, forKey: .rules) ?? []
+            defaultRouteId = try container.decodeIfPresent(UUID.self, forKey: .defaultRouteId)
+            schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+
+            // One-time migration: derive the routes/rules representation from the
+            // legacy bypass list + single proxy so the new model is populated for
+            // the UI and P1. schemaVersion stays 1, so routing behaviour is
+            // unchanged until P1 switches the engine explicitly.
+            if routes.isEmpty {
+                let derived = Config.derive(
+                    domains: domains, services: services,
+                    mode: routingMode, inverseDomains: inverseDomains, proxy: proxyConfig
+                )
+                routes = derived.routes
+                rules = derived.rules
+                defaultRouteId = derived.defaultRouteId
+            }
         }
 
         // Default initializer
         init() {}
+
+        /// Derive the multi-route representation from the legacy model on first
+        /// decode, so routes/rules are populated without changing behaviour
+        /// (schemaVersion stays 1). Mapping:
+        ///  - bypass  → default = Corporate VPN; each enabled domain/service → a rule to Direct
+        ///  - vpnOnly → default = Direct; each enabled inverse domain → a rule to Corporate VPN
+        ///  - an enabled legacy proxy → one SOCKS5 proxy route, with its services routed to it
+        static func derive(
+            domains: [DomainEntry],
+            services: [ServiceEntry],
+            mode: RoutingMode,
+            inverseDomains: [DomainEntry],
+            proxy: ProxyConfig
+        ) -> (routes: [Route], rules: [Rule], defaultRouteId: UUID?) {
+            let vpnRoute = Route(name: "Corporate VPN", egress: .vpnDefault)
+            let directRoute = Route(name: "Direct", egress: .direct)
+            var routes: [Route] = [vpnRoute, directRoute]
+            var rules: [Rule] = []
+            var order = 0
+
+            var proxyRoute: Route?
+            if proxy.enabled && proxy.isConfigured {
+                let r = Route(
+                    name: "Proxy",
+                    egress: .proxySOCKS5,
+                    proxyHost: proxy.server,
+                    proxyPort: proxy.port,
+                    proxyUser: proxy.username,
+                    proxyPass: proxy.password
+                )
+                proxyRoute = r
+                routes.append(r)
+            }
+
+            let defaultRouteId: UUID
+            switch mode {
+            case .bypass:
+                defaultRouteId = vpnRoute.id
+                for d in domains where d.enabled {
+                    rules.append(Rule(matchType: d.isCIDR ? .cidr : .domain, pattern: d.domain, routeId: directRoute.id, order: order))
+                    order += 1
+                }
+                for s in services where s.enabled {
+                    let target = proxyRouteId(forService: s.id, proxy: proxy, proxyRoute: proxyRoute) ?? directRoute.id
+                    rules.append(Rule(matchType: .service, pattern: s.id, routeId: target, order: order))
+                    order += 1
+                }
+            case .vpnOnly:
+                defaultRouteId = directRoute.id
+                for d in inverseDomains where d.enabled {
+                    rules.append(Rule(matchType: d.isCIDR ? .cidr : .domain, pattern: d.domain, routeId: vpnRoute.id, order: order))
+                    order += 1
+                }
+            }
+
+            return (routes, rules, defaultRouteId)
+        }
+
+        /// The proxy route a service maps to under the legacy single-proxy model,
+        /// or nil if the service is not proxied (caller routes it Direct).
+        /// useForServices empty means "all enabled services" (legacy semantics).
+        private static func proxyRouteId(forService serviceId: String, proxy: ProxyConfig, proxyRoute: Route?) -> UUID? {
+            guard let proxyRoute, proxy.enabled, proxy.isConfigured else { return nil }
+            return (proxy.useForServices.isEmpty || proxy.useForServices.contains(serviceId)) ? proxyRoute.id : nil
+        }
         
         static var defaultDomains: [DomainEntry] {
             []  // User adds their own domains in Settings
