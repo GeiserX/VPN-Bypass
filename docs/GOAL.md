@@ -17,3 +17,9 @@ _Context breadcrumb (pointer, not part of the directive — so "P0 → P2" still
 - **Out of scope:** P3 / `NETransparentProxy` (`.10`) — gated on the signing decision (`.11`).
 
 Branch: `feat/multi-route`. Loop: `/research! → /implement! → /review-pr!` → back to research.
+
+## 2026-06-30 — continuation (verbatim)
+
+> do all the work but lets test at the end aftwr you do all the three phases, wait for my to-go
+
+_Interpretation: implement ALL of P0→P1→P2 autonomously (unit-test + mock-verify as I go); Sergio does the LIVE testing (real Oxylabs egress, Tailscale-via-mini, GP coexistence) at the very end; do NOT merge or cut the single release until Sergio gives the explicit "to-go" after his test._
