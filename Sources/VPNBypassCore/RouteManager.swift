@@ -250,7 +250,24 @@ final class RouteManager: ObservableObject {
             guard let proxyRoute, proxy.enabled, proxy.isConfigured else { return nil }
             return (proxy.useForServices.isEmpty || proxy.useForServices.contains(serviceId)) ? proxyRoute.id : nil
         }
-        
+
+        /// A copy with all credentials cleared, for the shareable Export file.
+        /// Exports are routinely attached to bug reports, so proxy username/
+        /// password and any per-route proxy creds must never travel in them. The
+        /// in-app config keeps the live values; Import re-prompts for secrets.
+        func sanitizedForExport() -> Config {
+            var copy = self
+            copy.proxyConfig.username = ""
+            copy.proxyConfig.password = ""
+            copy.routes = copy.routes.map { route in
+                var r = route
+                r.proxyUser = nil
+                r.proxyPass = nil
+                return r
+            }
+            return copy
+        }
+
         static var defaultDomains: [DomainEntry] {
             []  // User adds their own domains in Settings
         }
@@ -617,10 +634,11 @@ final class RouteManager: ObservableObject {
     // MARK: - Import/Export Config
     
     func exportConfig() -> URL? {
+        // Never write credentials into the shareable export (see sanitizedForExport).
         let exportData = ExportData(
-            version: "1.1",
+            version: "2.0",
             exportDate: Date(),
-            config: config
+            config: config.sanitizedForExport()
         )
         
         guard let data = try? JSONEncoder().encode(exportData) else {

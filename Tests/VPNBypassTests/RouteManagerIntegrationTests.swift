@@ -351,7 +351,7 @@ final class ExportImportConfigTests: RouteManagerTestCase {
         }
         let data = try Data(contentsOf: url)
         let export = try JSONDecoder().decode(RouteManager.ExportData.self, from: data)
-        XCTAssertEqual(export.version, "1.1")
+        XCTAssertEqual(export.version, "2.0")  // bumped when exports became credential-sanitized
         try? FileManager.default.removeItem(at: url)
     }
 
