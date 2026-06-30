@@ -29,3 +29,21 @@ Append-only. **Newest at the bottom.** Every "done" carries real evidence (build
 - **Evidence:** full suite **569 tests, 0 failures**; `swift build` clean throughout. 5 commits on `feat/multi-route`.
 - **P0 net:** the live GP-teardown bug is fixed (single-instance lock + VPN-Only guard + no-op skip), the multi-route foundation is in place, ZERO behavior change for existing users (schemaVersion=1). Releasable as-is.
 - **Now → P1.** Order: S1 Keychain + strip-creds-from-Export (gating security, self-contained, verifiable) → pure rule-resolver (testable) → proxy listener (verify against a LOCAL mock proxy). **Live-verification dependency** (real Oxylabs egress / Tailscale-via-Mac-mini / GP coexistence) recorded in `DEFERRED-QUESTIONS.md` — those can only be confirmed in Sergio's environment, and the single release is his gate.
+
+## 2026-06-30 — P1 COMPLETE (proxy egress, functional + testable)
+Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, independently-tested files.
+- **S1** (`d549625`): export credential-strip (sanitizedForExport, version 2.0). Keychain-for-config.json deferred (config.json is user-only; export leak — the acute vector — closed).
+- **Rule resolver** (`5f85c55`): pure first-match domain/suffix/service/ip/cidr → route. 9 tests.
+- **Proxy primitives** (`9d9f633`): ProxyForwarder (loopback HTTP CONNECT chaining to an upstream proxy, Basic-auth injected, upstream bound to a physical iface to escape the VPN; mock-tunnel test) + HookGenerator (route-on exports + PAC, verified in JavaScriptCore) + CredentialTemplate (Oxylabs/IPRoyal session templates). **Forwarder independently reviewed** (code-reviewer): sound; start() blocks→started off-main; minor benign listener race noted.
+- **Listener manager** (`3dab928`): owns a forwarder per enabled proxy route, reconciles on config change. 4 tests.
+- **Lifecycle integration** (`8841470`): RouteManager.reconcileProxyListeners() at startup + stopAll on quit; detectPhysicalInterface (route -n get <gw>) for the VPN-escape binding. Additive — no-op without proxy routes.
+- **Routes UI** (`3688e13`): new Settings tab (index 2) — add/edit/delete/toggle proxy routes, LIVE listener port (ProxyListenerManager made ObservableObject), Copy-hook button. Delivers the Oxylabs dedicated-ISP use case end-to-end.
+- **Evidence:** 9 commits, full suite **594 tests, 0 failures**, every increment built clean. Independent reviews on P0 (caught the applyRoutesFromCache GP-guard gap — fixed) and the forwarder.
+- **P0 review fix** (`c80109a`): centralized refuseVPNOnlyUnderGlobalProtect() consulted by all 4 apply paths.
+
+## 2026-06-30 — HANDOFF POINT
+- **Done:** P0 (GP-teardown fix, reviewed) + P1 (proxy egress, full UI) — testable now.
+- **P1 live test (Sergio):** build+run the branch app → Settings → Routes → add an Oxylabs dedicated-ISP route (disp.oxylabs.io:800X, user/pass) → copy the HTTPS_PROXY block → run in iTerm → `curl ipinfo.io` shows the Oxylabs exit IP.
+- **P2 (Tailscale) — NOT built, by design:** the app-side (route a rule's dests into the tailscale utun via iface:utunX) is small, BUT it is non-functional + untestable until the **a tailnet peer advertises those destinations as subnet routes** (tailscaled drops packets otherwise — the research finding) AND it's verified live on the tailnet. So P2 is a quick collaborative step once the mini side is set up — handed off for Sergio's go on approach.
+- **Remaining beads:** .5 Keychain-for-config.json (deferred), .6 RouteManager refactor (deferred), .9 P2 Tailscale (handoff), .12 doc update, .11 signing decision / .10 P3 (gated).
+- **Release:** NOT cut — Sergio's gate after his live test + go.
