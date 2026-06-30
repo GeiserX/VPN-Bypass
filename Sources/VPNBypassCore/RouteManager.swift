@@ -1249,6 +1249,14 @@ final class RouteManager: ObservableObject {
 
         // VPN Only mode requires the VPN gateway for domain-specific routes
         if isInverse {
+            // VPN Only installs 0.0.0.0/1 + 128.0.0.0/1 catch-all routes that
+            // structurally defeat a full-tunnel VPN's coverage. Under
+            // GlobalProtect this reliably trips its route monitor and tears the
+            // tunnel down, so refuse VPN Only when GP is the active VPN.
+            if vpnType == .globalProtect {
+                log(.error, "VPN Only mode is disabled under GlobalProtect — its catch-all routes would tear down the GP tunnel. Use Bypass mode instead.")
+                return
+            }
             guard let vpnGw = vpnGateway else {
                 log(.error, "VPN Only mode requires a VPN gateway (is VPN connected?)")
                 return
@@ -3174,7 +3182,7 @@ final class RouteManager: ObservableObject {
             
             // Track nameserver
             if trimmed.hasPrefix("nameserver[0]") {
-                // Extract IP: "nameserver[0] : 192.168.10.102"
+                // Extract IP: "nameserver[0] : <lan-gateway>02"
                 let parts = trimmed.components(separatedBy: ":")
                 if parts.count >= 2 {
                     let dns = parts[1].trimmingCharacters(in: .whitespaces)
