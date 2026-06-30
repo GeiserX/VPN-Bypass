@@ -7,11 +7,13 @@
 import Foundation
 
 @MainActor
-final class ProxyListenerManager {
+final class ProxyListenerManager: ObservableObject {
     static let shared = ProxyListenerManager()
 
     private var forwarders: [UUID: ProxyForwarder] = [:]
-    private var ports: [UUID: UInt16] = [:]
+    /// routeId → bound listener port. @Published so the Routes UI updates the
+    /// instant a listener comes up (the Copy-hook button keys off this).
+    @Published private(set) var ports: [UUID: UInt16] = [:]
     private let startQueue = DispatchQueue(label: "com.vpnbypass.listenermgr", qos: .userInitiated)
 
     init() {}

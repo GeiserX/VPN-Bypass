@@ -33,7 +33,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             // Tab bar with pill selector
             HStack(spacing: 6) {
-                ForEach(0..<5) { index in
+                ForEach(0..<6) { index in
                     TabItem(
                         index: index,
                         title: tabTitle(for: index),
@@ -68,9 +68,10 @@ struct SettingsView: View {
                 switch selectedTab {
                 case 0: DomainsTab()
                 case 1: ServicesTab()
-                case 2: GeneralTab()
-                case 3: LogsTab()
-                case 4: InfoTab()
+                case 2: RoutesTab()
+                case 3: GeneralTab()
+                case 4: LogsTab()
+                case 5: InfoTab()
                 default: EmptyView()
                 }
             }
@@ -79,11 +80,11 @@ struct SettingsView: View {
     }
     
     private func tabTitle(for index: Int) -> LocalizedStringKey {
-        ["Domains", "Services", "General", "Logs", "Info"][index]
+        ["Domains", "Services", "Routes", "General", "Logs", "Info"][index]
     }
     
     private func tabIcon(for index: Int) -> String {
-        ["globe", "square.grid.2x2.fill", "gearshape.fill", "list.bullet.rectangle", "info.circle.fill"][index]
+        ["globe", "square.grid.2x2.fill", "arrow.triangle.branch", "gearshape.fill", "list.bullet.rectangle", "info.circle.fill"][index]
     }
 }
 
