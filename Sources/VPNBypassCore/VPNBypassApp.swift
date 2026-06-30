@@ -50,6 +50,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastSuccessfulVPNCheck = Date()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Single-instance guard FIRST. Two processes mutating the route table at
+        // once is what tore down the GlobalProtect tunnel. If another instance
+        // already holds the lock, exit immediately WITHOUT the normal terminate
+        // path: applicationShouldTerminate runs cleanupOnQuit(), which would
+        // remove the routes owned by the instance that is actually running.
+        guard SingleInstanceGuard.acquire() else {
+            NSLog("VPN Bypass: another instance is already running — exiting duplicate without touching routes.")
+            exit(0)
+        }
+
         // Hide dock icon (menu bar only)
         NSApp.setActivationPolicy(.accessory)
         
