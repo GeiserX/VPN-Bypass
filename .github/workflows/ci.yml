@@ -31,7 +31,7 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Select Xcode toolchain
         # `swift test` needs XCTest, which ships only with full Xcode — not with
         # the Command Line Tools. Point the toolchain at an installed Xcode so
@@ -49,7 +49,7 @@ jobs:
       - name: Verify XCTest is available
         run: xcrun --find xctest
       - name: Cache SPM
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .build

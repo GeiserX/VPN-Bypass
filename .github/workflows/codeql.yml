@@ -13,7 +13,7 @@ jobs:
   analyze:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: github/codeql-action/init@v4
         with:
           languages: swift
