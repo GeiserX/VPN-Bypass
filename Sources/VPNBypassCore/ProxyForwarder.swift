@@ -1,14 +1,16 @@
 // ProxyForwarder.swift
-// Per-route local chaining HTTP proxy (P1, VPN-Bypass-3sc.8).
+// Per-route local chaining proxy (P1, VPN-Bypass-3sc.8).
 //
 // A ProxyForwarder listens on 127.0.0.1:<port> — the address an app points its
-// HTTPS_PROXY at (see HookGenerator). Each client connection is tunnelled through
-// an UPSTREAM HTTP proxy (e.g. a residential provider at `proxy.example.com:8001`): we inject the
-// route's HTTP Basic auth and, crucially, bind the upstream socket to a chosen
-// physical interface (e.g. en0) so that hop leaves the box on real Wi-Fi/Ethernet
-// instead of the full-tunnel VPN's utun. TLS is never terminated here — for a
-// CONNECT request the client's TLS session tunnels end-to-end through both proxies,
-// so this process only shuffles opaque bytes and never sees plaintext.
+// HTTPS_PROXY at (see HookGenerator). It always speaks HTTP to the LOCAL app (which
+// issues a `CONNECT host:port`), but chains each connection through an UPSTREAM proxy
+// that is EITHER an HTTP proxy (HTTP CONNECT) OR a SOCKS5 proxy (RFC 1928 `socks5h`,
+// selected per route via `Upstream.isSOCKS5`) — e.g. a residential provider at
+// `proxy.example.com:8001`. We inject the route's Basic / user-pass auth and, crucially,
+// bind the upstream socket to a chosen physical interface (e.g. en0) so that hop leaves
+// the box on real Wi-Fi/Ethernet instead of the full-tunnel VPN's utun. TLS is never
+// terminated here — for a CONNECT the client's TLS session tunnels end-to-end through
+// both proxies, so this process only shuffles opaque bytes and never sees plaintext.
 //
 // This is a plain `final class` (NOT @MainActor): all Network.framework callbacks
 // run on a private serial queue, and a manager owns the instance from the main
@@ -26,6 +28,7 @@ final class ProxyForwarder {
         let username: String        // already template-expanded; may be ""
         let password: String        // may be ""
         let boundInterface: String? // e.g. "en0"; nil = no binding (loopback/tests)
+        var isSOCKS5: Bool = false  // false → chain via HTTP CONNECT; true → SOCKS5 (RFC 1928) handshake
     }
 
     enum ProxyForwarderError: Error {
@@ -229,10 +232,11 @@ final class ProxyForwarder {
 
 // MARK: - Tunnel
 
-/// One client↔upstream pairing. Owns both NWConnections, performs the CONNECT
-/// handshake against the upstream proxy, then relays bytes verbatim in both
-/// directions until either side closes. Every callback below is delivered on the
-/// forwarder's queue, so the mutable state here is single-threaded by construction.
+/// One client↔upstream pairing. Owns both NWConnections, performs the upstream
+/// handshake (HTTP CONNECT or, when `upstream.isSOCKS5`, a SOCKS5/RFC 1928 client
+/// handshake), then relays bytes verbatim in both directions until either side closes.
+/// Every callback below is delivered on the forwarder's queue, so the mutable state
+/// here is single-threaded by construction.
 private final class Tunnel {
 
     private let client: NWConnection
@@ -338,10 +342,15 @@ private final class Tunnel {
             guard let self = self else { return }
             switch state {
             case .ready:
-                // Ask the upstream proxy to open a raw tunnel to the target, carrying
-                // the route's Basic auth; then read its response to that CONNECT.
-                self.send(self.connectRequest(authority: authority), on: server) { [weak self] in
-                    self?.readUpstreamConnectResponse()
+                if self.upstream.isSOCKS5 {
+                    // SOCKS5 upstream: run the RFC 1928 client handshake, then relay.
+                    self.startSOCKS5Handshake(authority: authority, on: server)
+                } else {
+                    // HTTP upstream: ask it to open a raw tunnel to the target, carrying
+                    // the route's Basic auth; then read its response to that CONNECT.
+                    self.send(self.connectRequest(authority: authority), on: server) { [weak self] in
+                        self?.readUpstreamConnectResponse()
+                    }
                 }
             case .failed, .cancelled:
                 self.cancel()
@@ -408,6 +417,145 @@ private final class Tunnel {
         request += "Proxy-Connection: keep-alive\r\n"
         request += "\r\n"
         return Data(request.utf8)
+    }
+
+    // MARK: SOCKS5 upstream handshake (RFC 1928 + RFC 1929)
+
+    // The client already spoke HTTP `CONNECT host:port` to US; only the UPSTREAM leg is
+    // SOCKS5. We greet, optionally do user/pass auth, then issue a CONNECT carrying the
+    // target as a DOMAIN NAME (ATYP 0x03) so the SOCKS5 server resolves it remotely
+    // (socks5h — no local DNS lookup, matching the route's DNS-leak-safe design). On
+    // success the client gets the SAME clean `200 Connection established` the HTTP path
+    // sends; on any failure it gets `502 Bad Gateway` and the tunnel is torn down.
+
+    /// Step 1 — the method-negotiation greeting: offer no-auth, plus user/pass when we
+    /// hold a username, then read the server's single-method choice.
+    private func startSOCKS5Handshake(authority: String, on server: NWConnection) {
+        let greeting: Data = upstream.username.isEmpty
+            ? Data([0x05, 0x01, 0x00])              // VER=5, 1 method: no-auth
+            : Data([0x05, 0x02, 0x00, 0x02])        // VER=5, 2 methods: no-auth + user/pass
+        send(greeting, on: server) { [weak self] in
+            self?.readSOCKS5MethodSelection(authority: authority, on: server)
+        }
+    }
+
+    private func readSOCKS5MethodSelection(authority: String, on server: NWConnection) {
+        receiveExactly(2, on: server) { [weak self] bytes in
+            guard let self = self else { return }
+            guard bytes[0] == 0x05 else { self.failSOCKS5(); return }   // not a SOCKS5 server
+            switch bytes[1] {
+            case 0x00:
+                // No authentication required → straight to CONNECT.
+                self.sendSOCKS5Connect(authority: authority, on: server)
+            case 0x02:
+                // Server demands user/pass. We can only satisfy it with a username; if we
+                // have none (so we never even offered method 0x02) this is unusable → fail.
+                guard !self.upstream.username.isEmpty else { self.failSOCKS5(); return }
+                self.sendSOCKS5UserPassAuth(authority: authority, on: server)
+            default:
+                // 0xFF = "no acceptable methods", or any method we did not offer.
+                self.failSOCKS5()
+            }
+        }
+    }
+
+    /// Step 2 (optional) — RFC 1929 username/password sub-negotiation.
+    private func sendSOCKS5UserPassAuth(authority: String, on server: NWConnection) {
+        let user = Data(upstream.username.utf8)
+        let pass = Data(upstream.password.utf8)
+        // Each field is length-prefixed with a single byte, so neither may exceed 255.
+        guard user.count <= 255, pass.count <= 255 else { failSOCKS5(); return }
+        var msg = Data([0x01])                      // auth sub-negotiation version
+        msg.append(UInt8(user.count)); msg.append(user)
+        msg.append(UInt8(pass.count)); msg.append(pass)
+        send(msg, on: server) { [weak self] in
+            self?.readSOCKS5AuthResponse(authority: authority, on: server)
+        }
+    }
+
+    private func readSOCKS5AuthResponse(authority: String, on server: NWConnection) {
+        receiveExactly(2, on: server) { [weak self] bytes in
+            guard let self = self else { return }
+            // RFC 1929 reply is [VER, STATUS]; STATUS 0x00 == success. Key off the status
+            // byte alone (some servers echo VER 0x05 rather than the sub-negotiation's 0x01).
+            guard bytes[1] == 0x00 else { self.failSOCKS5(); return }
+            self.sendSOCKS5Connect(authority: authority, on: server)
+        }
+    }
+
+    /// Step 3 — the CONNECT request. ATYP 0x03 (domain) sends the hostname verbatim so the
+    /// SOCKS5 server performs the DNS resolution (socks5h), never this process.
+    private func sendSOCKS5Connect(authority: String, on server: NWConnection) {
+        guard let (host, port) = Self.splitAuthority(authority) else { failSOCKS5(); return }
+        let hostBytes = Data(host.utf8)
+        guard !hostBytes.isEmpty, hostBytes.count <= 255 else { failSOCKS5(); return }
+        var request = Data([0x05, 0x01, 0x00, 0x03])   // VER=5, CMD=CONNECT, RSV, ATYP=domain
+        request.append(UInt8(hostBytes.count)); request.append(hostBytes)
+        request.append(UInt8(port >> 8)); request.append(UInt8(port & 0xFF))   // DST.PORT, big-endian
+        send(request, on: server) { [weak self] in
+            self?.readSOCKS5ConnectReplyHead(on: server)
+        }
+    }
+
+    /// Step 4 — the CONNECT reply: fixed [VER, REP, RSV, ATYP] followed by a variable-length
+    /// bound address we must consume EXACTLY (so any early tunnel payload stays queued for
+    /// the relay). REP 0x00 == success; anything else means the upstream refused.
+    private func readSOCKS5ConnectReplyHead(on server: NWConnection) {
+        receiveExactly(4, on: server) { [weak self] bytes in
+            guard let self = self else { return }
+            guard bytes[0] == 0x05, bytes[1] == 0x00 else { self.failSOCKS5(); return }
+            switch bytes[3] {
+            case 0x01: self.consumeSOCKS5ReplyAddress(byteCount: 4 + 2, on: server)    // IPv4 + port
+            case 0x04: self.consumeSOCKS5ReplyAddress(byteCount: 16 + 2, on: server)   // IPv6 + port
+            case 0x03:
+                // Domain: a single length byte precedes the address; read it, then the rest.
+                self.receiveExactly(1, on: server) { [weak self] lenByte in
+                    guard let self = self else { return }
+                    self.consumeSOCKS5ReplyAddress(byteCount: Int(lenByte[0]) + 2, on: server)
+                }
+            default:
+                self.failSOCKS5()   // unknown ATYP → malformed reply
+            }
+        }
+    }
+
+    private func consumeSOCKS5ReplyAddress(byteCount: Int, on server: NWConnection) {
+        receiveExactly(byteCount, on: server) { [weak self] _ in
+            self?.openTunnelToClient()
+        }
+    }
+
+    /// Handshake done: hand the client the same clean 200 the HTTP path emits, replay its
+    /// early bytes upstream, and start the bidirectional relay. Nothing was over-read from
+    /// the server, so any early tunnel bytes remain queued and the relay picks them up.
+    private func openTunnelToClient() {
+        guard let server = server else { cancel(); return }
+        send(Data("HTTP/1.1 200 Connection established\r\n\r\n".utf8), on: client)
+        if !clientLeftover.isEmpty { send(clientLeftover, on: server) }
+        startRelay()
+    }
+
+    /// Read EXACTLY `count` bytes from `connection`, accumulating across partial segments,
+    /// then invoke `then`. A short close (isComplete) or error tears the tunnel down. Uses
+    /// `maximumLength: remaining` so it never over-reads past `count` — surplus bytes stay
+    /// buffered in the NWConnection for the next receive.
+    private func receiveExactly(_ count: Int, on connection: NWConnection, accumulated: Data = Data(), then: @escaping (Data) -> Void) {
+        let remaining = count - accumulated.count
+        connection.receive(minimumIncompleteLength: remaining, maximumLength: remaining) { [weak self] data, _, isComplete, error in
+            guard let self = self else { return }
+            if error != nil { self.cancel(); return }
+            var buffer = accumulated
+            if let data = data, !data.isEmpty { buffer.append(data) }
+            if buffer.count >= count { then(buffer); return }
+            if isComplete { self.cancel(); return }   // peer closed before the full reply arrived
+            self.receiveExactly(count, on: connection, accumulated: buffer, then: then)
+        }
+    }
+
+    /// Tell the client the upstream tunnel could not be opened, then tear down. The client
+    /// only ever speaks HTTP to us, so failures surface as a 502 (mirrors the HTTP path).
+    private func failSOCKS5() {
+        send(Data("HTTP/1.1 502 Bad Gateway\r\n\r\n".utf8), on: client) { [weak self] in self?.cancel() }
     }
 
     // MARK: Plain (non-CONNECT) forwarding
@@ -494,6 +642,16 @@ private final class Tunnel {
         let host = authority[..<colon]
         let portText = authority[authority.index(after: colon)...]
         return !host.isEmpty && UInt16(portText) != nil
+    }
+
+    /// Split a "host:port" authority into its parts using the SAME rule as isValidAuthority
+    /// (the LAST colon separates host from port). Returns nil when it isn't well-formed; the
+    /// SOCKS5 path calls this only after isValidAuthority has already passed.
+    private static func splitAuthority(_ authority: String) -> (host: String, port: UInt16)? {
+        guard let colon = authority.lastIndex(of: ":") else { return nil }
+        let host = String(authority[..<colon])
+        guard !host.isEmpty, let port = UInt16(authority[authority.index(after: colon)...]) else { return nil }
+        return (host, port)
     }
 
     private func send(_ data: Data, on connection: NWConnection, then: (() -> Void)? = nil) {

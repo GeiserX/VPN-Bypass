@@ -170,7 +170,8 @@ final class ProxyListenerManager: ObservableObject {
         // the socket to the physical NIC (the VPN-escape trick for internet proxies)
         // would send it out the wrong interface and break it. Such routes never bind.
         let effectiveInterface = usesTailnet(route) ? nil : boundInterface
-        return ProxyForwarder.Upstream(host: host, port: port16, username: username, password: password, boundInterface: effectiveInterface)
+        return ProxyForwarder.Upstream(host: host, port: port16, username: username, password: password,
+                                       boundInterface: effectiveInterface, isSOCKS5: route.egress == .proxySOCKS5)
     }
 
     // MARK: - Egress / tailnet classification (pure, testable)
