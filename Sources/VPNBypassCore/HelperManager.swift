@@ -281,6 +281,11 @@ final class HelperManager: ObservableObject {
                 return installHelperLegacy()
             }
 
+            // The legacy path writes the cdhash pin inline; SMAppService doesn't, so pin
+            // it now (best-effort) so a clean first install is protected too, not just
+            // updates. If this fails/cancels the helper stays on identifier-only.
+            ensureCDHashPinned()
+
             installationError = nil
             return true
         } catch {
@@ -316,6 +321,24 @@ final class HelperManager: ObservableObject {
             return false
         }
 
+        // Pin this app's cdhash so the freshly-installed helper accepts ONLY this binary
+        // (see Helper/HelperTool.swift verifyCallerIdentity). Written in the SAME admin
+        // op as the copy — no extra prompt, and it lands BEFORE `launchctl bootstrap` so
+        // the helper never runs without it. If our cdhash can't be computed, we omit the
+        // pin entirely: the helper falls back to identifier-only rather than pinning a bad
+        // value. cdhash is [0-9a-f], safe to interpolate; printf writes it with no newline.
+        let pinCommands: String
+        if let cdhash = ownCDHash() {
+            pinCommands = """
+                printf '%s' '\(cdhash)' > '\(HelperConstants.cdhashPinPath)'
+                    chmod 644 '\(HelperConstants.cdhashPinPath)'
+                    chown root:wheel '\(HelperConstants.cdhashPinPath)'
+            """
+        } else {
+            pinCommands = "true"
+            print("⚠️ Could not compute app cdhash — helper will use identifier-only auth")
+        }
+
         let script = """
         do shell script "
             mkdir -p /Library/PrivilegedHelperTools
@@ -326,6 +349,7 @@ final class HelperManager: ObservableObject {
             cp '\(plistSource)' '\(plistDest)'
             chmod 644 '\(plistDest)'
             chown root:wheel '\(plistDest)'
+            \(pinCommands)
             launchctl bootstrap system '\(plistDest)'
         " with administrator privileges
         """
@@ -348,6 +372,52 @@ final class HelperManager: ObservableObject {
 
         installationError = "Failed to create AppleScript"
         return false
+    }
+
+    // MARK: - cdhash pinning
+
+    /// This app's own code-directory hash as lowercase hex, or nil if it can't be
+    /// determined. `kSecCodeInfoUnique` is the value the `cdhash` requirement predicate
+    /// matches, so pinning it lets the helper require exactly this binary. nil on any
+    /// failure so callers omit the pin (→ helper uses identifier-only) rather than pin junk.
+    private func ownCDHash() -> String? {
+        var codeRef: SecCode?
+        guard SecCodeCopySelf([], &codeRef) == errSecSuccess, let code = codeRef else { return nil }
+        var staticRef: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticRef) == errSecSuccess, let staticCode = staticRef else { return nil }
+        var infoRef: CFDictionary?
+        guard SecCodeCopySigningInformation(staticCode, [], &infoRef) == errSecSuccess,
+              let info = infoRef as? [String: Any],
+              let cdhash = info[kSecCodeInfoUnique as String] as? Data,
+              !cdhash.isEmpty else { return nil }
+        return cdhash.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Make sure the root-only cdhash pin matches this app. The legacy install writes it
+    /// inline (this then no-ops); the modern SMAppService path does NOT, so this covers a
+    /// clean first install. Best-effort: on failure/cancel the helper falls back to
+    /// identifier-only (never a brick). Skips silently if the cdhash can't be computed.
+    private func ensureCDHashPinned() {
+        guard let cdhash = ownCDHash() else { return }
+        if let data = FileManager.default.contents(atPath: HelperConstants.cdhashPinPath),
+           let existing = String(data: data, encoding: .utf8)?
+               .trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           existing == cdhash {
+            return   // already correct
+        }
+        let script = """
+        do shell script "
+            printf '%s' '\(cdhash)' > '\(HelperConstants.cdhashPinPath)'
+            chmod 644 '\(HelperConstants.cdhashPinPath)'
+            chown root:wheel '\(HelperConstants.cdhashPinPath)'
+        " with administrator privileges
+        """
+        var error: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&error)
+        if let error = error {
+            let msg = error[NSAppleScript.errorMessage] as? String ?? "unknown"
+            print("⚠️ cdhash pin write (modern path) failed: \(msg) — helper will use identifier-only")
+        }
     }
 
     // MARK: - Route Operations (all with hard XPC deadline)

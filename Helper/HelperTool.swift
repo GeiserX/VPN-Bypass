@@ -29,7 +29,15 @@ class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
         return true
     }
 
-    /// Verify the calling process is signed with the expected bundle identifier
+    /// Verify the calling process is the real VPN Bypass app.
+    ///
+    /// Baseline requirement: signed with our identifier. Under ad-hoc signing that string
+    /// alone is forgeable by any local binary (`codesign -s - -i com.geiserx.vpn-bypass`),
+    /// so when a cdhash pin file (written root-only in the same admin op that installs the
+    /// helper) is present and valid, we ALSO require that exact cdhash — which a forged
+    /// binary cannot reproduce. If the pin is absent or malformed we fall back to
+    /// identifier-only: degraded but functional, and never a hard reject (removing/forging
+    /// the root-owned pin already needs root). See docs + HelperConstants.cdhashPinPath.
     private func verifyCallerIdentity(pid: pid_t) -> Bool {
         var code: SecCode?
         let attrs = [kSecGuestAttributePid: pid] as CFDictionary
@@ -38,15 +46,33 @@ class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
             return false
         }
 
-        // Require: signed by our bundle identifier
+        var requirementString = "identifier \"\(HelperConstants.appSigningIdentifier)\""
+        if let pinnedHash = Self.readPinnedCDHash() {
+            requirementString += " and cdhash H\"\(pinnedHash)\""
+        }
+
         var requirement: SecRequirement?
-        let requirementString = "identifier \"com.geiserx.vpn-bypass\"" as CFString
-        guard SecRequirementCreateWithString(requirementString, [], &requirement) == errSecSuccess,
+        guard SecRequirementCreateWithString(requirementString as CFString, [], &requirement) == errSecSuccess,
               let req = requirement else {
             return false
         }
 
         return SecCodeCheckValidity(callerCode, [], req) == errSecSuccess
+    }
+
+    /// The pinned app cdhash (lowercase hex) if the root-only pin file holds a well-formed
+    /// value, else nil. ANTI-BRICK: any non-hex/empty content returns nil so the caller
+    /// degrades to identifier-only rather than building a malformed `cdhash H"..."`
+    /// requirement that would reject every caller (including the real app). Read fresh each
+    /// call so a rewritten pin (app update) takes effect without restarting the helper.
+    private static func readPinnedCDHash() -> String? {
+        guard let data = FileManager.default.contents(atPath: HelperConstants.cdhashPinPath),
+              let raw = String(data: data, encoding: .utf8) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let isValidHex = !trimmed.isEmpty
+            && trimmed.count % 2 == 0
+            && trimmed.allSatisfy { $0.isHexDigit }
+        return isValidHex ? trimmed : nil
     }
 }
 
