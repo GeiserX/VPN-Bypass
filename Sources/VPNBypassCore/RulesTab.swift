@@ -352,6 +352,22 @@ struct RuleRow: View {
         return rule.pattern
     }
 
+    /// The route this rule is assigned to, resolved live so a rename/edit in the
+    /// Routes tab is reflected immediately. nil if routeId is dangling (its route
+    /// was deleted out from under the rule).
+    private var assignedRoute: Route? {
+        routeManager.config.routes.first { $0.id == rule.routeId }
+    }
+
+    /// True when the assigned route is served by a local 127.0.0.1 listener
+    /// (proxy/Tailscale-exit) rather than a kernel route (direct/VPN): such a rule
+    /// only takes effect for apps explicitly pointed at the route's proxy hook, unlike
+    /// a direct/VPN rule which is transparent. Drives the info affordance below.
+    private var needsProxyHook: Bool {
+        guard let assignedRoute else { return false }
+        return ProxyListenerManager.usesLocalListener(assignedRoute.egress)
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             if showDragHandle {
@@ -394,6 +410,13 @@ struct RuleRow: View {
             Spacer()
 
             RouteChipMenu(selectedRouteId: rule.routeId, onSelect: onReassign, onNewRoute: onNewRoute)
+
+            if needsProxyHook {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.textTertiary)
+                    .help("Apps must use this route's proxy env vars (copy them from the Routes tab) — this rule is not applied transparently at the network layer.")
+            }
 
             Button(action: onDelete) {
                 Image(systemName: "trash")

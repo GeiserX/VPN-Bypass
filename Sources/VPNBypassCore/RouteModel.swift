@@ -45,8 +45,11 @@ public enum MatchType: String, Codable, Equatable, Sendable {
 
 /// Which VPN a `.vpnDefault` route targets when several tunnels are up. An OPTIONAL
 /// field on Route (not a new Egress case): an old build that can't decode it simply
-/// ignores it and treats the route as the primary VPN — the safe direction. A new
-/// Egress case would instead coerce to `.direct` on an old build = a leak.
+/// ignores the unknown key and treats the route as the primary VPN — the safe
+/// direction. A new Egress case would instead be an unknown enum value that FAILS to
+/// decode on an old build (a Codable `DecodingError`), which drops the route or
+/// resets the whole config — never a silent coercion to `.direct`. The optional-field
+/// design is thus both backward- and forward-safe where a new egress case is not.
 public struct VPNSelector: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case primary    // whichever tunnel the OS treats as default (today's sole behaviour)

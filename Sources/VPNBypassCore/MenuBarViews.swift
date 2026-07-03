@@ -110,7 +110,12 @@ struct MenuContent: View {
     @State private var newDomain = ""
     @State private var isAddingDomain = false
     @State private var isVerifying = false
-    
+    /// The mode a tap wants to switch to, pending confirmation. Mirrors
+    /// RoutingModePicker in SettingsView so both surfaces behave identically —
+    /// switching mode changes how ALL traffic routes (and entering Custom
+    /// migrates your lists), so it's deliberately a two-step action.
+    @State private var pendingMode: RouteManager.RoutingMode?
+
     private let accentGradient = LinearGradient(
         colors: [Theme.success, Theme.successDark],
         startPoint: .leading,
@@ -152,8 +157,36 @@ struct MenuContent: View {
             // Refresh VPN status when menu opens
             routeManager.refreshStatus()
         }
+        .alert("Switch routing mode?", isPresented: Binding(
+            get: { pendingMode != nil },
+            set: { if !$0 { pendingMode = nil } }
+        ), presenting: pendingMode) { mode in
+            Button("Cancel", role: .cancel) { pendingMode = nil }
+            Button("Switch to \(mode.displayName)") {
+                routeManager.setRoutingMode(mode)
+                pendingMode = nil
+            }
+        } message: { mode in
+            Text(confirmationMessage(for: mode))
+        }
     }
-    
+
+    /// Mirrors RoutingModePicker.confirmationMessage(for:) in SettingsView
+    /// verbatim (that one is private to SettingsView.swift) so both surfaces
+    /// show identical wording for the same transition.
+    private func confirmationMessage(for mode: RouteManager.RoutingMode) -> String {
+        switch mode {
+        case .bypass:
+            return "Everything will go through your VPN except the sites you list. Your custom routes stay saved."
+        case .vpnOnly:
+            return "Only the sites you list will use your VPN; everything else goes direct."
+        case .custom:
+            return routeManager.config.schemaVersion < 2
+                ? "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime."
+                : "Switch to your per-rule custom routing. You can switch back to a simple mode anytime."
+        }
+    }
+
     // MARK: - Title Header
     
     private var titleHeader: some View {
@@ -682,7 +715,7 @@ struct MenuContent: View {
                     .clipShape(Capsule())
 
                     Button {
-                        routeManager.setRoutingMode(.bypass)
+                        pendingMode = .bypass
                     } label: {
                         Text("Switch to Bypass")
                             .font(.system(size: 10, weight: .medium))
@@ -705,7 +738,10 @@ struct MenuContent: View {
     private func modeButton(title: LocalizedStringKey, mode: RouteManager.RoutingMode) -> some View {
         let isSelected = routeManager.config.routingMode == mode
         return Button {
-            routeManager.setRoutingMode(mode)
+            // Tapping the current mode is a no-op; a different mode asks first.
+            if mode != routeManager.config.routingMode {
+                pendingMode = mode
+            }
         } label: {
             HStack(spacing: 4) {
                 Circle()

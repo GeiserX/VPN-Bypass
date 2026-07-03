@@ -300,6 +300,14 @@ struct RouteRow: View {
         }
     }
 
+    /// Status text for `.vpnDefault` / `.direct` routes, which have no loopback
+    /// listener (mirrors the vpnSelector logic in `upstreamDisplay`).
+    private var nonListenerStatusLabel: String {
+        guard route.egress == .vpnDefault else { return "direct" }
+        let iface = route.vpnSelector?.interfaceName ?? route.vpnSelector?.productHint
+        return iface.map { "→ \($0)" } ?? "primary VPN"
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             // Enabled toggle
@@ -340,17 +348,28 @@ struct RouteRow: View {
                     }
 
                     HStack(spacing: 4) {
-                        Image(systemName: "antenna.radiowaves.left.and.right")
-                            .font(.system(size: 10))
-                            .foregroundColor(route.enabled ? Theme.success : Theme.textTertiary)
-                        if let port = listenerPort {
-                            Text("127.0.0.1:\(port)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(route.enabled ? Theme.success : Theme.textSecondary)
+                        if ProxyListenerManager.usesLocalListener(route.egress) {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.system(size: 10))
+                                .foregroundColor(route.enabled ? Theme.success : Theme.textTertiary)
+                            if let port = listenerPort {
+                                Text("127.0.0.1:\(port)")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(route.enabled ? Theme.success : Theme.textSecondary)
+                            } else {
+                                Text(route.enabled ? "starting…" : "inactive")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(Theme.textTertiary)
+                            }
                         } else {
-                            Text(route.enabled ? "starting…" : "inactive")
+                            // No loopback listener for this egress (.vpnDefault / .direct) —
+                            // show what it actually targets instead of a fake "starting…".
+                            Image(systemName: route.egress == .vpnDefault ? "lock.shield" : "arrow.up.right")
+                                .font(.system(size: 10))
+                                .foregroundColor(route.enabled ? Theme.success : Theme.textTertiary)
+                            Text(nonListenerStatusLabel)
                                 .font(.system(size: 11))
-                                .foregroundColor(Theme.textTertiary)
+                                .foregroundColor(route.enabled ? Theme.success : Theme.textTertiary)
                         }
                     }
                 }
@@ -778,7 +797,16 @@ struct RouteEditorSheet: View {
             proxyPort: port,
             proxyUser: proxyUser.isEmpty ? nil : proxyUser,
             proxyPass: proxyPass.isEmpty ? nil : proxyPass,
-            tailscaleExitNode: isTailscalePeer && !tailscaleNodeName.isEmpty ? tailscaleNodeName : nil
+            // Not editable in this sheet — carry them through from the route being
+            // edited so a GUI save (even a plain rename) doesn't wipe scripting/
+            // session config the sheet has no inputs for.
+            proxyUsernameTemplate: editingRoute?.proxyUsernameTemplate,
+            proxyPasswordTemplate: editingRoute?.proxyPasswordTemplate,
+            sessionMode: editingRoute?.sessionMode ?? .none,
+            sessionTTLMinutes: editingRoute?.sessionTTLMinutes,
+            remoteDNS: editingRoute?.remoteDNS ?? true,
+            tailscaleExitNode: isTailscalePeer && !tailscaleNodeName.isEmpty ? tailscaleNodeName : nil,
+            localListenPort: editingRoute?.localListenPort
         )
         onSave(route)
     }
