@@ -370,9 +370,12 @@ enum CommandRouter {
     private static func setMode(
         _ request: ControlRequest, _ config: RouteManager.Config
     ) -> (config: RouteManager.Config, response: ControlResponse) {
-        // RoutingMode currently has exactly two cases (bypass/vpnOnly); rawValue
-        // init rejects anything else (e.g. a future ".custom") automatically.
-        guard let modeStr = request.args?["mode"], let mode = RouteManager.RoutingMode(rawValue: modeStr) else {
+        // The CLI `mode` verb toggles only the two simple modes. `.custom` is a
+        // heavier transition (schemaVersion bump + a visible derive() migration of
+        // domains/services into rules) owned by the GUI flow, so it is deliberately
+        // NOT reachable here — reject it like any unknown value.
+        guard let modeStr = request.args?["mode"], let mode = RouteManager.RoutingMode(rawValue: modeStr),
+              mode != .custom else {
             return errorResponse(config, code: "invalid_args", message: "mode must be \"bypass\" or \"vpnOnly\"")
         }
         var updated = config

@@ -69,6 +69,15 @@ final class RouteManager: ObservableObject {
     enum RoutingMode: String, Codable {
         case bypass = "bypass"      // Domains bypass VPN (current behavior)
         case vpnOnly = "vpnOnly"    // Only listed domains use VPN, everything else bypasses
+        case custom = "custom"      // Per-rule multi-route dispatch (schemaVersion >= 2 only); see RouteCompiler
+
+        var displayName: String {
+            switch self {
+            case .bypass:  return "Bypass"
+            case .vpnOnly: return "VPN Only"
+            case .custom:  return "Custom Routes"
+            }
+        }
     }
 
     enum VPNType: String, Codable {
@@ -223,7 +232,12 @@ final class RouteManager: ObservableObject {
 
             let defaultRouteId: UUID
             switch mode {
-            case .bypass:
+            // .custom migrates like .bypass: default = VPN, listed entries → Direct.
+            // In practice derive() runs while mode is still bypass/vpnOnly (the visible
+            // switch-into-Custom migration); this case only fires for the odd config that
+            // is already .custom with no explicit routes, where a VPN-default map is the
+            // safe (non-leaking) fallback until the user authors rules.
+            case .bypass, .custom:
                 defaultRouteId = vpnRoute.id
                 for d in domains where d.enabled {
                     rules.append(Rule(matchType: d.isCIDR ? .cidr : .domain, pattern: d.domain, routeId: directRoute.id, order: order))
@@ -1381,6 +1395,13 @@ final class RouteManager: ObservableObject {
         // Refuse VPN Only under GlobalProtect on every apply path (see method).
         if refuseVPNOnlyUnderGlobalProtect() { return }
 
+        // Custom mode: dispatch per rule via RouteCompiler, then return — the legacy
+        // bypass/vpnOnly builder below is untouched (classic modes stay byte-identical).
+        if config.schemaVersion >= 2 && config.routingMode == .custom {
+            await applyCustomRoutesInternal(useCacheOnly: false, sendNotification: sendNotification, forceReassert: forceReassert)
+            return
+        }
+
         let isInverse = config.routingMode == .vpnOnly
 
         // VPN Only mode requires the VPN gateway for domain-specific routes
@@ -1684,6 +1705,211 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    // MARK: - Custom-mode engine (schemaVersion >= 2 && routingMode == .custom)
+
+    /// Custom-mode apply. Resolves each enabled rule's matcher to concrete destinations,
+    /// compiles them to a kernel-route batch via RouteCompiler, and installs it with the
+    /// SAME batch-add + orphan-cleanup + epoch/commit/hosts discipline as the legacy full
+    /// apply — so the hard-won GP-teardown guards are inherited, not re-derived. Kernel
+    /// routes are emitted only for egresses that need them; proxy/tailscale/primary-VPN
+    /// destinations are served by their loopback listeners and emit nothing here.
+    ///
+    /// Gate-free: callers already hold the route-operation lock (matches
+    /// applyAllRoutesInternal). `useCacheOnly` mirrors applyRoutesFromCache — domains
+    /// resolve from dnsDiskCache with no live DNS, for instant startup. Returns true when
+    /// an apply was attempted (false on missing gateway / preemption).
+    @discardableResult
+    private func applyCustomRoutesInternal(useCacheOnly: Bool, sendNotification: Bool, forceReassert: Bool = false) async -> Bool {
+        let epoch = routeEpoch
+
+        guard let gateway = localGateway else {
+            log(.error, "Custom routing: no local gateway available")
+            return false
+        }
+
+        // Resolve every enabled rule's matcher to concrete kernel destinations.
+        let resolved = await resolveRuleDestinations(useCacheOnly: useCacheOnly)
+
+        // Compile to the shared routesToAdd batch shape. ifaceGatewayForRoute returns nil
+        // for now (multi-VPN egress is a later wiring step) so .vpnDefault emits nothing;
+        // proxy/tailscale egresses are served by loopback listeners.
+        var compiled = RouteCompiler.compile(
+            resolvedRules: resolved,
+            routes: config.routes,
+            localGateway: gateway,
+            ifaceGatewayForRoute: { _ in nil }
+        )
+
+        // Generalized GlobalProtect guard: never install a catch-all into a non-primary
+        // egress while GP is up (every compiled kernel route is non-primary). Custom mode
+        // is per-rule and shouldn't produce catch-alls, but refuse defensively — this is
+        // the custom-engine analog of refuseVPNOnlyUnderGlobalProtect().
+        let guarded = RouteCompiler.guardCatchAllUnderGlobalProtect(compiled, isGlobalProtect: vpnType == .globalProtect)
+        if !guarded.refused.isEmpty {
+            for r in guarded.refused {
+                log(.error, "Custom routing: refusing catch-all \(r.destination) into a non-primary egress under GlobalProtect — it would tear down the GP tunnel.")
+            }
+            compiled = guarded.kept
+        }
+
+        var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
+        var allSourceEntries: [(destination: String, source: String)] = []
+        for r in compiled {
+            routesToAdd.append((destination: r.destination, gateway: r.gateway, isNetwork: r.isNetwork, source: r.source))
+            allSourceEntries.append((destination: r.destination, source: r.source))
+        }
+
+        // Diff-before-mutate: skip a no-op re-apply to avoid route-table churn that
+        // pressures a VPN's route monitor (same guard the legacy full apply uses).
+        let desiredPairs = Set(routesToAdd.map { "\($0.destination)|\($0.gateway)" })
+        let activePairs = Set(activeRoutes.map { "\($0.destination)|\($0.gateway)" })
+        if Self.shouldSkipReapply(desiredPairs: desiredPairs, activePairs: activePairs, forceReassert: forceReassert) {
+            log(.info, "Custom routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
+            lastUpdate = Date()
+            return true
+        }
+
+        log(.info, "Custom routing: applying \(routesToAdd.count) kernel route(s) from \(resolved.count) rule(s)...")
+
+        var newRoutes: [ActiveRoute] = []
+        var batchFailureCount = 0
+        var batchFailedDests: Set<String> = []
+        if !routesToAdd.isEmpty {
+            if HelperManager.shared.isHelperInstalled {
+                let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
+                let result = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
+                batchFailureCount = result.failureCount
+                batchFailedDests = Set(result.failedDestinations)
+                if result.failureCount > 0 {
+                    log(.warning, "Custom route batch: \(result.successCount) succeeded, \(result.failureCount) failed (\(result.failedDestinations.prefix(3).joined(separator: ", "))...)")
+                }
+            } else {
+                log(.error, "Cannot add custom routes: helper not ready (\(HelperManager.shared.helperState.statusText))")
+                return false
+            }
+        }
+
+        // Build activeRoutes from source entries, excluding destinations that failed the add.
+        let appliedDestinations = Set(routesToAdd.map { $0.destination }).subtracting(batchFailedDests)
+        for entry in allSourceEntries where appliedDestinations.contains(entry.destination) {
+            let gw = routesToAdd.first(where: { $0.destination == entry.destination })?.gateway ?? gateway
+            newRoutes.append(ActiveRoute(destination: entry.destination, gateway: gw, source: entry.source, timestamp: Date()))
+        }
+
+        // Clean up stale kernel routes — same two-population logic as the full apply.
+        let newDestinations = Set(newRoutes.map { $0.destination })
+        let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
+        let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
+        let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
+        let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
+
+        if !trulyOrphanedDests.isEmpty {
+            let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
+            if result.failureCount > 0 {
+                log(.warning, "Custom orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
+                let failedSet = Set(result.failedDestinations)
+                for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
+                    newRoutes.append(route)
+                }
+            } else if result.successCount > 0 {
+                log(.info, "Custom orphan cleanup: \(result.successCount) stale kernel routes removed")
+            }
+        }
+        if !addFailedStaleDests.isEmpty {
+            let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
+            if result.failureCount > 0 {
+                log(.info, "Custom add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
+            }
+        }
+
+        // Preemption check: if removeAllRoutes() ran during our awaits, results are stale.
+        guard routeEpoch == epoch else {
+            log(.warning, "Custom apply aborted: routes were cleared during operation")
+            return false
+        }
+
+        activeRoutes = newRoutes
+        lastUpdate = Date()
+
+        if config.manageHostsFile {
+            await updateHostsFile()
+        }
+
+        let confirmedUniqueCount = uniqueRouteCount
+        if batchFailureCount > 0 {
+            log(.warning, "Applied custom routes (\(batchFailureCount) kernel failures — counts approximate until verified)")
+        } else {
+            log(.success, "Applied \(confirmedUniqueCount) unique custom route(s)")
+        }
+
+        if sendNotification && confirmedUniqueCount > 0 {
+            NotificationManager.shared.notifyRoutesApplied(count: confirmedUniqueCount, failedCount: batchFailureCount)
+        }
+
+        if config.verifyRoutesAfterApply || batchFailureCount > 0 {
+            await verifyRoutes()
+        }
+        return true
+    }
+
+    /// Resolve each enabled rule's matcher to concrete kernel destinations for the custom
+    /// engine, in first-match (ascending `order`) order:
+    ///   • .ip      → the address itself (host route).
+    ///   • .cidr    → the block itself (network route).
+    ///   • .domain  → resolved IPs (live, or dnsDiskCache when useCacheOnly / on failure).
+    ///   • .service → its domains resolved to IPs + its static ipRanges.
+    ///   • .suffix / .process → nothing (not kernel-routable — a listener/NE engine
+    ///     handles those, not the routing table; skipped with no error).
+    /// Live resolution refreshes dnsCache/dnsDiskCache so the hosts file + cache stay
+    /// consistent, mirroring the legacy paths.
+    private func resolveRuleDestinations(useCacheOnly: Bool) async -> [(rule: Rule, dests: [(value: String, isNetwork: Bool)])] {
+        let orderedRules = config.rules.filter { $0.enabled }.sorted { $0.order < $1.order }
+        var out: [(rule: Rule, dests: [(value: String, isNetwork: Bool)])] = []
+        var cacheDirty = false
+
+        // Resolve one hostname to IPs, honoring useCacheOnly and updating caches on a live
+        // hit. Returns cached IPs as a fallback when live resolution fails.
+        func ipsFor(_ host: String) async -> [String] {
+            if useCacheOnly {
+                return dnsDiskCache[host] ?? []
+            }
+            if let ips = await resolveIPs(for: host), !ips.isEmpty {
+                dnsDiskCache[host] = ips
+                if let first = ips.first { dnsCache[host] = first }
+                cacheDirty = true
+                return ips
+            }
+            return dnsDiskCache[host] ?? []
+        }
+
+        for rule in orderedRules {
+            var dests: [(value: String, isNetwork: Bool)] = []
+            switch rule.matchType {
+            case .ip:
+                dests = [(rule.pattern, false)]
+            case .cidr:
+                dests = [(rule.pattern, true)]
+            case .domain:
+                dests = (await ipsFor(rule.pattern)).map { ($0, false) }
+            case .service:
+                if let service = config.services.first(where: { $0.id == rule.pattern }) {
+                    for domain in service.domains {
+                        dests.append(contentsOf: (await ipsFor(domain)).map { ($0, false) })
+                    }
+                    for range in service.ipRanges {
+                        dests.append((range, true))
+                    }
+                }
+            case .suffix, .process:
+                dests = []   // not kernel-routable
+            }
+            out.append((rule, dests))
+        }
+
+        if cacheDirty { saveDNSCache() }
+        return out
+    }
+
     /// Remove all routes — always proceeds (critical teardown for disconnect/quit/clear).
     /// Does NOT acquire the route operation gate so it cannot be blocked by a running operation.
     /// Increments routeEpoch so in-flight applies detect preemption and abort before committing.
@@ -1752,6 +1978,11 @@ final class RouteManager: ObservableObject {
         // installs the same 0.0.0.0/1 + 128.0.0.0/1 catch-all and would tear down
         // the GP tunnel on the common cached-launch path.
         if refuseVPNOnlyUnderGlobalProtect() { return false }
+
+        // Custom mode: compile from cached IPs (no live DNS) for instant startup.
+        if config.schemaVersion >= 2 && config.routingMode == .custom {
+            return await applyCustomRoutesInternal(useCacheOnly: true, sendNotification: false, forceReassert: false)
+        }
 
         // VPN Only mode needs VPN gateway for domain routes
         if isInverse {
@@ -1959,6 +2190,15 @@ final class RouteManager: ObservableObject {
 
         guard let gateway = localGateway else {
             log(.warning, "Background DNS refresh skipped: no local gateway")
+            return
+        }
+
+        // Custom mode: re-resolve rules + recompile + reconcile (full replace), then
+        // refresh the timestamps. The legacy incremental diff below is untouched.
+        if config.schemaVersion >= 2 && config.routingMode == .custom {
+            _ = await applyCustomRoutesInternal(useCacheOnly: false, sendNotification: false)
+            lastDNSRefresh = Date()
+            nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
             return
         }
 
@@ -2252,6 +2492,15 @@ final class RouteManager: ObservableObject {
 
         guard isVPNConnected, let gateway = localGateway else {
             log(.info, "DNS refresh skipped: \(!isVPNConnected ? "VPN not connected" : "no local gateway")")
+            nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
+            return
+        }
+
+        // Custom mode: re-resolve rules + recompile + reconcile (full replace), then
+        // refresh the timestamps. The legacy incremental diff below is untouched.
+        if config.schemaVersion >= 2 && config.routingMode == .custom {
+            _ = await applyCustomRoutesInternal(useCacheOnly: false, sendNotification: false)
+            lastDNSRefresh = Date()
             nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
             return
         }
@@ -2912,9 +3161,30 @@ final class RouteManager: ObservableObject {
     func setRoutingMode(_ mode: RoutingMode) {
         guard config.routingMode != mode else { return }
 
+        // Entering Custom mode the FIRST time (schemaVersion still 1) is a one-time
+        // migration: bump to schemaVersion 2 and derive the routes/rules representation
+        // from the CURRENT bypass/vpnOnly lists + proxy, so the rule engine has the
+        // user's domains/services as rules to start from. Preserve any proxy/Tailscale
+        // routes the user already created (derive only produces VPN/Direct/legacy-proxy)
+        // so the migration is lossless. Re-entering Custom later (schemaVersion already 2)
+        // keeps the user's edited rules untouched.
+        if mode == .custom && config.schemaVersion < 2 {
+            config.schemaVersion = 2
+            let userRoutes = config.routes.filter {
+                $0.egress == .proxyHTTP || $0.egress == .proxySOCKS5 || $0.egress == .tailscaleExit
+            }
+            let derived = Config.derive(
+                domains: config.domains, services: config.services,
+                mode: config.routingMode, inverseDomains: config.inverseDomains, proxy: config.proxyConfig
+            )
+            config.routes = derived.routes + userRoutes
+            config.rules = derived.rules
+            config.defaultRouteId = derived.defaultRouteId
+        }
+
         config.routingMode = mode
         saveConfig()
-        log(.info, "Routing mode changed to \(mode == .bypass ? "Bypass" : "VPN Only")")
+        log(.info, "Routing mode changed to \(mode.displayName)")
 
         if isVPNConnected && acquireRouteOperation() {
             Task {
@@ -3312,7 +3582,9 @@ final class RouteManager: ObservableObject {
     /// VPN-Bypass-3sc.8). Safe to call any time; a no-op when there are no
     /// enabled proxy routes, so it changes nothing for existing users.
     func reconcileProxyListeners() async {
-        guard config.multiRouteEnabled else {
+        // Custom mode implies the multi-route surface, so its proxy/tailscale routes get
+        // loopback listeners too — not only the legacy opt-in multiRouteEnabled flag.
+        guard config.multiRouteEnabled || config.routingMode == .custom else {
             ProxyListenerManager.shared.stopAll()
             return
         }

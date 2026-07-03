@@ -433,6 +433,23 @@ final class RoutingModeTests: XCTestCase {
         let json = Data(#""invalid""#.utf8)
         XCTAssertThrowsError(try JSONDecoder().decode(RouteManager.RoutingMode.self, from: json))
     }
+
+    func testCustomRawValue() {
+        XCTAssertEqual(RouteManager.RoutingMode.custom.rawValue, "custom")
+    }
+
+    func testCodableRoundTripCustom() throws {
+        let original = RouteManager.RoutingMode.custom
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(RouteManager.RoutingMode.self, from: data)
+        XCTAssertEqual(decoded, original)
+    }
+
+    func testDecodeFromRawStringCustom() throws {
+        let json = Data(#""custom""#.utf8)
+        let decoded = try JSONDecoder().decode(RouteManager.RoutingMode.self, from: json)
+        XCTAssertEqual(decoded, .custom)
+    }
 }
 
 // MARK: - VPNType Tests
