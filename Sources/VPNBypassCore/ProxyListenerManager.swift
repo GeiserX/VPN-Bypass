@@ -18,7 +18,7 @@ final class ProxyListenerManager: ObservableObject {
     /// A route can be edited in place (same id, new host/port/creds); when its
     /// fingerprint changes we stop+restart that forwarder so the change takes
     /// effect live. Without this, reconcile keyed on id alone and an in-place edit
-    /// (e.g. re-pointing an Oxylabs port to change the exit IP) was a silent no-op.
+    /// (e.g. re-pointing a residential proxy's port to change the exit IP) was a silent no-op.
     private var fingerprints: [UUID: Int] = [:]
     private let startQueue = DispatchQueue(label: "com.vpnbypass.listenermgr", qos: .userInitiated)
 

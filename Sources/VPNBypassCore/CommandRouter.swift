@@ -239,7 +239,7 @@ enum CommandRouter {
     // MARK: - route.* mutations
 
     /// The canonical re-point verb: a script re-points a route's host/port/user/name/
-    /// enabled/password (e.g. switching an Oxylabs port to change the exit IP).
+    /// enabled/password (e.g. switching a residential proxy's port to change the exit IP).
     private static func routeSet(
         _ request: ControlRequest, _ config: RouteManager.Config, listenerPorts: [UUID: UInt16]
     ) -> (config: RouteManager.Config, response: ControlResponse) {

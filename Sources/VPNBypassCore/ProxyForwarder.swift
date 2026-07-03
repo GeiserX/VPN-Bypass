@@ -3,7 +3,7 @@
 //
 // A ProxyForwarder listens on 127.0.0.1:<port> — the address an app points its
 // HTTPS_PROXY at (see HookGenerator). Each client connection is tunnelled through
-// an UPSTREAM HTTP proxy (e.g. Oxylabs `disp.oxylabs.io:8001`): we inject the
+// an UPSTREAM HTTP proxy (e.g. a residential provider at `proxy.example.com:8001`): we inject the
 // route's HTTP Basic auth and, crucially, bind the upstream socket to a chosen
 // physical interface (e.g. en0) so that hop leaves the box on real Wi-Fi/Ethernet
 // instead of the full-tunnel VPN's utun. TLS is never terminated here — for a
@@ -36,7 +36,7 @@ final class ProxyForwarder {
     let listenPort: UInt16
 
     // The upstream a NEW tunnel chains through. Mutable so a route can be re-pointed
-    // live (e.g. switch an Oxylabs port to change the exit IP) WITHOUT tearing down the
+    // live (e.g. switch a residential proxy's port to change the exit IP) WITHOUT tearing down the
     // listener — the local port (and any app's HTTPS_PROXY) stays put; only connections
     // accepted after the swap use the new exit. Confined to `queue` once started.
     private var upstream: Upstream

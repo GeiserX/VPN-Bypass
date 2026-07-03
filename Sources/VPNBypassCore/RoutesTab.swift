@@ -142,7 +142,7 @@ struct RoutesTab: View {
             Text("No proxy routes yet")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(Theme.textSecondary)
-            Text("Add one to route specific traffic through a proxy (e.g. Oxylabs).")
+            Text("Add one to route specific traffic through a proxy, a Tailscale peer, or a specific VPN.")
                 .font(.system(size: 12))
                 .foregroundColor(Theme.textTertiary)
                 .multilineTextAlignment(.center)
@@ -460,6 +460,16 @@ struct RouteEditorSheet: View {
 
     private var isEditing: Bool { editingRoute != nil }
 
+    /// A neutral, type-appropriate name hint (never a specific provider).
+    private var namePlaceholder: String {
+        switch egress {
+        case .proxyHTTP, .proxySOCKS5: return "e.g. Residential Proxy"
+        case .tailscaleExit:           return "e.g. Home exit"
+        case .vpnDefault:              return "e.g. Work VPN"
+        case .direct:                  return "e.g. Direct"
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Sheet header
@@ -485,7 +495,7 @@ struct RouteEditorSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     formField(label: "Name", required: true) {
-                        TextField("e.g. Oxylabs Residential", text: $name)
+                        TextField(namePlaceholder, text: $name)
                             .textFieldStyle(.plain)
                             .font(.system(size: 13))
                             .foregroundColor(.white)
@@ -555,7 +565,7 @@ struct RouteEditorSheet: View {
                         }
                     } else {
                         formField(label: "Upstream Host", required: true) {
-                            TextField("pr.oxylabs.io", text: $proxyHost)
+                            TextField("proxy.example.com", text: $proxyHost)
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 13, design: .monospaced))
                                 .foregroundColor(.white)

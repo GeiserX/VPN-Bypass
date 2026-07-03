@@ -470,6 +470,10 @@ struct DomainRow: View {
 /// here, and drives which tabs are visible (`SettingsView.visibleTabs`).
 struct RoutingModePicker: View {
     @EnvironmentObject var routeManager: RouteManager
+    /// The mode a tap wants to switch to, pending confirmation. Switching mode
+    /// changes how ALL traffic routes (and entering Custom migrates your lists),
+    /// so it's deliberately a two-step action rather than a single click.
+    @State private var pendingMode: RouteManager.RoutingMode?
 
     private static let modes: [(mode: RouteManager.RoutingMode, title: LocalizedStringKey, icon: String)] = [
         (.bypass, "Bypass", "globe"),
@@ -485,6 +489,19 @@ struct RoutingModePicker: View {
         }
     }
 
+    private func confirmationMessage(for mode: RouteManager.RoutingMode) -> String {
+        switch mode {
+        case .bypass:
+            return "Everything will go through your VPN except the sites you list. Your custom routes stay saved."
+        case .vpnOnly:
+            return "Only the sites you list will use your VPN; everything else goes direct."
+        case .custom:
+            return routeManager.config.schemaVersion < 2
+                ? "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime."
+                : "Switch to your per-rule custom routing. You can switch back to a simple mode anytime."
+        }
+    }
+
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
@@ -494,7 +511,10 @@ struct RoutingModePicker: View {
                         icon: entry.icon,
                         isSelected: routeManager.config.routingMode == entry.mode
                     ) {
-                        routeManager.setRoutingMode(entry.mode)
+                        // Tapping the current mode is a no-op; a different mode asks first.
+                        if entry.mode != routeManager.config.routingMode {
+                            pendingMode = entry.mode
+                        }
                     }
                 }
             }
@@ -505,6 +525,18 @@ struct RoutingModePicker: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity)
+        }
+        .alert("Switch routing mode?", isPresented: Binding(
+            get: { pendingMode != nil },
+            set: { if !$0 { pendingMode = nil } }
+        ), presenting: pendingMode) { mode in
+            Button("Cancel", role: .cancel) { pendingMode = nil }
+            Button("Switch to \(mode.displayName)") {
+                routeManager.setRoutingMode(mode)
+                pendingMode = nil
+            }
+        } message: { mode in
+            Text(confirmationMessage(for: mode))
         }
     }
 }
