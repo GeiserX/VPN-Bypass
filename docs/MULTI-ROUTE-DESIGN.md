@@ -213,6 +213,124 @@ Bypass. *(Listener-port assignment + the `route-on` CLI design come from the hoo
   per-route DNS + health-check/failover selectors.
 - **P3 — providers:** WireGuard/OpenVPN/Tailscale route types; PAC for browsers; UI for routes+rules.
 
+## 2026-07-03 — Research corrections + locked build plan
+
+A fresh directive ("the definitive macOS routing manager": multiple VPNs, multiple proxies, direct,
+Tailscale, easy UX, plus a scripting surface) triggered a second research panel + a **live probe of the
+actual machine**. Several assumptions above are now corrected. This section is authoritative where it
+conflicts with the older text; the older sections are kept for history.
+
+### Corrections from live evidence (see `docs/research/2026-07-03-tailnet-probe.md`)
+
+1. **The reference machine's GlobalProtect is SPLIT-tunnel, not full-tunnel.** `route -n get 8.8.8.8` →
+   `en8` (home WAN), not the GP utun. GP only captures corporate CIDRs (a `/32` + `100.112.0.0/12`). The
+   "escape the full-tunnel VPN" framing still matters for *other* users (Cisco/Zscaler full-tunnel) so we
+   keep the physical-NIC upstream binding for internet proxies — but the baseline for general traffic is
+   already "direct".
+2. **Per-destination "route via my Tailscale server" MUST be proxy-over-tailnet — NOT kernel-routing into
+   the Tailscale utun.** Confirmed two ways (WireGuard cryptokey-routing drops any dest not in the peer's
+   AllowedIPs; Tailscale only injects a route via an *approved subnet route* or a *selected exit node*; and
+   macOS exit-nodes are **all-or-nothing**, no per-destination split — Tailscale issues #7766/#13677 still
+   open). Forcing `route add -host <public-ip> -interface utunX` is silently dropped. The **only**
+   inherently per-destination Tailscale mechanism: run an ordinary forward proxy on a peer bound to its
+   tailnet IP (`100.x:port`), and dial it as a normal proxy route. Tailnet peer IPs are unconditionally
+   reachable with **zero** Tailscale config changes. This reuses the existing `ProxyForwarder` wholesale.
+3. **No usable forward proxy exists on the tailnet today.** Probed peer-relay, peer-server-b, a tailnet peer — all
+   forward-proxy ports closed. peer-server-b:8080 looked like Squid but is a **Tomcat reverse-proxy** (CONNECT →
+   501). So P2 requires standing up a small forward proxy (tinyproxy/3proxy) on a peer — an infra step,
+   trivial given all peers run Docker via webhook GitOps. a tailnet peer `<tailnet-peer-ip>` is the target for the
+   "via the a tailnet peer" use case.
+4. **DNS leak rule for proxy-over-tailnet:** the dialing side must use **remote resolution** (SOCKS5h /
+   HTTP CONNECT with the hostname), so the lookup happens at the peer, not through GP's resolver. Our
+   `ProxyForwarder` already does HTTP `CONNECT <host>:<port>` (remote DNS) — correct by construction.
+5. **Landmine:** GP's `100.112.0.0/12` overlaps Tailscale's CGNAT `100.64.0.0/10`. A tailnet peer whose IP
+   is in `100.112–100.127` (e.g. the existing `nuc` at 100.114.x) is longest-prefix-hijacked into GP while
+   GP is up. **Guard:** refuse/warn on a Tailscale-peer route whose resolved IP ∈ `100.112.0.0/12` while
+   `vpnType == .globalProtect`. a tailnet peer (100.95) and peer-relay (100.68)/peer-server-b (100.73) are safe.
+
+### Locked architecture (supersedes "macOS implementation" P2=NE-first framing for THIS release)
+
+- **Egress model:** do NOT add new `Egress` cases for specific VPNs (a new rawValue makes *old* builds
+  coerce it to `.direct` on decode = a **leak**). Instead add optional fields on `Route` (old builds
+  ignore them → degrade to the safe "primary VPN"/"physical NIC" default). New enum cases only with a
+  `schemaVersion` bump that makes old builds refuse rule-dispatch (fall back to legacy) rather than
+  mis-route.
+- **Keep the legacy `routingMode` engine as the default apply path.** Make `rules[]+routes[]` a pure,
+  unit-tested **`RouteCompiler`** that emits the *same* `routesToAdd` batch the four apply paths already
+  build (`applyAllRoutesInternal` 1376, `applyRoutesFromCache` 1739, `backgroundDNSRefresh` 1955,
+  `performDNSRefresh` 2248), gated by `schemaVersion >= 2 && multiRouteEnabled`. No fork of the four paths;
+  the shared `addRoutesBatch`→epoch/orphan/hosts tail is untouched. This preserves the hard-won GP-teardown
+  guards instead of re-deriving them in a second engine.
+- **The helper already routes into any utun** (`HelperTool.buildRouteAddArgs` emits
+  `route -n add -host <dest> -interface utunX` for any `iface:<name>`, name-validated). Multi-VPN egress is
+  *wiring*, not new privileged plumbing. `vpnOnly` already uses `iface:<vpnInterface>`.
+- **VPN attribution:** refactor detection to return `[VPNLink]` (all live tunnels), scored by a ladder:
+  `tailscale status --json` (authoritative for the TS utun) → `scutil --nc list` (NE product names) →
+  running-process family → address/gateway shape. Reject `lsof`/`pfctl` owner as a primary signal. Manual
+  picker as the honest floor; **persist the utun mapping by a stable fingerprint (product + subnet +
+  scutil name), never the utun index** (indices renumber across reconnects).
+- **Guards (generalize `refuseVPNOnlyUnderGlobalProtect`):** refuse any catch-all (`0/1`,`128/1`,`0/0`)
+  into a non-primary egress under GP; refuse `iface:` into an absent interface (re-resolve every apply);
+  extend `shouldSkipReapply` to key on `destination|gateway` (gateway now varies per rule).
+- **Health & fallback:** per-route `FallbackPolicy` (`failClosed | toDefault | toRoute`) defaulting
+  **fail-closed** for proxy/residential routes (a silent fall-through to the wrong exit IP is worse than
+  failing — the incident that motivates the whole project). Kernel dests fail-closed via a blackhole route;
+  proxy-listener dests return 502. Menu bar must show each route's health **and the active egress**. Be
+  honest: a true *global* kill-switch needs the P2/NE engine, not the routing table.
+
+### UX (locked — the "really easy" requirement)
+
+- **Fold `multiRouteEnabled` into `routingMode` as a third case:** `bypass` (default, unchanged) ·
+  `vpnOnly` (unchanged) · `custom`. Move the mode choice to a persistent 3-segment picker **above the tab
+  bar** (retire the buried General→Experimental toggle and the in-Domains-tab mode card).
+- **Simple modes stay a single tap and byte-identical to today.** Existing users who never pick "Custom
+  Routes" see zero change.
+- **Custom mode = two tabs mirroring the model:** a **Rules** tab (ordered, first-match; each row's *Route
+  chip* is the one control that assigns a destination to an egress; a pinned "Everything else → default"
+  row) + a generalized **Routes** tab (auto-detected **System Routes** = each VPN link + Direct, plus
+  user-created **Your Routes** = proxies + Tailscale peers). Switching *into* Custom runs the existing
+  `derive()` migration **visibly** ("we converted your N domains/services into rules"); switching out warns
+  that non-direct/VPN routes are paused, not deleted.
+- **Transparent delivery for proxy routes** (so no more manual iTerm profiles): VPN Bypass can install a
+  **system PAC** (already generated by `HookGenerator.pac`) mapping the per-domain rules to the right
+  loopback listener and everything else to `DIRECT` — transparent for any app honoring the system proxy;
+  the `route-on` shell hook + per-route env stay for CLI tools that ignore it. (Full app-agnostic capture
+  of proxy-ignoring binaries is still the later P2/NE track.)
+- Menu bar: Custom shows a "Custom Routes" badge + a "Switch to Bypass" escape hatch and a "Routes In Use"
+  rollup (distinct from the existing kernel "Active Routes" section). Copy strings are specified in the UX
+  memo captured in the worklog.
+
+### Scripting / automation surface (new requirement — generic, no per-provider integrations)
+
+- **Verbs over the app's OWN model only** (routes/rules/mode/status) — the app never learns "Oxylabs" or
+  any vendor API. Canonical use case: a script re-points a route's upstream host/port (switch an Oxylabs
+  dedicated-ISP port = switch exit IP) and the listener reconciles live.
+- **Transport (leading candidate, pending the security critique): a bundled `vpnbypass` CLI talking to the
+  running app over a user-only UNIX domain socket** (`0600`, under `~/Library/Application Support`, **no
+  TCP**), peer-uid-checked (`getpeereid`), credential values never echoed back. Alternatives weighed:
+  config-file-watch + reload; AppleScript/App Intents; Clash-style localhost-HTTP+token (rejected as a
+  network surface). The mechanism must not widen the privileged-helper boundary beyond what the GUI already
+  allows. Command schema is versioned.
+
+### Build order (each slice independently green + releasable; single release at the very end)
+
+1. **Slice 1 — Tailscale-peer egress via proxy-over-tailnet.** App-side: a Tailscale route = a proxy route
+   whose upstream is a tailnet peer (`MagicDNS`/`100.x : port`), `boundInterface = nil` (route via the TS
+   utun, do **not** bind the physical NIC), remote-DNS by construction. Peer picker from
+   `tailscale status --json`. `100.112/12`-under-GP guard. Infra: stand up tinyproxy on the a tailnet peer
+   (`<tailnet-peer-ip>`) via Docker/GitOps. Live-verify a different exit IP. Reuses `ProxyForwarder`.
+2. **Slice 2 — UX mode overhaul.** `routingMode.custom` third case; mode picker above tabs; Rules tab +
+   generalized Routes tab; visible `derive()` migration; the `.custom` branch through `setRoutingMode()` +
+   the ~5 hardcoded binary call sites. Pure UI + plumbing; no new engine.
+3. **Slice 3 — Scripting surface.** The `vpnbypass` CLI + user-only socket + live reconcile, per the locked
+   security design (fold in the critic's guards).
+4. **Slice 4 — Multi-VPN egress (the "4th way").** `Route.vpnSelector` + `[VPNLink]` attribution +
+   `RouteCompiler` kernel dispatch into a *specific* utun, flag-gated at `schemaVersion >= 2`, with the
+   generalized GP catch-all guard + regression tests. The only new kernel step; riskiest, ships last.
+5. **Slice 5 — Health + fallback + system-PAC "transparent" toggle + final verification.**
+6. **P2/NETransparentProxy stays out of scope** (app-agnostic capture + true global fail-closed) — gated on
+   the signing-fork decision (`VPN-Bypass-3sc.11`).
+
 ## Tracking
 
 VPN Bypass uses **GitHub issues + this ROADMAP**, not beads. Issues to file (see ROADMAP "Multi-Route"

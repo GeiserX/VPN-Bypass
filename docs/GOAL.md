@@ -23,3 +23,14 @@ Branch: `feat/multi-route`. Loop: `/research! → /implement! → /review-pr!` �
 > do all the work but lets test at the end aftwr you do all the three phases, wait for my to-go
 
 _Interpretation: implement ALL of P0→P1→P2 autonomously (unit-test + mock-verify as I go); Sergio does the LIVE testing (real Oxylabs egress, Tailscale-via-mini, GP coexistence) at the very end; do NOT merge or cut the single release until Sergio gives the explicit "to-go" after his test._
+
+## 2026-07-03 — continuation (verbatim)
+
+> Okay so continue with the issue you had open in the repository, that's the /goal
+> so /sergio-loop until you have a perfect version of the vpn bypass app where you can configure multiple vpns, multiple proxies, also direct... etc. So from UX perspective, it's really easy to do it.
+> Obviously, make the current way of work of vpn/direct split to continue being the default, so it's not difficult for people to just select the old plain split vpn/direct, that's the app what's for, but cater to users like me that need a three way split, or even fourth way... so think and research well how to properly do this as this is extremely difficult think to do, and i expect you to throw all what you have into this problem
+> obviously we still suport what other user wanted which is the only select the vpn for specific domains, and by default just use direct. that's also really interesting. in the end I want vpn bypass to become the definitive routing manager in macos for all your needs
+
+## 2026-07-03 — continuation 2 (verbatim, same day)
+
+> Also I want even to support scripts so that people can via scripting modify the behavior of vpn bypass somehow (if it's secure, better, but whatever you can get) so that for exammple (just in my case) i want to select one oxylabs route for a given domain, but maybe i want to change the routing ip and use another, so i can have it via script (ideally, this should be also easily via vpn bypass, but i dont want to be supporting integrations with all kind of proxy services or vpns, so its just fyi to scope it well)

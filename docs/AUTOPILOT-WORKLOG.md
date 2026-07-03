@@ -47,3 +47,29 @@ Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, ind
 - **P2 (Tailscale) — NOT built, by design:** the app-side (route a rule's dests into the tailscale utun via iface:utunX) is small, BUT it is non-functional + untestable until the **a tailnet peer advertises those destinations as subnet routes** (tailscaled drops packets otherwise — the research finding) AND it's verified live on the tailnet. So P2 is a quick collaborative step once the mini side is set up — handed off for Sergio's go on approach.
 - **Remaining beads:** .5 Keychain-for-config.json (deferred), .6 RouteManager refactor (deferred), .9 P2 Tailscale (handoff), .12 doc update, .11 signing decision / .10 P3 (gated).
 - **Release:** NOT cut — Sergio's gate after his live test + go.
+
+## 2026-07-01..02 — LIVE PROOF + experimental gating (logged retroactively; work predates this entry)
+- **Live egress proven on Sergio's MacBook** (GP up on utun5, Tailscale utun10, physical en8 gw <lan-gateway>): `LiveProxyEgressTests` (OXY_LIVE=1-gated, upstream read from env — no secrets in repo): forwarder-bound-to-en8 exit IP = the Oxylabs dedicated IP (<proxy-exit-ip>) while direct default-route = <home-wan-ip>. Second test drives the REAL app path — `RouteManager.reconcileProxyListeners()` → stable port **18443** → same Oxylabs exit. Mechanism conclusively escapes the VPN via the app's own lifecycle.
+- **Experimental gating** (`abcc61e`): multi-route is opt-in — `multiRouteEnabled` toggle in General; Routes tab hidden otherwise; `reconcileProxyListeners()` hard-gated (`stopAll()` when disabled). Stable per-route ports (18000–18999 derived from route UUID, or explicit `localListenPort`).
+- **Helper-independent listeners** (`50cee4b`): proxy listeners start even when the privileged helper isn't ready (userspace path needs no root).
+- **Suite:** 596 tests, 2 live-gated skips, 0 failures. 17 commits on `feat/multi-route`. Homebrew app + Sergio's `oxy-on` fallback untouched (dev build NOT hot-swapped — ad-hoc signing would break helper auth).
+
+## 2026-07-03 — NEW DIRECTIVE (GOAL.md continuation): "definitive macOS routing manager"
+- Scope expanded: multiple VPNs (rule → a SPECIFIC utun among several), multiple proxies, direct, Tailscale egress (subnet routes now enabled on peer-relay+peer-server-b — P2 unblocked); UX overhaul (classic bypass stays default, vpnOnly stays simple, 3/4-way easy); **scripting surface** (generic verbs — e.g. switch an Oxylabs route's port from a script; NO per-provider integrations).
+- PRD rewritten (6 stories US-001..006) in session state; ralph re-engaged.
+- 8-agent research panel launched (Tailscale mechanics, UX landscape+scripting prior art, codebase map, history/issues, architecture, live tailnet probe, risk critique, UX design memo).
+
+## 2026-07-01..02 — LIVE PROOF + experimental gating (logged retroactively; work predates this entry)
+- **Live egress proven on Sergio's MacBook** (GP up on utun5, Tailscale utun10, physical en8 gw <lan-gateway>): `LiveProxyEgressTests` (OXY_LIVE=1-gated, upstream read from env — no secrets in repo): forwarder-bound-to-en8 exit IP = the Oxylabs dedicated IP (<proxy-exit-ip>) while direct default-route = <home-wan-ip>. Second test drives the REAL app path — `RouteManager.reconcileProxyListeners()` → stable port **18443** → same Oxylabs exit
+
+## 2026-07-03 — research panel synthesized, design LOCKED (US-001 done)
+- Panel returned (ts-docs, architect, ux-designer, tailnet-probe + my live tests). Convergent verdict.
+- **Live-verified on Sergio's Mac:** GP is split-tunnel (8.8.8.8 → en8); peer-server-b:8080 is a Tomcat
+  reverse-proxy NOT a forward proxy (CONNECT→501); no forward proxy anywhere on the tailnet (mini/wt/gct
+  ports closed). Tailscale per-destination egress therefore = proxy-over-tailnet (needs tinyproxy on a peer).
+- Design doc updated with corrections + locked architecture + UX + scripting + 5-slice build order
+  (closes intent of bead .12). Synthesis recap in docs/research/2026-07-03-synthesis.md; raw probe in
+  docs/research/2026-07-03-tailnet-probe.md.
+- **Next → Slice 1:** Tailscale-peer egress (proxy-over-tailnet), reusing ProxyForwarder with
+  boundInterface=nil for tailnet peers; peer picker from `tailscale status --json`; 100.112/12-under-GP
+  guard; then stand up tinyproxy on the mini and live-verify a distinct exit IP.
