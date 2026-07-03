@@ -102,3 +102,21 @@ Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, ind
   use case AND the Routes UI edit flow. Fix (Phase A.5, folding into Slice 1): fingerprint each route's
   upstream; restart the forwarder when the fingerprint changes. Holding the source edit until the UI
   executor finishes (avoid build contention), then apply + test + review UI + one green suite run.
+
+## 2026-07-03 — Slice 1 COMPLETE + the live-re-point fix (US-001 + US-002 done)
+- **Commits:** 482556f (Tailscale-peer core) · 7976054 (live re-point fix) · d0132b4 (Routes UI + live test).
+- **Live-re-point bug fixed:** `reconcile` keyed on route id only, so editing a live route's upstream was a
+  no-op. Now each route carries an upstream fingerprint; on change the forwarder is re-pointed IN PLACE via
+  `ProxyForwarder.updateUpstream` — listener + stable local port survive (HTTPS_PROXY keeps working), only
+  new connections use the new exit. (A test caught the alternative stop+restart racing the OS port release
+  → random-port fallback; in-place avoids it.)
+- **Tailscale UI:** RouteEditorSheet "Tailscale Peer" type + live peer picker (`tailscale status --json`) +
+  manual-IP fallback; RouteRow shows Tailscale routes.
+- **Suite:** 607 tests, 3 live-gated skips, 0 failures. Build clean.
+- **LIVE end-to-end (a tailnet peer):** `testTailscalePeerEgressViaAppReconcile` (TS_LIVE=1) PASSED — real app
+  reconcile → stable port 18944 → forwarder(boundInterface=nil) → mini <tailnet-peer-ip>:8888 → <home-wan-ip>.
+  Mechanism proven through the actual app code, not just a unit mock. (Throwaway tsproxy still on the mini;
+  `pkill -f /tmp/tsproxy.py` removes it. TS_LIVE test is gated so CI never needs it.)
+- **Next → Slice 2 (UX mode overhaul):** fold multiRouteEnabled into `routingMode` as a 3rd `.custom` case;
+  mode picker above the tabs; new Rules tab (route-chip = the one control) + generalized Routes tab; visible
+  derive() migration; `.custom` branch through setRoutingMode + the ~5 hardcoded binary call sites.
