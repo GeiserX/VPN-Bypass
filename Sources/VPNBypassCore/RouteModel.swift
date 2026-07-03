@@ -13,7 +13,9 @@
 import Foundation
 
 /// A named egress that a destination can be routed through (the typed outbound).
-enum Egress: String, Codable, Equatable {
+/// `public`: embedded in `SanitizedRoute.egress`, which the standalone `vpnb`
+/// CLI target decodes cross-module over the control socket.
+public enum Egress: String, Codable, Equatable, Sendable {
     case vpnDefault     // leave on the OS default route (corporate VPN). No kernel route added.
     case direct         // physical NIC: host-route via the local gateway (or IP_BOUND_IF on en0).
     case tailscaleExit  // into the Tailscale utun (iface:utunX) — Mac-mini-as-exit-node.
@@ -30,7 +32,9 @@ enum SessionMode: String, Codable, Equatable {
 }
 
 /// The matcher kind for a routing rule.
-enum MatchType: String, Codable, Equatable {
+/// `public`: embedded in `SanitizedRule.matchType`, which the standalone `vpnb`
+/// CLI target decodes cross-module over the control socket.
+public enum MatchType: String, Codable, Equatable, Sendable {
     case domain   // exact hostname (resolve → IP route under the kernel engine).
     case suffix   // *.example.com — only meaningful with a flow-intercept engine (P3).
     case ip       // a single IP.

@@ -20,20 +20,26 @@ import Foundation
 // MARK: - Wire envelope
 
 /// A single control command from the (future) scripting surface.
-struct ControlRequest: Codable, Equatable {
-    var v: Int
-    var cmd: String                 // e.g. "route.set"
-    var args: [String: String]?     // string args (id, name, host, port, user, pattern, routeId, mode, enabled, type, match)
-    var secrets: [String: String]?  // e.g. ["pass": "..."] — NEVER copied into any response or log
+///
+/// `public`: this is the wire DTO the standalone `vpnb` CLI target encodes to
+/// send over the control socket, so it must be visible outside this module.
+/// `Sendable` because it crosses the `ControlSocketServer.Handler`'s
+/// `@Sendable` closure boundary between the accept-loop thread and the
+/// (possibly @MainActor) handler.
+public struct ControlRequest: Codable, Equatable, Sendable {
+    public var v: Int
+    public var cmd: String                 // e.g. "route.set"
+    public var args: [String: String]?     // string args (id, name, host, port, user, pattern, routeId, mode, enabled, type, match)
+    public var secrets: [String: String]?  // e.g. ["pass": "..."] — NEVER copied into any response or log
 
-    init(v: Int = 1, cmd: String, args: [String: String]? = nil, secrets: [String: String]? = nil) {
+    public init(v: Int = 1, cmd: String, args: [String: String]? = nil, secrets: [String: String]? = nil) {
         self.v = v
         self.cmd = cmd
         self.args = args
         self.secrets = secrets
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         v = try c.decodeIfPresent(Int.self, forKey: .v) ?? 1
         // No default that would masquerade as a real verb: an absent/malformed
@@ -46,20 +52,22 @@ struct ControlRequest: Codable, Equatable {
 }
 
 /// The result of applying a ControlRequest. Never carries a credential.
-struct ControlResponse: Codable, Equatable {
-    var v: Int
-    var ok: Bool
-    var result: ControlResult?
-    var error: ControlError?
+/// `public`/`Sendable` for the same reason as `ControlRequest` — `vpnb`
+/// decodes this cross-module after reading a response line from the socket.
+public struct ControlResponse: Codable, Equatable, Sendable {
+    public var v: Int
+    public var ok: Bool
+    public var result: ControlResult?
+    public var error: ControlError?
 
-    init(v: Int = 1, ok: Bool, result: ControlResult? = nil, error: ControlError? = nil) {
+    public init(v: Int = 1, ok: Bool, result: ControlResult? = nil, error: ControlError? = nil) {
         self.v = v
         self.ok = ok
         self.result = result
         self.error = error
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         v = try c.decodeIfPresent(Int.self, forKey: .v) ?? 1
         ok = try c.decodeIfPresent(Bool.self, forKey: .ok) ?? false
@@ -68,22 +76,22 @@ struct ControlResponse: Codable, Equatable {
     }
 }
 
-struct ControlError: Codable, Equatable {
-    var code: String
-    var message: String
+public struct ControlError: Codable, Equatable, Sendable {
+    public var code: String
+    public var message: String
 }
 
 /// The sanitized payload a verb returns. All fields optional — each verb
 /// populates only what's relevant to it.
-struct ControlResult: Codable, Equatable {
-    var routes: [SanitizedRoute]? = nil
-    var rules: [SanitizedRule]? = nil
-    var mode: String? = nil
-    var defaultRouteId: UUID? = nil
-    var schemaVersion: Int? = nil
-    var supportedVersion: Int? = nil
-    var listenerPort: UInt16? = nil
-    var message: String? = nil
+public struct ControlResult: Codable, Equatable, Sendable {
+    public var routes: [SanitizedRoute]? = nil
+    public var rules: [SanitizedRule]? = nil
+    public var mode: String? = nil
+    public var defaultRouteId: UUID? = nil
+    public var schemaVersion: Int? = nil
+    public var supportedVersion: Int? = nil
+    public var listenerPort: UInt16? = nil
+    public var message: String? = nil
 }
 
 /// Mirrors `Route` but never carries a credential value — the same discipline
@@ -91,20 +99,20 @@ struct ControlResult: Codable, Equatable {
 /// since control responses can be logged, piped, or displayed. `hasProxyUser`/
 /// `hasPassword` let a script tell "configured" from "not configured" without
 /// ever seeing the secret itself.
-struct SanitizedRoute: Codable, Equatable {
-    var id: UUID
-    var name: String
-    var egress: Egress
-    var enabled: Bool
-    var proxyHost: String?
-    var proxyPort: Int?
-    var hasProxyUser: Bool
-    var hasPassword: Bool
-    var tailscaleExitNode: String?
-    var localListenPort: Int?
+public struct SanitizedRoute: Codable, Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var egress: Egress
+    public var enabled: Bool
+    public var proxyHost: String?
+    public var proxyPort: Int?
+    public var hasProxyUser: Bool
+    public var hasPassword: Bool
+    public var tailscaleExitNode: String?
+    public var localListenPort: Int?
     /// The route's LIVE loopback listener port, if a forwarder is currently
     /// running for it (nil for non-proxy routes or ones not yet started).
-    var listenerPort: UInt16?
+    public var listenerPort: UInt16?
 
     init(_ route: Route, listenerPort: UInt16?) {
         id = route.id
@@ -121,13 +129,13 @@ struct SanitizedRoute: Codable, Equatable {
     }
 }
 
-struct SanitizedRule: Codable, Equatable {
-    var id: UUID
-    var matchType: MatchType
-    var pattern: String
-    var routeId: UUID
-    var enabled: Bool
-    var order: Int
+public struct SanitizedRule: Codable, Equatable, Sendable {
+    public var id: UUID
+    public var matchType: MatchType
+    public var pattern: String
+    public var routeId: UUID
+    public var enabled: Bool
+    public var order: Int
 
     init(_ rule: Rule) {
         id = rule.id
@@ -185,6 +193,17 @@ enum CommandRouter {
             return setDefault(request, config)
         default:
             return errorResponse(config, code: "unknown_command", message: "unknown command: \(request.cmd)")
+        }
+    }
+
+    /// Whether a verb can change the config (so the socket handler knows when to
+    /// persist + reconcile). Read verbs return the config untouched; everything else
+    /// may mutate it (an errored mutation still returns it unchanged, so callers gate
+    /// on `response.ok` too).
+    static func isMutating(_ cmd: String) -> Bool {
+        switch cmd {
+        case "status", "route.list", "rule.list": return false
+        default: return true
         }
     }
 
