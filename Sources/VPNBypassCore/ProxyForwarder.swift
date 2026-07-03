@@ -35,11 +35,17 @@ final class ProxyForwarder {
 
     let listenPort: UInt16
 
-    private let upstream: Upstream
+    // The upstream a NEW tunnel chains through. Mutable so a route can be re-pointed
+    // live (e.g. switch an Oxylabs port to change the exit IP) WITHOUT tearing down the
+    // listener — the local port (and any app's HTTPS_PROXY) stays put; only connections
+    // accepted after the swap use the new exit. Confined to `queue` once started.
+    private var upstream: Upstream
 
     // All listener/connection mutation happens on this serial queue, so the live
     // state below (listener, activeTunnels) needs no extra locking once started.
     private let queue = DispatchQueue(label: "com.vpnbypass.proxy", qos: .userInitiated)
+    // Off-queue home for the (occasionally blocking) interface re-resolve on re-point.
+    private let interfaceResolveQueue = DispatchQueue(label: "com.vpnbypass.proxy.ifupdate")
 
     private var listener: NWListener?
     private var activeTunnels: [Tunnel] = []
@@ -120,6 +126,26 @@ final class ProxyForwarder {
             listener.cancel()
             self.listener = nil
             throw error
+        }
+    }
+
+    /// Re-point this forwarder at a new upstream WITHOUT restarting the listener, so the
+    /// local port survives. New tunnels use the new upstream; in-flight ones finish on the
+    /// old one. If the bound interface changed (e.g. an internet proxy ⇄ a tailnet peer, or
+    /// a Wi-Fi/Ethernet switch), re-resolve it off `queue` since resolution can block.
+    func updateUpstream(_ newUpstream: Upstream) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            let interfaceChanged = self.upstream.boundInterface != newUpstream.boundInterface
+            self.upstream = newUpstream
+            guard interfaceChanged else { return }
+            let name = newUpstream.boundInterface
+            // resolveInterface briefly runs an NWPathMonitor (can block up to 2s) — keep it
+            // off the listener/accept queue, then fold the result back on.
+            self.interfaceResolveQueue.async { [weak self] in
+                let resolved = name.flatMap { Self.resolveInterface(named: $0) }
+                self?.queue.async { self?.resolvedInterface = resolved }
+            }
         }
     }
 

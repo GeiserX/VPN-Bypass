@@ -14,6 +14,12 @@ final class ProxyListenerManager: ObservableObject {
     /// routeId → bound listener port. @Published so the Routes UI updates the
     /// instant a listener comes up (the Copy-hook button keys off this).
     @Published private(set) var ports: [UUID: UInt16] = [:]
+    /// routeId → the upstream fingerprint the running forwarder was built with.
+    /// A route can be edited in place (same id, new host/port/creds); when its
+    /// fingerprint changes we stop+restart that forwarder so the change takes
+    /// effect live. Without this, reconcile keyed on id alone and an in-place edit
+    /// (e.g. re-pointing an Oxylabs port to change the exit IP) was a silent no-op.
+    private var fingerprints: [UUID: Int] = [:]
     private let startQueue = DispatchQueue(label: "com.vpnbypass.listenermgr", qos: .userInitiated)
 
     init() {}
@@ -33,13 +39,37 @@ final class ProxyListenerManager: ObservableObject {
         let proxyRoutes = routes.filter {
             $0.enabled && Self.usesLocalListener($0.egress) && !($0.proxyHost ?? "").isEmpty
         }
-        let desired = Set(proxyRoutes.map { $0.id })
+        let byId = Dictionary(proxyRoutes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
-        // Stop forwarders that are no longer wanted.
-        for (id, forwarder) in forwarders where !desired.contains(id) {
-            forwarder.stop()
+        // Classify running forwarders (collect first, then mutate — never mutate
+        // `forwarders` while iterating it): gone → stop; same id but a changed upstream
+        // fingerprint → re-point IN PLACE, keeping the listener + local port so an app's
+        // HTTPS_PROXY survives the edit (the whole point of live re-pointing). Restarting
+        // would also race the OS releasing the stable port and fall back to a random one.
+        var toStop: [UUID] = []
+        var toRepoint: [(id: UUID, route: Route)] = []
+        for (id, _) in forwarders {
+            if let route = byId[id] {
+                if fingerprints[id] != Self.upstreamFingerprint(route, boundInterface: boundInterface) {
+                    toRepoint.append((id, route))
+                }
+            } else {
+                toStop.append(id)
+            }
+        }
+        for id in toStop {
+            forwarders[id]?.stop()
             forwarders[id] = nil
             ports[id] = nil
+            fingerprints[id] = nil
+        }
+        for (id, route) in toRepoint {
+            if let upstream = Self.makeUpstream(route: route, boundInterface: boundInterface) {
+                forwarders[id]?.updateUpstream(upstream)   // listener + ports[id] stay put
+                fingerprints[id] = Self.upstreamFingerprint(route, boundInterface: boundInterface)
+            } else {
+                forwarders[id]?.stop(); forwarders[id] = nil; ports[id] = nil; fingerprints[id] = nil
+            }
         }
 
         let toStart = proxyRoutes.filter { forwarders[$0.id] == nil }
@@ -48,11 +78,12 @@ final class ProxyListenerManager: ObservableObject {
         // start() blocks until ready — do it off the main thread, then fold the
         // results back onto the main actor.
         startQueue.async {
-            var started: [(id: UUID, forwarder: ProxyForwarder, port: UInt16)] = []
+            var started: [(id: UUID, forwarder: ProxyForwarder, port: UInt16, fingerprint: Int)] = []
             for route in toStart {
                 guard let upstream = Self.makeUpstream(route: route, boundInterface: boundInterface) else { continue }
                 if let result = Self.startForwarder(route: route, upstream: upstream) {
-                    started.append((route.id, result.forwarder, result.port))
+                    started.append((route.id, result.forwarder, result.port,
+                                    Self.upstreamFingerprint(route, boundInterface: boundInterface)))
                 }
             }
             Task { @MainActor [weak self] in
@@ -63,6 +94,7 @@ final class ProxyListenerManager: ObservableObject {
                 for entry in started {
                     self.forwarders[entry.id] = entry.forwarder
                     self.ports[entry.id] = entry.port
+                    self.fingerprints[entry.id] = entry.fingerprint
                 }
                 completion?()
             }
@@ -74,6 +106,7 @@ final class ProxyListenerManager: ObservableObject {
         for (_, forwarder) in forwarders { forwarder.stop() }
         forwarders.removeAll()
         ports.removeAll()
+        fingerprints.removeAll()
     }
 
     /// Start a single proxy forwarder and return it with its bound port.
@@ -149,6 +182,29 @@ final class ProxyListenerManager: ObservableObject {
     /// `host` is a literal Tailscale CGNAT address (100.64.0.0/10).
     nonisolated static func isTailnetHost(_ host: String) -> Bool {
         RuleResolver.ipv4(host, inCIDR: "100.64.0.0/10")
+    }
+
+    /// A stable-within-process fingerprint of the fields that define a route's UPSTREAM
+    /// (not the whole Route — renaming a route or toggling an unrelated field must NOT
+    /// restart its forwarder). The expanded credential (sticky session id) is deliberately
+    /// excluded so a plain reconcile doesn't re-mint the session every pass; a future
+    /// `rotate` verb restarts explicitly. Used only for in-process equality comparison, so
+    /// Hasher's per-process seed is fine and no plaintext credential is retained.
+    nonisolated static func upstreamFingerprint(_ route: Route, boundInterface: String?) -> Int {
+        var h = Hasher()
+        h.combine(route.egress)
+        h.combine(route.proxyHost ?? "")
+        h.combine(route.proxyPort ?? -1)
+        h.combine(route.proxyUser ?? "")
+        h.combine(route.proxyPass ?? "")
+        h.combine(route.proxyUsernameTemplate ?? "")
+        h.combine(route.proxyPasswordTemplate ?? "")
+        h.combine(route.sessionMode)
+        h.combine(route.sessionTTLMinutes ?? -1)
+        // The effective bound interface is part of the upstream: a physical-NIC change
+        // (network switch) must restart internet proxies, while tailnet routes never bind.
+        h.combine(usesTailnet(route) ? "" : (boundInterface ?? ""))
+        return h.finalize()
     }
 
     /// `host` falls in the CGNAT sub-range GlobalProtect also captures (100.112.0.0/12).

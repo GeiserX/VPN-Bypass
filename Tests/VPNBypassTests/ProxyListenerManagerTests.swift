@@ -106,6 +106,82 @@ final class ProxyListenerManagerTests: XCTestCase {
         XCTAssertEqual(ProxyListenerManager.makeUpstream(route: oxy, boundInterface: "en8")?.boundInterface, "en8")
     }
 
+    // MARK: - Upstream fingerprint (live re-point: editing a route restarts its forwarder)
+
+    func testUpstreamFingerprintIsDeterministicWithinProcess() {
+        // If it weren't stable, every reconcile would needlessly restart every forwarder.
+        let r = Route(name: "p", egress: .proxyHTTP, proxyHost: "h", proxyPort: 8001, proxyUser: "u", proxyPass: "pw")
+        XCTAssertEqual(
+            ProxyListenerManager.upstreamFingerprint(r, boundInterface: "en0"),
+            ProxyListenerManager.upstreamFingerprint(r, boundInterface: "en0")
+        )
+    }
+
+    func testUpstreamFingerprintChangesWhenUpstreamChanges() {
+        let base = Route(name: "p", egress: .proxyHTTP, proxyHost: "h", proxyPort: 8001, proxyUser: "u", proxyPass: "pw")
+        let fp: (Route) -> Int = { ProxyListenerManager.upstreamFingerprint($0, boundInterface: "en0") }
+        var port = base; port.proxyPort = 8002
+        var host = base; host.proxyHost = "h2"
+        var user = base; user.proxyUser = "u2"
+        var pass = base; pass.proxyPass = "pw2"
+        var tmpl = base; tmpl.proxyUsernameTemplate = "customer-{user}"
+        var sess = base; sess.sessionMode = .sticky
+        XCTAssertNotEqual(fp(base), fp(port), "a port change must restart the forwarder — THE re-point bug")
+        XCTAssertNotEqual(fp(base), fp(host))
+        XCTAssertNotEqual(fp(base), fp(user))
+        XCTAssertNotEqual(fp(base), fp(pass))
+        XCTAssertNotEqual(fp(base), fp(tmpl))
+        XCTAssertNotEqual(fp(base), fp(sess))
+    }
+
+    func testUpstreamFingerprintIgnoresNonUpstreamFields() {
+        let base = Route(name: "p", egress: .proxyHTTP, proxyHost: "h", proxyPort: 8001)
+        let fp: (Route) -> Int = { ProxyListenerManager.upstreamFingerprint($0, boundInterface: "en0") }
+        var renamed = base; renamed.name = "different name"
+        var toggled = base; toggled.enabled = false
+        var relisten = base; relisten.localListenPort = 18123
+        XCTAssertEqual(fp(base), fp(renamed), "renaming a route must NOT restart its forwarder")
+        XCTAssertEqual(fp(base), fp(toggled), "enabled is handled by the filter, not the upstream")
+        XCTAssertEqual(fp(base), fp(relisten), "the local listen port is not part of the UPSTREAM")
+    }
+
+    func testTailnetFingerprintIgnoresBoundInterfaceButInternetProxyDoesNot() {
+        // A tailnet route never binds the physical NIC → boundInterface must not affect it
+        // (else a Wi-Fi/Ethernet switch would needlessly restart it).
+        let ts = Route(name: "mini", egress: .tailscaleExit, proxyHost: "<tailnet-peer-ip>", proxyPort: 8888)
+        XCTAssertEqual(
+            ProxyListenerManager.upstreamFingerprint(ts, boundInterface: "en0"),
+            ProxyListenerManager.upstreamFingerprint(ts, boundInterface: "en8")
+        )
+        // An internet proxy's binding IS part of its upstream — a NIC change restarts it.
+        let oxy = Route(name: "oxy", egress: .proxyHTTP, proxyHost: "dc.oxylabs.io", proxyPort: 8001)
+        XCTAssertNotEqual(
+            ProxyListenerManager.upstreamFingerprint(oxy, boundInterface: "en0"),
+            ProxyListenerManager.upstreamFingerprint(oxy, boundInterface: "en8")
+        )
+    }
+
+    func testReconcileKeepsServingAfterInPlaceUpstreamEdit() {
+        // Editing a route in place (same id, new port) must keep it served (restart),
+        // and an identical reconcile must be a no-op — both on a stable per-route port.
+        let manager = ProxyListenerManager()
+        let id = UUID()
+        let r1 = Route(id: id, name: "p", egress: .proxyHTTP, proxyHost: "127.0.0.1", proxyPort: 9, localListenPort: 18077)
+
+        let e1 = expectation(description: "start")
+        manager.reconcile(routes: [r1], boundInterface: nil) { e1.fulfill() }
+        wait(for: [e1], timeout: 5)
+        XCTAssertEqual(manager.port(for: id), 18077)
+
+        let r2 = Route(id: id, name: "p", egress: .proxyHTTP, proxyHost: "127.0.0.1", proxyPort: 10, localListenPort: 18077)
+        let e2 = expectation(description: "restart")
+        manager.reconcile(routes: [r2], boundInterface: nil) { e2.fulfill() }
+        wait(for: [e2], timeout: 5)
+        XCTAssertEqual(manager.port(for: id), 18077, "still served on its stable port after an in-place edit")
+
+        manager.stopAll()
+    }
+
     func testReconcileStartsListenerForTailscaleExitRoute() {
         // A Tailscale-peer route is served by a loopback listener like any proxy route
         // (the listener binds locally; the upstream isn't dialed until a client connects).
