@@ -13,7 +13,11 @@ extension Route {
     func friendlyName(vpnName: String?) -> String {
         switch egress {
         case .direct:      return "Direct"
-        case .vpnDefault:  return vpnName ?? "VPN"
+        case .vpnDefault:
+            // A route pinned to a SPECIFIC tunnel is user-created — use its own name so
+            // several VPNs are distinguishable. The primary-VPN route derives its label.
+            if vpnSelector?.kind == .interface { return name.isEmpty ? "VPN" : name }
+            return vpnName ?? "VPN"
         case .proxyHTTP, .proxySOCKS5, .tailscaleExit: return name
         }
     }
@@ -415,15 +419,19 @@ struct RouteChipMenu: View {
     let onSelect: (UUID) -> Void
     let onNewRoute: () -> Void
 
-    /// Direct first, then the detected VPN — the two auto-created system routes.
+    /// Direct first, then the PRIMARY VPN — the two auto-created system routes. A
+    /// VPN route pinned to a specific tunnel is user-created, so it lives in Your Routes.
     private var systemRoutes: [Route] {
         routeManager.config.routes
-            .filter { $0.egress == .direct || $0.egress == .vpnDefault }
+            .filter { $0.egress == .direct || ($0.egress == .vpnDefault && $0.vpnSelector?.kind != .interface) }
             .sorted { ($0.egress == .direct ? 0 : 1) < ($1.egress == .direct ? 0 : 1) }
     }
 
     private var userRoutes: [Route] {
-        routeManager.config.routes.filter { ProxyListenerManager.usesLocalListener($0.egress) }
+        routeManager.config.routes.filter {
+            ProxyListenerManager.usesLocalListener($0.egress)
+                || ($0.egress == .vpnDefault && $0.vpnSelector?.kind == .interface)
+        }
     }
 
     private var selectedRoute: Route? {

@@ -33,6 +33,7 @@ struct RoutesTab: View {
     private var listenerRoutes: [Route] {
         routeManager.config.routes.filter {
             ProxyListenerManager.usesLocalListener($0.egress)
+                || ($0.egress == .vpnDefault && $0.vpnSelector?.kind == .interface)
         }
     }
 
@@ -263,7 +264,8 @@ struct RouteRow: View {
         case .proxyHTTP: return "HTTP CONNECT"
         case .proxySOCKS5: return "SOCKS5"
         case .tailscaleExit: return "Tailscale"
-        case .vpnDefault, .direct: return "Route"
+        case .vpnDefault: return "VPN"
+        case .direct: return "Direct"
         }
     }
 
@@ -272,7 +274,8 @@ struct RouteRow: View {
         case .proxyHTTP: return Theme.blue
         case .proxySOCKS5: return Theme.purple
         case .tailscaleExit: return Theme.success
-        case .vpnDefault, .direct: return Theme.textSecondary
+        case .vpnDefault: return Theme.warning
+        case .direct: return Theme.textSecondary
         }
     }
 
@@ -284,7 +287,11 @@ struct RouteRow: View {
                 return "\(peerName) · :\(port)"
             }
             return peerName
-        case .proxyHTTP, .proxySOCKS5, .vpnDefault, .direct:
+        case .vpnDefault:
+            // A specific-VPN route shows its pinned tunnel; the primary VPN has none.
+            let iface = route.vpnSelector?.interfaceName ?? route.vpnSelector?.productHint
+            return iface.map { "→ \($0)" } ?? "primary VPN"
+        case .proxyHTTP, .proxySOCKS5, .direct:
             let host = route.proxyHost ?? "—"
             if let port = route.proxyPort {
                 return "\(host):\(port)"
@@ -426,6 +433,11 @@ struct RouteEditorSheet: View {
     @State private var tailscaleNodeName: String
     @State private var peers: [RouteManager.TailscalePeer] = []
 
+    // VPN egress: which tunnel to target ("" = primary/automatic).
+    @State private var selectedVPNInterface: String
+    @State private var vpnProductHint: String
+    @State private var vpnLinks: [RouteManager.VPNLink] = []
+
     init(
         editingRoute: Route?,
         onSave: @escaping (Route) -> Void,
@@ -442,6 +454,8 @@ struct RouteEditorSheet: View {
         _proxyPass = State(initialValue: editingRoute?.proxyPass ?? "")
         _selectedPeerIP = State(initialValue: editingRoute?.proxyHost ?? "")
         _tailscaleNodeName = State(initialValue: editingRoute?.tailscaleExitNode ?? "")
+        _selectedVPNInterface = State(initialValue: editingRoute?.vpnSelector?.interfaceName ?? "")
+        _vpnProductHint = State(initialValue: editingRoute?.vpnSelector?.productHint ?? "")
     }
 
     private var isEditing: Bool { editingRoute != nil }
@@ -486,10 +500,14 @@ struct RouteEditorSheet: View {
                             Text("HTTP CONNECT").tag(Egress.proxyHTTP)
                             Text("SOCKS5").tag(Egress.proxySOCKS5)
                             Text("Tailscale Peer").tag(Egress.tailscaleExit)
+                            Text("VPN").tag(Egress.vpnDefault)
                         }
                         .pickerStyle(.segmented)
                     }
 
+                    if egress == .vpnDefault {
+                        vpnPickerField
+                    } else {
                     if egress == .tailscaleExit {
                         formField(label: "Tailscale Peer", required: true) {
                             if peers.isEmpty {
@@ -593,6 +611,7 @@ struct RouteEditorSheet: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+                    }  // end else: proxy/Tailscale fields (hidden for VPN routes)
 
                     if let error = validationError {
                         HStack(spacing: 6) {
@@ -643,6 +662,41 @@ struct RouteEditorSheet: View {
         .background(Theme.bgSecondary)
         .task {
             peers = await RouteManager.shared.listTailscalePeers()
+            vpnLinks = await RouteManager.shared.listVPNLinks()
+        }
+    }
+
+    /// VPN egress: "Primary VPN (automatic)" plus one entry per detected non-Tailscale
+    /// tunnel. Selecting a specific one pins the route to that interface.
+    @ViewBuilder
+    private var vpnPickerField: some View {
+        let selectable = vpnLinks.filter { !$0.isTailscale }
+        formField(label: "VPN", required: false) {
+            if selectable.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 10))
+                        .foregroundColor(Theme.textTertiary)
+                    Text("Uses whichever VPN is active. Connect a second VPN to pin this route to a specific one.")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Picker("", selection: Binding(
+                    get: { selectedVPNInterface },
+                    set: { iface in
+                        selectedVPNInterface = iface
+                        vpnProductHint = vpnLinks.first(where: { $0.interface == iface })?.label ?? ""
+                    }
+                )) {
+                    Text("Primary VPN (automatic)").tag("")
+                    ForEach(selectable) { link in
+                        Text("\(link.label) · \(link.interface)").tag(link.interface)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
         }
     }
 
@@ -669,13 +723,30 @@ struct RouteEditorSheet: View {
 
     private func attemptSave() {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
-        let isTailscalePeer = egress == .tailscaleExit
-        let trimmedHost = (isTailscalePeer ? selectedPeerIP : proxyHost).trimmingCharacters(in: .whitespaces)
-
         guard !trimmedName.isEmpty else {
             validationError = "Name is required."
             return
         }
+
+        // VPN egress: no host/port — just a tunnel selector ("" = the primary VPN).
+        if egress == .vpnDefault {
+            let selector = selectedVPNInterface.isEmpty
+                ? VPNSelector(kind: .primary)
+                : VPNSelector(kind: .interface, interfaceName: selectedVPNInterface,
+                              productHint: vpnProductHint.isEmpty ? nil : vpnProductHint)
+            onSave(Route(
+                id: editingRoute?.id ?? UUID(),
+                name: trimmedName,
+                egress: .vpnDefault,
+                enabled: editingRoute?.enabled ?? true,
+                vpnSelector: selector
+            ))
+            return
+        }
+
+        let isTailscalePeer = egress == .tailscaleExit
+        let trimmedHost = (isTailscalePeer ? selectedPeerIP : proxyHost).trimmingCharacters(in: .whitespaces)
+
         guard !trimmedHost.isEmpty else {
             validationError = isTailscalePeer
                 ? "Select a Tailscale peer (or enter its 100.x IP)."
