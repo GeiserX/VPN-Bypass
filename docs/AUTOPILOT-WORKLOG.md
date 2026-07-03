@@ -166,3 +166,19 @@ Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, ind
 - **Next after UI → Slice 4 (multi-VPN "4th way"):** `[VPNLink]` attribution ladder (tailscale-json →
   scutil --nc list → process → address-shape) + optional `Route.vpnSelector` + wire `ifaceGatewayForRoute`
   to resolve a specific-VPN route → `iface:utunX`; then the UI shows one System-route row per detected VPN.
+
+## 2026-07-03 — Slice 2 COMPLETE: Custom Routes mode (engine + UI) (US-004 done)
+- **Commits:** 693a5f8 (engine + transition) · 727786c (M1 GP-guard hardening) · 14ec388 (UI).
+- **Engine review verdict: SAFE — no Critical/High.** Classic bypass/vpnOnly byte-identical (pure-insertion
+  branches on all 4 apply paths, verified); GP catch-all guard covers teardown routes + hardened to any
+  /0-or-/1 CIDR (M1). M2 (exact-string vs CIDR-containment dedup) documented + deferred to Slice 4. L6
+  (stale log label) already fixed by RoutingMode.displayName.
+- **UI:** 3-mode picker above the tabs; new Rules tab (route-chip = the one control, drag-reorder, default
+  row); System Routes card; menu-bar custom badge + Routes-In-Use; retired the experimental toggle + the
+  in-Domains mode card. Fixed a fresh-window-no-selected-tab bug. Window 620→680 for the picker.
+- **Evidence:** 657 tests green, 3 live-gated skips, 0 failures. Both targets build. Classic modes untouched.
+- **Slices done:** 1 (Tailscale egress + re-point) ✓, 3 (scripting CLI) ✓, 2 (Custom mode UX+engine) ✓.
+- **Last feature slice → Slice 4 (multi-VPN "4th way"):** wire `ifaceGatewayForRoute` (currently returns nil)
+  to route a rule into a SPECIFIC VPN interface among several: `[VPNLink]` attribution ladder + optional
+  `Route.vpnSelector` + resolve to `iface:utunX` + System-routes UI shows one row per detected VPN. Reuses
+  the committed engine — no NE.
