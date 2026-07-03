@@ -40,9 +40,14 @@ public enum ControlSurface {
         // Proxy/Tailscale routes: re-point/start/stop the affected listener live.
         await RouteManager.shared.reconcileProxyListeners()
 
-        // A routing-mode change also needs the legacy kernel routes re-applied for
-        // the new mode (the config already carries the new mode at this point).
-        if request.cmd == "mode" {
+        // KERNEL routes must be re-applied for anything that changes what gets routed
+        // where — otherwise a scripted `rule.add`/`route.*`/`default` persists to config
+        // but the kernel table stays stale until the next hourly DNS refresh (or never).
+        // This mirrors the GUI, which re-applies after every rule/route mutation.
+        //   - `mode` → the new mode's routes (legacy or custom).
+        //   - in Custom mode, ANY mutating verb → recompile the per-rule kernel routes.
+        let cfg = RouteManager.shared.config
+        if request.cmd == "mode" || (cfg.schemaVersion >= 2 && cfg.routingMode == .custom) {
             await RouteManager.shared.detectAndApplyRoutesAsync(sendNotification: false)
         }
 

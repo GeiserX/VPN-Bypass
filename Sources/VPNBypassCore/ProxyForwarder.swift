@@ -84,6 +84,14 @@ final class ProxyForwarder {
         // with `boundInterface == nil` never block here.
         if let interfaceName = upstream.boundInterface {
             resolvedInterface = Self.resolveInterface(named: interfaceName)
+            if resolvedInterface == nil {
+                // The whole point of boundInterface is to make the upstream hop LEAVE on
+                // the physical NIC so it escapes a full-tunnel VPN. If it can't resolve,
+                // the socket binds nowhere and the OS routes it — potentially through the
+                // VPN in cleartext (target hostname + proxy creds exposed). Binding is
+                // best-effort by design, but this must NOT be silent — surface it loudly.
+                NSLog("VPN Bypass: WARNING — proxy route could not bind upstream to interface '%@'; its hop may traverse the VPN in cleartext. Check that the interface is up.", interfaceName)
+            }
         }
 
         let parameters = NWParameters.tcp

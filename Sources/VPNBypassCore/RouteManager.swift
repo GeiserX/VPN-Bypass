@@ -1846,7 +1846,7 @@ final class RouteManager: ObservableObject {
             resolvedRules: resolved,
             routes: config.routes,
             localGateway: gateway,
-            ifaceGatewayForRoute: { [weak self] route in self?.ifaceGateway(for: route, links: links) }
+            ifaceGatewayForRoute: { route in self.ifaceGateway(for: route, links: links) }
         )
 
         // Generalized GlobalProtect guard: never install a catch-all into a non-primary

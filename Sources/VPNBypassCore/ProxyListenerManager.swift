@@ -20,6 +20,11 @@ final class ProxyListenerManager: ObservableObject {
     /// effect live. Without this, reconcile keyed on id alone and an in-place edit
     /// (e.g. re-pointing a residential proxy's port to change the exit IP) was a silent no-op.
     private var fingerprints: [UUID: Int] = [:]
+    /// Route ids whose forwarder is being started RIGHT NOW on `startQueue` (start()
+    /// blocks, so the commit into `forwarders` happens later, off-actor). Guards against
+    /// a second reconcile() landing in that window, seeing `forwarders[id] == nil`, and
+    /// starting a DUPLICATE forwarder that leaks a bound socket. MainActor-confined.
+    private var startingIds: Set<UUID> = []
     private let startQueue = DispatchQueue(label: "com.vpnbypass.listenermgr", qos: .userInitiated)
 
     init() {}
@@ -72,8 +77,11 @@ final class ProxyListenerManager: ObservableObject {
             }
         }
 
-        let toStart = proxyRoutes.filter { forwarders[$0.id] == nil }
+        // Skip ids already being started by a still-in-flight reconcile (see startingIds).
+        let toStart = proxyRoutes.filter { forwarders[$0.id] == nil && !startingIds.contains($0.id) }
         guard !toStart.isEmpty else { completion?(); return }
+        let startingNow = toStart.map(\.id)
+        startingNow.forEach { startingIds.insert($0) }
 
         // start() blocks until ready — do it off the main thread, then fold the
         // results back onto the main actor.
@@ -91,6 +99,7 @@ final class ProxyListenerManager: ObservableObject {
                     started.forEach { $0.forwarder.stop() }
                     return
                 }
+                startingNow.forEach { self.startingIds.remove($0) }   // clear the in-flight marks (started or failed)
                 for entry in started {
                     self.forwarders[entry.id] = entry.forwarder
                     self.ports[entry.id] = entry.port
@@ -107,6 +116,7 @@ final class ProxyListenerManager: ObservableObject {
         forwarders.removeAll()
         ports.removeAll()
         fingerprints.removeAll()
+        startingIds.removeAll()
     }
 
     /// Start a single proxy forwarder and return it with its bound port.
