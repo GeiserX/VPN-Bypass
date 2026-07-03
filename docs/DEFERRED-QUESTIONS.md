@@ -24,3 +24,11 @@ Items needing Sergio's judgement or his LIVE environment. A reversible default i
   lands on `feat/multi-route` behind Sergio's merge gate, so nothing ships unseen.
 - **To change:** if Sergio wants the UX overhaul prioritized/reshaped, or wants to see a mockup before the
   kernel `RouteCompiler` work, say so. The full spec + copy is in the worklog and docs/MULTI-ROUTE-DESIGN.md.
+
+## 2026-07-03 — vpnb CLI packaging into the release (release-prep, not blocking)
+- **Context:** the `vpnb` scripting CLI is a new SwiftPM executable target. `swift build` produces it, but a
+  released user only gets it if the DMG/cask ships it.
+- **Default taken:** build the feature + tests now; leave packaging for release prep (it's mechanical:
+  universal-build vpnb, bundle it in the .app, cask-symlink to PATH).
+- **To change:** when cutting the single release, update .github/workflows/release.yml to build+embed `vpnb`
+  and the homebrew-vpn-bypass cask to symlink it. (Confirm the bundle location + PATH target with Sergio then.)

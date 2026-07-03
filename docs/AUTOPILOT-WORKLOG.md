@@ -129,3 +129,21 @@ Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, ind
   dedicated pass. Pure `CommandRouter` delegated (verbs over routes/rules/mode/status; secrets never echoed).
   Reversible sequencing only — final product unchanged. Slice 2 direction parked in DEFERRED-QUESTIONS for
   Sergio's eyes (it's the UX centerpiece he cares about).
+
+## 2026-07-03 — Slice 3 COMPLETE: scripting control surface (US-006 done)
+- **Commits:** 0e83843 (pure CommandRouter) · 23289e4 (vpnb CLI + control socket + wiring).
+- **What shipped:** a bundled `vpnb` CLI drives VPN Bypass generically (routes/rules/mode/status) over a
+  user-only UNIX socket (`~/Library/Application Support/VPNBypass/control.sock`, dir 0700, socket 0600, no
+  TCP). Canonical use case works: `vpnb route.set id=<uuid> port=<n>` re-points a route's exit live (the
+  in-place re-point fix makes it take effect without dropping the stable listener port).
+- **Security:** getpeereid() uid check before any read; SO_NOSIGPIPE so a CLI client can't crash the app;
+  secrets via stdin (`pass:-`), NEVER argv; SanitizedRoute never carries a credential (hasPassword bool);
+  handler logs only the verb. Socket server is RouteManager-free + handler-injected (stub-tested).
+- **Evidence:** 637 tests green (CommandRouter 18 + ControlSocketServer 8 + ControlSurface 4). `vpnb --help`
+  works; `vpnb status` with no socket → clean error + exit 2 (verified on the real default path).
+- **RELEASE-PREP FOLLOW-UP (required before the single release):** `swift build` produces `.build/debug/vpnb`,
+  but the release DMG/cask must (a) build `vpnb` universal + bundle it in the .app (e.g. Contents/Helpers/vpnb
+  or Contents/MacOS/vpnb), and (b) have the Homebrew cask symlink it to PATH (e.g. /opt/homebrew/bin/vpnb).
+  Edit .github/workflows/release.yml + the cask. Not blocking; do it at release prep.
+- **Slices done:** 1 (Tailscale egress + live re-point) ✓, 3 (scripting) ✓. **Remaining:** Slice 2 (UX
+  overhaul — parked in DEFERRED-QUESTIONS for Sergio's eyes), Slice 4 (multi-VPN "4th way").
