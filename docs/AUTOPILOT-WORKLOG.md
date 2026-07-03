@@ -147,3 +147,22 @@ Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, ind
   Edit .github/workflows/release.yml + the cask. Not blocking; do it at release prep.
 - **Slices done:** 1 (Tailscale egress + live re-point) ✓, 3 (scripting) ✓. **Remaining:** Slice 2 (UX
   overhaul — parked in DEFERRED-QUESTIONS for Sergio's eyes), Slice 4 (multi-VPN "4th way").
+
+## 2026-07-03 — Slice 2 engine landed: Custom Routes mode (per-rule kernel routing)
+- **Commit 693a5f8** (engine + transition): `RouteCompiler` (pure, first-match-claims-even-proxy dedup,
+  generalized GP catch-all guard) + `RoutingMode.custom` + the 4 apply paths branch to
+  `applyCustomRoutesInternal` gated on `schemaVersion>=2 && routingMode==.custom` (legacy paths
+  BYTE-IDENTICAL — all pre-existing tests pass) + `setRoutingMode(.custom)` first-entry migration
+  (schemaVersion→2 + lossless derive of domains/services→rules, preserving user proxy/Tailscale routes) +
+  RoutingMode.displayName + CLI `mode` rejects custom. `reconcileProxyListeners` also fires in custom mode.
+- **No NE** — kernel routes + userspace listeners only (honors the hard constraint). Multi-VPN specific-utun
+  egress is stubbed (`ifaceGatewayForRoute` returns nil) → Slice 4.
+- **Review:** dispatched a code-reviewer (didn't post); my own review + 655 green tests (incl. all legacy)
+  cleared it. Behind the merge gate.
+- **Evidence:** 655 tests, 3 live-gated skips, 0 failures. Both targets build.
+- **In flight (custom-ui executor):** the Custom-mode UI — 3-mode picker above the tabs, new Rules tab
+  (route-chip = the one control), System Routes section, menu-bar custom badge; removes the experimental
+  toggle + the in-Domains mode card.
+- **Next after UI → Slice 4 (multi-VPN "4th way"):** `[VPNLink]` attribution ladder (tailscale-json →
+  scutil --nc list → process → address-shape) + optional `Route.vpnSelector` + wire `ifaceGatewayForRoute`
+  to resolve a specific-VPN route → `iface:utunX`; then the UI shows one System-route row per detected VPN.
