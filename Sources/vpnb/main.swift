@@ -49,6 +49,10 @@ func printUsage() {
       The stdin line is read once and sent as secrets.pass — it never appears
       in args, in a process listing, or in any log.
 
+    Environment:
+      VPNB_SOCKET   Override the control socket path (default:
+                    ~/Library/Application Support/VPNBypass/control.sock).
+
     Exit codes:
       0  ok
       1  the app returned an error (see the printed "error: <code>: <message>")
@@ -250,7 +254,9 @@ let request = ControlRequest(
     secrets: secrets.isEmpty ? nil : secrets
 )
 
-let socketPath = ControlSocketServer.defaultSocketPath()
+// VPNB_SOCKET overrides the default socket path (for tests, or a non-standard
+// install). Falls back to the app's standard user-only socket otherwise.
+let socketPath = ProcessInfo.processInfo.environment["VPNB_SOCKET"] ?? ControlSocketServer.defaultSocketPath()
 guard let fd = connectToSocket(path: socketPath) else {
     FileHandle.standardError.write(Data("VPN Bypass isn't running, or its control socket is unavailable. Start the app and try again.\n".utf8))
     exit(2)
