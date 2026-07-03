@@ -120,3 +120,12 @@ Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, ind
 - **Next → Slice 2 (UX mode overhaul):** fold multiRouteEnabled into `routingMode` as a 3rd `.custom` case;
   mode picker above the tabs; new Rules tab (route-chip = the one control) + generalized Routes tab; visible
   derive() migration; `.custom` branch through setRoutingMode + the ~5 hardcoded binary call sites.
+
+## 2026-07-03 — sequencing note: Slice 3 (scripting) before Slice 2 (UX), for risk
+- Slice 2 (routingMode.custom + RouteCompiler kernel dispatch) is the highest-GP-teardown-risk + most
+  product-opinion-heavy work. Slice 3 (scripting CLI) is purely additive (new file/target, can't regress
+  existing modes) and directly exposes the live-re-point fix (the user's "switch the Oxylabs IP via script"
+  ask). So building Slice 3 first keeps every commit releasable and defers the risky UX engine to a careful
+  dedicated pass. Pure `CommandRouter` delegated (verbs over routes/rules/mode/status; secrets never echoed).
+  Reversible sequencing only — final product unchanged. Slice 2 direction parked in DEFERRED-QUESTIONS for
+  Sergio's eyes (it's the UX centerpiece he cares about).
