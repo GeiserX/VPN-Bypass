@@ -34,3 +34,9 @@ _Interpretation: implement ALL of P0→P1→P2 autonomously (unit-test + mock-ve
 ## 2026-07-03 — continuation 2 (verbatim, same day)
 
 > Also I want even to support scripts so that people can via scripting modify the behavior of vpn bypass somehow (if it's secure, better, but whatever you can get) so that for exammple (just in my case) i want to select one oxylabs route for a given domain, but maybe i want to change the routing ip and use another, so i can have it via script (ideally, this should be also easily via vpn bypass, but i dont want to be supporting integrations with all kind of proxy services or vpns, so its just fyi to scope it well)
+
+## 2026-07-03 — continuation 3 (verbatim, same day)
+
+> Just continue to /sergio-loop over these slices with ralph
+
+> Continue using these quirks with pf, CA, etc... I don't want to be using NE entitlements or anything for this

@@ -344,6 +344,27 @@ conflicts with the older text; the older sections are kept for history.
   localhost-HTTP+token (a TCP port every local process can reach + token lifecycle + CSRF/rebinding — bad
   look on a security tool; only if remote control is ever needed, and then Tailscale-bound, never localhost).
 
+### HARD CONSTRAINT (2026-07-03) — NO Network Extension entitlements, ever
+
+Owner directive: *"Continue using these quirks with pf, CA, etc… I don't want to be using NE entitlements
+or anything for this."* This **overrides** the "macOS implementation" section above where it names
+`NETransparentProxyProvider` as the P2 engine. NE is **out** — it needs Developer-ID + notarization + a
+system-extension approval, exactly the signing fork the owner rejects. The app stays ad-hoc-signable and
+entitlement-free.
+
+Consequences for the roadmap:
+- **Kernel routes (`iface:utunX`, host-routes via the gateway) + userspace loopback proxies stay the whole
+  engine.** Slices 2/4 (custom-mode rule dispatch, multi-VPN egress) use ONLY these — no NE.
+- **App-agnostic / "transparent" capture** (apps that ignore `HTTPS_PROXY` — curl-without-`-x`, Go/Rust
+  binaries) — the entitlement-free path is **PF + a local CA**, NOT NE: a PF `rdr`/`route-to` rule (or the
+  system HTTP/HTTPS proxy + PAC) steers matched flows into a local transparent proxy that terminates TLS
+  with a **user-installed local CA** (mitmproxy-style) to read the SNI/hostname for domain routing. This
+  needs its own research slice (PF's limits on the host's *own* outbound traffic; CA trust install UX) —
+  tracked as the "transparent PF/CA" track, replacing the old NE-based P2. It is NOT required for Slices
+  2/4, which route by IP/CIDR at the kernel level and by proxy-env at the userspace level.
+- P3/NE bead `.10` and the signing-decision bead `.11` are effectively **closed as WON'T-DO** (NE rejected);
+  re-scope `.10` to the PF/CA transparent track.
+
 ### Build order (each slice independently green + releasable; single release at the very end)
 
 1. **Slice 1 — Tailscale-peer egress via proxy-over-tailnet + the live-re-point fix.** App-side: a Tailscale
