@@ -1188,27 +1188,24 @@ final class RouteManager: ObservableObject {
         return false
     }
     
-    /// Read tailscale status JSON from any known CLI path.
+    /// Known Tailscale CLI locations (Homebrew, standalone, and the App bundle).
+    nonisolated static let tailscaleCLIPaths = [
+        "/usr/local/bin/tailscale",
+        "/opt/homebrew/bin/tailscale",
+        "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+    ]
+
+    /// Read tailscale status JSON (self only, no peers) from any known CLI path.
     private func readTailscaleStatusJSON() async -> [String: Any]? {
-        let tailscalePaths = [
-            "/usr/local/bin/tailscale",
-            "/opt/homebrew/bin/tailscale",
-            "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
-        ]
-        
-        for path in tailscalePaths {
-            if FileManager.default.fileExists(atPath: path) {
-                guard let result = await runProcessAsync(path, arguments: ["status", "--json", "--self", "--peers=false"], timeout: 3.0) else {
-                    continue
-                }
-                
-                if let jsonData = result.output.data(using: .utf8),
-                   let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                    return json
-                }
+        for path in Self.tailscaleCLIPaths where FileManager.default.fileExists(atPath: path) {
+            guard let result = await runProcessAsync(path, arguments: ["status", "--json", "--self", "--peers=false"], timeout: 3.0) else {
+                continue
+            }
+            if let jsonData = result.output.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                return json
             }
         }
-        
         return nil
     }
     
@@ -3320,7 +3317,65 @@ final class RouteManager: ObservableObject {
             return
         }
         let iface = await detectPhysicalInterface()
-        ProxyListenerManager.shared.reconcile(routes: config.routes, boundInterface: iface)
+        ProxyListenerManager.shared.reconcile(routes: listenerRoutesRespectingGPShadow(), boundInterface: iface)
+    }
+
+    /// `config.routes` with any Tailscale-peer route whose IP is inside GlobalProtect's
+    /// 100.112.0.0/12 capture range dropped WHILE GP is up: a listener there would dial
+    /// a peer address the GP tunnel hijacks (longest-prefix match), so the hop would
+    /// silently leave via GP instead of the tailnet. The route stays in config and its
+    /// listener returns as soon as GP disconnects. See docs/research/2026-07-03-tailnet-probe.md.
+    func listenerRoutesRespectingGPShadow() -> [Route] {
+        guard vpnType == .globalProtect else { return config.routes }
+        return config.routes.filter { route in
+            guard let host = route.proxyHost,
+                  ProxyListenerManager.isTailnetHostShadowedByGlobalProtect(host) else { return true }
+            log(.warning, "Route '\(route.name)' targets a Tailscale peer (\(host)) inside GlobalProtect's 100.112.0.0/12 range — pausing its listener to avoid a hijack. Pick a peer outside that range.")
+            return false
+        }
+    }
+
+    // MARK: - Tailscale peers (for the Routes UI picker)
+
+    /// A tailnet peer surfaced for the Routes editor: friendly name + its 100.x IP.
+    struct TailscalePeer: Identifiable, Equatable {
+        let name: String
+        let ip: String
+        let online: Bool
+        var id: String { ip }
+    }
+
+    /// Enumerate tailnet peers (name + 100.x IPv4 + online) so a Tailscale-peer route can
+    /// be created by picking a peer instead of typing an IP. Empty if Tailscale isn't
+    /// installed/running. Online peers first, then alphabetical.
+    func listTailscalePeers() async -> [TailscalePeer] {
+        guard let json = await readTailscaleStatusJSONWithPeers(),
+              let peers = json["Peer"] as? [String: [String: Any]] else { return [] }
+        var out: [TailscalePeer] = []
+        for (_, peer) in peers {
+            guard let ips = peer["TailscaleIPs"] as? [String],
+                  let ip4 = ips.first(where: { ProxyListenerManager.isTailnetHost($0) }) else { continue }
+            let host = (peer["HostName"] as? String)
+                ?? (peer["DNSName"] as? String)?.components(separatedBy: ".").first
+                ?? ip4
+            let online = (peer["Online"] as? Bool) ?? false
+            out.append(TailscalePeer(name: host, ip: ip4, online: online))
+        }
+        return out.sorted { a, b in
+            a.online != b.online ? a.online : a.name.lowercased() < b.name.lowercased()
+        }
+    }
+
+    /// Like `readTailscaleStatusJSON` but WITH peers (the self-only reader omits them).
+    private func readTailscaleStatusJSONWithPeers() async -> [String: Any]? {
+        for path in Self.tailscaleCLIPaths where FileManager.default.fileExists(atPath: path) {
+            guard let result = await runProcessAsync(path, arguments: ["status", "--json"], timeout: 3.0) else { continue }
+            if let data = result.output.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                return json
+            }
+        }
+        return nil
     }
 
     /// The physical interface (e.g. "en0") whose route reaches the local gateway.

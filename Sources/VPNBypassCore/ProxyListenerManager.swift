@@ -31,7 +31,7 @@ final class ProxyListenerManager: ObservableObject {
     /// `completion` runs on the main actor once starts settle.
     func reconcile(routes: [Route], boundInterface: String?, completion: (() -> Void)? = nil) {
         let proxyRoutes = routes.filter {
-            $0.enabled && ($0.egress == .proxyHTTP || $0.egress == .proxySOCKS5) && !($0.proxyHost ?? "").isEmpty
+            $0.enabled && Self.usesLocalListener($0.egress) && !($0.proxyHost ?? "").isEmpty
         }
         let desired = Set(proxyRoutes.map { $0.id })
 
@@ -122,6 +122,40 @@ final class ProxyListenerManager: ObservableObject {
             template: route.proxyPasswordTemplate, rawValue: pass,
             user: user, pass: pass, sessionId: sessionId, ttlMinutes: route.sessionTTLMinutes
         )
-        return ProxyForwarder.Upstream(host: host, port: port16, username: username, password: password, boundInterface: boundInterface)
+        // A Tailscale-peer upstream is reachable ONLY through the Tailscale utun. Its
+        // 100.x address routes there by the kernel's longest-prefix match, so binding
+        // the socket to the physical NIC (the VPN-escape trick for internet proxies)
+        // would send it out the wrong interface and break it. Such routes never bind.
+        let effectiveInterface = usesTailnet(route) ? nil : boundInterface
+        return ProxyForwarder.Upstream(host: host, port: port16, username: username, password: password, boundInterface: effectiveInterface)
+    }
+
+    // MARK: - Egress / tailnet classification (pure, testable)
+
+    /// Egresses served by a local 127.0.0.1 listener (a chaining forwarder): the two
+    /// proxy types and Tailscale-peer egress (which is proxy-over-tailnet under the hood).
+    nonisolated static func usesLocalListener(_ egress: Egress) -> Bool {
+        egress == .proxyHTTP || egress == .proxySOCKS5 || egress == .tailscaleExit
+    }
+
+    /// True when a route's upstream lives on the tailnet — either an explicit Tailscale
+    /// egress or any upstream whose host is a literal CGNAT address (100.64.0.0/10).
+    nonisolated static func usesTailnet(_ route: Route) -> Bool {
+        if route.egress == .tailscaleExit { return true }
+        if let host = route.proxyHost { return isTailnetHost(host) }
+        return false
+    }
+
+    /// `host` is a literal Tailscale CGNAT address (100.64.0.0/10).
+    nonisolated static func isTailnetHost(_ host: String) -> Bool {
+        RuleResolver.ipv4(host, inCIDR: "100.64.0.0/10")
+    }
+
+    /// `host` falls in the CGNAT sub-range GlobalProtect also captures (100.112.0.0/12).
+    /// While GP is up, longest-prefix match steals such a packet into the GP tunnel
+    /// instead of the Tailscale utun, so callers must refuse the route. See the
+    /// 2026-07-03 tailnet probe.
+    nonisolated static func isTailnetHostShadowedByGlobalProtect(_ host: String) -> Bool {
+        RuleResolver.ipv4(host, inCIDR: "100.112.0.0/12")
     }
 }
