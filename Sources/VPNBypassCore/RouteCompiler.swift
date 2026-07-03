@@ -58,6 +58,13 @@ enum RouteCompiler {
         // rule's egress emits no kernel route (e.g. a proxy). Otherwise a later Direct
         // rule could install a kernel route for a destination the proxy listener owns,
         // splitting one destination across two egresses.
+        //
+        // DEFERRED (revisit when the multi-VPN slice makes more egresses emit kernel
+        // routes): claiming is by EXACT destination string, not CIDR containment, so a
+        // later rule's host IP that falls inside an earlier rule's CIDR can disagree with
+        // RuleResolver's containment-aware first-match. Masked in this slice — iface-VPN
+        // emits nothing, Direct-in-Direct is the same gateway, and proxy CIDRs aren't
+        // kernel-routed — so no wrong kernel route results today.
         var claimed: Set<String> = []
 
         for entry in resolvedRules where entry.rule.enabled {
@@ -101,8 +108,17 @@ enum RouteCompiler {
     /// these, but the guard is the custom-engine analog of refuseVPNOnlyUnderGlobalProtect.
     static let catchAllDestinations: Set<String> = ["0.0.0.0/0", "0.0.0.0/1", "128.0.0.0/1"]
 
+    /// A destination that structurally shadows a full-tunnel VPN's default route.
+    /// The canonical trio, PLUS any CIDR with prefix length <= 1 (a /0 or /1 covers
+    /// half-or-more of the address space and replaces/shadows GP's coarse routes →
+    /// teardown). A more-specific broad CIDR (/2+) is additive (longest-prefix wins),
+    /// not a replacement, so it doesn't trip GP's route monitor — that's the user's
+    /// explicit choice, not a teardown vector. Covers IPv4 and IPv6 (::/0) alike.
     static func isCatchAll(_ destination: String) -> Bool {
-        catchAllDestinations.contains(destination)
+        if catchAllDestinations.contains(destination) { return true }
+        let parts = destination.split(separator: "/")
+        if parts.count == 2, let prefix = Int(parts[1]), prefix <= 1 { return true }
+        return false
     }
 
     /// Split compiled routes into the safe set to install and the catch-alls refused

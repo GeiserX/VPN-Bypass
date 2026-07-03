@@ -171,4 +171,30 @@ final class RouteCompilerTests: XCTestCase {
         XCTAssertEqual(g.kept.count, 2)
         XCTAssertTrue(g.refused.isEmpty)
     }
+
+    // M1: the guard refuses ANY /0 or /1 CIDR (not just the canonical trio), since a
+    // /1 to a non-primary egress under GP shadows GP's coarse routes → teardown. A /2+
+    // is additive (longest-prefix wins), so it's allowed (the user's explicit choice).
+    func testIsCatchAllRefusesAllSlashZeroAndSlashOnePrefixes() {
+        XCTAssertTrue(RouteCompiler.isCatchAll("0.0.0.0/0"))
+        XCTAssertTrue(RouteCompiler.isCatchAll("0.0.0.0/1"))
+        XCTAssertTrue(RouteCompiler.isCatchAll("128.0.0.0/1"))
+        XCTAssertTrue(RouteCompiler.isCatchAll("64.0.0.0/1"), "any /1, not only the canonical two")
+        XCTAssertTrue(RouteCompiler.isCatchAll("::/0"), "IPv6 catch-all too")
+        XCTAssertFalse(RouteCompiler.isCatchAll("0.0.0.0/2"), "a /2 is additive, not a teardown vector")
+        XCTAssertFalse(RouteCompiler.isCatchAll("10.0.0.0/8"))
+        XCTAssertFalse(RouteCompiler.isCatchAll("1.2.3.4"), "a host route is never a catch-all")
+    }
+
+    func testGuardRefusesNonCanonicalSlashOneUnderGlobalProtect() {
+        // A broad /1 authored to Direct that ISN'T in the canonical set must still be refused.
+        let compiled = RouteCompiler.compile(
+            resolvedRules: [rr(direct, [("64.0.0.0/1", true)], pattern: "64.0.0.0/1", matchType: .cidr)],
+            routes: [direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertEqual(compiled.count, 1)
+        let g = RouteCompiler.guardCatchAllUnderGlobalProtect(compiled, isGlobalProtect: true)
+        XCTAssertTrue(g.kept.isEmpty, "a /1 to Direct under GP is refused (would shadow GP's default)")
+        XCTAssertEqual(g.refused.map(\.destination), ["64.0.0.0/1"])
+    }
 }
