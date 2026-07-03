@@ -225,6 +225,58 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertTrue(updated.rules.isEmpty)
     }
 
+    /// A typo'd CIDR (missing an octet, out-of-range bits, ...) would otherwise be
+    /// accepted and then silently never match anything under RuleResolver.
+    func testRuleAddRejectsMalformedCIDRPatternAndDoesNotMutate() {
+        let route = Route(name: "R", egress: .direct)
+        var config = RouteManager.Config()
+        config.routes = [route]
+
+        for badPattern in ["10.0.0/8", "10.0.0.0/33", "10.0.0.0/-1", "not-a-cidr", "10.0.0.0"] {
+            let req = ControlRequest(cmd: "rule.add", args: ["match": "cidr", "pattern": badPattern, "routeId": route.id.uuidString])
+            let (updated, response) = CommandRouter.apply(req, to: config)
+
+            XCTAssertFalse(response.ok, "expected \(badPattern) to be rejected")
+            XCTAssertEqual(response.error?.code, "invalid_args")
+            XCTAssertTrue(updated.rules.isEmpty, "malformed pattern \(badPattern) must not create a rule")
+        }
+    }
+
+    func testRuleAddRejectsMalformedIPPatternAndDoesNotMutate() {
+        let route = Route(name: "R", egress: .direct)
+        var config = RouteManager.Config()
+        config.routes = [route]
+
+        for badPattern in ["10.0.0.999", "10.0.0", "10.0.0.0.1", "not-an-ip"] {
+            let req = ControlRequest(cmd: "rule.add", args: ["match": "ip", "pattern": badPattern, "routeId": route.id.uuidString])
+            let (updated, response) = CommandRouter.apply(req, to: config)
+
+            XCTAssertFalse(response.ok, "expected \(badPattern) to be rejected")
+            XCTAssertEqual(response.error?.code, "invalid_args")
+            XCTAssertTrue(updated.rules.isEmpty, "malformed pattern \(badPattern) must not create a rule")
+        }
+    }
+
+    func testRuleAddAcceptsWellFormedIPAndCIDRPatterns() {
+        let route = Route(name: "R", egress: .direct)
+        var config = RouteManager.Config()
+        config.routes = [route]
+
+        let (afterIP, ipResp) = CommandRouter.apply(
+            ControlRequest(cmd: "rule.add", args: ["match": "ip", "pattern": "10.0.0.5", "routeId": route.id.uuidString]),
+            to: config
+        )
+        XCTAssertTrue(ipResp.ok)
+        XCTAssertEqual(afterIP.rules.first?.pattern, "10.0.0.5")
+
+        let (afterCIDR, cidrResp) = CommandRouter.apply(
+            ControlRequest(cmd: "rule.add", args: ["match": "cidr", "pattern": "10.0.0.0/8", "routeId": route.id.uuidString]),
+            to: afterIP
+        )
+        XCTAssertTrue(cidrResp.ok)
+        XCTAssertEqual(afterCIDR.rules.last?.pattern, "10.0.0.0/8")
+    }
+
     func testRuleAddAppendsWithIncrementingOrderAndRuleRemoveDeletes() {
         let route = Route(name: "R", egress: .direct)
         var config = RouteManager.Config()
@@ -282,6 +334,26 @@ final class CommandRouterTests: XCTestCase {
         let (unchanged, badResponse) = CommandRouter.apply(ControlRequest(cmd: "default", args: ["routeId": UUID().uuidString]), to: config)
         XCTAssertEqual(badResponse.error?.code, "not_found")
         XCTAssertNil(unchanged.defaultRouteId)
+    }
+
+    // MARK: - isMutating
+
+    /// Pins the classification of every verb `apply()` currently switches on, so
+    /// an edit that moves a verb into the wrong branch (or typos a case string)
+    /// fails here instead of silently under/over-persisting+reconciling.
+    func testIsMutatingClassifiesEveryKnownVerbCorrectly() {
+        let readVerbs = ["status", "route.list", "rule.list"]
+        let writeVerbs = [
+            "route.set", "route.enable", "route.disable", "route.rm", "route.add",
+            "rule.add", "rule.rm", "mode", "default"
+        ]
+
+        for verb in readVerbs {
+            XCTAssertFalse(CommandRouter.isMutating(verb), "\(verb) must be classified as read-only")
+        }
+        for verb in writeVerbs {
+            XCTAssertTrue(CommandRouter.isMutating(verb), "\(verb) must be classified as mutating")
+        }
     }
 
     // MARK: - envelope errors

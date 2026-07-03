@@ -581,7 +581,6 @@ struct RuleEditorSheet: View {
                     formField(label: "Match", required: true) {
                         Picker("", selection: $matchType) {
                             Text("Domain").tag(MatchType.domain)
-                            Text("Suffix").tag(MatchType.suffix)
                             Text("Service").tag(MatchType.service)
                             Text("IP").tag(MatchType.ip)
                             Text("CIDR").tag(MatchType.cidr)

@@ -344,6 +344,15 @@ enum CommandRouter {
         guard let pattern = request.args?["pattern"], !pattern.isEmpty else {
             return errorResponse(config, code: "invalid_args", message: "pattern is required")
         }
+        // RuleResolver treats `.ip`/`.cidr` patterns as opaque strings at match
+        // time — a typo like "10.0.0/8" (missing an octet) is otherwise accepted
+        // here and then silently never matches anything.
+        if matchType == .ip, !isValidIPv4(pattern) {
+            return errorResponse(config, code: "invalid_args", message: "malformed IP/CIDR pattern")
+        }
+        if matchType == .cidr, !isValidCIDR(pattern) {
+            return errorResponse(config, code: "invalid_args", message: "malformed IP/CIDR pattern")
+        }
         guard let routeId = uuid(request.args, "routeId"), config.routes.contains(where: { $0.id == routeId }) else {
             return errorResponse(config, code: "not_found", message: "no route with that id")
         }
@@ -424,6 +433,23 @@ enum CommandRouter {
         case "false": return false
         default: return nil
         }
+    }
+
+    /// Same dotted-quad shape RuleResolver.ipv4(_:inCIDR:) parses at match time
+    /// (4 numeric octets 0...255). Kept as its own small parser rather than
+    /// shared — RuleResolver's is `private` to that file — but deliberately
+    /// no stricter (e.g. still tolerates a leading zero like "01") so a
+    /// pattern accepted here is guaranteed to also be one RuleResolver can match.
+    private static func isValidIPv4(_ s: String) -> Bool {
+        let octets = s.split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4 else { return false }
+        return octets.allSatisfy { UInt32($0).map { $0 <= 255 } ?? false }
+    }
+
+    private static func isValidCIDR(_ s: String) -> Bool {
+        let parts = s.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2, let bits = Int(parts[1]), (0...32).contains(bits) else { return false }
+        return isValidIPv4(String(parts[0]))
     }
 
     private static func parseEgressType(_ s: String?) -> Egress {

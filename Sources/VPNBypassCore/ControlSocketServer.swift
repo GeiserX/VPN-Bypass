@@ -45,6 +45,17 @@ public final class ControlSocketServer {
     private let handler: Handler
     private let acceptQueue = DispatchQueue(label: "com.vpnbypass.controlsocket.accept", qos: .userInitiated)
 
+    /// How long a single request line waits for the injected handler before
+    /// giving up and returning a `timeout` error. Bounds a `vpnb` invocation's
+    /// worst case if the (possibly @MainActor) handler wedges — e.g. stuck
+    /// behind a slow synchronous operation on the main thread.
+    private static let handlerTimeout: TimeInterval = 30
+
+    /// Backoff after an unexpected (non-EINTR/EBADF/EINVAL) accept() error,
+    /// e.g. EMFILE/ENFILE under fd exhaustion — keeps the accept loop from
+    /// tight-looping at 100% CPU retrying an error that won't clear instantly.
+    private static let acceptErrorBackoffMicroseconds: useconds_t = 10_000
+
     /// Guards `listenFD`/`isRunning`, written from the caller's thread
     /// (start/stop). The accept loop only ever touches its own captured local
     /// copy of the fd, so it never needs this lock.
@@ -171,13 +182,26 @@ public final class ControlSocketServer {
             if clientFD < 0 {
                 let err = errno
                 // stop() closed the listening fd out from under us — exit quietly.
-                if err == EBADF || err == EINVAL {
+                // On Darwin, closing an fd while another thread is blocked in
+                // accept() on it unblocks with ECONNABORTED (not EBADF); if the
+                // fd number gets recycled for something else before the next
+                // retry, that retry sees ENOTSOCK instead. Both can only happen
+                // to OUR OWN listenFD after stop() closed it, so they belong in
+                // the same quiet-exit bucket as EBADF/EINVAL — otherwise this
+                // loop keeps retrying (and, pre-backoff, spun at 100% CPU) on an
+                // fd that is simply gone.
+                if err == EBADF || err == EINVAL || err == ECONNABORTED || err == ENOTSOCK {
                     return
                 }
                 if err == EINTR {
                     continue
                 }
-                // Unexpected but non-fatal accept() error — keep serving.
+                // Unexpected but non-fatal accept() error (e.g. EMFILE/ENFILE
+                // under fd exhaustion) — keep serving, but back off first so
+                // this doesn't tight-loop at 100% CPU retrying an error that
+                // won't clear itself instantly.
+                NSLog("VPNBypass: control socket accept() error: %@", String(cString: strerror(err)))
+                usleep(Self.acceptErrorBackoffMicroseconds)
                 continue
             }
 
@@ -256,6 +280,11 @@ public final class ControlSocketServer {
     /// A malformed line gets a `bad_request` error, and the connection is
     /// KEPT OPEN — a scripted client can retry on the same pipe instead of
     /// having to reconnect after one bad line.
+    ///
+    /// The wait is bounded: if the (possibly @MainActor) handler wedges, a
+    /// `vpnb` invocation must still get an answer and exit rather than hang
+    /// forever. On timeout the handler's eventual result — if it ever arrives
+    /// — is simply discarded; `box` isn't read again after this call returns.
     private func processLine(_ lineData: Data) -> ControlResponse {
         guard let request = try? JSONDecoder().decode(ControlRequest.self, from: lineData) else {
             return ControlResponse(ok: false, error: ControlError(code: "bad_request", message: "malformed JSON"))
@@ -268,7 +297,9 @@ public final class ControlSocketServer {
             box.response = await handler(request)
             semaphore.signal()
         }
-        semaphore.wait()
+        guard semaphore.wait(timeout: .now() + Self.handlerTimeout) == .success else {
+            return ControlResponse(ok: false, error: ControlError(code: "timeout", message: "handler did not respond in time"))
+        }
         return box.response ?? ControlResponse(ok: false, error: ControlError(code: "internal_error", message: "handler did not return a response"))
     }
 
@@ -315,9 +346,11 @@ public final class ControlSocketServer {
 
 /// A single-slot box to hand an async handler's result back to the blocking
 /// read-loop thread. `@unchecked Sendable`: `response` is written exactly
-/// once (inside the Task, before `semaphore.signal()`) and read exactly once
-/// (after `semaphore.wait()` returns on the caller side), so the semaphore
-/// itself is the synchronization — mirrors `OnceGate` in HelperManager.swift.
+/// once (inside the Task, before `semaphore.signal()`) and read at most once
+/// (after a successful `semaphore.wait()` on the caller side — on a timeout
+/// the caller returns without ever reading `response`, and a late write from
+/// the still-running Task is simply discarded), so the semaphore itself is
+/// the synchronization — mirrors `OnceGate` in HelperManager.swift.
 private final class ResponseBox: @unchecked Sendable {
     var response: ControlResponse?
 }
