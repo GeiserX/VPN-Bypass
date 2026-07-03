@@ -533,8 +533,22 @@ final class RouteManager: ObservableObject {
     private var refreshTimer: Timer?
     
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDir = appSupport.appendingPathComponent("VPNBypass", isDirectory: true)
+        // Isolate the test suite from the user's real config: under XCTest, point at a
+        // throwaway temp dir so saveConfig() (reached via setRoutingMode / the control
+        // surface in tests) can never clobber ~/Library/.../VPNBypass/config.json.
+        // NSClassFromString("XCTestCase") is the reliable signal under `swift test`
+        // (the XCTest framework is linked into the test binary but not the app); the
+        // env var is Xcode-only, so it's just a belt-and-suspenders fallback.
+        let appDir: URL
+        let underTests = NSClassFromString("XCTestCase") != nil
+            || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        if underTests {
+            appDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("VPNBypassTests-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        } else {
+            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            appDir = appSupport.appendingPathComponent("VPNBypass", isDirectory: true)
+        }
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
         configURL = appDir.appendingPathComponent("config.json")
     }
