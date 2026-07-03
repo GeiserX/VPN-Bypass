@@ -1139,42 +1139,26 @@ final class RouteManager: ObservableObject {
     func listVPNLinks() async -> [VPNLink] {
         guard let result = await runProcessAsync("/sbin/ifconfig", timeout: 5.0) else { return [] }
 
-        var byIface: [String: (up: Bool, ips: [String])] = [:]
-        var order: [String] = []
-        var current: String?
-        for line in result.output.components(separatedBy: "\n") {
-            if !line.hasPrefix("\t") && !line.hasPrefix(" ") && line.contains(":") {
-                let name = line.components(separatedBy: ":").first ?? ""
-                current = name
-                if isVPNInterface(name) {
-                    let up = line.contains("<UP,") || line.contains(",UP,") || line.contains(",UP>")
-                    if byIface[name] == nil { byIface[name] = (up, []); order.append(name) }
-                    else { byIface[name]?.up = up }
-                }
-            }
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("inet "), !trimmed.contains("inet6"),
-               let c = current, isVPNInterface(c) {
-                let parts = trimmed.components(separatedBy: " ")
-                if parts.count >= 2 { byIface[c]?.ips.append(parts[1]) }
-            }
-        }
-
+        // Pure parse of the ifconfig text (order + UP flag + inet addresses + Tailscale
+        // marking) is delegated to IfconfigParser; only the labelling below needs live
+        // actor state (vpnInterface/vpnType), and only UP interfaces with an address are
+        // offered as egresses.
         let tsIPs = await tailscaleSelfIPs()
+        let parsed = IfconfigParser.parse(result.output, tailscaleIPs: tsIPs, isVPNInterface: { self.isVPNInterface($0) })
+
         var links: [VPNLink] = []
-        for iface in order {
-            guard let info = byIface[iface], info.up, !info.ips.isEmpty else { continue }
-            let isTS = info.ips.contains { tsIPs.contains($0) }
+        for p in parsed {
+            guard p.isUp, !p.addresses.isEmpty else { continue }
             let label: String
-            if isTS {
+            if p.isTailscale {
                 label = "Tailscale"
-            } else if vpnInterface == iface, let t = vpnType {
+            } else if vpnInterface == p.interface, let t = vpnType {
                 label = t.rawValue
             } else {
-                let t = detectVPNTypeFromInterface(iface)
-                label = t == .unknown ? "VPN (\(iface))" : t.rawValue
+                let t = detectVPNTypeFromInterface(p.interface)
+                label = t == .unknown ? "VPN (\(p.interface))" : t.rawValue
             }
-            links.append(VPNLink(interface: iface, addresses: info.ips, label: label, isTailscale: isTS))
+            links.append(VPNLink(interface: p.interface, addresses: p.addresses, label: label, isTailscale: p.isTailscale))
         }
         return links
     }
@@ -1456,6 +1440,16 @@ final class RouteManager: ObservableObject {
         !forceReassert && !desiredPairs.isEmpty && desiredPairs == activePairs
     }
 
+    /// The single dispatch predicate for the custom-mode rule engine: it runs ONLY at
+    /// schemaVersion >= 2 AND routingMode == .custom. A schemaVersion-1 config (even one
+    /// whose mode says .custom) is the FAIL-SAFE case — it must take the legacy
+    /// bypass/vpnOnly path, never the rule engine, because its routes/rules were not
+    /// migrated. Extracted as a pure static so every apply path shares one definition
+    /// and the fail-safe is unit-testable without driving the actor.
+    nonisolated static func usesCustomEngine(schemaVersion: Int, routingMode: RoutingMode) -> Bool {
+        schemaVersion >= 2 && routingMode == .custom
+    }
+
     /// Apply all routes — acquires exclusive gate, skips if another operation is running
     func applyAllRoutes() async {
         guard acquireRouteOperation() else {
@@ -1504,7 +1498,7 @@ final class RouteManager: ObservableObject {
 
         // Custom mode: dispatch per rule via RouteCompiler, then return — the legacy
         // bypass/vpnOnly builder below is untouched (classic modes stay byte-identical).
-        if config.schemaVersion >= 2 && config.routingMode == .custom {
+        if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
             await applyCustomRoutesInternal(useCacheOnly: false, sendNotification: sendNotification, forceReassert: forceReassert)
             return
         }
@@ -1841,7 +1835,21 @@ final class RouteManager: ObservableObject {
         // VPN resolves to an `iface:utunX` kernel route. A `.vpnDefault`/primary route
         // still emits nothing (stays on the OS default); proxy/tailscale egresses are
         // served by loopback listeners, not kernel routes.
-        let links = await listVPNLinks()
+        //
+        // listVPNLinks() shells out to ifconfig + tailscale status. Only a route that
+        // both is reachable from an ENABLED rule AND pins a specific tunnel (egress
+        // .vpnDefault + a .interface selector — exactly when ifaceGateway can return a
+        // non-nil token) ever consumes the link set. When none do — the common case with
+        // no multi-VPN pinning — skip the enumeration entirely and spawn zero extra
+        // processes; the compiler then sees an empty link set and every .vpnDefault route
+        // stays on the OS default, unchanged.
+        let referencedRouteIds = Set(config.rules.filter { $0.enabled }.map { $0.routeId })
+        let needsLinks = config.routes.contains { route in
+            referencedRouteIds.contains(route.id)
+                && route.egress == .vpnDefault
+                && route.vpnSelector?.kind == .interface
+        }
+        let links = needsLinks ? await listVPNLinks() : []
         var compiled = RouteCompiler.compile(
             resolvedRules: resolved,
             routes: config.routes,
@@ -1969,54 +1977,99 @@ final class RouteManager: ObservableObject {
     ///   • .service → its domains resolved to IPs + its static ipRanges.
     ///   • .suffix / .process → nothing (not kernel-routable — a listener/NE engine
     ///     handles those, not the routing table; skipped with no error).
-    /// Live resolution refreshes dnsCache/dnsDiskCache so the hosts file + cache stay
-    /// consistent, mirroring the legacy paths.
+    ///
+    /// DNS is resolved for the WHOLE rule set up front, de-duplicated and IN PARALLEL
+    /// (the same withTaskGroup + resolveIPsParallel machinery the legacy full-apply uses),
+    /// so a domain/service-heavy rule set applies in ~one DNS round-trip instead of one
+    /// per domain serially. The matching itself is delegated to the pure
+    /// `RuleDestinationBuilder` (unit-testable in isolation). Live resolution refreshes
+    /// dnsCache/dnsDiskCache so the hosts file + cache stay consistent, mirroring legacy;
+    /// a host that resolves to NOTHING (no live IPs, no cache) is surfaced like legacy —
+    /// logged, tracked in failedDomains, and retried in 15s via `scheduleRetry`.
     private func resolveRuleDestinations(useCacheOnly: Bool) async -> [(rule: Rule, dests: [(value: String, isNetwork: Bool)])] {
-        let orderedRules = config.rules.filter { $0.enabled }.sorted { $0.order < $1.order }
-        var out: [(rule: Rule, dests: [(value: String, isNetwork: Bool)])] = []
+        // The full de-duplicated hostname set across ALL enabled rules — resolved once,
+        // even when the same host is reachable via two rules.
+        let hosts = RuleDestinationBuilder.hostsToResolve(rules: config.rules, services: config.services)
+
+        // Build the host→IPs map. Cache-only (instant startup) reads the disk cache with
+        // no live DNS and never flags failures (a live apply follows). The live path
+        // resolves in parallel and reports the hosts that resolved to nothing.
+        let resolvedMap: [String: [String]]
+        if useCacheOnly {
+            var m: [String: [String]] = [:]
+            for host in hosts { m[host] = dnsDiskCache[host] ?? [] }
+            resolvedMap = m
+        } else {
+            let (map, failed, cacheDirty) = await resolveHostsParallel(Array(hosts))
+            resolvedMap = map
+            if cacheDirty { saveDNSCache() }
+            // Fix: custom-mode DNS failures were fully silent. Surface them exactly like
+            // the legacy path — the ✗ log line, a failedDomains entry, and the same 15s
+            // retry — so a domain that can't resolve doesn't just silently drop its route.
+            // Clear the ones that resolved this round first, so failedDomains tracks only
+            // the currently-failing hosts (it's shared with the legacy path, which logs +
+            // clears it, so stale entries must not leak across a mode switch).
+            let failedSet = Set(failed)
+            for host in hosts where !failedSet.contains(host) { failedDomains.remove(host) }
+            for host in failed {
+                failedDomains.insert(host)
+                log(.warning, "  ✗ \(host)")
+                scheduleRetry(for: host)
+            }
+        }
+
+        return RuleDestinationBuilder.build(rules: config.rules, services: config.services, resolved: resolvedMap)
+    }
+
+    /// Resolve a de-duplicated host list in parallel, reusing the SAME withTaskGroup +
+    /// resolveIPsParallel machinery (up to 100 concurrent) the legacy full-apply uses —
+    /// no second resolver. Returns: the host→IPs map (live IPs, or the disk-cache
+    /// fallback when live resolution fails), the hosts that resolved to NOTHING (neither
+    /// live nor cache — the caller logs + retries them), and whether the disk cache
+    /// changed. Cache-update semantics match the custom path's former serial resolver: a
+    /// live hit refreshes dnsDiskCache + dnsCache; a miss falls back to the disk cache
+    /// for the value without touching dnsCache.
+    private func resolveHostsParallel(_ hosts: [String]) async -> (resolved: [String: [String]], failed: [String], cacheDirty: Bool) {
+        guard !hosts.isEmpty else { return ([:], [], false) }
+        let userDNS = detectedDNSServer
+        let fallbackDNS = config.fallbackDNS
+        let batchSize = 100  // DNS resolution is truly parallel via GCD (nonisolated)
+
+        var resolved: [String: [String]] = [:]
+        var failed: [String] = []
         var cacheDirty = false
 
-        // Resolve one hostname to IPs, honoring useCacheOnly and updating caches on a live
-        // hit. Returns cached IPs as a fallback when live resolution fails.
-        func ipsFor(_ host: String) async -> [String] {
-            if useCacheOnly {
-                return dnsDiskCache[host] ?? []
-            }
-            if let ips = await resolveIPs(for: host), !ips.isEmpty {
-                dnsDiskCache[host] = ips
-                if let first = ips.first { dnsCache[host] = first }
-                cacheDirty = true
-                return ips
-            }
-            return dnsDiskCache[host] ?? []
-        }
-
-        for rule in orderedRules {
-            var dests: [(value: String, isNetwork: Bool)] = []
-            switch rule.matchType {
-            case .ip:
-                dests = [(rule.pattern, false)]
-            case .cidr:
-                dests = [(rule.pattern, true)]
-            case .domain:
-                dests = (await ipsFor(rule.pattern)).map { ($0, false) }
-            case .service:
-                if let service = config.services.first(where: { $0.id == rule.pattern }) {
-                    for domain in service.domains {
-                        dests.append(contentsOf: (await ipsFor(domain)).map { ($0, false) })
-                    }
-                    for range in service.ipRanges {
-                        dests.append((range, true))
+        var index = 0
+        while index < hosts.count {
+            let endIndex = min(index + batchSize, hosts.count)
+            let batch = Array(hosts[index..<endIndex])
+            let dnsResults = await withTaskGroup(of: (host: String, ips: [String]?).self) { group in
+                for host in batch {
+                    group.addTask {
+                        let ips = await Self.resolveIPsParallel(for: host, userDNS: userDNS, fallbackDNS: fallbackDNS)
+                        return (host, ips)
                     }
                 }
-            case .suffix, .process:
-                dests = []   // not kernel-routable
+                var results: [(host: String, ips: [String]?)] = []
+                for await r in group { results.append(r) }
+                return results
             }
-            out.append((rule, dests))
+            for r in dnsResults {
+                if let ips = r.ips, !ips.isEmpty {
+                    resolved[r.host] = ips
+                    dnsDiskCache[r.host] = ips
+                    if let first = ips.first { dnsCache[r.host] = first }
+                    cacheDirty = true
+                } else if let cached = dnsDiskCache[r.host], !cached.isEmpty {
+                    resolved[r.host] = cached
+                } else {
+                    resolved[r.host] = []
+                    failed.append(r.host)
+                }
+            }
+            index += batchSize
         }
-
-        if cacheDirty { saveDNSCache() }
-        return out
+        return (resolved, failed, cacheDirty)
     }
 
     /// Remove all routes — always proceeds (critical teardown for disconnect/quit/clear).
@@ -2089,7 +2142,7 @@ final class RouteManager: ObservableObject {
         if refuseVPNOnlyUnderGlobalProtect() { return false }
 
         // Custom mode: compile from cached IPs (no live DNS) for instant startup.
-        if config.schemaVersion >= 2 && config.routingMode == .custom {
+        if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
             return await applyCustomRoutesInternal(useCacheOnly: true, sendNotification: false, forceReassert: false)
         }
 
@@ -2961,6 +3014,30 @@ final class RouteManager: ObservableObject {
     }
     
     private func retryFailedDomain(_ domain: String) async {
+        // Custom mode: a rule-domain that failed DNS re-triggers a full custom re-apply
+        // (re-resolving every rule against live DNS), reusing scheduleRetry's per-domain
+        // timer/dedup machinery. applyCustomRoutesInternal is gate-free, so we take the
+        // route lock here (exactly as applyAllRoutes does); the diff-before-mutate guard
+        // makes a redundant re-apply cheap, and when several domains failed together only
+        // the first retry does real work (the rest find the gate held and skip). The
+        // legacy per-domain path below is untouched — this branch never runs in classic
+        // modes (usesCustomEngine is false there).
+        if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
+            guard isVPNConnected else { return }
+            guard !activeRoutes.contains(where: { $0.source == domain }) else {
+                log(.info, "Skipping retry for \(domain) — routes already exist")
+                return
+            }
+            guard acquireRouteOperation() else {
+                log(.info, "Retry skipped for \(domain): route operation in progress")
+                return
+            }
+            defer { releaseRouteOperation() }
+            log(.info, "Retrying custom DNS for \(domain)...")
+            await applyCustomRoutesInternal(useCacheOnly: false, sendNotification: false)
+            return
+        }
+
         guard let entry = config.domains.first(where: { $0.domain == domain && $0.enabled }) else { return }
         guard isVPNConnected else { return }
         guard let gateway = await ensureGateway() else {
@@ -3279,16 +3356,29 @@ final class RouteManager: ObservableObject {
         // keeps the user's edited rules untouched.
         if mode == .custom && config.schemaVersion < 2 {
             config.schemaVersion = 2
-            let userRoutes = config.routes.filter {
-                $0.egress == .proxyHTTP || $0.egress == .proxySOCKS5 || $0.egress == .tailscaleExit
+            // The decoder ALREADY derives routes/rules when a legacy config is loaded with
+            // an empty `routes` (Config.init(from:)). Re-deriving here would mint a SECOND
+            // set of route/rule UUIDs and discard the decoder's — giving non-deterministic
+            // IDs on every launch until the first save. So derive ONLY when the model has
+            // not been established yet, detected by the absence of the derived VPN+Direct
+            // pair that derive() always produces. When it IS present (the decoder derived,
+            // or the user built an equivalent), keep the existing routes/rules/default as
+            // they are — a lossless bump that also preserves any proxy/Tailscale routes
+            // already in `config.routes` without duplicating them.
+            let alreadyDerived = config.routes.contains { $0.egress == .vpnDefault }
+                && config.routes.contains { $0.egress == .direct }
+            if !alreadyDerived {
+                let userRoutes = config.routes.filter {
+                    $0.egress == .proxyHTTP || $0.egress == .proxySOCKS5 || $0.egress == .tailscaleExit
+                }
+                let derived = Config.derive(
+                    domains: config.domains, services: config.services,
+                    mode: config.routingMode, inverseDomains: config.inverseDomains, proxy: config.proxyConfig
+                )
+                config.routes = derived.routes + userRoutes
+                config.rules = derived.rules
+                config.defaultRouteId = derived.defaultRouteId
             }
-            let derived = Config.derive(
-                domains: config.domains, services: config.services,
-                mode: config.routingMode, inverseDomains: config.inverseDomains, proxy: config.proxyConfig
-            )
-            config.routes = derived.routes + userRoutes
-            config.rules = derived.rules
-            config.defaultRouteId = derived.defaultRouteId
         }
 
         config.routingMode = mode
