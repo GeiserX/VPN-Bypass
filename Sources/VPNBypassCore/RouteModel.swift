@@ -43,6 +43,35 @@ public enum MatchType: String, Codable, Equatable, Sendable {
     case process  // a process name — P3, NE-only.
 }
 
+/// Which VPN a `.vpnDefault` route targets when several tunnels are up. An OPTIONAL
+/// field on Route (not a new Egress case): an old build that can't decode it simply
+/// ignores it and treats the route as the primary VPN — the safe direction. A new
+/// Egress case would instead coerce to `.direct` on an old build = a leak.
+public struct VPNSelector: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable {
+        case primary    // whichever tunnel the OS treats as default (today's sole behaviour)
+        case interface  // a specific tunnel, pinned by name/product
+    }
+    public var kind: Kind
+    /// e.g. "utun6" — the pinned tunnel; re-resolved against the live link set every apply.
+    public var interfaceName: String?
+    /// e.g. "WireGuard" — a durable label fallback if the utun index renumbered.
+    public var productHint: String?
+
+    public init(kind: Kind = .primary, interfaceName: String? = nil, productHint: String? = nil) {
+        self.kind = kind
+        self.interfaceName = interfaceName
+        self.productHint = productHint
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .primary
+        interfaceName = try c.decodeIfPresent(String.self, forKey: .interfaceName)
+        productHint = try c.decodeIfPresent(String.self, forKey: .productHint)
+    }
+}
+
 /// A named route: a typed egress plus its provider configuration.
 struct Route: Codable, Identifiable, Equatable {
     var id: UUID
@@ -67,6 +96,10 @@ struct Route: Codable, Identifiable, Equatable {
     // Tailscale egress: pin a specific exit node; nil = the detected one.
     var tailscaleExitNode: String?
 
+    // VPN egress: which tunnel a `.vpnDefault` route targets. nil / .primary = the
+    // OS default VPN (today's behaviour); .interface pins a specific utun (multi-VPN).
+    var vpnSelector: VPNSelector?
+
     /// Daemon-managed: the assigned 127.0.0.1 listener port for proxy egresses.
     /// Never hand-edited.
     var localListenPort: Int?
@@ -86,6 +119,7 @@ struct Route: Codable, Identifiable, Equatable {
         sessionTTLMinutes: Int? = nil,
         remoteDNS: Bool = true,
         tailscaleExitNode: String? = nil,
+        vpnSelector: VPNSelector? = nil,
         localListenPort: Int? = nil
     ) {
         self.id = id
@@ -102,6 +136,7 @@ struct Route: Codable, Identifiable, Equatable {
         self.sessionTTLMinutes = sessionTTLMinutes
         self.remoteDNS = remoteDNS
         self.tailscaleExitNode = tailscaleExitNode
+        self.vpnSelector = vpnSelector
         self.localListenPort = localListenPort
     }
 
@@ -121,6 +156,7 @@ struct Route: Codable, Identifiable, Equatable {
         sessionTTLMinutes = try c.decodeIfPresent(Int.self, forKey: .sessionTTLMinutes)
         remoteDNS = try c.decodeIfPresent(Bool.self, forKey: .remoteDNS) ?? true
         tailscaleExitNode = try c.decodeIfPresent(String.self, forKey: .tailscaleExitNode)
+        vpnSelector = try c.decodeIfPresent(VPNSelector.self, forKey: .vpnSelector)
         localListenPort = try c.decodeIfPresent(Int.self, forKey: .localListenPort)
     }
 }

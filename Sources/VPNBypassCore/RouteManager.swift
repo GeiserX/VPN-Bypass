@@ -1106,6 +1106,99 @@ final class RouteManager: ObservableObject {
         return .unknown
     }
     
+    // MARK: - Multi-VPN link enumeration (Slice 4)
+
+    /// One live VPN-like tunnel, for the multi-VPN route picker + System Routes UI.
+    struct VPNLink: Identifiable, Equatable {
+        let interface: String
+        let addresses: [String]
+        let label: String
+        let isTailscale: Bool   // the Tailscale utun — NOT offered as a "VPN" egress
+        var id: String { interface }
+    }
+
+    /// Enumerate EVERY live tunnel (utun/ipsec/ppp/… that is UP and has an inet
+    /// address), attributed best-effort. Purely additive to the single-VPN detection
+    /// (`vpnInterface`/`vpnType`) that classic modes rely on — that path is untouched.
+    /// The Tailscale utun is flagged so it isn't offered as a plain VPN egress
+    /// (Tailscale egress has its own peer-proxy route type).
+    func listVPNLinks() async -> [VPNLink] {
+        guard let result = await runProcessAsync("/sbin/ifconfig", timeout: 5.0) else { return [] }
+
+        var byIface: [String: (up: Bool, ips: [String])] = [:]
+        var order: [String] = []
+        var current: String?
+        for line in result.output.components(separatedBy: "\n") {
+            if !line.hasPrefix("\t") && !line.hasPrefix(" ") && line.contains(":") {
+                let name = line.components(separatedBy: ":").first ?? ""
+                current = name
+                if isVPNInterface(name) {
+                    let up = line.contains("<UP,") || line.contains(",UP,") || line.contains(",UP>")
+                    if byIface[name] == nil { byIface[name] = (up, []); order.append(name) }
+                    else { byIface[name]?.up = up }
+                }
+            }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("inet "), !trimmed.contains("inet6"),
+               let c = current, isVPNInterface(c) {
+                let parts = trimmed.components(separatedBy: " ")
+                if parts.count >= 2 { byIface[c]?.ips.append(parts[1]) }
+            }
+        }
+
+        let tsIPs = await tailscaleSelfIPs()
+        var links: [VPNLink] = []
+        for iface in order {
+            guard let info = byIface[iface], info.up, !info.ips.isEmpty else { continue }
+            let isTS = info.ips.contains { tsIPs.contains($0) }
+            let label: String
+            if isTS {
+                label = "Tailscale"
+            } else if vpnInterface == iface, let t = vpnType {
+                label = t.rawValue
+            } else {
+                let t = detectVPNTypeFromInterface(iface)
+                label = t == .unknown ? "VPN (\(iface))" : t.rawValue
+            }
+            links.append(VPNLink(interface: iface, addresses: info.ips, label: label, isTailscale: isTS))
+        }
+        return links
+    }
+
+    /// The current node's Tailscale IPs (so we can spot which utun is Tailscale's).
+    private func tailscaleSelfIPs() async -> Set<String> {
+        guard let json = await readTailscaleStatusJSON() else { return [] }
+        if let selfNode = json["Self"] as? [String: Any], let ips = selfNode["TailscaleIPs"] as? [String] {
+            return Set(ips)
+        }
+        if let ips = json["TailscaleIPs"] as? [String] { return Set(ips) }
+        return []
+    }
+
+    /// Resolve a route's VPN selector to a helper gateway token for RouteCompiler:
+    /// nil (the primary VPN ⇒ no kernel route, unchanged) or `"iface:utunX"` for a
+    /// specific, currently-live, non-Tailscale tunnel. Returns nil (the route falls
+    /// back to the default) if the pinned tunnel is gone, or refuses if it resolves to
+    /// the Tailscale utun. Pure w.r.t. `links` (pass them in) so it's unit-testable.
+    func ifaceGateway(for route: Route, links: [VPNLink]) -> String? {
+        guard route.egress == .vpnDefault, let sel = route.vpnSelector, sel.kind == .interface else {
+            return nil   // primary VPN (or a non-VPN route) — no kernel route
+        }
+        // Prefer an exact interface match; fall back to the product label since utun
+        // indices renumber across reconnects.
+        let match = links.first(where: { $0.interface == sel.interfaceName })
+            ?? links.first(where: { link in sel.productHint != nil && link.label == sel.productHint })
+        guard let link = match else {
+            log(.warning, "Route '\(route.name)': its pinned VPN (\(sel.interfaceName ?? sel.productHint ?? "?")) isn't up — falling back to the default route.")
+            return nil
+        }
+        if link.isTailscale {
+            log(.warning, "Route '\(route.name)': can't target the Tailscale interface as a VPN egress — use a Tailscale Peer route instead.")
+            return nil
+        }
+        return "iface:\(link.interface)"
+    }
+
     /// Check if IP is likely a corporate VPN (not Tailscale mesh, not localhost, etc.)
     /// hintType comes from process detection -- used to distinguish Zscaler/WARP from Tailscale in the shared CGNAT range.
     private func isCorporateVPNIP(_ ip: String, hintType: VPNType?) async -> Bool {
@@ -1730,14 +1823,16 @@ final class RouteManager: ObservableObject {
         // Resolve every enabled rule's matcher to concrete kernel destinations.
         let resolved = await resolveRuleDestinations(useCacheOnly: useCacheOnly)
 
-        // Compile to the shared routesToAdd batch shape. ifaceGatewayForRoute returns nil
-        // for now (multi-VPN egress is a later wiring step) so .vpnDefault emits nothing;
-        // proxy/tailscale egresses are served by loopback listeners.
+        // Multi-VPN: enumerate the live tunnels once so a route pinned to a SPECIFIC
+        // VPN resolves to an `iface:utunX` kernel route. A `.vpnDefault`/primary route
+        // still emits nothing (stays on the OS default); proxy/tailscale egresses are
+        // served by loopback listeners, not kernel routes.
+        let links = await listVPNLinks()
         var compiled = RouteCompiler.compile(
             resolvedRules: resolved,
             routes: config.routes,
             localGateway: gateway,
-            ifaceGatewayForRoute: { _ in nil }
+            ifaceGatewayForRoute: { [weak self] route in self?.ifaceGateway(for: route, links: links) }
         )
 
         // Generalized GlobalProtect guard: never install a catch-all into a non-primary
