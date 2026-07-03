@@ -625,6 +625,9 @@ final class RouteManager: ObservableObject {
         
         guard let data = try? JSONEncoder().encode(config) else { return }
         try? data.write(to: configURL)
+        // config.json can hold proxy credentials — keep it owner-only (0600), tightening
+        // any pre-existing 0644 file on every save.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
         log(.info, "Config saved")
     }
     
@@ -642,6 +645,8 @@ final class RouteManager: ObservableObject {
         if FileManager.default.fileExists(atPath: configURL.path) {
             try? FileManager.default.removeItem(at: backupURL)
             try? FileManager.default.copyItem(at: configURL, to: backupURL)
+            // The backup carries the same proxy credentials — restrict it to 0600 too.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backupURL.path)
             log(.info, "Daily config backup created")
         }
     }
@@ -1182,10 +1187,26 @@ final class RouteManager: ObservableObject {
         guard route.egress == .vpnDefault, let sel = route.vpnSelector, sel.kind == .interface else {
             return nil   // primary VPN (or a non-VPN route) — no kernel route
         }
-        // Prefer an exact interface match; fall back to the product label since utun
-        // indices renumber across reconnects.
-        let match = links.first(where: { $0.interface == sel.interfaceName })
-            ?? links.first(where: { link in sel.productHint != nil && link.label == sel.productHint })
+        // Prefer the durable product label over the volatile utun index: macOS
+        // renumbers utun indices across VPN reconnects/reboots, so a bare-index match
+        // can silently pin a *different* tunnel than the one the user picked. When a
+        // product hint exists we trust it first, and only accept an index-only match if
+        // that index isn't currently a *different* named product.
+        let match: VPNLink?
+        if let hint = sel.productHint, !hint.isEmpty {
+            // A label is "generic/unknown" when the app couldn't name the product — the
+            // "VPN (utunX)" fallback or the "Unknown VPN" type (see listVPNLinks). Such a
+            // link is safe to accept on an index-only match; one that clearly names some
+            // OTHER product is the wrong tunnel and must not be hijacked.
+            let isGenericLabel: (VPNLink) -> Bool = { link in
+                link.label.hasPrefix("VPN (") || link.label == VPNType.unknown.rawValue
+            }
+            match = links.first(where: { $0.interface == sel.interfaceName && $0.label == hint })  // same product AND index — strongest
+                ?? links.first(where: { $0.label == hint })                                         // same product, index renumbered — the fix
+                ?? links.first(where: { $0.interface == sel.interfaceName && isGenericLabel($0) })  // index only, and not a different named product
+        } else {
+            match = links.first(where: { $0.interface == sel.interfaceName })  // productless pin — the index is the only signal
+        }
         guard let link = match else {
             log(.warning, "Route '\(route.name)': its pinned VPN (\(sel.interfaceName ?? sel.productHint ?? "?")) isn't up — falling back to the default route.")
             return nil
