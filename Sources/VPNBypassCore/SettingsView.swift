@@ -13,12 +13,13 @@ struct SettingsView: View {
     // MARK: - Tab model
 
     enum SettingsTab: Hashable {
-        case domains, services, routes, general, logs, info
+        case domains, services, rules, routes, general, logs, info
 
         var title: LocalizedStringKey {
             switch self {
             case .domains:  return "Domains"
             case .services: return "Services"
+            case .rules:    return "Rules"
             case .routes:   return "Routes"
             case .general:  return "General"
             case .logs:     return "Logs"
@@ -30,6 +31,7 @@ struct SettingsView: View {
             switch self {
             case .domains:  return "globe"
             case .services: return "square.grid.2x2.fill"
+            case .rules:    return "list.bullet.indent"
             case .routes:   return "arrow.triangle.branch"
             case .general:  return "gearshape.fill"
             case .logs:     return "list.bullet.rectangle"
@@ -38,12 +40,25 @@ struct SettingsView: View {
         }
     }
 
-    /// Ordered tabs to display. Routes is present only when multiRouteEnabled is on.
+    /// Ordered tabs to display, driven entirely by the routing mode (chosen via
+    /// RoutingModePicker in the header): Bypass/VPN Only keep the classic tabs;
+    /// Custom Routes swaps Domains/Services for Rules + Routes.
     private var visibleTabs: [SettingsTab] {
-        var tabs: [SettingsTab] = [.domains, .services]
-        if routeManager.config.multiRouteEnabled { tabs.append(.routes) }
-        tabs += [.general, .logs, .info]
-        return tabs
+        switch routeManager.config.routingMode {
+        case .bypass:  return [.domains, .services, .general, .logs, .info]
+        case .vpnOnly: return [.domains, .general, .logs, .info]
+        case .custom:  return [.rules, .routes, .general, .logs, .info]
+        }
+    }
+
+    /// If the selected tab isn't visible under the current mode (e.g. a fresh
+    /// window opened while already in Custom mode, or a mode switch while the
+    /// window is open), fall back to the first visible tab so the view is never
+    /// left showing hidden-tab content with no pill selected in the tab bar.
+    private func clampSelectedTabIfNeeded() {
+        if !visibleTabs.contains(selectedTab) {
+            selectedTab = visibleTabs.first ?? .general
+        }
     }
 
     var body: some View {
@@ -55,7 +70,7 @@ struct SettingsView: View {
             tabContent
                 .animation(.easeInOut(duration: 0.2), value: selectedTab)
         }
-        .frame(width: 580, height: 620)
+        .frame(width: 580, height: 680)
         .background(
             LinearGradient(
                 colors: [Theme.bgPrimary, Theme.bgSecondary],
@@ -63,17 +78,18 @@ struct SettingsView: View {
                 endPoint: .bottom
             )
         )
-        .onChange(of: routeManager.config.multiRouteEnabled) { enabled in
-            // If Routes was active when the flag turned off, fall back to General
-            // so the view is never left showing a hidden tab.
-            if !enabled && selectedTab == .routes {
-                selectedTab = .general
-            }
-        }
+        .onAppear { clampSelectedTabIfNeeded() }
+        .onChange(of: routeManager.config.routingMode) { _ in clampSelectedTabIfNeeded() }
     }
 
     private var headerView: some View {
         VStack(spacing: 0) {
+            // 3-way mode selector — chooses the routing mode, which in turn drives visibleTabs
+            RoutingModePicker()
+                .padding(.horizontal, 16)
+                .padding(.top, 36) // Space for titlebar traffic lights
+                .padding(.bottom, 10)
+
             // Tab bar with pill selector — driven by visibleTabs so indices stay consistent
             HStack(spacing: 6) {
                 ForEach(Array(visibleTabs.enumerated()), id: \.element) { offset, tab in
@@ -88,7 +104,6 @@ struct SettingsView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 36) // Space for titlebar traffic lights
             .padding(.bottom, 16)
 
             // Subtle separator
@@ -111,6 +126,7 @@ struct SettingsView: View {
                 switch selectedTab {
                 case .domains:  DomainsTab()
                 case .services: ServicesTab()
+                case .rules:    RulesTab()
                 case .routes:   RoutesTab()
                 case .general:  GeneralTab()
                 case .logs:     LogsTab()
@@ -206,27 +222,6 @@ struct DomainsTab: View {
                     .foregroundColor(Theme.textSecondary)
             }
 
-            // Routing mode selector
-            SettingsCard(title: "Routing Mode", icon: "arrow.triangle.swap", iconColor: Theme.purple) {
-                HStack(spacing: 12) {
-                    RoutingModeButton(
-                        title: "Bypass",
-                        subtitle: "Domains skip VPN",
-                        icon: "globe",
-                        isSelected: !isInverse,
-                        color: Theme.success
-                    ) { routeManager.setRoutingMode(.bypass) }
-
-                    RoutingModeButton(
-                        title: "VPN Only",
-                        subtitle: "Only domains use VPN",
-                        icon: "lock.shield",
-                        isSelected: isInverse,
-                        color: Theme.warning
-                    ) { routeManager.setRoutingMode(.vpnOnly) }
-                }
-            }
-            
             // Add domain input
             HStack(spacing: 10) {
                 HStack {
@@ -468,54 +463,95 @@ struct DomainRow: View {
     }
 }
 
-// MARK: - Routing Mode Button
+// MARK: - Routing Mode Picker
 
-struct RoutingModeButton: View {
+/// 3-way mode selector shown above the tab bar (see `SettingsView.headerView`).
+/// Replaces the old per-tab Bypass/VPN Only radio card — mode is chosen once,
+/// here, and drives which tabs are visible (`SettingsView.visibleTabs`).
+struct RoutingModePicker: View {
+    @EnvironmentObject var routeManager: RouteManager
+
+    private static let modes: [(mode: RouteManager.RoutingMode, title: LocalizedStringKey, icon: String)] = [
+        (.bypass, "Bypass", "globe"),
+        (.vpnOnly, "VPN Only", "lock.shield"),
+        (.custom, "Custom Routes", "arrow.triangle.branch")
+    ]
+
+    private var footnote: LocalizedStringKey {
+        switch routeManager.config.routingMode {
+        case .bypass:  return "Everything goes through your VPN except what you list below."
+        case .vpnOnly: return "Only what you list below goes through your VPN — everything else is direct."
+        case .custom:  return "Send different destinations through different routes — proxies, Tailscale, or your VPN."
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                ForEach(Array(Self.modes.enumerated()), id: \.offset) { _, entry in
+                    RoutingModeSegment(
+                        title: entry.title,
+                        icon: entry.icon,
+                        isSelected: routeManager.config.routingMode == entry.mode
+                    ) {
+                        routeManager.setRoutingMode(entry.mode)
+                    }
+                }
+            }
+
+            Text(footnote)
+                .font(.system(size: 10))
+                .foregroundColor(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+private struct RoutingModeSegment: View {
     let title: LocalizedStringKey
-    let subtitle: LocalizedStringKey
     let icon: String
     let isSelected: Bool
-    let color: Color
     let action: () -> Void
+
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                // Radio circle
-                Circle()
-                    .fill(isSelected ? color : Color.clear)
-                    .overlay(Circle().stroke(isSelected ? color : Theme.textDisabled, lineWidth: 2))
-                    .frame(width: 16, height: 16)
-                    .shadow(color: isSelected ? color.opacity(0.4) : .clear, radius: 4)
-
+            HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 14))
-                    .foregroundColor(isSelected ? color : Theme.textSecondary)
-                    .frame(width: 20)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(isSelected ? .white : Theme.textSecondary)
-                    Text(subtitle)
-                        .font(.system(size: 10))
-                        .foregroundColor(Theme.textSecondary)
-                }
-
-                Spacer()
+                    .font(.system(size: 12, weight: .medium))
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .foregroundColor(isSelected ? .white : Theme.textSecondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? color.opacity(0.1) : Theme.bgCard)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(isSelected ? color.opacity(0.4) : Color.clear, lineWidth: 1)
-                    )
+                Group {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Theme.accentGradient)
+                            .shadow(color: Theme.success.opacity(0.4), radius: 8, y: 2)
+                    } else if isHovered {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Theme.bgHover)
+                    } else {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Theme.bgCard)
+                    }
+                }
             )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
     }
 }
 
@@ -598,7 +634,7 @@ struct ServicesTab: View {
                         Text("Services disabled in VPN Only mode")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(Theme.warning)
-                        Text("Switch to Bypass mode in the Domains tab to manage services.")
+                        Text("Switch to Bypass mode above to manage services.")
                             .font(.system(size: 11))
                             .foregroundColor(Theme.textSecondary)
                     }
@@ -1838,23 +1874,6 @@ struct GeneralTab: View {
                 }
             }
             
-            // Experimental section
-            SettingsCard(title: "Experimental", icon: "flask.fill", iconColor: Theme.cyan) {
-                SettingsToggleRow(
-                    icon: "arrow.triangle.branch",
-                    title: "Multi-Route (experimental)",
-                    subtitle: "Route specific destinations through proxies (e.g. Oxylabs). Off by default.",
-                    isOn: Binding(
-                        get: { routeManager.config.multiRouteEnabled },
-                        set: { enabled in
-                            routeManager.config.multiRouteEnabled = enabled
-                            routeManager.saveConfig()
-                            Task { await routeManager.reconcileProxyListeners() }
-                        }
-                    )
-                )
-            }
-
             // About section
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -2652,7 +2671,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let hostingView = NSHostingView(rootView: settingsView)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 580, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 680),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -2664,8 +2683,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.backgroundColor = NSColor(Theme.bgPrimary)
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 580, height: 620)
-        window.contentMaxSize = NSSize(width: 580, height: 620)
+        window.contentMinSize = NSSize(width: 580, height: 680)
+        window.contentMaxSize = NSSize(width: 580, height: 680)
         window.delegate = self
         window.center()
 

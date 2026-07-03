@@ -81,6 +81,8 @@ struct RoutesTab: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            systemRoutesCard
+
             if listenerRoutes.isEmpty {
                 emptyState
             } else {
@@ -93,6 +95,38 @@ struct RoutesTab: View {
                 sheetState = nil
             } onCancel: {
                 sheetState = nil
+            }
+        }
+    }
+
+    // MARK: - System routes (the auto-created Direct / VPN-default routes)
+
+    private var systemRoutesCard: some View {
+        SettingsCard(title: "System Routes", icon: "shield.lefthalf.filled", iconColor: Theme.textSecondary) {
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(spacing: 0) {
+                    SystemRouteRow(
+                        icon: "arrow.up.right",
+                        name: "Direct",
+                        subtitle: "Your physical connection",
+                        color: Theme.textSecondary
+                    )
+                    Divider().background(Theme.divider).padding(.vertical, 4)
+                    SystemRouteRow(
+                        icon: routeManager.vpnType?.icon ?? "lock.shield",
+                        name: routeManager.vpnType?.rawValue ?? "VPN",
+                        subtitle: "Whatever tunnel is currently up",
+                        color: Theme.warning
+                    )
+                }
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 10))
+                        .foregroundColor(Theme.textTertiary)
+                    Text("Detected automatically.")
+                        .font(.system(size: 10))
+                        .foregroundColor(Theme.textTertiary)
+                }
             }
         }
     }
@@ -178,6 +212,38 @@ struct RoutesTab: View {
         routeManager.config.routes[idx].enabled = enabled
         routeManager.saveConfig()
         Task { await routeManager.reconcileProxyListeners() }
+    }
+}
+
+// MARK: - SystemRouteRow
+
+/// Read-only row for the auto-created Direct / VPN-default routes shown in
+/// "System Routes" — no edit/delete, these aren't user-configurable.
+struct SystemRouteRow: View {
+    let icon: String
+    let name: String
+    let subtitle: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13))
+                .foregroundColor(color)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.textSecondary)
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 6)
     }
 }
 

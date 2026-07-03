@@ -299,9 +299,11 @@ struct MenuContent: View {
                 .buttonStyle(.plain)
             }
             
-            // Active services summary (bypass mode only)
+            // Active services summary (bypass mode) / Routes in use (custom mode)
             if routeManager.config.routingMode == .bypass {
                 activeServicesSummary
+            } else if routeManager.config.routingMode == .custom {
+                routesInUseSummary
             }
             
             // Recent activity
@@ -501,6 +503,63 @@ struct MenuContent: View {
         .cornerRadius(8)
     }
     
+    // MARK: - Routes In Use Summary (Custom mode)
+
+    /// Custom mode's analogue of `activeServicesSummary`: enabled routes that at
+    /// least one enabled rule actually points at. Named "Routes In Use" (not
+    /// "Active Routes" — that title is already used for the kernel-route list
+    /// in `recentRoutesSection` and the Logs tab's Route Health card).
+    private var routesInUseSummary: some View {
+        let routesWithRules = routeManager.config.routes.filter { route in
+            route.enabled && routeManager.config.rules.contains { $0.enabled && $0.routeId == route.id }
+        }
+        let maxVisible = 4
+        let visibleRoutes = Array(routesWithRules.prefix(maxVisible))
+        let remainingCount = routesWithRules.count - maxVisible
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text("Routes In Use")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(routesWithRules.count)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(Theme.success)
+            }
+
+            if routesWithRules.isEmpty {
+                Text("No rules configured")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(visibleRoutes) { route in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(route.accentColor)
+                            .frame(width: 4, height: 4)
+                        Text(route.friendlyName(vpnName: routeManager.vpnType?.rawValue))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                    }
+                }
+
+                if remainingCount > 0 {
+                    Text("+\(remainingCount) more")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .cornerRadius(8)
+    }
+
     // MARK: - Recent Routes Section
     
     private var recentRoutesSection: some View {
@@ -608,12 +667,37 @@ struct MenuContent: View {
 
             Spacer()
 
-            HStack(spacing: 0) {
-                modeButton(title: "Bypass", mode: .bypass)
-                modeButton(title: "VPN Only", mode: .vpnOnly)
+            if routeManager.config.routingMode == .custom {
+                HStack(spacing: 8) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 9))
+                        Text("Custom Routes")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Theme.success.opacity(0.15))
+                    .clipShape(Capsule())
+
+                    Button {
+                        routeManager.setRoutingMode(.bypass)
+                    } label: {
+                        Text("Switch to Bypass")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else {
+                HStack(spacing: 0) {
+                    modeButton(title: "Bypass", mode: .bypass)
+                    modeButton(title: "VPN Only", mode: .vpnOnly)
+                }
+                .background(Color.secondary.opacity(0.12))
+                .cornerRadius(6)
             }
-            .background(Color.secondary.opacity(0.12))
-            .cornerRadius(6)
         }
         .padding(.top, 4)
     }
