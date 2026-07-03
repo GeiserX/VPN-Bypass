@@ -182,3 +182,28 @@ Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, ind
   to route a rule into a SPECIFIC VPN interface among several: `[VPNLink]` attribution ladder + optional
   `Route.vpnSelector` + resolve to `iface:utunX` + System-routes UI shows one row per detected VPN. Reuses
   the committed engine — no NE.
+
+## 2026-07-03 — Slice 4 COMPLETE: multi-VPN "4th way" (US-003 done) — ALL SLICES DONE
+- **Commits:** 1a51caa (engine/model: VPNSelector + listVPNLinks + ifaceGateway, wired into the compiler) ·
+  283179a (editor UI: "VPN" type + specific-tunnel picker; specific-VPN routes show their name + live in
+  Your Routes; RouteRow "VPN → utunX").
+- **Note:** the delegated multi-vpn executor hit a session limit and left no partial work; implemented + tested
+  by the orchestrator directly.
+- **Mechanism (no NE):** a `.vpnDefault` route pinned to a specific interface resolves (exact name → productHint
+  fallback for renumbered utuns → refuse if gone/Tailscale) to an `iface:utunX` kernel route via the existing
+  helper primitive. Primary VPN unchanged (nil → no route). GP catch-all guard still runs; a /32 into a foreign
+  utun is safe.
+- **Evidence:** 660 tests, 3 live-gated skips, 0 failures. Both targets build. Classic single-VPN detection
+  untouched (listVPNLinks is additive).
+
+## 2026-07-03 — ALL FOUR SLICES COMPLETE (branch feat/multi-route, 36 commits, 660 green, NOTHING merged)
+- **Slice 1** — Tailscale-peer egress (live-proven via the a tailnet peer) + the live-re-point fix.
+- **Slice 3** — scripting: `vpnb` CLI over a user-only 0600 UNIX socket (generic verbs, secrets via stdin).
+- **Slice 2** — Custom Routes mode: per-rule kernel routing engine (reviewed SAFE, classic modes byte-identical)
+  + the 3-mode UX (picker + Rules tab). GP guard hardened (M1).
+- **Slice 4** — multi-VPN egress into a specific tunnel among several.
+- **The whole thing is entitlement-free** (kernel routes + userspace loopback proxies; NO Network Extension),
+  so the app stays ad-hoc-signable. Classic Bypass / VPN Only are the untouched default.
+- **REMAINING (Sergio's gate + release prep):** (1) live-test each feature on the real machine; (2) bundle the
+  `vpnb` binary into the release DMG/cask (mechanical — see DEFERRED-QUESTIONS); (3) merge → the auto-tag CI
+  cuts the single release. Nothing merged; the release is Sergio's explicit go.
