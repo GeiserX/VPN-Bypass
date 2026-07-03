@@ -485,6 +485,13 @@ private final class Tunnel {
 
     /// Step 3 — the CONNECT request. ATYP 0x03 (domain) sends the hostname verbatim so the
     /// SOCKS5 server performs the DNS resolution (socks5h), never this process.
+    ///
+    /// Known limitation: a bracketed IPv6-literal target (e.g. `CONNECT [2001:db8::1]:443`)
+    /// is sent as a domain name too, which a strict SOCKS5 server will fail to resolve. This
+    /// is deliberately not special-cased (ATYP 0x04): the app is DNS-name/IPv4 oriented, the
+    /// deployment is IPv6-off, and a client rarely CONNECTs to a raw IPv6 literal through a
+    /// residential proxy. If that ever matters, detect the `[...]` literal here and emit
+    /// ATYP 0x04 with the 16 packed bytes via inet_pton(AF_INET6).
     private func sendSOCKS5Connect(authority: String, on server: NWConnection) {
         guard let (host, port) = Self.splitAuthority(authority) else { failSOCKS5(); return }
         let hostBytes = Data(host.utf8)

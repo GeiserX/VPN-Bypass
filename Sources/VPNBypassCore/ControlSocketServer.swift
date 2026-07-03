@@ -181,25 +181,28 @@ public final class ControlSocketServer {
             let clientFD = accept(listenFD, nil, nil)
             if clientFD < 0 {
                 let err = errno
-                // stop() closed the listening fd out from under us — exit quietly.
-                // On Darwin, closing an fd while another thread is blocked in
-                // accept() on it unblocks with ECONNABORTED (not EBADF); if the
-                // fd number gets recycled for something else before the next
-                // retry, that retry sees ENOTSOCK instead. Both can only happen
-                // to OUR OWN listenFD after stop() closed it, so they belong in
-                // the same quiet-exit bucket as EBADF/EINVAL — otherwise this
-                // loop keeps retrying (and, pre-backoff, spun at 100% CPU) on an
-                // fd that is simply gone.
-                if err == EBADF || err == EINVAL || err == ECONNABORTED || err == ENOTSOCK {
-                    return
-                }
                 if err == EINTR {
-                    continue
+                    continue   // interrupted syscall — retry immediately
                 }
-                // Unexpected but non-fatal accept() error (e.g. EMFILE/ENFILE
-                // under fd exhaustion) — keep serving, but back off first so
-                // this doesn't tight-loop at 100% CPU retrying an error that
-                // won't clear itself instantly.
+                // Decide whether to exit by STATE, not by errno. stop() closes
+                // listenFD (and sets isRunning=false) out from under a blocked
+                // accept(), which unblocks with EBADF/ECONNABORTED (and a recycled
+                // fd may then surface ENOTSOCK). But those SAME errnos also occur
+                // transiently on a HEALTHY server — most importantly ECONNABORTED,
+                // the POSIX code for a client that aborts in the window before
+                // accept() returns. Bucketing ECONNABORTED as a quiet exit would
+                // let one aborted CLI connection kill the control server until the
+                // app restarts. So the only reliable "we are shutting down" signal
+                // is our own isRunning flag — check it instead of guessing.
+                stateLock.lock()
+                let stopping = !isRunning
+                stateLock.unlock()
+                if stopping {
+                    return   // stop() asked us to exit; the fd is gone
+                }
+                // Still running: a transient accept() error (client abort before
+                // accept, or fd exhaustion like EMFILE/ENFILE). Log, back off so we
+                // don't tight-loop at 100% CPU, and keep serving.
                 NSLog("VPNBypass: control socket accept() error: %@", String(cString: strerror(err)))
                 usleep(Self.acceptErrorBackoffMicroseconds)
                 continue
