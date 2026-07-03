@@ -111,4 +111,48 @@ final class LiveProxyEgressTests: XCTestCase {
         XCTAssertFalse(exitIP.hasPrefix("10."), "should not be the corporate VPN IP")
         XCTAssertFalse(exitIP.hasPrefix("192.168."), "should not be a LAN IP")
     }
+
+    /// LIVE (TS_LIVE=1): a `.tailscaleExit` route reaches a forward proxy running on a
+    /// tailnet PEER through the Tailscale utun. The upstream (a 100.x address) must NOT
+    /// bind the physical NIC — it routes via utun. Requires a forward proxy on the peer
+    /// (see docs/research/2026-07-03-tailnet-probe.md — e.g. the throwaway tsproxy on the
+    /// a tailnet peer). TS_PEER=host:port overrides the default peer.
+    @MainActor
+    func testTailscalePeerEgressViaAppReconcile() async throws {
+        let env = ProcessInfo.processInfo.environment
+        try XCTSkipUnless(env["TS_LIVE"] == "1", "live test — run with TS_LIVE=1 and a proxy on the peer")
+        let peer = env["TS_PEER"] ?? "<tailnet-peer-ip>:8888"
+        let bits = peer.split(separator: ":")
+        guard bits.count == 2, let peerPort = Int(bits[1]) else { throw XCTSkip("TS_PEER must be host:port") }
+        let peerHost = String(bits[0])
+        XCTAssertTrue(ProxyListenerManager.isTailnetHost(peerHost), "peer must be a 100.64/10 tailnet IP")
+
+        let routeId = UUID()
+        let route = Route(id: routeId, name: "ts-live", egress: .tailscaleExit,
+                          proxyHost: peerHost, proxyPort: peerPort,
+                          tailscaleExitNode: "peer", localListenPort: 18944)
+        var cfg = RouteManager.shared.config
+        cfg.multiRouteEnabled = true
+        cfg.routes = [route]
+        RouteManager.shared.config = cfg
+        RouteManager.shared.localGateway = env["OXY_GW"] ?? "<lan-gateway>"
+
+        await RouteManager.shared.reconcileProxyListeners()
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        defer { ProxyListenerManager.shared.stopAll() }
+
+        // The upstream to the peer must not carry a physical-NIC binding.
+        let up = ProxyListenerManager.makeUpstream(route: route, boundInterface: "en8")
+        XCTAssertNil(up?.boundInterface, "a tailnet-peer upstream must route via utun, not the physical NIC")
+
+        let port = ProxyListenerManager.shared.port(for: routeId)
+        print("TS-RECONCILE listener port: \(port.map(String.init) ?? "nil")")
+        XCTAssertEqual(port, 18944, "stable per-route port honored")
+        guard let port else { return }
+
+        let exitIP = try await Self.fetchExitIP(throughLoopbackPort: port)
+        print("TS-RECONCILE egress via peer \(peer): \(exitIP)")
+        XCTAssertFalse(exitIP.isEmpty, "traffic egressed through the tailnet peer")
+        XCTAssertFalse(exitIP.hasPrefix("10."), "should not be the corporate VPN IP")
+    }
 }

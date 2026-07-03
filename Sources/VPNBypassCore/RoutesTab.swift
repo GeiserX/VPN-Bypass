@@ -30,9 +30,9 @@ struct RoutesTab: View {
     @ObservedObject private var listenerManager = ProxyListenerManager.shared
     @State private var sheetState: RouteSheetState?
 
-    private var proxyRoutes: [Route] {
+    private var listenerRoutes: [Route] {
         routeManager.config.routes.filter {
-            $0.egress == .proxyHTTP || $0.egress == .proxySOCKS5
+            ProxyListenerManager.usesLocalListener($0.egress)
         }
     }
 
@@ -51,8 +51,8 @@ struct RoutesTab: View {
 
                 Spacer()
 
-                if !proxyRoutes.isEmpty {
-                    Text("\(proxyRoutes.filter { $0.enabled }.count)/\(proxyRoutes.count) active")
+                if !listenerRoutes.isEmpty {
+                    Text("\(listenerRoutes.filter { $0.enabled }.count)/\(listenerRoutes.count) active")
                         .font(.system(size: 11))
                         .foregroundColor(Theme.textSecondary)
                 }
@@ -66,7 +66,7 @@ struct RoutesTab: View {
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
-                .help("Add Proxy Route")
+                .help("Add Route")
             }
 
             // Helper hint
@@ -81,7 +81,7 @@ struct RoutesTab: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if proxyRoutes.isEmpty {
+            if listenerRoutes.isEmpty {
                 emptyState
             } else {
                 routeList
@@ -117,7 +117,7 @@ struct RoutesTab: View {
                 HStack(spacing: 6) {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 13))
-                    Text("Add Proxy Route")
+                    Text("Add Route")
                         .font(.system(size: 13, weight: .medium))
                 }
                 .foregroundColor(.white)
@@ -135,9 +135,9 @@ struct RoutesTab: View {
     // MARK: - Route list
 
     private var routeList: some View {
-        SettingsCard(title: "Proxy Routes", icon: "arrow.triangle.branch", iconColor: Theme.blue) {
+        SettingsCard(title: "Routes", icon: "arrow.triangle.branch", iconColor: Theme.blue) {
             VStack(spacing: 0) {
-                ForEach(Array(proxyRoutes.enumerated()), id: \.element.id) { idx, route in
+                ForEach(Array(listenerRoutes.enumerated()), id: \.element.id) { idx, route in
                     RouteRow(route: route, listenerPort: listenerManager.port(for: route.id)) {
                         sheetState = .edit(route)
                     } onDelete: {
@@ -145,7 +145,7 @@ struct RoutesTab: View {
                     } onToggle: { enabled in
                         toggleRoute(route.id, enabled: enabled)
                     }
-                    if idx < proxyRoutes.count - 1 {
+                    if idx < listenerRoutes.count - 1 {
                         Divider()
                             .background(Theme.divider)
                             .padding(.vertical, 4)
@@ -193,19 +193,38 @@ struct RouteRow: View {
     @State private var didCopy = false
 
     private var typeLabel: String {
-        route.egress == .proxyHTTP ? "HTTP CONNECT" : "SOCKS5"
+        switch route.egress {
+        case .proxyHTTP: return "HTTP CONNECT"
+        case .proxySOCKS5: return "SOCKS5"
+        case .tailscaleExit: return "Tailscale"
+        case .vpnDefault, .direct: return "Route"
+        }
     }
 
     private var typeAccent: Color {
-        route.egress == .proxyHTTP ? Theme.blue : Theme.purple
+        switch route.egress {
+        case .proxyHTTP: return Theme.blue
+        case .proxySOCKS5: return Theme.purple
+        case .tailscaleExit: return Theme.success
+        case .vpnDefault, .direct: return Theme.textSecondary
+        }
     }
 
     private var upstreamDisplay: String {
-        let host = route.proxyHost ?? "—"
-        if let port = route.proxyPort {
-            return "\(host):\(port)"
+        switch route.egress {
+        case .tailscaleExit:
+            let peerName = route.tailscaleExitNode ?? route.proxyHost ?? "—"
+            if let port = route.proxyPort {
+                return "\(peerName) · :\(port)"
+            }
+            return peerName
+        case .proxyHTTP, .proxySOCKS5, .vpnDefault, .direct:
+            let host = route.proxyHost ?? "—"
+            if let port = route.proxyPort {
+                return "\(host):\(port)"
+            }
+            return host
         }
-        return host
     }
 
     var body: some View {
@@ -336,6 +355,11 @@ struct RouteEditorSheet: View {
     @State private var proxyPass: String
     @State private var validationError: String?
 
+    // Tailscale-peer egress: picking a peer from the list sets both of these.
+    @State private var selectedPeerIP: String
+    @State private var tailscaleNodeName: String
+    @State private var peers: [RouteManager.TailscalePeer] = []
+
     init(
         editingRoute: Route?,
         onSave: @escaping (Route) -> Void,
@@ -350,6 +374,8 @@ struct RouteEditorSheet: View {
         _proxyPortText = State(initialValue: editingRoute?.proxyPort.map(String.init) ?? "")
         _proxyUser = State(initialValue: editingRoute?.proxyUser ?? "")
         _proxyPass = State(initialValue: editingRoute?.proxyPass ?? "")
+        _selectedPeerIP = State(initialValue: editingRoute?.proxyHost ?? "")
+        _tailscaleNodeName = State(initialValue: editingRoute?.tailscaleExitNode ?? "")
     }
 
     private var isEditing: Bool { editingRoute != nil }
@@ -358,7 +384,7 @@ struct RouteEditorSheet: View {
         VStack(spacing: 0) {
             // Sheet header
             HStack {
-                Text(isEditing ? "Edit Proxy Route" : "Add Proxy Route")
+                Text(isEditing ? "Edit Route" : "Add Route")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.white)
                 Spacer()
@@ -393,23 +419,71 @@ struct RouteEditorSheet: View {
                         Picker("", selection: $egress) {
                             Text("HTTP CONNECT").tag(Egress.proxyHTTP)
                             Text("SOCKS5").tag(Egress.proxySOCKS5)
+                            Text("Tailscale Peer").tag(Egress.tailscaleExit)
                         }
                         .pickerStyle(.segmented)
                     }
 
-                    formField(label: "Upstream Host", required: true) {
-                        TextField("pr.oxylabs.io", text: $proxyHost)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(Theme.bgInput)
-                            .cornerRadius(8)
+                    if egress == .tailscaleExit {
+                        formField(label: "Tailscale Peer", required: true) {
+                            if peers.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    TextField("100.x.x.x", text: $selectedPeerIP)
+                                        .textFieldStyle(.plain)
+                                        .font(.system(size: 13, design: .monospaced))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 8)
+                                        .background(Theme.bgInput)
+                                        .cornerRadius(8)
+                                    HStack(alignment: .top, spacing: 6) {
+                                        Image(systemName: "info.circle")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(Theme.textTertiary)
+                                        Text("No Tailscale peers detected — enter the peer's 100.x IP manually.")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(Theme.textSecondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                            } else {
+                                Picker("", selection: Binding(
+                                    get: { selectedPeerIP },
+                                    set: { newIP in
+                                        selectedPeerIP = newIP
+                                        if let match = peers.first(where: { $0.ip == newIP }) {
+                                            tailscaleNodeName = match.name
+                                        }
+                                    }
+                                )) {
+                                    ForEach(peers) { peer in
+                                        HStack(spacing: 6) {
+                                            Circle()
+                                                .fill(peer.online ? Theme.success : Theme.textTertiary)
+                                                .frame(width: 6, height: 6)
+                                            Text(peer.name)
+                                        }
+                                        .tag(peer.ip)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                            }
+                        }
+                    } else {
+                        formField(label: "Upstream Host", required: true) {
+                            TextField("pr.oxylabs.io", text: $proxyHost)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(Theme.bgInput)
+                                .cornerRadius(8)
+                        }
                     }
 
-                    formField(label: "Upstream Port", required: true) {
-                        TextField("8080", text: $proxyPortText)
+                    formField(label: egress == .tailscaleExit ? "Proxy port on peer" : "Upstream Port", required: true) {
+                        TextField(egress == .tailscaleExit ? "8888" : "8080", text: $proxyPortText)
                             .textFieldStyle(.plain)
                             .font(.system(size: 13, design: .monospaced))
                             .foregroundColor(.white)
@@ -439,6 +513,19 @@ struct RouteEditorSheet: View {
                             .padding(.vertical, 8)
                             .background(Theme.bgInput)
                             .cornerRadius(8)
+                    }
+
+                    if egress == .tailscaleExit {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "info.circle")
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.textTertiary)
+                                .padding(.top, 1)
+                            Text("Runs a small forward proxy (e.g. tinyproxy) on a Tailscale peer; traffic on this route exits through that peer's internet connection. Set up the proxy on the peer first, listening on its Tailscale IP.")
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
 
                     if let error = validationError {
@@ -488,6 +575,9 @@ struct RouteEditorSheet: View {
         }
         .frame(width: 400)
         .background(Theme.bgSecondary)
+        .task {
+            peers = await RouteManager.shared.listTailscalePeers()
+        }
     }
 
     @ViewBuilder
@@ -513,14 +603,17 @@ struct RouteEditorSheet: View {
 
     private func attemptSave() {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
-        let trimmedHost = proxyHost.trimmingCharacters(in: .whitespaces)
+        let isTailscalePeer = egress == .tailscaleExit
+        let trimmedHost = (isTailscalePeer ? selectedPeerIP : proxyHost).trimmingCharacters(in: .whitespaces)
 
         guard !trimmedName.isEmpty else {
             validationError = "Name is required."
             return
         }
         guard !trimmedHost.isEmpty else {
-            validationError = "Upstream host is required."
+            validationError = isTailscalePeer
+                ? "Select a Tailscale peer (or enter its 100.x IP)."
+                : "Upstream host is required."
             return
         }
         guard let port = Int(proxyPortText.trimmingCharacters(in: .whitespaces)),
@@ -537,7 +630,8 @@ struct RouteEditorSheet: View {
             proxyHost: trimmedHost,
             proxyPort: port,
             proxyUser: proxyUser.isEmpty ? nil : proxyUser,
-            proxyPass: proxyPass.isEmpty ? nil : proxyPass
+            proxyPass: proxyPass.isEmpty ? nil : proxyPass,
+            tailscaleExitNode: isTailscalePeer && !tailscaleNodeName.isEmpty ? tailscaleNodeName : nil
         )
         onSave(route)
     }
