@@ -59,13 +59,20 @@ enum RouteCompiler {
         // rule could install a kernel route for a destination the proxy listener owns,
         // splitting one destination across two egresses.
         //
-        // DEFERRED (revisit when the multi-VPN slice makes more egresses emit kernel
-        // routes): claiming is by EXACT destination string, not CIDR containment, so a
-        // later rule's host IP that falls inside an earlier rule's CIDR can disagree with
-        // RuleResolver's containment-aware first-match. Masked in this slice — iface-VPN
-        // emits nothing, Direct-in-Direct is the same gateway, and proxy CIDRs aren't
-        // kernel-routed — so no wrong kernel route results today.
-        var claimed: Set<String> = []
+        // Claiming is by CIDR CONTAINMENT, not exact string: a new destination is
+        // suppressed when it is fully contained in (a subset of, or equal to) a range an
+        // EARLIER rule already claimed. This is required for first-match correctness under
+        // the kernel's longest-prefix-match. If an earlier /8 owns 10.0.0.0/8 and a later
+        // rule routes the host 10.1.2.3 into a different egress (e.g. a specific utun),
+        // both would be distinct strings and both emit — then the kernel's LPM lets the
+        // /32 win for 10.1.2.3, sending it to the VPN even though the earlier /8 claimed
+        // it. So the narrower-or-equal later dest is dropped; the earlier rule keeps it.
+        // Directionality matters: ONLY a narrower-or-equal new dest is suppressed. A later
+        // BROADER dest (e.g. a /8 after an earlier /32) still emits — LPM correctly lets
+        // the earlier narrower route win for its sub-range while the broader route serves
+        // the rest. IPv4 only; a non-IPv4 dest (IPv6 literal, ::/0, malformed) falls back
+        // to exact-string claiming so the containment math never runs on it (never crashes).
+        var claimed: [Claim] = []
 
         for entry in resolvedRules where entry.rule.enabled {
             // A rule pointing at a route that no longer exists is inert (matches the
@@ -85,7 +92,7 @@ enum RouteCompiler {
             }
 
             for dest in entry.dests {
-                guard claimed.insert(dest.value).inserted else { continue }  // first rule wins
+                guard claim(dest.value, in: &claimed) else { continue }  // first rule wins (by containment)
                 guard let gateway else { continue }
                 out.append(DesiredRoute(
                     destination: dest.value,
@@ -96,6 +103,78 @@ enum RouteCompiler {
             }
         }
         return out
+    }
+
+    // MARK: - CIDR-containment claiming
+
+    /// One entry in the containment-aware claim list: a parsed IPv4 range (compared by
+    /// CIDR containment) or a raw string (exact-match fallback for a non-IPv4 dest such
+    /// as an IPv6 literal, where the containment math doesn't apply).
+    private enum Claim {
+        case v4(network: UInt32, prefix: Int)
+        case raw(String)
+    }
+
+    /// First-match claim of `dest` against the ordered `claimed` list, containment-aware.
+    /// Returns true (and records the new claim) when NO earlier claim already covers
+    /// `dest`; returns false (suppress) when an earlier claim fully contains it — that
+    /// earlier rule owns the IP space, so no later rule may re-route any of it. The
+    /// direction is one-way: only a narrower-or-equal `dest` is suppressed; a broader
+    /// `dest` is still recorded and routed (kernel LPM carves out the earlier narrower
+    /// route). Mirrors Set.insert(_:).inserted, but CIDR-aware for IPv4.
+    private static func claim(_ dest: String, in claimed: inout [Claim]) -> Bool {
+        if let newRange = parseIPv4(dest) {
+            for case let .v4(network, prefix) in claimed
+                where isSubset(newRange, of: (network: network, prefix: prefix)) {
+                return false
+            }
+            claimed.append(.v4(network: newRange.network, prefix: newRange.prefix))
+        } else {
+            for case let .raw(string) in claimed where string == dest { return false }
+            claimed.append(.raw(dest))
+        }
+        return true
+    }
+
+    /// Parse an IPv4 host ("A.B.C.D" ⇒ /32) or IPv4 CIDR ("A.B.C.D/N") into a canonical
+    /// (network, prefix) with the host bits below `prefix` zeroed. Returns nil for anything
+    /// not parseable as IPv4 (empty, malformed, or an IPv6 literal) so the caller falls
+    /// back to exact-string claiming. Dotted-quad is parsed by hand — 4 octets 0...255.
+    private static func parseIPv4(_ dest: String) -> (network: UInt32, prefix: Int)? {
+        let slashParts = dest.split(separator: "/", omittingEmptySubsequences: false)
+        guard slashParts.count == 1 || slashParts.count == 2 else { return nil }
+        let prefix: Int
+        if slashParts.count == 2 {
+            guard let p = Int(slashParts[1]), (0...32).contains(p) else { return nil }
+            prefix = p
+        } else {
+            prefix = 32
+        }
+        let octets = slashParts[0].split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4 else { return nil }
+        var addr: UInt32 = 0
+        for octet in octets {
+            guard let value = UInt32(octet), value <= 255 else { return nil }
+            addr = (addr << 8) | value
+        }
+        return (network: maskIPv4(addr, prefix), prefix: prefix)
+    }
+
+    /// Zero the host bits below `prefix` so a network address compares canonically.
+    private static func maskIPv4(_ addr: UInt32, _ prefix: Int) -> UInt32 {
+        if prefix <= 0 { return 0 }
+        if prefix >= 32 { return addr }
+        return addr & (~UInt32(0) << (32 - prefix))
+    }
+
+    /// True when `inner` is fully contained in (a subset of, or equal to) `outer`: outer's
+    /// prefix is shorter-or-equal AND inner's network masked to outer's prefix equals
+    /// outer's network — i.e. every address in `inner` is also in `outer`.
+    private static func isSubset(
+        _ inner: (network: UInt32, prefix: Int),
+        of outer: (network: UInt32, prefix: Int)
+    ) -> Bool {
+        outer.prefix <= inner.prefix && maskIPv4(inner.network, outer.prefix) == outer.network
     }
 
     // MARK: - GlobalProtect catch-all guard (generalizes refuseVPNOnlyUnderGlobalProtect)

@@ -135,6 +135,111 @@ final class RouteCompilerTests: XCTestCase {
         XCTAssertTrue(out.isEmpty)
     }
 
+    // MARK: - CIDR-containment claiming (first-match under kernel longest-prefix-match)
+
+    /// The H3 bug: an earlier /8 → Direct must suppress a LATER host (/32) that falls
+    /// inside it and routes to a different egress. Without containment claiming both emit
+    /// and the kernel's longest-prefix-match sends 10.1.2.3 to the VPN — violating the
+    /// first-match rule that the earlier Direct /8 owns that whole space.
+    func testEarlierCIDRSuppressesLaterContainedHostToDifferentEgress() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [("10.0.0.0/8", true)], pattern: "10.0.0.0/8", matchType: .cidr, order: 0),
+                rr(vpn, [("10.1.2.3", false)], pattern: "corp", order: 1),
+            ],
+            routes: [direct, vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun5" }
+        )
+        XCTAssertEqual(out, [RouteCompiler.DesiredRoute(destination: "10.0.0.0/8", gateway: "gw", isNetwork: true, source: "10.0.0.0/8")])
+    }
+
+    /// Reverse direction: an earlier /32 does NOT suppress a LATER broader /8. The /8 is
+    /// not contained in the /32, so it still emits; the kernel's longest-prefix-match
+    /// carves the earlier /32 out of the later /8.
+    func testEarlierHostDoesNotSuppressLaterBroaderCIDR() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [("10.1.2.3", false)], pattern: "corp", order: 0),
+                rr(vpn, [("10.0.0.0/8", true)], pattern: "10.0.0.0/8", matchType: .cidr, order: 1),
+            ],
+            routes: [direct, vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun5" }
+        )
+        XCTAssertEqual(out.count, 2)
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "10.1.2.3", gateway: "gw", isNetwork: false, source: "corp")))
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "10.0.0.0/8", gateway: "iface:utun5", isNetwork: true, source: "10.0.0.0/8")))
+    }
+
+    /// Equal destination strings across two rules still dedup to the first (the prefix-
+    /// equal case of containment): 10.0.0.0/8 Direct then 10.0.0.0/8 VPN ⇒ only Direct.
+    func testEqualStringsStillDedupFirstWins() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [("10.0.0.0/8", true)], pattern: "10.0.0.0/8", matchType: .cidr, order: 0),
+                rr(vpn, [("10.0.0.0/8", true)], pattern: "corp", matchType: .cidr, order: 1),
+            ],
+            routes: [direct, vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun5" }
+        )
+        XCTAssertEqual(out, [RouteCompiler.DesiredRoute(destination: "10.0.0.0/8", gateway: "gw", isNetwork: true, source: "10.0.0.0/8")])
+    }
+
+    /// A proxy rule (gateway nil) that claims a /8 suppresses a LATER Direct host inside
+    /// it — the proxy listener owns that IP space, so no Direct /32 kernel route is
+    /// installed (it would split the space across two egresses).
+    func testProxyCIDRClaimSuppressesLaterContainedDirectHost() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(socks, [("10.0.0.0/8", true)], pattern: "10.0.0.0/8", matchType: .cidr, order: 0),
+                rr(direct, [("10.1.2.3", false)], pattern: "corp", order: 1),
+            ],
+            routes: [socks, direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertTrue(out.isEmpty, "proxy owns 10.0.0.0/8; the later contained Direct 10.1.2.3 is suppressed")
+    }
+
+    /// Non-overlapping ranges are independent — neither contains the other, so both emit.
+    func testNonOverlappingRangesBothEmit() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [("10.0.0.0/8", true)], pattern: "10.0.0.0/8", matchType: .cidr, order: 0),
+                rr(direct, [("192.168.0.0/16", true)], pattern: "192.168.0.0/16", matchType: .cidr, order: 1),
+            ],
+            routes: [direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertEqual(out.count, 2)
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "10.0.0.0/8", gateway: "gw", isNetwork: true, source: "10.0.0.0/8")))
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "192.168.0.0/16", gateway: "gw", isNetwork: true, source: "192.168.0.0/16")))
+    }
+
+    /// A non-IPv4 destination (IPv6 literal) falls back to EXACT-STRING claiming: two
+    /// identical strings dedup to the first, a distinct one still emits, and the
+    /// containment math is never run on it (no crash).
+    func testNonIPv4DestinationFallsBackToExactStringClaiming() {
+        let v6 = "2606:4700:4700::1111"
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [(v6, false)], pattern: "a", order: 0),
+                rr(vpn, [(v6, false)], pattern: "b", order: 1),                        // exact dup ⇒ suppressed
+                rr(direct, [("2606:4700:4700::1001", false)], pattern: "c", order: 2),  // distinct ⇒ emits
+            ],
+            routes: [direct, vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun5" }
+        )
+        XCTAssertEqual(out.count, 2)
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: v6, gateway: "gw", isNetwork: false, source: "a")))
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "2606:4700:4700::1001", gateway: "gw", isNetwork: false, source: "c")))
+    }
+
+    /// A malformed destination (not IPv4, not even a valid IP) also falls back to exact-
+    /// string claiming and never crashes the containment parser.
+    func testMalformedDestinationExactStringClaimingNoCrash() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [("not-an-ip", false)], pattern: "a", order: 0),
+                rr(vpn, [("not-an-ip", false)], pattern: "b", order: 1),  // exact dup ⇒ suppressed
+            ],
+            routes: [direct, vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun5" }
+        )
+        XCTAssertEqual(out, [RouteCompiler.DesiredRoute(destination: "not-an-ip", gateway: "gw", isNetwork: false, source: "a")])
+    }
+
     // MARK: - GlobalProtect catch-all guard
 
     func testIsCatchAllRecognizesAllThreeForms() {
