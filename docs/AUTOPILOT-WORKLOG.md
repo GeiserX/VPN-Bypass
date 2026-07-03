@@ -73,3 +73,32 @@ Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, ind
 - **Next → Slice 1:** Tailscale-peer egress (proxy-over-tailnet), reusing ProxyForwarder with
   boundInterface=nil for tailnet peers; peer picker from `tailscale status --json`; 100.112/12-under-GP
   guard; then stand up tinyproxy on the mini and live-verify a distinct exit IP.
+
+## 2026-07-03 — Slice 1 (Tailscale-peer egress) — core done + LIVE-PROVEN
+- **Core** (`482556f`): `.tailscaleExit` served by a loopback listener (proxy-over-tailnet); upstream to a
+  100.64/10 peer NEVER binds the physical NIC (routes via utun); GP-shadow guard (pause a listener whose
+  peer ∈ 100.112/12 while GP up); `listTailscalePeers()` for the UI picker. No model change. 5 new tests.
+- **Suite:** 601 tests, 2 live-gated skips, 0 failures. Build clean.
+- **LIVE network proof (Sergio's Mac + a tailnet peer):** stood up a throwaway Python CONNECT proxy on the mini
+  bound to its tailnet IP `<tailnet-peer-ip>:8888` (zero-install, reversible: `/tmp/tsproxy.py`,
+  `pkill -f /tmp/tsproxy.py` to remove). `curl -x http://<tailnet-peer-ip>:8888 https://ipinfo.io/ip` → 200;
+  the mini's proxy log shows `CONNECT from <tailnet-peer-ip> -> ipinfo.io:443` = THIS Mac's tailnet IP →
+  proves Mac → tailnet(utun10) → mini → internet. Exit IP == direct (<home-wan-ip>) only because the mini is
+  on the same home WAN; the geographic value appears when the MacBook is remote.
+- **App-path live test** (gated TS_LIVE=1, TS_PEER=host:port): `testTailscalePeerEgressViaAppReconcile`
+  drives the REAL reconcile → stable listener → asserts upstream binding is nil + egress works. To run
+  once the build is free.
+- **UI** (delegated, in review): RouteEditorSheet gains a "Tailscale Peer" type + peer picker from
+  `listTailscalePeers()`; RouteRow shows Tailscale routes. Not yet committed (under review).
+
+## 2026-07-03 — scripting addenda + a real bug found (folded into Slice 1 / Slice 3)
+- **Scripting design LOCKED** (architect + ux-designer addenda): a bundled `vpnb` CLI (2nd SwiftPM exe
+  target, cask-symlinked) over a user-only 0600 UNIX socket → a pure MainActor `CommandRouter`; secrets via
+  stdin only (never argv/logs); versioned envelope; `reload` verb (no file-watcher); HTTP/App-Intents
+  rejected as primary. Auto-refreshes GUI via existing `RouteManager.shared` reactivity. → Slice 3. Full
+  detail in docs/MULTI-ROUTE-DESIGN.md § Scripting.
+- **BUG found (architect):** `ProxyListenerManager.reconcile` keys only on route **id**, so editing a live
+  route's host/port/creds is a NO-OP until app restart — breaks the user's "re-point the Oxylabs port live"
+  use case AND the Routes UI edit flow. Fix (Phase A.5, folding into Slice 1): fingerprint each route's
+  upstream; restart the forwarder when the fingerprint changes. Holding the source edit until the UI
+  executor finishes (avoid build contention), then apply + test + review UI + one green suite run.

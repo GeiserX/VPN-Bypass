@@ -300,25 +300,59 @@ conflicts with the older text; the older sections are kept for history.
   rollup (distinct from the existing kernel "Active Routes" section). Copy strings are specified in the UX
   memo captured in the worklog.
 
-### Scripting / automation surface (new requirement — generic, no per-provider integrations)
+### Scripting / automation surface (new requirement — generic, no per-provider integrations) — LOCKED
 
 - **Verbs over the app's OWN model only** (routes/rules/mode/status) — the app never learns "Oxylabs" or
   any vendor API. Canonical use case: a script re-points a route's upstream host/port (switch an Oxylabs
   dedicated-ISP port = switch exit IP) and the listener reconciles live.
-- **Transport (leading candidate, pending the security critique): a bundled `vpnbypass` CLI talking to the
-  running app over a user-only UNIX domain socket** (`0600`, under `~/Library/Application Support`, **no
-  TCP**), peer-uid-checked (`getpeereid`), credential values never echoed back. Alternatives weighed:
-  config-file-watch + reload; AppleScript/App Intents; Clash-style localhost-HTTP+token (rejected as a
-  network surface). The mechanism must not widen the privileged-helper boundary beyond what the GUI already
-  allows. Command schema is versioned.
+- **PREREQUISITE BUG (Phase A.5, fix in Slice 1):** `ProxyListenerManager.reconcile` currently keys only on
+  route **id** — a route whose id is unchanged but whose host/port/creds/template/sessionMode changed is
+  neither stopped nor started, so the forwarder keeps the `Upstream` captured at construction. Thus
+  "re-point a route's port live" is a **no-op today**, and the same bug bites the Routes UI when editing an
+  existing proxy route. Fix: fingerprint each route's upstream (`host|port|user|pass|userTmpl|passTmpl|
+  sessionMode|ttl`); when the fingerprint changes for a live id, stop+restart that one forwarder. Tiny,
+  standalone, unblocks live re-point for BOTH the CLI and the GUI edit flow. (The same restart primitive
+  later powers a `route.rotate` verb for rotating/sticky sessions.)
+- **Transport (LOCKED): a bundled `vpnb`/`vpnbypass` CLI (a second SwiftPM executable target, cask-symlinked
+  to PATH) talking to the running app over a user-only UNIX domain socket** — `~/Library/Application
+  Support/VPNBypass/control.sock`, dir `0700`, socket `0600`, **no TCP**. Filesystem perms are the auth
+  (same-user only, which is who the app runs as); optional belt-and-suspenders peer-code check mirrors the
+  helper's `SecCodeCheckValidity`. This is the unprivileged analog of the existing privileged-helper XPC.
+- **Architecture:** a pure `CommandRouter` enum (`{cmd,args} → RouteManager mutation`), unit-tested exactly
+  like `RuleResolver`/`HookGenerator`; a thin `ControlSocketServer` (own queue, `NWListener` on
+  `NWEndpoint.unix(path:)`) does framing + `MainActor.run { router.dispatch }`. The socket mutates
+  `RouteManager` config + listeners only; kernel-affecting verbs go through the SAME apply path a GUI action
+  does (GP catch-all refusal, helper-readiness, epoch preemption all inherited) — **no new privilege path,
+  no capability the GUI user lacks**. Because both Settings and the menu bar bind the one `RouteManager.shared`,
+  a scripted change auto-refreshes both surfaces via existing SwiftUI reactivity (no new refresh mechanism).
+  Guard the handler with the existing `acquireRouteOperation()` lock so a script + GUI edit don't race.
+- **Credentials never echoed:** the CLI reads secrets from **stdin or env, never argv** (argv is world-
+  visible in `ps` + shell history) — e.g. `vpnb route set <id> port=… pass:-` (`pass:-` = read from stdin).
+  Replies/logs reuse the `sanitizedForExport` discipline: "route X upstream updated", never the value.
+- **Schema versioning:** newline-delimited JSON, envelope versioned on its OWN `v` axis (independent of
+  `config.schemaVersion`); additive verbs/args don't bump `v`; a breaking change bumps `v` and the app
+  accepts `v`+`v-1` for a window; unknown `v` → clear error, never silent misparse. `status` advertises
+  supported `v` + `schemaVersion` for feature-detection.
+- **UX (from the design addendum):** an "Automation" card in General (the retired Experimental slot) with
+  the CLI path + a copy-able cheat-sheet; a split Copy control on RouteRow ("Copy Shell Exports" / "Copy CLI
+  Command") and a "Copy CLI Command" item in RuleRow's overflow; log provenance `… via CLI`; a transient
+  row highlight on externally-sourced changes. App-not-running fallback: CLI writes config.json directly but
+  says so explicitly (`--queue` to apply on next launch), never a silent surprise.
+- **Rejected as primary:** config-file-watch (no validation, plaintext-secret-in-file, second writer racing
+  `saveConfig()` — folded in only as an explicit `reload` verb, NOT an FSEvents watcher); AppleScript/App
+  Intents (poor secret passing, resign/OS churn — later, as a thin shim over the same `CommandRouter`);
+  localhost-HTTP+token (a TCP port every local process can reach + token lifecycle + CSRF/rebinding — bad
+  look on a security tool; only if remote control is ever needed, and then Tailscale-bound, never localhost).
 
 ### Build order (each slice independently green + releasable; single release at the very end)
 
-1. **Slice 1 — Tailscale-peer egress via proxy-over-tailnet.** App-side: a Tailscale route = a proxy route
-   whose upstream is a tailnet peer (`MagicDNS`/`100.x : port`), `boundInterface = nil` (route via the TS
-   utun, do **not** bind the physical NIC), remote-DNS by construction. Peer picker from
-   `tailscale status --json`. `100.112/12`-under-GP guard. Infra: stand up tinyproxy on the a tailnet peer
-   (`<tailnet-peer-ip>`) via Docker/GitOps. Live-verify a different exit IP. Reuses `ProxyForwarder`.
+1. **Slice 1 — Tailscale-peer egress via proxy-over-tailnet + the live-re-point fix.** App-side: a Tailscale
+   route = a proxy route whose upstream is a tailnet peer (`100.x : port`), `boundInterface = nil` (route via
+   the TS utun, do **not** bind the physical NIC), remote-DNS by construction. Peer picker from
+   `tailscale status --json`. `100.112/12`-under-GP guard. **Includes the Phase A.5 fingerprint fix** so
+   editing a live route's host/port/creds restarts its forwarder (today a no-op — breaks both the UI edit
+   flow and the scripting re-point use case). Reuses `ProxyForwarder`. Live-verified end-to-end (Mac →
+   tailnet → a tailnet peer → internet; the mini's proxy log confirms the path).
 2. **Slice 2 — UX mode overhaul.** `routingMode.custom` third case; mode picker above tabs; Rules tab +
    generalized Routes tab; visible `derive()` migration; the `.custom` branch through `setRoutingMode()` +
    the ~5 hardcoded binary call sites. Pure UI + plumbing; no new engine.
