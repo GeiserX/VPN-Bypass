@@ -43,7 +43,7 @@ extension RouteManager {
     func addRoute(_ route: Route) {
         config.routes.append(route)
         saveConfig()
-        Task { await reconcileProxyListeners() }
+        Task { await reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: false) }
     }
 }
 
@@ -318,7 +318,7 @@ struct RulesTab: View {
 
     private func persistAndReapply() {
         routeManager.saveConfig()
-        Task { await routeManager.detectAndApplyRoutesAsync(sendNotification: false) }
+        Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
     }
 }
 

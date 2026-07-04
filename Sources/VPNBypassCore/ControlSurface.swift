@@ -37,19 +37,16 @@ public enum ControlSurface {
         RouteManager.shared.saveConfig()
         RouteManager.shared.log(.info, "Control: '\(request.cmd)' applied via the command line")
 
-        // Proxy/Tailscale routes: re-point/start/stop the affected listener live.
-        await RouteManager.shared.reconcileProxyListeners()
-
-        // KERNEL routes must be re-applied for anything that changes what gets routed
-        // where — otherwise a scripted `rule.add`/`route.*`/`default` persists to config
-        // but the kernel table stays stale until the next hourly DNS refresh (or never).
-        // This mirrors the GUI, which re-applies after every rule/route mutation.
+        // Reconcile proxy/Tailscale listeners live, then re-apply KERNEL routes for anything
+        // that changes what gets routed where — otherwise a scripted `rule.add`/`route.*`/`default`
+        // persists to config but the kernel table stays stale until the next hourly DNS refresh
+        // (or never). This mirrors the GUI, which re-applies after every rule/route mutation.
         //   - `mode` → the new mode's routes (legacy or custom).
         //   - in Custom mode, ANY mutating verb → recompile the per-rule kernel routes.
+        // Awaited inline (no Task): the socket response must return only after routes apply.
         let cfg = RouteManager.shared.config
-        if request.cmd == "mode" || (cfg.schemaVersion >= 2 && cfg.routingMode == .custom) {
-            await RouteManager.shared.detectAndApplyRoutesAsync(sendNotification: false)
-        }
+        let reapply = request.cmd == "mode" || RouteManager.usesCustomEngine(schemaVersion: cfg.schemaVersion, routingMode: cfg.routingMode)
+        await RouteManager.shared.reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: reapply)
 
         return response
     }

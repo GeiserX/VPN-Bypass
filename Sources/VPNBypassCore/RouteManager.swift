@@ -3843,6 +3843,15 @@ final class RouteManager: ObservableObject {
         return nil
     }
 
+    /// Make an in-memory config change live: reconcile proxy listeners and/or reapply the
+    /// custom-engine kernel routes, per the caller's policy. The caller persists (saveConfig)
+    /// and mutates config BEFORE calling this. Strictly a plumbing dedup of the tail that was
+    /// copied across the mutation surfaces — every per-site policy is an explicit argument.
+    func reconcileAfterConfigChange(reconcileListeners: Bool, reapplyRoutes: Bool, sendNotification: Bool = false) async {
+        if reconcileListeners { await reconcileProxyListeners() }
+        if reapplyRoutes { await detectAndApplyRoutesAsync(sendNotification: sendNotification) }
+    }
+
     /// Start/stop proxy-route listeners to match the current config (P1,
     /// VPN-Bypass-3sc.8). Safe to call any time; a no-op when there are no
     /// enabled proxy routes, so it changes nothing for existing users.
@@ -3960,7 +3969,7 @@ final class RouteManager: ObservableObject {
             
             // Track nameserver
             if trimmed.hasPrefix("nameserver[0]") {
-                // Extract IP: "nameserver[0] : <lan-gateway>02"
+                // Extract IP from a line like: "nameserver[0] : 192.168.1.1"
                 let parts = trimmed.components(separatedBy: ":")
                 if parts.count >= 2 {
                     let dns = parts[1].trimmingCharacters(in: .whitespaces)
