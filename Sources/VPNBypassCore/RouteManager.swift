@@ -1604,7 +1604,6 @@ final class RouteManager: ObservableObject {
             log(.info, "VPN Only mode: bypass-all via \(gateway), VPN domains via \(vpnGw)")
         }
 
-        var newRoutes: [ActiveRoute] = []
         var failedCount = 0
 
         // Clear DNS cache for fresh resolution
@@ -1656,7 +1655,7 @@ final class RouteManager: ObservableObject {
         // Collect all routes to add (for batch operation)
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
         var seenDestinations: Set<String> = []  // Deduplicate kernel operations
-        var allSourceEntries: [(destination: String, source: String)] = []  // Track all sources per IP
+        var allSourceEntries: [(destination: String, gateway: String, source: String)] = []  // Track all sources per IP
         var seenSourceDests: Set<String> = []  // Deduplicate (source, destination) pairs
 
         // VPN Only mode: add catch-all routes through local gateway first
@@ -1666,8 +1665,8 @@ final class RouteManager: ObservableObject {
             routesToAdd.append((destination: "128.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
             seenDestinations.insert("0.0.0.0/1")
             seenDestinations.insert("128.0.0.0/1")
-            allSourceEntries.append((destination: "0.0.0.0/1", source: "VPN Only catch-all"))
-            allSourceEntries.append((destination: "128.0.0.0/1", source: "VPN Only catch-all"))
+            allSourceEntries.append((destination: "0.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
+            allSourceEntries.append((destination: "128.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
             seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
             seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
 
@@ -1680,7 +1679,7 @@ final class RouteManager: ObservableObject {
                 let key = "\(cidr)|\(cidr)"
                 if !seenSourceDests.contains(key) {
                     seenSourceDests.insert(key)
-                    allSourceEntries.append((destination: cidr, source: cidr))
+                    allSourceEntries.append((destination: cidr, gateway: routeGateway, source: cidr))
                 }
             }
         }
@@ -1724,7 +1723,7 @@ final class RouteManager: ObservableObject {
                         let key = "\(result.source)|\(ip)"
                         if !seenSourceDests.contains(key) {
                             seenSourceDests.insert(key)
-                            allSourceEntries.append((destination: ip, source: result.source))
+                            allSourceEntries.append((destination: ip, gateway: routeGateway, source: result.source))
                         }
                     }
                 } else if let cachedIPs = dnsDiskCache[result.domain], !cachedIPs.isEmpty {
@@ -1741,7 +1740,7 @@ final class RouteManager: ObservableObject {
                         let key = "\(result.source)|\(ip)"
                         if !seenSourceDests.contains(key) {
                             seenSourceDests.insert(key)
-                            allSourceEntries.append((destination: ip, source: result.source))
+                            allSourceEntries.append((destination: ip, gateway: routeGateway, source: result.source))
                         }
                     }
                 } else {
@@ -1763,7 +1762,7 @@ final class RouteManager: ObservableObject {
                     let key = "\(service.name)|\(range)"
                     if !seenSourceDests.contains(key) {
                         seenSourceDests.insert(key)
-                        allSourceEntries.append((destination: range, source: service.name))
+                        allSourceEntries.append((destination: range, gateway: gateway, source: service.name))
                     }
                     guard !seenDestinations.contains(range) else { continue }
                     seenDestinations.insert(range)
@@ -1790,7 +1789,6 @@ final class RouteManager: ObservableObject {
         log(.info, "Adding \(routesToAdd.count) routes via batch operation...")
         
         // Apply all routes in batch (single XPC call for massive speedup)
-        let routeGwForEntries = routeGateway  // capture for source entries
         var batchFailureCount = 0
         var batchFailedDests: Set<String> = []
         if HelperManager.shared.isHelperInstalled {
@@ -1807,66 +1805,8 @@ final class RouteManager: ObservableObject {
             return
         }
 
-        // Build activeRoutes from allSourceEntries, excluding destinations that failed kernel add
-        let appliedDestinations = Set(routesToAdd.map { $0.destination }).subtracting(batchFailedDests)
-        for entry in allSourceEntries where appliedDestinations.contains(entry.destination) {
-            let gw = routesToAdd.first(where: { $0.destination == entry.destination })?.gateway ?? routeGwForEntries
-            newRoutes.append(ActiveRoute(
-                destination: entry.destination,
-                gateway: gw,
-                source: entry.source,
-                timestamp: Date()
-            ))
-        }
-
-        // Clean up stale kernel routes. Two populations:
-        // 1. Truly orphaned: not in batch add input — delete-before-add never touched
-        //    them, so a failed delete means the route IS still in the kernel.
-        // 2. Add-failed: were in batch add input but failed — delete-before-add already
-        //    removed the old route, so a failed delete means "already gone."
-        let newDestinations = Set(newRoutes.map { $0.destination })
-        let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
-        let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
-        let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
-        let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
-
-        // Truly orphaned: re-attach on failure (route is genuinely still in kernel)
-        if !trulyOrphanedDests.isEmpty {
-            let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
-            if result.failureCount > 0 {
-                log(.warning, "Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
-                let failedSet = Set(result.failedDestinations)
-                for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
-                    newRoutes.append(route)
-                }
-            } else if result.successCount > 0 {
-                log(.info, "Orphan cleanup: \(result.successCount) stale kernel routes removed")
-            }
-        }
-
-        // Add-failed: helper's addRoute does delete-before-add, so the old route is
-        // gone after a failed re-add. Don't re-attach — the kernel route doesn't exist.
-        if !addFailedStaleDests.isEmpty {
-            let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
-            if result.failureCount > 0 {
-                log(.info, "Add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
-            }
-        }
-
-        // Preemption check: if removeAllRoutes() ran during our awaits, our results are stale.
-        // The epoch check + commit is atomic on @MainActor (no await between them).
-        guard routeEpoch == epoch else {
-            log(.warning, "Apply aborted: routes were cleared during operation")
-            return
-        }
-
-        activeRoutes = newRoutes
-        lastUpdate = Date()
-
-        // Manage hosts file if enabled
-        if config.manageHostsFile {
-            await updateHostsFile()
-        }
+        let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "")
+        guard committed else { return }
 
         let confirmedUniqueCount = uniqueRouteCount
         let totalFailures = failedCount + batchFailureCount
@@ -2246,7 +2186,6 @@ final class RouteManager: ObservableObject {
 
         let routeGateway = isInverse ? vpnGateway! : gateway
 
-        var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
         var seenDestinations: Set<String> = []  // Deduplicate kernel operations
         var allSourceEntries: [(destination: String, gateway: String, source: String)] = []
@@ -2371,8 +2310,40 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        // Build activeRoutes from all source entries, excluding failed kernel adds
-        for entry in allSourceEntries where !batchFailedDests.contains(entry.destination) {
+        let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Cache ")
+        guard committed else { return false }
+
+        if batchFailureCount > 0 {
+            log(.warning, "Applied routes from cache (\(batchFailureCount) kernel failures — counts approximate)")
+        } else {
+            log(.success, "Applied \(uniqueRouteCount) unique routes from cache")
+        }
+        return true
+    }
+
+    /// Shared install-epilogue for the two full-replace apply paths
+    /// (applyAllRoutesInternal + applyRoutesFromCache): segments B–F of the apply
+    /// tail. Builds activeRoutes from the ownership entries (minus destinations that
+    /// failed the kernel batch add), runs the two-population orphan cleanup, then —
+    /// in an await-free window — re-checks the epoch guard and commits
+    /// activeRoutes/lastUpdate before updating the hosts file. Returns false when
+    /// preempted (removeAllRoutes() bumped the epoch mid-flight): the caller must
+    /// abort without any further commit. `logLabel` is "" for the full apply and
+    /// "Cache " for the cached fast-path (log prefixing only). Runs on the class
+    /// @MainActor; the epoch-guard→commit window stays await-free (updateHostsFile
+    /// awaits only after the commit).
+    private func commitAppliedRoutes(
+        routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)],
+        allSourceEntries: [(destination: String, gateway: String, source: String)],
+        batchFailedDests: Set<String>,
+        epoch: UInt64,
+        logLabel: String
+    ) async -> Bool {
+        var newRoutes: [ActiveRoute] = []
+
+        // Build activeRoutes from allSourceEntries, excluding destinations that failed kernel add
+        let appliedDestinations = Set(routesToAdd.map { $0.destination }).subtracting(batchFailedDests)
+        for entry in allSourceEntries where appliedDestinations.contains(entry.destination) {
             newRoutes.append(ActiveRoute(
                 destination: entry.destination,
                 gateway: entry.gateway,
@@ -2381,53 +2352,55 @@ final class RouteManager: ObservableObject {
             ))
         }
 
-        // Clean up stale routes — same two-population logic as full apply
+        // Clean up stale kernel routes. Two populations:
+        // 1. Truly orphaned: not in batch add input — delete-before-add never touched
+        //    them, so a failed delete means the route IS still in the kernel.
+        // 2. Add-failed: were in batch add input but failed — delete-before-add already
+        //    removed the old route, so a failed delete means "already gone."
         let newDestinations = Set(newRoutes.map { $0.destination })
         let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
         let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
         let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
         let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
 
+        // Truly orphaned: re-attach on failure (route is genuinely still in kernel)
         if !trulyOrphanedDests.isEmpty {
             let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
             if result.failureCount > 0 {
-                log(.warning, "Cache orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
+                log(.warning, "\(logLabel)Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
                 let failedSet = Set(result.failedDestinations)
                 for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
                     newRoutes.append(route)
                 }
             } else if result.successCount > 0 {
-                log(.info, "Cache orphan cleanup: \(result.successCount) stale kernel routes removed")
+                log(.info, "\(logLabel)Orphan cleanup: \(result.successCount) stale kernel routes removed")
             }
         }
 
-        // Add-failed: delete-before-add already removed the old route (see full apply comment)
+        // Add-failed: helper's addRoute does delete-before-add, so the old route is
+        // gone after a failed re-add. Don't re-attach — the kernel route doesn't exist.
         if !addFailedStaleDests.isEmpty {
             let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
             if result.failureCount > 0 {
-                log(.info, "Cache add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
+                log(.info, "\(logLabel)Add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
             }
         }
 
         // Preemption check: if removeAllRoutes() ran during our awaits, our results are stale.
+        // The epoch check + commit is atomic on @MainActor (no await between them).
         guard routeEpoch == epoch else {
-            log(.warning, "Cache apply aborted: routes were cleared during operation")
+            log(.warning, "\(logLabel)Apply aborted: routes were cleared during operation")
             return false
         }
 
         activeRoutes = newRoutes
         lastUpdate = Date()
 
-        // Update hosts file
+        // Manage hosts file if enabled
         if config.manageHostsFile {
             await updateHostsFile()
         }
 
-        if batchFailureCount > 0 {
-            log(.warning, "Applied routes from cache (\(batchFailureCount) kernel failures — counts approximate)")
-        } else {
-            log(.success, "Applied \(uniqueRouteCount) unique routes from cache")
-        }
         return true
     }
 
