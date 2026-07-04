@@ -5,6 +5,23 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.1] - 2026-07-04
+
+Classic **Bypass** and **VPN Only** route application stays byte-identical — every change here is behavior-preserving, and the DNS-refresh path now has its first regression test net.
+
+### Fixed
+- **The audit-token helper hardening now actually reaches existing installs** — 3.1.0 taught the privileged helper to verify XPC callers by their kernel audit token, but didn't bump the helper's version, so already-installed helpers never updated and kept the older process-ID check. The helper version is bumped (1.6.0 → 1.7.0) so existing installs detect the mismatch, reinstall once (a one-time admin prompt on first launch), and receive the hardened helper.
+
+### Changed
+- **Faster recurring DNS refresh** — the periodic re-resolution of your domains now runs in parallel instead of one domain at a time, so a large domain/service set refreshes quickly without holding up route updates. The refresh's route planning was lifted into a pure, unit-tested unit and proven set-equivalent to the old inline code, so exactly the same routes are installed.
+- **Continued routing-core cleanup** — the DNS resolver and process-runner internals were extracted into standalone, tested units, shrinking the routing controller further (part of the ongoing refactor from 3.0.1).
+
+## [3.1.0] - 2026-07-04
+
+### Changed
+- **Hardened privileged-helper authentication** — the root helper now verifies each XPC caller by its kernel **audit token** instead of the reusable process ID, closing a PID-reuse race where a short-lived forged process could momentarily impersonate the app. The helper stays ad-hoc-signable with no Network Extension entitlements and keeps its anti-brick fallback. (Reaching already-installed helpers is completed in 3.1.1.)
+- **Config model extracted** — the configuration, routing-mode, proxy, domain, and service types were lifted out of the routing controller into a standalone model file (behavior-preserving; identical on-disk config format), continuing the routing-core refactor.
+
 ## [3.0.1] - 2026-07-04
 
 A hardening release from a whole-codebase review. Classic **Bypass** and **VPN Only** route application stays byte-identical to 3.0.0 (same kernel routes, same `/etc/hosts` output) — every routing change here is behavior-preserving, proven by a new test net.

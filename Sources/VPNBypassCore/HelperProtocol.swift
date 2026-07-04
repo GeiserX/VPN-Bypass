@@ -74,7 +74,12 @@ struct HelperConstants {
     // 1.6.0: helper pins the installing app's cdhash (Helper/HelperTool.swift) so a
     // locally forged binary that merely claims our identifier under ad-hoc signing can
     // no longer drive the root helper. Bumped from 1.5.0 so installed helpers update.
-    static let helperVersion = "1.6.0"
+    // 1.7.0: helper verifies XPC callers by the kernel AUDIT TOKEN instead of the reusable,
+    // race-prone PID (closes a PID-reuse window where a forged process could momentarily
+    // impersonate the app). This code shipped in app 3.1.0 but helperVersion was NOT bumped,
+    // so installed 1.6.0 helpers never reinstalled and never received it; bumping to 1.7.0
+    // makes existing installs detect the mismatch, reinstall, and actually get the hardening.
+    static let helperVersion = "1.7.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

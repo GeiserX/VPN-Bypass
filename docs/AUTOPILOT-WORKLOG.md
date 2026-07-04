@@ -246,3 +246,36 @@ Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, ind
 - **HELD for Sergio (delicately — see docs/CODE-REVIEW-3.0.1.md Status block):** audit-token XPC (root helper, brick-risk, can't live-test — this is the `feat:` that would make it 3.1.0; without it the batch is a 3.0.1 patch); god-class split US-013 (recommend separate PR); DNS-refresh unification US-009 (apply path not suite-exercised); helper addRoutesBatch parallelization; US-014 leftovers (watchdog / CoreWLAN / notifications / timer-cancel).
 - **Version:** ships as **3.0.1** (patch) since the feature-like audit-token is deferred; becomes 3.1.0 when it lands. Asked Sergio (audit-token handling + god-class-split sequencing) — no answer in 60s, took the reversible/delicate defaults.
 - **NOT merged** — Sergio's release gate. CodeRabbit to be addressed on the grown PR.
+
+### 2026-07-04 — 3.1.0 SHIPPED (free CI); 3.2.0 roadmap set
+- **3.1.0 released** on free macos-latest: release v3.1.0 + DMG + cask (3.1.0). Audit-token (self-validated on the mini) + config-model extraction. Both 3.0.1 and 3.1.0 now shipped, $0 CI, dead runner gone.
+- Branch feat/routemanager-3.2.0 created off main (8c3dbbc). (Caught + fixed a stale-origin/main reset that had briefly based it on 3.0.1.)
+- **3.2.0 backlog (all leak-critical or large — do with fresh care, self-test each on the mini which is now a proven test env):**
+  1. God-class split cont'd: extract the STATEFUL collaborators (VPNDetector, RouteApplier, ConfigStore, DNSResolver) — high churn on the @MainActor apply/detect logic. (Model extraction already done in 3.1.0.)
+  2. US-009: unify the two DNS-refresh engines; make the recurring timer use the parallel resolver (not the serial one). Apply path not suite-exercised → mini self-test.
+  3. Helper addRoutesBatch parallelization (perf; privileged, leak-critical).
+  4. US-014 leftovers: helper re-validation watchdog (mini-testable); airport→CoreWLAN (needs a Location-permission decision); the never-firing 1.3.0 service/domain notifications (product call: wire vs remove); withXPCDeadline timer-cancel (micro-opt on the XPC-hang primitive).
+- Mini self-test recipe (proven): copy RC app → sudo-install helper (replicate installHelperLegacy) → launch → read ~/Library/Logs/VPNBypass/vpnbypass.log for "Helper installed: true" / route application → clean up (bootout + rm helper/pin/plist).
+
+### 2026-07-04 (cont'd) — 3.2.0 loop, self-release authorized; delegate-and-verify to beat fatigue
+- Sergio: "over it and release it directly dont ask me just unblock yourselph, use ralph" — release gate removed for 3.2.0; keep looping.
+- **Approach shift:** with the review gate gone AND fatigue starting to cost file-navigation accuracy on a leak-critical codebase, the safe way to honor "go + release directly + delicately" is to **delegate each fiddly-but-verifiable increment to a fresh (un-fatigued) subagent**, let the build + test suite (and, for leak-critical logic, NEW unit tests) be the safety net, and run a SEPARATE adversarial review before shipping. Main thread orchestrates; subagents do leaf work.
+- **SHIPPED to branch (committed 87aeb1e), verified green by a fresh subagent (Build complete, 786 tests / 0 failures):**
+  - **US-013 cont'd** — extracted the DNS-resolution + process-runner subsystem out of RouteManager into a pure `enum DNSResolver` (resolveIPsParallel + DNS/DoT/DoH/system resolvers + isValidIPStatic + runProcessParallel/runProcessSyncSafe + the shared process queue). Pure code motion, bodies verbatim, call-sites requalified. **RouteManager 3955 → 3671 lines** (~880 out across the model + DNS extractions since session start).
+- **IN PROGRESS (delegated):** **US-009 done delicately** — extract `performDNSRefresh`'s currently-UNTESTED classic-mode route-planning into a pure, unit-tested `DNSRefreshPlanner` (mirrors ClassicRouteCompiler's "impure work stays in the caller" contract), THEN parallelize the resolve (provably leak-safe because the planner is order-independent given the resolved map). Net risk-REDUCING: adds a test net to a leak-critical path the suite never exercised. Adversarial set-equivalence review to follow before ship.
+- **DEFERRED (recorded, reversible defaults — NOT forcing risky low-value work into fatigue with the review gate off):**
+  - Helper `addRoutesBatch` parallelization — leak-critical (privileged), and **un-runtime-testable** (the mini has no VPN, so the apply paths early-return); marginal + declining value (custom mode already batches). Revisit only behind a tested pure seam.
+  - `airport`→CoreWLAN SSID detection — needs Sergio's Location-permission product decision (adds a permission prompt). Human-only call.
+  - Helper re-validation watchdog — marginal (the helper is a `RunAtLoad` LaunchDaemon; launchd already auto-restarts it); notifications are already wired (not dead code). Skip unless a real need appears.
+- **Release plan:** bundle US-013(DNS) + US-009 (both behavior-preserving, tested) → PR → free macos-latest CI + CodeRabbit → self-merge (no Sergio gate this time) → auto-tag (feat: parallel refresh → minor 3.2.0) → release + cask, DIRECTLY.
+
+### 2026-07-04 (cont'd) — 3.1.1 in flight (PR #57), self-release
+- Versioning verified against the REMOTE (pod local tags were stale): v3.1.0 IS released (@8c3dbbc). Commits since are refactor/perf/fix/docs, NO feat -> auto-tag cuts **v3.1.1** (patch) on merge. Not inflating a commit to force a minor.
+- **On PR #57 (branch feat/routemanager-3.2.0), all verified green (796 tests, clean build, helper builds; two independent adversarial set-equivalence reviews on the leak-critical refresh):**
+  - refactor(US-013): DNS/process subsystem -> pure enum DNSResolver. RouteManager 3955 -> 3687.
+  - perf(US-009): performDNSRefresh route-planning extracted to pure, unit-tested DNSRefreshPlanner (mirrors ClassicRouteCompiler) + parallel resolve bounded to the 16-wide window. First test net this leak-critical path ever had (+10 set-equivalence tests, incl. VPN-Only cache-fallback). Route SET provably unchanged.
+  - **fix (important): helperVersion 1.6.0 -> 1.7.0.** The 3.1.0 audit-token change modified the helper binary but LEFT the version at 1.6.0, so existing installs saw installed==expected, never reinstalled, and never got the hardening (only fresh installs did). Bumping it triggers the standard reinstall so everyone actually receives the audit-token helper.
+  - fix (CodeRabbit x2): bounded the refresh resolve concurrency (was unbounded fork-storm); drained runProcessSyncSafe stdout on a background queue (>64KB pipe-buffer deadlock for tailscale/ps/ifconfig) — timeout still returns nil.
+  - CHANGELOG: added [3.1.1] and the retroactively-missing [3.1.0].
+- **POD GIT STALLED on the Colima bind mount** (git log/commit hang uninterruptibly in IO wait; file writes + gh + machost all fine). Workaround: run ALL git via `machost exec git -C <repo> ...` (native FS, instant). Edit/Write tool still works for file contents.
+- Next: CI + CodeRabbit re-verify the fixes -> self-merge #57 (no Sergio gate, per directive) -> auto-tag v3.1.1 -> release.yml (DMG + release + cask) -> verify.
