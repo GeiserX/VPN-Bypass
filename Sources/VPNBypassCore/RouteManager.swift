@@ -2033,12 +2033,24 @@ final class RouteManager: ObservableObject {
         var failedDests: Set<String> = []
         if !destinations.isEmpty {
             if HelperManager.shared.isHelperInstalled {
-                let result = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
-                failedDests = Set(result.failedDestinations)
-                if result.failureCount > 0 {
-                    log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
-                } else {
-                    log(.info, "Batch route removal: \(result.successCount) routes removed")
+                // Remove the catch-all routes (0.0.0.0/1 + 128.0.0.0/1, or a custom 0.0.0.0/0)
+                // FIRST, in their own fast batch. If a time-capped quit cuts teardown short,
+                // the full-tunnel-defeating catch-alls are already gone rather than stranded
+                // (leaving the machine forcing all traffic at a now-dead gateway).
+                let catchAlls = destinations.filter { RouteCompiler.catchAllDestinations.contains($0) }
+                let rest = destinations.filter { !RouteCompiler.catchAllDestinations.contains($0) }
+                if !catchAlls.isEmpty {
+                    let r = await HelperManager.shared.removeRoutesBatch(destinations: catchAlls)
+                    failedDests.formUnion(r.failedDestinations)
+                }
+                if !rest.isEmpty {
+                    let result = await HelperManager.shared.removeRoutesBatch(destinations: rest)
+                    failedDests.formUnion(result.failedDestinations)
+                    if result.failureCount > 0 {
+                        log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
+                    } else {
+                        log(.info, "Batch route removal: \(result.successCount) routes removed")
+                    }
                 }
             } else {
                 log(.error, "Cannot remove routes: helper not ready (\(HelperManager.shared.helperState.statusText))")
