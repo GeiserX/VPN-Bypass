@@ -2538,8 +2538,11 @@ final class RouteManager: ObservableObject {
         // Update hosts file with any newly resolved domains (only if still connected)
         let shouldUpdateHosts = await MainActor.run { config.manageHostsFile && isVPNConnected }
         if shouldUpdateHosts {
-            await updateHostsFile()
-            await MainActor.run { log(.info, "Background refresh: hosts file updated") }
+            let hostsOK = await updateHostsFile()
+            await MainActor.run {
+                if hostsOK { log(.info, "Background refresh: hosts file updated") }
+                else { log(.warning, "Background refresh: hosts file update FAILED — /etc/hosts may be stale") }
+            }
         }
 
         // Update UI refresh timestamps
@@ -2827,8 +2830,8 @@ final class RouteManager: ObservableObject {
 
         // Update hosts file if enabled and still connected
         if config.manageHostsFile && isVPNConnected {
-            await updateHostsFile()
-            log(.info, "DNS refresh: hosts file updated")
+            if await updateHostsFile() { log(.info, "DNS refresh: hosts file updated") }
+            else { log(.warning, "DNS refresh: hosts file update FAILED — /etc/hosts may be stale") }
         }
 
         lastDNSRefresh = Date()
@@ -4201,7 +4204,8 @@ final class RouteManager: ObservableObject {
         return result.success
     }
     
-    private func updateHostsFile() async {
+    @discardableResult
+    private func updateHostsFile() async -> Bool {
         // Collect domain -> IP mappings, filtered against activeRoutes so hosts
         // only contains entries for domains that actually have installed kernel routes.
         // Checks all cached IPs (not just first) to find a routed one.
@@ -4274,7 +4278,7 @@ final class RouteManager: ObservableObject {
         }
 
         // Update /etc/hosts (requires sudo)
-        await modifyHostsFile(entries: entries)
+        return await modifyHostsFile(entries: entries)
     }
 
     /// Find the first cached IP for a domain that has a confirmed kernel route
@@ -4311,15 +4315,17 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    private func modifyHostsFile(entries: [(domain: String, ip: String)]) async {
+    @discardableResult
+    private func modifyHostsFile(entries: [(domain: String, ip: String)]) async -> Bool {
         guard HelperManager.shared.isHelperInstalled else {
             log(.error, "Cannot modify hosts file: helper not ready (\(HelperManager.shared.helperState.statusText))")
-            return
+            return false
         }
         let result = await HelperManager.shared.updateHostsFile(entries: entries)
         if !result.success {
             log(.error, "Helper hosts update failed: \(result.error ?? "unknown")")
         }
+        return result.success
     }
     
     nonisolated func cleanDomain(_ input: String) -> String {

@@ -538,7 +538,14 @@ final class HelperManager: ObservableObject {
         // at ~0.07s each ≈ 0.14s/route). 0.1s/route was too tight and caused timeouts
         // for batches above ~250 routes, dropping all routes as failed.
         let timeout = xpcTimeout + Double(routes.count) * 0.25
-        let fallback = (0, routes.count, allDests, Optional("XPC timeout"))
+        // On a DEADLINE timeout (not an XPC error — the call DID reach the helper), the helper may
+        // be slow rather than dead and have installed some/all routes without confirming. Reporting
+        // them as failed strands orphaned kernel routes the app never tracks — a leak that survives
+        // disconnect and quit. Report an INDETERMINATE result (no confirmed failures) so the caller
+        // records the attempted destinations as active; a later teardown then removes them
+        // (removeRoutesBatch tolerates already-absent routes). The XPC-error / nil-proxy paths below
+        // keep reporting allDests failed — those genuinely never installed.
+        let fallback = (0, 0, [String](), Optional("XPC timeout"))
 
         let connection = getOrCreateConnection()
         let result = await withXPCDeadline(seconds: timeout, fallback: fallback) { once in
@@ -556,7 +563,10 @@ final class HelperManager: ObservableObject {
             }
         }
 
-        if result.3 == "XPC timeout" { dropXPCConnection() }
+        if result.3 == "XPC timeout" {
+            RouteManager.shared.log(.warning, "Route batch timed out — recording \(allDests.count) attempted route(s) as active so teardown can remove them")
+            dropXPCConnection()
+        }
         return result
     }
 
