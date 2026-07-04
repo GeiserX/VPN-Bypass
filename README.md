@@ -5,7 +5,10 @@
 <h1 align="center">VPN Bypass</h1>
 
 <p align="center">
-  A macOS menu bar app that automatically routes specific domains and services around your VPN, ensuring they use your regular internet connection.
+  A macOS menu bar app for fine-grained control over what goes through your VPN. Route specific domains
+  and services <em>around</em> the VPN, force only some things <em>through</em> it, or — in Custom mode —
+  send each domain, service, or subnet out a route of your choice: direct, a specific VPN, an HTTP/SOCKS5
+  proxy, or a Tailscale peer.
 </p>
 
 <p align="center">
@@ -30,19 +33,18 @@ VPN Bypass intelligently routes selected services directly to the internet while
 
 ## Features
 
-- 🎯 **Menu bar app** - Quick access to status and controls
-- 🌐 **Custom domains** - Add any domain you want to bypass
-- 🔧 **Built-in services** - Telegram, YouTube, WhatsApp, Spotify, Tailscale, and more
-- 🔄 **Auto-apply** - Routes are applied automatically when VPN connects
-- 📋 **Hosts file management** - Optional DNS bypass via `/etc/hosts`
-- 🪵 **Activity logs** - See what's happening in real-time
-- 🔍 **VPN Detection** - Supports GlobalProtect, Cisco, Fortinet, Zscaler, Cloudflare WARP, and more
-- 📶 **Network Monitoring** - Detects VPN and network changes automatically
-- 🔔 **Notifications** - Alerts when VPN connects/disconnects and routes are applied
-- ✅ **Route Verification** - Ping tests to verify routes are actually working
-- 💾 **Import/Export Config** - Backup and restore your configuration
-- 🚀 **Launch at Login** - Start automatically when you log in
-- 🔄 **Auto DNS Refresh** - Periodically re-resolves domains and updates routes
+- 🎯 **Menu bar app** — quick access to status, mode, and controls
+- 🧭 **Three routing modes** — **Bypass** (listed traffic skips the VPN), **VPN Only** (everything uses the VPN except what you list), and **Custom** (per-rule routing)
+- 🌐 **Custom domains & built-in services** — add any domain, or toggle bundled service packs (Telegram, YouTube, WhatsApp, Spotify, Tailscale, and more)
+- 🧩 **Custom rules & routes** — map each domain, suffix, IP/CIDR, service, or process to a specific route; first match wins
+- 🔀 **Multiple egresses** — send traffic out the local gateway, a specific VPN interface (multi-VPN), an **HTTP/SOCKS5 proxy**, or a **Tailscale peer** used as an exit
+- ⌨️ **`vpnb` CLI** — script the app over a user-only socket (status, routes, rules, mode)
+- 🔄 **Auto-apply** — routes are (re)applied automatically as the VPN connects, disconnects, or the network changes
+- 🔁 **Auto DNS refresh** — periodically re-resolves domains and updates routes as IPs rotate
+- 📋 **Hosts file management** — optional DNS bypass via `/etc/hosts`
+- 🔍 **VPN detection** — GlobalProtect, Cisco, Fortinet, Zscaler, Cloudflare WARP, Tailscale exit nodes, and more
+- 🔔 **Notifications**, ✅ **route verification**, 🪵 **activity logs**, 💾 **import/export**, 🚀 **launch at login**
+- 🔐 **Hardened privileged helper** — a small root helper performs the routing; it's cdhash-pinned to this app and uses **no Network Extension entitlements**
 
 <details>
 <summary><h3>📸 Screenshots</h3></summary>
@@ -54,6 +56,29 @@ VPN Bypass intelligently routes selected services directly to the internet while
 </p>
 
 </details>
+
+## Routing modes
+
+VPN Bypass has three modes; switch anytime from the menu bar or Settings.
+
+- **Bypass** *(default)* — everything uses the VPN as usual, and only the domains/services you list are routed *around* it to your regular connection. Best when your VPN carries all traffic but a few apps misbehave through it.
+- **VPN Only** — the inverse: your regular connection is the default, and only the domains/services you list are forced *through* the VPN. Best for a mostly-direct machine with a few things tunneled.
+- **Custom** — a per-rule engine: you define **routes** (egresses) and **rules** that map traffic to them. Rules are evaluated top-to-bottom, first match wins, with a pinned "everything else → default" rule. This is what unlocks multi-VPN, proxy, and Tailscale-peer routing.
+
+**Bypass and VPN Only work exactly as they did in earlier versions** — if that's all you need, nothing changes. Custom mode is entirely opt-in.
+
+### Routes and rules (Custom mode)
+
+A **route** is a place traffic can exit:
+
+| Route type | Traffic exits via |
+|------------|-------------------|
+| **Direct** | your local gateway (around the VPN) |
+| **VPN** | a specific VPN interface — pick *which* tunnel when several are up (multi-VPN) |
+| **HTTP / SOCKS5 proxy** | a local `127.0.0.1` listener that forwards to your proxy |
+| **Tailscale peer** | out through a chosen Tailscale device used as an exit |
+
+A **rule** maps traffic to a route by `domain`, `suffix`, `ip`, `cidr`, `service`, or `process`. The first matching rule wins; anything unmatched takes the **default** route. Direct and detected VPN routes appear automatically; proxy and Tailscale-peer routes are ones you add.
 
 ## Installation
 
@@ -110,29 +135,41 @@ Click the shield icon in the menu bar to:
 
 ### Settings
 
-Click the gear icon to access settings:
+Click the gear icon to access settings. The visible tabs depend on the active mode:
 
-**Domains Tab**
-- Add custom domains to bypass
-- Enable/disable individual domains
-- See resolved IPs
+**Domains** — add custom domains, enable/disable them individually, see resolved IPs.
 
-**Services Tab**
-- Toggle built-in services (Telegram, YouTube, Spotify, etc.)
-- Each service includes known domains and IP ranges
+**Services** — toggle built-in service packs (Telegram, YouTube, Spotify, …); each bundles known domains and IP ranges.
 
-**General Tab**
-- Launch at Login toggle
-- Auto-apply routes when VPN connects
-- Manage `/etc/hosts` entries
-- Enable route verification after apply
-- Notification preferences (connect, disconnect, routes, failures)
-- Import/Export configuration backup
-- Network status display (VPN type, interface, gateway, WiFi SSID)
+**Rules** *(Custom mode)* — the ordered rule list (first match wins) mapping domains/suffixes/IPs/CIDRs/services/processes to routes.
 
-**Logs Tab**
-- View recent activity
-- Debug connection issues
+**Routes** *(Custom mode)* — your egresses: auto-detected Direct + VPN links, plus any proxy or Tailscale-peer routes you add.
+
+**General** — launch at login, auto-apply on connect, `/etc/hosts` management, route verification, notification preferences, import/export, and network status (VPN type, interface, gateway, Wi-Fi SSID).
+
+**Logs** — recent activity for debugging.
+
+**Info** — version and helper status.
+
+## Command-line control (`vpnb`)
+
+A bundled `vpnb` CLI drives the same routing the GUI does, over a user-only UNIX socket — handy for scripting or headless tweaks. It needs no extra privilege (the app already holds it).
+
+```bash
+vpnb status                                   # current mode, routes, schema/version
+vpnb mode mode=custom                         # switch modes: bypass | vpnOnly | custom
+vpnb route.add name=work type=socks5 host=127.0.0.1 port=1080
+vpnb rule.add match=suffix pattern=example.com routeId=<uuid>
+vpnb route.list ; vpnb rule.list
+```
+
+Secrets are never passed on the command line (argv is world-visible via `ps`). Pass the bare token `pass:-` and pipe the password on stdin:
+
+```bash
+read -rs PASS && printf '%s' "$PASS" | vpnb route.set id=<uuid> pass:-
+```
+
+Set `VPNB_SOCKET` to override the socket path (default: `~/Library/Application Support/VPNBypass/control.sock`).
 
 ## Supported VPN Types
 
@@ -154,7 +191,7 @@ Click the gear icon to access settings:
 
 1. **VPN Detection**: Monitors network interfaces and running processes to detect VPN type
 2. **Gateway Detection**: Identifies your local gateway (Wi-Fi/Ethernet router)
-3. **Route Management**: Adds host routes to send specific traffic through local gateway instead of VPN
+3. **Route Management**: A small privileged helper adds/removes host routes to steer traffic per your mode — around the VPN (Bypass), through it (VPN Only), or to the route a rule selects (Custom). The helper is cdhash-pinned to this app and uses no Network Extension entitlements.
 4. **Route Verification**: Optionally pings routes to verify they're working
 5. **DNS Bypass**: Optionally adds entries to `/etc/hosts` to bypass VPN DNS
 

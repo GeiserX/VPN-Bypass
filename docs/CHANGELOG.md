@@ -5,6 +5,27 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-07-04
+
+### Changed
+- **RouteManager routing core refactor** — Internal restructuring of the routing core with no behavior change: classic **Bypass** and **VPN Only** route application is byte-identical to 3.0.0 (same kernel routes, same `/etc/hosts` output). Dead code left over from the refactor was removed.
+- **Hardened debug log** — The debug log file moved to `~/Library/Logs/VPNBypass/` and is now created owner-only, keeping diagnostics out of world-readable locations.
+
+### Fixed
+- **More complete logging** — Consolidated logging so previously-silent helper and notification failures are captured, plus assorted error-observability fixes that surface failures in the logs instead of swallowing them.
+
+## [3.0.0] - 2026-07-03
+
+### Added
+- **Custom routing mode** — A third routing mode alongside Bypass and VPN Only. Custom mode runs a per-rule dispatch engine: each rule maps a domain, service, or CIDR to a named route (egress), evaluated in order (first match wins) with a pinned "everything else → default" rule. This is a major addition; **Bypass and VPN Only remain the defaults and are unchanged** — existing users see no difference until they opt into Custom.
+- **Multiple egress types** — Custom-mode routes can send traffic out through several egresses: the local gateway (direct), a specific VPN interface (multi-VPN — pick *which* tunnel per rule), an HTTP or SOCKS5 **proxy** via a local `127.0.0.1` listener, or a **Tailscale peer** used as an exit (proxy-over-tailnet, so per-destination routing works without changing any Tailscale settings).
+- **`vpnb` command-line interface** — A bundled CLI (a second executable, symlinked onto `PATH` by the cask) that scripts the app over a user-only UNIX socket: `status`, `route add/set/rm`, `rule add/rm`, `mode`, and `default`. Secrets are read from stdin/env (never argv), and it honors `VPNB_SOCKET`. It drives the same routing paths a GUI action does — no new privilege.
+- **Rules and Routes tabs** — Custom mode adds a Rules tab (ordered, first-match rule list) and a Routes tab (auto-detected system routes — each VPN link plus Direct — alongside your own proxy and Tailscale-peer routes). The Settings window now has up to seven tabs (Domains, Services, Rules, Routes, General, Logs, Info); the visible set depends on the active mode.
+
+### Changed
+- **Privileged helper 1.6.0** — The helper is now cdhash-pinned and stays ad-hoc-signable, with no Network Extension entitlements. Existing users are prompted once to update the helper on first launch.
+- **Routing engine generalized to routes + rules** — Bypass and VPN Only are preserved as the default apply path; Custom mode compiles its rules into the same route batches the existing engine already applies, so the hard-won teardown and re-assertion guards are shared rather than reimplemented.
+
 ## [2.9.1] - 2026-06-09
 
 ### Fixed

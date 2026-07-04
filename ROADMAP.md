@@ -1,6 +1,14 @@
 # VPN Bypass - Product Roadmap
 
-## Current State (v2.0.0)
+## Current State (v3.0)
+
+Three routing modes ship today: **Bypass** (listed domains/services skip the VPN), **VPN Only** (everything
+tunnels except listed items), and **Custom** (new in 3.0 — a per-rule engine mapping each domain/service/CIDR
+to a named route). Custom-mode egresses include the local gateway, a specific VPN interface (multi-VPN), an
+HTTP/SOCKS5 proxy via a local `127.0.0.1` listener, and a Tailscale-peer exit (proxy-over-tailnet). A bundled
+**`vpnb` CLI** scripts it all over a user-only socket, and the privileged helper is cdhash-pinned (1.6.0). The
+whole engine stays **entitlement-free** — kernel routes + `/etc/hosts` + local proxy listeners + a PF/local-CA
+path, **no Network Extension** — so the app remains ad-hoc-signable.
 
 ### ✅ Phase 1 Complete - Core & Polish (v1.0 - v1.2)
 
@@ -59,7 +67,7 @@
 
 ## Roadmap
 
-### ⭐ Multi-Route Networking (next major architecture)
+### ⭐ Multi-Route Networking (landed in v3.0 — Custom mode)
 
 > The unifying direction: generalize today's *bypass-the-VPN* model into **N named routes** (corporate
 > VPN / proxies incl. residential like Oxylabs / direct) with a **per-destination policy**, plus a clean
@@ -69,10 +77,10 @@
 
 | Phase | Deliverable |
 |-------|-------------|
-| **P0 — Model** | `Config` → `routes[] + rules[]` (named routes + per-destination selector); back-compat migration of the current bypass-list + single SOCKS5 proxy |
-| **P1 — Proxy routes + hooks** | generalize the one proxy into N proxy routes, each a `127.0.0.1:PORT` local listener (auth-injecting, VPN-escaping); `route-on <name>` shell hook + PAC for browsers — delivers the proven VPN / proxy / direct 3-way, generically |
-| **P2 — OS-level engine** | `NETransparentProxy` (or PF `rdr` + transparent forwarder) for app-agnostic per-destination routing; **per-route DNS**; health-check + failover selectors |
-| **P3 — Providers** | WireGuard / OpenVPN / Tailscale-exit route types; residential-proxy sticky sessions; routes+rules UI |
+| **P0 — Model** ✅ shipped v3.0 | `Config` → `routes[] + rules[]` (named routes + per-destination selector); back-compat migration of the current bypass-list + single SOCKS5 proxy |
+| **P1 — Proxy routes + hooks** ✅ shipped v3.0 | generalize the one proxy into N proxy routes, each a `127.0.0.1:PORT` local listener (auth-injecting, VPN-escaping); `route-on <name>` shell hook + PAC for browsers — delivers the proven VPN / proxy / direct 3-way, generically |
+| **P2 — App-agnostic capture** 🔲 future | **entitlement-free PF + local-CA** transparent path (system HTTP/HTTPS proxy + PAC, or a PF rule steering matched flows into a local TLS-terminating proxy that reads the SNI/hostname) for apps that ignore `HTTPS_PROXY`; **per-route DNS**; health-check + failover selectors. **No Network Extension** — NE is explicitly out of scope so the app stays ad-hoc-signable (no Developer-ID / notarization / system-extension approval, no NE entitlement) |
+| **P3 — Providers** 🔲 partial (Tailscale-peer egress + routes/rules UI shipped v3.0) | WireGuard / OpenVPN / native Tailscale-exit route types; residential-proxy sticky sessions; routes+rules UI |
 
 ### Phase 2: Advanced Routing (v2.0 - v2.5)
 
@@ -95,7 +103,7 @@
 | **Blocklists Integration** | Block ads/trackers/malware domains |
 | **Network-based Profiles** | Auto-switch profile based on WiFi SSID |
 | **Bandwidth Monitor** | Track data through VPN vs bypassed |
-| **CLI Interface** | Command-line control for automation |
+| ~~**CLI Interface**~~ | ✅ Done in v3.0 — `vpnb` command-line control over a user-only socket (`status`, `route`/`rule`/`mode`/`default` verbs) for automation |
 | **API/Webhooks** | Integration with other tools |
 | **Statistics Dashboard** | Detailed analytics and history |
 | **Traffic Verification** | Verify traffic actually goes through correct interface |
@@ -187,8 +195,9 @@
 2. ✅ **v1.3 - v1.6**: Performance overhaul, instant startup, DoH/DoT, DNS cache
 3. ✅ **v1.7 - v1.9**: VPN compatibility (Check Point, Zscaler, Tailscale), gateway robustness, auto-merge
 4. ✅ **v2.0**: Inverse mode (VPN Only routing) + custom services
-5. 🔲 **v2.5**: Kill switch + leak protection + connection profiles (Premium)
-6. 🔲 **v3.0**: CLI interface + network profiles + statistics
+5. ✅ **v3.0**: Custom routing mode (per-rule multi-route) + `vpnb` CLI + proxy / Tailscale-peer egress + cdhash-pinned helper
+6. 🔲 **v2.5 (deferred)**: Kill switch + leak protection + connection profiles (Premium)
+7. 🔲 **Later**: network profiles + statistics dashboard
 
 ---
 
@@ -200,4 +209,4 @@
 
 ---
 
-*Last updated: March 30, 2026*
+*Last updated: July 4, 2026*

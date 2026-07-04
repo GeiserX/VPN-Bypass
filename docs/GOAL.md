@@ -44,3 +44,7 @@ _Interpretation: implement ALL of P0→P1→P2 autonomously (unit-test + mock-ve
 ## 2026-07-04 — continuation
 
 > over the god class refactors 3.0.1 and do even more thorough testing too also do /review-code! when you finish again over all the code focusing on different parts
+
+## 2026-07-04 — continuation
+
+> Also when you finish, edit the readme and the gh description to reflect the new reality of vpn bypass
