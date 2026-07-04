@@ -199,20 +199,47 @@ struct RoutesTab: View {
             routeManager.config.routes.append(route)
         }
         routeManager.saveConfig()
-        Task { await routeManager.reconcileProxyListeners() }
+        Task {
+            await routeManager.reconcileProxyListeners()
+            // Custom mode: this route may compile to a KERNEL route (a `.vpnDefault`
+            // route with an `.interface` selector) — re-apply so it doesn't go stale
+            // until the next hourly refresh (mirrors ControlSurface.handle).
+            let cfg = routeManager.config
+            if RouteManager.usesCustomEngine(schemaVersion: cfg.schemaVersion, routingMode: cfg.routingMode) {
+                await routeManager.detectAndApplyRoutesAsync(sendNotification: false)
+            }
+        }
     }
 
     private func deleteRoute(_ route: Route) {
         routeManager.config.routes.removeAll { $0.id == route.id }
         routeManager.saveConfig()
-        Task { await routeManager.reconcileProxyListeners() }
+        Task {
+            await routeManager.reconcileProxyListeners()
+            // Custom mode: this route may compile to a KERNEL route (a `.vpnDefault`
+            // route with an `.interface` selector) — re-apply so it doesn't go stale
+            // until the next hourly refresh (mirrors ControlSurface.handle).
+            let cfg = routeManager.config
+            if RouteManager.usesCustomEngine(schemaVersion: cfg.schemaVersion, routingMode: cfg.routingMode) {
+                await routeManager.detectAndApplyRoutesAsync(sendNotification: false)
+            }
+        }
     }
 
     private func toggleRoute(_ id: UUID, enabled: Bool) {
         guard let idx = routeManager.config.routes.firstIndex(where: { $0.id == id }) else { return }
         routeManager.config.routes[idx].enabled = enabled
         routeManager.saveConfig()
-        Task { await routeManager.reconcileProxyListeners() }
+        Task {
+            await routeManager.reconcileProxyListeners()
+            // Custom mode: this route may compile to a KERNEL route (a `.vpnDefault`
+            // route with an `.interface` selector) — re-apply so it doesn't go stale
+            // until the next hourly refresh (mirrors ControlSurface.handle).
+            let cfg = routeManager.config
+            if RouteManager.usesCustomEngine(schemaVersion: cfg.schemaVersion, routingMode: cfg.routingMode) {
+                await routeManager.detectAndApplyRoutesAsync(sendNotification: false)
+            }
+        }
     }
 }
 

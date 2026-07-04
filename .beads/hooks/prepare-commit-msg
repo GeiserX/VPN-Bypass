@@ -16,9 +16,6 @@ call_lefthook()
   elif lefthook -h >/dev/null 2>&1
   then
     lefthook "$@"
-  elif /Users/sergio/.npm/_npx/5e761d7efa6d0191/node_modules/lefthook-darwin-arm64/bin/lefthook -h >/dev/null 2>&1
-  then
-    /Users/sergio/.npm/_npx/5e761d7efa6d0191/node_modules/lefthook-darwin-arm64/bin/lefthook "$@"
   else
     dir="$(git rev-parse --show-toplevel)"
     osArch=$(uname | tr '[:upper:]' '[:lower:]')

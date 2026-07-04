@@ -24,11 +24,34 @@ enum CredentialTemplate {
         ttlMinutes: Int?
     ) -> String {
         guard let t = template, !t.isEmpty else { return rawValue }
-        return t
-            .replacingOccurrences(of: "{user}", with: user)
-            .replacingOccurrences(of: "{pass}", with: pass)
-            .replacingOccurrences(of: "{id}", with: sessionId ?? "")
-            .replacingOccurrences(of: "{ttl}", with: ttlMinutes.map(String.init) ?? "")
+        let values: [String: String] = [
+            "user": user,
+            "pass": pass,
+            "id": sessionId ?? "",
+            "ttl": ttlMinutes.map(String.init) ?? "",
+        ]
+        // Single left-to-right pass. Chained `replacingOccurrences` would run each
+        // replacement over the OUTPUT of the previous one, so a credential value that
+        // itself contains a literal `{pass}`/`{id}`/`{ttl}` would get re-matched and
+        // mangled (leaking one field into another's expansion). Here each recognized
+        // `{token}` is replaced with its value and the cursor jumps PAST the inserted
+        // value, so substituted text is never re-scanned. Unknown `{tokens}` are left
+        // verbatim.
+        var out = ""
+        var i = t.startIndex
+        while i < t.endIndex {
+            if t[i] == "{", let close = t[i...].firstIndex(of: "}") {
+                let token = String(t[t.index(after: i)..<close])
+                if let value = values[token] {
+                    out += value
+                    i = t.index(after: close)
+                    continue
+                }
+            }
+            out.append(t[i])
+            i = t.index(after: i)
+        }
+        return out
     }
 
     /// A short, URL-safe random session id for sticky residential sessions.

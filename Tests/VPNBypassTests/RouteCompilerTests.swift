@@ -107,6 +107,24 @@ final class RouteCompilerTests: XCTestCase {
         XCTAssertTrue(out.isEmpty, "proxy claimed the dest first; Direct must not route it")
     }
 
+    func testDisabledRouteIsInertAndDoesNotClaim() {
+        var disabledDirect = Route(name: "off", egress: .direct)
+        disabledDirect.enabled = false
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(disabledDirect, [("1.2.3.4", false)], pattern: "a", order: 0),
+                rr(direct, [("1.2.3.4", false)], pattern: "b", order: 1),
+            ],
+            routes: [disabledDirect, direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        // A disabled route's rule emits no kernel route AND does not claim the dest, so the
+        // later ENABLED Direct rule routes 1.2.3.4 (toggling a route off truly removes it).
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out.first?.destination, "1.2.3.4")
+        XCTAssertEqual(out.first?.gateway, "gw")
+        XCTAssertEqual(out.first?.source, "b")
+    }
+
     func testFirstRuleWinsForEmittedRoute() {
         let out = RouteCompiler.compile(
             resolvedRules: [

@@ -45,7 +45,7 @@ func printUsage() {
       shell history. Instead pass the bare token "pass:-" (or the flag
       --pass-stdin) and pipe/type the password on stdin:
 
-        echo "s3cret" | vpnb route.set id=<uuid> port=24001 pass:-
+        read -rs PASS && printf '%s' "$PASS" | vpnb route.set id=<uuid> port=24001 pass:-
 
       The stdin line is read once and sent as secrets.pass — it never appears
       in args, in a process listing, or in any log.
@@ -129,6 +129,13 @@ func connectToSocket(path: String) -> Int32? {
         close(fd)
         return nil
     }
+
+    // Darwin has no MSG_NOSIGNAL; without SO_NOSIGPIPE, the server closing
+    // mid-write would deliver SIGPIPE to this process and kill the CLI
+    // instead of returning EPIPE from write().
+    var noSigPipe: Int32 = 1
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+
     return fd
 }
 

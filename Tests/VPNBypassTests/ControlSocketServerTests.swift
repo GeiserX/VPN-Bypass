@@ -70,6 +70,12 @@ final class ControlSocketServerTests: XCTestCase {
         // fast with a clear timeout instead of hanging the suite.
         var tv = timeval(tv_sec: 5, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+        // The server closes the connection after rejecting an oversized request;
+        // a client still writing into that closed pipe would otherwise take a
+        // SIGPIPE and kill the whole test runner. Suppress it like vpnb would.
+        var noSigPipe: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
         return fd
     }
 
@@ -77,6 +83,20 @@ final class ControlSocketServerTests: XCTestCase {
         let data = Data(text.utf8)
         _ = data.withUnsafeBytes { raw -> Int in
             write(fd, raw.baseAddress, data.count)
+        }
+    }
+
+    /// Writes every byte, looping over partial writes — needed for payloads
+    /// larger than the socket send buffer (the oversized-line test).
+    private func sendAll(_ fd: Int32, _ bytes: [UInt8]) {
+        bytes.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            var offset = 0
+            while offset < raw.count {
+                let n = write(fd, base.advanced(by: offset), raw.count - offset)
+                if n <= 0 { break }  // peer closed (server hit the cap) or error
+                offset += n
+            }
         }
     }
 
@@ -242,5 +262,106 @@ final class ControlSocketServerTests: XCTestCase {
 
         let dir = URL(fileURLWithPath: path).deletingLastPathComponent().path
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir), "defaultSocketPath() must create its parent directory")
+    }
+
+    // MARK: - Request-size cap
+
+    /// A client that streams a huge request line and never sends a newline must
+    /// not grow the server's read buffer without bound: past the 64 KiB cap the
+    /// server answers `request_too_large` and closes the connection.
+    func testOversizedRequestLineIsRejected() throws {
+        let path = tempSocketPath()
+        let server = ControlSocketServer(socketPath: path, handler: stubHandler())
+        try server.start()
+        defer { server.stop() }
+
+        let expectation = expectation(description: "oversized line rejected")
+        var response: ControlResponse?
+
+        DispatchQueue.global().async {
+            defer { expectation.fulfill() }
+            guard let fd = self.connectClient(path: path) else { return }
+            defer { close(fd) }
+
+            // Well past the 64 KiB cap, with NO newline — a single unframed line.
+            let flood = [UInt8](repeating: UInt8(ascii: "x"), count: 70 * 1024)
+            self.sendAll(fd, flood)
+
+            guard let line = self.readOneLine(fd) else { return }
+            response = try? JSONDecoder().decode(ControlResponse.self, from: Data(line.utf8))
+        }
+
+        wait(for: [expectation], timeout: 5.0)
+
+        XCTAssertEqual(response?.ok, false)
+        XCTAssertEqual(response?.error?.code, "request_too_large")
+    }
+
+    // MARK: - Handler wait policy (read vs mutating)
+
+    /// A handler that answers `{ok:true, result.message:"done:<cmd>"}` only after
+    /// sleeping — lets a test make the handler outlast the read-path timeout.
+    private func delayingHandler(seconds: Double) -> ControlSocketServer.Handler {
+        { request in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            return ControlResponse(ok: true, result: ControlResult(message: "done:\(request.cmd)"))
+        }
+    }
+
+    /// A MUTATING command must never be answered with `timeout` while its handler
+    /// can still commit the mutation afterward. The handler here runs far longer
+    /// than the (tiny) read-path timeout; because `route.add` is mutating, the
+    /// server waits for the real result instead of racing the timeout — so a
+    /// client can't see `timeout`, retry, and cause a phantom double-apply.
+    func testMutatingCommandWaitsForCompletionInsteadOfTimingOut() throws {
+        let path = tempSocketPath()
+        let server = ControlSocketServer(socketPath: path, handler: delayingHandler(seconds: 0.5), handlerTimeout: 0.05)
+        try server.start()
+        defer { server.stop() }
+
+        let expectation = expectation(description: "mutating command awaits real completion")
+        var response: ControlResponse?
+
+        DispatchQueue.global().async {
+            defer { expectation.fulfill() }
+            guard let fd = self.connectClient(path: path) else { return }
+            defer { close(fd) }
+            self.send(fd, "{\"v\":1,\"cmd\":\"route.add\"}\n")
+            guard let line = self.readOneLine(fd) else { return }
+            response = try? JSONDecoder().decode(ControlResponse.self, from: Data(line.utf8))
+        }
+
+        wait(for: [expectation], timeout: 5.0)
+
+        XCTAssertEqual(response?.ok, true, "mutating command must return the handler's real result, not a timeout")
+        XCTAssertNil(response?.error, "mutating command must not report a timeout error")
+        XCTAssertEqual(response?.result?.message, "done:route.add")
+    }
+
+    /// Read (non-mutating) commands keep the bounded timeout: a wedged handler
+    /// must not hang `vpnb` forever. `status` is a read verb, so a handler slower
+    /// than the timeout yields a structured `timeout` error.
+    func testReadCommandStillTimesOutWhenHandlerWedges() throws {
+        let path = tempSocketPath()
+        let server = ControlSocketServer(socketPath: path, handler: delayingHandler(seconds: 2.0), handlerTimeout: 0.2)
+        try server.start()
+        defer { server.stop() }
+
+        let expectation = expectation(description: "read command times out")
+        var response: ControlResponse?
+
+        DispatchQueue.global().async {
+            defer { expectation.fulfill() }
+            guard let fd = self.connectClient(path: path) else { return }
+            defer { close(fd) }
+            self.send(fd, "{\"v\":1,\"cmd\":\"status\"}\n")
+            guard let line = self.readOneLine(fd) else { return }
+            response = try? JSONDecoder().decode(ControlResponse.self, from: Data(line.utf8))
+        }
+
+        wait(for: [expectation], timeout: 5.0)
+
+        XCTAssertEqual(response?.ok, false)
+        XCTAssertEqual(response?.error?.code, "timeout")
     }
 }

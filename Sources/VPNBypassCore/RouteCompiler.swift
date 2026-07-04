@@ -75,9 +75,13 @@ enum RouteCompiler {
         var claimed: [Claim] = []
 
         for entry in resolvedRules where entry.rule.enabled {
-            // A rule pointing at a route that no longer exists is inert (matches the
-            // resilient all-zero-UUID decode: skip, never fail the whole compile).
-            guard let route = byId[entry.rule.routeId] else { continue }
+            // A rule pointing at a route that no longer exists — OR a route the user has
+            // DISABLED — is inert: skip it entirely, and do NOT claim its destinations, so
+            // they fall through to a later rule or the default. Matches the resilient
+            // all-zero-UUID decode (skip, never fail the whole compile). Without the
+            // `route.enabled` check, toggling a .vpnDefault route off in the Routes tab
+            // would leave its iface:utunX kernel route installed.
+            guard let route = byId[entry.rule.routeId], route.enabled else { continue }
 
             // nil gateway ⇒ this egress is served without a kernel route; the
             // destination is still claimed so no later rule re-routes it.

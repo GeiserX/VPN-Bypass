@@ -5,10 +5,13 @@
 // delegates ALL command logic to an injected handler closure.
 //
 // RouteManager-FREE and I/O-generic by design: this file knows nothing about
-// routes, rules, or CommandRouter — it only frames bytes and calls `handler`.
-// That keeps it unit-testable with a stub (see ControlSocketServerTests) and
-// keeps the privilege/locking story owned entirely by whatever wires the real
-// handler up later (CommandRouter.apply + RouteManager, on @MainActor).
+// routes or rules — it only frames bytes and calls `handler`. Its one nod to
+// command semantics is CommandRouter.isMutating(cmd), used purely to pick the
+// per-verb wait policy (see processLine) so a mutating command is never
+// answered with a premature `timeout`. That keeps it unit-testable with a stub
+// (see ControlSocketServerTests) and keeps the privilege/locking story owned
+// entirely by whatever wires the real handler up later (CommandRouter.apply +
+// RouteManager, on @MainActor).
 //
 // Raw POSIX sockets, not Network.framework: NWListener's AF_UNIX support
 // (NWEndpoint.unix) has proven unreliable in practice, so this talks to the
@@ -45,11 +48,28 @@ public final class ControlSocketServer {
     private let handler: Handler
     private let acceptQueue = DispatchQueue(label: "com.vpnbypass.controlsocket.accept", qos: .userInitiated)
 
-    /// How long a single request line waits for the injected handler before
-    /// giving up and returning a `timeout` error. Bounds a `vpnb` invocation's
-    /// worst case if the (possibly @MainActor) handler wedges — e.g. stuck
-    /// behind a slow synchronous operation on the main thread.
-    private static let handlerTimeout: TimeInterval = 30
+    /// How long a READ (non-mutating) request waits for the injected handler
+    /// before giving up and returning a `timeout` error. Bounds a `vpnb`
+    /// invocation's worst case if the (possibly @MainActor) handler wedges —
+    /// e.g. stuck behind a slow synchronous operation on the main thread.
+    /// MUTATING requests deliberately IGNORE this and wait for the handler's
+    /// real completion (see processLine): answering a mutating command with
+    /// `timeout` while its saveConfig + route reapply can still land later would
+    /// race the client into a retry and a phantom double-apply, so we never do it.
+    private let handlerTimeout: TimeInterval
+
+    /// Default read-path timeout the public initializer uses. The
+    /// timeout-taking initializer is a test seam so tests can exercise the
+    /// read-path timeout without a 30s wait.
+    private static let defaultHandlerTimeout: TimeInterval = 30
+
+    /// Hard cap on a single un-framed request line. Control requests are tiny
+    /// JSON lines; a client that never sends a newline (or floods one enormous
+    /// line) must not grow the per-connection read buffer without bound. 64 KiB
+    /// is orders of magnitude above any real request — on overflow the
+    /// connection is answered with `request_too_large` and closed (the framing
+    /// is broken, so the pipe can't be safely reused).
+    private static let maxRequestLineBytes = 64 * 1024
 
     /// Backoff after an unexpected (non-EINTR/EBADF/EINVAL) accept() error,
     /// e.g. EMFILE/ENFILE under fd exhaustion — keeps the accept loop from
@@ -66,6 +86,16 @@ public final class ControlSocketServer {
     public init(socketPath: String, handler: @escaping Handler) {
         self.socketPath = socketPath
         self.handler = handler
+        self.handlerTimeout = Self.defaultHandlerTimeout
+    }
+
+    /// Test seam (module-internal): identical to the public initializer but lets
+    /// a test drive the read-path timeout directly instead of waiting the full
+    /// default. Not part of the public API.
+    init(socketPath: String, handler: @escaping Handler, handlerTimeout: TimeInterval) {
+        self.socketPath = socketPath
+        self.handler = handler
+        self.handlerTimeout = handlerTimeout
     }
 
     /// `~/Library/Application Support/VPNBypass/control.sock`. Creates the
@@ -274,6 +304,21 @@ public final class ControlSocketServer {
                     return  // Peer gone — stop servicing this connection.
                 }
             }
+
+            // With every complete line drained above, whatever remains is a
+            // single partial line still waiting for its newline. If that alone
+            // blows past the cap, a client is flooding us without ever framing a
+            // request — answer once with `request_too_large` and hang up rather
+            // than letting the read buffer grow without bound.
+            if buffer.count > Self.maxRequestLineBytes {
+                let response = ControlResponse(ok: false, error: ControlError(code: "request_too_large", message: "request line exceeded \(Self.maxRequestLineBytes)-byte limit"))
+                if let responseData = try? JSONEncoder().encode(response) {
+                    var out = responseData
+                    out.append(0x0A)
+                    _ = writeAll(fd: fd, data: out)
+                }
+                return
+            }
         }
     }
 
@@ -284,10 +329,18 @@ public final class ControlSocketServer {
     /// KEPT OPEN — a scripted client can retry on the same pipe instead of
     /// having to reconnect after one bad line.
     ///
-    /// The wait is bounded: if the (possibly @MainActor) handler wedges, a
-    /// `vpnb` invocation must still get an answer and exit rather than hang
-    /// forever. On timeout the handler's eventual result — if it ever arrives
-    /// — is simply discarded; `box` isn't read again after this call returns.
+    /// The wait policy depends on whether the verb mutates state:
+    ///   - READ verbs (CommandRouter.isMutating == false) use a bounded wait:
+    ///     if the (possibly @MainActor) handler wedges, a `vpnb` invocation
+    ///     still gets an answer and exits rather than hanging forever. On
+    ///     timeout the handler's eventual result — if it ever arrives — is
+    ///     simply discarded; `box` isn't read again after this call returns.
+    ///   - MUTATING verbs wait for the handler's ACTUAL completion, with no
+    ///     timeout. Reporting `timeout` for a mutation that can still commit
+    ///     later (saveConfig + reapply routes) would race the client into a
+    ///     retry and a phantom double-apply (e.g. route.add appending a second
+    ///     route on the retry). A truly wedged app therefore blocks just this
+    ///     one CLI connection — strictly better than a duplicate mutation.
     private func processLine(_ lineData: Data) -> ControlResponse {
         guard let request = try? JSONDecoder().decode(ControlRequest.self, from: lineData) else {
             return ControlResponse(ok: false, error: ControlError(code: "bad_request", message: "malformed JSON"))
@@ -300,7 +353,12 @@ public final class ControlSocketServer {
             box.response = await handler(request)
             semaphore.signal()
         }
-        guard semaphore.wait(timeout: .now() + Self.handlerTimeout) == .success else {
+        // Mutating verbs must not race a premature timeout against a commit that
+        // can still land (see the doc comment above): wait for real completion.
+        // Read verbs keep the bounded wait so a stuck app can't hang `vpnb`.
+        if CommandRouter.isMutating(request.cmd) {
+            semaphore.wait()
+        } else if semaphore.wait(timeout: .now() + handlerTimeout) != .success {
             return ControlResponse(ok: false, error: ControlError(code: "timeout", message: "handler did not respond in time"))
         }
         return box.response ?? ControlResponse(ok: false, error: ControlError(code: "internal_error", message: "handler did not return a response"))

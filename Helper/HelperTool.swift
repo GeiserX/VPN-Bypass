@@ -69,10 +69,15 @@ class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
         guard let data = FileManager.default.contents(atPath: HelperConstants.cdhashPinPath),
               let raw = String(data: data, encoding: .utf8) else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let isValidHex = !trimmed.isEmpty
-            && trimmed.count % 2 == 0
+        // Require a WHOLE cdhash, not merely "some hex". kSecCodeInfoUnique is a 20-byte
+        // code-directory hash (40 hex chars); a SHA-256 form is 32 bytes (64 hex). A
+        // partial/truncated write (e.g. "ab") is still even-length valid hex but would
+        // build a `cdhash H"ab"` requirement the real app can NEVER satisfy — locking out
+        // the helper. Reject anything that isn't a full-length hex cdhash so we fall back
+        // to identifier-only rather than pinning an unsatisfiable value.
+        let isValidCDHash = (trimmed.count == 40 || trimmed.count == 64)
             && trimmed.allSatisfy { $0.isHexDigit }
-        return isValidHex ? trimmed : nil
+        return isValidCDHash ? trimmed : nil
     }
 }
 

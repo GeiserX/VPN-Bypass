@@ -732,6 +732,17 @@ struct RuleEditorSheet: View {
             validationError = matchType == .service ? "Select a service." : "Pattern is required."
             return
         }
+        // Same validators RouteManager already uses for inverse-domain/CIDR entry
+        // (see addInverseDomain) — reused here rather than duplicated, so a malformed
+        // IP/CIDR can't be saved as an inert rule.
+        guard matchType != .ip || routeManager.isValidIP(effectivePattern) else {
+            validationError = "Enter a valid IPv4 address (e.g. 10.0.0.5)."
+            return
+        }
+        guard matchType != .cidr || routeManager.isValidCIDR(effectivePattern) else {
+            validationError = "Enter a valid IPv4 CIDR range (e.g. 10.0.0.0/8)."
+            return
+        }
         guard let routeId else {
             validationError = "Select a route."
             return
