@@ -17,7 +17,7 @@ permissions:
 jobs:
   release:
     name: Build and Release
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: macos-latest  # free + unlimited on public repos; ships full Xcode for the universal build
 
     steps:
       - name: Checkout code
