@@ -492,4 +492,139 @@ final class ProxyForwarderTests: XCTestCase {
             self.receiveStatusHead(connection, expected: expected, fulfill: fulfill, buffer: buffer)
         }
     }
+
+    // MARK: - Authority-parsing edge cases (isValidAuthority / splitAuthority)
+
+    // isValidAuthority/splitAuthority are private to a private nested type (Tunnel),
+    // so they are only reachable through the forwarder's public start()/CONNECT
+    // behavior — these drive that surface directly, exercising the "last colon
+    // separates host from port" rule: no colon at all, an empty host before the
+    // colon, a numeric-but-overflowing port, and a bracketed IPv6 literal both
+    // without and with an explicit port.
+
+    /// No colon anywhere in the authority: `lastIndex(of: ":")` finds nothing, so
+    /// isValidAuthority fails closed with 400 before ever dialing upstream.
+    func testConnectAuthorityWithNoColonReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: "example.com")
+    }
+
+    /// An empty host before the colon (":443") fails the `!host.isEmpty` check.
+    func testConnectAuthorityWithEmptyHostReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: ":443")
+    }
+
+    /// A numeric but out-of-UInt16-range port (70000 > 65535) fails `UInt16(portText)`.
+    func testConnectAuthorityWithPortOutOfUInt16RangeReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: "example.com:70000")
+    }
+
+    /// A bracketed IPv6 literal with NO port: the last colon in the string is one of
+    /// the address's OWN colons (inside the brackets), so the "port" text captured
+    /// after it is non-numeric ("1]") and the CONNECT is rejected — a real consequence
+    /// of the "last colon" heuristic when there is no actual port suffix.
+    func testConnectAuthorityBracketedIPv6WithoutPortReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: "[2001:db8::1]")
+    }
+
+    /// Shared driver for the 400-path tests above: no mock upstream is needed since
+    /// isValidAuthority rejects before the forwarder ever dials out (mirrors the
+    /// existing testMalformedConnectAuthorityReturns400, which covers a non-numeric port).
+    private func assertMalformedConnectAuthorityReturns400(authority: String) throws {
+        let got400 = expectation(description: "client received 400 Bad Request for authority '\(authority)'")
+        let forwarder = ProxyForwarder(
+            listenPort: 0,
+            upstream: .init(host: "127.0.0.1", port: 1, username: "", password: "", boundInterface: nil)
+        )
+        try forwarder.start()
+        self.forwarder = forwarder
+        let listenPort = try XCTUnwrap(forwarder.boundPort)
+
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: listenPort)!, using: .tcp)
+        self.clientConnection = client
+        client.stateUpdateHandler = { [weak self] state in
+            guard let self = self else { return }
+            if case .ready = state {
+                let request = "CONNECT \(authority) HTTP/1.1\r\nHost: \(authority)\r\n\r\n"
+                client.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
+                self.receiveStatusHead(client, expected: "HTTP/1.1 400 Bad Request\r\n\r\n", fulfill: got400)
+            }
+        }
+        client.start(queue: clientQueue)
+        wait(for: [got400], timeout: 5.0)
+    }
+
+    /// A bracketed IPv6 literal WITH an explicit port ("[2001:db8::1]:443"): the last
+    /// colon correctly falls after the closing bracket, so isValidAuthority accepts it
+    /// and the forwarder dials upstream carrying the authority VERBATIM, brackets and
+    /// all — the documented limitation that a raw IPv6 CONNECT target is sent as a
+    /// domain name, not specially unwrapped.
+    func testConnectAuthorityBracketedIPv6WithPortIsDialedVerbatimAsHostname() throws {
+        let mockReady = expectation(description: "capturing mock ready")
+        let gotHead = expectation(description: "mock captured the CONNECT head")
+
+        var mockPort: UInt16 = 0
+        try startCapturingHTTPMock(onHead: { head in
+            XCTAssertTrue(head.contains("CONNECT [2001:db8::1]:443 HTTP/1.1"),
+                          "the bracketed literal must reach the upstream verbatim as the authority: \(head)")
+            gotHead.fulfill()
+        }, ready: { port in mockPort = port; mockReady.fulfill() })
+        wait(for: [mockReady], timeout: 5.0)
+        XCTAssertNotEqual(mockPort, 0)
+
+        let forwarder = ProxyForwarder(
+            listenPort: 0,
+            upstream: .init(host: "127.0.0.1", port: mockPort, username: "", password: "", boundInterface: nil)
+        )
+        try forwarder.start()
+        self.forwarder = forwarder
+        let listenPort = try XCTUnwrap(forwarder.boundPort)
+
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: listenPort)!, using: .tcp)
+        self.clientConnection = client
+        client.stateUpdateHandler = { state in
+            if case .ready = state {
+                let request = "CONNECT [2001:db8::1]:443 HTTP/1.1\r\nHost: [2001:db8::1]:443\r\n\r\n"
+                client.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
+            }
+        }
+        client.start(queue: clientQueue)
+        wait(for: [gotHead], timeout: 5.0)
+    }
+
+    /// A minimal HTTP CONNECT mock that CAPTURES the request head verbatim (no
+    /// hardcoded host/auth assertions, unlike startMockUpstream/readMockRequest) so a
+    /// test can drive an arbitrary CONNECT authority and inspect exactly what the
+    /// forwarder dialed upstream with.
+    private func startCapturingHTTPMock(onHead: @escaping (String) -> Void, ready: @escaping (UInt16) -> Void) throws {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+        let listener = try NWListener(using: parameters)
+        self.mockListener = listener
+        listener.stateUpdateHandler = { [weak self] state in
+            guard case .ready = state, let port = self?.mockListener?.port?.rawValue else { return }
+            ready(port)
+        }
+        listener.newConnectionHandler = { [weak self] connection in
+            guard let self = self else { return }
+            self.mockConnection = connection
+            connection.start(queue: self.mockQueue)
+            self.captureHTTPHead(connection, buffer: Data(), onHead: onHead)
+        }
+        listener.start(queue: mockQueue)
+    }
+
+    private func captureHTTPHead(_ connection: NWConnection, buffer: Data, onHead: @escaping (String) -> Void) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, isComplete, error in
+            guard let self = self else { return }
+            var buffer = buffer
+            if let data = data { buffer.append(data) }
+            if let range = buffer.range(of: Data("\r\n\r\n".utf8)) {
+                let head = String(data: buffer.subdata(in: buffer.startIndex..<range.upperBound), encoding: .utf8) ?? ""
+                onHead(head)
+                return   // no response sent — the test only observes what was dialed
+            }
+            if isComplete || error != nil { return }
+            self.captureHTTPHead(connection, buffer: buffer, onHead: onHead)
+        }
+    }
 }

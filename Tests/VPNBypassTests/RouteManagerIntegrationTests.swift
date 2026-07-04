@@ -401,8 +401,11 @@ final class SaveLoadConfigTests: RouteManagerTestCase {
 final class DetectedDNSDisplayTests: XCTestCase {
 
     func testDetectedDNSServerDisplayDefaultNil() {
+        // detectedDNSServer is only ever assigned inside detectUserDNSServer() (private,
+        // reached only via detectAndApplyRoutesAsync). No test drives that path, so the
+        // public display accessor reports the untouched default: nil.
         let display = RouteManager.shared.detectedDNSServerDisplay
-        _ = display
+        XCTAssertNil(display)
     }
 }
 

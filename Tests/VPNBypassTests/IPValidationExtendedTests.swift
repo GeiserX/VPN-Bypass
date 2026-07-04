@@ -6,6 +6,7 @@ import XCTest
 
 // MARK: - isValidIP Edge Cases
 
+@MainActor
 final class IsValidIPEdgeCaseTests: XCTestCase {
 
     private let rm = RouteManager.shared
@@ -248,6 +249,7 @@ final class IsValidIPEdgeCaseTests: XCTestCase {
 
 // MARK: - isValidCIDR Edge Cases
 
+@MainActor
 final class IsValidCIDREdgeCaseTests: XCTestCase {
 
     private let rm = RouteManager.shared

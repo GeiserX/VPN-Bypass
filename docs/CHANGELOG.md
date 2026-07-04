@@ -5,6 +5,35 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-07-04
+
+A hardening release from a whole-codebase review. Classic **Bypass** and **VPN Only** route application stays byte-identical to 3.0.0 (same kernel routes, same `/etc/hosts` output) — every routing change here is behavior-preserving, proven by a new test net.
+
+### Fixed
+- **No orphaned routes on a helper timeout** — if a route-install batch timed out (a slow, not dead, helper), the app used to record none of the routes it may have installed, so they could survive VPN disconnect and quit — traffic stuck at a dead gateway. The app now records those routes so teardown removes them.
+- **Hosts-file failures are surfaced** — a failed `/etc/hosts` update is now reported as a warning instead of being logged as success while the file silently drifted from the kernel routes.
+- **Catch-all routes torn down first** — on quit/teardown the VPN-Only `0.0.0.0/1`+`128.0.0.0/1` catch-alls are removed before per-host routes, so a time-capped quit can't strand a full-tunnel-defeating route.
+- **Healthy helper no longer needlessly reinstalled** — a helper that's merely slow to answer at launch is retried once before the app concludes it's broken and prompts for an admin reinstall.
+- **More complete logging** — helper install/update and notification failures now reach the log (and the Logs tab) instead of vanishing to stdout; DNS-cache read/write failures are surfaced rather than swallowed.
+
+### Changed
+- **Routing core refactor (behavior-preserving)** — classic route-building was lifted into a pure, exhaustively-tested compiler and the duplicated apply logic was unified, so the default-mode path finally has a regression test net.
+- **Hardened debug log** — moved to `~/Library/Logs/VPNBypass/`, created owner-only (off the world-readable `/tmp`), and made cheaper to write on the hot path.
+- **Bounded DNS resolution** — domain resolution is capped with a sliding window so a large domain set can't spawn a subprocess fork-storm.
+- Dead code removed; whole package builds with zero warnings.
+
+## [3.0.0] - 2026-07-03
+
+### Added
+- **Custom routing mode** — A third routing mode alongside Bypass and VPN Only. Custom mode runs a per-rule dispatch engine: each rule maps a domain, service, or CIDR to a named route (egress), evaluated in order (first match wins) with a pinned "everything else → default" rule. This is a major addition; **Bypass and VPN Only remain the defaults and are unchanged** — existing users see no difference until they opt into Custom.
+- **Multiple egress types** — Custom-mode routes can send traffic out through several egresses: the local gateway (direct), a specific VPN interface (multi-VPN — pick *which* tunnel per rule), an HTTP or SOCKS5 **proxy** via a local `127.0.0.1` listener, or a **Tailscale peer** used as an exit (proxy-over-tailnet, so per-destination routing works without changing any Tailscale settings).
+- **`vpnb` command-line interface** — A bundled CLI (a second executable, symlinked onto `PATH` by the cask) that scripts the app over a user-only UNIX socket: `status`, `route add/set/rm`, `rule add/rm`, `mode`, and `default`. Secrets are read from stdin/env (never argv), and it honors `VPNB_SOCKET`. It drives the same routing paths a GUI action does — no new privilege.
+- **Rules and Routes tabs** — Custom mode adds a Rules tab (ordered, first-match rule list) and a Routes tab (auto-detected system routes — each VPN link plus Direct — alongside your own proxy and Tailscale-peer routes). The Settings window now has up to seven tabs (Domains, Services, Rules, Routes, General, Logs, Info); the visible set depends on the active mode.
+
+### Changed
+- **Privileged helper 1.6.0** — The helper is now cdhash-pinned and stays ad-hoc-signable, with no Network Extension entitlements. Existing users are prompted once to update the helper on first launch.
+- **Routing engine generalized to routes + rules** — Bypass and VPN Only are preserved as the default apply path; Custom mode compiles its rules into the same route batches the existing engine already applies, so the hard-won teardown and re-assertion guards are shared rather than reimplemented.
+
 ## [2.9.1] - 2026-06-09
 
 ### Fixed

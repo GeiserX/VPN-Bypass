@@ -4,7 +4,6 @@
 
 import SwiftUI
 import Network
-import UserNotifications
 
 public struct VPNBypassApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -46,10 +45,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastInterfaceTypes: Set<NWInterface.InterfaceType> = []
     private var lastInterfaceNames: Set<String> = []
     private var networkDebounceWorkItem: DispatchWorkItem?
-    private var hasCompletedInitialStartup = false
     private var appStartTime = Date()
-    private var lastSuccessfulVPNCheck = Date()
-    
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Single-instance guard FIRST. Two processes mutating the route table at
         // once is what tore down the GlobalProtect tunnel. If another instance
@@ -109,10 +106,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Start the auto DNS refresh timer
             RouteManager.shared.startDNSRefreshTimer()
-
-            // Mark startup as complete
-            hasCompletedInitialStartup = true
-            lastSuccessfulVPNCheck = Date()
         }
         
         // Start network monitoring for changes (after a delay to avoid duplicate startup)
@@ -202,22 +195,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    private func interfaceTypeName(_ type: NWInterface.InterfaceType) -> String {
-        switch type {
-        case .wifi: return "WiFi"
-        case .cellular: return "Cellular"
-        case .wiredEthernet: return "Ethernet"
-        case .loopback: return "Loopback"
-        case .other: return "Other"
-        @unknown default: return "Unknown"
-        }
-    }
-    
     private func startPeriodicRefresh() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
             Task { @MainActor in
                 RouteManager.shared.refreshStatus()
-                self?.lastSuccessfulVPNCheck = Date()
             }
         }
     }

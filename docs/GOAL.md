@@ -40,3 +40,20 @@ _Interpretation: implement ALL of P0→P1→P2 autonomously (unit-test + mock-ve
 > Just continue to /sergio-loop over these slices with ralph
 
 > Continue using these quirks with pf, CA, etc... I don't want to be using NE entitlements or anything for this
+
+## 2026-07-04 — continuation (3.0.1 refactors + review)
+
+> over the god class refactors 3.0.1 and do even more thorough testing too also do /review-code! when you finish again over all the code focusing on different parts
+
+## 2026-07-04 — continuation (README + gh description)
+
+> Also when you finish, edit the readme and the gh description to reflect the new reality of vpn bypass
+
+## 2026-07-04 — continuation (hardening backlog)
+
+> [pointing at the deferred hardening milestone — audit-token XPC fix, timeout→orphaned-route
+> kernel reconcile, apply-head + DNS-engine unification, classic-mode compiler extraction +
+> apply-path integration tests, helper addRoutesBatch parallelization, DNS concurrency cap, and
+> the god-class split — recorded in docs/CODE-REVIEW-3.0.1.md]
+>
+> /sergio-loop over it too when you finish with all this

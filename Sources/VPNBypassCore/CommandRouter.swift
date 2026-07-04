@@ -449,6 +449,11 @@ enum CommandRouter {
         return octets.allSatisfy { UInt32($0).map { $0 <= 255 } ?? false }
     }
 
+    /// Validates a rule MATCH pattern (RuleResolver matches traffic IPs against it), NOT a
+    /// kernel route destination. `/0` is intentionally allowed here — it means "match any
+    /// IPv4" (a catch-all rule) — whereas RouteManager.isValidCIDR rejects `/0` for route
+    /// *destinations* because it collides with the VPN-Only `0.0.0.0/1`+`128.0.0.0/1`
+    /// catch-all. Different purposes; the `/0` difference is deliberate, not drift.
     private static func isValidCIDR(_ s: String) -> Bool {
         let parts = s.split(separator: "/", omittingEmptySubsequences: false)
         guard parts.count == 2, let bits = Int(parts[1]), (0...32).contains(bits) else { return false }

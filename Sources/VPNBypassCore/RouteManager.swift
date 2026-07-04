@@ -723,16 +723,26 @@ final class RouteManager: ObservableObject {
     // MARK: - DNS Disk Cache
     
     private func loadDNSCache() {
-        guard let data = try? Data(contentsOf: dnsCacheURL),
-              let cache = try? JSONDecoder().decode([String: [String]].self, from: data) else {
-            return
+        // A missing cache is normal (first run) — stay silent. A present-but-corrupt
+        // cache should surface, otherwise the fast-start / preserve-cached-IPs safety
+        // nets that read it silently degrade with no way to notice.
+        guard FileManager.default.fileExists(atPath: dnsCacheURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: dnsCacheURL)
+            dnsDiskCache = try JSONDecoder().decode([String: [String]].self, from: data)
+        } catch {
+            log(.warning, "DNS cache unreadable/corrupt, ignoring: \(error.localizedDescription)")
         }
-        dnsDiskCache = cache
     }
-    
+
     private func saveDNSCache() {
-        guard let data = try? JSONEncoder().encode(dnsDiskCache) else { return }
-        try? data.write(to: dnsCacheURL)
+        do {
+            let data = try JSONEncoder().encode(dnsDiskCache)
+            try data.write(to: dnsCacheURL, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dnsCacheURL.path)
+        } catch {
+            log(.error, "Failed to persist DNS cache: \(error.localizedDescription)")
+        }
     }
     
     // MARK: - Import/Export Config
@@ -858,10 +868,16 @@ final class RouteManager: ObservableObject {
         // This avoids thread pool exhaustion issues
         let deadline = Date().addingTimeInterval(timeout)
         
+        // NOTE: this runs on `vpnBypassProcessQueue.async` (a raw GCD closure, not a Swift
+        // Task), so `Task.isCancelled` is always false here — it cannot see the enclosing
+        // resolver TaskGroup's cancelAll(). Promptly killing a losing resolver therefore needs
+        // a cancellation flag threaded in via withTaskCancellationHandler (deferred; see
+        // docs/CODE-REVIEW-3.0.1.md). A loser simply runs out its own 1–3 s timeout; harmless,
+        // just wasted CPU.
         while process.isRunning && Date() < deadline {
             Thread.sleep(forTimeInterval: 0.01) // 10ms poll interval
         }
-        
+
         if process.isRunning {
             // Timeout - terminate the process
             process.terminate()
@@ -876,13 +892,7 @@ final class RouteManager: ObservableObject {
     }
     
     // MARK: - Network Status
-    
-    func updateNetworkStatus(_ path: NWPath) {
-        Task {
-            await checkVPNStatus()
-        }
-    }
-    
+
     func detectCurrentNetwork() async {
         // Get current WiFi SSID using helper with timeout
         guard let result = await runProcessAsync(
@@ -932,13 +942,18 @@ final class RouteManager: ObservableObject {
         // NWPathMonitor and ifconfig can momentarily miss the interface during
         // network transitions, causing spurious disconnect→reconnect notifications.
         if wasVPNConnected && !connected {
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            let (recheckConnected, recheckInterface, recheckType) = await detectVPNInterface()
-            if recheckConnected {
-                log(.info, "VPN flap suppressed — interface reappeared after recheck")
-                connected = recheckConnected
-                interface = recheckInterface
-                detectedType = recheckType
+            do {
+                try await Task.sleep(nanoseconds: 1_500_000_000)
+                let (recheckConnected, recheckInterface, recheckType) = await detectVPNInterface()
+                if recheckConnected {
+                    log(.info, "VPN flap suppressed — interface reappeared after recheck")
+                    connected = recheckConnected
+                    interface = recheckInterface
+                    detectedType = recheckType
+                }
+            } catch {
+                // Cancelled during the flap-recheck window — skip the recheck rather
+                // than running it a beat early on a torn-down detection pass.
             }
         }
 
@@ -1404,13 +1419,6 @@ final class RouteManager: ObservableObject {
         return nil
     }
     
-    /// Called from startup - no notification
-    func detectAndApplyRoutes() {
-        Task {
-            await detectAndApplyRoutesAsync(sendNotification: false)
-        }
-    }
-    
     /// Called from Refresh button - sends notification
     func refreshRoutes() {
         guard HelperManager.shared.isHelperInstalled else {
@@ -1604,7 +1612,6 @@ final class RouteManager: ObservableObject {
             log(.info, "VPN Only mode: bypass-all via \(gateway), VPN domains via \(vpnGw)")
         }
 
-        var newRoutes: [ActiveRoute] = []
         var failedCount = 0
 
         // Clear DNS cache for fresh resolution
@@ -1613,7 +1620,7 @@ final class RouteManager: ObservableObject {
         // Collect all domains to resolve (for parallel resolution)
         var allDomains: [(domain: String, source: String)] = []
 
-        // Collect CIDR entries separately (added to route structures after variable declarations)
+        // Collect CIDR entries separately (routed directly, not DNS-resolved)
         var inverseCIDRs: [String] = []
 
         if isInverse {
@@ -1623,15 +1630,13 @@ final class RouteManager: ObservableObject {
                 if domain.isCIDR {
                     inverseCIDRs.append(domain.domain)
                 } else {
-                    let resolvable = domain.domain
-                    allDomains.append((resolvable, domain.domain))
+                    allDomains.append((domain.domain, domain.domain))
                 }
             }
         } else {
             // Bypass mode: resolve bypass domains + service domains
             for domain in config.domains where domain.enabled {
-                let resolvable = domain.domain
-                allDomains.append((resolvable, domain.domain))
+                allDomains.append((domain.domain, domain.domain))
             }
             for service in config.services where service.enabled {
                 for domain in service.domains {
@@ -1639,139 +1644,106 @@ final class RouteManager: ObservableObject {
                 }
             }
         }
-        
+
         // Resolve domains in parallel batches (truly parallel now with nonisolated DNS)
         log(.info, "Resolving \(allDomains.count) domains...")
-        
+
         let batchSize = 100  // Large batch size - DNS resolution is truly parallel via GCD
         var index = 0
-        
+
         // Capture values for nonisolated access
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
-        
+
         // In VPN Only mode, domain-specific routes go through VPN gateway
         let routeGateway = isInverse ? (vpnGateway ?? gateway) : gateway
 
-        // Collect all routes to add (for batch operation)
-        var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
-        var seenDestinations: Set<String> = []  // Deduplicate kernel operations
-        var allSourceEntries: [(destination: String, source: String)] = []  // Track all sources per IP
-        var seenSourceDests: Set<String> = []  // Deduplicate (source, destination) pairs
-
-        // VPN Only mode: add catch-all routes through local gateway first
-        // 0.0.0.0/1 + 128.0.0.0/1 cover all IPv4 with higher specificity than default route
-        if isInverse {
-            routesToAdd.append((destination: "0.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
-            routesToAdd.append((destination: "128.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
-            seenDestinations.insert("0.0.0.0/1")
-            seenDestinations.insert("128.0.0.0/1")
-            allSourceEntries.append((destination: "0.0.0.0/1", source: "VPN Only catch-all"))
-            allSourceEntries.append((destination: "128.0.0.0/1", source: "VPN Only catch-all"))
-            seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
-            seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
-
-            // Add CIDR entries as network routes through VPN gateway
-            for cidr in inverseCIDRs {
-                if !seenDestinations.contains(cidr) {
-                    seenDestinations.insert(cidr)
-                    routesToAdd.append((destination: cidr, gateway: routeGateway, isNetwork: true, source: cidr))
-                }
-                let key = "\(cidr)|\(cidr)"
-                if !seenSourceDests.contains(key) {
-                    seenSourceDests.insert(key)
-                    allSourceEntries.append((destination: cidr, source: cidr))
-                }
-            }
-        }
-
+        // Resolve every matcher (impure: DNS + cache + failed tracking), then hand the
+        // already-resolved data to the pure ClassicRouteCompiler which builds the route set.
+        // Groups are assembled in input order (a domain may appear under several sources, so we
+        // carry the batch index rather than key by domain) — deterministic, and the emitted
+        // route SET is identical to the old inline collection (see ClassicRouteCompiler).
+        var resolvedGroups: [ClassicRouteCompiler.ResolvedGroup] = []
         while index < allDomains.count {
             let endIndex = min(index + batchSize, allDomains.count)
             let batch = Array(allDomains[index..<endIndex])
-            
-            // Resolve DNS in parallel (truly parallel - nonisolated)
-            let dnsResults = await withTaskGroup(of: (domain: String, source: String, ips: [String]?).self) { group in
-                for item in batch {
-                    group.addTask {
-                        let ips = await Self.resolveIPsParallel(for: item.domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
-                        return (item.domain, item.source, ips)
-                    }
-                }
-                
-                var results: [(domain: String, source: String, ips: [String]?)] = []
-                for await result in group {
-                    results.append(result)
-                }
-                return results
-            }
-            
-            // Collect routes from DNS results and cache for hosts file
-            for result in dnsResults {
-                if let ips = result.ips, !ips.isEmpty {
-                    // DNS succeeded - use fresh IPs and update disk cache
-                    if let firstIP = ips.first {
-                        dnsCache[result.domain] = firstIP
-                    }
-                    dnsDiskCache[result.domain] = ips  // Update persistent cache
 
-                    for ip in ips {
-                        // Dedup kernel operations
-                        if !seenDestinations.contains(ip) {
-                            seenDestinations.insert(ip)
-                            routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: result.source))
-                        }
-                        // Dedup (source, destination) ownership pairs
-                        let key = "\(result.source)|\(ip)"
-                        if !seenSourceDests.contains(key) {
-                            seenSourceDests.insert(key)
-                            allSourceEntries.append((destination: ip, source: result.source))
-                        }
+            // Sliding-window resolve: cap in-flight domain resolutions. Each domain fans out to
+            // ~5 dig/curl subprocesses, so an unbounded 100-wide batch could spawn ~500 concurrent
+            // processes — a fork storm that oversubscribes the GCD pool. Bound the in-flight count
+            // so subprocess concurrency stays ~80. Results are reassembled in input order.
+            let maxConcurrentResolves = 16
+            let dnsResults = await withTaskGroup(of: (idx: Int, ips: [String]?).self) { group in
+                var next = 0
+                while next < batch.count && next < maxConcurrentResolves {
+                    let i = next, item = batch[i]
+                    group.addTask { (i, await Self.resolveIPsParallel(for: item.domain, userDNS: userDNS, fallbackDNS: fallbackDNS)) }
+                    next += 1
+                }
+                var results: [(idx: Int, ips: [String]?)] = []
+                while let result = await group.next() {
+                    results.append(result)
+                    if next < batch.count {
+                        let i = next, item = batch[i]
+                        group.addTask { (i, await Self.resolveIPsParallel(for: item.domain, userDNS: userDNS, fallbackDNS: fallbackDNS)) }
+                        next += 1
                     }
-                } else if let cachedIPs = dnsDiskCache[result.domain], !cachedIPs.isEmpty {
+                }
+                return results.sorted { $0.idx < $1.idx }
+            }
+
+            for result in dnsResults {
+                let item = batch[result.idx]
+                if let ips = result.ips, !ips.isEmpty {
+                    // DNS succeeded - use fresh IPs and update caches
+                    if let firstIP = ips.first {
+                        dnsCache[item.domain] = firstIP
+                    }
+                    dnsDiskCache[item.domain] = ips  // Update persistent cache
+                    resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: item.source, ips: ips))
+                } else if let cachedIPs = dnsDiskCache[item.domain], !cachedIPs.isEmpty {
                     // DNS failed but we have cached IPs - use them as fallback
-                    log(.info, "Using cached IPs for \(result.domain)")
+                    log(.info, "Using cached IPs for \(item.domain)")
                     if let firstIP = cachedIPs.first {
-                        dnsCache[result.domain] = firstIP
+                        dnsCache[item.domain] = firstIP
                     }
-                    for ip in cachedIPs {
-                        if !seenDestinations.contains(ip) {
-                            seenDestinations.insert(ip)
-                            routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: result.source))
-                        }
-                        let key = "\(result.source)|\(ip)"
-                        if !seenSourceDests.contains(key) {
-                            seenSourceDests.insert(key)
-                            allSourceEntries.append((destination: ip, source: result.source))
-                        }
-                    }
+                    resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: item.source, ips: cachedIPs))
                 } else {
-                    failedDomains.insert(result.domain)
+                    failedDomains.insert(item.domain)
                     failedCount += 1
                 }
             }
-            
+
             index += batchSize
         }
-        
+
         // Save updated DNS cache to disk
         saveDNSCache()
-        
-        // Collect IP ranges (bypass mode only — services are not used in VPN Only mode)
+
+        // Service IP ranges (bypass mode only — services are not used in VPN Only mode)
+        var serviceRanges: [(source: String, range: String)] = []
         if !isInverse {
             for service in config.services where service.enabled {
                 for range in service.ipRanges {
-                    let key = "\(service.name)|\(range)"
-                    if !seenSourceDests.contains(key) {
-                        seenSourceDests.insert(key)
-                        allSourceEntries.append((destination: range, source: service.name))
-                    }
-                    guard !seenDestinations.contains(range) else { continue }
-                    seenDestinations.insert(range)
-                    routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
+                    serviceRanges.append((service.name, range))
                 }
             }
         }
-        
+
+        // Build the classic route set from the resolved data (pure + unit-tested).
+        let build = ClassicRouteCompiler.build(
+            isInverse: isInverse,
+            localGateway: gateway,
+            routeGateway: routeGateway,
+            inverseCIDRs: inverseCIDRs,
+            resolvedGroups: resolvedGroups,
+            serviceRanges: serviceRanges
+        )
+        let routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] =
+            build.routesToAdd.map { ($0.destination, $0.gateway, $0.isNetwork, $0.source) }
+        let allSourceEntries: [(destination: String, gateway: String, source: String)] =
+            build.allSourceEntries.map { ($0.destination, $0.gateway, $0.source) }
+
         // Diff-before-mutate (VPN-Bypass-3sc.2): if the desired route set already
         // matches what is active (same destination+gateway pairs), re-running
         // delete-before-add for every route is pure churn that pressures the VPN's
@@ -1790,7 +1762,6 @@ final class RouteManager: ObservableObject {
         log(.info, "Adding \(routesToAdd.count) routes via batch operation...")
         
         // Apply all routes in batch (single XPC call for massive speedup)
-        let routeGwForEntries = routeGateway  // capture for source entries
         var batchFailureCount = 0
         var batchFailedDests: Set<String> = []
         if HelperManager.shared.isHelperInstalled {
@@ -1807,66 +1778,8 @@ final class RouteManager: ObservableObject {
             return
         }
 
-        // Build activeRoutes from allSourceEntries, excluding destinations that failed kernel add
-        let appliedDestinations = Set(routesToAdd.map { $0.destination }).subtracting(batchFailedDests)
-        for entry in allSourceEntries where appliedDestinations.contains(entry.destination) {
-            let gw = routesToAdd.first(where: { $0.destination == entry.destination })?.gateway ?? routeGwForEntries
-            newRoutes.append(ActiveRoute(
-                destination: entry.destination,
-                gateway: gw,
-                source: entry.source,
-                timestamp: Date()
-            ))
-        }
-
-        // Clean up stale kernel routes. Two populations:
-        // 1. Truly orphaned: not in batch add input — delete-before-add never touched
-        //    them, so a failed delete means the route IS still in the kernel.
-        // 2. Add-failed: were in batch add input but failed — delete-before-add already
-        //    removed the old route, so a failed delete means "already gone."
-        let newDestinations = Set(newRoutes.map { $0.destination })
-        let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
-        let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
-        let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
-        let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
-
-        // Truly orphaned: re-attach on failure (route is genuinely still in kernel)
-        if !trulyOrphanedDests.isEmpty {
-            let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
-            if result.failureCount > 0 {
-                log(.warning, "Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
-                let failedSet = Set(result.failedDestinations)
-                for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
-                    newRoutes.append(route)
-                }
-            } else if result.successCount > 0 {
-                log(.info, "Orphan cleanup: \(result.successCount) stale kernel routes removed")
-            }
-        }
-
-        // Add-failed: helper's addRoute does delete-before-add, so the old route is
-        // gone after a failed re-add. Don't re-attach — the kernel route doesn't exist.
-        if !addFailedStaleDests.isEmpty {
-            let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
-            if result.failureCount > 0 {
-                log(.info, "Add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
-            }
-        }
-
-        // Preemption check: if removeAllRoutes() ran during our awaits, our results are stale.
-        // The epoch check + commit is atomic on @MainActor (no await between them).
-        guard routeEpoch == epoch else {
-            log(.warning, "Apply aborted: routes were cleared during operation")
-            return
-        }
-
-        activeRoutes = newRoutes
-        lastUpdate = Date()
-
-        // Manage hosts file if enabled
-        if config.manageHostsFile {
-            await updateHostsFile()
-        }
+        let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "")
+        guard committed else { return }
 
         let confirmedUniqueCount = uniqueRouteCount
         let totalFailures = failedCount + batchFailureCount
@@ -1960,10 +1873,10 @@ final class RouteManager: ObservableObject {
         }
 
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
-        var allSourceEntries: [(destination: String, source: String)] = []
+        var allSourceEntries: [(destination: String, gateway: String, source: String)] = []
         for r in compiled {
             routesToAdd.append((destination: r.destination, gateway: r.gateway, isNetwork: r.isNetwork, source: r.source))
-            allSourceEntries.append((destination: r.destination, source: r.source))
+            allSourceEntries.append((destination: r.destination, gateway: r.gateway, source: r.source))
         }
 
         // Diff-before-mutate: skip a no-op re-apply to avoid route-table churn that
@@ -1978,7 +1891,6 @@ final class RouteManager: ObservableObject {
 
         log(.info, "Custom routing: applying \(routesToAdd.count) kernel route(s) from \(resolved.count) rule(s)...")
 
-        var newRoutes: [ActiveRoute] = []
         var batchFailureCount = 0
         var batchFailedDests: Set<String> = []
         if !routesToAdd.isEmpty {
@@ -1996,51 +1908,8 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        // Build activeRoutes from source entries, excluding destinations that failed the add.
-        let appliedDestinations = Set(routesToAdd.map { $0.destination }).subtracting(batchFailedDests)
-        for entry in allSourceEntries where appliedDestinations.contains(entry.destination) {
-            let gw = routesToAdd.first(where: { $0.destination == entry.destination })?.gateway ?? gateway
-            newRoutes.append(ActiveRoute(destination: entry.destination, gateway: gw, source: entry.source, timestamp: Date()))
-        }
-
-        // Clean up stale kernel routes — same two-population logic as the full apply.
-        let newDestinations = Set(newRoutes.map { $0.destination })
-        let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
-        let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
-        let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
-        let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
-
-        if !trulyOrphanedDests.isEmpty {
-            let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
-            if result.failureCount > 0 {
-                log(.warning, "Custom orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
-                let failedSet = Set(result.failedDestinations)
-                for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
-                    newRoutes.append(route)
-                }
-            } else if result.successCount > 0 {
-                log(.info, "Custom orphan cleanup: \(result.successCount) stale kernel routes removed")
-            }
-        }
-        if !addFailedStaleDests.isEmpty {
-            let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
-            if result.failureCount > 0 {
-                log(.info, "Custom add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
-            }
-        }
-
-        // Preemption check: if removeAllRoutes() ran during our awaits, results are stale.
-        guard routeEpoch == epoch else {
-            log(.warning, "Custom apply aborted: routes were cleared during operation")
-            return false
-        }
-
-        activeRoutes = newRoutes
-        lastUpdate = Date()
-
-        if config.manageHostsFile {
-            await updateHostsFile()
-        }
+        let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Custom ")
+        guard committed else { return false }
 
         let confirmedUniqueCount = uniqueRouteCount
         if batchFailureCount > 0 {
@@ -2172,12 +2041,24 @@ final class RouteManager: ObservableObject {
         var failedDests: Set<String> = []
         if !destinations.isEmpty {
             if HelperManager.shared.isHelperInstalled {
-                let result = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
-                failedDests = Set(result.failedDestinations)
-                if result.failureCount > 0 {
-                    log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
-                } else {
-                    log(.info, "Batch route removal: \(result.successCount) routes removed")
+                // Remove the catch-all routes (0.0.0.0/1 + 128.0.0.0/1, or a custom 0.0.0.0/0)
+                // FIRST, in their own fast batch. If a time-capped quit cuts teardown short,
+                // the full-tunnel-defeating catch-alls are already gone rather than stranded
+                // (leaving the machine forcing all traffic at a now-dead gateway).
+                let catchAlls = destinations.filter { RouteCompiler.catchAllDestinations.contains($0) }
+                let rest = destinations.filter { !RouteCompiler.catchAllDestinations.contains($0) }
+                if !catchAlls.isEmpty {
+                    let r = await HelperManager.shared.removeRoutesBatch(destinations: catchAlls)
+                    failedDests.formUnion(r.failedDestinations)
+                }
+                if !rest.isEmpty {
+                    let result = await HelperManager.shared.removeRoutesBatch(destinations: rest)
+                    failedDests.formUnion(result.failedDestinations)
+                    if result.failureCount > 0 {
+                        log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
+                    } else {
+                        log(.info, "Batch route removal: \(result.successCount) routes removed")
+                    }
                 }
             } else {
                 log(.error, "Cannot remove routes: helper not ready (\(HelperManager.shared.helperState.statusText))")
@@ -2246,110 +2127,55 @@ final class RouteManager: ObservableObject {
 
         let routeGateway = isInverse ? vpnGateway! : gateway
 
-        var newRoutes: [ActiveRoute] = []
-        var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
-        var seenDestinations: Set<String> = []  // Deduplicate kernel operations
-        var allSourceEntries: [(destination: String, gateway: String, source: String)] = []
-        var seenSourceDests: Set<String> = []  // Deduplicate (source, destination) pairs
+        // Collect from the DNS disk cache (no live resolution), then hand the resolved data to
+        // the same pure ClassicRouteCompiler the live path uses. Set-equivalent to the old inline
+        // collection: CIDR ranges and host IPs never string-collide, and services-before-domains
+        // first-wins is preserved by the collection order below.
+        var inverseCIDRs: [String] = []
+        var resolvedGroups: [ClassicRouteCompiler.ResolvedGroup] = []
+        var serviceRanges: [(source: String, range: String)] = []
 
         if isInverse {
-            // VPN Only mode: catch-all through local gateway, domain routes through VPN
-            routesToAdd.append((destination: "0.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
-            routesToAdd.append((destination: "128.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
-            seenDestinations.insert("0.0.0.0/1")
-            seenDestinations.insert("128.0.0.0/1")
-            allSourceEntries.append((destination: "0.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
-            allSourceEntries.append((destination: "128.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
-            seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
-            seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
-
             for domain in config.inverseDomains where domain.enabled {
                 if domain.isCIDR {
-                    // CIDR entries: route directly as network routes, no DNS cache
-                    let cidr = domain.domain
-                    let key = "\(cidr)|\(cidr)"
-                    if !seenSourceDests.contains(key) {
-                        seenSourceDests.insert(key)
-                        allSourceEntries.append((destination: cidr, gateway: routeGateway, source: cidr))
-                    }
-                    if !seenDestinations.contains(cidr) {
-                        seenDestinations.insert(cidr)
-                        routesToAdd.append((destination: cidr, gateway: routeGateway, isNetwork: true, source: cidr))
-                    }
-                } else {
-                    let cacheKey = domain.domain
-                    if let cachedIPs = dnsDiskCache[cacheKey] {
-                        for ip in cachedIPs {
-                            let key = "\(domain.domain)|\(ip)"
-                            if !seenSourceDests.contains(key) {
-                                seenSourceDests.insert(key)
-                                allSourceEntries.append((destination: ip, gateway: routeGateway, source: domain.domain))
-                            }
-                            if !seenDestinations.contains(ip) {
-                                seenDestinations.insert(ip)
-                                routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: domain.domain))
-                            }
-                        }
-                        if let firstIP = cachedIPs.first {
-                            dnsCache[cacheKey] = firstIP
-                        }
-                    }
+                    inverseCIDRs.append(domain.domain)
+                } else if let cachedIPs = dnsDiskCache[domain.domain] {
+                    resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: domain.domain, ips: cachedIPs))
+                    if let firstIP = cachedIPs.first { dnsCache[domain.domain] = firstIP }
                 }
             }
         } else {
-            // Bypass mode: services + domains through local gateway
             for service in config.services where service.enabled {
                 for domain in service.domains {
                     if let cachedIPs = dnsDiskCache[domain] {
-                        for ip in cachedIPs {
-                            let key = "\(service.name)|\(ip)"
-                            if !seenSourceDests.contains(key) {
-                                seenSourceDests.insert(key)
-                                allSourceEntries.append((destination: ip, gateway: gateway, source: service.name))
-                            }
-                            if !seenDestinations.contains(ip) {
-                                seenDestinations.insert(ip)
-                                routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: service.name))
-                            }
-                        }
-                        if let firstIP = cachedIPs.first {
-                            dnsCache[domain] = firstIP
-                        }
+                        resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: service.name, ips: cachedIPs))
+                        if let firstIP = cachedIPs.first { dnsCache[domain] = firstIP }
                     }
                 }
                 for range in service.ipRanges {
-                    let key = "\(service.name)|\(range)"
-                    if !seenSourceDests.contains(key) {
-                        seenSourceDests.insert(key)
-                        allSourceEntries.append((destination: range, gateway: gateway, source: service.name))
-                    }
-                    if !seenDestinations.contains(range) {
-                        seenDestinations.insert(range)
-                        routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
-                    }
+                    serviceRanges.append((service.name, range))
                 }
             }
-
             for domain in config.domains where domain.enabled {
-                let cacheKey = domain.domain
-                if let cachedIPs = dnsDiskCache[cacheKey] {
-                    for ip in cachedIPs {
-                        let key = "\(domain.domain)|\(ip)"
-                        if !seenSourceDests.contains(key) {
-                            seenSourceDests.insert(key)
-                            allSourceEntries.append((destination: ip, gateway: gateway, source: domain.domain))
-                        }
-                        if !seenDestinations.contains(ip) {
-                            seenDestinations.insert(ip)
-                            routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: domain.domain))
-                        }
-                    }
-                    if let firstIP = cachedIPs.first {
-                        dnsCache[cacheKey] = firstIP
-                    }
+                if let cachedIPs = dnsDiskCache[domain.domain] {
+                    resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: domain.domain, ips: cachedIPs))
+                    if let firstIP = cachedIPs.first { dnsCache[domain.domain] = firstIP }
                 }
             }
         }
+
+        let build = ClassicRouteCompiler.build(
+            isInverse: isInverse,
+            localGateway: gateway,
+            routeGateway: routeGateway,
+            inverseCIDRs: inverseCIDRs,
+            resolvedGroups: resolvedGroups,
+            serviceRanges: serviceRanges
+        )
+        let routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] =
+            build.routesToAdd.map { ($0.destination, $0.gateway, $0.isNetwork, $0.source) }
+        let allSourceEntries: [(destination: String, gateway: String, source: String)] =
+            build.allSourceEntries.map { ($0.destination, $0.gateway, $0.source) }
 
         log(.info, "Applying \(routesToAdd.count) routes from cache (\(isInverse ? "VPN Only" : "Bypass") mode)...")
 
@@ -2371,8 +2197,49 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        // Build activeRoutes from all source entries, excluding failed kernel adds
-        for entry in allSourceEntries where !batchFailedDests.contains(entry.destination) {
+        let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Cache ")
+        guard committed else { return false }
+
+        if batchFailureCount > 0 {
+            log(.warning, "Applied routes from cache (\(batchFailureCount) kernel failures — counts approximate)")
+        } else {
+            log(.success, "Applied \(uniqueRouteCount) unique routes from cache")
+        }
+        return true
+    }
+
+    /// Partition the stale kernel routes (active destinations no longer in the new set)
+    /// into the two cleanup populations: `orphaned` (never in this batch → a failed remove
+    /// means the route is still installed, re-attach) vs `addFailed` (in the batch but the
+    /// add failed → delete-before-add already removed it, don't re-attach). Pure set algebra.
+    nonisolated static func partitionStaleRoutes(active: Set<String>, applied newDestinations: Set<String>, attempted: Set<String>) -> (orphaned: Set<String>, addFailed: Set<String>) {
+        let stale = active.subtracting(newDestinations)
+        return (orphaned: stale.subtracting(attempted), addFailed: stale.intersection(attempted))
+    }
+
+    /// Shared install-epilogue for the two full-replace apply paths
+    /// (applyAllRoutesInternal + applyRoutesFromCache): segments B–F of the apply
+    /// tail. Builds activeRoutes from the ownership entries (minus destinations that
+    /// failed the kernel batch add), runs the two-population orphan cleanup, then —
+    /// in an await-free window — re-checks the epoch guard and commits
+    /// activeRoutes/lastUpdate before updating the hosts file. Returns false when
+    /// preempted (removeAllRoutes() bumped the epoch mid-flight): the caller must
+    /// abort without any further commit. `logLabel` is "" for the full apply and
+    /// "Cache " for the cached fast-path (log prefixing only). Runs on the class
+    /// @MainActor; the epoch-guard→commit window stays await-free (updateHostsFile
+    /// awaits only after the commit).
+    private func commitAppliedRoutes(
+        routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)],
+        allSourceEntries: [(destination: String, gateway: String, source: String)],
+        batchFailedDests: Set<String>,
+        epoch: UInt64,
+        logLabel: String
+    ) async -> Bool {
+        var newRoutes: [ActiveRoute] = []
+
+        // Build activeRoutes from allSourceEntries, excluding destinations that failed kernel add
+        let appliedDestinations = Set(routesToAdd.map { $0.destination }).subtracting(batchFailedDests)
+        for entry in allSourceEntries where appliedDestinations.contains(entry.destination) {
             newRoutes.append(ActiveRoute(
                 destination: entry.destination,
                 gateway: entry.gateway,
@@ -2381,53 +2248,58 @@ final class RouteManager: ObservableObject {
             ))
         }
 
-        // Clean up stale routes — same two-population logic as full apply
+        // Clean up stale kernel routes. Two populations:
+        // 1. Truly orphaned: not in batch add input — delete-before-add never touched
+        //    them, so a failed delete means the route IS still in the kernel.
+        // 2. Add-failed: were in batch add input but failed — delete-before-add already
+        //    removed the old route, so a failed delete means "already gone."
         let newDestinations = Set(newRoutes.map { $0.destination })
-        let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
-        let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
-        let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
-        let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
+        let stalePartition = RouteManager.partitionStaleRoutes(
+            active: Set(activeRoutes.map { $0.destination }),
+            applied: newDestinations,
+            attempted: Set(routesToAdd.map { $0.destination })
+        )
+        let trulyOrphanedDests = Array(stalePartition.orphaned)
+        let addFailedStaleDests = Array(stalePartition.addFailed)
 
+        // Truly orphaned: re-attach on failure (route is genuinely still in kernel)
         if !trulyOrphanedDests.isEmpty {
             let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
             if result.failureCount > 0 {
-                log(.warning, "Cache orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
+                log(.warning, "\(logLabel)Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
                 let failedSet = Set(result.failedDestinations)
                 for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
                     newRoutes.append(route)
                 }
             } else if result.successCount > 0 {
-                log(.info, "Cache orphan cleanup: \(result.successCount) stale kernel routes removed")
+                log(.info, "\(logLabel)Orphan cleanup: \(result.successCount) stale kernel routes removed")
             }
         }
 
-        // Add-failed: delete-before-add already removed the old route (see full apply comment)
+        // Add-failed: helper's addRoute does delete-before-add, so the old route is
+        // gone after a failed re-add. Don't re-attach — the kernel route doesn't exist.
         if !addFailedStaleDests.isEmpty {
             let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
             if result.failureCount > 0 {
-                log(.info, "Cache add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
+                log(.info, "\(logLabel)Add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
             }
         }
 
         // Preemption check: if removeAllRoutes() ran during our awaits, our results are stale.
+        // The epoch check + commit is atomic on @MainActor (no await between them).
         guard routeEpoch == epoch else {
-            log(.warning, "Cache apply aborted: routes were cleared during operation")
+            log(.warning, "\(logLabel)Apply aborted: routes were cleared during operation")
             return false
         }
 
         activeRoutes = newRoutes
         lastUpdate = Date()
 
-        // Update hosts file
+        // Manage hosts file if enabled
         if config.manageHostsFile {
             await updateHostsFile()
         }
 
-        if batchFailureCount > 0 {
-            log(.warning, "Applied routes from cache (\(batchFailureCount) kernel failures — counts approximate)")
-        } else {
-            log(.success, "Applied \(uniqueRouteCount) unique routes from cache")
-        }
         return true
     }
 
@@ -2686,8 +2558,11 @@ final class RouteManager: ObservableObject {
         // Update hosts file with any newly resolved domains (only if still connected)
         let shouldUpdateHosts = await MainActor.run { config.manageHostsFile && isVPNConnected }
         if shouldUpdateHosts {
-            await updateHostsFile()
-            await MainActor.run { log(.info, "Background refresh: hosts file updated") }
+            let hostsOK = await updateHostsFile()
+            await MainActor.run {
+                if hostsOK { log(.info, "Background refresh: hosts file updated") }
+                else { log(.warning, "Background refresh: hosts file update FAILED — /etc/hosts may be stale") }
+            }
         }
 
         // Update UI refresh timestamps
@@ -2975,8 +2850,8 @@ final class RouteManager: ObservableObject {
 
         // Update hosts file if enabled and still connected
         if config.manageHostsFile && isVPNConnected {
-            await updateHostsFile()
-            log(.info, "DNS refresh: hosts file updated")
+            if await updateHostsFile() { log(.info, "DNS refresh: hosts file updated") }
+            else { log(.warning, "DNS refresh: hosts file update FAILED — /etc/hosts may be stale") }
         }
 
         lastDNSRefresh = Date()
@@ -3843,6 +3718,15 @@ final class RouteManager: ObservableObject {
         return nil
     }
 
+    /// Make an in-memory config change live: reconcile proxy listeners and/or reapply the
+    /// custom-engine kernel routes, per the caller's policy. The caller persists (saveConfig)
+    /// and mutates config BEFORE calling this. Strictly a plumbing dedup of the tail that was
+    /// copied across the mutation surfaces — every per-site policy is an explicit argument.
+    func reconcileAfterConfigChange(reconcileListeners: Bool, reapplyRoutes: Bool, sendNotification: Bool = false) async {
+        if reconcileListeners { await reconcileProxyListeners() }
+        if reapplyRoutes { await detectAndApplyRoutesAsync(sendNotification: sendNotification) }
+    }
+
     /// Start/stop proxy-route listeners to match the current config (P1,
     /// VPN-Bypass-3sc.8). Safe to call any time; a no-op when there are no
     /// enabled proxy routes, so it changes nothing for existing users.
@@ -3960,7 +3844,7 @@ final class RouteManager: ObservableObject {
             
             // Track nameserver
             if trimmed.hasPrefix("nameserver[0]") {
-                // Extract IP: "nameserver[0] : <lan-gateway>02"
+                // Extract IP from a line like: "nameserver[0] : 192.168.1.1"
                 let parts = trimmed.components(separatedBy: ":")
                 if parts.count >= 2 {
                     let dns = parts[1].trimmingCharacters(in: .whitespaces)
@@ -4091,10 +3975,6 @@ final class RouteManager: ObservableObject {
         }
         
         return routes.isEmpty ? nil : routes
-    }
-    
-    private func applyRouteForRange(_ range: String, gateway: String) async -> Bool {
-        return await addRoute(range, gateway: gateway, isNetwork: true)
     }
     
     private func resolveIPs(for domain: String) async -> [String]? {
@@ -4344,7 +4224,8 @@ final class RouteManager: ObservableObject {
         return result.success
     }
     
-    private func updateHostsFile() async {
+    @discardableResult
+    private func updateHostsFile() async -> Bool {
         // Collect domain -> IP mappings, filtered against activeRoutes so hosts
         // only contains entries for domains that actually have installed kernel routes.
         // Checks all cached IPs (not just first) to find a routed one.
@@ -4417,7 +4298,7 @@ final class RouteManager: ObservableObject {
         }
 
         // Update /etc/hosts (requires sudo)
-        await modifyHostsFile(entries: entries)
+        return await modifyHostsFile(entries: entries)
     }
 
     /// Find the first cached IP for a domain that has a confirmed kernel route
@@ -4454,15 +4335,17 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    private func modifyHostsFile(entries: [(domain: String, ip: String)]) async {
+    @discardableResult
+    private func modifyHostsFile(entries: [(domain: String, ip: String)]) async -> Bool {
         guard HelperManager.shared.isHelperInstalled else {
             log(.error, "Cannot modify hosts file: helper not ready (\(HelperManager.shared.helperState.statusText))")
-            return
+            return false
         }
         let result = await HelperManager.shared.updateHostsFile(entries: entries)
         if !result.success {
             log(.error, "Helper hosts update failed: \(result.error ?? "unknown")")
         }
+        return result.success
     }
     
     nonisolated func cleanDomain(_ input: String) -> String {
@@ -4521,26 +4404,51 @@ final class RouteManager: ObservableObject {
         return true
     }
     
+    /// One shared timestamp formatter — allocating a fresh `ISO8601DateFormatter`
+    /// per log line is measurably expensive and this is a hot path (hundreds of
+    /// lines per apply/refresh).
+    private static let logFormatter = ISO8601DateFormatter()
+
+    /// Owner-only log file under the per-user, `0700`-protected `~/Library/Logs`
+    /// (never the world-writable, symlink-plantable `/tmp`). Computed once.
+    private lazy var logFileURL: URL? = {
+        guard let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else { return nil }
+        let dir = base.appendingPathComponent("Logs/VPNBypass", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        return dir.appendingPathComponent("vpnbypass.log")
+    }()
+
+    /// Persistent append handle so we don't open/seek/close on every line.
+    /// Safe to cache: `RouteManager` is `@MainActor`, so `log()` is serialized.
+    private var logFileHandle: FileHandle?
+
     func log(_ level: LogEntry.LogLevel, _ message: String) {
         let entry = LogEntry(timestamp: Date(), level: level, message: message)
         recentLogs.insert(entry, at: 0)
         if recentLogs.count > 200 {
             recentLogs.removeLast()
         }
-        
-        // Log to file
-        let logLine = "[\(ISO8601DateFormatter().string(from: Date()))] [\(level.rawValue)] \(message)\n"
-        let logPath = "/tmp/vpnbypass.log"
-        if let data = logLine.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: logPath) {
-                if let handle = FileHandle(forWritingAtPath: logPath) {
-                    handle.seekToEndOfFile()
-                    handle.write(data)
-                    handle.closeFile()
-                }
-            } else {
-                try? data.write(to: URL(fileURLWithPath: logPath))
+
+        // Log to file (owner-only, never following a planted symlink).
+        guard let url = logFileURL,
+              let data = "[\(Self.logFormatter.string(from: entry.timestamp))] [\(level.rawValue)] \(message)\n".data(using: .utf8)
+        else { return }
+
+        if logFileHandle == nil {
+            let fd = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0o600)
+            if fd >= 0 {
+                logFileHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
             }
+        }
+        guard let handle = logFileHandle else { return }
+        do {
+            try handle.write(contentsOf: data)
+        } catch {
+            // Handle went stale (file rotated/deleted) — drop it; the next call reopens.
+            try? handle.close()
+            logFileHandle = nil
         }
     }
 }

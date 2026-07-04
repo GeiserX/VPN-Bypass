@@ -837,7 +837,7 @@ struct MenuContent: View {
         routeManager.config.rules.append(Rule(matchType: .domain, pattern: cleaned, routeId: directRouteId, order: maxOrder + 1))
         routeManager.saveConfig()
         routeManager.log(.success, "Added rule: \(cleaned) → Direct")
-        Task { await routeManager.detectAndApplyRoutesAsync(sendNotification: false) }
+        Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
     }
 
     private func openSettings() {

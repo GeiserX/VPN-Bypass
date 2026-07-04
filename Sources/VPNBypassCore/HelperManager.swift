@@ -44,7 +44,6 @@ final class HelperManager: ObservableObject {
     var isHelperInstalled: Bool { helperState.isReady }
 
     private var xpcConnection: NSXPCConnection?
-    private let hasPromptedKey = "HasPromptedHelperInstall"
 
     /// XPC timeout for all helper RPCs (seconds)
     private let xpcTimeout: TimeInterval = 10
@@ -90,12 +89,8 @@ final class HelperManager: ObservableObject {
         if !FileManager.default.fileExists(atPath: helperPath) ||
            !FileManager.default.fileExists(atPath: plistPath) {
             // First launch or files removed — try to install
-            let hasPrompted = UserDefaults.standard.bool(forKey: hasPromptedKey)
-            if !hasPrompted {
-                UserDefaults.standard.set(true, forKey: hasPromptedKey)
-            }
             helperState = .missing
-            print("🔐 Helper not found, attempting install...")
+            RouteManager.shared.log(.info, "Helper not found, attempting install...")
             let installed = await installHelper()
             if !installed {
                 helperState = .failed(installationError ?? String(localized: "Installation failed"))
@@ -107,18 +102,26 @@ final class HelperManager: ObservableObject {
 
         // Files exist — verify version via XPC with timeout
         helperState = .checking
-        let version = await getVersionWithTimeout()
+        var probe = await probeVersion()
+        if case .timedOut = probe {
+            // The helper may just be slow under launch load — retry once before
+            // concluding it needs reinstalling. Reinstalling a healthy-but-busy
+            // helper would fire an intrusive admin-password prompt for nothing.
+            RouteManager.shared.log(.warning, "Helper version probe timed out; retrying before reinstall")
+            probe = await probeVersion()
+        }
+        let version: String? = { if case .version(let v) = probe { return v } else { return nil } }()
 
         guard let version = version else {
             // Check if the user disabled the background item in System Settings
             if #available(macOS 13.0, *), isDaemonDisabledByUser() {
-                print("🔐 Helper daemon disabled by user in System Settings")
+                RouteManager.shared.log(.warning, "Helper daemon disabled by user in System Settings")
                 helperState = .failed(String(localized: "Please enable VPN Bypass in System Settings → General → Login Items"))
                 return false
             }
 
-            // XPC connection failed — helper may be corrupted or wrong arch
-            print("🔐 Helper XPC connection failed, attempting reinstall...")
+            // XPC unreachable or persistently unresponsive — helper may be corrupted or wrong arch
+            RouteManager.shared.log(.warning, "Helper XPC connection failed, attempting reinstall...")
             helperState = .installing
             let reinstalled = await installHelper()
             if reinstalled {
@@ -144,10 +147,10 @@ final class HelperManager: ObservableObject {
         }
 
         // Version mismatch — update
-        print("🔐 Helper version mismatch: installed=\(version), expected=\(expected)")
+        RouteManager.shared.log(.info, "🔐 Helper version mismatch: installed=\(version), expected=\(expected)")
         helperState = .outdated(installed: version, expected: expected)
 
-        print("🔐 Auto-updating helper...")
+        RouteManager.shared.log(.info, "🔐 Auto-updating helper...")
         let updated = await installHelper()
         if !updated {
             helperState = .failed(String(localized: "Helper update failed: \(installationError ?? String(localized: "unknown"))"))
@@ -212,31 +215,47 @@ final class HelperManager: ObservableObject {
 
     // MARK: - Version Check with Timeout
 
-    private func getVersionWithTimeout() async -> String? {
+    /// Outcome of a version probe. Distinguishing `timedOut` (the helper may just be
+    /// slow under launch load) from `unreachable` (XPC error / no proxy — the helper
+    /// is likely broken) lets the caller retry a slow helper instead of firing an
+    /// intrusive admin-password reinstall for a perfectly healthy one.
+    private enum VersionProbe: Sendable {
+        case version(String)
+        case unreachable
+        case timedOut
+    }
+
+    private func probeVersion() async -> VersionProbe {
         let connection = getOrCreateConnection()
-        let noVersion: String? = nil
-        let result: String? = await withXPCDeadline(seconds: xpcTimeout, fallback: noVersion) { once in
+        let result = await withXPCDeadline(seconds: xpcTimeout, fallback: VersionProbe.timedOut) { once in
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                print("🔐 XPC error during getVersion: \(error.localizedDescription)")
-                once.complete(noVersion)
+                RouteManager.shared.log(.error, "XPC error during getVersion: \(error.localizedDescription)")
+                once.complete(.unreachable)
             } as? HelperProtocol
 
             guard let helper = proxy else {
-                once.complete(noVersion)
+                once.complete(.unreachable)
                 return
             }
 
             helper.getVersion { version in
-                once.complete(version)
+                once.complete(.version(version))
             }
         }
         return result
     }
 
+    /// Thin string-returning wrapper for the post-reinstall verification callers,
+    /// where any non-version outcome equally means "not the version we expect".
+    private func getVersionWithTimeout() async -> String? {
+        if case .version(let v) = await probeVersion() { return v }
+        return nil
+    }
+
     // MARK: - Helper Installation
 
     func installHelper() async -> Bool {
-        print("🔐 Installing privileged helper...")
+        RouteManager.shared.log(.info, "🔐 Installing privileged helper...")
         isInstalling = true
         helperState = .installing
         defer {
@@ -262,22 +281,22 @@ final class HelperManager: ObservableObject {
         let helperPath = "/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)"
         let plistPath = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
         if FileManager.default.fileExists(atPath: helperPath) {
-            print("🔐 Helper exists on disk, using legacy path for update...")
+            RouteManager.shared.log(.info, "🔐 Helper exists on disk, using legacy path for update...")
             return installHelperLegacy()
         }
 
         do {
             let service = SMAppService.daemon(plistName: "\(kHelperToolMachServiceName).plist")
-            try await service.register()
+            try service.register()   // synchronous throwing API — no await needed
 
-            print("✅ Helper registered successfully via SMAppService")
+            RouteManager.shared.log(.success, "✅ Helper registered successfully via SMAppService")
 
             // SMAppService.register() can report success without actually placing the
             // binary/plist on disk (observed with enterprise security tools like Zscaler).
             // Verify both files exist before trusting the registration.
             if !FileManager.default.fileExists(atPath: helperPath) ||
                !FileManager.default.fileExists(atPath: plistPath) {
-                print("⚠️ SMAppService reported success but helper files missing on disk, falling back to legacy install...")
+                RouteManager.shared.log(.warning, "⚠️ SMAppService reported success but helper files missing on disk, falling back to legacy install...")
                 return installHelperLegacy()
             }
 
@@ -289,8 +308,8 @@ final class HelperManager: ObservableObject {
             installationError = nil
             return true
         } catch {
-            print("⚠️ SMAppService failed: \(error.localizedDescription)")
-            print("🔐 Falling back to legacy install...")
+            RouteManager.shared.log(.warning, "⚠️ SMAppService failed: \(error.localizedDescription)")
+            RouteManager.shared.log(.info, "🔐 Falling back to legacy install...")
             return installHelperLegacy()
         }
     }
@@ -309,7 +328,7 @@ final class HelperManager: ObservableObject {
     }
 
     private func installHelperLegacy() -> Bool {
-        print("🔐 Attempting manual helper installation via AppleScript...")
+        RouteManager.shared.log(.info, "🔐 Attempting manual helper installation via AppleScript...")
 
         guard let bundlePath = Bundle.main.bundlePath as String?,
               bundlePath.hasSuffix(".app") else {
@@ -324,13 +343,13 @@ final class HelperManager: ObservableObject {
 
         guard FileManager.default.fileExists(atPath: helperSource) else {
             installationError = "Helper binary not found in app bundle"
-            print("❌ Helper not found at: \(helperSource)")
+            RouteManager.shared.log(.error, "❌ Helper not found at: \(helperSource)")
             return false
         }
 
         guard FileManager.default.fileExists(atPath: plistSource) else {
             installationError = "Helper plist not found in app bundle"
-            print("❌ Plist not found at: \(plistSource)")
+            RouteManager.shared.log(.error, "❌ Plist not found at: \(plistSource)")
             return false
         }
 
@@ -360,7 +379,7 @@ final class HelperManager: ObservableObject {
             """
         } else {
             pinCommands = "true"
-            print("⚠️ Could not compute app cdhash — helper will use identifier-only auth")
+            RouteManager.shared.log(.warning, "⚠️ Could not compute app cdhash — helper will use identifier-only auth")
         }
 
         let shellCommand = """
@@ -384,11 +403,11 @@ final class HelperManager: ObservableObject {
             if let error = error {
                 let errorMessage = error[NSAppleScript.errorMessage] as? String ?? "Unknown error"
                 installationError = errorMessage
-                print("❌ AppleScript error: \(errorMessage)")
+                RouteManager.shared.log(.error, "❌ AppleScript error: \(errorMessage)")
                 return false
             }
 
-            print("✅ Helper installed successfully via AppleScript")
+            RouteManager.shared.log(.success, "✅ Helper installed successfully via AppleScript")
             installationError = nil
             return true
         }
@@ -428,18 +447,25 @@ final class HelperManager: ObservableObject {
            existing == cdhash {
             return   // already correct
         }
-        let script = """
-        do shell script "
-            printf '%s' '\(cdhash)' > '\(HelperConstants.cdhashPinPath)'
-            chmod 644 '\(HelperConstants.cdhashPinPath)'
-            chown root:wheel '\(HelperConstants.cdhashPinPath)'
-        " with administrator privileges
+        // Escape uniformly through the same shell → AppleScript layers the legacy
+        // installer uses, so the trust boundary is consistent even though cdhash is
+        // [0-9a-f] and the pin path is currently a constant.
+        let pin = Self.shSingleQuoteEscaped(HelperConstants.cdhashPinPath)
+        let shellCommand = """
+        printf '%s' '\(cdhash)' > '\(pin)'
+        chmod 644 '\(pin)'
+        chown root:wheel '\(pin)'
         """
+        let script = "do shell script \"\(Self.appleScriptStringEscaped(shellCommand))\" with administrator privileges"
         var error: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&error)
+        guard let appleScript = NSAppleScript(source: script) else {
+            RouteManager.shared.log(.warning, "cdhash pin write (modern path): failed to create AppleScript — helper will use identifier-only")
+            return
+        }
+        appleScript.executeAndReturnError(&error)
         if let error = error {
             let msg = error[NSAppleScript.errorMessage] as? String ?? "unknown"
-            print("⚠️ cdhash pin write (modern path) failed: \(msg) — helper will use identifier-only")
+            RouteManager.shared.log(.warning, "cdhash pin write (modern path) failed: \(msg) — helper will use identifier-only")
         }
     }
 
@@ -516,7 +542,14 @@ final class HelperManager: ObservableObject {
         // at ~0.07s each ≈ 0.14s/route). 0.1s/route was too tight and caused timeouts
         // for batches above ~250 routes, dropping all routes as failed.
         let timeout = xpcTimeout + Double(routes.count) * 0.25
-        let fallback = (0, routes.count, allDests, Optional("XPC timeout"))
+        // On a DEADLINE timeout (not an XPC error — the call DID reach the helper), the helper may
+        // be slow rather than dead and have installed some/all routes without confirming. Reporting
+        // them as failed strands orphaned kernel routes the app never tracks — a leak that survives
+        // disconnect and quit. Report an INDETERMINATE result (no confirmed failures) so the caller
+        // records the attempted destinations as active; a later teardown then removes them
+        // (removeRoutesBatch tolerates already-absent routes). The XPC-error / nil-proxy paths below
+        // keep reporting allDests failed — those genuinely never installed.
+        let fallback = (0, 0, [String](), Optional("XPC timeout"))
 
         let connection = getOrCreateConnection()
         let result = await withXPCDeadline(seconds: timeout, fallback: fallback) { once in
@@ -534,7 +567,10 @@ final class HelperManager: ObservableObject {
             }
         }
 
-        if result.3 == "XPC timeout" { dropXPCConnection() }
+        if result.3 == "XPC timeout" {
+            RouteManager.shared.log(.warning, "Route batch timed out — recording \(allDests.count) attempted route(s) as active so teardown can remove them")
+            dropXPCConnection()
+        }
         return result
     }
 
@@ -602,10 +638,6 @@ final class HelperManager: ObservableObject {
 
         if result == fallback { dropXPCConnection() }
         return result
-    }
-
-    func clearHostsFile() async -> (success: Bool, error: String?) {
-        return await updateHostsFile(entries: [])
     }
 }
 

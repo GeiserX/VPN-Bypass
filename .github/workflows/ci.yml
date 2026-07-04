@@ -25,27 +25,22 @@ permissions:
 
 jobs:
   test:
-    runs-on: [self-hosted, macOS, ARM64]
-    # Do not run untrusted fork PR code on the self-hosted runner.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+    # GitHub-hosted macOS runners are free + unlimited on public repos, and being
+    # throwaway VMs they remove the self-hosted fork-PR attack surface entirely
+    # (so no fork guard is needed). They ship full Xcode, so XCTest is available.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Select Xcode toolchain
-        # `swift test` needs XCTest, which ships only with full Xcode — not with
-        # the Command Line Tools. Point the toolchain at an installed Xcode so
-        # XCTest resolves, and fail fast with a clear message if it's missing.
-        run: |
-          XCODE_APP=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1 || true)
-          if [ -z "$XCODE_APP" ]; then
-            echo "::error::No Xcode found in /Applications. Full Xcode (not just Command Line Tools) is required for 'swift test' because XCTest ships only with Xcode. Install Xcode on this self-hosted runner."
-            exit 1
-          fi
-          DEV_DIR="$XCODE_APP/Contents/Developer"
-          echo "Using Xcode at $XCODE_APP"
-          sudo xcode-select -s "$DEV_DIR"
-          echo "DEVELOPER_DIR=$DEV_DIR" >> "$GITHUB_ENV"
+        with:
+          # Don't leave the GitHub token in local git config while running
+          # PR-controlled code (`swift test`) — fork PRs now run here.
+          persist-credentials: false
+      - name: Select Xcode (latest stable)
+        # Full Xcode ships XCTest and a Swift 6 compiler (the code uses `sending`).
+        # The action selects reliably across images (no non-portable `sort -V`).
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
       - name: Verify XCTest is available
         run: xcrun --find xctest
       - name: Cache SPM

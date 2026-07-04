@@ -66,12 +66,12 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             isAuthorized = granted
             
             if granted {
-                print("✅ Notification authorization granted")
+                RouteManager.shared.log(.success, "Notification authorization granted")
             } else {
-                print("⚠️ Notification authorization denied")
+                RouteManager.shared.log(.warning, "Notification authorization denied")
             }
         } catch {
-            print("❌ Notification authorization error: \(error)")
+            RouteManager.shared.log(.error, "Notification authorization error: \(error.localizedDescription)")
             isAuthorized = false
         }
         
@@ -192,7 +192,10 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         
         notificationCenter.add(request) { error in
             if let error = error {
-                print("❌ Failed to send notification: \(error)")
+                // The completion runs off the main actor; hop back to log (and pre-format
+                // the message so no non-Sendable Error crosses the boundary).
+                let msg = "Failed to send notification: \(error.localizedDescription)"
+                Task { @MainActor in RouteManager.shared.log(.error, msg) }
             }
         }
     }
@@ -251,7 +254,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         // Check if this is first launch - if so, use defaults
         let hasLaunched = UserDefaults.standard.bool(forKey: hasLaunchedKey)
         if !hasLaunched {
-            print("🔔 First launch - using default notification settings (routes OFF)")
+            RouteManager.shared.log(.info, "First launch - using default notification settings (routes OFF)")
             UserDefaults.standard.set(true, forKey: hasLaunchedKey)
             savePreferences()
             return

@@ -1,5 +1,5 @@
 // SettingsView.swift
-// Settings window with tabs for Domains, Services, General, and Logs.
+// Settings window with tabs for Domains, Services, Rules, Routes, General, Logs, and Info.
 
 import SwiftUI
 import UniformTypeIdentifiers
@@ -2677,10 +2677,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
 
     func show() {
-        showWindow()
-    }
-
-    func showOnTop() {
         showWindow()
     }
 

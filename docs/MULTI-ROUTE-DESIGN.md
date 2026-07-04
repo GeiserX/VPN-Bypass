@@ -1,6 +1,11 @@
 # Multi-Route Networking — design & handoff
 
-> **Status: DESIGN (research in flight).** This document is the handoff for turning VPN Bypass from a
+> **Status: P0 + P1 SHIPPED in 3.0.** The routes+rules model (P0) and the proxy local-listeners + `route-on`
+> hook + `vpnb` CLI (P1) landed in 3.0, along with Tailscale-peer & multi-VPN egress and the Custom-mode UX
+> (build Slices 1–4). **The remaining track is P2 — app-agnostic capture of proxy-ignoring apps — and it is
+> entitlement-free (PF + a local CA), NOT Network Extension** (see the NO-NE hard-constraint section near the
+> end; it supersedes every mention of `NETransparentProxy` in the body below).
+> This document is the handoff for turning VPN Bypass from a
 > two-way *"bypass the VPN for these domains"* tool into a general **multi-route router**: any
 > destination can take any of **N named routes** — the corporate VPN (default), one or more **proxies**
 > (HTTP/SOCKS, including residential like Oxylabs / Bright Data / IPRoyal), or **direct** — and any app
@@ -122,7 +127,8 @@ clarity. *(See open questions for which selector types ship in v1.)*
 
 ## macOS implementation
 
-**Decision (from research): the OS-level engine is `NETransparentProxyProvider`** (a Network System
+**Decision (from research): the OS-level engine is `NETransparentProxyProvider`** *(superseded — see the
+NO-NE hard-constraint section below; the shipped path is entitlement-free, and NE is out)* (a Network System
 Extension). It is the *only* mechanism that reliably intercepts a workstation's **own** outbound flows
 per-destination — and it hands the handler the **hostname before DNS** (`flow.remoteHostname`), which is
 exactly what makes domain-based routing *and* the DNS fix possible. mitmproxy (local mode), ProxyBridge,
@@ -152,6 +158,8 @@ route-change watchdog to re-apply on VPN resets — they can't reach a proxy ups
 listeners + `route-on`) ships first with zero entitlements** (just local proxy listeners + the proxy env —
 today's `oxy-on`, generalized) and already delivers the proven 3-way; **P2 (the NE engine) is the
 app-agnostic upgrade** for traffic that ignores a proxy env (curl-without-`-x`, Go/Rust binaries, daemons).
+*(Superseded — the app-agnostic upgrade is now the entitlement-free PF/CA transparent path, NOT NE; see the
+NO-NE hard-constraint section below. P1 shipped in 3.0.)*
 
 ## Hookability — how an app picks a route
 
@@ -189,7 +197,10 @@ Bypass. *(Listener-port assignment + the `route-on` CLI design come from the hoo
 ## Resolved by research / still open
 
 **Resolved:**
-- **Engine** → `NETransparentProxyProvider` (PF-`rdr` rejected — it can't touch the box's own traffic).
+- **Engine** → `NETransparentProxyProvider` *(superseded — NE is out; the engine is the entitlement-free
+  kernel-routes + local-listener path, with a PF/local-CA transparent track for app-agnostic capture. See the
+  NO-NE hard-constraint section below.)* (PF-`rdr` rejected as a redsocks-style redirect — it can't touch the
+  box's own traffic).
 - **Per-route DNS** → proxy routes: the proxy resolves remotely; direct: interface-bound resolve; else
   `/etc/resolver/<domain>` (`NEDNSSettings.matchDomains` is silently ignored).
 - **Schema** → typed-outbound (sing-box model) + the three residential session modes (see *Provider abstraction*).
@@ -209,8 +220,9 @@ Bypass. *(Listener-port assignment + the `route-on` CLI design come from the hoo
 - **P1 — proxy route + local listeners:** generalize the single `proxyConfig` into N proxy routes, each
   with a `127.0.0.1:PORT` forwarder (the `oxy-on` forwarder, made general + auth-injecting + VPN-escaping).
   Ship `route-on <name>`. This alone delivers the proven 3-way, generically.
-- **P2 — OS-level engine:** NETransparentProxy (or PF-rdr) for app-agnostic per-destination routing +
-  per-route DNS + health-check/failover selectors.
+- **P2 — app-agnostic capture:** *(superseded — NE is out; see the NO-NE hard-constraint section below.)* the
+  entitlement-free **PF + local-CA** transparent path (not `NETransparentProxy`) for app-agnostic
+  per-destination routing + per-route DNS + health-check/failover selectors.
 - **P3 — providers:** WireGuard/OpenVPN/Tailscale route types; PAC for browsers; UI for routes+rules.
 
 ## 2026-07-03 — Research corrections + locked build plan
