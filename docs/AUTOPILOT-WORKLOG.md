@@ -246,3 +246,13 @@ Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, ind
 - **HELD for Sergio (delicately — see docs/CODE-REVIEW-3.0.1.md Status block):** audit-token XPC (root helper, brick-risk, can't live-test — this is the `feat:` that would make it 3.1.0; without it the batch is a 3.0.1 patch); god-class split US-013 (recommend separate PR); DNS-refresh unification US-009 (apply path not suite-exercised); helper addRoutesBatch parallelization; US-014 leftovers (watchdog / CoreWLAN / notifications / timer-cancel).
 - **Version:** ships as **3.0.1** (patch) since the feature-like audit-token is deferred; becomes 3.1.0 when it lands. Asked Sergio (audit-token handling + god-class-split sequencing) — no answer in 60s, took the reversible/delicate defaults.
 - **NOT merged** — Sergio's release gate. CodeRabbit to be addressed on the grown PR.
+
+### 2026-07-04 — 3.1.0 SHIPPED (free CI); 3.2.0 roadmap set
+- **3.1.0 released** on free macos-latest: release v3.1.0 + DMG + cask (3.1.0). Audit-token (self-validated on the mini) + config-model extraction. Both 3.0.1 and 3.1.0 now shipped, $0 CI, dead runner gone.
+- Branch feat/routemanager-3.2.0 created off main (8c3dbbc). (Caught + fixed a stale-origin/main reset that had briefly based it on 3.0.1.)
+- **3.2.0 backlog (all leak-critical or large — do with fresh care, self-test each on the mini which is now a proven test env):**
+  1. God-class split cont'd: extract the STATEFUL collaborators (VPNDetector, RouteApplier, ConfigStore, DNSResolver) — high churn on the @MainActor apply/detect logic. (Model extraction already done in 3.1.0.)
+  2. US-009: unify the two DNS-refresh engines; make the recurring timer use the parallel resolver (not the serial one). Apply path not suite-exercised → mini self-test.
+  3. Helper addRoutesBatch parallelization (perf; privileged, leak-critical).
+  4. US-014 leftovers: helper re-validation watchdog (mini-testable); airport→CoreWLAN (needs a Location-permission decision); the never-firing 1.3.0 service/domain notifications (product call: wire vs remove); withXPCDeadline timer-cancel (micro-opt on the XPC-hang primitive).
+- Mini self-test recipe (proven): copy RC app → sudo-install helper (replicate installHelperLegacy) → launch → read ~/Library/Logs/VPNBypass/vpnbypass.log for "Helper installed: true" / route application → clean up (bootout + rm helper/pin/plist).
