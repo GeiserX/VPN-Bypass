@@ -1900,10 +1900,10 @@ final class RouteManager: ObservableObject {
         }
 
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
-        var allSourceEntries: [(destination: String, source: String)] = []
+        var allSourceEntries: [(destination: String, gateway: String, source: String)] = []
         for r in compiled {
             routesToAdd.append((destination: r.destination, gateway: r.gateway, isNetwork: r.isNetwork, source: r.source))
-            allSourceEntries.append((destination: r.destination, source: r.source))
+            allSourceEntries.append((destination: r.destination, gateway: r.gateway, source: r.source))
         }
 
         // Diff-before-mutate: skip a no-op re-apply to avoid route-table churn that
@@ -1918,7 +1918,6 @@ final class RouteManager: ObservableObject {
 
         log(.info, "Custom routing: applying \(routesToAdd.count) kernel route(s) from \(resolved.count) rule(s)...")
 
-        var newRoutes: [ActiveRoute] = []
         var batchFailureCount = 0
         var batchFailedDests: Set<String> = []
         if !routesToAdd.isEmpty {
@@ -1936,51 +1935,8 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        // Build activeRoutes from source entries, excluding destinations that failed the add.
-        let appliedDestinations = Set(routesToAdd.map { $0.destination }).subtracting(batchFailedDests)
-        for entry in allSourceEntries where appliedDestinations.contains(entry.destination) {
-            let gw = routesToAdd.first(where: { $0.destination == entry.destination })?.gateway ?? gateway
-            newRoutes.append(ActiveRoute(destination: entry.destination, gateway: gw, source: entry.source, timestamp: Date()))
-        }
-
-        // Clean up stale kernel routes — same two-population logic as the full apply.
-        let newDestinations = Set(newRoutes.map { $0.destination })
-        let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
-        let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
-        let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
-        let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
-
-        if !trulyOrphanedDests.isEmpty {
-            let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
-            if result.failureCount > 0 {
-                log(.warning, "Custom orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
-                let failedSet = Set(result.failedDestinations)
-                for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
-                    newRoutes.append(route)
-                }
-            } else if result.successCount > 0 {
-                log(.info, "Custom orphan cleanup: \(result.successCount) stale kernel routes removed")
-            }
-        }
-        if !addFailedStaleDests.isEmpty {
-            let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
-            if result.failureCount > 0 {
-                log(.info, "Custom add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
-            }
-        }
-
-        // Preemption check: if removeAllRoutes() ran during our awaits, results are stale.
-        guard routeEpoch == epoch else {
-            log(.warning, "Custom apply aborted: routes were cleared during operation")
-            return false
-        }
-
-        activeRoutes = newRoutes
-        lastUpdate = Date()
-
-        if config.manageHostsFile {
-            await updateHostsFile()
-        }
+        let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Custom ")
+        guard committed else { return false }
 
         let confirmedUniqueCount = uniqueRouteCount
         if batchFailureCount > 0 {
