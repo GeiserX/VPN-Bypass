@@ -2277,6 +2277,15 @@ final class RouteManager: ObservableObject {
         return true
     }
 
+    /// Partition the stale kernel routes (active destinations no longer in the new set)
+    /// into the two cleanup populations: `orphaned` (never in this batch → a failed remove
+    /// means the route is still installed, re-attach) vs `addFailed` (in the batch but the
+    /// add failed → delete-before-add already removed it, don't re-attach). Pure set algebra.
+    nonisolated static func partitionStaleRoutes(active: Set<String>, applied newDestinations: Set<String>, attempted: Set<String>) -> (orphaned: Set<String>, addFailed: Set<String>) {
+        let stale = active.subtracting(newDestinations)
+        return (orphaned: stale.subtracting(attempted), addFailed: stale.intersection(attempted))
+    }
+
     /// Shared install-epilogue for the two full-replace apply paths
     /// (applyAllRoutesInternal + applyRoutesFromCache): segments B–F of the apply
     /// tail. Builds activeRoutes from the ownership entries (minus destinations that
@@ -2314,10 +2323,13 @@ final class RouteManager: ObservableObject {
         // 2. Add-failed: were in batch add input but failed — delete-before-add already
         //    removed the old route, so a failed delete means "already gone."
         let newDestinations = Set(newRoutes.map { $0.destination })
-        let batchAttemptedDests = Set(routesToAdd.map { $0.destination })
-        let allStaleDests = Set(activeRoutes.map { $0.destination }).subtracting(newDestinations)
-        let trulyOrphanedDests = Array(allStaleDests.subtracting(batchAttemptedDests))
-        let addFailedStaleDests = Array(allStaleDests.intersection(batchAttemptedDests))
+        let stalePartition = RouteManager.partitionStaleRoutes(
+            active: Set(activeRoutes.map { $0.destination }),
+            applied: newDestinations,
+            attempted: Set(routesToAdd.map { $0.destination })
+        )
+        let trulyOrphanedDests = Array(stalePartition.orphaned)
+        let addFailedStaleDests = Array(stalePartition.addFailed)
 
         // Truly orphaned: re-attach on failure (route is genuinely still in kernel)
         if !trulyOrphanedDests.isEmpty {
