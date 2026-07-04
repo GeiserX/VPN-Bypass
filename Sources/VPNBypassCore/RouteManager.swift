@@ -1622,7 +1622,7 @@ final class RouteManager: ObservableObject {
         // Collect all domains to resolve (for parallel resolution)
         var allDomains: [(domain: String, source: String)] = []
 
-        // Collect CIDR entries separately (added to route structures after variable declarations)
+        // Collect CIDR entries separately (routed directly, not DNS-resolved)
         var inverseCIDRs: [String] = []
 
         if isInverse {
@@ -1632,15 +1632,13 @@ final class RouteManager: ObservableObject {
                 if domain.isCIDR {
                     inverseCIDRs.append(domain.domain)
                 } else {
-                    let resolvable = domain.domain
-                    allDomains.append((resolvable, domain.domain))
+                    allDomains.append((domain.domain, domain.domain))
                 }
             }
         } else {
             // Bypass mode: resolve bypass domains + service domains
             for domain in config.domains where domain.enabled {
-                let resolvable = domain.domain
-                allDomains.append((resolvable, domain.domain))
+                allDomains.append((domain.domain, domain.domain))
             }
             for service in config.services where service.enabled {
                 for domain in service.domains {
@@ -1648,139 +1646,96 @@ final class RouteManager: ObservableObject {
                 }
             }
         }
-        
+
         // Resolve domains in parallel batches (truly parallel now with nonisolated DNS)
         log(.info, "Resolving \(allDomains.count) domains...")
-        
+
         let batchSize = 100  // Large batch size - DNS resolution is truly parallel via GCD
         var index = 0
-        
+
         // Capture values for nonisolated access
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
-        
+
         // In VPN Only mode, domain-specific routes go through VPN gateway
         let routeGateway = isInverse ? (vpnGateway ?? gateway) : gateway
 
-        // Collect all routes to add (for batch operation)
-        var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
-        var seenDestinations: Set<String> = []  // Deduplicate kernel operations
-        var allSourceEntries: [(destination: String, gateway: String, source: String)] = []  // Track all sources per IP
-        var seenSourceDests: Set<String> = []  // Deduplicate (source, destination) pairs
-
-        // VPN Only mode: add catch-all routes through local gateway first
-        // 0.0.0.0/1 + 128.0.0.0/1 cover all IPv4 with higher specificity than default route
-        if isInverse {
-            routesToAdd.append((destination: "0.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
-            routesToAdd.append((destination: "128.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
-            seenDestinations.insert("0.0.0.0/1")
-            seenDestinations.insert("128.0.0.0/1")
-            allSourceEntries.append((destination: "0.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
-            allSourceEntries.append((destination: "128.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
-            seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
-            seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
-
-            // Add CIDR entries as network routes through VPN gateway
-            for cidr in inverseCIDRs {
-                if !seenDestinations.contains(cidr) {
-                    seenDestinations.insert(cidr)
-                    routesToAdd.append((destination: cidr, gateway: routeGateway, isNetwork: true, source: cidr))
-                }
-                let key = "\(cidr)|\(cidr)"
-                if !seenSourceDests.contains(key) {
-                    seenSourceDests.insert(key)
-                    allSourceEntries.append((destination: cidr, gateway: routeGateway, source: cidr))
-                }
-            }
-        }
-
+        // Resolve every matcher (impure: DNS + cache + failed tracking), then hand the
+        // already-resolved data to the pure ClassicRouteCompiler which builds the route set.
+        // Groups are assembled in input order (a domain may appear under several sources, so we
+        // carry the batch index rather than key by domain) — deterministic, and the emitted
+        // route SET is identical to the old inline collection (see ClassicRouteCompiler).
+        var resolvedGroups: [ClassicRouteCompiler.ResolvedGroup] = []
         while index < allDomains.count {
             let endIndex = min(index + batchSize, allDomains.count)
             let batch = Array(allDomains[index..<endIndex])
-            
-            // Resolve DNS in parallel (truly parallel - nonisolated)
-            let dnsResults = await withTaskGroup(of: (domain: String, source: String, ips: [String]?).self) { group in
-                for item in batch {
+
+            let dnsResults = await withTaskGroup(of: (idx: Int, ips: [String]?).self) { group in
+                for (i, item) in batch.enumerated() {
                     group.addTask {
                         let ips = await Self.resolveIPsParallel(for: item.domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
-                        return (item.domain, item.source, ips)
+                        return (i, ips)
                     }
                 }
-                
-                var results: [(domain: String, source: String, ips: [String]?)] = []
+                var results: [(idx: Int, ips: [String]?)] = []
                 for await result in group {
                     results.append(result)
                 }
-                return results
+                return results.sorted { $0.idx < $1.idx }
             }
-            
-            // Collect routes from DNS results and cache for hosts file
-            for result in dnsResults {
-                if let ips = result.ips, !ips.isEmpty {
-                    // DNS succeeded - use fresh IPs and update disk cache
-                    if let firstIP = ips.first {
-                        dnsCache[result.domain] = firstIP
-                    }
-                    dnsDiskCache[result.domain] = ips  // Update persistent cache
 
-                    for ip in ips {
-                        // Dedup kernel operations
-                        if !seenDestinations.contains(ip) {
-                            seenDestinations.insert(ip)
-                            routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: result.source))
-                        }
-                        // Dedup (source, destination) ownership pairs
-                        let key = "\(result.source)|\(ip)"
-                        if !seenSourceDests.contains(key) {
-                            seenSourceDests.insert(key)
-                            allSourceEntries.append((destination: ip, gateway: routeGateway, source: result.source))
-                        }
+            for result in dnsResults {
+                let item = batch[result.idx]
+                if let ips = result.ips, !ips.isEmpty {
+                    // DNS succeeded - use fresh IPs and update caches
+                    if let firstIP = ips.first {
+                        dnsCache[item.domain] = firstIP
                     }
-                } else if let cachedIPs = dnsDiskCache[result.domain], !cachedIPs.isEmpty {
+                    dnsDiskCache[item.domain] = ips  // Update persistent cache
+                    resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: item.source, ips: ips))
+                } else if let cachedIPs = dnsDiskCache[item.domain], !cachedIPs.isEmpty {
                     // DNS failed but we have cached IPs - use them as fallback
-                    log(.info, "Using cached IPs for \(result.domain)")
+                    log(.info, "Using cached IPs for \(item.domain)")
                     if let firstIP = cachedIPs.first {
-                        dnsCache[result.domain] = firstIP
+                        dnsCache[item.domain] = firstIP
                     }
-                    for ip in cachedIPs {
-                        if !seenDestinations.contains(ip) {
-                            seenDestinations.insert(ip)
-                            routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: result.source))
-                        }
-                        let key = "\(result.source)|\(ip)"
-                        if !seenSourceDests.contains(key) {
-                            seenSourceDests.insert(key)
-                            allSourceEntries.append((destination: ip, gateway: routeGateway, source: result.source))
-                        }
-                    }
+                    resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: item.source, ips: cachedIPs))
                 } else {
-                    failedDomains.insert(result.domain)
+                    failedDomains.insert(item.domain)
                     failedCount += 1
                 }
             }
-            
+
             index += batchSize
         }
-        
+
         // Save updated DNS cache to disk
         saveDNSCache()
-        
-        // Collect IP ranges (bypass mode only — services are not used in VPN Only mode)
+
+        // Service IP ranges (bypass mode only — services are not used in VPN Only mode)
+        var serviceRanges: [(source: String, range: String)] = []
         if !isInverse {
             for service in config.services where service.enabled {
                 for range in service.ipRanges {
-                    let key = "\(service.name)|\(range)"
-                    if !seenSourceDests.contains(key) {
-                        seenSourceDests.insert(key)
-                        allSourceEntries.append((destination: range, gateway: gateway, source: service.name))
-                    }
-                    guard !seenDestinations.contains(range) else { continue }
-                    seenDestinations.insert(range)
-                    routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
+                    serviceRanges.append((service.name, range))
                 }
             }
         }
-        
+
+        // Build the classic route set from the resolved data (pure + unit-tested).
+        let build = ClassicRouteCompiler.build(
+            isInverse: isInverse,
+            localGateway: gateway,
+            routeGateway: routeGateway,
+            inverseCIDRs: inverseCIDRs,
+            resolvedGroups: resolvedGroups,
+            serviceRanges: serviceRanges
+        )
+        let routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] =
+            build.routesToAdd.map { ($0.destination, $0.gateway, $0.isNetwork, $0.source) }
+        let allSourceEntries: [(destination: String, gateway: String, source: String)] =
+            build.allSourceEntries.map { ($0.destination, $0.gateway, $0.source) }
+
         // Diff-before-mutate (VPN-Bypass-3sc.2): if the desired route set already
         // matches what is active (same destination+gateway pairs), re-running
         // delete-before-add for every route is pure churn that pressures the VPN's
