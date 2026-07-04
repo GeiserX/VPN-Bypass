@@ -458,7 +458,11 @@ final class HelperManager: ObservableObject {
         """
         let script = "do shell script \"\(Self.appleScriptStringEscaped(shellCommand))\" with administrator privileges"
         var error: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&error)
+        guard let appleScript = NSAppleScript(source: script) else {
+            RouteManager.shared.log(.warning, "cdhash pin write (modern path): failed to create AppleScript — helper will use identifier-only")
+            return
+        }
+        appleScript.executeAndReturnError(&error)
         if let error = error {
             let msg = error[NSAppleScript.errorMessage] as? String ?? "unknown"
             RouteManager.shared.log(.warning, "cdhash pin write (modern path) failed: \(msg) — helper will use identifier-only")

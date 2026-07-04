@@ -868,15 +868,13 @@ final class RouteManager: ObservableObject {
         // This avoids thread pool exhaustion issues
         let deadline = Date().addingTimeInterval(timeout)
         
+        // NOTE: this runs on `vpnBypassProcessQueue.async` (a raw GCD closure, not a Swift
+        // Task), so `Task.isCancelled` is always false here — it cannot see the enclosing
+        // resolver TaskGroup's cancelAll(). Promptly killing a losing resolver therefore needs
+        // a cancellation flag threaded in via withTaskCancellationHandler (deferred; see
+        // docs/CODE-REVIEW-3.0.1.md). A loser simply runs out its own 1–3 s timeout; harmless,
+        // just wasted CPU.
         while process.isRunning && Date() < deadline {
-            // If a racing resolver already won (the enclosing TaskGroup called
-            // cancelAll()), stop polling and kill this loser instead of running it
-            // out to its full timeout — its result would be discarded anyway.
-            if Task.isCancelled {
-                process.terminate()
-                Thread.sleep(forTimeInterval: 0.05)
-                return nil
-            }
             Thread.sleep(forTimeInterval: 0.01) // 10ms poll interval
         }
 

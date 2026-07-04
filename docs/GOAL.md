@@ -41,11 +41,11 @@ _Interpretation: implement ALL of P0→P1→P2 autonomously (unit-test + mock-ve
 
 > Continue using these quirks with pf, CA, etc... I don't want to be using NE entitlements or anything for this
 
-## 2026-07-04 — continuation
+## 2026-07-04 — continuation (3.0.1 refactors + review)
 
 > over the god class refactors 3.0.1 and do even more thorough testing too also do /review-code! when you finish again over all the code focusing on different parts
 
-## 2026-07-04 — continuation
+## 2026-07-04 — continuation (README + gh description)
 
 > Also when you finish, edit the readme and the gh description to reflect the new reality of vpn bypass
 
