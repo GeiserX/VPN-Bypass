@@ -2107,109 +2107,55 @@ final class RouteManager: ObservableObject {
 
         let routeGateway = isInverse ? vpnGateway! : gateway
 
-        var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = []
-        var seenDestinations: Set<String> = []  // Deduplicate kernel operations
-        var allSourceEntries: [(destination: String, gateway: String, source: String)] = []
-        var seenSourceDests: Set<String> = []  // Deduplicate (source, destination) pairs
+        // Collect from the DNS disk cache (no live resolution), then hand the resolved data to
+        // the same pure ClassicRouteCompiler the live path uses. Set-equivalent to the old inline
+        // collection: CIDR ranges and host IPs never string-collide, and services-before-domains
+        // first-wins is preserved by the collection order below.
+        var inverseCIDRs: [String] = []
+        var resolvedGroups: [ClassicRouteCompiler.ResolvedGroup] = []
+        var serviceRanges: [(source: String, range: String)] = []
 
         if isInverse {
-            // VPN Only mode: catch-all through local gateway, domain routes through VPN
-            routesToAdd.append((destination: "0.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
-            routesToAdd.append((destination: "128.0.0.0/1", gateway: gateway, isNetwork: true, source: "VPN Only catch-all"))
-            seenDestinations.insert("0.0.0.0/1")
-            seenDestinations.insert("128.0.0.0/1")
-            allSourceEntries.append((destination: "0.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
-            allSourceEntries.append((destination: "128.0.0.0/1", gateway: gateway, source: "VPN Only catch-all"))
-            seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
-            seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
-
             for domain in config.inverseDomains where domain.enabled {
                 if domain.isCIDR {
-                    // CIDR entries: route directly as network routes, no DNS cache
-                    let cidr = domain.domain
-                    let key = "\(cidr)|\(cidr)"
-                    if !seenSourceDests.contains(key) {
-                        seenSourceDests.insert(key)
-                        allSourceEntries.append((destination: cidr, gateway: routeGateway, source: cidr))
-                    }
-                    if !seenDestinations.contains(cidr) {
-                        seenDestinations.insert(cidr)
-                        routesToAdd.append((destination: cidr, gateway: routeGateway, isNetwork: true, source: cidr))
-                    }
-                } else {
-                    let cacheKey = domain.domain
-                    if let cachedIPs = dnsDiskCache[cacheKey] {
-                        for ip in cachedIPs {
-                            let key = "\(domain.domain)|\(ip)"
-                            if !seenSourceDests.contains(key) {
-                                seenSourceDests.insert(key)
-                                allSourceEntries.append((destination: ip, gateway: routeGateway, source: domain.domain))
-                            }
-                            if !seenDestinations.contains(ip) {
-                                seenDestinations.insert(ip)
-                                routesToAdd.append((destination: ip, gateway: routeGateway, isNetwork: false, source: domain.domain))
-                            }
-                        }
-                        if let firstIP = cachedIPs.first {
-                            dnsCache[cacheKey] = firstIP
-                        }
-                    }
+                    inverseCIDRs.append(domain.domain)
+                } else if let cachedIPs = dnsDiskCache[domain.domain] {
+                    resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: domain.domain, ips: cachedIPs))
+                    if let firstIP = cachedIPs.first { dnsCache[domain.domain] = firstIP }
                 }
             }
         } else {
-            // Bypass mode: services + domains through local gateway
             for service in config.services where service.enabled {
                 for domain in service.domains {
                     if let cachedIPs = dnsDiskCache[domain] {
-                        for ip in cachedIPs {
-                            let key = "\(service.name)|\(ip)"
-                            if !seenSourceDests.contains(key) {
-                                seenSourceDests.insert(key)
-                                allSourceEntries.append((destination: ip, gateway: gateway, source: service.name))
-                            }
-                            if !seenDestinations.contains(ip) {
-                                seenDestinations.insert(ip)
-                                routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: service.name))
-                            }
-                        }
-                        if let firstIP = cachedIPs.first {
-                            dnsCache[domain] = firstIP
-                        }
+                        resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: service.name, ips: cachedIPs))
+                        if let firstIP = cachedIPs.first { dnsCache[domain] = firstIP }
                     }
                 }
                 for range in service.ipRanges {
-                    let key = "\(service.name)|\(range)"
-                    if !seenSourceDests.contains(key) {
-                        seenSourceDests.insert(key)
-                        allSourceEntries.append((destination: range, gateway: gateway, source: service.name))
-                    }
-                    if !seenDestinations.contains(range) {
-                        seenDestinations.insert(range)
-                        routesToAdd.append((destination: range, gateway: gateway, isNetwork: true, source: service.name))
-                    }
+                    serviceRanges.append((service.name, range))
                 }
             }
-
             for domain in config.domains where domain.enabled {
-                let cacheKey = domain.domain
-                if let cachedIPs = dnsDiskCache[cacheKey] {
-                    for ip in cachedIPs {
-                        let key = "\(domain.domain)|\(ip)"
-                        if !seenSourceDests.contains(key) {
-                            seenSourceDests.insert(key)
-                            allSourceEntries.append((destination: ip, gateway: gateway, source: domain.domain))
-                        }
-                        if !seenDestinations.contains(ip) {
-                            seenDestinations.insert(ip)
-                            routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false, source: domain.domain))
-                        }
-                    }
-                    if let firstIP = cachedIPs.first {
-                        dnsCache[cacheKey] = firstIP
-                    }
+                if let cachedIPs = dnsDiskCache[domain.domain] {
+                    resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: domain.domain, ips: cachedIPs))
+                    if let firstIP = cachedIPs.first { dnsCache[domain.domain] = firstIP }
                 }
             }
         }
+
+        let build = ClassicRouteCompiler.build(
+            isInverse: isInverse,
+            localGateway: gateway,
+            routeGateway: routeGateway,
+            inverseCIDRs: inverseCIDRs,
+            resolvedGroups: resolvedGroups,
+            serviceRanges: serviceRanges
+        )
+        let routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)] =
+            build.routesToAdd.map { ($0.destination, $0.gateway, $0.isNetwork, $0.source) }
+        let allSourceEntries: [(destination: String, gateway: String, source: String)] =
+            build.allSourceEntries.map { ($0.destination, $0.gateway, $0.source) }
 
         log(.info, "Applying \(routesToAdd.count) routes from cache (\(isInverse ? "VPN Only" : "Bypass") mode)...")
 
