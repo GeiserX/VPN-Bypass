@@ -11,6 +11,7 @@
 import XCTest
 @testable import VPNBypassCore
 
+@MainActor
 final class ConfigDeriveEdgeCaseTests: XCTestCase {
 
     // MARK: - derive(): proxy → service mapping

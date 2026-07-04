@@ -287,7 +287,7 @@ final class HelperManager: ObservableObject {
 
         do {
             let service = SMAppService.daemon(plistName: "\(kHelperToolMachServiceName).plist")
-            try await service.register()
+            try service.register()   // synchronous throwing API — no await needed
 
             RouteManager.shared.log(.success, "✅ Helper registered successfully via SMAppService")
 

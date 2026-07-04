@@ -1,6 +1,7 @@
 import XCTest
 @testable import VPNBypassCore
 
+@MainActor
 final class CleanDomainTests: XCTestCase {
     private let rm = RouteManager.shared
 
