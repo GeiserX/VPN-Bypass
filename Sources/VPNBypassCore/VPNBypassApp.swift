@@ -38,6 +38,7 @@ public struct VPNBypassApp: App {
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var controlServer: ControlSocketServer?
     private var networkMonitor: NWPathMonitor?
     private var refreshTimer: Timer?
     private var watchdogTimer: Timer?
@@ -50,6 +51,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastSuccessfulVPNCheck = Date()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Single-instance guard FIRST. Two processes mutating the route table at
+        // once is what tore down the GlobalProtect tunnel. If another instance
+        // already holds the lock, exit immediately WITHOUT the normal terminate
+        // path: applicationShouldTerminate runs cleanupOnQuit(), which would
+        // remove the routes owned by the instance that is actually running.
+        guard SingleInstanceGuard.acquire() else {
+            NSLog("VPN Bypass: another instance is already running — exiting duplicate without touching routes.")
+            exit(0)
+        }
+
         // Hide dock icon (menu bar only)
         NSApp.setActivationPolicy(.accessory)
         
@@ -58,6 +69,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Pre-warm SettingsWindowController so first click is instant
         _ = SettingsWindowController.shared
+
+        // Start the scripting control socket (a user-only UNIX socket; userspace,
+        // so it's independent of the privileged helper and starts unconditionally).
+        // Only the instance that won the single-instance lock reaches here, so it
+        // is the sole owner of the socket.
+        controlServer = ControlSurface.makeServer()
+        do {
+            try controlServer?.start()
+        } catch {
+            RouteManager.shared.log(.warning, "Control socket unavailable: \(error)")
+        }
 
         // Load config and apply routes on startup
         Task { @MainActor in
@@ -73,6 +95,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // require the helper. This clears the "Setting Up..." spinner
                 // instead of hanging on it forever when the helper is absent.
                 await RouteManager.shared.detectVPNStateOnly()
+                // Proxy-route listeners are userspace and don't need the helper —
+                // start them regardless so multi-route works even if the helper is down.
+                await RouteManager.shared.reconcileProxyListeners()
                 return
             }
 
@@ -106,6 +131,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide all UI immediately so quit feels instant
         NSApp.windows.forEach { $0.orderOut(nil) }
 
+        controlServer?.stop()
         networkMonitor?.cancel()
         refreshTimer?.invalidate()
         watchdogTimer?.invalidate()

@@ -8,7 +8,8 @@ let package = Package(
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "VPNBypass", targets: ["VPNBypass"])
+        .executable(name: "VPNBypass", targets: ["VPNBypass"]),
+        .executable(name: "vpnb", targets: ["vpnb"])
     ],
     dependencies: [],
     targets: [
@@ -24,6 +25,11 @@ let package = Package(
             name: "VPNBypass",
             dependencies: ["VPNBypassCore"],
             path: "Sources/VPNBypass"
+        ),
+        .executableTarget(
+            name: "vpnb",
+            dependencies: ["VPNBypassCore"],
+            path: "Sources/vpnb"
         ),
         .testTarget(
             name: "VPNBypassTests",

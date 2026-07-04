@@ -1,0 +1,42 @@
+# GOAL
+
+> Directive (verbatim — 2026-06-30):
+>
+> with ralph over P0 until P2 then release just once
+
+---
+
+_Context breadcrumb (pointer, not part of the directive — so "P0 → P2" still means something after a context reset):_
+
+"P0 → P2" are the **Multi-Route Networking** phases, filed as beads under epic **`VPN-Bypass-3sc`** and designed in **`docs/MULTI-ROUTE-DESIGN.md`** (corrections pending). Scope of THIS run:
+
+- **P0** — `routes[]+rules[]` config model + back-compat migration **+ GlobalProtect-teardown hardening** (`VPN-Bypass-3sc.7` + `.1`/`.2`/`.3`/`.4`). No behaviour change.
+- **P1** — proxy local-listener egress (Oxylabs) + `route-on` hook (`VPN-Bypass-3sc.8`); prereqs Keychain (`.5`) + RouteEngine refactor (`.6`).
+- **P2** — native Tailscale-exit egress via the a tailnet peer (`VPN-Bypass-3sc.9`).
+- **"release just once"** — NO per-phase release. One single release after P0–P2 land, via the auto-tag pipeline on merge to `main`, **pending Sergio's merge approval** (release = outward-facing → Sergio-only gate).
+- **Out of scope:** P3 / `NETransparentProxy` (`.10`) — gated on the signing decision (`.11`).
+
+Branch: `feat/multi-route`. Loop: `/research! → /implement! → /review-pr!` → back to research.
+
+## 2026-06-30 — continuation (verbatim)
+
+> do all the work but lets test at the end aftwr you do all the three phases, wait for my to-go
+
+_Interpretation: implement ALL of P0→P1→P2 autonomously (unit-test + mock-verify as I go); Sergio does the LIVE testing (real Oxylabs egress, Tailscale-via-mini, GP coexistence) at the very end; do NOT merge or cut the single release until Sergio gives the explicit "to-go" after his test._
+
+## 2026-07-03 — continuation (verbatim)
+
+> Okay so continue with the issue you had open in the repository, that's the /goal
+> so /sergio-loop until you have a perfect version of the vpn bypass app where you can configure multiple vpns, multiple proxies, also direct... etc. So from UX perspective, it's really easy to do it.
+> Obviously, make the current way of work of vpn/direct split to continue being the default, so it's not difficult for people to just select the old plain split vpn/direct, that's the app what's for, but cater to users like me that need a three way split, or even fourth way... so think and research well how to properly do this as this is extremely difficult think to do, and i expect you to throw all what you have into this problem
+> obviously we still suport what other user wanted which is the only select the vpn for specific domains, and by default just use direct. that's also really interesting. in the end I want vpn bypass to become the definitive routing manager in macos for all your needs
+
+## 2026-07-03 — continuation 2 (verbatim, same day)
+
+> Also I want even to support scripts so that people can via scripting modify the behavior of vpn bypass somehow (if it's secure, better, but whatever you can get) so that for exammple (just in my case) i want to select one oxylabs route for a given domain, but maybe i want to change the routing ip and use another, so i can have it via script (ideally, this should be also easily via vpn bypass, but i dont want to be supporting integrations with all kind of proxy services or vpns, so its just fyi to scope it well)
+
+## 2026-07-03 — continuation 3 (verbatim, same day)
+
+> Just continue to /sergio-loop over these slices with ralph
+
+> Continue using these quirks with pf, CA, etc... I don't want to be using NE entitlements or anything for this

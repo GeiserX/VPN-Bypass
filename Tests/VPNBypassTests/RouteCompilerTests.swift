@@ -1,0 +1,323 @@
+// RouteCompilerTests.swift
+// Coverage for the pure custom-mode route compiler (Slice 4). RouteCompiler maps
+// already-resolved rules → the routesToAdd batch shape the apply paths install:
+// direct/specific-VPN egresses emit kernel routes; proxy/tailscale/primary-VPN emit
+// nothing (a loopback listener / the OS default carries them); first rule wins per
+// destination; and the GlobalProtect catch-all guard refuses tunnel-tearing routes.
+
+import XCTest
+@testable import VPNBypassCore
+
+final class RouteCompilerTests: XCTestCase {
+
+    private let direct = Route(name: "direct", egress: .direct)
+    private let vpn = Route(name: "vpn", egress: .vpnDefault)
+    private let socks = Route(name: "proxy", egress: .proxySOCKS5)
+    private let http = Route(name: "http", egress: .proxyHTTP)
+    private let tailscale = Route(name: "ts", egress: .tailscaleExit)
+
+    /// Build one resolved rule (rule + its already-resolved destinations).
+    private func rr(
+        _ route: Route,
+        _ dests: [(String, Bool)],
+        pattern: String = "p",
+        matchType: MatchType = .domain,
+        enabled: Bool = true,
+        order: Int = 0
+    ) -> (rule: Rule, dests: [(value: String, isNetwork: Bool)]) {
+        (rule: Rule(matchType: matchType, pattern: pattern, routeId: route.id, enabled: enabled, order: order),
+         dests: dests.map { (value: $0.0, isNetwork: $0.1) })
+    }
+
+    private let noIface: (Route) -> String? = { _ in nil }
+
+    // MARK: - Egress → gateway mapping
+
+    func testDirectRuleEmitsHostRouteViaLocalGateway() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [rr(direct, [("1.2.3.4", false)], pattern: "x.com")],
+            routes: [direct], localGateway: "192.168.1.1", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertEqual(out, [RouteCompiler.DesiredRoute(destination: "1.2.3.4", gateway: "192.168.1.1", isNetwork: false, source: "x.com")])
+    }
+
+    func testCIDRDestinationEmitsNetworkRoute() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [rr(direct, [("10.0.0.0/8", true)], pattern: "10.0.0.0/8", matchType: .cidr)],
+            routes: [direct], localGateway: "192.168.1.1", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out.first?.destination, "10.0.0.0/8")
+        XCTAssertTrue(out.first?.isNetwork ?? false)
+        XCTAssertEqual(out.first?.gateway, "192.168.1.1")
+    }
+
+    /// A service rule resolves to a mix of host IPs (its domains) + network ranges
+    /// (its ipRanges); the compiler emits both, all via the route's egress.
+    func testServiceRuleEmitsDomainsAndIPRanges() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [rr(direct, [("1.1.1.1", false), ("2.2.2.2", false), ("91.108.4.0/22", true)],
+                               pattern: "telegram", matchType: .service)],
+            routes: [direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertEqual(out.count, 3)
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "1.1.1.1", gateway: "gw", isNetwork: false, source: "telegram")))
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "2.2.2.2", gateway: "gw", isNetwork: false, source: "telegram")))
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "91.108.4.0/22", gateway: "gw", isNetwork: true, source: "telegram")))
+    }
+
+    /// Proxy, Tailscale, and primary-VPN (iface == nil) egresses are served without a
+    /// kernel route — the routing table must stay clear of them.
+    func testProxyTailscaleAndPrimaryVPNEmitNothing() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(socks, [("1.1.1.1", false)], pattern: "a", order: 0),
+                rr(http, [("2.2.2.2", false)], pattern: "b", order: 1),
+                rr(tailscale, [("3.3.3.3", false)], pattern: "c", order: 2),
+                rr(vpn, [("4.4.4.4", false)], pattern: "d", order: 3),
+            ],
+            routes: [socks, http, tailscale, vpn], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertTrue(out.isEmpty)
+    }
+
+    /// The Slice-4 hook: a specific VPN (ifaceGatewayForRoute returns "iface:utunX")
+    /// DOES emit a kernel route into that tunnel.
+    func testVPNDefaultWithIfaceEmitsIfaceRoute() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [rr(vpn, [("10.1.2.3", false)], pattern: "corp")],
+            routes: [vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun4" }
+        )
+        XCTAssertEqual(out, [RouteCompiler.DesiredRoute(destination: "10.1.2.3", gateway: "iface:utun4", isNetwork: false, source: "corp")])
+    }
+
+    // MARK: - Dedup / ordering
+
+    /// First rule to claim a destination wins — even when that rule's egress emits no
+    /// kernel route. Here the proxy claims 1.2.3.4, so the later Direct rule must NOT
+    /// install a kernel route (otherwise the destination splits across two egresses).
+    func testFirstRuleClaimsDestinationEvenWhenItEmitsNothing() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(socks, [("1.2.3.4", false)], pattern: "a", order: 0),
+                rr(direct, [("1.2.3.4", false)], pattern: "b", order: 1),
+            ],
+            routes: [socks, direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertTrue(out.isEmpty, "proxy claimed the dest first; Direct must not route it")
+    }
+
+    func testDisabledRouteIsInertAndDoesNotClaim() {
+        var disabledDirect = Route(name: "off", egress: .direct)
+        disabledDirect.enabled = false
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(disabledDirect, [("1.2.3.4", false)], pattern: "a", order: 0),
+                rr(direct, [("1.2.3.4", false)], pattern: "b", order: 1),
+            ],
+            routes: [disabledDirect, direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        // A disabled route's rule emits no kernel route AND does not claim the dest, so the
+        // later ENABLED Direct rule routes 1.2.3.4 (toggling a route off truly removes it).
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out.first?.destination, "1.2.3.4")
+        XCTAssertEqual(out.first?.gateway, "gw")
+        XCTAssertEqual(out.first?.source, "b")
+    }
+
+    func testFirstRuleWinsForEmittedRoute() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [("1.2.3.4", false)], pattern: "a", order: 0),
+                rr(vpn, [("1.2.3.4", false)], pattern: "b", order: 1),
+            ],
+            routes: [direct, vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun9" }
+        )
+        XCTAssertEqual(out, [RouteCompiler.DesiredRoute(destination: "1.2.3.4", gateway: "gw", isNetwork: false, source: "a")])
+    }
+
+    func testDisabledRuleSkipped() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [rr(direct, [("1.2.3.4", false)], pattern: "x", enabled: false)],
+            routes: [direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertTrue(out.isEmpty)
+    }
+
+    func testDanglingRouteIdSkipped() {
+        let dangling = Rule(matchType: .domain, pattern: "x", routeId: UUID(), order: 0)
+        let out = RouteCompiler.compile(
+            resolvedRules: [(rule: dangling, dests: [(value: "1.2.3.4", isNetwork: false)])],
+            routes: [direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertTrue(out.isEmpty)
+    }
+
+    // MARK: - CIDR-containment claiming (first-match under kernel longest-prefix-match)
+
+    /// The H3 bug: an earlier /8 → Direct must suppress a LATER host (/32) that falls
+    /// inside it and routes to a different egress. Without containment claiming both emit
+    /// and the kernel's longest-prefix-match sends 10.1.2.3 to the VPN — violating the
+    /// first-match rule that the earlier Direct /8 owns that whole space.
+    func testEarlierCIDRSuppressesLaterContainedHostToDifferentEgress() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [("10.0.0.0/8", true)], pattern: "10.0.0.0/8", matchType: .cidr, order: 0),
+                rr(vpn, [("10.1.2.3", false)], pattern: "corp", order: 1),
+            ],
+            routes: [direct, vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun5" }
+        )
+        XCTAssertEqual(out, [RouteCompiler.DesiredRoute(destination: "10.0.0.0/8", gateway: "gw", isNetwork: true, source: "10.0.0.0/8")])
+    }
+
+    /// Reverse direction: an earlier /32 does NOT suppress a LATER broader /8. The /8 is
+    /// not contained in the /32, so it still emits; the kernel's longest-prefix-match
+    /// carves the earlier /32 out of the later /8.
+    func testEarlierHostDoesNotSuppressLaterBroaderCIDR() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [("10.1.2.3", false)], pattern: "corp", order: 0),
+                rr(vpn, [("10.0.0.0/8", true)], pattern: "10.0.0.0/8", matchType: .cidr, order: 1),
+            ],
+            routes: [direct, vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun5" }
+        )
+        XCTAssertEqual(out.count, 2)
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "10.1.2.3", gateway: "gw", isNetwork: false, source: "corp")))
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "10.0.0.0/8", gateway: "iface:utun5", isNetwork: true, source: "10.0.0.0/8")))
+    }
+
+    /// Equal destination strings across two rules still dedup to the first (the prefix-
+    /// equal case of containment): 10.0.0.0/8 Direct then 10.0.0.0/8 VPN ⇒ only Direct.
+    func testEqualStringsStillDedupFirstWins() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [("10.0.0.0/8", true)], pattern: "10.0.0.0/8", matchType: .cidr, order: 0),
+                rr(vpn, [("10.0.0.0/8", true)], pattern: "corp", matchType: .cidr, order: 1),
+            ],
+            routes: [direct, vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun5" }
+        )
+        XCTAssertEqual(out, [RouteCompiler.DesiredRoute(destination: "10.0.0.0/8", gateway: "gw", isNetwork: true, source: "10.0.0.0/8")])
+    }
+
+    /// A proxy rule (gateway nil) that claims a /8 suppresses a LATER Direct host inside
+    /// it — the proxy listener owns that IP space, so no Direct /32 kernel route is
+    /// installed (it would split the space across two egresses).
+    func testProxyCIDRClaimSuppressesLaterContainedDirectHost() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(socks, [("10.0.0.0/8", true)], pattern: "10.0.0.0/8", matchType: .cidr, order: 0),
+                rr(direct, [("10.1.2.3", false)], pattern: "corp", order: 1),
+            ],
+            routes: [socks, direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertTrue(out.isEmpty, "proxy owns 10.0.0.0/8; the later contained Direct 10.1.2.3 is suppressed")
+    }
+
+    /// Non-overlapping ranges are independent — neither contains the other, so both emit.
+    func testNonOverlappingRangesBothEmit() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [("10.0.0.0/8", true)], pattern: "10.0.0.0/8", matchType: .cidr, order: 0),
+                rr(direct, [("192.168.0.0/16", true)], pattern: "192.168.0.0/16", matchType: .cidr, order: 1),
+            ],
+            routes: [direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertEqual(out.count, 2)
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "10.0.0.0/8", gateway: "gw", isNetwork: true, source: "10.0.0.0/8")))
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "192.168.0.0/16", gateway: "gw", isNetwork: true, source: "192.168.0.0/16")))
+    }
+
+    /// A non-IPv4 destination (IPv6 literal) falls back to EXACT-STRING claiming: two
+    /// identical strings dedup to the first, a distinct one still emits, and the
+    /// containment math is never run on it (no crash).
+    func testNonIPv4DestinationFallsBackToExactStringClaiming() {
+        let v6 = "2606:4700:4700::1111"
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [(v6, false)], pattern: "a", order: 0),
+                rr(vpn, [(v6, false)], pattern: "b", order: 1),                        // exact dup ⇒ suppressed
+                rr(direct, [("2606:4700:4700::1001", false)], pattern: "c", order: 2),  // distinct ⇒ emits
+            ],
+            routes: [direct, vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun5" }
+        )
+        XCTAssertEqual(out.count, 2)
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: v6, gateway: "gw", isNetwork: false, source: "a")))
+        XCTAssertTrue(out.contains(RouteCompiler.DesiredRoute(destination: "2606:4700:4700::1001", gateway: "gw", isNetwork: false, source: "c")))
+    }
+
+    /// A malformed destination (not IPv4, not even a valid IP) also falls back to exact-
+    /// string claiming and never crashes the containment parser.
+    func testMalformedDestinationExactStringClaimingNoCrash() {
+        let out = RouteCompiler.compile(
+            resolvedRules: [
+                rr(direct, [("not-an-ip", false)], pattern: "a", order: 0),
+                rr(vpn, [("not-an-ip", false)], pattern: "b", order: 1),  // exact dup ⇒ suppressed
+            ],
+            routes: [direct, vpn], localGateway: "gw", ifaceGatewayForRoute: { _ in "iface:utun5" }
+        )
+        XCTAssertEqual(out, [RouteCompiler.DesiredRoute(destination: "not-an-ip", gateway: "gw", isNetwork: false, source: "a")])
+    }
+
+    // MARK: - GlobalProtect catch-all guard
+
+    func testIsCatchAllRecognizesAllThreeForms() {
+        for d in ["0.0.0.0/0", "0.0.0.0/1", "128.0.0.0/1"] {
+            XCTAssertTrue(RouteCompiler.isCatchAll(d), "\(d) should be a catch-all")
+        }
+        XCTAssertFalse(RouteCompiler.isCatchAll("10.0.0.0/8"))
+        XCTAssertFalse(RouteCompiler.isCatchAll("1.2.3.4"))
+    }
+
+    func testCatchAllIntoNonPrimaryEgressRefusedUnderGlobalProtect() {
+        let compiled = RouteCompiler.compile(
+            resolvedRules: [rr(direct, [("0.0.0.0/0", true)], pattern: "0.0.0.0/0", matchType: .cidr)],
+            routes: [direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertEqual(compiled.count, 1, "the compiler emits it; the GP guard is what refuses it")
+
+        let underGP = RouteCompiler.guardCatchAllUnderGlobalProtect(compiled, isGlobalProtect: true)
+        XCTAssertTrue(underGP.kept.isEmpty)
+        XCTAssertEqual(underGP.refused.map(\.destination), ["0.0.0.0/0"])
+
+        // GP down → nothing refused.
+        let noGP = RouteCompiler.guardCatchAllUnderGlobalProtect(compiled, isGlobalProtect: false)
+        XCTAssertEqual(noGP.kept.count, 1)
+        XCTAssertTrue(noGP.refused.isEmpty)
+    }
+
+    func testGuardKeepsNonCatchAllRoutesUnderGlobalProtect() {
+        let compiled = RouteCompiler.compile(
+            resolvedRules: [rr(direct, [("1.2.3.4", false), ("10.0.0.0/8", true)], pattern: "x")],
+            routes: [direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        let g = RouteCompiler.guardCatchAllUnderGlobalProtect(compiled, isGlobalProtect: true)
+        XCTAssertEqual(g.kept.count, 2)
+        XCTAssertTrue(g.refused.isEmpty)
+    }
+
+    // M1: the guard refuses ANY /0 or /1 CIDR (not just the canonical trio), since a
+    // /1 to a non-primary egress under GP shadows GP's coarse routes → teardown. A /2+
+    // is additive (longest-prefix wins), so it's allowed (the user's explicit choice).
+    func testIsCatchAllRefusesAllSlashZeroAndSlashOnePrefixes() {
+        XCTAssertTrue(RouteCompiler.isCatchAll("0.0.0.0/0"))
+        XCTAssertTrue(RouteCompiler.isCatchAll("0.0.0.0/1"))
+        XCTAssertTrue(RouteCompiler.isCatchAll("128.0.0.0/1"))
+        XCTAssertTrue(RouteCompiler.isCatchAll("64.0.0.0/1"), "any /1, not only the canonical two")
+        XCTAssertTrue(RouteCompiler.isCatchAll("::/0"), "IPv6 catch-all too")
+        XCTAssertFalse(RouteCompiler.isCatchAll("0.0.0.0/2"), "a /2 is additive, not a teardown vector")
+        XCTAssertFalse(RouteCompiler.isCatchAll("10.0.0.0/8"))
+        XCTAssertFalse(RouteCompiler.isCatchAll("1.2.3.4"), "a host route is never a catch-all")
+    }
+
+    func testGuardRefusesNonCanonicalSlashOneUnderGlobalProtect() {
+        // A broad /1 authored to Direct that ISN'T in the canonical set must still be refused.
+        let compiled = RouteCompiler.compile(
+            resolvedRules: [rr(direct, [("64.0.0.0/1", true)], pattern: "64.0.0.0/1", matchType: .cidr)],
+            routes: [direct], localGateway: "gw", ifaceGatewayForRoute: noIface
+        )
+        XCTAssertEqual(compiled.count, 1)
+        let g = RouteCompiler.guardCatchAllUnderGlobalProtect(compiled, isGlobalProtect: true)
+        XCTAssertTrue(g.kept.isEmpty, "a /1 to Direct under GP is refused (would shadow GP's default)")
+        XCTAssertEqual(g.refused.map(\.destination), ["64.0.0.0/1"])
+    }
+}

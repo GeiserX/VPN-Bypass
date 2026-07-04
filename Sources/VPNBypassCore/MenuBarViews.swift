@@ -110,7 +110,12 @@ struct MenuContent: View {
     @State private var newDomain = ""
     @State private var isAddingDomain = false
     @State private var isVerifying = false
-    
+    /// The mode a tap wants to switch to, pending confirmation. Mirrors
+    /// RoutingModePicker in SettingsView so both surfaces behave identically —
+    /// switching mode changes how ALL traffic routes (and entering Custom
+    /// migrates your lists), so it's deliberately a two-step action.
+    @State private var pendingMode: RouteManager.RoutingMode?
+
     private let accentGradient = LinearGradient(
         colors: [Theme.success, Theme.successDark],
         startPoint: .leading,
@@ -152,8 +157,36 @@ struct MenuContent: View {
             // Refresh VPN status when menu opens
             routeManager.refreshStatus()
         }
+        .alert("Switch routing mode?", isPresented: Binding(
+            get: { pendingMode != nil },
+            set: { if !$0 { pendingMode = nil } }
+        ), presenting: pendingMode) { mode in
+            Button("Cancel", role: .cancel) { pendingMode = nil }
+            Button("Switch to \(mode.displayName)") {
+                routeManager.setRoutingMode(mode)
+                pendingMode = nil
+            }
+        } message: { mode in
+            Text(confirmationMessage(for: mode))
+        }
     }
-    
+
+    /// Mirrors RoutingModePicker.confirmationMessage(for:) in SettingsView
+    /// verbatim (that one is private to SettingsView.swift) so both surfaces
+    /// show identical wording for the same transition.
+    private func confirmationMessage(for mode: RouteManager.RoutingMode) -> String {
+        switch mode {
+        case .bypass:
+            return "Everything will go through your VPN except the sites you list. Your custom routes stay saved."
+        case .vpnOnly:
+            return "Only the sites you list will use your VPN; everything else goes direct."
+        case .custom:
+            return routeManager.config.schemaVersion < 2
+                ? "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime."
+                : "Switch to your per-rule custom routing. You can switch back to a simple mode anytime."
+        }
+    }
+
     // MARK: - Title Header
     
     private var titleHeader: some View {
@@ -299,9 +332,11 @@ struct MenuContent: View {
                 .buttonStyle(.plain)
             }
             
-            // Active services summary (bypass mode only)
+            // Active services summary (bypass mode) / Routes in use (custom mode)
             if routeManager.config.routingMode == .bypass {
                 activeServicesSummary
+            } else if routeManager.config.routingMode == .custom {
+                routesInUseSummary
             }
             
             // Recent activity
@@ -501,6 +536,63 @@ struct MenuContent: View {
         .cornerRadius(8)
     }
     
+    // MARK: - Routes In Use Summary (Custom mode)
+
+    /// Custom mode's analogue of `activeServicesSummary`: enabled routes that at
+    /// least one enabled rule actually points at. Named "Routes In Use" (not
+    /// "Active Routes" — that title is already used for the kernel-route list
+    /// in `recentRoutesSection` and the Logs tab's Route Health card).
+    private var routesInUseSummary: some View {
+        let routesWithRules = routeManager.config.routes.filter { route in
+            route.enabled && routeManager.config.rules.contains { $0.enabled && $0.routeId == route.id }
+        }
+        let maxVisible = 4
+        let visibleRoutes = Array(routesWithRules.prefix(maxVisible))
+        let remainingCount = routesWithRules.count - maxVisible
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text("Routes In Use")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(routesWithRules.count)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(Theme.success)
+            }
+
+            if routesWithRules.isEmpty {
+                Text("No rules configured")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(visibleRoutes) { route in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(route.accentColor)
+                            .frame(width: 4, height: 4)
+                        Text(route.friendlyName(vpnName: routeManager.vpnType?.rawValue))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                    }
+                }
+
+                if remainingCount > 0 {
+                    Text("+\(remainingCount) more")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .cornerRadius(8)
+    }
+
     // MARK: - Recent Routes Section
     
     private var recentRoutesSection: some View {
@@ -608,12 +700,37 @@ struct MenuContent: View {
 
             Spacer()
 
-            HStack(spacing: 0) {
-                modeButton(title: "Bypass", mode: .bypass)
-                modeButton(title: "VPN Only", mode: .vpnOnly)
+            if routeManager.config.routingMode == .custom {
+                HStack(spacing: 8) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 9))
+                        Text("Custom Routes")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Theme.success.opacity(0.15))
+                    .clipShape(Capsule())
+
+                    Button {
+                        pendingMode = .bypass
+                    } label: {
+                        Text("Switch to Bypass")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else {
+                HStack(spacing: 0) {
+                    modeButton(title: "Bypass", mode: .bypass)
+                    modeButton(title: "VPN Only", mode: .vpnOnly)
+                }
+                .background(Color.secondary.opacity(0.12))
+                .cornerRadius(6)
             }
-            .background(Color.secondary.opacity(0.12))
-            .cornerRadius(6)
         }
         .padding(.top, 4)
     }
@@ -621,7 +738,10 @@ struct MenuContent: View {
     private func modeButton(title: LocalizedStringKey, mode: RouteManager.RoutingMode) -> some View {
         let isSelected = routeManager.config.routingMode == mode
         return Button {
-            routeManager.setRoutingMode(mode)
+            // Tapping the current mode is a no-op; a different mode asks first.
+            if mode != routeManager.config.routingMode {
+                pendingMode = mode
+            }
         } label: {
             HStack(spacing: 4) {
                 Circle()
@@ -687,13 +807,39 @@ struct MenuContent: View {
         guard !newDomain.isEmpty else { return }
         if routeManager.config.routingMode == .vpnOnly {
             routeManager.addInverseDomain(newDomain)
+        } else if RouteManager.usesCustomEngine(schemaVersion: routeManager.config.schemaVersion, routingMode: routeManager.config.routingMode) {
+            addDomainRuleToDirect(newDomain)
         } else {
             routeManager.addDomain(newDomain)
         }
         newDomain = ""
         isAddingDomain = false
     }
-    
+
+    /// Custom mode routes from `config.rules`, not `config.domains` (see
+    /// `RouteManager.usesCustomEngine`), so the quick-add above would silently do
+    /// nothing there. Add a `.domain` rule to the Direct route instead - the same
+    /// mapping `RouteManager.Config.derive()` uses for a bypass-mode domain - so
+    /// quick-add behaves like "bypass this domain" in Custom mode too. Mirrors
+    /// RulesTab.saveRule's append-at-end-of-order for brand-new rules.
+    private func addDomainRuleToDirect(_ domain: String) {
+        let cleaned = routeManager.cleanDomain(domain)
+        guard !cleaned.isEmpty else { return }
+        guard let directRouteId = routeManager.config.routes.first(where: { $0.egress == .direct })?.id else {
+            routeManager.log(.error, "Cannot add rule for \(cleaned): no Direct route found")
+            return
+        }
+        guard !routeManager.config.rules.contains(where: { $0.matchType == .domain && $0.pattern == cleaned }) else {
+            routeManager.log(.warning, "Rule for \(cleaned) already exists")
+            return
+        }
+        let maxOrder = routeManager.config.rules.map(\.order).max() ?? -1
+        routeManager.config.rules.append(Rule(matchType: .domain, pattern: cleaned, routeId: directRouteId, order: maxOrder + 1))
+        routeManager.saveConfig()
+        routeManager.log(.success, "Added rule: \(cleaned) → Direct")
+        Task { await routeManager.detectAndApplyRoutesAsync(sendNotification: false) }
+    }
+
     private func openSettings() {
         // Close the MenuBarExtra dropdown window
         // The dropdown is the current key window when clicking inside it

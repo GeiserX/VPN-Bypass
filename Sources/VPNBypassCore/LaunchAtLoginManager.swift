@@ -98,53 +98,68 @@ final class LaunchAtLoginManager: ObservableObject {
             print("Could not determine app path")
             return
         }
-        
+
         let launchAgentContent: [String: Any] = [
             "Label": bundleIdentifier,
             "ProgramArguments": [appPath + "/Contents/MacOS/VPNBypass"],
             "RunAtLoad": true,
             "KeepAlive": false
         ]
-        
-        // Ensure LaunchAgents directory exists
-        let launchAgentsDir = launchAgentURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: launchAgentsDir, withIntermediateDirectories: true)
-        
-        // Write plist
+
         do {
+            // Ensure LaunchAgents directory exists
+            let launchAgentsDir = launchAgentURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: launchAgentsDir, withIntermediateDirectories: true)
+
+            // Write plist
             let data = try PropertyListSerialization.data(
                 fromPropertyList: launchAgentContent,
                 format: .xml,
                 options: 0
             )
             try data.write(to: launchAgentURL)
-            
-            // Load the agent asynchronously to avoid UI blocking
+
+            // Load the agent asynchronously to avoid UI blocking - we don't wait for
+            // launchctl to finish, so isEnabled below is derived from the plist's
+            // actual on-disk presence rather than assumed from this call alone.
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
             process.arguments = ["load", launchAgentURL.path]
             try process.run()
-            // Don't wait - launchctl load is fast and we don't need the result
-            
-            isEnabled = true
-            print("Launch at login enabled via LaunchAgent")
         } catch {
             print("Failed to create LaunchAgent: \(error)")
         }
+
+        // Reflect the actual outcome instead of assuming success - matches
+        // checkStatus()'s own definition of "enabled" for this fallback path.
+        isEnabled = launchAgentExists()
+        if isEnabled {
+            print("Launch at login enabled via LaunchAgent")
+        }
     }
-    
+
     private func disableViaLaunchAgent() {
-        // Unload the agent first - don't wait to avoid UI blocking
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = ["unload", launchAgentURL.path]
-        try? process.run()
-        // Don't wait - launchctl unload is fast
-        
-        // Remove the plist file
-        try? FileManager.default.removeItem(at: launchAgentURL)
-        
-        isEnabled = false
-        print("Launch at login disabled via LaunchAgent")
+        do {
+            // Unload the agent first - don't wait to avoid UI blocking
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            process.arguments = ["unload", launchAgentURL.path]
+            try process.run()
+        } catch {
+            print("Failed to run launchctl unload: \(error)")
+        }
+
+        do {
+            // Remove the plist file
+            try FileManager.default.removeItem(at: launchAgentURL)
+        } catch {
+            print("Failed to remove LaunchAgent plist: \(error)")
+        }
+
+        // Reflect the actual outcome instead of assuming success.
+        isEnabled = launchAgentExists()
+        if !isEnabled {
+            print("Launch at login disabled via LaunchAgent")
+        }
     }
 }

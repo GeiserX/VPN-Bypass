@@ -78,8 +78,21 @@ protocol HelperProgressProtocol {
 // MARK: - Helper Constants
 
 struct HelperConstants {
-    static let helperVersion = "1.5.0"
+    // 1.6.0: helper pins the installing app's cdhash (Helper/HelperTool.swift) so a
+    // locally forged binary that merely claims our identifier under ad-hoc signing can
+    // no longer drive the root helper. Bumped from 1.5.0 so installed helpers update.
+    static let helperVersion = "1.6.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"
+
+    /// The main app's code-signing identifier (ad-hoc). The helper requires the caller
+    /// to satisfy this AND, when present, the pinned cdhash below.
+    static let appSigningIdentifier = "com.geiserx.vpn-bypass"
+
+    /// Root-only file (root:wheel 644) holding the installing app's cdhash as lowercase
+    /// hex. Written in the SAME admin operation that installs/updates the helper, read
+    /// per-connection by verifyCallerIdentity. Absent/!valid-hex ⇒ identifier-only
+    /// (degraded, never a hard reject — the anti-brick fallback).
+    static let cdhashPinPath = "/Library/PrivilegedHelperTools/com.geiserx.vpnbypass.helper.cdhash"
 }
