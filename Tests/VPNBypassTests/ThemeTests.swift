@@ -11,190 +11,200 @@ final class ThemeColorTests: XCTestCase {
     }
 
     func testTextSecondaryNotNil() {
-        _ = Theme.textSecondary
+        // Secondary text is a mid-grey, distinct from the pure-white primary.
+        XCTAssertNotEqual(Theme.textSecondary, Theme.textPrimary)
     }
 
     func testTextTertiaryNotNil() {
-        _ = Theme.textTertiary
+        // Tertiary (decorative) grey is a different shade from secondary text.
+        XCTAssertNotEqual(Theme.textTertiary, Theme.textSecondary)
     }
 
     func testTextDisabledNotNil() {
-        _ = Theme.textDisabled
+        XCTAssertNotEqual(Theme.textDisabled, Theme.textPrimary)
     }
 
     // MARK: - Semantic Status Colors
 
     func testSuccessColor() {
-        _ = Theme.success
+        // Success (green) and error (red) must never collide.
+        XCTAssertNotEqual(Theme.success, Theme.error)
     }
 
     func testSuccessDarkColor() {
-        _ = Theme.successDark
+        XCTAssertNotEqual(Theme.successDark, Theme.success)
     }
 
     func testSuccessLightColor() {
-        _ = Theme.successLight
+        XCTAssertNotEqual(Theme.successLight, Theme.success)
     }
 
     func testErrorColor() {
-        _ = Theme.error
+        // Error (red) and warning (amber) are semantically distinct status colors.
+        XCTAssertNotEqual(Theme.error, Theme.warning)
     }
 
     func testWarningColor() {
-        _ = Theme.warning
+        XCTAssertNotEqual(Theme.warning, Theme.warningLight)
     }
 
     func testWarningLightColor() {
-        _ = Theme.warningLight
+        XCTAssertNotEqual(Theme.warningLight, Theme.warning)
     }
 
     func testPurpleColor() {
-        _ = Theme.purple
+        XCTAssertNotEqual(Theme.purple, Theme.purpleLight)
     }
 
     func testPurpleLightColor() {
-        _ = Theme.purpleLight
+        XCTAssertNotEqual(Theme.purpleLight, Theme.purple)
     }
 
     func testBlueColor() {
-        _ = Theme.blue
+        XCTAssertNotEqual(Theme.blue, Theme.blueDark)
     }
 
     func testBlueDarkColor() {
-        _ = Theme.blueDark
+        XCTAssertNotEqual(Theme.blueDark, Theme.blueLight)
     }
 
     func testBlueLightColor() {
-        _ = Theme.blueLight
+        XCTAssertNotEqual(Theme.blueLight, Theme.blue)
     }
 
     func testCyanColor() {
-        _ = Theme.cyan
+        XCTAssertNotEqual(Theme.cyan, Theme.blue)
     }
 
     // MARK: - Gradients
 
     func testAccentGradient() {
-        _ = Theme.accentGradient
+        // LinearGradient's Equatable conformance is not guaranteed across SDKs, so assert
+        // the value is constructible and has a non-empty textual representation.
+        XCTAssertFalse(String(describing: Theme.accentGradient).isEmpty)
     }
 
     func testWarningGradient() {
-        _ = Theme.warningGradient
+        XCTAssertFalse(String(describing: Theme.warningGradient).isEmpty)
     }
 
     func testSuccessGradient() {
-        _ = Theme.successGradient
+        XCTAssertFalse(String(describing: Theme.successGradient).isEmpty)
     }
 
     func testPurpleGradient() {
-        _ = Theme.purpleGradient
+        XCTAssertFalse(String(describing: Theme.purpleGradient).isEmpty)
     }
 
     func testBlueGradient() {
-        _ = Theme.blueGradient
+        XCTAssertFalse(String(describing: Theme.blueGradient).isEmpty)
     }
 
     // MARK: - Backgrounds
+    // Several background/structural values are Color.white at differing opacities, so some
+    // share an alpha (e.g. bgInput and bgHover are both 0.08). To keep every assertion true,
+    // translucent members are compared against a solid, opaque anchor (bgPrimary) rather than
+    // a possibly-equal sibling.
 
     func testBgPrimary() {
-        _ = Theme.bgPrimary
+        XCTAssertNotEqual(Theme.bgPrimary, Theme.bgSecondary)
     }
 
     func testBgSecondary() {
-        _ = Theme.bgSecondary
+        XCTAssertNotEqual(Theme.bgSecondary, Theme.bgInputAlt)
     }
 
     func testBgCard() {
-        _ = Theme.bgCard
+        XCTAssertNotEqual(Theme.bgCard, Theme.bgPrimary)
     }
 
     func testBgCardBorder() {
-        _ = Theme.bgCardBorder
+        XCTAssertNotEqual(Theme.bgCardBorder, Theme.bgPrimary)
     }
 
     func testBgInput() {
-        _ = Theme.bgInput
+        XCTAssertNotEqual(Theme.bgInput, Theme.bgPrimary)
     }
 
     func testBgInputAlt() {
-        _ = Theme.bgInputAlt
+        XCTAssertNotEqual(Theme.bgInputAlt, Theme.bgSecondary)
     }
 
     func testBgDisabled() {
-        _ = Theme.bgDisabled
+        XCTAssertNotEqual(Theme.bgDisabled, Theme.bgPrimary)
     }
 
     func testBgHover() {
-        _ = Theme.bgHover
+        XCTAssertNotEqual(Theme.bgHover, Theme.bgPrimary)
     }
 
     func testBgElevated() {
-        _ = Theme.bgElevated
+        XCTAssertNotEqual(Theme.bgElevated, Theme.bgPrimary)
     }
 
     // MARK: - Structural
 
     func testDivider() {
-        _ = Theme.divider
+        XCTAssertNotEqual(Theme.divider, Theme.bgPrimary)
     }
 
     func testBorder() {
-        _ = Theme.border
+        XCTAssertNotEqual(Theme.border, Theme.bgPrimary)
     }
 
     func testSeparator() {
-        _ = Theme.separator
+        XCTAssertNotEqual(Theme.separator, Theme.bgPrimary)
     }
 
     // MARK: - Brand (fundraising)
 
     func testGithubSponsors() {
-        _ = Theme.githubSponsors
+        XCTAssertNotEqual(Theme.githubSponsors, Theme.patreon)
     }
 
     func testBuyMeACoffee() {
-        _ = Theme.buyMeACoffee
+        XCTAssertNotEqual(Theme.buyMeACoffee, Theme.patreon)
     }
 
     func testPatreon() {
-        _ = Theme.patreon
+        XCTAssertNotEqual(Theme.patreon, Theme.githubSponsors)
     }
 
     // MARK: - Brand Identity
 
     func testBrandBlue() {
-        _ = Theme.Brand.blue
+        XCTAssertNotEqual(Theme.Brand.blue, Theme.Brand.blueLight)
     }
 
     func testBrandBlueLight() {
-        _ = Theme.Brand.blueLight
+        XCTAssertNotEqual(Theme.Brand.blueLight, Theme.Brand.blueDark)
     }
 
     func testBrandBlueDark() {
-        _ = Theme.Brand.blueDark
+        XCTAssertNotEqual(Theme.Brand.blueDark, Theme.Brand.blue)
     }
 
     func testBrandSilver() {
-        _ = Theme.Brand.silver
+        XCTAssertNotEqual(Theme.Brand.silver, Theme.Brand.silverLight)
     }
 
     func testBrandSilverLight() {
-        _ = Theme.Brand.silverLight
+        XCTAssertNotEqual(Theme.Brand.silverLight, Theme.Brand.silverDark)
     }
 
     func testBrandSilverDark() {
-        _ = Theme.Brand.silverDark
+        XCTAssertNotEqual(Theme.Brand.silverDark, Theme.Brand.silver)
     }
 
     func testBrandArrowBlue() {
-        _ = Theme.Brand.arrowBlue
+        XCTAssertNotEqual(Theme.Brand.arrowBlue, Theme.Brand.blue)
     }
 
     func testBrandBlueGradient() {
-        _ = Theme.Brand.blueGradient
+        XCTAssertFalse(String(describing: Theme.Brand.blueGradient).isEmpty)
     }
 
     func testBrandSilverGradient() {
-        _ = Theme.Brand.silverGradient
+        XCTAssertFalse(String(describing: Theme.Brand.silverGradient).isEmpty)
     }
 }

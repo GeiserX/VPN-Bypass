@@ -99,50 +99,74 @@ final class StaleRoutePartitionTests: XCTestCase {
 
     // MARK: - Partition invariants (property-style)
 
-    /// Asserts, for one hand-built case, that the two populations (a) are disjoint —
-    /// orphaned ∩ addFailed = ∅ — and (b) together equal the stale set — orphaned ∪
-    /// addFailed = active − new — and each is split exactly by membership in `attempted`.
+    /// Asserts, for one hand-built case, that `partitionStaleRoutes` produces the EXACT
+    /// `orphaned`/`addFailed` sets computed BY HAND for these inputs (concrete literals,
+    /// not a re-derivation of the implementation's formula — so a formula regression fails
+    /// here). Also checks the two structural invariants that must always hold: the two
+    /// populations are disjoint, and together they equal the hand-computed stale set.
     private func assertInvariants(active: Set<String>, new: Set<String>, attempted: Set<String>,
+                                  expectedOrphaned: Set<String>, expectedAddFailed: Set<String>,
                                   file: StaticString = #filePath, line: UInt = #line) {
         let p = RouteManager.partitionStaleRoutes(active: active, applied: new, attempted: attempted)
-        let stale = active.subtracting(new)
+        XCTAssertEqual(p.orphaned, expectedOrphaned, "orphaned mismatch", file: file, line: line)
+        XCTAssertEqual(p.addFailed, expectedAddFailed, "addFailed mismatch", file: file, line: line)
         XCTAssertTrue(p.orphaned.isDisjoint(with: p.addFailed), "orphaned ∩ addFailed must be empty", file: file, line: line)
-        XCTAssertEqual(p.orphaned.union(p.addFailed), stale, "orphaned ∪ addFailed must equal stale", file: file, line: line)
-        XCTAssertEqual(p.addFailed, stale.intersection(attempted), file: file, line: line)
-        XCTAssertEqual(p.orphaned, stale.subtracting(attempted), file: file, line: line)
+        XCTAssertEqual(p.orphaned.union(p.addFailed), expectedOrphaned.union(expectedAddFailed),
+                       "orphaned ∪ addFailed must equal the stale set", file: file, line: line)
     }
 
     func testInvariantsAcrossHandBuiltCases() {
-        assertInvariants(active: [], new: [], attempted: [])
-        assertInvariants(active: ["a"], new: [], attempted: [])
-        assertInvariants(active: ["a"], new: ["a"], attempted: ["a"])
-        assertInvariants(active: ["a", "b", "c", "d"], new: ["a"], attempted: ["b", "d"])
-        assertInvariants(active: ["a", "b", "c"], new: ["a", "b", "c"], attempted: ["a", "b", "c"]) // nothing stale
-        assertInvariants(active: ["x", "y"], new: ["z"], attempted: ["x", "y", "z"])                // new never active
-        assertInvariants(active: ["10.0.0.0/8", "1.1.1.1"], new: ["1.1.1.1"], attempted: ["10.0.0.0/8"])
+        // active,new,attempted → hand-computed (orphaned, addFailed). stale = active − new;
+        // orphaned = stale − attempted; addFailed = stale ∩ attempted — all worked out by hand below.
+        assertInvariants(active: [], new: [], attempted: [],
+                         expectedOrphaned: [], expectedAddFailed: [])
+        // stale={a}, a∉attempted → orphaned={a}
+        assertInvariants(active: ["a"], new: [], attempted: [],
+                         expectedOrphaned: ["a"], expectedAddFailed: [])
+        // stale=∅ (a survives) → both empty
+        assertInvariants(active: ["a"], new: ["a"], attempted: ["a"],
+                         expectedOrphaned: [], expectedAddFailed: [])
+        // stale={b,c,d}; attempted={b,d} → orphaned={c}, addFailed={b,d}
+        assertInvariants(active: ["a", "b", "c", "d"], new: ["a"], attempted: ["b", "d"],
+                         expectedOrphaned: ["c"], expectedAddFailed: ["b", "d"])
+        // nothing stale
+        assertInvariants(active: ["a", "b", "c"], new: ["a", "b", "c"], attempted: ["a", "b", "c"],
+                         expectedOrphaned: [], expectedAddFailed: [])
+        // new never active → stale={x,y}; both in attempted → addFailed={x,y}, orphaned=∅
+        assertInvariants(active: ["x", "y"], new: ["z"], attempted: ["x", "y", "z"],
+                         expectedOrphaned: [], expectedAddFailed: ["x", "y"])
+        // stale={10.0.0.0/8}; in attempted → addFailed={10.0.0.0/8}, orphaned=∅
+        assertInvariants(active: ["10.0.0.0/8", "1.1.1.1"], new: ["1.1.1.1"], attempted: ["10.0.0.0/8"],
+                         expectedOrphaned: [], expectedAddFailed: ["10.0.0.0/8"])
     }
 
     // MARK: - Byte-preservation vs the old inline set math
 
-    /// Executable proof the extraction is behavior-preserving: the static must yield
-    /// exactly the old inline `(trulyOrphanedDests, addFailedStaleDests)` set math that
-    /// lived in commitAppliedRoutes before the refactor.
+    /// Executable proof the extraction is behavior-preserving: for each concrete input the
+    /// static must yield exactly the `(trulyOrphanedDests, addFailedStaleDests)` the old
+    /// inline set math in commitAppliedRoutes produced. The expected values here are the
+    /// results HAND-COMPUTED from that old formulation — pinned literals, not a live
+    /// re-derivation — so a drift in the extracted static's math is caught here.
     func testMatchesOldInlineSetMath() {
-        let cases: [(active: Set<String>, new: Set<String>, attempted: Set<String>)] = [
-            ([], [], []),
-            (["a", "b", "c", "d"], ["a"], ["b", "d"]),
-            (["10.0.0.0/8", "1.1.1.1", "192.168.0.1"], ["1.1.1.1"], ["10.0.0.0/8", "x"]),
-            (["p", "q"], ["p", "q"], ["p"]),
+        // (active, new, attempted, expectedOrphaned, expectedAddFailed)
+        //   allStale = active − new; orphaned = allStale − attempted; addFailed = allStale ∩ attempted
+        let cases: [(active: Set<String>, new: Set<String>, attempted: Set<String>,
+                     expectedOrphaned: Set<String>, expectedAddFailed: Set<String>)] = [
+            // allStale=∅
+            ([], [], [], [], []),
+            // allStale={b,c,d}; ∩{b,d}={b,d}; −{b,d}={c}
+            (["a", "b", "c", "d"], ["a"], ["b", "d"], ["c"], ["b", "d"]),
+            // allStale={10.0.0.0/8,192.168.0.1}; attempted {10.0.0.0/8,x}: addFailed={10.0.0.0/8},
+            // orphaned={192.168.0.1} ("x" is not stale so it never appears)
+            (["10.0.0.0/8", "1.1.1.1", "192.168.0.1"], ["1.1.1.1"], ["10.0.0.0/8", "x"],
+             ["192.168.0.1"], ["10.0.0.0/8"]),
+            // allStale=∅ (p,q both survive) → both empty
+            (["p", "q"], ["p", "q"], ["p"], [], []),
         ]
         for c in cases {
-            // Old inline formulation, verbatim from the pre-refactor commitAppliedRoutes.
-            let allStaleDests = c.active.subtracting(c.new)
-            let oldOrphaned = Set(allStaleDests.subtracting(c.attempted))
-            let oldAddFailed = Set(allStaleDests.intersection(c.attempted))
-            // New extracted static.
             let p = RouteManager.partitionStaleRoutes(active: c.active, applied: c.new, attempted: c.attempted)
-            XCTAssertEqual(p.orphaned, oldOrphaned)
-            XCTAssertEqual(p.addFailed, oldAddFailed)
+            XCTAssertEqual(p.orphaned, c.expectedOrphaned, "orphaned mismatch for active=\(c.active)")
+            XCTAssertEqual(p.addFailed, c.expectedAddFailed, "addFailed mismatch for active=\(c.active)")
         }
     }
 }
