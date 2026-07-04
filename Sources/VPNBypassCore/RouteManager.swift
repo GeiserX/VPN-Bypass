@@ -723,16 +723,26 @@ final class RouteManager: ObservableObject {
     // MARK: - DNS Disk Cache
     
     private func loadDNSCache() {
-        guard let data = try? Data(contentsOf: dnsCacheURL),
-              let cache = try? JSONDecoder().decode([String: [String]].self, from: data) else {
-            return
+        // A missing cache is normal (first run) — stay silent. A present-but-corrupt
+        // cache should surface, otherwise the fast-start / preserve-cached-IPs safety
+        // nets that read it silently degrade with no way to notice.
+        guard FileManager.default.fileExists(atPath: dnsCacheURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: dnsCacheURL)
+            dnsDiskCache = try JSONDecoder().decode([String: [String]].self, from: data)
+        } catch {
+            log(.warning, "DNS cache unreadable/corrupt, ignoring: \(error.localizedDescription)")
         }
-        dnsDiskCache = cache
     }
-    
+
     private func saveDNSCache() {
-        guard let data = try? JSONEncoder().encode(dnsDiskCache) else { return }
-        try? data.write(to: dnsCacheURL)
+        do {
+            let data = try JSONEncoder().encode(dnsDiskCache)
+            try data.write(to: dnsCacheURL, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dnsCacheURL.path)
+        } catch {
+            log(.error, "Failed to persist DNS cache: \(error.localizedDescription)")
+        }
     }
     
     // MARK: - Import/Export Config
@@ -859,9 +869,17 @@ final class RouteManager: ObservableObject {
         let deadline = Date().addingTimeInterval(timeout)
         
         while process.isRunning && Date() < deadline {
+            // If a racing resolver already won (the enclosing TaskGroup called
+            // cancelAll()), stop polling and kill this loser instead of running it
+            // out to its full timeout — its result would be discarded anyway.
+            if Task.isCancelled {
+                process.terminate()
+                Thread.sleep(forTimeInterval: 0.05)
+                return nil
+            }
             Thread.sleep(forTimeInterval: 0.01) // 10ms poll interval
         }
-        
+
         if process.isRunning {
             // Timeout - terminate the process
             process.terminate()
@@ -876,13 +894,7 @@ final class RouteManager: ObservableObject {
     }
     
     // MARK: - Network Status
-    
-    func updateNetworkStatus(_ path: NWPath) {
-        Task {
-            await checkVPNStatus()
-        }
-    }
-    
+
     func detectCurrentNetwork() async {
         // Get current WiFi SSID using helper with timeout
         guard let result = await runProcessAsync(
@@ -932,13 +944,18 @@ final class RouteManager: ObservableObject {
         // NWPathMonitor and ifconfig can momentarily miss the interface during
         // network transitions, causing spurious disconnect→reconnect notifications.
         if wasVPNConnected && !connected {
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            let (recheckConnected, recheckInterface, recheckType) = await detectVPNInterface()
-            if recheckConnected {
-                log(.info, "VPN flap suppressed — interface reappeared after recheck")
-                connected = recheckConnected
-                interface = recheckInterface
-                detectedType = recheckType
+            do {
+                try await Task.sleep(nanoseconds: 1_500_000_000)
+                let (recheckConnected, recheckInterface, recheckType) = await detectVPNInterface()
+                if recheckConnected {
+                    log(.info, "VPN flap suppressed — interface reappeared after recheck")
+                    connected = recheckConnected
+                    interface = recheckInterface
+                    detectedType = recheckType
+                }
+            } catch {
+                // Cancelled during the flap-recheck window — skip the recheck rather
+                // than running it a beat early on a torn-down detection pass.
             }
         }
 
@@ -1402,13 +1419,6 @@ final class RouteManager: ObservableObject {
             }
         }
         return nil
-    }
-    
-    /// Called from startup - no notification
-    func detectAndApplyRoutes() {
-        Task {
-            await detectAndApplyRoutesAsync(sendNotification: false)
-        }
     }
     
     /// Called from Refresh button - sends notification
@@ -4043,10 +4053,6 @@ final class RouteManager: ObservableObject {
         return routes.isEmpty ? nil : routes
     }
     
-    private func applyRouteForRange(_ range: String, gateway: String) async -> Bool {
-        return await addRoute(range, gateway: gateway, isNetwork: true)
-    }
-    
     private func resolveIPs(for domain: String) async -> [String]? {
         // Use nonisolated static method for true parallelism
         let userDNS = detectedDNSServer
@@ -4471,26 +4477,51 @@ final class RouteManager: ObservableObject {
         return true
     }
     
+    /// One shared timestamp formatter — allocating a fresh `ISO8601DateFormatter`
+    /// per log line is measurably expensive and this is a hot path (hundreds of
+    /// lines per apply/refresh).
+    private static let logFormatter = ISO8601DateFormatter()
+
+    /// Owner-only log file under the per-user, `0700`-protected `~/Library/Logs`
+    /// (never the world-writable, symlink-plantable `/tmp`). Computed once.
+    private lazy var logFileURL: URL? = {
+        guard let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else { return nil }
+        let dir = base.appendingPathComponent("Logs/VPNBypass", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        return dir.appendingPathComponent("vpnbypass.log")
+    }()
+
+    /// Persistent append handle so we don't open/seek/close on every line.
+    /// Safe to cache: `RouteManager` is `@MainActor`, so `log()` is serialized.
+    private var logFileHandle: FileHandle?
+
     func log(_ level: LogEntry.LogLevel, _ message: String) {
         let entry = LogEntry(timestamp: Date(), level: level, message: message)
         recentLogs.insert(entry, at: 0)
         if recentLogs.count > 200 {
             recentLogs.removeLast()
         }
-        
-        // Log to file
-        let logLine = "[\(ISO8601DateFormatter().string(from: Date()))] [\(level.rawValue)] \(message)\n"
-        let logPath = "/tmp/vpnbypass.log"
-        if let data = logLine.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: logPath) {
-                if let handle = FileHandle(forWritingAtPath: logPath) {
-                    handle.seekToEndOfFile()
-                    handle.write(data)
-                    handle.closeFile()
-                }
-            } else {
-                try? data.write(to: URL(fileURLWithPath: logPath))
+
+        // Log to file (owner-only, never following a planted symlink).
+        guard let url = logFileURL,
+              let data = "[\(Self.logFormatter.string(from: entry.timestamp))] [\(level.rawValue)] \(message)\n".data(using: .utf8)
+        else { return }
+
+        if logFileHandle == nil {
+            let fd = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0o600)
+            if fd >= 0 {
+                logFileHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
             }
+        }
+        guard let handle = logFileHandle else { return }
+        do {
+            try handle.write(contentsOf: data)
+        } catch {
+            // Handle went stale (file rotated/deleted) — drop it; the next call reopens.
+            try? handle.close()
+            logFileHandle = nil
         }
     }
 }

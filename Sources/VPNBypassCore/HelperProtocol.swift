@@ -68,13 +68,6 @@ protocol HelperProtocol {
     func getVersion(withReply reply: @escaping (String) -> Void)
 }
 
-/// Protocol for the main app to receive callbacks from helper
-@objc(HelperProgressProtocol) 
-protocol HelperProgressProtocol {
-    /// Called when an operation completes
-    func operationComplete(success: Bool, message: String?)
-}
-
 // MARK: - Helper Constants
 
 struct HelperConstants {
