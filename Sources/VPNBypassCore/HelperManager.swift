@@ -295,6 +295,19 @@ final class HelperManager: ObservableObject {
         }
     }
 
+    /// Escape a string for safe inclusion inside a shell single-quoted context (`'…'`):
+    /// a literal `'` is closed, backslash-escaped, and reopened (`'\''`).
+    private static func shSingleQuoteEscaped(_ s: String) -> String {
+        s.replacingOccurrences(of: "'", with: "'\\''")
+    }
+
+    /// Escape a shell command for inclusion inside an AppleScript double-quoted string:
+    /// backslashes first (so escapes we add next aren't double-processed), then quotes.
+    private static func appleScriptStringEscaped(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
     private func installHelperLegacy() -> Bool {
         print("🔐 Attempting manual helper installation via AppleScript...")
 
@@ -321,38 +334,48 @@ final class HelperManager: ObservableObject {
             return false
         }
 
+        // helperSource/plistSource derive from Bundle.main.bundlePath, so a bundle path
+        // containing a single quote (e.g. /Users/o'brien/…/VPN Bypass.app) would otherwise
+        // break out of the 'cp …' single-quoting and inject commands into this ROOT admin
+        // script. Escape ' as '\'' for the shell layer, then escape the whole command for
+        // the AppleScript double-quoted string layer (\ and "). The dest/pin paths are
+        // constants and cdhash is [0-9a-f], but they go through the same escaping uniformly.
+        let hs = Self.shSingleQuoteEscaped(helperSource)
+        let ps = Self.shSingleQuoteEscaped(plistSource)
+        let hd = Self.shSingleQuoteEscaped(helperDest)
+        let pd = Self.shSingleQuoteEscaped(plistDest)
+        let pinPath = Self.shSingleQuoteEscaped(HelperConstants.cdhashPinPath)
+
         // Pin this app's cdhash so the freshly-installed helper accepts ONLY this binary
-        // (see Helper/HelperTool.swift verifyCallerIdentity). Written in the SAME admin
-        // op as the copy — no extra prompt, and it lands BEFORE `launchctl bootstrap` so
-        // the helper never runs without it. If our cdhash can't be computed, we omit the
-        // pin entirely: the helper falls back to identifier-only rather than pinning a bad
-        // value. cdhash is [0-9a-f], safe to interpolate; printf writes it with no newline.
+        // (see Helper/HelperTool.swift verifyCallerIdentity). Written in the SAME admin op
+        // as the copy — no extra prompt, and it lands BEFORE `launchctl bootstrap` so the
+        // helper never runs without it. If our cdhash can't be computed, we omit the pin:
+        // the helper falls back to identifier-only rather than pinning a bad value.
         let pinCommands: String
         if let cdhash = ownCDHash() {
             pinCommands = """
-                printf '%s' '\(cdhash)' > '\(HelperConstants.cdhashPinPath)'
-                    chmod 644 '\(HelperConstants.cdhashPinPath)'
-                    chown root:wheel '\(HelperConstants.cdhashPinPath)'
+            printf '%s' '\(cdhash)' > '\(pinPath)'
+                chmod 644 '\(pinPath)'
+                chown root:wheel '\(pinPath)'
             """
         } else {
             pinCommands = "true"
             print("⚠️ Could not compute app cdhash — helper will use identifier-only auth")
         }
 
-        let script = """
-        do shell script "
-            mkdir -p /Library/PrivilegedHelperTools
-            launchctl bootout system/\(kHelperToolMachServiceName) 2>/dev/null || true
-            cp '\(helperSource)' '\(helperDest)'
-            chmod 544 '\(helperDest)'
-            chown root:wheel '\(helperDest)'
-            cp '\(plistSource)' '\(plistDest)'
-            chmod 644 '\(plistDest)'
-            chown root:wheel '\(plistDest)'
-            \(pinCommands)
-            launchctl bootstrap system '\(plistDest)'
-        " with administrator privileges
+        let shellCommand = """
+        mkdir -p /Library/PrivilegedHelperTools
+        launchctl bootout system/\(kHelperToolMachServiceName) 2>/dev/null || true
+        cp '\(hs)' '\(hd)'
+        chmod 544 '\(hd)'
+        chown root:wheel '\(hd)'
+        cp '\(ps)' '\(pd)'
+        chmod 644 '\(pd)'
+        chown root:wheel '\(pd)'
+        \(pinCommands)
+        launchctl bootstrap system '\(pd)'
         """
+        let script = "do shell script \"\(Self.appleScriptStringEscaped(shellCommand))\" with administrator privileges"
 
         var error: NSDictionary?
         if let appleScript = NSAppleScript(source: script) {

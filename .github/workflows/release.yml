@@ -32,9 +32,11 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
           else
             VERSION="${GITHUB_REF#refs/tags/v}"
           fi
@@ -42,24 +44,31 @@ jobs:
           echo "📦 Building version: $VERSION"
 
       - name: Update Info.plist version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ steps.version.outputs.version }}" Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" Info.plist
 
       - name: Build release
         run: make release
 
       - name: Calculate SHA256
         id: sha
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          SHA256=$(shasum -a 256 dist/VPN-Bypass-${{ steps.version.outputs.version }}.dmg | awk '{print $1}')
+          SHA256=$(shasum -a 256 "dist/VPN-Bypass-$VERSION.dmg" | awk '{print $1}')
           echo "sha256=$SHA256" >> $GITHUB_OUTPUT
           echo "📝 SHA256: $SHA256"
 
       - name: Generate changelog
         id: changelog
+        env:
+          VERSION_NUMBER: ${{ steps.version.outputs.version }}
+          SHA256: ${{ steps.sha.outputs.sha256 }}
         run: |
-          VERSION="v${{ steps.version.outputs.version }}"
+          VERSION="v$VERSION_NUMBER"
           PREV_TAG=$(git tag -l "v*" --sort=-version:refname | sed -n '2p')
           
           if [ -z "$PREV_TAG" ]; then
@@ -107,11 +116,11 @@ jobs:
             echo '```'
             echo ""
             echo "### Manual Download"
-            echo "Download \`VPN-Bypass-${{ steps.version.outputs.version }}.dmg\` from the assets below."
+            echo "Download \`VPN-Bypass-$VERSION_NUMBER.dmg\` from the assets below."
             echo ""
             echo "---"
             echo ""
-            echo "**SHA256:** \`${{ steps.sha.outputs.sha256 }}\`"
+            echo "**SHA256:** \`$SHA256\`"
             echo ""
             echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREV_TAG...$VERSION"
           } > changelog.md
@@ -130,10 +139,10 @@ jobs:
             dist/VPN-Bypass-${{ steps.version.outputs.version }}.dmg
 
       - name: Update Homebrew Cask
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA256: ${{ steps.sha.outputs.sha256 }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          SHA256="${{ steps.sha.outputs.sha256 }}"
-          
           # Clone homebrew tap
           git clone "https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/GeiserX/homebrew-vpn-bypass.git" homebrew-tap
           cd homebrew-tap

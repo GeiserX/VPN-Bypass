@@ -807,13 +807,39 @@ struct MenuContent: View {
         guard !newDomain.isEmpty else { return }
         if routeManager.config.routingMode == .vpnOnly {
             routeManager.addInverseDomain(newDomain)
+        } else if RouteManager.usesCustomEngine(schemaVersion: routeManager.config.schemaVersion, routingMode: routeManager.config.routingMode) {
+            addDomainRuleToDirect(newDomain)
         } else {
             routeManager.addDomain(newDomain)
         }
         newDomain = ""
         isAddingDomain = false
     }
-    
+
+    /// Custom mode routes from `config.rules`, not `config.domains` (see
+    /// `RouteManager.usesCustomEngine`), so the quick-add above would silently do
+    /// nothing there. Add a `.domain` rule to the Direct route instead - the same
+    /// mapping `RouteManager.Config.derive()` uses for a bypass-mode domain - so
+    /// quick-add behaves like "bypass this domain" in Custom mode too. Mirrors
+    /// RulesTab.saveRule's append-at-end-of-order for brand-new rules.
+    private func addDomainRuleToDirect(_ domain: String) {
+        let cleaned = routeManager.cleanDomain(domain)
+        guard !cleaned.isEmpty else { return }
+        guard let directRouteId = routeManager.config.routes.first(where: { $0.egress == .direct })?.id else {
+            routeManager.log(.error, "Cannot add rule for \(cleaned): no Direct route found")
+            return
+        }
+        guard !routeManager.config.rules.contains(where: { $0.matchType == .domain && $0.pattern == cleaned }) else {
+            routeManager.log(.warning, "Rule for \(cleaned) already exists")
+            return
+        }
+        let maxOrder = routeManager.config.rules.map(\.order).max() ?? -1
+        routeManager.config.rules.append(Rule(matchType: .domain, pattern: cleaned, routeId: directRouteId, order: maxOrder + 1))
+        routeManager.saveConfig()
+        routeManager.log(.success, "Added rule: \(cleaned) → Direct")
+        Task { await routeManager.detectAndApplyRoutesAsync(sendNotification: false) }
+    }
+
     private func openSettings() {
         // Close the MenuBarExtra dropdown window
         // The dropdown is the current key window when clicking inside it
