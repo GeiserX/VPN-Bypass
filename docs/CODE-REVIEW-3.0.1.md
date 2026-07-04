@@ -10,6 +10,42 @@ some hot-path inefficiency, thin coverage of the imperative apply paths, and a d
 
 ---
 
+## Status (updated 2026-07-04)
+
+The review scope was expanded to "fix everything, including the deferred items." A second pass
+then **shipped** most of the hardening (all behavior-preserving, each verified: 786 tests, 0
+failures, 0 warnings on a clean rebuild):
+
+- **US-007** — classic route-building extracted into a pure, tested `ClassicRouteCompiler` (the test net).
+- **US-008** — the cache apply path folded onto it; apply head de-duplicated.
+- **US-011** — timeout→orphaned-route **leak fixed**; hosts-write failures surfaced.
+- **US-012** — DNS resolution bounded with a sliding window (no fork-storm).
+- **US-014** — catch-all routes torn down first; CLI vs GUI CIDR difference documented as intentional.
+- plus the log-subsystem hardening, `print`→logger consolidation, DNS-cache error surfacing, helper
+  slow-vs-broken probe, dead-code removal, and a 0-warning build.
+
+**Held for Sergio (need his machine or his decision — NOT shipped un-validated):**
+
+- **Audit-token XPC caller auth** (root helper) — a bug could reject the real app and break routing
+  for everyone on update, and it can't be live-tested from the build pod. To be implemented with an
+  anti-brick fallback + one admin-install XPC round-trip on Sergio's Mac before it ships. Until then
+  the PID-based check (documented ad-hoc tradeoff) stands. This is the `feat:` that would make the
+  release a **3.1.0** minor; without it this batch is a **3.0.1** patch.
+- **God-class split** (US-013) — recommended as its own follow-up PR so a huge pure-code-motion diff
+  isn't stacked on this release's security/correctness/perf changes.
+- **DNS-refresh engine unification** (US-009) — the recurring path's apply logic isn't exercised by the
+  suite (`isVPNConnected=false`), so a restructure there is compile-checked only; deferred until it can
+  be live-tested or the mock-`HelperManager` end-to-end test exists.
+- **Helper `addRoutesBatch` parallelization** (US-012 pt.2) — privileged, leak-critical, can't live-test.
+- **US-014 leftovers** — helper re-validation watchdog (needs live-test to avoid false reinstall
+  prompts), `airport`→`CoreWLAN` (needs a Location-permission decision), the never-firing 1.3.0
+  service/domain notifications (product call: re-wire vs remove), and the `withXPCDeadline` timer-cancel
+  micro-opt (won't touch the load-bearing XPC-hang primitive without a real hang to test against).
+
+The catalogue below is the original review; items above override it where they've since shipped.
+
+---
+
 ## Fixed in 3.0.1 (safe, behavior-preserving hygiene)
 
 - **Log subsystem** — the debug log moved off the world-readable, symlink-plantable `/tmp/vpnbypass.log`

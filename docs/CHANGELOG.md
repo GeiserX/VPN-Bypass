@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.0.1] - 2026-07-04
 
-### Changed
-- **RouteManager routing core refactor** — Internal restructuring of the routing core with no behavior change: classic **Bypass** and **VPN Only** route application is byte-identical to 3.0.0 (same kernel routes, same `/etc/hosts` output). Dead code left over from the refactor was removed.
-- **Hardened debug log** — The debug log file moved to `~/Library/Logs/VPNBypass/` and is now created owner-only, keeping diagnostics out of world-readable locations.
+A hardening release from a whole-codebase review. Classic **Bypass** and **VPN Only** route application stays byte-identical to 3.0.0 (same kernel routes, same `/etc/hosts` output) — every routing change here is behavior-preserving, proven by a new test net.
 
 ### Fixed
-- **More complete logging** — Consolidated logging so previously-silent helper and notification failures are captured, plus assorted error-observability fixes that surface failures in the logs instead of swallowing them.
+- **No orphaned routes on a helper timeout** — if a route-install batch timed out (a slow, not dead, helper), the app used to record none of the routes it may have installed, so they could survive VPN disconnect and quit — traffic stuck at a dead gateway. The app now records those routes so teardown removes them.
+- **Hosts-file failures are surfaced** — a failed `/etc/hosts` update is now reported as a warning instead of being logged as success while the file silently drifted from the kernel routes.
+- **Catch-all routes torn down first** — on quit/teardown the VPN-Only `0.0.0.0/1`+`128.0.0.0/1` catch-alls are removed before per-host routes, so a time-capped quit can't strand a full-tunnel-defeating route.
+- **Healthy helper no longer needlessly reinstalled** — a helper that's merely slow to answer at launch is retried once before the app concludes it's broken and prompts for an admin reinstall.
+- **More complete logging** — helper install/update and notification failures now reach the log (and the Logs tab) instead of vanishing to stdout; DNS-cache read/write failures are surfaced rather than swallowed.
+
+### Changed
+- **Routing core refactor (behavior-preserving)** — classic route-building was lifted into a pure, exhaustively-tested compiler and the duplicated apply logic was unified, so the default-mode path finally has a regression test net.
+- **Hardened debug log** — moved to `~/Library/Logs/VPNBypass/`, created owner-only (off the world-readable `/tmp`), and made cheaper to write on the hot path.
+- **Bounded DNS resolution** — domain resolution is capped with a sliding window so a large domain set can't spawn a subprocess fork-storm.
+- Dead code removed; whole package builds with zero warnings.
 
 ## [3.0.0] - 2026-07-03
 

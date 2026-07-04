@@ -48,3 +48,12 @@ _Interpretation: implement ALL of P0→P1→P2 autonomously (unit-test + mock-ve
 ## 2026-07-04 — continuation
 
 > Also when you finish, edit the readme and the gh description to reflect the new reality of vpn bypass
+
+## 2026-07-04 — continuation (hardening backlog)
+
+> [pointing at the deferred hardening milestone — audit-token XPC fix, timeout→orphaned-route
+> kernel reconcile, apply-head + DNS-engine unification, classic-mode compiler extraction +
+> apply-path integration tests, helper addRoutesBatch parallelization, DNS concurrency cap, and
+> the god-class split — recorded in docs/CODE-REVIEW-3.0.1.md]
+>
+> /sergio-loop over it too when you finish with all this
