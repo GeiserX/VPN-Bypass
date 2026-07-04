@@ -52,6 +52,11 @@ jobs:
           key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
           restore-keys: spm-${{ runner.os }}-
       - run: swift test --enable-code-coverage
+      - name: Build privileged helper
+        # The helper isn't part of the SPM package (it's compiled by the Makefile with
+        # a bridging header for the XPC audit token), so `swift test` doesn't cover it.
+        # Build it here so a helper/bridging-header regression is caught on every PR.
+        run: make build-helper
       - name: Convert coverage
         run: |
           BIN=$(find .build -path '*.xctest/Contents/MacOS/*' -type f ! -path '*.dSYM*' | head -1)

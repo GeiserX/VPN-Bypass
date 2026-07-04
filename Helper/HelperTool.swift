@@ -8,9 +8,8 @@ import Foundation
 class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
-        // Verify the connecting process is our main app by checking its bundle identifier
-        let pid = newConnection.processIdentifier
-        guard verifyCallerIdentity(pid: pid) else {
+        // Verify the connecting process is the real VPN Bypass app (by kernel audit token — race-free).
+        guard verifyCaller(newConnection) else {
             return false
         }
 
@@ -31,16 +30,34 @@ class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
 
     /// Verify the calling process is the real VPN Bypass app.
     ///
-    /// Baseline requirement: signed with our identifier. Under ad-hoc signing that string
-    /// alone is forgeable by any local binary (`codesign -s - -i com.geiserx.vpn-bypass`),
-    /// so when a cdhash pin file (written root-only in the same admin op that installs the
-    /// helper) is present and valid, we ALSO require that exact cdhash — which a forged
-    /// binary cannot reproduce. If the pin is absent or malformed we fall back to
-    /// identifier-only: degraded but functional, and never a hard reject (removing/forging
-    /// the root-owned pin already needs root). See docs + HelperConstants.cdhashPinPath.
-    private func verifyCallerIdentity(pid: pid_t) -> Bool {
+    /// Prefer the connection's kernel-issued AUDIT TOKEN (`kSecGuestAttributeAudit`): it names the
+    /// exact process on the other end and cannot be reused mid-connection. Validating by PID
+    /// instead is subject to a PID-reuse race — a local process can grab the app's recycled PID in
+    /// the window between exit and this check, so the helper's "who is PID X?" question is answered
+    /// by the wrong process, satisfying even the pinned cdhash. The audit token closes that race.
+    ///
+    /// Anti-brick: if no usable audit token is present (it always is on a live XPC connection) we
+    /// fall back to the previous PID check, so a missing/removed private API can never lock out the
+    /// real app. See Helper/NSXPCConnection+AuditToken.h.
+    private func verifyCaller(_ connection: NSXPCConnection) -> Bool {
+        var token = connection.auditToken
+        let tokenIsZero = withUnsafeBytes(of: token) { $0.allSatisfy { $0 == 0 } }
+        if !tokenIsZero {
+            let tokenData = Data(bytes: &token, count: MemoryLayout<audit_token_t>.size)
+            return verifyCallerCode(attribute: kSecGuestAttributeAudit, value: tokenData as CFData)
+        }
+        return verifyCallerCode(attribute: kSecGuestAttributePid, value: connection.processIdentifier as CFNumber)
+    }
+
+    /// Build the caller's `SecCode` from a guest attribute (audit token or PID) and check it against
+    /// our signing identifier. Under ad-hoc signing that identifier string alone is forgeable by any
+    /// local binary (`codesign -s - -i com.geiserx.vpn-bypass`), so when the root-only cdhash pin
+    /// file is present and valid we ALSO require that exact cdhash — which a forged binary cannot
+    /// reproduce. If the pin is absent/malformed we fall back to identifier-only: degraded but
+    /// functional, never a hard reject (forging the root-owned pin already needs root).
+    private func verifyCallerCode(attribute: CFString, value: CFTypeRef) -> Bool {
         var code: SecCode?
-        let attrs = [kSecGuestAttributePid: pid] as CFDictionary
+        let attrs = [attribute: value] as CFDictionary
         guard SecCodeCopyGuestWithAttributes(nil, attrs, [], &code) == errSecSuccess,
               let callerCode = code else {
             return false

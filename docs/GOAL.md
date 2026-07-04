@@ -57,3 +57,15 @@ _Interpretation: implement ALL of P0→P1→P2 autonomously (unit-test + mock-ve
 > the god-class split — recorded in docs/CODE-REVIEW-3.0.1.md]
 >
 > /sergio-loop over it too when you finish with all this
+
+## 2026-07-04 — continuation (3.1.0 loop, after shipping 3.0.1)
+
+> Just kill the runner if its so problematic, i just want it purely free or if not i just take care of the releases
+> fix this and /sergio-loop towards 3.1.0 with a new PR asap
+
+**Context:** 3.0.1 shipped (PR #55 merged; release v3.0.1 + cask, all on FREE macos-latest CI after
+moving off the dead self-hosted runner, which was killed). Now: new PR `feat/routemanager-3.1.0`, loop to
+3.1.0 = the **audit-token XPC** hardening (the `feat:` that makes it a minor; explained to Sergio: replaces
+the PID-reuse-vulnerable caller check with the kernel audit token; anti-brick fallback; needs ONE
+admin-install live-test on his Mac) + the **god-class split** (US-013). Delicately; classic routing stays
+byte-identical.
