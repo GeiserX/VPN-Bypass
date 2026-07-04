@@ -17,12 +17,14 @@ build-helper:
 	@echo "Building privileged helper..."
 	@mkdir -p $(HELPER_BUILD_DIR)
 	@swiftc -O \
+		-import-objc-header Helper/NSXPCConnection+AuditToken.h \
 		-target arm64-apple-macos13.0 \
 		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-arm64 \
 		Sources/VPNBypassCore/HelperProtocol.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
 	@swiftc -O \
+		-import-objc-header Helper/NSXPCConnection+AuditToken.h \
 		-target x86_64-apple-macos13.0 \
 		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-x86_64 \
 		Sources/VPNBypassCore/HelperProtocol.swift \
