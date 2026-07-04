@@ -268,3 +268,14 @@ Built ADDITIVELY (no risky RouteManager refactor — R1 deferred): separate, ind
   - `airport`→CoreWLAN SSID detection — needs Sergio's Location-permission product decision (adds a permission prompt). Human-only call.
   - Helper re-validation watchdog — marginal (the helper is a `RunAtLoad` LaunchDaemon; launchd already auto-restarts it); notifications are already wired (not dead code). Skip unless a real need appears.
 - **Release plan:** bundle US-013(DNS) + US-009 (both behavior-preserving, tested) → PR → free macos-latest CI + CodeRabbit → self-merge (no Sergio gate this time) → auto-tag (feat: parallel refresh → minor 3.2.0) → release + cask, DIRECTLY.
+
+### 2026-07-04 (cont'd) — 3.1.1 in flight (PR #57), self-release
+- Versioning verified against the REMOTE (pod local tags were stale): v3.1.0 IS released (@8c3dbbc). Commits since are refactor/perf/fix/docs, NO feat -> auto-tag cuts **v3.1.1** (patch) on merge. Not inflating a commit to force a minor.
+- **On PR #57 (branch feat/routemanager-3.2.0), all verified green (796 tests, clean build, helper builds; two independent adversarial set-equivalence reviews on the leak-critical refresh):**
+  - refactor(US-013): DNS/process subsystem -> pure enum DNSResolver. RouteManager 3955 -> 3687.
+  - perf(US-009): performDNSRefresh route-planning extracted to pure, unit-tested DNSRefreshPlanner (mirrors ClassicRouteCompiler) + parallel resolve bounded to the 16-wide window. First test net this leak-critical path ever had (+10 set-equivalence tests, incl. VPN-Only cache-fallback). Route SET provably unchanged.
+  - **fix (important): helperVersion 1.6.0 -> 1.7.0.** The 3.1.0 audit-token change modified the helper binary but LEFT the version at 1.6.0, so existing installs saw installed==expected, never reinstalled, and never got the hardening (only fresh installs did). Bumping it triggers the standard reinstall so everyone actually receives the audit-token helper.
+  - fix (CodeRabbit x2): bounded the refresh resolve concurrency (was unbounded fork-storm); drained runProcessSyncSafe stdout on a background queue (>64KB pipe-buffer deadlock for tailscale/ps/ifconfig) — timeout still returns nil.
+  - CHANGELOG: added [3.1.1] and the retroactively-missing [3.1.0].
+- **POD GIT STALLED on the Colima bind mount** (git log/commit hang uninterruptibly in IO wait; file writes + gh + machost all fine). Workaround: run ALL git via `machost exec git -C <repo> ...` (native FS, instant). Edit/Write tool still works for file contents.
+- Next: CI + CodeRabbit re-verify the fixes -> self-merge #57 (no Sergio gate, per directive) -> auto-tag v3.1.1 -> release.yml (DMG + release + cask) -> verify.
