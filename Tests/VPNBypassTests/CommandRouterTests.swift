@@ -316,9 +316,37 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertTrue(resp2.ok)
         XCTAssertEqual(backToBypass.routingMode, .bypass)
 
-        let (unchanged, resp3) = CommandRouter.apply(ControlRequest(cmd: "mode", args: ["mode": "custom"]), to: backToBypass)
-        XCTAssertEqual(resp3.error?.code, "invalid_args")
+        // Custom is now a scriptable mode (previously rejected). With no domains to route
+        // it simply enters Custom with an empty rule set.
+        let (toCustom, resp3) = CommandRouter.apply(ControlRequest(cmd: "mode", args: ["mode": "custom"]), to: backToBypass)
+        XCTAssertTrue(resp3.ok, "custom is now an accepted mode")
+        XCTAssertEqual(toCustom.routingMode, .custom)
+        XCTAssertEqual(resp3.result?.mode, "custom")
+
+        // A genuinely unknown value is still rejected and must not mutate.
+        let (unchanged, resp4) = CommandRouter.apply(ControlRequest(cmd: "mode", args: ["mode": "nonsense"]), to: backToBypass)
+        XCTAssertEqual(resp4.error?.code, "invalid_args")
         XCTAssertEqual(unchanged.routingMode, .bypass, "rejected mode must not mutate config")
+    }
+
+    func testModeCustomCarriesBypassDomainsIntoRules() {
+        // Gap #1 fix: a scripted switch to custom must run the SAME migration the GUI does,
+        // so a classic bypass user's listed domains are carried into rules, not dropped.
+        var config = RouteManager.Config()
+        config.routingMode = .bypass
+        config.schemaVersion = 2
+        let vpn = Route(name: "Corporate VPN", egress: .vpnDefault)
+        let direct = Route(name: "Direct", egress: .direct)
+        config.routes = [vpn, direct]
+        config.rules = []
+        config.domains = [RouteManager.DomainEntry(domain: "x.com")]
+
+        let (updated, resp) = CommandRouter.apply(ControlRequest(cmd: "mode", args: ["mode": "custom"]), to: config)
+        XCTAssertTrue(resp.ok)
+        XCTAssertEqual(updated.routingMode, .custom)
+        XCTAssertEqual(updated.rules.count, 1, "the bypass domain became a rule via the CLI switch")
+        XCTAssertEqual(updated.rules.first?.pattern, "x.com")
+        XCTAssertEqual(updated.rules.first?.routeId, direct.id, "onto the existing Direct route")
     }
 
     func testDefaultSetsDefaultRouteIdAndRejectsUnknownId() {

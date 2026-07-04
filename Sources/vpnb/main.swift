@@ -35,7 +35,8 @@ func printUsage() {
       rule.add match=<domain|suffix|ip|cidr|service|process> pattern=<value> routeId=<uuid>
                                                  Add a routing rule
       rule.rm id=<uuid>                         Remove a rule
-      mode mode=<bypass|vpnOnly>                 Set the routing mode
+      mode mode=<bypass|vpnOnly|custom>          Set the routing mode (custom carries
+                                                 your listed domains into rules)
       default routeId=<uuid>                    Set the default route
       help | --help | -h                        Show this help
 

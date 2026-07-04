@@ -379,15 +379,18 @@ enum CommandRouter {
     private static func setMode(
         _ request: ControlRequest, _ config: RouteManager.Config
     ) -> (config: RouteManager.Config, response: ControlResponse) {
-        // The CLI `mode` verb toggles only the two simple modes. `.custom` is a
-        // heavier transition (schemaVersion bump + a visible derive() migration of
-        // domains/services into rules) owned by the GUI flow, so it is deliberately
-        // NOT reachable here — reject it like any unknown value.
-        guard let modeStr = request.args?["mode"], let mode = RouteManager.RoutingMode(rawValue: modeStr),
-              mode != .custom else {
-            return errorResponse(config, code: "invalid_args", message: "mode must be \"bypass\" or \"vpnOnly\"")
+        // All three modes are scriptable. Entering Custom runs the SAME pure migration
+        // the GUI uses (Config.preparedForCustomMode) so a bypass/vpnOnly user's listed
+        // domains are carried into rules first — otherwise a scripted switch to custom
+        // would enter with zero rules and drop them. ControlSurface re-applies routes
+        // after a `mode` command, so the new custom routes take effect immediately.
+        guard let modeStr = request.args?["mode"], let mode = RouteManager.RoutingMode(rawValue: modeStr) else {
+            return errorResponse(config, code: "invalid_args", message: "mode must be \"bypass\", \"vpnOnly\", or \"custom\"")
         }
         var updated = config
+        if mode == .custom {
+            updated = updated.preparedForCustomMode()   // reads the pre-switch mode for rule semantics
+        }
         updated.routingMode = mode
         return successResponse(updated, result: ControlResult(mode: mode.rawValue))
     }

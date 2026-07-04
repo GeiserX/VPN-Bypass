@@ -259,6 +259,75 @@ final class RouteManager: ObservableObject {
             return (routes, rules, defaultRouteId)
         }
 
+        /// Prepare THIS config for Custom mode, purely (no actor, no I/O) so the GUI
+        /// (`setRoutingMode`) and the CLI (`CommandRouter`) migrate identically.
+        ///
+        /// Guarantees the rule model exists so a classic bypass/vpnOnly user's listed
+        /// domains keep routing after the switch. Two cases:
+        ///   • No route model yet (fresh schemaVersion-1 config) → adopt derive()'s
+        ///     routes/rules/default wholesale, preserving any user proxy/Tailscale routes.
+        ///   • Routes exist but rules are EMPTY while there ARE domains/services to route
+        ///     (a schemaVersion-2 bypass config the decoder bumped but never ruled — which
+        ///     would otherwise enter Custom with zero rules and silently drop every listed
+        ///     domain onto the OS default). Derive rules and REMAP their routeId onto the
+        ///     routes the config already has (by egress), so existing route ids/names
+        ///     (e.g. a renamed VPN) are preserved and no rule dangles.
+        /// Idempotent: a config that already has rules (or nothing to route) is unchanged.
+        /// Does NOT set routingMode — the caller flips that after (derive reads the
+        /// pre-switch mode to pick bypass-vs-vpnOnly rule semantics).
+        func preparedForCustomMode() -> Config {
+            var c = self
+            if c.schemaVersion < 2 { c.schemaVersion = 2 }
+
+            // Already has a rule model → leave it entirely untouched (idempotent re-entry;
+            // never clobber a user's edited rules). Only derive when rules are EMPTY.
+            guard c.rules.isEmpty else { return c }
+            // Nothing to route → start Custom empty (a valid choice; don't fabricate a model).
+            let hasRoutableLists = !c.domains.isEmpty
+                || c.services.contains { $0.enabled }
+                || c.inverseDomains.contains { $0.enabled }
+            guard hasRoutableLists else { return c }
+
+            let hasSystemRoutes = c.routes.contains { $0.egress == .vpnDefault }
+                && c.routes.contains { $0.egress == .direct }
+
+            let derived = Config.derive(
+                domains: c.domains, services: c.services,
+                mode: c.routingMode, inverseDomains: c.inverseDomains, proxy: c.proxyConfig
+            )
+
+            if !hasSystemRoutes {
+                // Fresh config — adopt the derived model, keeping user proxy/Tailscale routes.
+                let userRoutes = c.routes.filter {
+                    $0.egress == .proxyHTTP || $0.egress == .proxySOCKS5 || $0.egress == .tailscaleExit
+                }
+                c.routes = derived.routes + userRoutes
+                c.rules = derived.rules
+                c.defaultRouteId = derived.defaultRouteId
+                return c
+            }
+
+            // Routes exist, rules are empty: remap derived rules onto existing route ids.
+            var idMap: [UUID: UUID] = [:]
+            for dr in derived.routes {
+                if let existing = c.routes.first(where: { $0.egress == dr.egress }) {
+                    idMap[dr.id] = existing.id
+                } else {
+                    c.routes.append(dr)     // no existing counterpart (e.g. a proxy route) — keep it
+                    idMap[dr.id] = dr.id
+                }
+            }
+            c.rules = derived.rules.map { rule in
+                var r = rule
+                if let mapped = idMap[rule.routeId] { r.routeId = mapped }
+                return r
+            }
+            // Adopt the derived default (VPN for bypass, Direct for vpnOnly), remapped onto
+            // an existing route — the classic-mode default the user actually had.
+            c.defaultRouteId = derived.defaultRouteId.flatMap { idMap[$0] } ?? c.defaultRouteId
+            return c
+        }
+
         /// The proxy route a service maps to under the legacy single-proxy model,
         /// or nil if the service is not proxied (caller routes it Direct).
         /// useForServices empty means "all enabled services" (legacy semantics).
@@ -3368,38 +3437,14 @@ final class RouteManager: ObservableObject {
     func setRoutingMode(_ mode: RoutingMode) {
         guard config.routingMode != mode else { return }
 
-        // Entering Custom mode the FIRST time (schemaVersion still 1) is a one-time
-        // migration: bump to schemaVersion 2 and derive the routes/rules representation
-        // from the CURRENT bypass/vpnOnly lists + proxy, so the rule engine has the
-        // user's domains/services as rules to start from. Preserve any proxy/Tailscale
-        // routes the user already created (derive only produces VPN/Direct/legacy-proxy)
-        // so the migration is lossless. Re-entering Custom later (schemaVersion already 2)
-        // keeps the user's edited rules untouched.
-        if mode == .custom && config.schemaVersion < 2 {
-            config.schemaVersion = 2
-            // The decoder ALREADY derives routes/rules when a legacy config is loaded with
-            // an empty `routes` (Config.init(from:)). Re-deriving here would mint a SECOND
-            // set of route/rule UUIDs and discard the decoder's — giving non-deterministic
-            // IDs on every launch until the first save. So derive ONLY when the model has
-            // not been established yet, detected by the absence of the derived VPN+Direct
-            // pair that derive() always produces. When it IS present (the decoder derived,
-            // or the user built an equivalent), keep the existing routes/rules/default as
-            // they are — a lossless bump that also preserves any proxy/Tailscale routes
-            // already in `config.routes` without duplicating them.
-            let alreadyDerived = config.routes.contains { $0.egress == .vpnDefault }
-                && config.routes.contains { $0.egress == .direct }
-            if !alreadyDerived {
-                let userRoutes = config.routes.filter {
-                    $0.egress == .proxyHTTP || $0.egress == .proxySOCKS5 || $0.egress == .tailscaleExit
-                }
-                let derived = Config.derive(
-                    domains: config.domains, services: config.services,
-                    mode: config.routingMode, inverseDomains: config.inverseDomains, proxy: config.proxyConfig
-                )
-                config.routes = derived.routes + userRoutes
-                config.rules = derived.rules
-                config.defaultRouteId = derived.defaultRouteId
-            }
+        // Entering Custom mode: ensure the routes/rules model exists so the user's
+        // bypass/vpnOnly lists keep routing after the switch. This is a pure migration
+        // (Config.preparedForCustomMode) shared with the CLI so both surfaces behave
+        // identically. It supersedes the old `schemaVersion < 2` guard, which let a
+        // schemaVersion-2-but-unruled config enter Custom with zero rules and silently
+        // drop every listed domain onto the OS default.
+        if mode == .custom {
+            config = config.preparedForCustomMode()
         }
 
         config.routingMode = mode
