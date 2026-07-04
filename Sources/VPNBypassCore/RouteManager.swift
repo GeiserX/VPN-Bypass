@@ -2126,23 +2126,40 @@ final class RouteManager: ObservableObject {
         let existingDestinations = Set(activeRoutes.map { $0.destination })
         let existingSourceDests = Set(activeRoutes.map { SourceDest(source: $0.source, destination: $0.destination) })
 
-        // Re-resolve every UNIQUE domain in parallel — same withTaskGroup + resolveIPsParallel
-        // machinery the full-apply path uses. Resolving once per domain (vs. the old serial
-        // per-(domain,source) loop) only collapses duplicate work into one consistent view; the
-        // planner below is order-independent given the resolved map, so the route SET is identical.
+        // Re-resolve every UNIQUE domain — same withTaskGroup + resolveIPsParallel machinery the
+        // full-apply path uses, including its 16-wide sliding window. Resolving once per domain
+        // (vs. the old serial per-(domain,source) loop) only collapses duplicate work into one
+        // consistent view; the planner below is order-independent given the resolved map, so the
+        // route SET is identical.
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
         let uniqueDomains = Array(Set(domainsToResolve.map { $0.domain }))
+        // Sliding-window resolve: cap in-flight domain resolutions (mirrors applyAllRoutesInternal).
+        // Each domain fans out to ~5 dig/curl subprocesses, so adding a task per domain up front
+        // could spawn a fork storm for large domain sets. Bound the in-flight count; every unique
+        // domain is still resolved and lands in resolvedDomainIPs below (order-independent).
+        let maxConcurrentResolves = 16
         let domainResults = await withTaskGroup(of: (String, [String]?).self) { group in
-            for domain in uniqueDomains {
+            var next = 0
+            while next < uniqueDomains.count && next < maxConcurrentResolves {
+                let domain = uniqueDomains[next]
                 group.addTask {
                     let ips = await DNSResolver.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
                     return (domain, ips)
                 }
+                next += 1
             }
             var results: [(String, [String]?)] = []
-            for await result in group {
+            while let result = await group.next() {
                 results.append(result)
+                if next < uniqueDomains.count {
+                    let domain = uniqueDomains[next]
+                    group.addTask {
+                        let ips = await DNSResolver.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
+                        return (domain, ips)
+                    }
+                    next += 1
+                }
             }
             return results
         }

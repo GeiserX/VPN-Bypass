@@ -42,7 +42,22 @@ enum DNSResolver {
         } catch {
             return nil
         }
-        
+
+        // Drain stdout concurrently while the process runs. `readDataToEndOfFile()` blocks until
+        // the write-end closes (on exit or terminate), so it must run on its own queue rather than
+        // after the poll loop: a command that emits more than the ~64KB pipe buffer (e.g.
+        // `tailscale status --json`, `ps -eo comm`, `ifconfig`) would otherwise block on write,
+        // never exit, and false-time-out below. The background reader empties the buffer as bytes
+        // arrive so the writer can finish; the semaphore hands the fully drained bytes back once
+        // the write-end closes.
+        let drainQueue = DispatchQueue(label: "com.vpnbypass.process.drain", qos: .userInitiated)
+        let drainDone = DispatchSemaphore(value: 0)
+        var drainedData = Data()
+        drainQueue.async {
+            drainedData = pipe.fileHandleForReading.readDataToEndOfFile()
+            drainDone.signal()
+        }
+
         // Use a simple polling approach with deadline instead of nested GCD + semaphore
         // This avoids thread pool exhaustion issues
         let deadline = Date().addingTimeInterval(timeout)
@@ -58,15 +73,20 @@ enum DNSResolver {
         }
 
         if process.isRunning {
-            // Timeout - terminate the process
+            // Timeout - terminate the process. terminate() closes the child's write-end of the
+            // pipe, which unblocks the background readDataToEndOfFile() so the drain queue can
+            // finish. Wait for full teardown, reap the drain thread, then abandon with nil — a
+            // timed-out run never returns partial output (contract preserved).
             process.terminate()
-            // Give it a moment to clean up
-            Thread.sleep(forTimeInterval: 0.05)
+            process.waitUntilExit()
+            drainDone.wait()
             return nil
         }
-        
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
+
+        // Normal exit: the process closed its write-end, so the background read has hit EOF (or
+        // will imminently). Wait for the drained buffer, then return it with the exit status.
+        drainDone.wait()
+        let output = String(data: drainedData, encoding: .utf8) ?? ""
         return (output, process.terminationStatus)
     }
 
