@@ -2090,25 +2090,21 @@ final class RouteManager: ObservableObject {
 
         var updatedCount = 0
 
-        // Source-aware tracking: (source, destination) pairs instead of flat IP sets
-        struct SourceDest: Hashable { let source: String; let destination: String }
-        var expectedEntries: Set<SourceDest> = []
+        // Source-aware tracking: (source, destination) pairs instead of flat IP sets. SourceDest
+        // now lives on DNSRefreshPlanner (the pure planner that owns the refresh route-delta
+        // logic); alias it so the rest of this method reads unchanged.
+        typealias SourceDest = DNSRefreshPlanner.SourceDest
         var addedKernelRoutes: Set<String> = []  // Track new kernel routes added this cycle
 
-        // Preserve catch-all routes in VPN Only mode (they aren't DNS-resolved)
-        if isInverse {
-            expectedEntries.insert(SourceDest(source: "VPN Only catch-all", destination: "0.0.0.0/1"))
-            expectedEntries.insert(SourceDest(source: "VPN Only catch-all", destination: "128.0.0.0/1"))
-        }
-
-        // Collect domains based on routing mode
+        // Collect domains based on routing mode. Inverse CIDR entries are preserved as static
+        // routes (no DNS resolution) and handed to the planner to seed expectedEntries.
         var domainsToResolve: [(domain: String, source: String)] = []
+        var inverseCIDRs: [String] = []
 
         if isInverse {
             for domain in config.inverseDomains where domain.enabled {
                 if domain.isCIDR {
-                    // CIDR entries: preserve as static routes, no DNS resolution
-                    expectedEntries.insert(SourceDest(source: domain.domain, destination: domain.domain))
+                    inverseCIDRs.append(domain.domain)
                 } else {
                     let resolvable = domain.domain
                     domainsToResolve.append((resolvable, domain.domain))
@@ -2130,46 +2126,66 @@ final class RouteManager: ObservableObject {
         let existingDestinations = Set(activeRoutes.map { $0.destination })
         let existingSourceDests = Set(activeRoutes.map { SourceDest(source: $0.source, destination: $0.destination) })
 
-        // Re-resolve and check for changes
-        var resolvedDomainIPs: [String: [String]] = [:]
-        for (domain, source) in domainsToResolve {
-            if let ips = await resolveIPs(for: domain) {
-                resolvedDomainIPs[domain] = ips
-                for ip in ips {
-                    let entry = SourceDest(source: source, destination: ip)
-                    expectedEntries.insert(entry)
-
-                    // Add kernel route if destination is completely new
-                    let kernelHasRoute: Bool
-                    if !existingDestinations.contains(ip) && !addedKernelRoutes.contains(ip) {
-                        if await addRoute(ip, gateway: routeGateway) {
-                            addedKernelRoutes.insert(ip)
-                            updatedCount += 1
-                            kernelHasRoute = true
-                            log(.success, "DNS refresh: added new IP \(ip) for \(domain)")
-                        } else {
-                            kernelHasRoute = false
-                        }
-                    } else {
-                        kernelHasRoute = true  // already exists in kernel
-                    }
-
-                    // Only record source entry if kernel actually has the route
-                    if kernelHasRoute && !existingSourceDests.contains(entry) {
-                        activeRoutes.append(ActiveRoute(
-                            destination: ip,
-                            gateway: routeGateway,
-                            source: source,
-                            timestamp: Date()
-                        ))
-                    }
-                }
-            } else if let cachedIPs = dnsDiskCache[domain] {
-                // DNS failed — preserve cached IPs so they aren't treated as stale
-                for ip in cachedIPs {
-                    expectedEntries.insert(SourceDest(source: source, destination: ip))
+        // Re-resolve every UNIQUE domain in parallel — same withTaskGroup + resolveIPsParallel
+        // machinery the full-apply path uses. Resolving once per domain (vs. the old serial
+        // per-(domain,source) loop) only collapses duplicate work into one consistent view; the
+        // planner below is order-independent given the resolved map, so the route SET is identical.
+        let userDNS = detectedDNSServer
+        let fallbackDNS = config.fallbackDNS
+        let uniqueDomains = Array(Set(domainsToResolve.map { $0.domain }))
+        let domainResults = await withTaskGroup(of: (String, [String]?).self) { group in
+            for domain in uniqueDomains {
+                group.addTask {
+                    let ips = await DNSResolver.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
+                    return (domain, ips)
                 }
             }
+            var results: [(String, [String]?)] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
+        }
+        var resolvedDomainIPs: [String: [String]] = [:]
+        for (domain, ips) in domainResults {
+            if let ips = ips { resolvedDomainIPs[domain] = ips }
+        }
+
+        // Plan the route delta purely (see DNSRefreshPlanner): which new kernel routes to add,
+        // which ownership rows to commit once their route is present, and the full expected set.
+        let plan = DNSRefreshPlanner.plan(
+            domainsToResolve: domainsToResolve,
+            resolvedDomainIPs: resolvedDomainIPs,
+            cachedDomainIPs: dnsDiskCache,
+            existingDestinations: existingDestinations,
+            existingSourceDests: existingSourceDests,
+            isInverse: isInverse,
+            routeGateway: routeGateway,
+            inverseCIDRs: inverseCIDRs
+        )
+        var expectedEntries = plan.expectedEntries
+
+        // Apply: add each new kernel route (host route through the route gateway), tracking
+        // successes. This is the same addRoute call the serial loop made.
+        for plannedRoute in plan.routesToAdd {
+            if await addRoute(plannedRoute.destination, gateway: routeGateway) {
+                addedKernelRoutes.insert(plannedRoute.destination)
+                updatedCount += 1
+                log(.success, "DNS refresh: added new IP \(plannedRoute.destination)")
+            }
+        }
+
+        // Commit ownership rows whose kernel route is present (already existed OR just added). The
+        // not-already-owned gate was applied by the planner; this is the kernelHasRoute half of the
+        // old inline condition, so together they reproduce it exactly.
+        for candidate in plan.candidateActiveEntries {
+            guard existingDestinations.contains(candidate.destination) || addedKernelRoutes.contains(candidate.destination) else { continue }
+            activeRoutes.append(ActiveRoute(
+                destination: candidate.destination,
+                gateway: candidate.gateway,
+                source: candidate.source,
+                timestamp: Date()
+            ))
         }
 
         // Update DNS caches only for successfully resolved domains
