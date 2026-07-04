@@ -95,7 +95,7 @@ final class LiveProxyEgressTests: XCTestCase {
         cfg.multiRouteEnabled = true
         cfg.routes = [route]
         RouteManager.shared.config = cfg
-        RouteManager.shared.localGateway = env["OXY_GW"] ?? "<lan-gateway>"
+        RouteManager.shared.localGateway = env["OXY_GW"] ?? "192.168.0.1"
 
         await RouteManager.shared.reconcileProxyListeners()
         try await Task.sleep(nanoseconds: 1_500_000_000)  // let the off-main start settle
@@ -121,7 +121,7 @@ final class LiveProxyEgressTests: XCTestCase {
     func testTailscalePeerEgressViaAppReconcile() async throws {
         let env = ProcessInfo.processInfo.environment
         try XCTSkipUnless(env["TS_LIVE"] == "1", "live test — run with TS_LIVE=1 and a proxy on the peer")
-        let peer = env["TS_PEER"] ?? "<tailnet-peer-ip>:8888"
+        let peer = env["TS_PEER"] ?? "100.100.0.1:8888"
         let bits = peer.split(separator: ":")
         guard bits.count == 2, let peerPort = Int(bits[1]) else { throw XCTSkip("TS_PEER must be host:port") }
         let peerHost = String(bits[0])
@@ -135,7 +135,7 @@ final class LiveProxyEgressTests: XCTestCase {
         cfg.multiRouteEnabled = true
         cfg.routes = [route]
         RouteManager.shared.config = cfg
-        RouteManager.shared.localGateway = env["OXY_GW"] ?? "<lan-gateway>"
+        RouteManager.shared.localGateway = env["OXY_GW"] ?? "192.168.0.1"
 
         await RouteManager.shared.reconcileProxyListeners()
         try await Task.sleep(nanoseconds: 1_500_000_000)

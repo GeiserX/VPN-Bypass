@@ -60,26 +60,26 @@ final class ProxyListenerManagerTests: XCTestCase {
 
     func testTailnetHostClassification() {
         // Inside 100.64.0.0/10.
-        XCTAssertTrue(ProxyListenerManager.isTailnetHost("<tailnet-peer-ip>"))   // peer-mac
-        XCTAssertTrue(ProxyListenerManager.isTailnetHost("<tailnet-peer-ip>"))   // peer-relay
+        XCTAssertTrue(ProxyListenerManager.isTailnetHost("100.100.0.1"))     // a tailnet peer
+        XCTAssertTrue(ProxyListenerManager.isTailnetHost("100.100.0.2"))     // another tailnet peer
         XCTAssertTrue(ProxyListenerManager.isTailnetHost("100.64.0.0"))      // low edge
         XCTAssertTrue(ProxyListenerManager.isTailnetHost("100.127.255.255")) // high edge
         // Outside.
         XCTAssertFalse(ProxyListenerManager.isTailnetHost("100.63.255.255")) // just below
         XCTAssertFalse(ProxyListenerManager.isTailnetHost("100.128.0.0"))    // just above
-        XCTAssertFalse(ProxyListenerManager.isTailnetHost("<proxy-exit-ip>"))    // an Oxylabs IP
+        XCTAssertFalse(ProxyListenerManager.isTailnetHost("203.0.113.10"))   // a public proxy IP (non-tailnet)
         XCTAssertFalse(ProxyListenerManager.isTailnetHost("not-an-ip"))
     }
 
     func testGlobalProtectShadowClassification() {
         // GP captures 100.112.0.0/12 (100.112–100.127), which overlaps CGNAT.
-        XCTAssertTrue(ProxyListenerManager.isTailnetHostShadowedByGlobalProtect("<tailnet-peer-ip>"))  // nuc — hijacked
+        XCTAssertTrue(ProxyListenerManager.isTailnetHostShadowedByGlobalProtect("100.120.0.1"))  // a peer in 100.112/12 — hijacked by GP
         XCTAssertTrue(ProxyListenerManager.isTailnetHostShadowedByGlobalProtect("100.112.0.0"))
         XCTAssertTrue(ProxyListenerManager.isTailnetHostShadowedByGlobalProtect("100.127.255.255"))
         // Safe peers (below 100.112).
-        XCTAssertFalse(ProxyListenerManager.isTailnetHostShadowedByGlobalProtect("<tailnet-peer-ip>")) // peer-mac
-        XCTAssertFalse(ProxyListenerManager.isTailnetHostShadowedByGlobalProtect("<tailnet-peer-ip>"))  // peer-relay
-        XCTAssertFalse(ProxyListenerManager.isTailnetHostShadowedByGlobalProtect("<tailnet-peer-ip>"))  // peer-server-b
+        XCTAssertFalse(ProxyListenerManager.isTailnetHostShadowedByGlobalProtect("100.100.0.1")) // a tailnet peer
+        XCTAssertFalse(ProxyListenerManager.isTailnetHostShadowedByGlobalProtect("100.100.0.2"))  // another tailnet peer
+        XCTAssertFalse(ProxyListenerManager.isTailnetHostShadowedByGlobalProtect("100.100.0.3"))  // another tailnet peer
     }
 
     func testUsesLocalListenerIncludesTailscaleExit() {
@@ -94,11 +94,11 @@ final class ProxyListenerManagerTests: XCTestCase {
         // A Tailscale-peer route must NOT bind the physical NIC — its 100.x upstream
         // routes via the Tailscale utun, so binding en8 would break it.
         let ts = Route(name: "mini", egress: .tailscaleExit,
-                       proxyHost: "<tailnet-peer-ip>", proxyPort: 8888, tailscaleExitNode: "peer-mac")
+                       proxyHost: "100.100.0.1", proxyPort: 8888, tailscaleExitNode: "peer-mac")
         XCTAssertNil(ProxyListenerManager.makeUpstream(route: ts, boundInterface: "en8")?.boundInterface)
 
         // Belt-and-suspenders: even a plain proxy route pointed at a tailnet IP drops the binding.
-        let proxyToTailnet = Route(name: "p", egress: .proxyHTTP, proxyHost: "<tailnet-peer-ip>", proxyPort: 3128)
+        let proxyToTailnet = Route(name: "p", egress: .proxyHTTP, proxyHost: "100.100.0.1", proxyPort: 3128)
         XCTAssertNil(ProxyListenerManager.makeUpstream(route: proxyToTailnet, boundInterface: "en8")?.boundInterface)
 
         // A normal internet proxy KEEPS the VPN-escape binding.
@@ -148,7 +148,7 @@ final class ProxyListenerManagerTests: XCTestCase {
     func testTailnetFingerprintIgnoresBoundInterfaceButInternetProxyDoesNot() {
         // A tailnet route never binds the physical NIC → boundInterface must not affect it
         // (else a Wi-Fi/Ethernet switch would needlessly restart it).
-        let ts = Route(name: "mini", egress: .tailscaleExit, proxyHost: "<tailnet-peer-ip>", proxyPort: 8888)
+        let ts = Route(name: "mini", egress: .tailscaleExit, proxyHost: "100.100.0.1", proxyPort: 8888)
         XCTAssertEqual(
             ProxyListenerManager.upstreamFingerprint(ts, boundInterface: "en0"),
             ProxyListenerManager.upstreamFingerprint(ts, boundInterface: "en8")
@@ -187,7 +187,7 @@ final class ProxyListenerManagerTests: XCTestCase {
         // (the listener binds locally; the upstream isn't dialed until a client connects).
         let manager = ProxyListenerManager()
         let ts = Route(name: "mini", egress: .tailscaleExit,
-                       proxyHost: "<tailnet-peer-ip>", proxyPort: 8888, tailscaleExitNode: "peer-mac")
+                       proxyHost: "100.100.0.1", proxyPort: 8888, tailscaleExitNode: "peer-mac")
         let started = expectation(description: "started")
         manager.reconcile(routes: [ts], boundInterface: "en8") { started.fulfill() }
         wait(for: [started], timeout: 5)
