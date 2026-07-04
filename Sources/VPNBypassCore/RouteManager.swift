@@ -1670,16 +1670,26 @@ final class RouteManager: ObservableObject {
             let endIndex = min(index + batchSize, allDomains.count)
             let batch = Array(allDomains[index..<endIndex])
 
+            // Sliding-window resolve: cap in-flight domain resolutions. Each domain fans out to
+            // ~5 dig/curl subprocesses, so an unbounded 100-wide batch could spawn ~500 concurrent
+            // processes — a fork storm that oversubscribes the GCD pool. Bound the in-flight count
+            // so subprocess concurrency stays ~80. Results are reassembled in input order.
+            let maxConcurrentResolves = 16
             let dnsResults = await withTaskGroup(of: (idx: Int, ips: [String]?).self) { group in
-                for (i, item) in batch.enumerated() {
-                    group.addTask {
-                        let ips = await Self.resolveIPsParallel(for: item.domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
-                        return (i, ips)
-                    }
+                var next = 0
+                while next < batch.count && next < maxConcurrentResolves {
+                    let i = next, item = batch[i]
+                    group.addTask { (i, await Self.resolveIPsParallel(for: item.domain, userDNS: userDNS, fallbackDNS: fallbackDNS)) }
+                    next += 1
                 }
                 var results: [(idx: Int, ips: [String]?)] = []
-                for await result in group {
+                while let result = await group.next() {
                     results.append(result)
+                    if next < batch.count {
+                        let i = next, item = batch[i]
+                        group.addTask { (i, await Self.resolveIPsParallel(for: item.domain, userDNS: userDNS, fallbackDNS: fallbackDNS)) }
+                        next += 1
+                    }
                 }
                 return results.sorted { $0.idx < $1.idx }
             }
