@@ -69,3 +69,7 @@ moving off the dead self-hosted runner, which was killed). Now: new PR `feat/rou
 the PID-reuse-vulnerable caller check with the kernel audit token; anti-brick fallback; needs ONE
 admin-install live-test on his Mac) + the **god-class split** (US-013). Delicately; classic routing stays
 byte-identical.
+
+## 2026-07-04 — continuation (3.2.0, self-release)
+
+> over it and release it directly dont ask me just unblock yourselph, use ralph
