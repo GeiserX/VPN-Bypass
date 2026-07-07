@@ -153,7 +153,15 @@ jobs:
           
           sed -i '' "s/sha256 \".*\"/sha256 \"$SHA256\"/" Casks/vpn-bypass.rb 2>/dev/null || \
           sed -i "s/sha256 \".*\"/sha256 \"$SHA256\"/" Casks/vpn-bypass.rb
-          
+
+          # Ensure the `binary` stanza is present so `vpnb` is symlinked onto PATH by
+          # `brew install --cask`. The seds above only rewrite version/sha256, so a tap
+          # cask that predates this change would never otherwise gain the stanza. The
+          # grep-guard makes this idempotent; perl slurp-mode is BSD/GNU-portable and
+          # inserts the line right after `app "VPN Bypass.app"`, preserving indentation.
+          grep -q 'Contents/MacOS/vpnb' Casks/vpn-bypass.rb || \
+            perl -0pi -e 's{(app "VPN Bypass\.app"\n)}{$1  binary "VPN Bypass.app/Contents/MacOS/vpnb"\n}' Casks/vpn-bypass.rb
+
           # Commit and push
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

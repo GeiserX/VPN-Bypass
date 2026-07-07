@@ -45,6 +45,11 @@ bundle: build build-helper
 	@mkdir -p "$(APP_BUNDLE)/Contents/Resources"
 	@mkdir -p "$(APP_BUNDLE)/Contents/Library/LaunchDaemons"
 	@cp $(BUILD_DIR)/VPNBypass "$(APP_BUNDLE)/Contents/MacOS/"
+	@# Bundle the vpnb control CLI alongside the app binary. It's a SwiftPM
+	@# executable target, so the universal `swift build` above already produced
+	@# it at $(BUILD_DIR)/vpnb (same arm64+x86_64 treatment as VPNBypass). The
+	@# Homebrew cask's `binary` stanza symlinks it onto PATH.
+	@cp $(BUILD_DIR)/vpnb "$(APP_BUNDLE)/Contents/MacOS/"
 	@cp Info.plist "$(APP_BUNDLE)/Contents/"
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" "$(APP_BUNDLE)/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(VERSION)" "$(APP_BUNDLE)/Contents/Info.plist"

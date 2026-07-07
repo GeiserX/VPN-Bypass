@@ -155,6 +155,8 @@ Click the gear icon to access settings. The visible tabs depend on the active mo
 
 A bundled `vpnb` CLI drives the same routing the GUI does, over a user-only UNIX socket — handy for scripting or headless tweaks. It needs no extra privilege (the app already holds it).
 
+`vpnb` ships inside the app bundle (`VPN Bypass.app/Contents/MacOS/vpnb`). Installing the cask with `brew install --cask vpn-bypass` symlinks it onto your `PATH`; with a manual DMG install, call it by that path or symlink it yourself.
+
 ```bash
 vpnb status                                   # current mode, routes, schema/version
 vpnb mode mode=custom                         # switch modes: bypass | vpnOnly | custom
