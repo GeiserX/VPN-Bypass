@@ -155,12 +155,18 @@ jobs:
           sed -i "s/sha256 \".*\"/sha256 \"$SHA256\"/" Casks/vpn-bypass.rb
 
           # Ensure the `binary` stanza is present so `vpnb` is symlinked onto PATH by
-          # `brew install --cask`. The seds above only rewrite version/sha256, so a tap
-          # cask that predates this change would never otherwise gain the stanza. The
-          # grep-guard makes this idempotent; perl slurp-mode is BSD/GNU-portable and
-          # inserts the line right after `app "VPN Bypass.app"`, preserving indentation.
+          # `brew install --cask`. It MUST be rooted at #{appdir}: Homebrew moves the
+          # .app to /Applications BEFORE linking, so a relative source would resolve to
+          # the emptied staging dir and abort the whole install (CaskError: source not
+          # there). The seds above only rewrite version/sha256, so a tap cask predating
+          # this change never otherwise gains the stanza. grep-guard = idempotent; #{...}
+          # is literal in a Perl replacement (only $ and @ interpolate), so it reaches the
+          # cask verbatim for Ruby to interpolate at install time.
           grep -q 'Contents/MacOS/vpnb' Casks/vpn-bypass.rb || \
-            perl -0pi -e 's{(app "VPN Bypass\.app"\n)}{$1  binary "VPN Bypass.app/Contents/MacOS/vpnb"\n}' Casks/vpn-bypass.rb
+            perl -0777pi -e 's{(app "VPN Bypass\.app"\n)}{$1  binary "#{appdir}/VPN Bypass.app/Contents/MacOS/vpnb"\n}' Casks/vpn-bypass.rb
+          # Fail the release loudly if the app anchor moved and the insert silently no-op'd
+          # (otherwise vpnb would just never appear on PATH, with no error).
+          grep -q 'Contents/MacOS/vpnb' Casks/vpn-bypass.rb || { echo "::error::vpnb binary stanza not inserted into the tap cask (app anchor not found)"; exit 1; }
 
           # Commit and push
           git config user.name "github-actions[bot]"

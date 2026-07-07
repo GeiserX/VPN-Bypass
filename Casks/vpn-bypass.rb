@@ -14,7 +14,6 @@ cask "vpn-bypass" do
   depends_on macos: :ventura
 
   app "VPN Bypass.app"
-  binary "VPN Bypass.app/Contents/MacOS/vpnb"
 
   postflight do
     # Sign the app after installation (ad-hoc) for notifications to work
