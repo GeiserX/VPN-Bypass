@@ -148,29 +148,6 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         )
     }
     
-    func notifyNetworkChanged(newNetwork: String?) {
-        guard notificationsEnabled else { return }
-        
-        let body = newNetwork != nil
-            ? String(localized: "Switched to \(newNetwork!). Checking VPN status...")
-            : String(localized: "Network changed. Checking VPN status...")
-
-        sendNotification(
-            title: String(localized: "Network Changed"),
-            body: body,
-            identifier: "network-changed"
-        )
-    }
-    
-    /// Send a test notification
-    func sendTestNotification() {
-        sendNotification(
-            title: String(localized: "VPN Bypass"),
-            body: String(localized: "Test notification successful!") + " 🎉",
-            identifier: "test-notification"
-        )
-    }
-    
     /// Open System Settings to Notifications pane
     func openNotificationSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
@@ -274,36 +251,6 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     }
     
     // MARK: - Additional Notifications
-    
-    func notifyServiceToggled(service: String, enabled: Bool) {
-        guard notificationsEnabled && notifyOnRoutesApplied else { return }
-        
-        sendNotification(
-            title: enabled ? String(localized: "Service Enabled") : String(localized: "Service Disabled"),
-            body: service,
-            identifier: "service-toggled"
-        )
-    }
-    
-    func notifyDomainAdded(domain: String) {
-        guard notificationsEnabled && notifyOnRoutesApplied else { return }
-        
-        sendNotification(
-            title: String(localized: "Domain Added"),
-            body: domain,
-            identifier: "domain-added"
-        )
-    }
-    
-    func notifyDomainRemoved(domain: String) {
-        guard notificationsEnabled && notifyOnRoutesApplied else { return }
-        
-        sendNotification(
-            title: String(localized: "Domain Removed"),
-            body: domain,
-            identifier: "domain-removed"
-        )
-    }
     
     func notifyDNSRefreshCompleted(updatedCount: Int) {
         guard notificationsEnabled && notifyOnRoutesApplied else { return }
