@@ -5,6 +5,16 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.4] - 2026-07-18
+
+Classic **Bypass** and **VPN Only** route application stays byte-identical — both fixes below preserve the normal path, and each ships with new regression tests.
+
+### Security
+- **The privileged helper no longer accepts a forgeable identity.** When the root-only cdhash pin was absent (never written, or removed), the helper fell back to authorizing XPC callers by code-signing *identifier* alone — and under ad-hoc signing that identifier is forgeable (`codesign -s - -i …`), so a locally-built binary could drive the root helper. The helper is now **fail-closed**: no valid pin means the caller is rejected. To keep that from ever locking out the real app, the installer now *guarantees* the pin (the modern install verifies it landed, otherwise falls back to the atomic legacy install; the legacy path refuses to install pin-less), and the readiness gate self-heals a missing/stale pin by reinstalling. Helper version 1.7.0 → 1.8.0 so existing installs reinstall once and pick up the fail-closed build. The app also re-verifies the cdhash pin on its readiness fast path (fail-closed if it can't be confirmed), so a pin removed or rotated after launch self-heals via reinstall instead of leaving the app reporting a stale "ready." Verified on real hardware: a forged binary claiming our identifier is rejected, a correctly-pinned install stays ready (no brick), and a missing/mismatched pin fails closed.
+
+### Fixed
+- **No silent leak when a reroute is dropped.** On an interface change or Tailscale state change, VPN-Only link-interface routes are re-pinned to the live interface. That reroute was fire-once: if it arrived while the route-operation gate was held or during the post-change cooldown, it was lost, leaving VPN-Only routes pinned to a dead `utun` — a silent leak. The reroute is now latched and retried until it actually applies, so a change that lands at a busy moment is never dropped. It still applies the exact same route set (remove-all then re-apply), so classic Bypass/VPN-Only output is unchanged.
+
 ## [3.1.3] - 2026-07-18
 
 ### Changed

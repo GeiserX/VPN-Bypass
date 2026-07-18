@@ -79,8 +79,12 @@ final class HelperManager: ObservableObject {
     /// If outdated, attempts an automatic update. Returns true only when helper
     /// is verified ready. Route application MUST NOT start until this returns true.
     func ensureHelperReady() async -> Bool {
-        // Fast path: already verified
-        if helperState.isReady { return true }
+        // Fast path: already verified AND the cdhash pin still matches this app. Re-checking
+        // the pin here — not just the cached `.ready` flag — keeps readiness authoritative: a
+        // pin removed or rotated after we cached `.ready` drops back into the full flow below
+        // (which probes and, if the fail-closed 1.8.0 helper now rejects us, reinstalls to
+        // restore the pin) instead of reporting a stale "ready" while route ops silently fail.
+        if helperState.isReady, readinessPinSatisfied() { return true }
 
         let helperPath = "/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)"
         let plistPath = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
@@ -142,8 +146,28 @@ final class HelperManager: ObservableObject {
         let expected = HelperConstants.helperVersion
 
         if version == expected {
-            helperState = .ready
-            return true
+            // Fail-closed readiness gate: the 1.8.0 helper rejects XPC callers without a
+            // matching cdhash pin, so a *successful* version probe already implies the pin is
+            // present and matches this app. Re-check the pin file here as defense-in-depth and
+            // to self-heal a stale pin: if we can compute our own cdhash and the pin file is
+            // absent/stale, reinstall (re-writes the pin) rather than marking ready.
+            if readinessPinSatisfied() {
+                helperState = .ready
+                return true
+            }
+            RouteManager.shared.log(.warning, "🔐 Helper \(version) present but cdhash pin missing/stale; reinstalling to restore fail-closed auth")
+            helperState = .installing
+            let repinned = await installHelper()
+            if repinned {
+                dropXPCConnection()
+                if await getVersionWithTimeout() == expected, readinessPinSatisfied() {
+                    helperVersion = expected
+                    helperState = .ready
+                    return true
+                }
+            }
+            helperState = .failed(String(localized: "Helper security pin could not be restored"))
+            return false
         }
 
         // Version mismatch — update
@@ -300,13 +324,35 @@ final class HelperManager: ObservableObject {
                 return installHelperLegacy()
             }
 
-            // The legacy path writes the cdhash pin inline; SMAppService doesn't, so pin
-            // it now (best-effort) so a clean first install is protected too, not just
-            // updates. If this fails/cancels the helper stays on identifier-only.
-            ensureCDHashPinned()
+            // The legacy path writes the cdhash pin inline; SMAppService doesn't. The 1.8.0
+            // helper is FAIL-CLOSED on the pin, so a pin-less helper is unusable (it rejects
+            // every caller), not merely degraded — we must GUARANTEE the pin here. If we can
+            // confirm it landed, the modern install is complete; otherwise fall back to the
+            // legacy installer, which writes helper+pin atomically in one admin op.
+            if ensureCDHashPinned() {
+                installationError = nil
+                return true
+            }
 
-            installationError = nil
-            return true
+            RouteManager.shared.log(.warning, "⚠️ cdhash pin not confirmed after SMAppService register; falling back to legacy install to guarantee it")
+            if installHelperLegacy() {
+                return true
+            }
+
+            // Anti-brick invariant: never leave a helper installed without a valid pin.
+            // Neither the modern-pin nor the legacy path secured it, so boot the helper out —
+            // the app then sees no live helper and prompts for a clean reinstall (recoverable),
+            // rather than a wedged fail-closed helper masquerading as "installed".
+            RouteManager.shared.log(.error, "❌ Could not secure the cdhash pin via modern or legacy install; booting out the unpinned helper")
+            bootOutHelper()
+            // If bootOutHelper() itself also fails, a pin-less fail-closed helper may be left
+            // running — but that is recoverable, NOT a brick: we return false so isHelperInstalled
+            // stays false (never .ready), and the next ensureHelperReady finds the fail-closed
+            // helper rejects its XPC probe (unreachable) and reinstalls + re-pins.
+            if installationError == nil {
+                installationError = String(localized: "Could not secure the helper. Please try installing again.")
+            }
+            return false
         } catch {
             RouteManager.shared.log(.warning, "⚠️ SMAppService failed: \(error.localizedDescription)")
             RouteManager.shared.log(.info, "🔐 Falling back to legacy install...")
@@ -366,21 +412,22 @@ final class HelperManager: ObservableObject {
         let pinPath = Self.shSingleQuoteEscaped(HelperConstants.cdhashPinPath)
 
         // Pin this app's cdhash so the freshly-installed helper accepts ONLY this binary
-        // (see Helper/HelperTool.swift verifyCallerIdentity). Written in the SAME admin op
-        // as the copy — no extra prompt, and it lands BEFORE `launchctl bootstrap` so the
-        // helper never runs without it. If our cdhash can't be computed, we omit the pin:
-        // the helper falls back to identifier-only rather than pinning a bad value.
-        let pinCommands: String
-        if let cdhash = ownCDHash() {
-            pinCommands = """
-            printf '%s' '\(cdhash)' > '\(pinPath)'
-                chmod 644 '\(pinPath)'
-                chown root:wheel '\(pinPath)'
-            """
-        } else {
-            pinCommands = "true"
-            RouteManager.shared.log(.warning, "⚠️ Could not compute app cdhash — helper will use identifier-only auth")
+        // (see Helper/HelperTool.swift verifyCallerCode). Written in the SAME admin op as the
+        // copy — no extra prompt, and it lands BEFORE `launchctl bootstrap` so the helper
+        // never runs without it. The 1.8.0 helper is FAIL-CLOSED on the pin, so if our cdhash
+        // can't be computed we must NOT install: a pin-less helper would reject every caller
+        // (unusable). Fail the install with a clear, recoverable error instead of leaving a
+        // broken helper behind.
+        guard let cdhash = ownCDHash() else {
+            installationError = String(localized: "Cannot secure the helper: this app has no computable code signature (cdhash). Reinstall the app from the official DMG.")
+            RouteManager.shared.log(.error, "❌ Could not compute app cdhash — refusing to install a pin-less (fail-closed = unusable) helper")
+            return false
         }
+        let pinCommands = """
+        printf '%s' '\(cdhash)' > '\(pinPath)'
+            chmod 644 '\(pinPath)'
+            chown root:wheel '\(pinPath)'
+        """
 
         let shellCommand = """
         mkdir -p /Library/PrivilegedHelperTools
@@ -407,6 +454,18 @@ final class HelperManager: ObservableObject {
                 return false
             }
 
+            // Defense-in-depth: `do shell script` has no `set -e`, so it reports success based
+            // on the LAST command (`launchctl bootstrap`). If the `printf … > pinPath` step
+            // silently failed while bootstrap succeeded, we'd leave a pin-less fail-closed 1.8.0
+            // helper running (rejects everyone). Confirm the pin actually landed before trusting
+            // the install — mirrors the modern path. `cdhash` is non-nil here (we fail the
+            // install above when it can't be computed).
+            guard currentPinnedCDHash() == cdhash else {
+                installationError = String(localized: "Helper installed but its security pin did not persist. Please try installing again.")
+                RouteManager.shared.log(.error, "❌ Helper installed but cdhash pin did not land — treating install as failed")
+                return false
+            }
+
             RouteManager.shared.log(.success, "✅ Helper installed successfully via AppleScript")
             installationError = nil
             return true
@@ -421,7 +480,8 @@ final class HelperManager: ObservableObject {
     /// This app's own code-directory hash as lowercase hex, or nil if it can't be
     /// determined. `kSecCodeInfoUnique` is the value the `cdhash` requirement predicate
     /// matches, so pinning it lets the helper require exactly this binary. nil on any
-    /// failure so callers omit the pin (→ helper uses identifier-only) rather than pin junk.
+    /// failure; because the 1.8.0 helper is fail-closed, callers treat nil as "cannot secure
+    /// the helper" and fail the install rather than pinning junk or installing pin-less.
     private func ownCDHash() -> String? {
         var codeRef: SecCode?
         guard SecCodeCopySelf([], &codeRef) == errSecSuccess, let code = codeRef else { return nil }
@@ -435,18 +495,26 @@ final class HelperManager: ObservableObject {
         return cdhash.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Make sure the root-only cdhash pin matches this app. The legacy install writes it
-    /// inline (this then no-ops); the modern SMAppService path does NOT, so this covers a
-    /// clean first install. Best-effort: on failure/cancel the helper falls back to
-    /// identifier-only (never a brick). Skips silently if the cdhash can't be computed.
-    private func ensureCDHashPinned() {
-        guard let cdhash = ownCDHash() else { return }
-        if let data = FileManager.default.contents(atPath: HelperConstants.cdhashPinPath),
-           let existing = String(data: data, encoding: .utf8)?
-               .trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-           existing == cdhash {
-            return   // already correct
-        }
+    /// The cdhash currently written to the root-only pin file (validated lowercase hex), or
+    /// nil if the file is absent/unreadable/malformed. Uses the same validation the helper
+    /// applies (`HelperAuthPolicy.validatedCDHash`) so "is the pin correct?" means the same
+    /// thing on both sides of the trust boundary.
+    private func currentPinnedCDHash() -> String? {
+        guard let data = FileManager.default.contents(atPath: HelperConstants.cdhashPinPath),
+              let raw = String(data: data, encoding: .utf8) else { return nil }
+        return HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: raw)
+    }
+
+    /// Ensure the root-only cdhash pin matches this app, returning whether the pin is correct
+    /// on disk AFTER this call. The legacy install writes the pin inline (so this no-ops
+    /// there); the modern SMAppService path does NOT, so this covers a clean first install.
+    /// `installHelperModern` uses the return value to decide whether the modern install is
+    /// safe or must fall back to the atomic legacy installer — the 1.8.0 helper is
+    /// fail-closed, so an unconfirmed pin is not acceptable. Returns false if the cdhash
+    /// can't be computed, or the admin write failed / was cancelled / didn't land.
+    private func ensureCDHashPinned() -> Bool {
+        guard let cdhash = ownCDHash() else { return false }
+        if currentPinnedCDHash() == cdhash { return true }   // already correct
         // Escape uniformly through the same shell → AppleScript layers the legacy
         // installer uses, so the trust boundary is consistent even though cdhash is
         // [0-9a-f] and the pin path is currently a constant.
@@ -459,14 +527,48 @@ final class HelperManager: ObservableObject {
         let script = "do shell script \"\(Self.appleScriptStringEscaped(shellCommand))\" with administrator privileges"
         var error: NSDictionary?
         guard let appleScript = NSAppleScript(source: script) else {
-            RouteManager.shared.log(.warning, "cdhash pin write (modern path): failed to create AppleScript — helper will use identifier-only")
-            return
+            RouteManager.shared.log(.warning, "cdhash pin write (modern path): failed to create AppleScript")
+            return false
         }
         appleScript.executeAndReturnError(&error)
         if let error = error {
             let msg = error[NSAppleScript.errorMessage] as? String ?? "unknown"
-            RouteManager.shared.log(.warning, "cdhash pin write (modern path) failed: \(msg) — helper will use identifier-only")
+            RouteManager.shared.log(.warning, "cdhash pin write (modern path) failed: \(msg)")
+            return false
         }
+        // Confirm the write actually landed with the right value before trusting it.
+        return currentPinnedCDHash() == cdhash
+    }
+
+    /// Boot the helper daemon out of launchd via an admin AppleScript op. Used ONLY to avoid
+    /// leaving a helper running without a valid cdhash pin: the 1.8.0 helper is fail-closed
+    /// and would reject every caller anyway, so removing it lets the app see "not installed"
+    /// and prompt for a clean reinstall (which re-writes the pin) instead of surfacing a
+    /// wedged helper. Best-effort — the state is already recoverable even if this can't run.
+    private func bootOutHelper() {
+        let shellCommand = "launchctl bootout system/\(kHelperToolMachServiceName) 2>/dev/null || true"
+        let script = "do shell script \"\(Self.appleScriptStringEscaped(shellCommand))\" with administrator privileges"
+        var error: NSDictionary?
+        guard let appleScript = NSAppleScript(source: script) else { return }
+        appleScript.executeAndReturnError(&error)
+        if let error = error {
+            let msg = error[NSAppleScript.errorMessage] as? String ?? "unknown"
+            RouteManager.shared.log(.warning, "helper bootout failed: \(msg)")
+        }
+    }
+
+    /// Whether the readiness pin invariant holds: our own cdhash can be computed AND the
+    /// root-only pin file equals it. FAIL-CLOSED — returns false when we can't compute our
+    /// cdhash, or the pin is absent/stale/malformed. This is called BOTH on the fast path
+    /// (before any XPC probe, so there is no "the helper already vouched for this caller"
+    /// signal to lean on) and post-probe as defense-in-depth + stale-pin self-heal; in every
+    /// case an unverifiable pin must NOT be reported as satisfied, since the 1.8.0 helper is
+    /// fail-closed and readiness must stay authoritative. A false here drops the caller into
+    /// the full ensureHelperReady flow, which reinstalls to restore a good pin (or fails
+    /// closed if even that can't compute our cdhash — no privileged op proceeds unverified).
+    private func readinessPinSatisfied() -> Bool {
+        guard let own = ownCDHash() else { return false }
+        return currentPinnedCDHash() == own
     }
 
     // MARK: - Route Operations (all with hard XPC deadline)
