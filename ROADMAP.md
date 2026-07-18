@@ -1,6 +1,6 @@
 # VPN Bypass - Product Roadmap
 
-## Current State (v3.1.4)
+## Current State (v3.1.5)
 
 Three routing modes ship today: **Bypass** (listed domains/services skip the VPN), **VPN Only** (everything
 tunnels except listed items), and **Custom** (the multi-route epic, shipped in 3.0 — a per-rule engine mapping

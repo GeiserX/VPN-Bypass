@@ -73,3 +73,24 @@ byte-identical.
 ## 2026-07-04 — continuation (3.2.0, self-release)
 
 > over it and release it directly dont ask me just unblock yourselph, use ralph
+
+## 2026-07-18 — continuation (issue #61 — strand-on-preemption leak)
+
+> /research! and then /sergio-loop over it with ralph in workflows
+
+_Topic ("it") = GitHub issue **#61**: a VPN-Only leak where an apply preempted mid-kernel-add
+strands untracked routes. `applyAllRoutesInternal` → `commitAppliedRoutes` adds routes to the
+kernel (`addRoutesBatch`) BEFORE recording them in `activeRoutes` (recorded only after
+`guard routeEpoch == epoch`, `RouteManager.swift:1752`); `removeAllRoutes()` (`:1499`) removes
+ONLY tracked `activeRoutes` and bumps `routeEpoch`. A disconnect/config-change `removeAllRoutes()`
+interleaving at an `await` after the kernel add but before the commit removes nothing and the
+apply aborts → kernel routes stranded, untracked = silent VPN-Only leak. Systemic across every
+apply path (callers don't uniformly hold the route-operation gate)._
+
+**Done =** correct minimal fix across ALL apply paths (no untracked strand when a teardown
+interleaves any apply); classic Bypass/VPN-Only route SETs byte-identical; helper stays
+ad-hoc-signable (no NE entitlements); no brick; teardown stays prompt (no deadlock/latency
+regression). Verified: `swift build` + full tests + NEW interleave-reproducing regression test +
+universal helper build + Mac-mini. Open a **PR** with CodeRabbit addressed — **do NOT merge
+without Sergio's explicit approval.** Loop: `/research! → /implement! → /review-pr!`, ralph
+persistence, then `/oh-my-claudecode:cancel`.
