@@ -47,6 +47,16 @@ final class RouteManager: ObservableObject {
     private var routeEpoch: UInt64 = 0  // Incremented by removeAllRoutes — lets in-flight applies detect preemption
     private var gatewayDetectedAt: Date?
     private var lastInterfaceReroute: Date?
+    /// A re-route (interface change or Tailscale profile change) that was NEEDED but
+    /// couldn't run when it was detected — the route-operation gate was held (e.g. by a
+    /// concurrent DNS refresh), the 10s cooldown was active, or no gateway/helper was
+    /// ready yet. Latched here so the re-route is NEVER lost: once vpnInterface /
+    /// lastTailscaleSelfFingerprint advance in checkVPNStatus the change condition can
+    /// never re-fire, so this flag is the only thing that carries the need forward and
+    /// closes the silent-leak window. Decided by the pure RerouteDecider; drained by
+    /// scheduleRerouteRetry(). Cleared on a successful re-route and on VPN disconnect.
+    var pendingReroute = false
+    var pendingRerouteReason: String?
     private var lastTailscaleSelfFingerprint: String?
     
     
@@ -429,52 +439,68 @@ final class RouteManager: ObservableObject {
             }
         }
         
-        // VPN interface switched while still connected — re-route through new gateway
-        if isVPNConnected && wasVPNConnected && interface != oldInterface && oldInterface != nil && interface != nil && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled {
-            if let last = lastInterfaceReroute, Date().timeIntervalSince(last) < 10 {
-                log(.info, "Skipping interface re-route (cooldown, last was \(Int(Date().timeIntervalSince(last)))s ago)")
-            } else {
-                log(.warning, "VPN interface changed: \(oldInterface ?? "?") → \(interface ?? "?")")
-                lastInterfaceReroute = Date()
-                if localGateway != nil, acquireRouteOperation() {
-                    isLoading = true
-                    await removeAllRoutes()
-                    await applyAllRoutesInternal(sendNotification: false)
-                    isLoading = false
-                    releaseRouteOperation()
-                } else if localGateway == nil {
-                    log(.error, "VPN interface changed but no gateway detected")
-                }
-            }
-        }
+        // VPN interface switched, OR the Tailscale profile changed while the utun
+        // stayed the same — either way the installed routes are now pinned to the wrong
+        // egress and must be re-applied. The route-operation gate (held by a concurrent
+        // DNS refresh) or the 10s cooldown can block the re-route; when it does we must
+        // NOT drop it — vpnInterface / lastTailscaleSelfFingerprint already advanced
+        // above, so `interfaceChanged` can never re-fire, and a dropped re-route becomes
+        // a silent VPN leak. Instead we LATCH it (pendingReroute) and drain it via a
+        // bounded retry. RerouteDecider is the single, pure authority for the
+        // needed? / run-now? / defer? decision. Guarded by isVPNConnected so a latched
+        // re-route is never acted on after the VPN is gone (the disconnect block below
+        // clears the latch on the transition).
+        if isVPNConnected {
+            let interfaceChanged = isVPNConnected && wasVPNConnected
+                && interface != oldInterface && oldInterface != nil && interface != nil
+            let tailscaleChanged = isVPNConnected && wasVPNConnected
+                && interface == oldInterface
+                && oldTailscaleFingerprint != nil && newTailscaleFingerprint != nil
+                && oldTailscaleFingerprint != newTailscaleFingerprint
+            // A local gateway AND a ready helper are both hard prerequisites for
+            // actually installing routes; without either we can't re-route now but must
+            // still latch (never drop) so it heals once they're available.
+            let canApplyRoutes = localGateway != nil && HelperManager.shared.isHelperInstalled
+            // Reason for logging; nil when this pass only drains an existing latch
+            // (interfaceChanged / tailscaleChanged already false), in which case the
+            // reason captured when the latch was set is reused.
+            let rerouteReason: String? = interfaceChanged
+                ? "VPN interface changed: \(oldInterface ?? "?") → \(interface ?? "?")"
+                : (tailscaleChanged ? "Tailscale active account changed, refreshing routes" : nil)
 
-        // Tailscale account/profile can change while utun interface stays the same.
-        // Re-apply routes when active local Tailscale identity changes.
-        if isVPNConnected && wasVPNConnected &&
-           interface == oldInterface &&
-           oldTailscaleFingerprint != nil && newTailscaleFingerprint != nil &&
-           oldTailscaleFingerprint != newTailscaleFingerprint &&
-           !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled {
-            if let last = lastInterfaceReroute, Date().timeIntervalSince(last) < 10 {
-                log(.info, "Skipping Tailscale profile re-route (cooldown, last was \(Int(Date().timeIntervalSince(last)))s ago)")
-            } else {
-                log(.warning, "Tailscale active account changed, refreshing routes")
-                lastInterfaceReroute = Date()
-                if localGateway != nil, acquireRouteOperation() {
-                    isLoading = true
-                    await removeAllRoutes()
-                    await applyAllRoutesInternal(sendNotification: false)
-                    isLoading = false
-                    releaseRouteOperation()
-                } else if localGateway == nil {
-                    log(.error, "Tailscale account changed but no gateway detected")
-                }
+            switch RerouteDecider.decide(
+                interfaceChanged: interfaceChanged,
+                tailscaleChanged: tailscaleChanged,
+                pending: pendingReroute,
+                isLoading: isLoading,
+                isApplyingRoutes: isApplyingRoutes,
+                cooldownActive: rerouteCooldownActive(),
+                hasGateway: canApplyRoutes
+            ) {
+            case .reroute:
+                if let rerouteReason { pendingRerouteReason = rerouteReason }
+                log(.warning, pendingRerouteReason ?? "Re-routing through current gateway")
+                await performReroute()
+            case .latch:
+                if let rerouteReason { pendingRerouteReason = rerouteReason }
+                pendingReroute = true
+                log(.info, "Re-route deferred (\(pendingRerouteReason ?? "pending")) — route op busy / cooldown / not ready; will retry until applied")
+                scheduleRerouteRetry()
+            case .none:
+                break
             }
         }
         
         if !isVPNConnected && wasVPNConnected {
             log(.warning, "VPN disconnected (was: \(oldInterface ?? "unknown"))")
             cancelAllRetries()
+            // Drop any latched re-route and stop its retry chain — there's nothing to
+            // re-route once the VPN is gone. Prevents an orphaned retry Task and a
+            // double-apply on the way out.
+            pendingReroute = false
+            pendingRerouteReason = nil
+            rerouteRetryTask?.cancel()
+            rerouteRetryTask = nil
             // Remove kernel routes before clearing in-memory state
             await removeAllRoutes()
             routeVerificationResults.removeAll()
@@ -2507,6 +2533,124 @@ final class RouteManager: ObservableObject {
         pendingRetryTasks.values.forEach { $0.cancel() }
         pendingRetryTasks.removeAll()
     }
+
+    // MARK: - Re-route latch (leak-critical: never drop a needed re-route)
+
+    /// The 10s re-route cooldown: true while a re-route ran within the last 10s.
+    /// Preserves the original cooldown semantics — a change during the window is
+    /// deferred (latched), not dropped, and applies as soon as the window elapses.
+    private func rerouteCooldownActive() -> Bool {
+        guard let last = lastInterfaceReroute else { return false }
+        return Date().timeIntervalSince(last) < 10
+    }
+
+    /// The re-route action itself: drop every installed route and re-install the full
+    /// set through the current gateway. The remove + re-apply pair (and thus the kernel
+    /// route SET it produces) is byte-identical to the pre-latch inline re-route — only
+    /// *when* it runs changed. Callers must already have decided (via RerouteDecider)
+    /// that a re-route is warranted and runnable.
+    func performReroute() async {
+        lastInterfaceReroute = Date()
+        if localGateway != nil, acquireRouteOperation() {
+            // Clear the latch HERE — at the START of the re-route, synchronously after
+            // acquiring the gate and BEFORE the multi-second apply below. This ordering
+            // is leak-critical: two checkVPNStatus passes can interleave on @MainActor
+            // (refreshStatus spawns independent Tasks), so a concurrent pass that sees a
+            // NEWER interface change while this apply is in flight finds the gate held
+            // (isApplyingRoutes == true) and .latches it. Clearing at the END would wipe
+            // that fresh latch and strand the routes on the now-stale interface — the
+            // exact silent leak this fix exists to prevent. Clearing first lets the
+            // fresh latch survive; the retry chain then drains it to the newest
+            // interface. It also means the clear runs ONLY when a re-route actually runs,
+            // never on the no-gateway / gate-not-acquired no-op branches.
+            pendingReroute = false
+            pendingRerouteReason = nil
+            isLoading = true
+            if let overrideApply = rerouteApplyOverrideForTests {
+                // Test-only seam (nil in production): exercises the latch-clear timing
+                // without touching the helper, kernel routes, or /etc/hosts.
+                await overrideApply()
+            } else {
+                await removeAllRoutes()
+                await applyAllRoutesInternal(sendNotification: false)
+            }
+            isLoading = false
+            releaseRouteOperation()
+        } else if localGateway == nil {
+            log(.error, "Re-route needed but no gateway detected")
+        }
+    }
+
+    /// Drain a latched (deferred) re-route without waiting for the 30s status timer.
+    /// Bounded and single-flight: at most one chain runs, it sleeps between attempts,
+    /// and it stops as soon as the latch clears or after `rerouteRetryMaxAttempts`.
+    /// If it gives up while still pending (e.g. a very long DNS refresh), the periodic
+    /// checkVPNStatus re-latches and reschedules, so the re-route is never permanently
+    /// lost. Matches the scheduleRetry(for:) idiom used for failed-domain retries.
+    private func scheduleRerouteRetry() {
+        guard rerouteRetryTask == nil else { return }   // a chain is already draining the latch
+        rerouteRetryTask = Task { [weak self] in
+            var attempts = 0
+            while attempts < Self.rerouteRetryMaxAttempts {
+                attempts += 1
+                do {
+                    try await Task.sleep(nanoseconds: Self.rerouteRetryDelayNs)
+                } catch {
+                    break   // cancelled (e.g. VPN disconnected)
+                }
+                guard let self else { return }
+                if await self.attemptPendingReroute() { break }   // latch resolved
+            }
+            guard let self else { return }
+            self.rerouteRetryTask = nil
+            // Safety net: never exit with a latch still outstanding and no drainer. If
+            // we hit the attempt bound (or a NEWER change was latched during the final
+            // apply) while a re-route is still pending and the VPN is up, start a fresh
+            // chain so the deferred re-route is never permanently stranded.
+            if self.pendingReroute && self.isVPNConnected {
+                self.scheduleRerouteRetry()
+            }
+        }
+    }
+
+    /// One attempt to satisfy a latched re-route against freshly-detected state.
+    /// Returns true when the retry chain should STOP (re-routed, disconnected, or the
+    /// latch was already cleared by checkVPNStatus); false to keep retrying. Re-runs
+    /// the SAME pure RerouteDecider so the retry and the timer share one decision.
+    private func attemptPendingReroute() async -> Bool {
+        guard pendingReroute else { return true }   // already handled elsewhere
+        guard isVPNConnected else {                 // disconnected during the wait — drop it
+            pendingReroute = false
+            pendingRerouteReason = nil
+            return true
+        }
+        // Re-detect the gateway — it may have been missing when we latched.
+        let gateway = await ensureGateway()
+        let canApplyRoutes = gateway != nil && HelperManager.shared.isHelperInstalled
+        switch RerouteDecider.decide(
+            interfaceChanged: false,
+            tailscaleChanged: false,
+            pending: pendingReroute,
+            isLoading: isLoading,
+            isApplyingRoutes: isApplyingRoutes,
+            cooldownActive: rerouteCooldownActive(),
+            hasGateway: canApplyRoutes
+        ) {
+        case .reroute:
+            log(.warning, pendingRerouteReason ?? "Re-routing through current gateway (deferred)")
+            await performReroute()
+            // performReroute cleared the latch at its START; if a concurrent
+            // checkVPNStatus re-latched a NEWER change during the apply, pendingReroute
+            // is true again — keep looping to drain it rather than exiting the chain.
+            return !pendingReroute
+        case .latch:
+            return false   // still blocked (gate held / cooldown / not ready) — retry
+        case .none:
+            pendingReroute = false
+            pendingRerouteReason = nil
+            return true
+        }
+    }
     
     func removeDomain(_ domain: DomainEntry) {
         pendingRetryTasks[domain.domain]?.cancel()
@@ -3413,8 +3557,20 @@ final class RouteManager: ObservableObject {
     private var failedDomains: Set<String> = []
     
     private static let retryDelayNs: UInt64 = 15_000_000_000 // 15 seconds
-    
+
+    /// Bounded fast-retry for a latched re-route: re-check every 2s, up to ~30s, so a
+    /// deferred re-route heals quickly instead of waiting for the 30s status timer.
+    private static let rerouteRetryDelayNs: UInt64 = 2_000_000_000 // 2 seconds
+    private static let rerouteRetryMaxAttempts = 15
+
     private var pendingRetryTasks: [String: Task<Void, Never>] = [:]
+    /// Single in-flight retry chain draining a latched re-route (never more than one).
+    private var rerouteRetryTask: Task<Void, Never>?
+    /// Test-only override for the re-route apply body (nil in production). When set,
+    /// performReroute() runs it INSTEAD of removeAllRoutes()+applyAllRoutesInternal(),
+    /// so the leak-critical latch-clear timing is unit-testable without the helper,
+    /// kernel routes, or /etc/hosts. See RerouteLatchTimingTests.
+    var rerouteApplyOverrideForTests: (() async -> Void)?
     
     private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil, persistCache: Bool = true) async -> [ActiveRoute]? {
         guard let ips = await resolveIPs(for: domain) else {
