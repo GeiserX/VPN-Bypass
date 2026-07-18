@@ -1702,16 +1702,34 @@ final class RouteManager: ObservableObject {
 
     /// #61 self-remediation: on epoch-preemption abort, remove from the kernel exactly the
     /// destinations this apply just added (catch-alls FIRST for leak safety) so nothing is left
-    /// installed-but-untracked. Best-effort: discards the result and NEVER mutates activeRoutes
-    /// (re-removing an already-gone route is a harmless no-op). MUST run while the route-operation
-    /// gate is still held — never move into a defer-after-release or a detached Task.
+    /// installed-but-untracked. MUST run while the route-operation gate is still held — never move
+    /// into a defer-after-release or a detached Task.
+    ///
+    /// If a kernel removal itself FAILS (or times out), the route is still installed, so dropping it
+    /// would recreate the very strand this prevents. Instead it is retained in `activeRoutes` — the
+    /// same failed-removal discipline `removeAllRoutes()` and the DNS-refresh stale-removal use — so
+    /// the next teardown removes it (removal is by destination, so a minimal entry is enough). A
+    /// timeout with no explicit failed list is treated conservatively as "all failed" (over-retaining
+    /// is a harmless no-op next teardown; under-retaining would strand).
     private func unstrandRoutes(attempted: Set<String>, addFailed: Set<String>) async {
         let split = RouteManager.destinationsToUnstrand(attempted: attempted, addFailed: addFailed)
         if split.catchAlls.isEmpty && split.rest.isEmpty { return }
         guard HelperManager.shared.isHelperInstalled || removeRoutesBatchOverrideForTests != nil else { return }
         log(.warning, "🔧 Apply preempted — removing \(split.catchAlls.count + split.rest.count) route(s) added before preemption to avoid a strand (#61)")
-        if !split.catchAlls.isEmpty { _ = await removeRoutesBatchVia(split.catchAlls) }
-        if !split.rest.isEmpty { _ = await removeRoutesBatchVia(split.rest) }
+        var failed: [String] = []
+        for batch in [split.catchAlls, split.rest] where !batch.isEmpty {
+            let r = await removeRoutesBatchVia(batch)
+            // Explicit failed list when present; a bare error (e.g. XPC timeout) ⇒ treat the whole
+            // batch as failed so nothing installed is left untracked.
+            failed += (r.error != nil && r.failedDestinations.isEmpty) ? batch : r.failedDestinations
+        }
+        if !failed.isEmpty {
+            let tracked = Set(activeRoutes.map { $0.destination })
+            for dest in failed where !tracked.contains(dest) {
+                activeRoutes.append(ActiveRoute(destination: dest, gateway: localGateway ?? "", source: "#61 cleanup-retry", timestamp: Date()))
+            }
+            log(.warning, "🔧 \(failed.count) route(s) failed kernel removal during unstrand — retained in activeRoutes so the next teardown removes them")
+        }
     }
 
     /// Shared install-epilogue for the two full-replace apply paths

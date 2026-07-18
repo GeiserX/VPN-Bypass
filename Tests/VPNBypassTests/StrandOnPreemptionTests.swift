@@ -95,9 +95,17 @@ final class DestinationsToUnstrandTests: XCTestCase {
 /// "installed" set, then observe exactly what an aborting apply removes.
 private final class FakeKernel {
     var installed: Set<String>
-    init(installed: Set<String>) { self.installed = installed }
+    let failRemovals: Bool
+    init(installed: Set<String>, failRemovals: Bool = false) {
+        self.installed = installed
+        self.failRemovals = failRemovals
+    }
 
     func remove(_ destinations: [String]) -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
+        if failRemovals {
+            // Simulate a kernel-delete failure: nothing is removed; every dest is reported failed.
+            return (successCount: 0, failureCount: destinations.count, failedDestinations: destinations, error: nil)
+        }
         var success = 0
         for d in destinations where installed.remove(d) != nil { success += 1 }
         return (successCount: success, failureCount: 0, failedDestinations: [], error: nil)
@@ -192,5 +200,42 @@ final class StrandOnPreemptionTests: XCTestCase {
         )
         XCTAssertTrue(committed, "commit must succeed when the epoch is unchanged")
         XCTAssertEqual(rm.activeRoutes.map { $0.destination }, ["1.2.3.4"])
+    }
+
+    /// Finding-1 hardening (CodeRabbit): if the kernel removal DURING unstrand itself fails, the
+    /// routes are still installed — so unstrandRoutes must RETAIN them in activeRoutes (tracked)
+    /// rather than discard the failure, or they become a permanent untracked strand (the exact
+    /// leak this remediation prevents). Mirrors removeAllRoutes()'s failed-removal retention.
+    func testFailedUnstrandRetainsRoutesForNextTeardown() async {
+        let rm = RouteManager.shared
+        let fake = FakeKernel(installed: ["0.0.0.0/1", "128.0.0.0/1"], failRemovals: true)
+        rm.removeRoutesBatchOverrideForTests = { dests in fake.remove(dests) }
+
+        let capturedEpoch = rm.routeEpochForTests
+        await rm.removeAllRoutes()   // bumps epoch; activeRoutes empty
+
+        let catchAlls: [(destination: String, gateway: String, isNetwork: Bool, source: String)] = [
+            (destination: "0.0.0.0/1", gateway: "10.0.0.1", isNetwork: true, source: "vpn-only"),
+            (destination: "128.0.0.0/1", gateway: "10.0.0.1", isNetwork: true, source: "vpn-only"),
+        ]
+        let sources: [(destination: String, gateway: String, source: String)] = catchAlls.map {
+            (destination: $0.destination, gateway: $0.gateway, source: $0.source)
+        }
+
+        let committed = await rm.commitAppliedRoutes(
+            routesToAdd: catchAlls,
+            allSourceEntries: sources,
+            batchFailedDests: [],
+            epoch: capturedEpoch,
+            logLabel: ""
+        )
+
+        XCTAssertFalse(committed, "commit must abort on the stale epoch")
+        // The kernel delete failed, so the catch-alls remain installed...
+        XCTAssertEqual(fake.installed, ["0.0.0.0/1", "128.0.0.0/1"],
+                       "failRemovals kernel leaves the routes installed")
+        // ...therefore they MUST now be TRACKED, so the next teardown removes them — not a strand.
+        XCTAssertEqual(Set(rm.activeRoutes.map { $0.destination }), ["0.0.0.0/1", "128.0.0.0/1"],
+                       "#61: routes that fail kernel removal during unstrand must be retained in activeRoutes for the next teardown, not dropped")
     }
 }
