@@ -11,6 +11,17 @@ on:
         required: true
         type: string
 
+# Serialize ALL release runs with a single global group. A tag push and a manual/auto-tag
+# dispatch can target the same version but land on different refs AND differ in the `v`
+# prefix (tag `github.ref_name` = `v3.1.3` vs. dispatch input `3.1.3`), so any version-keyed
+# group would let those two race on the shared Homebrew-tap push. A global group makes every
+# release run wait for the previous one — releases are infrequent and the tap push is a shared
+# resource, so serializing them all is correct. cancel-in-progress: false — never abort an
+# in-flight release mid-publish.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -21,12 +32,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
       - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: latest-stable
 
@@ -128,7 +139,7 @@ jobs:
           cat changelog.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: "VPN Bypass v${{ steps.version.outputs.version }}"
