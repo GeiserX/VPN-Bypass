@@ -5,6 +5,18 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.3] - 2026-07-18
+
+### Changed
+- **Docs corrected to match shipped reality** — README and CHANGELOG installation/CLI instructions were updated for accuracy: the cask-scoped `brew trust` command now appears before the install step, and the manual-DMG `vpnb` path is quoted as an absolute path so it's copy/paste-safe.
+- **Removed unused `NotificationManager` methods** — 5 dead-code methods with no remaining callers were removed; no behavior change.
+- **Hardened the release workflow** — the `concurrency` group now keys on the release version instead of `github.ref`, so a tag push and a same-version `workflow_dispatch` run always serialize instead of racing; third-party GitHub Actions used in `release.yml` are pinned to a commit SHA.
+
+## [3.1.2] - 2026-07-07
+
+### Fixed
+- **`vpnb` CLI now lands on your `PATH`** — the `vpnb` control CLI has shipped bundled inside the app since 3.0.0, but the cask never linked it, so `vpnb` wasn't runnable from a terminal after a Homebrew install. Installing via the tap (`brew tap geiserx/vpn-bypass && brew install --cask vpn-bypass`) now symlinks the bundled `vpnb` onto `PATH`. Manual DMG installs can still call it at `"/Applications/VPN Bypass.app/Contents/MacOS/vpnb"` or symlink it themselves.
+
 ## [3.1.1] - 2026-07-04
 
 Classic **Bypass** and **VPN Only** route application stays byte-identical — every change here is behavior-preserving, and the DNS-refresh path now has its first regression test net.
@@ -44,7 +56,7 @@ A hardening release from a whole-codebase review. Classic **Bypass** and **VPN O
 ### Added
 - **Custom routing mode** — A third routing mode alongside Bypass and VPN Only. Custom mode runs a per-rule dispatch engine: each rule maps a domain, service, or CIDR to a named route (egress), evaluated in order (first match wins) with a pinned "everything else → default" rule. This is a major addition; **Bypass and VPN Only remain the defaults and are unchanged** — existing users see no difference until they opt into Custom.
 - **Multiple egress types** — Custom-mode routes can send traffic out through several egresses: the local gateway (direct), a specific VPN interface (multi-VPN — pick *which* tunnel per rule), an HTTP or SOCKS5 **proxy** via a local `127.0.0.1` listener, or a **Tailscale peer** used as an exit (proxy-over-tailnet, so per-destination routing works without changing any Tailscale settings).
-- **`vpnb` command-line interface** — A bundled CLI (a second executable, symlinked onto `PATH` by the cask) that scripts the app over a user-only UNIX socket: `status`, `route add/set/rm`, `rule add/rm`, `mode`, and `default`. Secrets are read from stdin/env (never argv), and it honors `VPNB_SOCKET`. It drives the same routing paths a GUI action does — no new privilege.
+- **`vpnb` command-line interface** — A bundled CLI (a second executable inside the app bundle) that scripts the app over a user-only UNIX socket using dot-verb `key=value` arguments: `status`, `route.add`/`route.set`/`route.rm`, `rule.add`/`rule.rm`, `mode`, and `default`. Secrets are read from stdin/env (never argv), and it honors `VPNB_SOCKET`. It drives the same routing paths a GUI action does — no new privilege.
 - **Rules and Routes tabs** — Custom mode adds a Rules tab (ordered, first-match rule list) and a Routes tab (auto-detected system routes — each VPN link plus Direct — alongside your own proxy and Tailscale-peer routes). The Settings window now has up to seven tabs (Domains, Services, Rules, Routes, General, Logs, Info); the visible set depends on the active mode.
 
 ### Changed
