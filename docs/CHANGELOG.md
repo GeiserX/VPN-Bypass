@@ -5,6 +5,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.5] - 2026-07-18
+
+### Fixed
+- **No stranded routes when an apply is interrupted mid-install (VPN-Only leak).** Every route-apply path added routes to the kernel *before* recording them internally, so if a teardown (VPN disconnect, app quit, or a config change) landed in that brief window, the just-added routes could be left installed but untracked — and in VPN Only mode the `0.0.0.0/1` + `128.0.0.0/1` catch-alls could then survive a disconnect and route all traffic to a dead gateway (a silent, persistent leak until the next refresh/reconnect). Each apply now self-remediates on interruption: it removes exactly the routes it just added (catch-alls first) instead of abandoning them, so nothing is ever left installed-but-untracked. Teardown itself is unchanged (still prompt and catch-all-first), and classic Bypass/VPN Only route sets stay byte-identical.
+
 ## [3.1.4] - 2026-07-18
 
 Classic **Bypass** and **VPN Only** route application stays byte-identical — both fixes below preserve the normal path, and each ships with new regression tests.

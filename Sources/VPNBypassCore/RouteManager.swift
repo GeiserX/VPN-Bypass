@@ -1679,6 +1679,59 @@ final class RouteManager: ObservableObject {
         return (orphaned: stale.subtracting(attempted), addFailed: stale.intersection(attempted))
     }
 
+    /// Destinations an aborting apply must remove from the kernel to avoid stranding them (#61).
+    /// A preempted apply already added `attempted` to the kernel but will NOT record them in
+    /// activeRoutes, so a later removeAllRoutes() (tracked-only) can never clean them. Returns
+    /// exactly what THIS apply added and must self-remove — `attempted − addFailed` (add-failed
+    /// dests are already gone via delete-before-add) — split with the VPN-Only catch-alls FIRST
+    /// (leak-critical) then the rest, each sorted (deterministic for tests). Pure set algebra.
+    nonisolated static func destinationsToUnstrand(attempted: Set<String>, addFailed: Set<String>) -> (catchAlls: [String], rest: [String]) {
+        let applied = attempted.subtracting(addFailed)
+        let catchAlls = applied.filter { RouteCompiler.catchAllDestinations.contains($0) }.sorted()
+        let rest = applied.subtracting(RouteCompiler.catchAllDestinations).sorted()
+        return (catchAlls: catchAlls, rest: rest)
+    }
+
+    /// removeRoutesBatch routed through the test override when set (so tests observe kernel
+    /// removals without a real helper), else the privileged helper. Return shape matches
+    /// HelperManager.removeRoutesBatch.
+    private func removeRoutesBatchVia(_ destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
+        if let override = removeRoutesBatchOverrideForTests { return await override(destinations) }
+        return await HelperManager.shared.removeRoutesBatch(destinations: destinations)
+    }
+
+    /// #61 self-remediation: on epoch-preemption abort, remove from the kernel exactly the
+    /// destinations this apply just added (catch-alls FIRST for leak safety) so nothing is left
+    /// installed-but-untracked. MUST run while the route-operation gate is still held — never move
+    /// into a defer-after-release or a detached Task.
+    ///
+    /// If a kernel removal itself FAILS (or times out), the route is still installed, so dropping it
+    /// would recreate the very strand this prevents. Instead it is retained in `activeRoutes` — the
+    /// same failed-removal discipline `removeAllRoutes()` and the DNS-refresh stale-removal use — so
+    /// the next teardown removes it (removal is by destination, so a minimal entry is enough). A
+    /// timeout with no explicit failed list is treated conservatively as "all failed" (over-retaining
+    /// is a harmless no-op next teardown; under-retaining would strand).
+    private func unstrandRoutes(attempted: Set<String>, addFailed: Set<String>) async {
+        let split = RouteManager.destinationsToUnstrand(attempted: attempted, addFailed: addFailed)
+        if split.catchAlls.isEmpty && split.rest.isEmpty { return }
+        guard HelperManager.shared.isHelperInstalled || removeRoutesBatchOverrideForTests != nil else { return }
+        log(.warning, "🔧 Apply preempted — removing \(split.catchAlls.count + split.rest.count) route(s) added before preemption to avoid a strand (#61)")
+        var failed: [String] = []
+        for batch in [split.catchAlls, split.rest] where !batch.isEmpty {
+            let r = await removeRoutesBatchVia(batch)
+            // Explicit failed list when present; a bare error (e.g. XPC timeout) ⇒ treat the whole
+            // batch as failed so nothing installed is left untracked.
+            failed += (r.error != nil && r.failedDestinations.isEmpty) ? batch : r.failedDestinations
+        }
+        if !failed.isEmpty {
+            let tracked = Set(activeRoutes.map { $0.destination })
+            for dest in failed where !tracked.contains(dest) {
+                activeRoutes.append(ActiveRoute(destination: dest, gateway: localGateway ?? "", source: "#61 cleanup-retry", timestamp: Date()))
+            }
+            log(.warning, "🔧 \(failed.count) route(s) failed kernel removal during unstrand — retained in activeRoutes so the next teardown removes them")
+        }
+    }
+
     /// Shared install-epilogue for the two full-replace apply paths
     /// (applyAllRoutesInternal + applyRoutesFromCache): segments B–F of the apply
     /// tail. Builds activeRoutes from the ownership entries (minus destinations that
@@ -1690,7 +1743,7 @@ final class RouteManager: ObservableObject {
     /// "Cache " for the cached fast-path (log prefixing only). Runs on the class
     /// @MainActor; the epoch-guard→commit window stays await-free (updateHostsFile
     /// awaits only after the commit).
-    private func commitAppliedRoutes(
+    func commitAppliedRoutes(
         routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)],
         allSourceEntries: [(destination: String, gateway: String, source: String)],
         batchFailedDests: Set<String>,
@@ -1726,7 +1779,7 @@ final class RouteManager: ObservableObject {
 
         // Truly orphaned: re-attach on failure (route is genuinely still in kernel)
         if !trulyOrphanedDests.isEmpty {
-            let result = await HelperManager.shared.removeRoutesBatch(destinations: trulyOrphanedDests)
+            let result = await removeRoutesBatchVia(trulyOrphanedDests)
             if result.failureCount > 0 {
                 log(.warning, "\(logLabel)Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
                 let failedSet = Set(result.failedDestinations)
@@ -1741,7 +1794,7 @@ final class RouteManager: ObservableObject {
         // Add-failed: helper's addRoute does delete-before-add, so the old route is
         // gone after a failed re-add. Don't re-attach — the kernel route doesn't exist.
         if !addFailedStaleDests.isEmpty {
-            let result = await HelperManager.shared.removeRoutesBatch(destinations: addFailedStaleDests)
+            let result = await removeRoutesBatchVia(addFailedStaleDests)
             if result.failureCount > 0 {
                 log(.info, "\(logLabel)Add-failed cleanup: \(result.failureCount) route(s) already removed by delete-before-add")
             }
@@ -1751,6 +1804,7 @@ final class RouteManager: ObservableObject {
         // The epoch check + commit is atomic on @MainActor (no await between them).
         guard routeEpoch == epoch else {
             log(.warning, "\(logLabel)Apply aborted: routes were cleared during operation")
+            await unstrandRoutes(attempted: Set(routesToAdd.map { $0.destination }), addFailed: batchFailedDests)
             return false
         }
 
@@ -1895,6 +1949,7 @@ final class RouteManager: ObservableObject {
         
         // Apply route changes if any (re-check VPN state to avoid racing with disconnect)
         let stillConnected = await MainActor.run { isVPNConnected }
+        var passAddedDests: Set<String> = []  // #61: kernel dests this pass added, for unstrand-on-preempt
         if !routeChanges.isEmpty && stillConnected {
             let additions = routeChanges.filter { $0.add }
             let removals = routeChanges.filter { !$0.add }
@@ -1949,9 +2004,13 @@ final class RouteManager: ObservableObject {
                 }
                 let result = await HelperManager.shared.addRoutesBatch(routes: routes)
                 addFailedDests = Set(result.failedDestinations)
+                passAddedDests.formUnion(Set(routes.map { $0.destination }).subtracting(addFailedDests))
 
-                // Record ownership for ALL sources whose destinations succeeded
+                // Record ownership for ALL sources whose destinations succeeded — but only while
+                // the epoch still matches. A concurrent removeAllRoutes() means these kernel adds
+                // must be unstranded at the guard below, not tracked (guard→append is await-free). #61
                 await MainActor.run {
+                    guard routeEpoch == epoch else { return }
                     for add in additions where !addFailedDests.contains(add.destination) {
                         activeRoutes.append(ActiveRoute(
                             destination: add.destination,
@@ -1981,8 +2040,9 @@ final class RouteManager: ObservableObject {
                 for range in service.ipRanges {
                     if existingDests.contains(range) { continue }
                     if repairedRanges.contains(range) {
-                        // Already repaired by another service — just add ownership
+                        // Already repaired by another service — just add ownership (epoch-gated). #61
                         await MainActor.run {
+                            guard routeEpoch == epoch else { return }
                             activeRoutes.append(ActiveRoute(
                                 destination: range,
                                 gateway: routeGateway,
@@ -1994,7 +2054,9 @@ final class RouteManager: ObservableObject {
                     }
                     if await addRoute(range, gateway: routeGateway, isNetwork: true) {
                         repairedRanges.insert(range)
+                        passAddedDests.insert(range)
                         await MainActor.run {
+                            guard routeEpoch == epoch else { return }
                             activeRoutes.append(ActiveRoute(
                                 destination: range,
                                 gateway: routeGateway,
@@ -2011,9 +2073,11 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        // Preemption check: if removeAllRoutes() ran during our awaits, skip commits
+        // Preemption check: if removeAllRoutes() ran during our awaits, skip commits and
+        // unstrand any kernel routes this pass added before the epoch diverged. #61
         guard routeEpoch == epoch else {
             await MainActor.run { log(.warning, "Background DNS refresh aborted: routes were cleared during operation") }
+            await unstrandRoutes(attempted: passAddedDests, addFailed: [])
             return
         }
 
@@ -2220,15 +2284,19 @@ final class RouteManager: ObservableObject {
 
         // Commit ownership rows whose kernel route is present (already existed OR just added). The
         // not-already-owned gate was applied by the planner; this is the kernelHasRoute half of the
-        // old inline condition, so together they reproduce it exactly.
-        for candidate in plan.candidateActiveEntries {
-            guard existingDestinations.contains(candidate.destination) || addedKernelRoutes.contains(candidate.destination) else { continue }
-            activeRoutes.append(ActiveRoute(
-                destination: candidate.destination,
-                gateway: candidate.gateway,
-                source: candidate.source,
-                timestamp: Date()
-            ))
+        // old inline condition, so together they reproduce it exactly. Epoch-gated (await-free): a
+        // concurrent removeAllRoutes() means these rows must NOT be tracked — the kernel routes this
+        // pass added are unstranded at the guard below instead. #61
+        if routeEpoch == epoch {
+            for candidate in plan.candidateActiveEntries {
+                guard existingDestinations.contains(candidate.destination) || addedKernelRoutes.contains(candidate.destination) else { continue }
+                activeRoutes.append(ActiveRoute(
+                    destination: candidate.destination,
+                    gateway: candidate.gateway,
+                    source: candidate.source,
+                    timestamp: Date()
+                ))
+            }
         }
 
         // Update DNS caches only for successfully resolved domains
@@ -2250,23 +2318,27 @@ final class RouteManager: ObservableObject {
 
                     if existingDestinations.contains(range) { continue }
                     if addedKernelRoutes.contains(range) {
-                        // Already repaired by another service — just add ownership
-                        activeRoutes.append(ActiveRoute(
-                            destination: range,
-                            gateway: routeGateway,
-                            source: service.name,
-                            timestamp: Date()
-                        ))
+                        // Already repaired by another service — just add ownership (epoch-gated) #61
+                        if routeEpoch == epoch {
+                            activeRoutes.append(ActiveRoute(
+                                destination: range,
+                                gateway: routeGateway,
+                                source: service.name,
+                                timestamp: Date()
+                            ))
+                        }
                         continue
                     }
                     // Repair missing CIDR route
                     if await addRoute(range, gateway: routeGateway, isNetwork: true) {
-                        activeRoutes.append(ActiveRoute(
-                            destination: range,
-                            gateway: routeGateway,
-                            source: service.name,
-                            timestamp: Date()
-                        ))
+                        if routeEpoch == epoch {
+                            activeRoutes.append(ActiveRoute(
+                                destination: range,
+                                gateway: routeGateway,
+                                source: service.name,
+                                timestamp: Date()
+                            ))
+                        }
                         addedKernelRoutes.insert(range)
                         updatedCount += 1
                         log(.success, "DNS refresh: repaired missing CIDR route \(range) for \(service.name)")
@@ -2283,12 +2355,14 @@ final class RouteManager: ObservableObject {
                 if existingDestinations.contains(cidr) { continue }
                 if addedKernelRoutes.contains(cidr) { continue }
                 if await addRoute(cidr, gateway: routeGateway, isNetwork: true) {
-                    activeRoutes.append(ActiveRoute(
-                        destination: cidr,
-                        gateway: routeGateway,
-                        source: cidr,
-                        timestamp: Date()
-                    ))
+                    if routeEpoch == epoch {
+                        activeRoutes.append(ActiveRoute(
+                            destination: cidr,
+                            gateway: routeGateway,
+                            source: cidr,
+                            timestamp: Date()
+                        ))
+                    }
                     addedKernelRoutes.insert(cidr)
                     updatedCount += 1
                     log(.success, "DNS refresh: repaired missing CIDR route \(cidr)")
@@ -2339,6 +2413,7 @@ final class RouteManager: ObservableObject {
         // Preemption check: if removeAllRoutes() ran during our awaits, skip commits
         guard routeEpoch == epoch else {
             log(.warning, "DNS refresh aborted: routes were cleared during operation")
+            await unstrandRoutes(attempted: addedKernelRoutes, addFailed: [])
             nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
             return
         }
@@ -2446,7 +2521,10 @@ final class RouteManager: ObservableObject {
                     return
                 }
                 if let routes = await applyRoutesForDomain(entry.domain, gateway: gateway, source: cleaned) {
-                    guard routeEpoch == epoch else { return }
+                    guard routeEpoch == epoch else {
+                        await unstrandRoutes(attempted: Set(routes.map { $0.destination }), addFailed: [])
+                        return
+                    }
                     activeRoutes.append(contentsOf: routes)
                     if config.manageHostsFile {
                         await updateHostsFile()
@@ -2518,7 +2596,10 @@ final class RouteManager: ObservableObject {
 
         log(.info, "Retrying DNS for \(domain)...")
         if let routes = await applyRoutesForDomain(entry.domain, gateway: gateway, source: domain) {
-            guard routeEpoch == epoch else { return }
+            guard routeEpoch == epoch else {
+                await unstrandRoutes(attempted: Set(routes.map { $0.destination }), addFailed: [])
+                return
+            }
             activeRoutes.append(contentsOf: routes)
             if config.manageHostsFile {
                 await updateHostsFile()
@@ -2695,7 +2776,10 @@ final class RouteManager: ObservableObject {
                     }
                     let resolvable = domain.domain
                     if let routes = await applyRoutesForDomain(resolvable, gateway: gateway, source: domain.domain) {
-                        guard routeEpoch == epoch else { return }
+                        guard routeEpoch == epoch else {
+                            await unstrandRoutes(attempted: Set(routes.map { $0.destination }), addFailed: [])
+                            return
+                        }
                         activeRoutes.append(contentsOf: routes)
                         if config.manageHostsFile {
                             await updateHostsFile()
@@ -2726,17 +2810,25 @@ final class RouteManager: ObservableObject {
         Task {
             defer { releaseRouteOperation() }
             let epoch = routeEpoch
+            var passAdded: Set<String> = []  // #61: kernel dests added across this pass, for unstrand-on-preempt
             let gateway: String? = enabled ? await ensureGateway() : nil
             if enabled && gateway == nil {
                 log(.error, "Cannot enable domains: no local gateway detected")
                 return
             }
             for domain in domainsToChange {
-                guard routeEpoch == epoch else { return }
+                guard routeEpoch == epoch else {
+                    await unstrandRoutes(attempted: passAdded, addFailed: [])
+                    return
+                }
                 if enabled, let gw = gateway {
                     let resolvable = domain.domain
                     if let routes = await applyRoutesForDomain(resolvable, gateway: gw, source: domain.domain, persistCache: false) {
-                        guard routeEpoch == epoch else { return }
+                        passAdded.formUnion(routes.map { $0.destination })
+                        guard routeEpoch == epoch else {
+                            await unstrandRoutes(attempted: passAdded, addFailed: [])
+                            return
+                        }
                         activeRoutes.append(contentsOf: routes)
                     }
                 } else if !enabled {
@@ -2830,7 +2922,10 @@ final class RouteManager: ObservableObject {
                 }
                 if cidr {
                     if await addRoute(cleaned, gateway: gw, isNetwork: true) {
-                        guard routeEpoch == epoch else { return }
+                        guard routeEpoch == epoch else {
+                            await unstrandRoutes(attempted: [cleaned], addFailed: [])
+                            return
+                        }
                         activeRoutes.append(ActiveRoute(
                             destination: cleaned,
                             gateway: gw,
@@ -2840,7 +2935,10 @@ final class RouteManager: ObservableObject {
                         log(.success, "Routed CIDR \(cleaned) through VPN")
                     }
                 } else if let routes = await applyRoutesForDomain(inverseEntry.domain, gateway: gw, source: cleaned) {
-                    guard routeEpoch == epoch else { return }
+                    guard routeEpoch == epoch else {
+                        await unstrandRoutes(attempted: Set(routes.map { $0.destination }), addFailed: [])
+                        return
+                    }
                     activeRoutes.append(contentsOf: routes)
                     if config.manageHostsFile { await updateHostsFile() }
                 }
@@ -2882,7 +2980,10 @@ final class RouteManager: ObservableObject {
                     if domain.isCIDR {
                         // CIDR: add network route directly
                         if await addRoute(domain.domain, gateway: gw, isNetwork: true) {
-                            guard routeEpoch == epoch else { return }
+                            guard routeEpoch == epoch else {
+                                await unstrandRoutes(attempted: [domain.domain], addFailed: [])
+                                return
+                            }
                             activeRoutes.append(ActiveRoute(
                                 destination: domain.domain,
                                 gateway: gw,
@@ -2893,7 +2994,10 @@ final class RouteManager: ObservableObject {
                     } else {
                         let resolvable = domain.domain
                         if let routes = await applyRoutesForDomain(resolvable, gateway: gw, source: domain.domain) {
-                            guard routeEpoch == epoch else { return }
+                            guard routeEpoch == epoch else {
+                                await unstrandRoutes(attempted: Set(routes.map { $0.destination }), addFailed: [])
+                                return
+                            }
                             activeRoutes.append(contentsOf: routes)
                             if config.manageHostsFile { await updateHostsFile() }
                         }
@@ -3150,6 +3254,7 @@ final class RouteManager: ObservableObject {
         // Preemption check before committing
         guard routeEpoch == epoch else {
             log(.info, "Service apply aborted for \(service.name): routes were cleared during operation")
+            await unstrandRoutes(attempted: Set(routesToAdd.map { $0.destination }), addFailed: failedDests)
             return
         }
 
@@ -3573,7 +3678,13 @@ final class RouteManager: ObservableObject {
     /// so the leak-critical latch-clear timing is unit-testable without the helper,
     /// kernel routes, or /etc/hosts. See RerouteLatchTimingTests.
     var rerouteApplyOverrideForTests: (() async -> Void)?
-    
+
+    /// #61 test-only seams (nil in production). `removeRoutesBatchOverrideForTests` lets the strand
+    /// repro observe kernel removals (incl. unstrandRoutes) without a real helper; `routeEpochForTests`
+    /// exposes the private preemption epoch so the test can capture it before forcing a teardown.
+    var removeRoutesBatchOverrideForTests: (([String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?))?
+    var routeEpochForTests: UInt64 { routeEpoch }
+
     private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil, persistCache: Bool = true) async -> [ActiveRoute]? {
         guard let ips = await resolveIPs(for: domain) else {
             failedDomains.insert(domain)
