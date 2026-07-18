@@ -50,11 +50,17 @@ class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
     }
 
     /// Build the caller's `SecCode` from a guest attribute (audit token or PID) and check it against
-    /// our signing identifier. Under ad-hoc signing that identifier string alone is forgeable by any
-    /// local binary (`codesign -s - -i com.geiserx.vpn-bypass`), so when the root-only cdhash pin
-    /// file is present and valid we ALSO require that exact cdhash — which a forged binary cannot
-    /// reproduce. If the pin is absent/malformed we fall back to identifier-only: degraded but
-    /// functional, never a hard reject (forging the root-owned pin already needs root).
+    /// our authorization requirement. Under ad-hoc signing the signing identifier alone is forgeable
+    /// by any local binary (`codesign -s - -i com.geiserx.vpn-bypass /tmp/evil`), so identifier-only
+    /// is NOT sufficient — HelperAuthPolicy binds the requirement to the root-only pinned cdhash,
+    /// which a forged binary cannot reproduce.
+    ///
+    /// FAIL-CLOSED (1.8.0): when the pin is absent/malformed, `HelperAuthPolicy.requirementString`
+    /// returns nil and we REJECT the caller rather than falling back to the forgeable identifier-only
+    /// requirement. Anti-brick invariant: this cannot lock out the real app because the installer
+    /// GUARANTEES a matching pin at install time and the readiness gate self-heals a missing/stale
+    /// pin by reinstalling (see HelperManager). A correctly installed helper always has a matching
+    /// pin, so only forged/unauthorized callers are rejected.
     private func verifyCallerCode(attribute: CFString, value: CFTypeRef) -> Bool {
         var code: SecCode?
         let attrs = [attribute: value] as CFDictionary
@@ -63,9 +69,12 @@ class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
             return false
         }
 
-        var requirementString = "identifier \"\(HelperConstants.appSigningIdentifier)\""
-        if let pinnedHash = Self.readPinnedCDHash() {
-            requirementString += " and cdhash H\"\(pinnedHash)\""
+        // No valid pin ⇒ reject (fail-closed). Never fall back to identifier-only.
+        guard let requirementString = HelperAuthPolicy.requirementString(
+            pinnedCDHash: Self.readPinnedCDHash(),
+            appSigningIdentifier: HelperConstants.appSigningIdentifier
+        ) else {
+            return false
         }
 
         var requirement: SecRequirement?
@@ -78,23 +87,17 @@ class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
     }
 
     /// The pinned app cdhash (lowercase hex) if the root-only pin file holds a well-formed
-    /// value, else nil. ANTI-BRICK: any non-hex/empty content returns nil so the caller
-    /// degrades to identifier-only rather than building a malformed `cdhash H"..."`
-    /// requirement that would reject every caller (including the real app). Read fresh each
-    /// call so a rewritten pin (app update) takes effect without restarting the helper.
+    /// value, else nil. Validation is delegated to the shared, testable
+    /// `HelperAuthPolicy.validatedCDHash` so the helper and the tests agree on exactly what
+    /// counts as a valid pin (a whole 40- or 64-hex cdhash). Read fresh each call so a
+    /// rewritten pin (app update) takes effect without restarting the helper. A nil result
+    /// makes `verifyCallerCode` fail-closed (reject); because the installer and readiness
+    /// gate guarantee a valid pin for the real app, nil means "no authorized caller present",
+    /// not "brick the real app".
     private static func readPinnedCDHash() -> String? {
         guard let data = FileManager.default.contents(atPath: HelperConstants.cdhashPinPath),
               let raw = String(data: data, encoding: .utf8) else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        // Require a WHOLE cdhash, not merely "some hex". kSecCodeInfoUnique is a 20-byte
-        // code-directory hash (40 hex chars); a SHA-256 form is 32 bytes (64 hex). A
-        // partial/truncated write (e.g. "ab") is still even-length valid hex but would
-        // build a `cdhash H"ab"` requirement the real app can NEVER satisfy — locking out
-        // the helper. Reject anything that isn't a full-length hex cdhash so we fall back
-        // to identifier-only rather than pinning an unsatisfiable value.
-        let isValidCDHash = (trimmed.count == 40 || trimmed.count == 64)
-            && trimmed.allSatisfy { $0.isHexDigit }
-        return isValidCDHash ? trimmed : nil
+        return HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: raw)
     }
 }
 
