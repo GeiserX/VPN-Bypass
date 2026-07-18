@@ -1,13 +1,14 @@
 # VPN Bypass - Product Roadmap
 
-## Current State (v3.0)
+## Current State (v3.1.2)
 
 Three routing modes ship today: **Bypass** (listed domains/services skip the VPN), **VPN Only** (everything
-tunnels except listed items), and **Custom** (new in 3.0 — a per-rule engine mapping each domain/service/CIDR
-to a named route). Custom-mode egresses include the local gateway, a specific VPN interface (multi-VPN), an
-HTTP/SOCKS5 proxy via a local `127.0.0.1` listener, and a Tailscale-peer exit (proxy-over-tailnet). A bundled
-**`vpnb` CLI** scripts it all over a user-only socket, and the privileged helper is cdhash-pinned (1.6.0). The
-whole engine stays **entitlement-free** — kernel routes + `/etc/hosts` + local proxy listeners + a PF/local-CA
+tunnels except listed items), and **Custom** (the multi-route epic, shipped in 3.0 — a per-rule engine mapping
+each domain/service/CIDR to a named route). Custom-mode egresses include the local gateway, a specific VPN
+interface (multi-VPN), an HTTP/SOCKS5 proxy via a local `127.0.0.1` listener, and a Tailscale-peer exit
+(proxy-over-tailnet). A bundled **`vpnb` CLI** scripts it all over a user-only socket (on `PATH` via the tap
+cask since 3.1.2), and the privileged helper is cdhash-pinned and audit-token-verified (1.7.0). The whole
+engine stays **entitlement-free** — kernel routes + `/etc/hosts` + local proxy listeners + a PF/local-CA
 path, **no Network Extension** — so the app remains ad-hoc-signable.
 
 ### ✅ Phase 1 Complete - Core & Polish (v1.0 - v1.2)
@@ -209,4 +210,4 @@ path, **no Network Extension** — so the app remains ad-hoc-signable.
 
 ---
 
-*Last updated: July 4, 2026*
+*Last updated: July 7, 2026*
