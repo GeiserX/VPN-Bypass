@@ -88,11 +88,14 @@ A **rule** maps traffic to a route by `domain`, `suffix`, `ip`, `cidr`, `service
 # Add the tap (first time only)
 brew tap geiserx/vpn-bypass
 
+# Trust the tap (first time only, required on Homebrew 6+)
+brew trust --cask geiserx/vpn-bypass/vpn-bypass
+
 # Install VPN Bypass
 brew install --cask vpn-bypass
 ```
 
-The **tap is the canonical install path** — it always tracks the latest release and auto-updates with `brew upgrade`. On Homebrew 6+ you may be prompted to trust the tap first with `brew trust geiserx/vpn-bypass`.
+The **tap is the canonical install path** — it always tracks the latest release and auto-updates with `brew upgrade`. On Homebrew 6+, trust the tap first (as shown above) or the install will be blocked.
 
 > **Note:** Don't `brew install --cask` the raw `Casks/vpn-bypass.rb` in this repo — that in-repo cask is a frozen snapshot and will install an old build. Always use the tap above.
 
@@ -153,7 +156,7 @@ Click the gear icon to access settings. The visible tabs depend on the active mo
 
 A bundled `vpnb` CLI drives the same routing the GUI does, over a user-only UNIX socket — handy for scripting or headless tweaks. It needs no extra privilege (the app already holds it).
 
-`vpnb` ships inside the app bundle (`VPN Bypass.app/Contents/MacOS/vpnb`). Installing via the Homebrew **tap** (`brew tap geiserx/vpn-bypass && brew install --cask vpn-bypass`) symlinks it onto your `PATH`. With a manual DMG install, call it by that path (`VPN Bypass.app/Contents/MacOS/vpnb`) or symlink it onto your `PATH` yourself.
+`vpnb` ships inside the app bundle (`VPN Bypass.app/Contents/MacOS/vpnb`). Installing via the Homebrew **tap** (`brew tap geiserx/vpn-bypass && brew install --cask vpn-bypass`) symlinks it onto your `PATH`. With a manual DMG install, call it by its full path (`"/Applications/VPN Bypass.app/Contents/MacOS/vpnb"`) or symlink it onto your `PATH` yourself.
 
 ```bash
 vpnb status                                   # current mode, routes, schema/version

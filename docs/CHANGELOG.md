@@ -5,10 +5,17 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.3] - 2026-07-18
+
+### Changed
+- **Docs corrected to match shipped reality** — README and CHANGELOG installation/CLI instructions were updated for accuracy: the cask-scoped `brew trust` command now appears before the install step, and the manual-DMG `vpnb` path is quoted as an absolute path so it's copy/paste-safe.
+- **Removed unused `NotificationManager` methods** — 5 dead-code methods with no remaining callers were removed; no behavior change.
+- **Hardened the release workflow** — the `concurrency` group now keys on the release version instead of `github.ref`, so a tag push and a same-version `workflow_dispatch` run always serialize instead of racing; third-party GitHub Actions used in `release.yml` are pinned to a commit SHA.
+
 ## [3.1.2] - 2026-07-07
 
 ### Fixed
-- **`vpnb` CLI now lands on your `PATH`** — the `vpnb` control CLI has shipped bundled inside the app since 3.0.0, but the cask never linked it, so `vpnb` wasn't runnable from a terminal after a Homebrew install. Installing via the tap (`brew tap geiserx/vpn-bypass && brew install --cask vpn-bypass`) now symlinks the bundled `vpnb` onto `PATH`. Manual DMG installs can still call it at `VPN Bypass.app/Contents/MacOS/vpnb` or symlink it themselves.
+- **`vpnb` CLI now lands on your `PATH`** — the `vpnb` control CLI has shipped bundled inside the app since 3.0.0, but the cask never linked it, so `vpnb` wasn't runnable from a terminal after a Homebrew install. Installing via the tap (`brew tap geiserx/vpn-bypass && brew install --cask vpn-bypass`) now symlinks the bundled `vpnb` onto `PATH`. Manual DMG installs can still call it at `"/Applications/VPN Bypass.app/Contents/MacOS/vpnb"` or symlink it themselves.
 
 ## [3.1.1] - 2026-07-04
 

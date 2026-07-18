@@ -11,11 +11,15 @@ on:
         required: true
         type: string
 
-# A tag push and a manual/auto-tag dispatch can both target the same version. Serialize
-# per ref so two runs never build+publish the same release or race on the Homebrew cask
-# push. cancel-in-progress: false — never abort an in-flight release mid-publish.
+# Serialize ALL release runs with a single global group. A tag push and a manual/auto-tag
+# dispatch can target the same version but land on different refs AND differ in the `v`
+# prefix (tag `github.ref_name` = `v3.1.3` vs. dispatch input `3.1.3`), so any version-keyed
+# group would let those two race on the shared Homebrew-tap push. A global group makes every
+# release run wait for the previous one — releases are infrequent and the tap push is a shared
+# resource, so serializing them all is correct. cancel-in-progress: false — never abort an
+# in-flight release mid-publish.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 permissions:
