@@ -79,8 +79,12 @@ final class HelperManager: ObservableObject {
     /// If outdated, attempts an automatic update. Returns true only when helper
     /// is verified ready. Route application MUST NOT start until this returns true.
     func ensureHelperReady() async -> Bool {
-        // Fast path: already verified
-        if helperState.isReady { return true }
+        // Fast path: already verified AND the cdhash pin still matches this app. Re-checking
+        // the pin here — not just the cached `.ready` flag — keeps readiness authoritative: a
+        // pin removed or rotated after we cached `.ready` drops back into the full flow below
+        // (which probes and, if the fail-closed 1.8.0 helper now rejects us, reinstalls to
+        // restore the pin) instead of reporting a stale "ready" while route ops silently fail.
+        if helperState.isReady, readinessPinSatisfied() { return true }
 
         let helperPath = "/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)"
         let plistPath = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
@@ -553,13 +557,17 @@ final class HelperManager: ObservableObject {
         }
     }
 
-    /// Whether the readiness pin invariant holds. The 1.8.0 helper is fail-closed on the
-    /// cdhash pin, so a successful version probe already implies a matching pin — this is
-    /// defense-in-depth plus stale-pin self-heal. Returns true when we can't compute our own
-    /// cdhash (trust the probe: the helper only answered a caller whose cdhash it accepted),
-    /// or when the pin file is present and equals our cdhash.
+    /// Whether the readiness pin invariant holds: our own cdhash can be computed AND the
+    /// root-only pin file equals it. FAIL-CLOSED — returns false when we can't compute our
+    /// cdhash, or the pin is absent/stale/malformed. This is called BOTH on the fast path
+    /// (before any XPC probe, so there is no "the helper already vouched for this caller"
+    /// signal to lean on) and post-probe as defense-in-depth + stale-pin self-heal; in every
+    /// case an unverifiable pin must NOT be reported as satisfied, since the 1.8.0 helper is
+    /// fail-closed and readiness must stay authoritative. A false here drops the caller into
+    /// the full ensureHelperReady flow, which reinstalls to restore a good pin (or fails
+    /// closed if even that can't compute our cdhash — no privileged op proceeds unverified).
     private func readinessPinSatisfied() -> Bool {
-        guard let own = ownCDHash() else { return true }
+        guard let own = ownCDHash() else { return false }
         return currentPinnedCDHash() == own
     }
 

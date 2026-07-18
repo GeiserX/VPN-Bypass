@@ -2603,13 +2603,15 @@ final class RouteManager: ObservableObject {
             }
             guard let self else { return }
             self.rerouteRetryTask = nil
-            // Safety net: never exit with a latch still outstanding and no drainer. If
-            // we hit the attempt bound (or a NEWER change was latched during the final
-            // apply) while a re-route is still pending and the VPN is up, start a fresh
-            // chain so the deferred re-route is never permanently stranded.
-            if self.pendingReroute && self.isVPNConnected {
-                self.scheduleRerouteRetry()
-            }
+            // Bounded on purpose: we STOP here even if the latch is still set (e.g. the
+            // gateway or helper is persistently unavailable). Re-kicking a fresh chain from
+            // inside this one would busy-loop every `rerouteRetryDelayNs` forever — a battery
+            // drain, not a drain of the latch. The latch stays set; the periodic
+            // checkVPNStatus() (30s status timer + network-change events) re-runs the SAME
+            // RerouteDecider, which returns .latch while (pending && !canRunNow) and calls
+            // scheduleRerouteRetry() again — a fresh bounded chain on the next pass. So a
+            // still-blocked re-route is retried on the next status tick, never permanently
+            // lost, and never in a tight loop.
         }
     }
 
