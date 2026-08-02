@@ -30,7 +30,7 @@ jobs:
     # (so no fork guard is needed). They ship full Xcode, so XCTest is available.
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           # Don't leave the GitHub token in local git config while running
           # PR-controlled code (`swift test`) — fork PRs now run here.
