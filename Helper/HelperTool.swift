@@ -2,6 +2,14 @@
 // Privileged helper tool implementation that runs as root.
 
 import Foundation
+import os.log
+
+/// Structured logging for the privileged helper. Until now the helper logged nothing at all, so a
+/// root daemon that owns the routing table left no record of which routes it wrote or which callers
+/// it rejected. Read with:
+///   log stream --predicate 'subsystem == "com.geiserx.vpnbypass.helper"' --info
+/// Destinations/gateways are route data the caller already supplied; no credentials pass through here.
+let helperLog = Logger(subsystem: "com.geiserx.vpnbypass.helper", category: "routes")
 
 // MARK: - XPC Listener Delegate
 
@@ -104,9 +112,17 @@ class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
 // MARK: - Helper Tool Implementation
 
 class HelperTool: NSObject, HelperProtocol {
-    
+
+    /// Serialises every route/hosts mutation across ALL XPC connections. `HelperToolDelegate`
+    /// creates a fresh `HelperTool` per connection, and the app drops and recreates its connection
+    /// on an XPC deadline, so without this two handlers could mutate the routing table at the same
+    /// time — the condition behind the concurrent `/sbin/route` processes seen in #65.
+    /// Deliberately NOT used by `getVersion`: that is the app's liveness probe, and queueing it
+    /// behind a long batch would time it out and trigger a spurious helper reinstall.
+    private static let routeQueue = DispatchQueue(label: "com.geiserx.vpnbypass.helper.routes")
+
     // MARK: - Route Management
-    
+
     func addRoute(destination: String, gateway: String, isNetwork: Bool, withReply reply: @escaping (Bool, String?) -> Void) {
         // Validate inputs
         guard isValidDestination(destination), isValidGateway(gateway) else {
@@ -114,91 +130,131 @@ class HelperTool: NSObject, HelperProtocol {
             return
         }
 
-        // First try to delete existing route (ignore result)
-        _ = executeRoute(args: ["-n", "delete", destination])
-
-        // Add the new route
-        let result = executeRoute(args: buildRouteAddArgs(destination: destination, gateway: gateway, isNetwork: isNetwork))
-        reply(result.success, result.error)
+        Self.routeQueue.async {
+            let result = self.installRoute(destination: destination, gateway: gateway, isNetwork: isNetwork)
+            reply(result.success, result.error)
+        }
     }
-    
+
     func removeRoute(destination: String, withReply reply: @escaping (Bool, String?) -> Void) {
         guard isValidDestination(destination) else {
             reply(false, "Invalid destination format")
             return
         }
-        
-        let result = executeRoute(args: ["-n", "delete", destination])
-        reply(result.success, result.error)
+
+        Self.routeQueue.async {
+            let result = self.executeRoute(args: ["-n", "delete", destination])
+            if !result.success {
+                helperLog.info("delete \(destination, privacy: .public) failed: \(result.error ?? "unknown", privacy: .public)")
+            }
+            reply(result.success, result.error)
+        }
     }
     
     // MARK: - Batch Route Management (for startup/stop performance)
     
     func addRoutesBatch(routes: [[String: Any]], withReply reply: @escaping (Int, Int, [String], String?) -> Void) {
-        var successCount = 0
-        var failureCount = 0
-        var failedDestinations: [String] = []
-        var lastError: String?
+        Self.routeQueue.async {
+            var successCount = 0
+            var failureCount = 0
+            var failedDestinations: [String] = []
+            var lastError: String?
 
-        for route in routes {
-            guard let destination = route["destination"] as? String,
-                  let gateway = route["gateway"] as? String else {
-                failureCount += 1
-                continue
+            for route in routes {
+                guard let destination = route["destination"] as? String,
+                      let gateway = route["gateway"] as? String else {
+                    failureCount += 1
+                    continue
+                }
+
+                let isNetwork = route["isNetwork"] as? Bool ?? false
+
+                // Validate inputs
+                guard self.isValidDestination(destination), self.isValidGateway(gateway) else {
+                    failureCount += 1
+                    failedDestinations.append(destination)
+                    continue
+                }
+
+                let result = self.installRoute(destination: destination, gateway: gateway, isNetwork: isNetwork)
+                if result.success {
+                    successCount += 1
+                } else {
+                    failureCount += 1
+                    failedDestinations.append(destination)
+                    lastError = result.error
+                }
             }
 
-            let isNetwork = route["isNetwork"] as? Bool ?? false
-
-            // Validate inputs
-            guard isValidDestination(destination), isValidGateway(gateway) else {
-                failureCount += 1
-                failedDestinations.append(destination)
-                continue
-            }
-
-            // First try to delete existing route (ignore result)
-            _ = executeRoute(args: ["-n", "delete", destination])
-
-            // Add the new route
-            let result = executeRoute(args: buildRouteAddArgs(destination: destination, gateway: gateway, isNetwork: isNetwork))
-            if result.success {
-                successCount += 1
-            } else {
-                failureCount += 1
-                failedDestinations.append(destination)
-                lastError = result.error
-            }
+            helperLog.info("addRoutesBatch: \(routes.count, privacy: .public) requested, \(successCount, privacy: .public) ok, \(failureCount, privacy: .public) failed")
+            reply(successCount, failureCount, failedDestinations, lastError)
         }
-
-        reply(successCount, failureCount, failedDestinations, lastError)
     }
 
     func removeRoutesBatch(destinations: [String], withReply reply: @escaping (Int, Int, [String], String?) -> Void) {
-        var successCount = 0
-        var failureCount = 0
-        var failedDestinations: [String] = []
-        var lastError: String?
+        Self.routeQueue.async {
+            var successCount = 0
+            var failureCount = 0
+            var failedDestinations: [String] = []
+            var lastError: String?
 
-        for destination in destinations {
-            guard isValidDestination(destination) else {
-                failureCount += 1
-                failedDestinations.append(destination)
-                continue
+            for destination in destinations {
+                guard self.isValidDestination(destination) else {
+                    failureCount += 1
+                    failedDestinations.append(destination)
+                    continue
+                }
+
+                let result = self.executeRoute(args: ["-n", "delete", destination])
+                if result.success {
+                    successCount += 1
+                } else {
+                    failureCount += 1
+                    failedDestinations.append(destination)
+                    lastError = result.error
+                }
             }
 
-            let result = executeRoute(args: ["-n", "delete", destination])
-            if result.success {
-                successCount += 1
-            } else {
-                failureCount += 1
-                failedDestinations.append(destination)
-                lastError = result.error
-            }
+            helperLog.info("removeRoutesBatch: \(destinations.count, privacy: .public) requested, \(successCount, privacy: .public) removed, \(failureCount, privacy: .public) failed")
+            reply(successCount, failureCount, failedDestinations, lastError)
+        }
+    }
+
+    /// Install one route WITHOUT the old blind `route delete` that preceded every add.
+    ///
+    /// #65: the previous `delete` + `add` pair cost two kernel mutations per route even when the
+    /// route was already correct, and — worse — it briefly REMOVED the route. Each mutation raises a
+    /// kernel route-change event, and GlobalProtect re-validates its own gateway route on every one;
+    /// its teardowns were preceded by `Failed to find route for <gateway>`, exactly what a transient
+    /// removal produces. The blind delete could also remove a route this app never owned.
+    ///
+    /// The ladder below never opens a window where the destination has no route:
+    ///   1. `change` — rewrites an existing route in place (one mutation, no gap). Succeeds in the
+    ///      re-apply case, which is the common one.
+    ///   2. `add` — only when nothing was there to change (one mutation).
+    ///   3. `delete` + `add` — last resort, only if `add` reports the route already exists (a race
+    ///      with another writer between steps 1 and 2). This is the sole path that can still open a
+    ///      gap, and it is now rare rather than universal.
+    private func installRoute(destination: String, gateway: String, isNetwork: Bool) -> (success: Bool, error: String?) {
+        let changed = executeRoute(args: buildRouteArgs(verb: "change", destination: destination, gateway: gateway, isNetwork: isNetwork))
+        if changed.success { return (true, nil) }
+
+        let added = executeRoute(args: buildRouteArgs(verb: "add", destination: destination, gateway: gateway, isNetwork: isNetwork))
+        if added.success { return (true, nil) }
+
+        // `add` refused because a route for this destination exists after all — fall back to the
+        // old replace, which is the only remaining way to converge.
+        if (added.error ?? "").localizedCaseInsensitiveContains("exists") {
+            helperLog.info("install \(destination, privacy: .public): change+add both refused, replacing")
+            _ = executeRoute(args: ["-n", "delete", destination])
+            let replaced = executeRoute(args: buildRouteArgs(verb: "add", destination: destination, gateway: gateway, isNetwork: isNetwork))
+            return (replaced.success, replaced.error)
         }
 
-        reply(successCount, failureCount, failedDestinations, lastError)
+        helperLog.error("install \(destination, privacy: .public) failed: \(added.error ?? "unknown", privacy: .public)")
+        return (false, added.error)
     }
-    
+
     private func executeRoute(args: [String]) -> (success: Bool, error: String?) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/sbin/route")
@@ -347,8 +403,10 @@ class HelperTool: NSObject, HelperProtocol {
         return name.allSatisfy { $0.isLetter || $0.isNumber } && name.count <= 16
     }
 
-    private func buildRouteAddArgs(destination: String, gateway: String, isNetwork: Bool) -> [String] {
-        var args = ["-n", "add"]
+    /// Build `route(8)` arguments for `verb` ("add" or "change"). Both take an identical argument
+    /// shape, so `installRoute` can try an in-place change before falling back to an add.
+    private func buildRouteArgs(verb: String, destination: String, gateway: String, isNetwork: Bool) -> [String] {
+        var args = ["-n", verb]
         args.append(isNetwork ? "-net" : "-host")
         args.append(destination)
         if gateway.hasPrefix("iface:") {

@@ -87,7 +87,15 @@ struct HelperConstants {
     // self-heals a missing/stale pin by reinstalling. Bumped from 1.7.0 so existing
     // (possibly pin-less, identifier-only) helpers detect the mismatch and reinstall to
     // the fail-closed + guaranteed-pin build.
-    static let helperVersion = "1.8.0"
+    // 1.9.0: the helper no longer issues a blind `route delete` before every `route add` (#65).
+    // That cost two kernel mutations per route even when the route was already correct, and it
+    // briefly REMOVED the route — every mutation raises a kernel route-change event, and
+    // GlobalProtect re-validates its gateway route on each one, tearing down its tunnel when the
+    // lookup transiently fails. It now changes-in-place, adds only when nothing was there, and
+    // replaces only as a last resort. Route/hosts mutations are also serialised across XPC
+    // connections (concurrent handlers were producing simultaneous /sbin/route processes), and the
+    // helper finally emits os_log records. Bumped from 1.8.0 so installed helpers pick this up.
+    static let helperVersion = "1.9.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

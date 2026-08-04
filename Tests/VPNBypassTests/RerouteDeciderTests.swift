@@ -270,11 +270,26 @@ final class RerouteLatchTimingTests: XCTestCase {
         super.tearDown()
     }
 
+    /// `performReroute` try-acquires the route-operation gate, so with the gate held it is a no-op
+    /// and every assertion below would be vacuous. `RouteManager` is a `private init` singleton that
+    /// loads the real on-disk config on first touch, so on a developer machine with a populated
+    /// config an unrelated suite can leave asynchronous startup work holding the gate — these tests
+    /// then fail for a reason that has nothing to do with latch timing. (CI has no user config, so
+    /// the gate is free and they run normally.) Skip loudly rather than report a false failure;
+    /// making the suite hermetic is tracked separately.
+    private func requireFreeRouteGate() throws {
+        try XCTSkipIf(
+            rm.isApplyingRoutes,
+            "route-operation gate held by unrelated async startup work — cannot exercise performReroute"
+        )
+    }
+
     /// MAJOR-1: a latch set by a concurrent checkVPNStatus DURING the apply must survive
     /// performReroute. With the old code (clear at END) it was wiped and the retry then
     /// saw pendingReroute == false and stopped → leak. With the fix (clear at START) the
     /// fresh latch survives so the retry chain drains it to the newest interface.
-    func testConcurrentLatchDuringRerouteIsNotWiped() async {
+    func testConcurrentLatchDuringRerouteIsNotWiped() async throws {
+        try requireFreeRouteGate()
         rm.localGateway = "10.0.0.1"
         rm.pendingReroute = true
         rm.pendingRerouteReason = "initial change"
@@ -299,7 +314,8 @@ final class RerouteLatchTimingTests: XCTestCase {
 
     /// A plain re-route with no concurrent change clears the latch exactly once (at the
     /// start) and leaves it clear.
-    func testRerouteClearsLatchWhenNoConcurrentChange() async {
+    func testRerouteClearsLatchWhenNoConcurrentChange() async throws {
+        try requireFreeRouteGate()
         rm.localGateway = "10.0.0.1"
         rm.pendingReroute = true
         rm.pendingRerouteReason = "some change"
@@ -314,7 +330,8 @@ final class RerouteLatchTimingTests: XCTestCase {
     /// The clear lives INSIDE the acquired block: with no gateway, performReroute is a
     /// no-op and must NOT clear an outstanding latch (MINOR-1) — the retry re-detects the
     /// gateway and drains it later.
-    func testNoGatewayDoesNotClearLatch() async {
+    func testNoGatewayDoesNotClearLatch() async throws {
+        try requireFreeRouteGate()
         rm.localGateway = nil
         rm.pendingReroute = true
         rm.pendingRerouteReason = "change awaiting gateway"
