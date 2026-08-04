@@ -246,7 +246,13 @@ class HelperTool: NSObject, HelperProtocol {
         // old replace, which is the only remaining way to converge.
         if (added.error ?? "").localizedCaseInsensitiveContains("exists") {
             helperLog.info("install \(destination, privacy: .public): change+add both refused, replacing")
-            _ = executeRoute(args: ["-n", "delete", destination])
+            let removed = executeRoute(args: ["-n", "delete", destination])
+            guard removed.success else {
+                // Report why the removal failed rather than letting the follow-up add fail with a
+                // secondary "exists" that hides the real cause.
+                helperLog.error("install \(destination, privacy: .public): delete before replace failed: \(removed.error ?? "unknown", privacy: .public)")
+                return (false, removed.error)
+            }
             let replaced = executeRoute(args: buildRouteArgs(verb: "add", destination: destination, gateway: gateway, isNetwork: isNetwork))
             return (replaced.success, replaced.error)
         }
@@ -283,12 +289,22 @@ class HelperTool: NSObject, HelperProtocol {
     // MARK: - Hosts File Management
     
     func updateHostsFile(entries: [[String: String]], withReply reply: @escaping (Bool, String?) -> Void) {
+        // Serialised alongside route mutations on the same queue. This is a read-modify-write of
+        // /etc/hosts, so without it two concurrent XPC connections could read the same content and
+        // the later write would silently discard the earlier update.
+        Self.routeQueue.async {
+            let result = self.performHostsUpdate(entries: entries)
+            reply(result.success, result.error)
+        }
+    }
+
+    /// The /etc/hosts read-modify-write itself. Always call it on `routeQueue`.
+    private func performHostsUpdate(entries: [[String: String]]) -> (success: Bool, error: String?) {
         let hostsPath = "/etc/hosts"
-        
+
         // Read current hosts file
         guard let currentContent = try? String(contentsOfFile: hostsPath, encoding: .utf8) else {
-            reply(false, "Could not read /etc/hosts")
-            return
+            return (false, "Could not read /etc/hosts")
         }
         
         // Remove existing VPN-BYPASS section
@@ -350,9 +366,9 @@ class HelperTool: NSObject, HelperProtocol {
         
         do {
             try newContent.write(toFile: hostsPath, atomically: true, encoding: .utf8)
-            reply(true, nil)
+            return (true, nil)
         } catch {
-            reply(false, "Failed to write hosts file: \(error.localizedDescription)")
+            return (false, "Failed to write hosts file: \(error.localizedDescription)")
         }
     }
     
