@@ -44,3 +44,6 @@ dist/
 # AI tooling state
 .omc/
 .lynxprompt/
+
+# goal-loop durable state (loop-owned, not part of the product)
+.goal-loop/

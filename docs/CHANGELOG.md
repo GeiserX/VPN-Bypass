@@ -5,6 +5,21 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.7] - 2026-08-04
+
+### Fixed
+- **VPN Bypass no longer destabilises other VPN clients (GlobalProtect disconnect loop).** Two habits made the app rewrite the routing table constantly even when nothing had changed, and every routing-table write is an event that enterprise VPN clients react to — one measured machine logged 757 route-change events and 48 tunnel teardowns over roughly 6.5 hours of active use — about one disconnect every 8 minutes, with ~27 seconds of downtime each.
+  - **Re-routing rebuilt everything instead of reconciling.** When the VPN interface changed, the app removed every route it managed and re-installed the whole set. Because the teardown also cleared its own record of what was installed, the "nothing changed, skip this" check could never fire on that path. In Bypass mode the routes point at your local gateway, so a VPN reconnect changed nothing about them — the entire rebuild produced exactly the routes that were already there. Re-routing now reconciles: it applies only what genuinely differs, and does nothing at all when the routes are already correct.
+  - **Every route was deleted before it was added.** The privileged helper issued a blind `route delete` ahead of each `route add`, which doubled the number of routing-table writes and briefly left the destination with no route at all — the exact condition that makes another VPN client's gateway check fail. It now changes the route in place, adds only when nothing was there, and falls back to a replace only in the rare case where both are refused.
+- **Route operations can no longer overlap.** Helper-side route and hosts-file changes are serialised across connections, so two requests can't mutate the routing table simultaneously.
+- **A stuck route-operation lock can no longer wedge the app.** The re-route path released its lock without a `defer`, so an interruption at the wrong moment left it held permanently — silently disabling every later route apply, re-route and DNS refresh for the life of the process.
+
+### Added
+- **The privileged helper now logs.** It previously produced no diagnostics at all. Inspect with `log stream --predicate 'subsystem == "com.geiserx.vpnbypass.helper"' --info`.
+
+### Changed
+- Helper version 1.8.0 → 1.9.0, so an installed helper picks up the fixes above (one admin prompt on first launch after upgrading).
+
 ## [3.1.5] - 2026-07-18
 
 ### Fixed
