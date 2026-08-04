@@ -2625,11 +2625,11 @@ final class RouteManager: ObservableObject {
         return Date().timeIntervalSince(last) < 10
     }
 
-    /// The re-route action itself: drop every installed route and re-install the full
-    /// set through the current gateway. The remove + re-apply pair (and thus the kernel
-    /// route SET it produces) is byte-identical to the pre-latch inline re-route — only
-    /// *when* it runs changed. Callers must already have decided (via RerouteDecider)
-    /// that a re-route is warranted and runnable.
+    /// The re-route action itself: RECONCILE the installed routes against the desired set
+    /// for the current gateway. The resulting kernel route SET is the same one the old
+    /// teardown-then-rebuild produced — only the mutations taken to reach it changed.
+    /// Callers must already have decided (via RerouteDecider) that a re-route is warranted
+    /// and runnable.
     func performReroute() async {
         lastInterfaceReroute = Date()
         if localGateway != nil, acquireRouteOperation() {
@@ -2646,17 +2646,46 @@ final class RouteManager: ObservableObject {
             // never on the no-gateway / gate-not-acquired no-op branches.
             pendingReroute = false
             pendingRerouteReason = nil
+            // Release via defer, like every other gate holder in this file. The body below
+            // suspends (a full apply resolves DNS and awaits the helper), and an unwind at any
+            // of those suspension points — task cancellation on quit, for instance — would skip
+            // a trailing release and leak the gate. A leaked gate is silent and permanent:
+            // acquireRouteOperation() try-acquires, so every later apply, re-route and DNS
+            // refresh would give up without a word for the rest of the process's life.
+            defer {
+                isLoading = false
+                releaseRouteOperation()
+            }
             isLoading = true
             if let overrideApply = rerouteApplyOverrideForTests {
                 // Test-only seam (nil in production): exercises the latch-clear timing
                 // without touching the helper, kernel routes, or /etc/hosts.
                 await overrideApply()
             } else {
-                await removeAllRoutes()
+                // #65: reconcile, do NOT tear down first.
+                //
+                // The old `removeAllRoutes()` + `applyAllRoutesInternal()` pair emptied
+                // activeRoutes (removeAllRoutes clears it), which left `shouldSkipReapply`
+                // structurally unable to fire on this path — activePairs was always empty, so
+                // it never equalled desiredPairs. Every re-route therefore re-issued the ENTIRE
+                // route set: N deletes from the teardown plus N delete-before-adds from the
+                // re-apply, i.e. ~3N kernel mutations.
+                //
+                // In Bypass mode those routes egress via the LOCAL gateway, so a VPN interface
+                // renumber (the usual trigger) changes no destination|gateway pair at all —
+                // the entire storm rebuilt routes to the values they already had. Every one of
+                // those mutations raises a kernel route-change event, and GlobalProtect's
+                // connection monitor re-validates its own gateway route on each one; when that
+                // lookup transiently fails it tears down and re-negotiates the tunnel.
+                //
+                // applyAllRoutesInternal already does the right thing on its own: it computes
+                // the desired set, skips entirely when it matches what we hold (zero mutations),
+                // and drops genuinely stale destinations via commitAppliedRoutes' orphan
+                // cleanup. A real gateway change is still applied — in place, without a window
+                // where the route is absent, which also removes a brief VPN-Only leak window
+                // the teardown used to open.
                 await applyAllRoutesInternal(sendNotification: false)
             }
-            isLoading = false
-            releaseRouteOperation()
         } else if localGateway == nil {
             log(.error, "Re-route needed but no gateway detected")
         }
