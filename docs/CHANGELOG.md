@@ -5,6 +5,15 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.8] - 2026-08-06
+
+### Fixed
+- **Re-applying a route that is already correct no longer touches the routing table.** 3.1.7 stopped the re-route teardown and replaced delete-before-add with a change-in-place, but it did not stop the churn: the app legitimately re-applies its whole route set on a schedule (DNS refresh, the 15-second failed-domain retry, periodic status passes), and the helper wrote *every* route on *every* pass — even when the kernel already held exactly that route. Measured on a live machine running 3.1.7: 48+ `route` processes in 150 seconds, in bursts of ~180 routing-table writes. Every write is an event that other VPN clients react to, which is what destabilised GlobalProtect. The helper now checks the existing route first and skips the write entirely when nothing would change, so a steady state with no network change costs zero routing-table writes.
+- **Every privileged route operation is now logged.** 1.9.0 logged only batch operations and failures, so per-route work was invisible in the system log — which is how the remaining churn went unnoticed after 3.1.7. Inspect with `log stream --predicate 'subsystem == "com.geiserx.vpnbypass.helper"' --info`.
+
+### Changed
+- Helper version 1.9.0 → 1.10.0, so an installed helper picks up the fix (one admin prompt on first launch after upgrading).
+
 ## [3.1.7] - 2026-08-04
 
 ### Fixed
