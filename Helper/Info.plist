@@ -9,9 +9,9 @@
 	<key>CFBundleName</key>
 	<string>VPNBypassHelper</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.9.0</string>
+	<string>1.10.0</string>
 	<key>CFBundleVersion</key>
-	<string>9</string>
+	<string>10</string>
 	<key>SMAuthorizedClients</key>
 	<array>
 		<string>identifier "com.geiserx.vpn-bypass"</string>

@@ -144,7 +144,9 @@ class HelperTool: NSObject, HelperProtocol {
 
         Self.routeQueue.async {
             let result = self.executeRoute(args: ["-n", "delete", destination])
-            if !result.success {
+            if result.success {
+                helperLog.info("delete \(destination, privacy: .public): removed")
+            } else {
                 helperLog.info("delete \(destination, privacy: .public) failed: \(result.error ?? "unknown", privacy: .public)")
             }
             reply(result.success, result.error)
@@ -236,11 +238,27 @@ class HelperTool: NSObject, HelperProtocol {
     ///      with another writer between steps 1 and 2). This is the sole path that can still open a
     ///      gap, and it is now rare rather than universal.
     private func installRoute(destination: String, gateway: String, isNetwork: Bool) -> (success: Bool, error: String?) {
+        // #65, the core of it: if the kernel ALREADY has exactly this route, write nothing.
+        // Callers re-apply the same route set constantly (DNS refresh, failed-domain retries,
+        // status passes), and each redundant write raises a kernel route-change event that other
+        // VPN clients react to by re-validating their tunnel — which is the entire bug. Skipping
+        // the write is what makes steady state cost ZERO mutations.
+        if routeAlreadyCorrect(destination: destination, gateway: gateway, isNetwork: isNetwork) {
+            helperLog.debug("install \(destination, privacy: .public): already correct, no mutation")
+            return (true, nil)
+        }
+
         let changed = executeRoute(args: buildRouteArgs(verb: "change", destination: destination, gateway: gateway, isNetwork: isNetwork))
-        if changed.success { return (true, nil) }
+        if changed.success {
+            helperLog.info("install \(destination, privacy: .public): changed in place")
+            return (true, nil)
+        }
 
         let added = executeRoute(args: buildRouteArgs(verb: "add", destination: destination, gateway: gateway, isNetwork: isNetwork))
-        if added.success { return (true, nil) }
+        if added.success {
+            helperLog.info("install \(destination, privacy: .public): added")
+            return (true, nil)
+        }
 
         // `add` refused because a route for this destination exists after all — fall back to the
         // old replace, which is the only remaining way to converge.
@@ -259,6 +277,70 @@ class HelperTool: NSObject, HelperProtocol {
 
         helperLog.error("install \(destination, privacy: .public) failed: \(added.error ?? "unknown", privacy: .public)")
         return (false, added.error)
+    }
+
+    /// True when the kernel already holds exactly this route, so installing it again would be a
+    /// pure no-op write. `route -n get` is a READ: it reports the route that *would* be used and
+    /// raises no route-change event, so asking is free in the sense that matters here.
+    ///
+    /// The `destination:` comparison is load-bearing, not defensive padding. For a host with NO
+    /// specific route, `route get` reports the DEFAULT route — and in Bypass mode the default
+    /// route's gateway IS the local gateway we are about to install through. Comparing gateways
+    /// alone would therefore report "already correct" for a route that does not exist, and we
+    /// would silently never install it: the bypass would break with no error anywhere. Requiring
+    /// `destination` to equal the host we asked about is what distinguishes "this exact route is
+    /// present" from "something else would carry this traffic".
+    ///
+    /// Network routes are deliberately excluded: `route get` normalises a network destination in
+    /// ways that are not reliably comparable to the CIDR string we were handed, and a wrong match
+    /// there would skip a write that was genuinely needed. They are few; host routes are where
+    /// the churn is.
+    private func routeAlreadyCorrect(destination: String, gateway: String, isNetwork: Bool) -> Bool {
+        guard !isNetwork else { return false }
+        guard let output = routeOutput(args: ["-n", "get", destination]) else { return false }
+
+        var dest: String?
+        var gw: String?
+        var iface: String?
+        for rawLine in output.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("destination:") {
+                dest = String(line.dropFirst("destination:".count)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("gateway:") {
+                gw = String(line.dropFirst("gateway:".count)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("interface:") {
+                iface = String(line.dropFirst("interface:".count)).trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        // No route specific to this destination -> it must be installed.
+        guard dest == destination else { return false }
+
+        if gateway.hasPrefix("iface:") {
+            return iface == String(gateway.dropFirst(6))
+        }
+        return gw == gateway
+    }
+
+    /// Run `route` and capture stdout. Used only for read-only queries (`route -n get`).
+    private func routeOutput(args: [String]) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/sbin/route")
+        process.arguments = args
+
+        let outPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            return String(data: data, encoding: .utf8)
+        } catch {
+            return nil
+        }
     }
 
     private func executeRoute(args: [String]) -> (success: Bool, error: String?) {

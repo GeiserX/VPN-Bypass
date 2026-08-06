@@ -87,6 +87,13 @@ struct HelperConstants {
     // self-heals a missing/stale pin by reinstalling. Bumped from 1.7.0 so existing
     // (possibly pin-less, identifier-only) helpers detect the mismatch and reinstall to
     // the fail-closed + guaranteed-pin build.
+    // 1.10.0: the helper now READS before it writes (#65). Callers re-apply the same route set
+    // constantly (DNS refresh, failed-domain retries, status passes); 1.9.0 still issued a
+    // `route change` for every one of those, and every write is a kernel route-change event that
+    // other VPN clients react to by re-validating their tunnel. installRoute now asks
+    // `route -n get` first and returns success WITHOUT writing when the route is already correct,
+    // so steady state costs zero mutations. Every mutation path also logs now — 1.9.0 logged only
+    // batches and failures, which hid per-route churn completely.
     // 1.9.0: the helper no longer issues a blind `route delete` before every `route add` (#65).
     // That cost two kernel mutations per route even when the route was already correct, and it
     // briefly REMOVED the route — every mutation raises a kernel route-change event, and
@@ -95,7 +102,7 @@ struct HelperConstants {
     // replaces only as a last resort. Route/hosts mutations are also serialised across XPC
     // connections (concurrent handlers were producing simultaneous /sbin/route processes), and the
     // helper finally emits os_log records. Bumped from 1.8.0 so installed helpers pick this up.
-    static let helperVersion = "1.9.0"
+    static let helperVersion = "1.10.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"
