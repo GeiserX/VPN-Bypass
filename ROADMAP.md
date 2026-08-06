@@ -2,8 +2,9 @@
 
 ## Current State (v3.1.8)
 
-Three routing modes ship today: **Bypass** (listed domains/services skip the VPN), **VPN Only** (everything
-tunnels except listed items), and **Custom** (the multi-route epic, shipped in 3.0 — a per-rule engine mapping
+Three routing modes ship today: **Bypass** (everything uses the VPN except the listed domains/services,
+which skip it), **VPN Only** (the inverse — everything goes direct except the listed items, which are
+forced through the VPN), and **Custom** (the multi-route epic, shipped in 3.0 — a per-rule engine mapping
 each domain/service/CIDR to a named route). Custom-mode egresses include the local gateway, a specific VPN
 interface (multi-VPN), an HTTP/SOCKS5 proxy via a local `127.0.0.1` listener, and a Tailscale-peer exit
 (proxy-over-tailnet). A bundled **`vpnb` CLI** scripts it all over a user-only socket (on `PATH` via the tap

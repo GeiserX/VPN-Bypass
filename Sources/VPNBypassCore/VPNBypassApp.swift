@@ -41,6 +41,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var networkMonitor: NWPathMonitor?
     private var refreshTimer: Timer?
     private var watchdogTimer: Timer?
+    /// Retained so the SIGTERM/SIGINT sources stay alive for the process lifetime.
+    private var terminationSignalSources: [DispatchSourceSignal] = []
     private var lastPathStatus: NWPath.Status?
     private var lastInterfaceTypes: Set<NWInterface.InterfaceType> = []
     private var lastInterfaceNames: Set<String> = []
@@ -118,8 +120,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Start watchdog timer (every 12 hours) to ensure long-term stability
         startWatchdog()
+
+        installTerminationSignalHandler()
     }
-    
+
+    /// Run the same teardown on SIGTERM that a normal Quit runs.
+    ///
+    /// `applicationShouldTerminate` is only invoked for the Quit AppleEvent / `NSApp.terminate`.
+    /// It is NOT invoked for SIGTERM — and SIGTERM is exactly what the Homebrew cask's preflight
+    /// sends (`pkill -x VPNBypass`) on every upgrade. Because `activeRoutes` lives only in memory
+    /// and nothing reconciles against the kernel, an upgrade previously left the entire route set
+    /// installed but *untracked*: the replacement binary started with an empty model, so no later
+    /// cleanup could ever remove them. In VPN Only that strands the `0.0.0.0/1`+`128.0.0.0/1`
+    /// catch-alls pointing at the local gateway — every subsequent connection silently leaves the
+    /// tunnel while the app reports itself healthy. That is the most likely mechanism behind the
+    /// "app is on but my public IP is my real one" reports.
+    ///
+    /// `signal(SIGTERM, SIG_IGN)` is required: the DispatchSource only observes the signal, it does
+    /// not suppress the default terminate-immediately disposition.
+    ///
+    /// This does not cover `kill -9` or a crash — nothing in-process can. The durable fix is a
+    /// helper-side journal swept at RunAtLoad, tracked separately.
+    private func installTerminationSignalHandler() {
+        for sig in [SIGTERM, SIGINT] {
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler {
+                Task { @MainActor in
+                    await RouteManager.shared.cleanupOnQuit()
+                    exit(0)
+                }
+            }
+            source.resume()
+            terminationSignalSources.append(source)
+        }
+    }
+
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Hide all UI immediately so quit feels instant
         NSApp.windows.forEach { $0.orderOut(nil) }

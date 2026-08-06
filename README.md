@@ -34,7 +34,7 @@ VPN Bypass intelligently routes selected services directly to the internet while
 ## Features
 
 - 🎯 **Menu bar app** — quick access to status, mode, and controls
-- 🧭 **Three routing modes** — **Bypass** (listed traffic skips the VPN), **VPN Only** (everything uses the VPN except what you list), and **Custom** (per-rule routing)
+- 🧭 **Three routing modes** — **Bypass** *(default)*: everything uses the VPN **except** the domains you list. **VPN Only**: the inverse — everything goes **direct** except the domains you list, which are forced through the VPN. **Custom**: per-rule routing.
 - 🌐 **Custom domains & built-in services** — add any domain, or toggle bundled service packs (Telegram, YouTube, WhatsApp, Spotify, Tailscale, and more)
 - 🧩 **Custom rules & routes** — map each domain, suffix, IP/CIDR, service, or process to a specific route; first match wins
 - 🔀 **Multiple egresses** — send traffic out the local gateway, a specific VPN interface (multi-VPN), an **HTTP/SOCKS5 proxy**, or a **Tailscale peer** used as an exit

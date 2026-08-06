@@ -1050,6 +1050,9 @@ final class RouteManager: ObservableObject {
 
         guard let gateway = localGateway else {
             log(.error, "No local gateway available")
+            NotificationManager.shared.notifyEnforcementFailed(
+                reason: String(localized: "No network gateway was detected, so no routes could be applied.")
+            )
             return
         }
 
@@ -1069,6 +1072,9 @@ final class RouteManager: ObservableObject {
         if isInverse {
             guard let vpnGw = vpnGateway else {
                 log(.error, "VPN Only mode requires a VPN gateway (is VPN connected?)")
+                NotificationManager.shared.notifyEnforcementFailed(
+                    reason: String(localized: "VPN Only needs a connected VPN. Nothing is being routed through the VPN right now.")
+                )
                 return
             }
             log(.info, "VPN Only mode: bypass-all via \(gateway), VPN domains via \(vpnGw)")
@@ -1237,6 +1243,9 @@ final class RouteManager: ObservableObject {
             }
         } else {
             log(.error, "Cannot add routes: helper not ready (\(HelperManager.shared.helperState.statusText))")
+            NotificationManager.shared.notifyEnforcementFailed(
+                reason: String(localized: "The privileged helper isn't ready, so no routes could be applied.")
+            )
             return
         }
 
@@ -2684,7 +2693,24 @@ final class RouteManager: ObservableObject {
                 // cleanup. A real gateway change is still applied — in place, without a window
                 // where the route is absent, which also removes a brief VPN-Only leak window
                 // the teardown used to open.
-                await applyAllRoutesInternal(sendNotification: false)
+                // forceReassert: re-assert every route against the KERNEL, not just against our
+                // in-memory model.
+                //
+                // 3.1.7 removed `removeAllRoutes()` from this path to stop the churn, but that
+                // teardown had a second, unnoticed job: it re-issued every route unconditionally,
+                // so any divergence between our model and the actual routing table self-healed on
+                // every interface change — exactly the event during which the kernel purges routes
+                // bound to a departing utun. Without it, `shouldSkipReapply` compares desired
+                // against our own bookkeeping, sees them equal, and performs ZERO kernel operations
+                // while the kernel no longer holds the routes at all. The only remaining recovery
+                // was the manual Refresh button.
+                //
+                // forceReassert restores that self-healing, and since 1.10.0 it is nearly free:
+                // the helper reads each route first and writes only the ones that actually differ,
+                // so a fully-correct set costs N reads and zero mutations — no route-change events,
+                // nothing for a coexisting VPN client to react to. This is what makes the 3.1.7 and
+                // 3.1.8 changes compose instead of cancelling each other out.
+                await applyAllRoutesInternal(sendNotification: false, forceReassert: true)
             }
         } else if localGateway == nil {
             log(.error, "Re-route needed but no gateway detected")

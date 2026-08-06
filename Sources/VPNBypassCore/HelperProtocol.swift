@@ -160,3 +160,38 @@ enum HelperAuthPolicy {
         return isValidCDHash ? trimmed : nil
     }
 }
+
+/// CIDR helpers shared by the app and the privileged helper.
+///
+/// These live here, rather than in `HelperTool.swift`, specifically so they are testable: the helper
+/// target is a root LaunchDaemon that is never linked into the test bundle, whereas this file is
+/// compiled into both. The helper's `routeAlreadyCorrect` depends on getting these exactly right —
+/// a wrong netmask makes it skip a route write that was genuinely needed, which is silent.
+public enum RouteCIDR {
+    /// Split `"10.0.0.0/8"` into `("10.0.0.0", 8)`. Returns nil for anything that is not a
+    /// well-formed IPv4 CIDR with a canonical, in-range prefix.
+    public static func parse(_ cidr: String) -> (network: String, prefixLength: Int)? {
+        let parts = cidr.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return nil }
+        let network = String(parts[0])
+        let prefixText = String(parts[1])
+        // Reject non-canonical forms ("08", "+8") so they can never round-trip to a different value
+        // than the one the caller believes it asked for.
+        guard let prefix = Int(prefixText), String(prefix) == prefixText, (0...32).contains(prefix) else { return nil }
+        let octets = network.split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4 else { return nil }
+        for octet in octets {
+            guard let value = Int(octet), String(value) == octet, (0...255).contains(value) else { return nil }
+        }
+        return (network, prefix)
+    }
+
+    /// Expand a prefix length into the dotted netmask `route(8)` prints, e.g. 1 -> "128.0.0.0",
+    /// 8 -> "255.0.0.0", 24 -> "255.255.255.0". A /0 is reported by `route` as "default", not
+    /// "0.0.0.0", so it is returned as such to match what we would be comparing against.
+    public static func netmaskString(prefixLength: Int) -> String {
+        guard (1...32).contains(prefixLength) else { return "default" }
+        let mask = UInt32.max << (32 - UInt32(prefixLength))
+        return "\((mask >> 24) & 0xFF).\((mask >> 16) & 0xFF).\((mask >> 8) & 0xFF).\(mask & 0xFF)"
+    }
+}
