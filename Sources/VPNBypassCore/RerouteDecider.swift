@@ -45,6 +45,14 @@ enum RerouteDecider {
     ///   installing routes (a local gateway present, the privileged helper ready).
     /// - If needed but any precondition is blocked → `.latch` (defer, don't drop).
     /// - If not needed → `.none` (blockers are irrelevant when there's nothing to do).
+    /// - Parameter gatewayChanged: the VPN's gateway address changed while the interface name did
+    ///   NOT. A tunnel that renegotiates keeps `utunN` but can come back on a different next-hop,
+    ///   and every other signal here is blind to that: `interfaceChanged` compares names, and the
+    ///   DNS refresh only schedules work for destinations it does not already track, so an
+    ///   already-installed route is never revisited. The route then stays pinned to a gateway that
+    ///   no longer exists — in VPN Only the listed destinations blackhole (ARP to a dead next-hop)
+    ///   rather than leak, so it fails safe, but it fails silently and does not self-heal.
+    ///   Defaulted so existing callers and the decision-table tests keep their meaning.
     static func decide(
         interfaceChanged: Bool,
         tailscaleChanged: Bool,
@@ -52,9 +60,10 @@ enum RerouteDecider {
         isLoading: Bool,
         isApplyingRoutes: Bool,
         cooldownActive: Bool,
-        hasGateway: Bool
+        hasGateway: Bool,
+        gatewayChanged: Bool = false
     ) -> RerouteAction {
-        let needed = interfaceChanged || tailscaleChanged || pending
+        let needed = interfaceChanged || tailscaleChanged || pending || gatewayChanged
         guard needed else { return .none }
 
         let canRunNow = !isLoading && !isApplyingRoutes && !cooldownActive && hasGateway
