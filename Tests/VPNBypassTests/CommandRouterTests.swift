@@ -173,7 +173,7 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertFalse(json.contains("cust-user"), "response JSON must never carry the raw username either")
     }
 
-    func testRouteAddMissingNameIsInvalidArgsAndUnrecognizedTypeDefaultsToHTTP() {
+    func testRouteAddMissingNameIsInvalidArgsAndAbsentTypeDefaultsToHTTP() {
         let config = RouteManager.Config()
 
         let (unchanged, badResp) = CommandRouter.apply(ControlRequest(cmd: "route.add"), to: config)
@@ -182,7 +182,7 @@ final class CommandRouterTests: XCTestCase {
 
         let (withRoute, okResp) = CommandRouter.apply(ControlRequest(cmd: "route.add", args: ["name": "Plain"]), to: config)
         XCTAssertTrue(okResp.ok)
-        XCTAssertEqual(withRoute.routes.first?.egress, .proxyHTTP, "absent/unrecognized type defaults to HTTP proxy")
+        XCTAssertEqual(withRoute.routes.first?.egress, .proxyHTTP, "ABSENT type defaults to HTTP proxy; an unrecognized one is now an error (see testRouteAddRejectsUnknownEgressType)")
     }
 
     // MARK: - route.rm
@@ -431,5 +431,48 @@ final class CommandRouterTests: XCTestCase {
                 XCTAssertFalse(json.contains(marker), "response leaked secret marker \(marker): \(json)")
             }
         }
+    }
+}
+
+// MARK: - CLI parity for VPN routes (pins)
+
+extension CommandRouterTests {
+
+    /// An unrecognized egress type must be an ERROR. It used to fall through to proxyHTTP
+    /// silently, so a typo (or the then-unsupported "vpn") built a proxy route with no host.
+    func testRouteAddRejectsUnknownEgressType() {
+        let (config, response) = CommandRouter.apply(
+            ControlRequest(cmd: "route.add", args: ["name": "r", "type": "bogus"]),
+            to: RouteManager.Config())
+        XCTAssertFalse(response.ok)
+        XCTAssertEqual(response.error?.code, "invalid_type")
+        XCTAssertTrue(config.routes.isEmpty, "an errored verb must not mutate")
+    }
+
+    /// `type=vpn` with an interface pin must land in config AND be visible in the sanitized
+    /// response — the scriptable surface previously could neither set nor display a pin.
+    func testRouteAddCanPinAVPNTunnel() {
+        let (config, response) = CommandRouter.apply(
+            ControlRequest(cmd: "route.add",
+                           args: ["name": "corp", "type": "vpn",
+                                  "interface": "utun9", "product": "GlobalProtect"]),
+            to: RouteManager.Config())
+        XCTAssertTrue(response.ok)
+        let added = config.routes.first { $0.name == "corp" }
+        XCTAssertEqual(added?.egress, .vpnDefault)
+        XCTAssertEqual(added?.vpnSelector?.kind, .interface)
+        XCTAssertEqual(added?.vpnSelector?.interfaceName, "utun9")
+        XCTAssertEqual(added?.vpnSelector?.productHint, "GlobalProtect")
+        XCTAssertEqual(response.result?.routes?.first?.vpnSelector?.interfaceName, "utun9",
+                       "vpnb status/route.list must be able to DISPLAY the pin")
+    }
+
+    /// A plain `type=vpn` without an interface is the automatic primary — no selector.
+    func testRouteAddPlainVPNHasNoSelector() {
+        let (config, response) = CommandRouter.apply(
+            ControlRequest(cmd: "route.add", args: ["name": "vpnauto", "type": "vpn"]),
+            to: RouteManager.Config())
+        XCTAssertTrue(response.ok)
+        XCTAssertNil(config.routes.first { $0.name == "vpnauto" }?.vpnSelector)
     }
 }

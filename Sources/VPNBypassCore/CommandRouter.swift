@@ -136,6 +136,9 @@ public struct SanitizedRoute: Codable, Equatable, Sendable {
     public var hasProxyUser: Bool
     public var hasPassword: Bool
     public var tailscaleExitNode: String?
+    /// The pinned tunnel of a VPN route (nil = primary/automatic) — previously omitted, so
+    /// the one scriptable surface could not even display a pin the GUI had created.
+    public var vpnSelector: VPNSelector?
     public var localListenPort: Int?
     /// The route's LIVE loopback listener port, if a forwarder is currently
     /// running for it (nil for non-proxy routes or ones not yet started).
@@ -151,6 +154,7 @@ public struct SanitizedRoute: Codable, Equatable, Sendable {
         hasProxyUser = !(route.proxyUser ?? "").isEmpty
         hasPassword = !(route.proxyPass ?? "").isEmpty
         tailscaleExitNode = route.tailscaleExitNode
+        vpnSelector = route.vpnSelector
         localListenPort = route.localListenPort
         self.listenerPort = listenerPort
     }
@@ -346,14 +350,27 @@ enum CommandRouter {
             validatedPort = p
         }
 
-        let route = Route(
+        guard let egress = parseEgressType(request.args?["type"]) else {
+            return errorResponse(config, code: "invalid_type",
+                                 message: "type must be one of: http, socks5, tailscale, vpn")
+        }
+
+        var route = Route(
             name: name,
-            egress: parseEgressType(request.args?["type"]),
+            egress: egress,
             proxyHost: request.args?["host"],
             proxyPort: validatedPort,
             proxyUser: request.args?["user"],
             proxyPass: request.secrets?["pass"]
         )
+        // A VPN route may pin a specific tunnel: `--interface utunX [--product "Label"]`.
+        // The label is the durable half — utun indices renumber across reconnects, and the
+        // resolver prefers the label match for exactly that reason.
+        if egress == .vpnDefault, let iface = request.args?["interface"], !iface.isEmpty {
+            route.vpnSelector = VPNSelector(kind: .interface,
+                                            interfaceName: iface,
+                                            productHint: request.args?["product"])
+        }
         var updated = config
         updated.routes.append(route)
         let sanitized = SanitizedRoute(route, listenerPort: listenerPorts[route.id])
@@ -487,11 +504,16 @@ enum CommandRouter {
         return isValidIPv4(String(parts[0]))
     }
 
-    private static func parseEgressType(_ s: String?) -> Egress {
+    /// nil (omitted) defaults to http. An UNRECOGNIZED string is an error — it used to fall
+    /// through to proxyHTTP silently, so `--type vpn` (a real egress the GUI can create) quietly
+    /// built a proxy route with no host instead of failing loudly.
+    private static func parseEgressType(_ s: String?) -> Egress? {
         switch s {
+        case nil, "http": return .proxyHTTP
         case "socks5": return .proxySOCKS5
         case "tailscale": return .tailscaleExit
-        default: return .proxyHTTP  // "http" and anything unrecognized
+        case "vpn": return .vpnDefault
+        default: return nil
         }
     }
 }
