@@ -90,6 +90,19 @@ final class ControlSurfaceTests: XCTestCase {
         XCTAssertTrue(ProxyListenerManager.shared.activePorts.isEmpty, "status must not start listeners")
     }
 
+    /// `status` must answer "is it actually working?" — live enforcement facts, not config
+    /// alone. In the test environment the helper is never ready, so the honest answer is
+    /// enforcing=false with helperReady=false; a config-only response could not say that.
+    func testStatusReportsLiveEnforcementFacts() async {
+        let resp = await ControlSurface.handle(ControlRequest(cmd: "status"))
+        XCTAssertTrue(resp.ok)
+        let runtime = resp.result?.runtime
+        XCTAssertNotNil(runtime, "status must carry the runtime block")
+        XCTAssertEqual(runtime?.helperReady, false, "no helper in tests — must be reported, not hidden")
+        XCTAssertEqual(runtime?.enforcing, false)
+        XCTAssertFalse(runtime?.helperState.isEmpty ?? true, "state text must name the reason")
+    }
+
     func testUnknownCommandErrorsWithoutMutating() async {
         var cfg = RouteManager.shared.config
         cfg.routes = [Route(name: "r", egress: .proxyHTTP, proxyHost: "h", proxyPort: 8001)]

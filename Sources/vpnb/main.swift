@@ -22,7 +22,7 @@ func printUsage() {
       vpnb <cmd> [key=value ...] [pass:-]
 
     Commands:
-      status                                    Mode, routes, and schema/version info
+      status                                    Mode, routes, live enforcement (helper/VPN/route facts)
       route.list                                List all routes
       route.set id=<uuid> [name=] [host=] [port=] [user=] [enabled=true|false] [pass:-]
                                                  Re-point a route's host/port/user/enabled/password

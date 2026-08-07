@@ -92,6 +92,33 @@ public struct ControlResult: Codable, Equatable, Sendable {
     public var supportedVersion: Int? = nil
     public var listenerPort: UInt16? = nil
     public var message: String? = nil
+    public var runtime: RuntimeStatus? = nil
+}
+
+/// Live enforcement facts for `status` — the answer to "is it actually working?", which the
+/// config-only response could not give: scripts (and bug reports) had no way to distinguish a
+/// healthy install from one whose helper was down and enforcing nothing.
+public struct RuntimeStatus: Codable, Equatable, Sendable {
+    public var helperReady: Bool
+    public var helperState: String
+    public var vpnConnected: Bool
+    public var vpnInterface: String? = nil
+    public var vpnType: String? = nil
+    public var enforcedRouteCount: Int
+    /// The single honest headline: VPN up AND helper ready AND routes installed.
+    public var enforcing: Bool
+
+    public init(helperReady: Bool, helperState: String, vpnConnected: Bool,
+                vpnInterface: String? = nil, vpnType: String? = nil,
+                enforcedRouteCount: Int, enforcing: Bool) {
+        self.helperReady = helperReady
+        self.helperState = helperState
+        self.vpnConnected = vpnConnected
+        self.vpnInterface = vpnInterface
+        self.vpnType = vpnType
+        self.enforcedRouteCount = enforcedRouteCount
+        self.enforcing = enforcing
+    }
 }
 
 /// Mirrors `Route` but never carries a credential value — the same discipline

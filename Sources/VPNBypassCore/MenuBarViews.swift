@@ -124,6 +124,7 @@ struct MenuContent: View {
     @EnvironmentObject var routeManager: RouteManager
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
+    @ObservedObject private var helperManager = HelperManager.shared
     @State private var newDomain = ""
     @State private var isAddingDomain = false
     @State private var isVerifying = false
@@ -143,6 +144,7 @@ struct MenuContent: View {
         VStack(spacing: 0) {
             // App title
             titleHeader
+            helperDownBanner
             
             // Header with VPN status
             headerSection
@@ -213,25 +215,72 @@ struct MenuContent: View {
             
             Spacer()
             
-            // Live status indicator
+            // Live status indicator.
+            //
+            // "ON" is a claim about ENFORCEMENT, not about the VPN: with the helper down this
+            // app enforces nothing, and showing a green ON next to "VPN Connected" while zero
+            // routes were installed is exactly how a broken install looked healthy for weeks.
             HStack(spacing: 4) {
                 Circle()
-                    .fill(routeManager.isVPNConnected ? Theme.success : Theme.error)
+                    .fill(statusPill.color)
                     .frame(width: 6, height: 6)
-                    .shadow(color: routeManager.isVPNConnected ? Theme.success.opacity(0.6) : Theme.error.opacity(0.6), radius: 3)
+                    .shadow(color: statusPill.color.opacity(0.6), radius: 3)
 
-                Text(routeManager.isVPNConnected ? String(localized: "ON") : String(localized: "OFF"))
+                Text(statusPill.label)
                     .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundColor(routeManager.isVPNConnected ? Theme.success : Theme.error)
+                    .foregroundColor(statusPill.color)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
                 Capsule()
-                    .fill(routeManager.isVPNConnected ? Theme.success.opacity(0.15) : Theme.error.opacity(0.15))
+                    .fill(statusPill.color.opacity(0.15))
             )
         }
         .padding(.bottom, 12)
+    }
+
+    /// What the pill may honestly claim right now.
+    private var statusPill: (label: String, color: Color) {
+        guard routeManager.isVPNConnected else {
+            return (String(localized: "OFF"), Theme.error)
+        }
+        if !helperManager.helperState.isReady {
+            return (String(localized: "NOT ENFORCING"), Theme.warning)
+        }
+        if routeManager.activeRoutes.isEmpty {
+            return (String(localized: "NO ROUTES"), Theme.warning)
+        }
+        return (String(localized: "ON"), Theme.success)
+    }
+
+    /// Shown at the top of the dropdown whenever the helper cannot enforce anything while a
+    /// VPN is connected — the state that used to be one log line nobody saw.
+    @ViewBuilder
+    private var helperDownBanner: some View {
+        if routeManager.isVPNConnected && !helperManager.helperState.isReady {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(Theme.warning)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "Helper not running — nothing is being routed"))
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(helperManager.helperState.statusText)
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Button(String(localized: "Fix…")) {
+                    openSettings()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.warning.opacity(0.12)))
+            .padding(.bottom, 8)
+        }
     }
     
     // MARK: - Header
