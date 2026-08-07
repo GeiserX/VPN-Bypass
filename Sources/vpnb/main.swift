@@ -28,7 +28,8 @@ func printUsage() {
                                                  Re-point a route's host/port/user/enabled/password
       route.enable id=<uuid>                    Enable a route
       route.disable id=<uuid>                   Disable a route
-      route.add name=<name> [type=http|socks5|tailscale] [host=] [port=] [user=] [pass:-]
+      route.add name=<name> [type=http|socks5|tailscale|vpn] [host=] [port=] [user=] [pass:-]
+                                                [interface=utunX] [product=<label>]  (type=vpn: pin a tunnel)
                                                  Add a new route
       route.rm id=<uuid>                        Remove a route
       rule.list                                 List all rules
