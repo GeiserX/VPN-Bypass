@@ -162,3 +162,48 @@ final class VPNInterfaceSelectorTests: XCTestCase {
         XCTAssertNil(VPNInterfaceSelector.parseDefaultRouteInterface("route: writing to routing socket: not in table"))
     }
 }
+
+// MARK: - User pin (constrains, never invents)
+
+extension VPNInterfaceSelectorTests {
+
+    private func c2(_ iface: String, up: Bool = true, corp: Bool = true, ts: Bool = false) -> VPNCandidate {
+        VPNCandidate(interface: iface, isUp: up, isTunnel: true, isCorporateAddress: corp, isTailscale: ts)
+    }
+
+    /// An eligible pinned tunnel wins outright — including over the default-route holder.
+    /// That is the point of a pin: the user has declared which VPN this app manages.
+    func testEligiblePinWinsOverDefaultRouteHolder() {
+        let picked = VPNInterfaceSelector.select(
+            candidates: [c2("utun3"), c2("utun9")],
+            defaultRouteInterface: "utun3", current: nil, pinnedInterface: "utun9")
+        XCTAssertEqual(picked, "utun9")
+    }
+
+    /// A stale pin (tunnel gone) must degrade to AUTOMATIC selection, not disable the app.
+    func testStalePinFallsBackToAutomatic() {
+        let picked = VPNInterfaceSelector.select(
+            candidates: [c2("utun3")],
+            defaultRouteInterface: "utun3", current: nil, pinnedInterface: "utun9")
+        XCTAssertEqual(picked, "utun3", "fail open to automatic — the caller logs the disagreement")
+    }
+
+    /// Pinning Tailscale's tunnel must not work: the pin constrains the ELIGIBLE set, and
+    /// Tailscale is excluded from eligibility before the pin is consulted.
+    func testPinCannotResurrectTailscale() {
+        let picked = VPNInterfaceSelector.select(
+            candidates: [c2("utun4", ts: true), c2("utun9")],
+            defaultRouteInterface: nil, current: nil, pinnedInterface: "utun4")
+        XCTAssertEqual(picked, "utun9")
+    }
+
+    /// No pin = exactly the automatic behaviour (regression guard on the default argument).
+    func testNilPinIsPureAutomatic() {
+        let auto = VPNInterfaceSelector.select(
+            candidates: [c2("utun3"), c2("utun9")], defaultRouteInterface: "utun9", current: nil)
+        let explicit = VPNInterfaceSelector.select(
+            candidates: [c2("utun3"), c2("utun9")], defaultRouteInterface: "utun9", current: nil, pinnedInterface: nil)
+        XCTAssertEqual(auto, explicit)
+        XCTAssertEqual(auto, "utun9")
+    }
+}
