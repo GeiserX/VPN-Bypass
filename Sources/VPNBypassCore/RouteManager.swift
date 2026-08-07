@@ -836,6 +836,36 @@ final class RouteManager: ObservableObject {
     /// (`vpnInterface`/`vpnType`) that classic modes rely on — that path is untouched.
     /// The Tailscale utun is flagged so it isn't offered as a plain VPN egress
     /// (Tailscale egress has its own peer-proxy route type).
+    /// A tunnel seen at some point on this machine. Kept so a route or a pin can name a VPN
+    /// that is not connected at this moment — live enumeration only ever reports tunnels that
+    /// are UP, which made it impossible to pre-configure a VPN you were not currently using.
+    struct RememberedLink: Codable, Equatable, Identifiable {
+        let interface: String
+        let label: String
+        var id: String { interface }
+    }
+
+    /// Live tunnels merged with previously-seen ones (deduplicated, live first). `isLive`
+    /// tells the UI which are connected right now.
+    func selectableVPNLinks() async -> [(link: RememberedLink, isLive: Bool)] {
+        let live = await listVPNLinks().filter { !$0.isTailscale }
+        var out = live.map { (RememberedLink(interface: $0.interface, label: $0.label), true) }
+        // Record what we just saw, so it stays offerable after the VPN disconnects.
+        var remembered = config.rememberedVPNLinks
+        for l in live where !remembered.contains(where: { $0.interface == l.interface && $0.label == l.label }) {
+            remembered.removeAll { $0.interface == l.interface }
+            remembered.append(RememberedLink(interface: l.interface, label: l.label))
+        }
+        if remembered != config.rememberedVPNLinks {
+            config.rememberedVPNLinks = remembered
+            saveConfig()
+        }
+        for r in remembered where !out.contains(where: { $0.0.interface == r.interface }) {
+            out.append((r, false))
+        }
+        return out
+    }
+
     /// Everything the coexistence diagnostics card shows, gathered in one pass.
     struct CoexistenceSnapshot: Equatable {
         let links: [VPNLink]
@@ -3937,6 +3967,10 @@ final class RouteManager: ObservableObject {
         let name: String
         let ip: String
         let online: Bool
+        /// The peer advertises itself as a Tailscale exit node (`ExitNodeOption`). Worth
+        /// showing because it is usually a tiny minority of a tailnet, and because it is the
+        /// only peer class that can carry general internet traffic without extra setup.
+        let exitNodeCapable: Bool
         var id: String { ip }
     }
 
@@ -3954,10 +3988,15 @@ final class RouteManager: ObservableObject {
                 ?? (peer["DNSName"] as? String)?.components(separatedBy: ".").first
                 ?? ip4
             let online = (peer["Online"] as? Bool) ?? false
-            out.append(TailscalePeer(name: host, ip: ip4, online: online))
+            let exitCapable = (peer["ExitNodeOption"] as? Bool) ?? false
+            out.append(TailscalePeer(name: host, ip: ip4, online: online, exitNodeCapable: exitCapable))
         }
+        // Exit-capable first, then online, then alphabetical — the ordering that puts the
+        // peers that can actually carry traffic at the top of a 17-device list.
         return out.sorted { a, b in
-            a.online != b.online ? a.online : a.name.lowercased() < b.name.lowercased()
+            if a.exitNodeCapable != b.exitNodeCapable { return a.exitNodeCapable }
+            if a.online != b.online { return a.online }
+            return a.name.lowercased() < b.name.lowercased()
         }
     }
 
