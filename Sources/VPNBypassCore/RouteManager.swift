@@ -1632,7 +1632,18 @@ final class RouteManager: ObservableObject {
                     }
                 }
             } else {
-                log(.error, "Cannot remove routes: helper not ready (\(HelperManager.shared.helperState.statusText))")
+                log(.error, "Cannot remove routes: helper not ready (\(HelperManager.shared.helperState.statusText)) — retaining \(destinations.count) route(s) in the model so they can still be removed later")
+                // Every destination is still installed in the kernel: the helper never ran, so
+                // nothing was removed. Treat them ALL as failed.
+                //
+                // Falling through with an empty `failedDests` reached `activeRoutes.removeAll()`
+                // below, which stranded the routes AND destroyed the only record that they are
+                // ours — route ownership lives nowhere else. That is reachable on an ordinary
+                // quit (the helper can be booted out, or simply not ready), and it strands
+                // silently, immediately after logging that cleanup was impossible. In VPN Only
+                // the survivors can include the catch-alls, which then steer every connection
+                // around the tunnel with nothing left able to identify or remove them.
+                failedDests.formUnion(destinations)
             }
         }
 
@@ -3563,16 +3574,25 @@ final class RouteManager: ObservableObject {
     }
     
     private func detectLocalGateway() async -> String? {
-        // Try common network services
-        let services = ["Wi-Fi", "Ethernet", "USB 10/100/1000 LAN", "Thunderbolt Ethernet", "USB-C LAN"]
-        
-        for service in services {
-            if let gateway = await getGatewayForService(service) {
-                return gateway
+        // Enumerate the machine's ACTUAL network services, in macOS's own order.
+        //
+        // This used to try a hardcoded list — "Wi-Fi", "Ethernet", "USB 10/100/1000 LAN",
+        // "Thunderbolt Ethernet", "USB-C LAN". Any Mac whose active link is named something else
+        // matched nothing, which is the common case for docks: "USB3.0 5K Graphic Docking",
+        // "Dell Universal Dock D6000". Detection then fell through to the route table, and once a
+        // VPN is connected the default route's gateway is the VPN'S OWN tunnel gateway. Every
+        // "bypass" route was then installed pointing INTO the tunnel — bypassing nothing — and
+        // every VPN state change moved the gateway, so the whole route set was torn down and
+        // rebuilt on each flap. Enumerating the real services removes the guesswork entirely.
+        if let listing = await runProcessAsync("/usr/sbin/networksetup", arguments: ["-listnetworkserviceorder"], timeout: 5.0) {
+            for service in NetworkServiceOrder.parse(listing.output) {
+                if let gateway = await getGatewayForService(service) {
+                    return gateway
+                }
             }
         }
-        
-        // Fallback: parse route table
+
+        // Fallback: parse the route table, refusing a tunnel (see parseDefaultGateway).
         return await parseDefaultGateway()
     }
     
@@ -3756,16 +3776,29 @@ final class RouteManager: ObservableObject {
             return nil
         }
 
+        // Refuse a default route that exits through a TUNNEL. Once a VPN is connected it owns the
+        // default route, so this would hand back the VPN's own gateway as our "local" gateway —
+        // and every bypass route built on it would be routed straight back into the tunnel it is
+        // supposed to avoid. Returning nil is the safe answer: the apply paths already refuse to
+        // install without a gateway and say so, which is a visible failure rather than a silent
+        // one that quietly stops bypassing while reporting success.
+        var iface: String?
+        var gateway: String?
         for line in result.output.components(separatedBy: "\n") {
-            if line.contains("gateway:") {
-                let parts = line.components(separatedBy: ":")
-                if parts.count >= 2 {
-                    let gateway = parts[1].trimmingCharacters(in: .whitespaces)
-                    if isValidIP(gateway) {
-                        return gateway
-                    }
-                }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("interface:") {
+                iface = String(trimmed.dropFirst("interface:".count)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("gateway:") {
+                gateway = String(trimmed.dropFirst("gateway:".count)).trimmingCharacters(in: .whitespaces)
             }
+        }
+
+        if let iface, isVPNInterface(iface) {
+            log(.warning, "Default route exits via \(iface) (a tunnel) — not using it as the local gateway")
+            return nil
+        }
+        if let gateway, isValidIP(gateway) {
+            return gateway
         }
 
         return nil
