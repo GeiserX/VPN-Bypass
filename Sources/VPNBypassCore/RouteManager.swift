@@ -474,10 +474,24 @@ final class RouteManager: ObservableObject {
             // return on a new gateway; nothing else notices, because interfaceChanged compares
             // names and the DNS refresh only schedules destinations it does not already track. The
             // routes would stay pinned to a gateway that no longer exists.
+            // Only a change of ADDRESS counts, never a change of NOTATION.
+            //
+            // detectVPNGateway returns the next-hop IP when it can read one and falls back to the
+            // `iface:<name>` form when it cannot — so the same unchanged tunnel is reported as
+            // "10.167.222.191" on one pass and "iface:utun9" on the next. Comparing those as
+            // strings makes that flip look like a real gateway change, and the re-route it triggers
+            // re-issues the ENTIRE route set: observed as `VPN gateway changed on utun9:
+            // 10.167.222.191 → iface:utun9` followed immediately by `Adding 317 routes`, roughly
+            // ten seconds after GlobalProtect reconnected — hundreds of route-change events fired
+            // straight into the tunnel monitor that had just come up, which tore it down again.
+            //
+            // Both forms are only ever produced for the SAME interface, and `interface ==
+            // oldInterface` is already required above, so when either side is the `iface:` fallback
+            // the two are by construction the same gateway. Requiring both to be real addresses
+            // means we act on a genuine next-hop change and ignore the notation flip.
             let gatewayChanged = isVPNConnected && wasVPNConnected
                 && interface == oldInterface
-                && oldVPNGateway != nil && vpnGateway != nil
-                && oldVPNGateway != vpnGateway
+                && Self.isRealGatewayChange(from: oldVPNGateway, to: vpnGateway)
 
             let rerouteReason: String? = interfaceChanged
                 ? "VPN interface changed: \(oldInterface ?? "?") → \(interface ?? "?")"
@@ -894,6 +908,25 @@ final class RouteManager: ObservableObject {
     }
     
     /// Check if this IP is the local Tailscale node's address
+    /// True only when the VPN's next-hop ADDRESS genuinely changed — never when its NOTATION did.
+    ///
+    /// Callers must already have established that the interface is unchanged.
+    ///
+    /// `detectVPNGateway` reports the next-hop IP when it can read one and falls back to the
+    /// `iface:<name>` form when it cannot, so an unchanged tunnel alternates between
+    /// "10.167.222.191" and "iface:utun9" from pass to pass. Treating that as a change triggers a
+    /// re-route that re-issues the entire route set — observed live as 317 route writes ten seconds
+    /// after GlobalProtect reconnected, which tore the freshly-established tunnel down again.
+    ///
+    /// Since both forms describe the same interface, and the caller has already required the
+    /// interface to be unchanged, either side being the fallback form means the gateway is by
+    /// construction the same. Only two real addresses can express a real change.
+    nonisolated static func isRealGatewayChange(from old: String?, to new: String?) -> Bool {
+        guard let old, let new else { return false }
+        guard !old.hasPrefix("iface:"), !new.hasPrefix("iface:") else { return false }
+        return old != new
+    }
+
     /// Whether a CGNAT (100.64/10) address belongs to Tailscale — keeping "could not tell" DISTINCT
     /// from "confirmed it does not".
     ///
