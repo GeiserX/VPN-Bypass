@@ -101,15 +101,23 @@ final class ClassicRouteCompilerTests: XCTestCase {
 
     // MARK: - VPN Only mode
 
-    func testVPNOnlyInjectsCatchAllThroughLocalGatewayFirst() {
+    /// The catch-alls must be installed LAST, and this ordering is leak-critical rather than
+    /// cosmetic. The helper writes `routesToAdd` strictly in order, one subprocess per route, so
+    /// emitting the catch-alls first pointed ALL traffic at the local gateway while the listed
+    /// destinations still had no VPN route — the exact destinations the user asked to protect went
+    /// out in the clear for the length of the apply. Teardown already removes catch-alls first (so
+    /// traffic falls back INTO the VPN default); this is the same principle at the other end.
+    ///
+    /// Note `allSourceEntries` (ownership bookkeeping, not install order) is unchanged.
+    func testVPNOnlyInstallsCatchAllLastSoVPNRoutesLandFirst() {
         let b = C.build(isInverse: true, localGateway: local, routeGateway: vpn,
                         inverseCIDRs: [],
                         resolvedGroups: [C.ResolvedGroup(source: "x.com", ips: ["3.3.3.3"])],
                         serviceRanges: [])
         XCTAssertEqual(b.routesToAdd, [
+            route("3.3.3.3", vpn, false, "x.com"),   // domain IP rides the VPN gateway — installed FIRST
             route("0.0.0.0/1", local, true, "VPN Only catch-all"),
             route("128.0.0.0/1", local, true, "VPN Only catch-all"),
-            route("3.3.3.3", vpn, false, "x.com"),   // domain IP rides the VPN gateway
         ])
         XCTAssertEqual(b.allSourceEntries, [
             entry("0.0.0.0/1", local, "VPN Only catch-all"),
@@ -118,14 +126,32 @@ final class ClassicRouteCompilerTests: XCTestCase {
         ])
     }
 
-    func testVPNOnlyInverseCIDRsRideRouteGatewayAfterCatchAll() {
+    func testVPNOnlyInverseCIDRsAreInstalledBeforeTheCatchAll() {
         let b = C.build(isInverse: true, localGateway: local, routeGateway: vpn,
                         inverseCIDRs: ["172.16.0.0/12"], resolvedGroups: [], serviceRanges: [])
         XCTAssertEqual(b.routesToAdd, [
+            route("172.16.0.0/12", vpn, true, "172.16.0.0/12"),
             route("0.0.0.0/1", local, true, "VPN Only catch-all"),
             route("128.0.0.0/1", local, true, "VPN Only catch-all"),
-            route("172.16.0.0/12", vpn, true, "172.16.0.0/12"),
         ])
+    }
+
+    /// Guards the invariant directly, independent of the exact route set: whatever else is being
+    /// installed, no catch-all may precede a non-catch-all.
+    func testNoCatchAllIsInstalledBeforeAnyProtectedRoute() {
+        let b = C.build(isInverse: true, localGateway: local, routeGateway: vpn,
+                        inverseCIDRs: ["172.16.0.0/12", "10.1.0.0/16"],
+                        resolvedGroups: [C.ResolvedGroup(source: "a.com", ips: ["4.4.4.4", "5.5.5.5"])],
+                        serviceRanges: [])
+        let catchAlls: Set<String> = ["0.0.0.0/1", "128.0.0.0/1"]
+        let firstCatchAll = b.routesToAdd.firstIndex { catchAlls.contains($0.destination) }
+        let lastProtected = b.routesToAdd.lastIndex { !catchAlls.contains($0.destination) }
+        XCTAssertNotNil(firstCatchAll, "VPN Only must install catch-alls")
+        if let first = firstCatchAll, let last = lastProtected {
+            XCTAssertGreaterThan(first, last,
+                "every VPN-bound route must be installed before the first catch-all, or traffic to "
+                + "those destinations egresses the local gateway for the duration of the apply")
+        }
     }
 
     func testVPNOnlyDuplicateInverseCIDRDeduped() {

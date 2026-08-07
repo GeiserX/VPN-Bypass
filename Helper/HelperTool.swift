@@ -599,7 +599,10 @@ class HelperTool: NSObject, HelperProtocol {
             guard parts.count == 2,
                   isValidIP(parts[0]),
                   let mask = Int(parts[1]),
-                  mask >= 0 && mask <= 32 else {
+                  mask >= 1 && mask <= 32 else {
+            // /0 is the entire default route. The app-side validator already rejects it; the root
+            // daemon must never be the MORE permissive layer, or a caller that slipped past the app
+            // could hand the kernel a route that captures everything.
                 return false
             }
             return true

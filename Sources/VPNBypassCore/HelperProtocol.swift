@@ -87,6 +87,16 @@ struct HelperConstants {
     // self-heals a missing/stale pin by reinstalling. Bumped from 1.7.0 so existing
     // (possibly pin-less, identifier-only) helpers detect the mismatch and reinstall to
     // the fail-closed + guaranteed-pin build.
+    // 1.11.0: fixes a way the 1.10.0 read-before-write check could skip a route it should have
+    // written. It ignored `flags:` entirely, so a kernel-CLONED route (the default route carries
+    // PRCLONING, so macOS mints ephemeral host routes inheriting the parent's gateway) echoed back
+    // our exact destination with a matching gateway and was accepted as "already correct" — we
+    // skipped the write, recorded the route as applied, and the clone then expired. Silent. It now
+    // rejects WASCLONED/REJECT/BLACKHOLE and requires the matched route to be the KIND being
+    // installed. Network routes are no longer excluded from the check either (they were, so VPN
+    // Only rewrote both catch-alls on every apply). Also bounds the wait on every `route`
+    // subprocess — since 1.9.0 one wedged child would block the whole serial mutation queue for the
+    // life of the daemon — and rejects /0 at the privileged boundary, which the app already did.
     // 1.10.0: the helper now READS before it writes (#65). Callers re-apply the same route set
     // constantly (DNS refresh, failed-domain retries, status passes); 1.9.0 still issued a
     // `route change` for every one of those, and every write is a kernel route-change event that
@@ -102,7 +112,7 @@ struct HelperConstants {
     // replaces only as a last resort. Route/hosts mutations are also serialised across XPC
     // connections (concurrent handlers were producing simultaneous /sbin/route processes), and the
     // helper finally emits os_log records. Bumped from 1.8.0 so installed helpers pick this up.
-    static let helperVersion = "1.10.0"
+    static let helperVersion = "1.11.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

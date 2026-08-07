@@ -60,10 +60,12 @@ final class RouteManager: ObservableObject {
     private var lastTailscaleSelfFingerprint: String?
     
     
-    private var dnsCacheURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("VPNBypass/dns-cache.json")
-    }
+    /// Set once in init from the SAME directory as `configURL`, so it follows the under-test
+    /// redirect. It used to be a computed property that always resolved to the real Application
+    /// Support path, which meant every `swift test` run read — and via saveDNSCache could write —
+    /// the developer's live DNS cache. `configURL` was already fixed for exactly this reason; this
+    /// was the same hole in a sibling property that never got the same treatment.
+    private let dnsCacheURL: URL
     
     /// Public accessor for UI to display detected DNS server
     var detectedDNSServerDisplay: String? {
@@ -127,6 +129,7 @@ final class RouteManager: ObservableObject {
         }
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
         configURL = appDir.appendingPathComponent("config.json")
+        dnsCacheURL = appDir.appendingPathComponent("dns-cache.json")
     }
     
     // MARK: - Public API
@@ -1037,9 +1040,37 @@ final class RouteManager: ObservableObject {
     /// route monitor and tears the tunnel down (the original incident), so EVERY
     /// route-applying path must refuse it. Returns true (and logs) when the apply
     /// should be skipped.
+    /// Catch-alls this app currently believes it owns. Used by the GlobalProtect refusal so it can
+    /// remove what is already installed rather than only declining to add more.
+    private var installedCatchAllDestinations: [String] {
+        let catchAlls = Set(RouteCompiler.catchAllDestinations)
+        return activeRoutes.map { $0.destination }.filter { catchAlls.contains($0) }
+    }
+
     private func refuseVPNOnlyUnderGlobalProtect() -> Bool {
         guard config.routingMode == .vpnOnly, vpnType == .globalProtect else { return false }
         log(.error, "VPN Only mode is disabled under GlobalProtect — its catch-all routes would tear down the GP tunnel. Use Bypass mode instead.")
+
+        // Refusing to ADD is not enough on its own. GlobalProtect can come up *after* VPN Only has
+        // already installed its catch-alls (vpnType is detected from running processes, so it flips
+        // mid-session), and the flap suppressor can turn a VPN swap into "still connected, new
+        // interface" so the disconnect teardown never runs. The refusal then returned early and left
+        // `0.0.0.0/1` + `128.0.0.0/1` pointing at the LOCAL gateway — more specific than GP's
+        // default, so 100% of traffic silently left the tunnel while the app reported itself
+        // healthy, and nothing would ever remove them. A guard that declines to add but tolerates
+        // what is already there is not a guard.
+        let stranded = installedCatchAllDestinations
+        if !stranded.isEmpty {
+            log(.warning, "Removing \(stranded.count) stranded VPN Only catch-all route(s) — they would route all traffic around GlobalProtect")
+            Task { @MainActor in
+                let result = await self.removeRoutesBatchVia(stranded)
+                let removed = Set(stranded).subtracting(result.failedDestinations)
+                self.activeRoutes.removeAll { removed.contains($0.destination) }
+                NotificationManager.shared.notifyEnforcementFailed(
+                    reason: String(localized: "VPN Only isn't available while GlobalProtect is connected. Its catch-all routes were removed so your traffic stays in the tunnel. Switch to Bypass mode.")
+                )
+            }
+        }
         return true
     }
 
