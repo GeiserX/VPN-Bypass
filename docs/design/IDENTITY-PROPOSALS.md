@@ -17,10 +17,28 @@ Each block shows, left to right: **menu bar (active)** · **menu bar (idle)** ·
 
 ## The decision that matters most: the menu bar at real size
 
-An 18-pixel glyph is where most icons fall apart, so judge here first. This is actual size, on
-both a light and a dark menu bar, with the active and idle state of each direction side by side:
+An 18-pixel glyph is where most icons fall apart, so judge here first. Actual size, on a light
+and a dark menu bar — **active** then **idle** for each direction:
 
 ![Menu bar icons at actual size](images/menubar-actual-size.png)
+
+### How idle is shown (revised)
+
+The first attempt made idle a hollow outline of the same mark. At 18px that was **not
+distinguishable from active** — you could not tell whether the app was routing without
+comparing the two side by side, which you never get to do in a real menu bar.
+
+So idle is now a **different silhouette, not a lighter one**: the obstacle stays, the traffic
+disappears. Lanes loses its arrow and stops at the wall; Tunnel loses the line going over it;
+Orbit's swoosh drops to a bare ring; Arch's span collapses to its feet. A small dim is applied
+on top, but the shape alone carries the state — no comparison required.
+
+Three treatments were built and tested at true size before choosing (active, dimmed, hollow,
+dashed — left to right per direction):
+
+![Idle treatments tested](images/idle-treatments-tested.png)
+
+Dashed fragments turned to mush and hollow read as active; only a real silhouette change worked.
 
 ---
 
@@ -31,8 +49,9 @@ in these proposals:
 
 - **The count is removed.** It moved with DNS churn rather than with anything you did, so at a
   glance it was noise.
-- **State is the same mark, filled or hollow.** Solid = actively routing. Hollow = idle or no
-  VPN. One shape, two weights — nothing flips to a different icon, and there is no badge.
+- **State is the same mark, whole or reduced.** Complete mark = actively routing. Reduced mark
+  (obstacle only, traffic gone) = idle or no VPN. Same family, no badge, and legible at 18px
+  without comparing against anything.
 - A problem (helper down, nothing being enforced) is the only case that changes anything more,
   and it is stated in words in the dropdown rather than encoded in a glyph.
 
