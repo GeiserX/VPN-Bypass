@@ -2380,7 +2380,7 @@ struct InfoTab: View {
     }
     
     private var appInfoSection: some View {
-        VStack(alignment: .center, spacing: 12) {
+        VStack(alignment: .center, spacing: 10) {
             // App logo from bundle
             if let logoPath = Bundle.main.path(forResource: "VPNBypass", ofType: "png"),
                let nsImage = NSImage(contentsOfFile: logoPath) {
@@ -2388,27 +2388,33 @@ struct InfoTab: View {
                     .interpolation(.high)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 80, height: 80)
+                    .frame(width: 96, height: 96)
+                    .clipShape(RoundedRectangle(cornerRadius: 21.6, style: .continuous))
+                    .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
             } else {
-                Image(systemName: "shield.checkered")
+                Image(systemName: "arrow.right")
                     .font(.system(size: 48))
-                    .foregroundStyle(Theme.Brand.blueGradient)
+                    .foregroundColor(Theme.Brand.sky)
             }
-            
-            // App name with branded colors
-            BrandedAppName(fontSize: 24)
-            
+
+            // Type only — the icon directly above IS the mark. Repeating it here duplicated
+            // the mark and, because a mark+type lockup centres as one unit, left the type
+            // visibly off-centre under the icon.
+            BrandedAppName(fontSize: 26)
+                .padding(.top, 2)
+
             Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")")
-                .font(.system(size: 12, design: .monospaced))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundColor(Theme.textTertiary)
 
             Text("Route specific traffic around your corporate VPN")
                 .font(.system(size: 13))
                 .foregroundColor(Theme.textSecondary)
                 .multilineTextAlignment(.center)
+                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
+        .padding(.vertical, 26)
     }
     
     private var authorSection: some View {
@@ -2763,31 +2769,24 @@ struct BrandedTitlebarView: View {
         HStack {
             Spacer()
 
-            HStack(spacing: 6) {
-                // App logo from bundle
-                if let logoPath = Bundle.main.path(forResource: "VPNBypass", ofType: "png"),
-                   let nsImage = NSImage(contentsOfFile: logoPath) {
-                    Image(nsImage: nsImage)
-                        .interpolation(.high)
+            // The FLAT mark, tinted — not the squircle app icon scaled to 18px, which turns to
+            // mud at that size because its gradient ground and rounded shape carry no detail
+            // there. The title bar is exactly what the template glyph is drawn for.
+            HStack(spacing: 7) {
+                if let mark = Bundle.main.image(forResource: "menubar-icon-active") {
+                    Image(nsImage: mark)
+                        .renderingMode(.template)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 18, height: 18)
+                        .frame(width: 15, height: 15)
+                        .foregroundColor(Theme.Brand.sky)
                 } else {
-                    Image(systemName: "shield.checkered")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.Brand.blueGradient)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(Theme.Brand.sky)
                 }
 
-                // Branded name
-                HStack(spacing: 0) {
-                    Text("VPN")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Brand.blueGradient)
-
-                    Text("Bypass")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Theme.Brand.silverGradient)
-                }
+                BrandedAppName(fontSize: 13)
             }
 
             Spacer()

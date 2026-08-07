@@ -103,9 +103,13 @@ struct MenuBarLabel: View {
 
 struct BrandedAppName: View {
     var fontSize: CGFloat = 15
-    /// Show the mark alongside the type (the full lockup). Off where the mark would repeat
-    /// something already on screen.
-    var showsMark: Bool = true
+    /// Show the mark alongside the type (the full lockup).
+    ///
+    /// Defaults OFF. Every surface that shows this wordmark already has the mark nearby — the
+    /// app icon above it, or the menu bar icon it hangs from — so showing it again duplicated
+    /// the mark AND pushed the type off-centre, because the lockup centres as one unit while
+    /// the icon above centres on its own.
+    var showsMark: Bool = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -120,9 +124,13 @@ struct BrandedAppName: View {
             }
             // Weight contrast, not colour contrast, carries the lockup — the same relationship
             // the banner and app icon use, so the three read as one identity.
+            //
+            // The gap is required: set solid, "VPN"+"Bypass" reads as one word, "VPNBypass".
+            // The banner has always had this gap; the SwiftUI lockup was missing it.
             Text("VPN")
                 .font(.system(size: fontSize, weight: .heavy, design: .rounded))
                 .foregroundColor(Theme.textPrimary)
+                .padding(.trailing, fontSize * 0.16)
 
             Text("Bypass")
                 .font(.system(size: fontSize, weight: .light, design: .rounded))
