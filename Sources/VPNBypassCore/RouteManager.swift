@@ -561,6 +561,8 @@ final class RouteManager: ObservableObject {
             //
             // VPN Only keeps the full teardown: its catch-alls are leak-critical and its listed
             // destinations point at a gateway that is now gone, so there is nothing worth keeping.
+            var keptCount = 0
+            var failedCount = 0
             if config.routingMode == .bypass {
                 let stale = Self.vpnBoundDestinations(
                     activeRoutes: activeRoutes,
@@ -569,20 +571,28 @@ final class RouteManager: ObservableObject {
                 )
                 if stale.isEmpty {
                     log(.info, "VPN gone; \(activeRoutes.count) bypass route(s) still egress the local gateway — keeping them")
+                    keptCount = activeRoutes.count
                 } else {
                     log(.info, "VPN gone; removing \(stale.count) VPN-bound route(s), keeping \(activeRoutes.count - stale.count) local-gateway route(s)")
                     let result = await removeRoutesBatchVia(stale)
                     let removed = Set(stale).subtracting(result.failedDestinations)
                     activeRoutes.removeAll { removed.contains($0.destination) }
+                    failedCount = result.failedDestinations.count
+                    keptCount = activeRoutes.count - failedCount
                 }
             } else {
                 await removeAllRoutes()
+                // Whatever teardown retained is a genuine failed removal (see removeAllRoutes).
+                failedCount = activeRoutes.count
             }
             routeVerificationResults.removeAll()
             lastTailscaleSelfFingerprint = nil
             vpnGateway = nil
-            // Notify after cleanup so notification reflects actual state
-            NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface, routesRemaining: activeRoutes.count)
+            // Notify after cleanup so the notification reflects the ACTUAL state — and names
+            // kept-by-design separately from failed-removal.
+            NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface,
+                                                             routesKept: keptCount,
+                                                             routesFailed: failedCount)
         }
     }
     
