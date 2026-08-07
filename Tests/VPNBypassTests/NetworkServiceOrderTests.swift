@@ -64,6 +64,40 @@ final class NetworkServiceOrderTests: XCTestCase {
         XCTAssertEqual(NetworkServiceOrder.parse(output), ["Zeta", "Alpha", "Mu"])
     }
 
+    /// Generality: Apple's own adapter names contain parentheses. The number tag is closed by the
+    /// FIRST ")", so everything after it is the name — including any parentheses it carries.
+    func testServiceNamesContainingParenthesesSurvive() {
+        let output = "(1) Thunderbolt Ethernet Slot 1 (Port 1)\n(2) iPhone USB"
+        XCTAssertEqual(NetworkServiceOrder.parse(output),
+                       ["Thunderbolt Ethernet Slot 1 (Port 1)", "iPhone USB"])
+    }
+
+    /// Generality: the plain Wi-Fi/Ethernet machines the old hardcoded list DID serve must keep
+    /// working — this change must not regress the common case to fix the uncommon one.
+    func testPlainWiFiAndEthernetMachineStillWorks() {
+        let output = """
+        (1) Wi-Fi
+        (Hardware Port: Wi-Fi, Device: en0)
+        (2) Ethernet
+        (Hardware Port: Ethernet, Device: en1)
+        """
+        XCTAssertEqual(NetworkServiceOrder.parse(output), ["Wi-Fi", "Ethernet"])
+    }
+
+    /// Generality: double-digit service numbers (machines with many adapters/VMs) must parse.
+    func testDoubleDigitServiceNumbers() {
+        let output = "(9) Ethernet 9\n(10) Ethernet 10\n(11) Ethernet 11"
+        XCTAssertEqual(NetworkServiceOrder.parse(output), ["Ethernet 9", "Ethernet 10", "Ethernet 11"])
+    }
+
+    /// Generality: VPN-provided services (Tailscale, utun-backed clients) appear in this list too.
+    /// Parsing them is fine — they are filtered later by whether they report a Router, and the
+    /// route-table fallback separately refuses tunnels.
+    func testVPNProvidedServicesAreParsedNotCrashed() {
+        let output = "(1) Wi-Fi\n(2) Tailscale\n(3) Cisco AnyConnect"
+        XCTAssertEqual(NetworkServiceOrder.parse(output), ["Wi-Fi", "Tailscale", "Cisco AnyConnect"])
+    }
+
     func testEmptyAndGarbageInputYieldNoServices() {
         XCTAssertTrue(NetworkServiceOrder.parse("").isEmpty)
         XCTAssertTrue(NetworkServiceOrder.parse("no parenthesised headings here").isEmpty)
