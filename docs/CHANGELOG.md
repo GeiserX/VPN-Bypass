@@ -5,6 +5,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **With two VPNs running, the app could pick the wrong one.** Several tunnels being up at once is ordinary — a corporate VPN alongside Tailscale — but the app took the first one it happened to see, which had nothing to do with which tunnel was carrying traffic. Because Tailscale usually appears earlier in that list, it could win, and in VPN Only mode the app would then install its rules to escape the wrong tunnel and send the other one's traffic straight out. It now prefers the tunnel actually carrying the default route, never picks Tailscale, keeps its choice stable while several remain valid, and breaks any remaining tie the same way every time.
+
 ## [3.1.13] - 2026-08-07
 
 ### Fixed
