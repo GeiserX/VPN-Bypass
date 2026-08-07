@@ -5,6 +5,16 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.10] - 2026-08-07
+
+### Fixed
+- **A VPN reconnect no longer rebuilds every route.** When the VPN dropped, the app removed *all* of its routes and re-added them once it came back. With a tunnel that reconnects often this dominated everything — one machine logged 15 disconnects and 8 full 342-route rebuilds in a single day, and each rebuild fires hundreds of routing-table changes that the VPN client itself then reacts to, feeding the very instability that caused the disconnect. In Bypass mode your routes go through your normal connection, so they stay perfectly valid while the VPN is away; they are now kept, and a reconnect finds them already correct and changes nothing. VPN Only still tears down fully, because its routes genuinely do point at a gateway that has gone.
+- **A VPN that reconnects on a new gateway is now noticed.** If the tunnel came back on the same interface but a different next-hop, nothing detected it and the routes stayed pinned to a gateway that no longer existed — those destinations silently stopped working until the next restart.
+- **Quitting no longer abandons routes half-removed.** The shutdown cleanup was given a flat 8 seconds regardless of how many routes existed; with a few hundred it was cut off partway through, and whatever remained could never be cleaned up afterwards. The time allowed now scales with the number of routes.
+
+### Changed
+- The menu bar now says which mode is active and what it means, instead of only a route count. Bypass and VPN Only are near-opposites and used to look identical.
+
 ## [3.1.9] - 2026-08-07
 
 ### Fixed

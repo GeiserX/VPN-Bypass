@@ -519,8 +519,36 @@ final class RouteManager: ObservableObject {
             pendingRerouteReason = nil
             rerouteRetryTask?.cancel()
             rerouteRetryTask = nil
-            // Remove kernel routes before clearing in-memory state
-            await removeAllRoutes()
+            // Remove only what actually went stale.
+            //
+            // In Bypass mode every route egresses via the LOCAL gateway, so a VPN disconnect leaves
+            // them all still correct — those destinations were already going direct and continue to.
+            // Tearing the whole set down and rebuilding it on reconnect was the dominant source of
+            // churn once a tunnel started flapping: 15 disconnects produced 8 full 342-route
+            // rebuilds in one day here, and each rebuild fires hundreds of kernel route-change
+            // events that the VPN client then reacts to — feeding the very instability that caused
+            // the disconnect. Keeping the still-valid routes means a reconnect finds them already
+            // correct and costs zero mutations.
+            //
+            // VPN Only keeps the full teardown: its catch-alls are leak-critical and its listed
+            // destinations point at a gateway that is now gone, so there is nothing worth keeping.
+            if config.routingMode == .bypass {
+                let stale = Self.vpnBoundDestinations(
+                    activeRoutes: activeRoutes,
+                    localGateway: localGateway,
+                    catchAlls: RouteCompiler.catchAllDestinations
+                )
+                if stale.isEmpty {
+                    log(.info, "VPN gone; \(activeRoutes.count) bypass route(s) still egress the local gateway — keeping them")
+                } else {
+                    log(.info, "VPN gone; removing \(stale.count) VPN-bound route(s), keeping \(activeRoutes.count - stale.count) local-gateway route(s)")
+                    let result = await removeRoutesBatchVia(stale)
+                    let removed = Set(stale).subtracting(result.failedDestinations)
+                    activeRoutes.removeAll { removed.contains($0.destination) }
+                }
+            } else {
+                await removeAllRoutes()
+            }
             routeVerificationResults.removeAll()
             lastTailscaleSelfFingerprint = nil
             vpnGateway = nil
@@ -1055,6 +1083,32 @@ final class RouteManager: ObservableObject {
     /// route monitor and tears the tunnel down (the original incident), so EVERY
     /// route-applying path must refuse it. Returns true (and logs) when the apply
     /// should be skipped.
+    /// Destinations whose route becomes STALE when the VPN goes away: anything egressing via the
+    /// VPN gateway or bound to a tunnel interface, plus the VPN-Only catch-alls.
+    ///
+    /// Pure so it can be tested without a helper, a kernel, or a live VPN.
+    ///
+    /// The point of the split: in Bypass mode every route egresses via the LOCAL gateway, so a VPN
+    /// disconnect leaves them all perfectly valid — those domains were already going direct, and
+    /// they continue to. Tearing the whole set down and rebuilding it on reconnect was pure churn,
+    /// and with a tunnel that reconnects often it dominated everything: one machine logged 15
+    /// disconnects and 8 full 342-route rebuilds in a day, each rebuild firing hundreds of kernel
+    /// route-change events that the VPN client itself then reacts to.
+    nonisolated static func vpnBoundDestinations(
+        activeRoutes: [ActiveRoute],
+        localGateway: String?,
+        catchAlls: Set<String>
+    ) -> [String] {
+        activeRoutes.compactMap { route in
+            if catchAlls.contains(route.destination) { return route.destination }
+            // Interface-scoped routes name a tunnel that is going away.
+            if route.gateway.hasPrefix("iface:") { return route.destination }
+            // Anything not egressing via the local gateway is VPN-bound.
+            if let local = localGateway, route.gateway == local { return nil }
+            return route.destination
+        }
+    }
+
     /// Catch-alls this app currently believes it owns. Used by the GlobalProtect refusal so it can
     /// remove what is already installed rather than only declining to add more.
     private var installedCatchAllDestinations: [String] {
