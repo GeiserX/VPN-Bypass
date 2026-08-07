@@ -1906,6 +1906,11 @@ struct GeneralTab: View {
                 }
             }
             
+            // Coexistence diagnostics: which tunnels are up, which one this app acts on,
+            // which carries the default route — the three facts every multi-VPN confusion
+            // turns on, previously answerable only by hand-run shell commands.
+            CoexistenceCard()
+
             // About section
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -2790,3 +2795,90 @@ struct BrandedTitlebarView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+
+// MARK: - Coexistence Diagnostics
+
+/// Read-only view of every live tunnel and what this app is doing about them. Refreshes on
+/// appear and on demand ONLY — the underlying enumeration spawns `ifconfig` and
+/// `tailscale status`, which must never sit on a timer.
+struct CoexistenceCard: View {
+    @EnvironmentObject var routeManager: RouteManager
+    @State private var snapshot: RouteManager.CoexistenceSnapshot?
+    @State private var isRefreshing = false
+
+    var body: some View {
+        SettingsCard(title: "Coexistence", icon: "point.3.connected.trianglepath.dotted", iconColor: Theme.blue) {
+            if let snapshot {
+                if snapshot.links.isEmpty {
+                    Text(String(localized: "No VPN tunnels are up."))
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.textSecondary)
+                } else {
+                    ForEach(snapshot.links) { link in
+                        HStack(spacing: 6) {
+                            Text(link.interface)
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            Text(link.label)
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.textSecondary)
+                                .lineLimit(1)
+                            Spacer()
+                            if link.interface == snapshot.selectedInterface {
+                                TagBadge(text: String(localized: "acting on"), color: Theme.success)
+                            }
+                            if link.interface == snapshot.defaultRouteInterface {
+                                TagBadge(text: String(localized: "default route"), color: Theme.blue)
+                            }
+                            if link.isTailscale {
+                                TagBadge(text: "Tailscale", color: Theme.warning)
+                            }
+                        }
+                    }
+                }
+                Divider().background(Theme.divider)
+                StatusRow(label: "Routes owned (kernel-tagged)", value: "\(snapshot.taggedRouteCount)")
+                Text(String(localized: "This app acts on ONE tunnel and tags every route it installs in the kernel itself. Tailscale and loopback are never touched."))
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.textSecondary)
+            } else {
+                Text(String(localized: "Reading network state…"))
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.textSecondary)
+            }
+
+            HStack {
+                Spacer()
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    Label(String(localized: "Refresh"), systemImage: "arrow.clockwise")
+                        .font(.system(size: 11))
+                }
+                .disabled(isRefreshing)
+            }
+        }
+        .task { await refresh() }
+    }
+
+    private func refresh() async {
+        isRefreshing = true
+        snapshot = await routeManager.coexistenceSnapshot()
+        isRefreshing = false
+    }
+}
+
+/// Small capsule badge used by the coexistence rows.
+struct TagBadge: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundColor(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(color.opacity(0.15)))
+    }
+}
+

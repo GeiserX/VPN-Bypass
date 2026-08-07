@@ -701,7 +701,7 @@ final class RouteManager: ObservableObject {
         let tsIPs = await tailscaleSelfIPs()
         var candidates: [VPNCandidate] = []
         for i in interfaces.indices {
-            let isValid = await isCorporateVPNIP(interfaces[i].ip, hintType: hintType)
+            let isValid = await isCorporateVPNIP(interfaces[i].ip)
             interfaces[i].isValidCorporateIP = isValid
             guard interfaces[i].isVPN else { continue }
             candidates.append(VPNCandidate(
@@ -745,7 +745,7 @@ final class RouteManager: ObservableObject {
     
     /// Which interface the default route currently exits through, or nil if unreadable.
     /// This is the only direct evidence of which tunnel is actually carrying traffic.
-    private func currentDefaultRouteInterface() async -> String? {
+    func currentDefaultRouteInterface() async -> String? {
         guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", "default"], timeout: 5.0) else {
             return nil
         }
@@ -796,6 +796,28 @@ final class RouteManager: ObservableObject {
     /// (`vpnInterface`/`vpnType`) that classic modes rely on — that path is untouched.
     /// The Tailscale utun is flagged so it isn't offered as a plain VPN egress
     /// (Tailscale egress has its own peer-proxy route type).
+    /// Everything the coexistence diagnostics card shows, gathered in one pass.
+    struct CoexistenceSnapshot: Equatable {
+        let links: [VPNLink]
+        let selectedInterface: String?
+        let defaultRouteInterface: String?
+        /// Kernel routes carrying OUR ownership tag (RTF_PROTO1) — ground truth of what this
+        /// app currently owns, read silently from the table itself.
+        let taggedRouteCount: Int
+    }
+
+    /// On-demand only — never call from a timer. `listVPNLinks` spawns `ifconfig` and
+    /// `tailscale status`, which the hot paths deliberately avoid (see the needsLinks guard).
+    func coexistenceSnapshot() async -> CoexistenceSnapshot {
+        let links = await listVPNLinks()
+        let defaultIface = await currentDefaultRouteInterface()
+        let tagged = RouteKernel.currentTable()?.filter { $0.isOurs }.count ?? 0
+        return CoexistenceSnapshot(links: links,
+                                   selectedInterface: vpnInterface,
+                                   defaultRouteInterface: defaultIface,
+                                   taggedRouteCount: tagged)
+    }
+
     func listVPNLinks() async -> [VPNLink] {
         guard let result = await runProcessAsync("/sbin/ifconfig", timeout: 5.0) else { return [] }
 
@@ -874,8 +896,9 @@ final class RouteManager: ObservableObject {
     }
 
     /// Check if IP is likely a corporate VPN (not Tailscale mesh, not localhost, etc.)
-    /// hintType comes from process detection -- used to distinguish Zscaler/WARP from Tailscale in the shared CGNAT range.
-    private func isCorporateVPNIP(_ ip: String, hintType: VPNType?) async -> Bool {
+    /// (CGNAT disambiguation — Tailscale vs Zscaler/WARP — is done by classifyCGNATAddress,
+    /// not by the process hint: a machine-wide process match cannot attribute an ADDRESS.)
+    private func isCorporateVPNIP(_ ip: String) async -> Bool {
         let parts = ip.components(separatedBy: ".")
         guard parts.count == 4,
               let first = Int(parts[0]),
@@ -3856,7 +3879,7 @@ final class RouteManager: ObservableObject {
     /// 100.112.0.0/12 capture range dropped WHILE GP is up: a listener there would dial
     /// a peer address the GP tunnel hijacks (longest-prefix match), so the hop would
     /// silently leave via GP instead of the tailnet. The route stays in config and its
-    /// listener returns as soon as GP disconnects. See docs/research/2026-07-03-tailnet-probe.md.
+    /// listener returns as soon as GP disconnects. (Tailnet-probe research, 2026-07-03 — see the guardCatchAllUnderGlobalProtect rationale.)
     func listenerRoutesRespectingGPShadow() -> [Route] {
         guard vpnType == .globalProtect else { return config.routes }
         return config.routes.filter { route in
