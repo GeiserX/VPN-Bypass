@@ -96,6 +96,12 @@ struct Config: Codable {
     var defaultRouteId: UUID? = nil
     var schemaVersion: Int = 1
     var multiRouteEnabled: Bool = false  // Opt-in experimental: show Routes tab and start proxy listeners
+    /// Optional pin: act ONLY on this tunnel when it is up and eligible ("utun9"). Constrains
+    /// automatic selection; a stale pin degrades to automatic with a logged warning.
+    var pinnedVPNInterface: String? = nil
+    /// Durable half of the pin — utun indices renumber across reconnects, so the product label
+    /// ("GlobalProtect") re-resolves the pin when the named interface vanishes.
+    var pinnedVPNProductHint: String? = nil
 
     // Custom decoder for backward compatibility with configs missing new fields
     init(from decoder: Decoder) throws {
@@ -118,6 +124,8 @@ struct Config: Codable {
         defaultRouteId = try container.decodeIfPresent(UUID.self, forKey: .defaultRouteId)
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         multiRouteEnabled = try container.decodeIfPresent(Bool.self, forKey: .multiRouteEnabled) ?? false
+        pinnedVPNInterface = try container.decodeIfPresent(String.self, forKey: .pinnedVPNInterface)
+        pinnedVPNProductHint = try container.decodeIfPresent(String.self, forKey: .pinnedVPNProductHint)
 
         // One-time migration: derive the routes/rules representation from the
         // legacy bypass list + single proxy so the new model is populated for

@@ -322,7 +322,8 @@ public enum VPNInterfaceSelector {
 
     public static func select(candidates: [VPNCandidate],
                               defaultRouteInterface: String?,
-                              current: String?) -> String? {
+                              current: String?,
+                              pinnedInterface: String? = nil) -> String? {
         // Tailscale is excluded outright. In mesh mode it is not a VPN at all, and as an exit node
         // it has its own egress route type — it must never become the tunnel whose traffic the app
         // reroutes, because doing so silently changes what a corporate VPN policy applies to.
@@ -330,6 +331,16 @@ public enum VPNInterfaceSelector {
             $0.isUp && $0.isTunnel && $0.isCorporateAddress && !$0.isTailscale
         }
         guard !eligible.isEmpty else { return nil }
+
+        // 0. A user pin CONSTRAINS the choice — it never invents one. If the pinned tunnel is
+        //    eligible right now, it wins outright; if it is absent or ineligible, selection
+        //    falls through to the automatic rules below (the caller logs the disagreement).
+        //    Failing open here is deliberate: a stale pin must degrade to today's automatic
+        //    behaviour, not silently disable the app.
+        if let pinnedInterface,
+           let pinned = eligible.first(where: { $0.interface == pinnedInterface }) {
+            return pinned.interface
+        }
 
         // 1. Ground truth. The tunnel carrying the default route is the one actually moving
         //    traffic; no heuristic beats observing it. A change here is a real change worth acting

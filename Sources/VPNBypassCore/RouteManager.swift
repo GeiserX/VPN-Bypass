@@ -714,11 +714,41 @@ final class RouteManager: ObservableObject {
         }
 
         let defaultRouteInterface = await currentDefaultRouteInterface()
+
+        // Resolve the user's pin, if any. utun indices renumber across reconnects, so when the
+        // pinned NAME is gone but a product label was stored, re-resolve by label against the
+        // live links — the same durable-label strategy ifaceGateway uses for route pins.
+        var pin = config.pinnedVPNInterface
+        if let pinned = pin, !candidates.contains(where: { $0.interface == pinned }),
+           let hint = config.pinnedVPNProductHint, !hint.isEmpty {
+            let links = await listVPNLinks()
+            if let relabelled = links.first(where: { !$0.isTailscale && $0.label == hint }) {
+                await MainActor.run {
+                    log(.info, "Pinned tunnel \(pinned) is gone; re-resolved by label '\(hint)' to \(relabelled.interface)")
+                }
+                pin = relabelled.interface
+                config.pinnedVPNInterface = relabelled.interface
+            }
+        }
+
         let selected = VPNInterfaceSelector.select(
             candidates: candidates,
             defaultRouteInterface: defaultRouteInterface,
-            current: vpnInterface
+            current: vpnInterface,
+            pinnedInterface: pin
         )
+
+        // Say so when the pin and reality disagree — a pin must never silently change what
+        // the app acts on relative to what the user believes.
+        if let pinned = pin, let selected, selected != pinned {
+            await MainActor.run {
+                log(.warning, "Pinned tunnel \(pinned) is not eligible right now — acting on \(selected) (automatic)")
+            }
+        } else if let pinned = pin, selected == nil {
+            await MainActor.run {
+                log(.warning, "Pinned tunnel \(pinned) is not available and no other VPN is eligible")
+            }
+        }
 
         if let selected {
             if candidates.filter({ $0.isUp && $0.isCorporateAddress && !$0.isTailscale }).count > 1 {

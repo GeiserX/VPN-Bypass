@@ -2836,6 +2836,39 @@ struct CoexistenceCard: View {
                     }
                 }
                 Divider().background(Theme.divider)
+
+                // The pin: act only on one tunnel. Constrains automatic selection — a stale
+                // pin degrades to automatic with a logged warning, never to a silent no-op.
+                HStack {
+                    Text(String(localized: "Act on"))
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.textSecondary)
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { routeManager.config.pinnedVPNInterface ?? "" },
+                        set: { iface in
+                            routeManager.config.pinnedVPNInterface = iface.isEmpty ? nil : iface
+                            routeManager.config.pinnedVPNProductHint = iface.isEmpty ? nil
+                                : snapshot.links.first(where: { $0.interface == iface })?.label
+                            routeManager.saveConfig()
+                            Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
+                        }
+                    )) {
+                        Text(String(localized: "Automatic (recommended)")).tag("")
+                        ForEach(snapshot.links.filter { !$0.isTailscale }) { link in
+                            Text("\(link.label) · \(link.interface)").tag(link.interface)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 240)
+                }
+                if let pinned = routeManager.config.pinnedVPNInterface,
+                   let selected = snapshot.selectedInterface, pinned != selected {
+                    Text(String(localized: "Pinned tunnel \(pinned) is not eligible right now — acting on \(selected) automatically."))
+                        .font(.system(size: 10))
+                        .foregroundColor(Theme.warning)
+                }
+
                 StatusRow(label: "Routes owned (kernel-tagged)", value: "\(snapshot.taggedRouteCount)")
                 Text(String(localized: "This app acts on ONE tunnel and tags every route it installs in the kernel itself. Tailscale and loopback are never touched."))
                     .font(.system(size: 10))
