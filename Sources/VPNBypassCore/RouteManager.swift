@@ -834,11 +834,33 @@ final class RouteManager: ObservableObject {
         // (Zscaler, WARP, etc.) so we accept it without requiring a process hint.
         // This fixes detection when VPN process names don't match known patterns (#18).
         if first == 100 && second >= 64 && second <= 127 {
-            if await isTailscaleIP(ip) {
+            // CGNAT (100.64/10) is shared ground: Tailscale, Zscaler and Cloudflare WARP all live
+            // here, so an address alone proves nothing and we have to ask Tailscale directly.
+            //
+            // FAIL CLOSED when that question cannot be answered. This used to collapse two very
+            // different outcomes into one: `isTailscaleIP` returns false both when the address is
+            // confirmed NOT Tailscale's and when the status query could not run at all (CLI absent,
+            // or the 3s subprocess timeout hit — and it is queried on every status pass with no
+            // memoisation, so load is exactly when it fails). Both fell through to "accept as
+            // corporate VPN", meaning a failed lookup silently promoted Tailscale's own tunnel to
+            // being treated as the corporate VPN — after which this app would re-route around a
+            // mesh network it has no business touching, and flip-flop between the two tunnels as
+            // the answer changed from poll to poll.
+            //
+            // Claiming another tool's tunnel is never the safe default. If we cannot prove a CGNAT
+            // address is not Tailscale's, we decline it.
+            switch await classifyCGNATAddress(ip) {
+            case .tailscale:
+                // Tailscale is only "the VPN" when it is actually carrying traffic as an exit node;
+                // in ordinary mesh mode it must be left entirely alone.
                 return await isTailscaleExitNodeActive()
+            case .notTailscale:
+                // Confirmed a different CGNAT VPN (Zscaler, WARP) — that one really is the tunnel.
+                return true
+            case .undetermined:
+                log(.warning, "Could not determine whether \(ip) belongs to Tailscale — not treating it as the VPN")
+                return false
             }
-            // Non-Tailscale CGNAT IP on a VPN interface → accept as corporate VPN
-            return true
         }
         
         // Corporate VPNs typically use private ranges
@@ -872,6 +894,29 @@ final class RouteManager: ObservableObject {
     }
     
     /// Check if this IP is the local Tailscale node's address
+    /// Whether a CGNAT (100.64/10) address belongs to Tailscale — keeping "could not tell" DISTINCT
+    /// from "confirmed it does not".
+    ///
+    /// That distinction is the entire point. Collapsing the two is what allowed a failed status
+    /// query to promote Tailscale's own tunnel to "corporate VPN" (see isCorporateVPNIP).
+    enum CGNATIdentity { case tailscale, notTailscale, undetermined }
+
+    private func classifyCGNATAddress(_ ip: String) async -> CGNATIdentity {
+        guard let json = await readTailscaleStatusJSON() else { return .undetermined }
+
+        if let selfStatus = json["Self"] as? [String: Any],
+           let selfIPs = selfStatus["TailscaleIPs"] as? [String],
+           selfIPs.contains(ip) {
+            return .tailscale
+        }
+        if let topLevelIPs = json["TailscaleIPs"] as? [String],
+           topLevelIPs.contains(ip) {
+            return .tailscale
+        }
+        // Tailscale answered, and does not claim this address.
+        return .notTailscale
+    }
+
     private func isTailscaleIP(_ ip: String) async -> Bool {
         guard let json = await readTailscaleStatusJSON() else {
             return false
