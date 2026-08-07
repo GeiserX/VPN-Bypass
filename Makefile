@@ -21,6 +21,7 @@ build-helper:
 		-target arm64-apple-macos13.0 \
 		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-arm64 \
 		Sources/VPNBypassCore/HelperProtocol.swift \
+		Sources/VPNBypassCore/RouteKernel.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
 	@swiftc -O \
@@ -28,6 +29,7 @@ build-helper:
 		-target x86_64-apple-macos13.0 \
 		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-x86_64 \
 		Sources/VPNBypassCore/HelperProtocol.swift \
+		Sources/VPNBypassCore/RouteKernel.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
 	@lipo -create \

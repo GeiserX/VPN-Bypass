@@ -131,7 +131,7 @@ class HelperTool: NSObject, HelperProtocol {
         }
 
         Self.routeQueue.async {
-            let result = self.installRoute(destination: destination, gateway: gateway, isNetwork: isNetwork)
+            let result = self.installRoute(destination: destination, gateway: gateway, isNetwork: isNetwork, snapshot: self.kernelSnapshot())
             reply(result.success, result.error)
         }
     }
@@ -143,7 +143,7 @@ class HelperTool: NSObject, HelperProtocol {
         }
 
         Self.routeQueue.async {
-            let result = self.executeRoute(args: ["-n", "delete", destination])
+            let result = self.deleteRoute(destination: destination)
             if result.success {
                 helperLog.info("delete \(destination, privacy: .public): removed")
             } else {
@@ -162,6 +162,10 @@ class HelperTool: NSObject, HelperProtocol {
             var failedDestinations: [String] = []
             var lastError: String?
 
+            // ONE silent table read for the whole batch — replaces a forked, event-emitting
+            // `route -n get` per destination.
+            let snapshot = self.kernelSnapshot()
+
             for route in routes {
                 guard let destination = route["destination"] as? String,
                       let gateway = route["gateway"] as? String else {
@@ -178,7 +182,7 @@ class HelperTool: NSObject, HelperProtocol {
                     continue
                 }
 
-                let result = self.installRoute(destination: destination, gateway: gateway, isNetwork: isNetwork)
+                let result = self.installRoute(destination: destination, gateway: gateway, isNetwork: isNetwork, snapshot: snapshot)
                 if result.success {
                     successCount += 1
                 } else {
@@ -207,7 +211,7 @@ class HelperTool: NSObject, HelperProtocol {
                     continue
                 }
 
-                let result = self.executeRoute(args: ["-n", "delete", destination])
+                let result = self.deleteRoute(destination: destination)
                 if result.success {
                     successCount += 1
                 } else {
@@ -222,219 +226,167 @@ class HelperTool: NSObject, HelperProtocol {
         }
     }
 
-    /// Install one route WITHOUT the old blind `route delete` that preceded every add.
-    ///
-    /// #65: the previous `delete` + `add` pair cost two kernel mutations per route even when the
-    /// route was already correct, and — worse — it briefly REMOVED the route. Each mutation raises a
-    /// kernel route-change event, and GlobalProtect re-validates its own gateway route on every one;
-    /// its teardowns were preceded by `Failed to find route for <gateway>`, exactly what a transient
-    /// removal produces. The blind delete could also remove a route this app never owned.
-    ///
-    /// The ladder below never opens a window where the destination has no route:
-    ///   1. `change` — rewrites an existing route in place (one mutation, no gap). Succeeds in the
-    ///      re-apply case, which is the common one.
-    ///   2. `add` — only when nothing was there to change (one mutation).
-    ///   3. `delete` + `add` — last resort, only if `add` reports the route already exists (a race
-    ///      with another writer between steps 1 and 2). This is the sole path that can still open a
-    ///      gap, and it is now rare rather than universal.
-    private func installRoute(destination: String, gateway: String, isNetwork: Bool) -> (success: Bool, error: String?) {
-        // #65, the core of it: if the kernel ALREADY has exactly this route, write nothing.
-        // Callers re-apply the same route set constantly (DNS refresh, failed-domain retries,
-        // status passes), and each redundant write raises a kernel route-change event that other
-        // VPN clients react to by re-validating their tunnel — which is the entire bug. Skipping
-        // the write is what makes steady state cost ZERO mutations.
-        if routeAlreadyCorrect(destination: destination, gateway: gateway, isNetwork: isNetwork) {
-            helperLog.debug("install \(destination, privacy: .public): already correct, no mutation")
-            return (true, nil)
-        }
+    // MARK: - Routing-socket engine
+    //
+    // Every route mutation goes through ONE owned PF_ROUTE socket instead of forking
+    // /sbin/route per operation. The fork/exec design was the traced root cause of the VPN
+    // instability this helper used to trigger: each exec opens its own routing socket and
+    // blocks with no timeout, and stacked execs starved other processes' route operations —
+    // including the corporate VPN client's own periodic gateway-route READ, whose timeout it
+    // misreads as "my gateway route was removed" and tears the tunnel down. A single socket
+    // with one in-flight request makes that starvation structurally impossible: no processes,
+    // errno straight from write(2), and reads replaced by a silent NET_RT_DUMP snapshot.
 
-        let changed = executeRoute(args: buildRouteArgs(verb: "change", destination: destination, gateway: gateway, isNetwork: isNetwork))
-        if changed.success {
-            helperLog.info("install \(destination, privacy: .public): changed in place")
-            return (true, nil)
-        }
+    private var routeSocketFD: Int32 = -1
+    private var routeSeq: Int32 = 0
 
-        let added = executeRoute(args: buildRouteArgs(verb: "add", destination: destination, gateway: gateway, isNetwork: isNetwork))
-        if added.success {
+    /// Writes one routing message; returns nil on success or the errno on failure.
+    private func routeSocketPerform(type: Int32, spec: RouteKernel.Spec) -> Int32? {
+        if routeSocketFD < 0 {
+            routeSocketFD = socket(PF_ROUTE, SOCK_RAW, 0)
+            guard routeSocketFD >= 0 else { return errno }
+            // Outcomes come from write(2)'s errno — nothing is ever read from this socket, and
+            // an unread receive buffer on a long-lived routing socket would otherwise fill with
+            // every other process's routing chatter.
+            shutdown(routeSocketFD, SHUT_RD)
+        }
+        routeSeq &+= 1
+        guard let msg = RouteKernel.message(type: type, seq: routeSeq, spec: spec) else {
+            return EINVAL
+        }
+        let written = msg.withUnsafeBytes { raw in
+            write(routeSocketFD, raw.baseAddress, raw.count)
+        }
+        if written == msg.count { return nil }
+        let err = errno
+        if err == EBADF || err == EPIPE {
+            // Socket itself is broken — reopen on the next call.
+            close(routeSocketFD)
+            routeSocketFD = -1
+        }
+        return err
+    }
+
+    private func errnoString(_ err: Int32) -> String {
+        String(cString: strerror(err)) + " (errno \(err))"
+    }
+
+    /// Resolves the wire-format spec for a request. `iface:<name>` gateways become interface
+    /// indices here — if the interface vanished, that is a normal failure, not a crash.
+    private func specFor(destination: String, gateway: String, isNetwork: Bool) -> RouteKernel.Spec? {
+        if gateway.hasPrefix("iface:") {
+            let name = String(gateway.dropFirst(6))
+            let index = if_nametoindex(name)
+            guard index != 0 else { return nil }
+            return RouteKernel.Spec(destination: destination,
+                                    gateway: .interfaceIndex(UInt16(index)),
+                                    isNetwork: isNetwork)
+        }
+        return RouteKernel.Spec(destination: destination,
+                                gateway: .address(gateway),
+                                isNetwork: isNetwork)
+    }
+
+    /// Snapshot of the live table, indexed by destination string, restricted to entries that
+    /// could be "the route we would install": real static-kind entries, not kernel clones and
+    /// not reject/blackhole placeholders. One silent sysctl replaces a `route -n get` fork —
+    /// which also BROADCASTS a routing message to every listener — per destination.
+    private func kernelSnapshot() -> [String: RouteKernel.KernelRoute] {
+        guard let table = RouteKernel.currentTable() else { return [:] }
+        var index: [String: RouteKernel.KernelRoute] = [:]
+        for route in table {
+            guard route.flags & RTF_WASCLONED == 0,
+                  route.flags & RTF_REJECT == 0,
+                  route.flags & RTF_BLACKHOLE == 0 else { continue }
+            index[route.destinationString] = route
+        }
+        return index
+    }
+
+    /// Whether the kernel entry already IS the route we want — same kind, same egress.
+    /// Skipping the write on a match is what makes steady state cost zero kernel events.
+    private func kernelRouteMatches(_ kernel: RouteKernel.KernelRoute, spec: RouteKernel.Spec) -> Bool {
+        guard kernel.isHost == !spec.isNetwork else { return false }
+        switch spec.gateway {
+        case .address(let ip):
+            return kernel.gatewayAddress != nil
+                && RouteKernel.dotted(kernel.gatewayAddress!) == ip
+        case .interfaceIndex(let index):
+            return kernel.gatewayInterfaceIndex == index
+        }
+    }
+
+    /// The snapshot key a spec's destination corresponds to.
+    private func snapshotKey(destination: String, isNetwork: Bool) -> String {
+        guard isNetwork, let (network, prefix) = RouteCIDR.parse(destination) else {
+            return destination.hasSuffix("/32") ? String(destination.dropLast(3)) : destination
+        }
+        return "\(network)/\(prefix)"
+    }
+
+
+    /// Install one route via the routing socket, never opening a window where the destination
+    /// has no route:
+    ///   1. no-op — the snapshot says the kernel already has exactly this route (ZERO events;
+    ///      this is what makes a restart against an already-correct kernel completely silent).
+    ///   2. RTM_CHANGE — a different route exists for the destination: rewrite in place.
+    ///   3. RTM_ADD — nothing exists for it.
+    ///   4. cross-retry for the race in between: ADD refused with EEXIST → CHANGE.
+    private func installRoute(destination: String, gateway: String, isNetwork: Bool,
+                              snapshot: [String: RouteKernel.KernelRoute]) -> (success: Bool, error: String?) {
+        guard let spec = specFor(destination: destination, gateway: gateway, isNetwork: isNetwork) else {
+            return (false, "cannot resolve gateway \(gateway)")
+        }
+        let key = snapshotKey(destination: destination, isNetwork: isNetwork)
+        if let current = snapshot[key] {
+            if kernelRouteMatches(current, spec: spec) {
+                helperLog.debug("install \(destination, privacy: .public): already correct, no mutation")
+                return (true, nil)
+            }
+            // Route exists with a different egress — rewrite in place (one event, no gap).
+            if routeSocketPerform(type: RTM_CHANGE, spec: spec) == nil {
+                helperLog.info("install \(destination, privacy: .public): changed in place")
+                return (true, nil)
+            }
+        }
+        var err = routeSocketPerform(type: RTM_ADD, spec: spec)
+        if err == nil {
             helperLog.info("install \(destination, privacy: .public): added")
             return (true, nil)
         }
-
-        // `add` refused because a route for this destination exists after all — fall back to the
-        // old replace, which is the only remaining way to converge.
-        if (added.error ?? "").localizedCaseInsensitiveContains("exists") {
-            helperLog.info("install \(destination, privacy: .public): change+add both refused, replacing")
-            let removed = executeRoute(args: ["-n", "delete", destination])
-            guard removed.success else {
-                // Report why the removal failed rather than letting the follow-up add fail with a
-                // secondary "exists" that hides the real cause.
-                helperLog.error("install \(destination, privacy: .public): delete before replace failed: \(removed.error ?? "unknown", privacy: .public)")
-                return (false, removed.error)
-            }
-            let replaced = executeRoute(args: buildRouteArgs(verb: "add", destination: destination, gateway: gateway, isNetwork: isNetwork))
-            return (replaced.success, replaced.error)
-        }
-
-        helperLog.error("install \(destination, privacy: .public) failed: \(added.error ?? "unknown", privacy: .public)")
-        return (false, added.error)
-    }
-
-    /// True when the kernel already holds exactly this route, so installing it again would be a
-    /// pure no-op write. `route -n get` is a READ: it reports the route that *would* be used and
-    /// raises no route-change event, so asking is free in the sense that matters here.
-    ///
-    /// The `destination:` comparison is load-bearing, not defensive padding. For a host with NO
-    /// specific route, `route get` reports the DEFAULT route — and in Bypass mode the default
-    /// route's gateway IS the local gateway we are about to install through. Comparing gateways
-    /// alone would therefore report "already correct" for a route that does not exist, and we
-    /// would silently never install it: the bypass would break with no error anywhere. Requiring
-    /// `destination` to equal the host we asked about is what distinguishes "this exact route is
-    /// present" from "something else would carry this traffic".
-    ///
-    /// Network routes are handled too, by comparing BOTH `destination:` and `mask:`. Excluding them
-    /// (as the first cut of this check did) left VPN Only mode churning on every single apply: its
-    /// `0.0.0.0/1` + `128.0.0.0/1` catch-alls are network routes, so they were rewritten every time
-    /// — which is exactly the leak-critical mode where a coexisting VPN client reacting to our
-    /// route-change events does the most damage. `route -n get -net <cidr>` reports the network in
-    /// `destination:` and the netmask in `mask:`, and reports the DEFAULT route (`destination:
-    /// default`, `mask: default`) when no such network route exists — so the same "did it echo back
-    /// what I asked about" discriminator that protects the host path protects this one.
-    private func routeAlreadyCorrect(destination: String, gateway: String, isNetwork: Bool) -> Bool {
-        let args = isNetwork ? ["-n", "get", "-net", destination] : ["-n", "get", destination]
-        guard let output = routeOutput(args: args) else { return false }
-
-        var dest: String?
-        var mask: String?
-        var gw: String?
-        var iface: String?
-        var flags = ""
-        for rawLine in output.split(separator: "\n") {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("destination:") {
-                dest = String(line.dropFirst("destination:".count)).trimmingCharacters(in: .whitespaces)
-            } else if line.hasPrefix("mask:") {
-                mask = String(line.dropFirst("mask:".count)).trimmingCharacters(in: .whitespaces)
-            } else if line.hasPrefix("gateway:") {
-                gw = String(line.dropFirst("gateway:".count)).trimmingCharacters(in: .whitespaces)
-            } else if line.hasPrefix("interface:") {
-                iface = String(line.dropFirst("interface:".count)).trimmingCharacters(in: .whitespaces)
-            } else if line.hasPrefix("flags:") {
-                flags = String(line.dropFirst("flags:".count)).trimmingCharacters(in: .whitespaces)
-            }
-        }
-
-        // The route we matched must be a real, static entry of the KIND we are installing — not an
-        // ephemeral clone and not a wider route that merely covers this address.
-        //
-        // This is the subtle one. The default route carries PRCLONING, so macOS mints short-lived
-        // host routes to arbitrary destinations that inherit the parent's gateway. Such a clone
-        // echoes back `destination: <our exact IP>` with `gateway: <local gateway>` — and in Bypass
-        // mode the local gateway is precisely what we were about to install. Without this guard we
-        // would call that "already correct", skip the write, record the route as applied, and then
-        // watch the clone expire — leaving the destination silently on whatever the parent route
-        // says. No error, no log, no failed verification: exactly the silent bypass failure the
-        // destination check above exists to prevent.
-        guard !flags.contains("WASCLONED"),
-              !flags.contains("REJECT"),
-              !flags.contains("BLACKHOLE") else { return false }
-        if isNetwork {
-            guard !flags.contains("HOST") else { return false }
-        } else {
-            guard flags.contains("HOST") else { return false }
-        }
-
-        if isNetwork {
-            // `route get -net 10.0.0.0/8` echoes `destination: 10.0.0.0` + `mask: 255.0.0.0`, so the
-            // CIDR we were handed has to be split and the prefix expanded before comparing. BOTH must
-            // match: destination alone would treat 0.0.0.0/1 and a 0.0.0.0/8 as the same route.
-            guard let (network, prefix) = RouteCIDR.parse(destination),
-                  dest == network,
-                  mask == RouteCIDR.netmaskString(prefixLength: prefix)
-            else { return false }
-        } else {
-            // No route specific to this host -> it must be installed. (For a host with no route,
-            // `route get` reports the DEFAULT route, whose gateway in Bypass mode is the same local
-            // gateway we are about to install through — so this check, not the gateway one, is what
-            // stops us silently skipping a route that does not exist.)
-            guard dest == destination else { return false }
-        }
-
-        if gateway.hasPrefix("iface:") {
-            return iface == String(gateway.dropFirst(6))
-        }
-        return gw == gateway
-    }
-
-    /// Wait for `process`, but never longer than `timeout`. On expiry the process is terminated and
-    /// `false` is returned.
-    ///
-    /// Every route/hosts mutation runs on ONE serial queue (see `routeQueue`), so an unbounded
-    /// `waitUntilExit()` means a single wedged `/sbin/route` blocks every later add, remove, batch
-    /// and hosts update for the lifetime of the helper — with no watchdog and no recovery short of
-    /// restarting a root daemon. Bounding the wait keeps a stuck child from taking the pipeline
-    /// down with it; the caller sees an ordinary failure and can retry.
-    private func waitBounded(_ process: Process, timeout: TimeInterval = 10) -> Bool {
-        let done = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .userInitiated).async {
-            process.waitUntilExit()
-            done.signal()
-        }
-        if done.wait(timeout: .now() + timeout) == .timedOut {
-            helperLog.error("route command exceeded \(timeout, privacy: .public)s — terminating")
-            process.terminate()
-            _ = done.wait(timeout: .now() + 2)
-            return false
-        }
-        return true
-    }
-
-    /// Run `route` and capture stdout. Used only for read-only queries (`route -n get`).
-    private func routeOutput(args: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/sbin/route")
-        process.arguments = args
-
-        let outPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-            guard waitBounded(process), process.terminationStatus == 0 else { return nil }
-            return String(data: data, encoding: .utf8)
-        } catch {
-            return nil
-        }
-    }
-
-    private func executeRoute(args: [String]) -> (success: Bool, error: String?) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/sbin/route")
-        process.arguments = args
-        
-        let errorPipe = Pipe()
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = errorPipe
-        
-        do {
-            try process.run()
-            guard waitBounded(process) else {
-                return (false, "route command timed out")
-            }
-
-            if process.terminationStatus == 0 {
+        if err == EEXIST {
+            // A route landed between the snapshot and the add — converge with a change.
+            err = routeSocketPerform(type: RTM_CHANGE, spec: spec)
+            if err == nil {
+                helperLog.info("install \(destination, privacy: .public): raced, changed in place")
                 return (true, nil)
-            } else {
-                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                let errorString = String(data: errorData, encoding: .utf8) ?? "Unknown error"
-                return (false, errorString.trimmingCharacters(in: .whitespacesAndNewlines))
             }
-        } catch {
-            return (false, error.localizedDescription)
         }
+        let message = errnoString(err ?? EINVAL)
+        helperLog.error("install \(destination, privacy: .public) failed: \(message, privacy: .public)")
+        return (false, message)
     }
-    
+
+    /// Remove one route. "Not in table" (ESRCH) is SUCCESS — the goal state is "absent", and
+    /// treating an already-gone route as a failure made teardown retain phantom records.
+    private func deleteRoute(destination: String) -> (success: Bool, error: String?) {
+        let isNetwork = destination.contains("/") && !destination.hasSuffix("/32")
+        let spec = RouteKernel.Spec(destination: destination, gateway: .address("0.0.0.0"),
+                                    isNetwork: isNetwork)
+        let err = routeSocketPerform(type: RTM_DELETE, spec: spec)
+        if err == nil {
+            helperLog.info("delete \(destination, privacy: .public): removed")
+            return (true, nil)
+        }
+        if err == ESRCH {
+            helperLog.info("delete \(destination, privacy: .public): already absent")
+            return (true, nil)
+        }
+        let message = errnoString(err!)
+        helperLog.error("delete \(destination, privacy: .public) failed: \(message, privacy: .public)")
+        return (false, message)
+    }
+
     // MARK: - Hosts File Management
     
     func updateHostsFile(entries: [[String: String]], withReply reply: @escaping (Bool, String?) -> Void) {
@@ -570,18 +522,6 @@ class HelperTool: NSObject, HelperProtocol {
 
     /// Build `route(8)` arguments for `verb` ("add" or "change"). Both take an identical argument
     /// shape, so `installRoute` can try an in-place change before falling back to an add.
-    private func buildRouteArgs(verb: String, destination: String, gateway: String, isNetwork: Bool) -> [String] {
-        var args = ["-n", verb]
-        args.append(isNetwork ? "-net" : "-host")
-        args.append(destination)
-        if gateway.hasPrefix("iface:") {
-            args.append(contentsOf: ["-interface", String(gateway.dropFirst(6))])
-        } else {
-            args.append(gateway)
-        }
-        return args
-    }
-
     private func isValidIP(_ string: String) -> Bool {
         let parts = string.components(separatedBy: ".")
         guard parts.count == 4 else { return false }

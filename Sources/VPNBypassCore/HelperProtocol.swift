@@ -112,7 +112,7 @@ struct HelperConstants {
     // replaces only as a last resort. Route/hosts mutations are also serialised across XPC
     // connections (concurrent handlers were producing simultaneous /sbin/route processes), and the
     // helper finally emits os_log records. Bumped from 1.8.0 so installed helpers pick this up.
-    static let helperVersion = "1.11.0"
+    static let helperVersion = "2.0.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"
