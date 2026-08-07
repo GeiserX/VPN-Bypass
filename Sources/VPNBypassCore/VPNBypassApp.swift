@@ -147,6 +147,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
             source.setEventHandler {
                 Task { @MainActor in
+                    self.beginAppShutdown()
+                    // Same safety deadline as the menu-quit path — this path previously had
+                    // none, so a wedged helper XPC could hold the process open indefinitely.
+                    let deadline = Self.quitDeadlineSeconds()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + deadline) {
+                        RouteManager.shared.log(.warning, "Signal teardown exceeded \(Int(deadline))s — exiting")
+                        exit(0)
+                    }
                     await RouteManager.shared.cleanupOnQuit()
                     exit(0)
                 }
@@ -157,16 +165,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
 
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // Hide all UI immediately so quit feels instant
-        NSApp.windows.forEach { $0.orderOut(nil) }
-
+    /// Shared first step of BOTH quit paths — menu quit and SIGTERM/SIGINT (the latter is
+    /// what `brew upgrade`'s pkill delivers, and it previously performed none of these stops,
+    /// so timers and monitors kept firing route work during teardown).
+    @MainActor private func beginAppShutdown() {
         controlServer?.stop()
         networkMonitor?.cancel()
         refreshTimer?.invalidate()
         watchdogTimer?.invalidate()
         networkDebounceWorkItem?.cancel()
         RouteManager.shared.stopDNSRefreshTimer()
+        RouteManager.shared.beginShutdown()
+    }
+
+    /// The teardown budget. Scales with tracked routes — but a quit that lands MID-APPLY
+    /// reads a still-empty model while hundreds of routes are installing; that under-sized
+    /// the budget to 8s once while 319 routes landed, so an in-flight apply floors it.
+    @MainActor static func quitDeadlineSeconds() -> Double {
+        if RouteManager.shared.isApplyingRoutes { return 60.0 }
+        let trackedRouteCount = RouteManager.shared.activeRoutes.count
+        return min(60.0, 8.0 + Double(trackedRouteCount) * 0.15)
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Hide all UI immediately so quit feels instant
+        NSApp.windows.forEach { $0.orderOut(nil) }
+
+        // applicationShouldTerminate is delivered on the main thread.
+        MainActor.assumeIsolated { beginAppShutdown() }
 
         // Clean up routes and hosts file on quit, then allow termination.
         //
@@ -180,8 +206,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         //
         // Catch-alls are torn down first (see removeAllRoutes), so the most leak-relevant work is
         // done early; this budget is about not abandoning the remainder.
-        let trackedRouteCount = RouteManager.shared.activeRoutes.count
-        let quitDeadline = min(60.0, 8.0 + Double(trackedRouteCount) * 0.15)
+        let quitDeadline = MainActor.assumeIsolated { Self.quitDeadlineSeconds() }
         var didReply = false
         DispatchQueue.main.asyncAfter(deadline: .now() + quitDeadline) {
             guard !didReply else { return }

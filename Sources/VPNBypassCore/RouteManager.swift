@@ -27,6 +27,21 @@ final class RouteManager: ObservableObject {
     @Published var routeVerificationResults: [String: RouteVerificationResult] = [:]
     @Published var isLoading = true
     @Published private(set) var isApplyingRoutes = false
+
+    /// True once shutdown has begun. Checked by the operation gate (so no new route
+    /// operation can start) and by the tracked batch-add wrapper (so an operation
+    /// already past the gate cannot push more routes into the kernel mid-teardown).
+    private(set) var isShuttingDown = false
+
+    /// Kernel-visible destinations that may not (yet, or ever) be recorded in
+    /// `activeRoutes`. Recorded BEFORE every batch add, so quit teardown can remove
+    /// routes the in-memory model never got to track: the epoch guard deliberately
+    /// skips the model append after preemption, which once left 93 kernel routes
+    /// with no record anywhere (2026-08-07).
+    var pendingKernelAdds: Set<String> = []
+
+    /// Handle for the fire-and-forget background DNS refresh, so shutdown can cancel it.
+    private var backgroundRefreshTask: Task<Void, Never>?
     @Published var lastDNSRefresh: Date?
     @Published var nextDNSRefresh: Date?
     @Published var isTestingProxy = false
@@ -44,7 +59,7 @@ final class RouteManager: ObservableObject {
     private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
     private var orphanedServiceDomains: [String: [String]] = [:]  // Deleted service name -> its domains (for hosts reconstruction)
-    private var routeEpoch: UInt64 = 0  // Incremented by removeAllRoutes — lets in-flight applies detect preemption
+    private(set) var routeEpoch: UInt64 = 0  // Incremented by removeAllRoutes — lets in-flight applies detect preemption
     private var gatewayDetectedAt: Date?
     private var lastInterfaceReroute: Date?
     /// A re-route (interface change or Tailscale profile change) that was NEEDED but
@@ -1118,8 +1133,10 @@ final class RouteManager: ObservableObject {
                     log(.info, "Routes applied from cache. Refreshing DNS in background...")
                 }
                 
-                // Background refresh: re-resolve DNS and update routes if changed
-                Task.detached { [weak self] in
+                // Background refresh: re-resolve DNS and update routes if changed.
+                // The handle is stored so beginShutdown() can cancel it — unowned, this
+                // task once raced quit teardown and re-added 93 routes after removal.
+                backgroundRefreshTask = Task.detached { [weak self] in
                     await self?.backgroundDNSRefresh(sendNotification: sendNotification)
                 }
             } else {
@@ -1446,7 +1463,7 @@ final class RouteManager: ObservableObject {
         var batchFailedDests: Set<String> = []
         if HelperManager.shared.isHelperInstalled {
             let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
-            let result = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
+            let result = await addRoutesBatchTracked(routes: helperRoutes)
             batchFailureCount = result.failureCount
             batchFailedDests = Set(result.failedDestinations)
 
@@ -1579,7 +1596,7 @@ final class RouteManager: ObservableObject {
         if !routesToAdd.isEmpty {
             if HelperManager.shared.isHelperInstalled {
                 let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
-                let result = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
+                let result = await addRoutesBatchTracked(routes: helperRoutes)
                 batchFailureCount = result.failureCount
                 batchFailedDests = Set(result.failedDestinations)
                 if result.failureCount > 0 {
@@ -1719,7 +1736,10 @@ final class RouteManager: ObservableObject {
     /// Increments routeEpoch so in-flight applies detect preemption and abort before committing.
     func removeAllRoutes() async {
         routeEpoch &+= 1
-        let destinations = Array(Set(activeRoutes.map { $0.destination }))
+        // Sweep the union of what the model tracks AND what was pushed to the kernel but
+        // never committed (pendingKernelAdds) — the latter is invisible to the model by
+        // design of the epoch guard, and was the strand mechanism on 2026-08-07.
+        let destinations = Array(Set(activeRoutes.map { $0.destination }).union(pendingKernelAdds))
 
         var failedDests: Set<String> = []
         if !destinations.isEmpty {
@@ -1760,6 +1780,14 @@ final class RouteManager: ObservableObject {
         }
 
         cancelAllRetries()
+        // A failed removal must keep its record. The retention filter below only keeps entries
+        // already in activeRoutes — a pending-only destination (pushed to the kernel but never
+        // committed to the model) would lose its record here, so append one first.
+        let trackedBeforeRetention = Set(activeRoutes.map { $0.destination })
+        for dest in failedDests where !trackedBeforeRetention.contains(dest) && pendingKernelAdds.contains(dest) {
+            activeRoutes.append(ActiveRoute(destination: dest, gateway: localGateway ?? "", source: "pending-sweep-retry", timestamp: Date()))
+        }
+        pendingKernelAdds.removeAll()
         if !failedDests.isEmpty {
             // Retain entries for destinations that failed kernel removal — they're still live
             activeRoutes.removeAll { !failedDests.contains($0.destination) }
@@ -1879,7 +1907,7 @@ final class RouteManager: ObservableObject {
         if !routesToAdd.isEmpty {
             if HelperManager.shared.isHelperInstalled {
                 let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
-                let result = await HelperManager.shared.addRoutesBatch(routes: helperRoutes)
+                let result = await addRoutesBatchTracked(routes: helperRoutes)
                 batchFailureCount = result.failureCount
                 batchFailedDests = Set(result.failedDestinations)
                 if result.failureCount > 0 {
@@ -1962,6 +1990,9 @@ final class RouteManager: ObservableObject {
             }
             log(.warning, "🔧 \(failed.count) route(s) failed kernel removal during unstrand — retained in activeRoutes so the next teardown removes them")
         }
+        // Every attempted destination is now either out of the kernel or retained in
+        // activeRoutes — either way it is no longer pending.
+        pendingKernelAdds.subtract(attempted)
     }
 
     /// Shared install-epilogue for the two full-replace apply paths
@@ -2041,6 +2072,8 @@ final class RouteManager: ObservableObject {
         }
 
         activeRoutes = newRoutes
+        // Committed destinations are tracked in activeRoutes now — no longer pending.
+        pendingKernelAdds.subtract(newRoutes.map { $0.destination })
         lastUpdate = Date()
 
         // Manage hosts file if enabled
@@ -2234,7 +2267,7 @@ final class RouteManager: ObservableObject {
                     guard seenAddDests.insert(add.destination).inserted else { return nil }
                     return (destination: add.destination, gateway: add.gateway, isNetwork: add.isNetwork)
                 }
-                let result = await HelperManager.shared.addRoutesBatch(routes: routes)
+                let result = await addRoutesBatchTracked(routes: routes)
                 addFailedDests = Set(result.failedDestinations)
                 passAddedDests.formUnion(Set(routes.map { $0.destination }).subtracting(addFailedDests))
 
@@ -3513,7 +3546,7 @@ final class RouteManager: ObservableObject {
         // Apply new kernel routes in single batch, exclude failed destinations from ownership
         var failedDests: Set<String> = []
         if !routesToAdd.isEmpty && HelperManager.shared.isHelperInstalled {
-            let result = await HelperManager.shared.addRoutesBatch(routes: routesToAdd)
+            let result = await addRoutesBatchTracked(routes: routesToAdd)
             failedDests = Set(result.failedDestinations)
             if result.failureCount > 0 {
                 log(.warning, "Batch route add for \(service.name): \(result.successCount) succeeded, \(result.failureCount) failed")
@@ -3658,10 +3691,27 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Private Methods
     
+    /// The only sanctioned way to batch-add routes to the kernel. Records destinations as
+    /// pending BEFORE the write (so teardown can always find them) and refuses outright once
+    /// shutdown has begun (so nothing lands mid-teardown).
+    func addRoutesBatchTracked(
+        routes: [(destination: String, gateway: String, isNetwork: Bool)]
+    ) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
+        guard !isShuttingDown else {
+            log(.warning, "Refusing batch add of \(routes.count) route(s): shutdown in progress")
+            return (0, routes.count, routes.map { $0.destination }, "shutdown in progress")
+        }
+        pendingKernelAdds.formUnion(routes.map { $0.destination })
+        let result = await HelperManager.shared.addRoutesBatch(routes: routes)
+        // Failed destinations never reached the kernel — nothing to sweep for them.
+        pendingKernelAdds.subtract(result.failedDestinations)
+        return result
+    }
+
     /// Acquire exclusive route operation lock. Returns false if another operation is running.
     /// @MainActor guarantees atomic check-and-set between await suspension points.
     private func acquireRouteOperation() -> Bool {
-        guard !isApplyingRoutes else { return false }
+        guard !isShuttingDown, !isApplyingRoutes else { return false }
         isApplyingRoutes = true
         return true
     }
@@ -4142,12 +4192,46 @@ final class RouteManager: ObservableObject {
     }
     
     /// Called when app is quitting - clean up routes and hosts file
+    /// Synchronously flips the shutdown flag and cancels every background task that could
+    /// mutate routes. Must be the FIRST thing both quit paths do — before any `await`.
+    /// Test-only: reverses beginShutdown so shared-singleton tests can restore state.
+    func resetShutdownStateForTests() {
+        isShuttingDown = false
+    }
+
+    /// Test-only seams for the operation gate (it is private by design).
+    func tryAcquireRouteOperationForTests() -> Bool { acquireRouteOperation() }
+    func releaseRouteOperationForTests() { releaseRouteOperation() }
+
+    func beginShutdown() {
+        guard !isShuttingDown else { return }
+        isShuttingDown = true
+        backgroundRefreshTask?.cancel()
+        rerouteRetryTask?.cancel()
+        rerouteRetryTask = nil
+        cancelAllRetries()
+    }
+
     func cleanupOnQuit() async {
+        beginShutdown()
         log(.info, "Cleaning up on quit...")
         ProxyListenerManager.shared.stopAll()
-        // Always remove active routes (especially critical for VPN Only catch-alls)
-        if !activeRoutes.isEmpty {
-            await removeAllRoutes()
+        // ALWAYS run teardown — even with an empty model. Its epoch bump is what preempts
+        // an in-flight apply; skipping it when `activeRoutes` was empty let a quit that
+        // landed mid-apply finish installing its full set after "cleanup" had completed.
+        await removeAllRoutes()
+        // An operation that was already past the gate may still be draining. Wait briefly
+        // (bounded — never blocks quit), then sweep anything it pushed into the kernel.
+        var polls = 0
+        while isApplyingRoutes && polls < 30 {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            polls += 1
+        }
+        if !pendingKernelAdds.isEmpty {
+            let residual = Array(pendingKernelAdds)
+            log(.warning, "Quit sweep: removing \(residual.count) route(s) installed during teardown")
+            _ = await removeRoutesBatchVia(residual)
+            pendingKernelAdds.removeAll()
         }
         if config.manageHostsFile {
             await cleanHostsFile()
