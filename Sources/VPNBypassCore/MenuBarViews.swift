@@ -103,16 +103,30 @@ struct MenuBarLabel: View {
 
 struct BrandedAppName: View {
     var fontSize: CGFloat = 15
-    
+    /// Show the mark alongside the type (the full lockup). Off where the mark would repeat
+    /// something already on screen.
+    var showsMark: Bool = true
+
     var body: some View {
         HStack(spacing: 0) {
+            if showsMark, let mark = Bundle.main.image(forResource: "menubar-icon-active") {
+                Image(nsImage: mark)
+                    .renderingMode(.template)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: fontSize * 1.25, height: fontSize * 1.25)
+                    .foregroundStyle(Theme.Brand.sky)
+                    .padding(.trailing, fontSize * 0.42)
+            }
+            // Weight contrast, not colour contrast, carries the lockup — the same relationship
+            // the banner and app icon use, so the three read as one identity.
             Text("VPN")
-                .font(.system(size: fontSize, weight: .black, design: .rounded))
-                .foregroundStyle(Theme.Brand.blueGradient)
-            
+                .font(.system(size: fontSize, weight: .heavy, design: .rounded))
+                .foregroundColor(Theme.textPrimary)
+
             Text("Bypass")
-                .font(.system(size: fontSize, weight: .bold, design: .rounded))
-                .foregroundStyle(Theme.Brand.silverGradient)
+                .font(.system(size: fontSize, weight: .light, design: .rounded))
+                .foregroundColor(Theme.Brand.sky)
         }
     }
 }
