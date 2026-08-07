@@ -90,10 +90,9 @@ struct MenuBarLabel: View {
                 }
             }
 
-            if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty && !routeManager.isLoading && !routeManager.isApplyingRoutes {
-                Text("\(routeManager.uniqueRouteCount)")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-            }
+            // No route count in the menu bar: it is noise at a glance (the number changes with
+            // DNS churn, not with anything the user did) and the accessibility label + dropdown
+            // carry the real state. Removed deliberately — do not reintroduce.
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(iconAccessibilityLabel)
