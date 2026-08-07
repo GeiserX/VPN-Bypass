@@ -96,6 +96,9 @@ struct Config: Codable {
     var defaultRouteId: UUID? = nil
     var schemaVersion: Int = 1
     var multiRouteEnabled: Bool = false  // Opt-in experimental: show Routes tab and start proxy listeners
+    /// Tunnels seen previously, so a VPN that is not connected right now can still be chosen
+    /// for a route or a pin. Live enumeration only reports tunnels that are UP.
+    var rememberedVPNLinks: [RouteManager.RememberedLink] = []
     /// Optional pin: act ONLY on this tunnel when it is up and eligible ("utun9"). Constrains
     /// automatic selection; a stale pin degrades to automatic with a logged warning.
     var pinnedVPNInterface: String? = nil
@@ -124,6 +127,7 @@ struct Config: Codable {
         defaultRouteId = try container.decodeIfPresent(UUID.self, forKey: .defaultRouteId)
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         multiRouteEnabled = try container.decodeIfPresent(Bool.self, forKey: .multiRouteEnabled) ?? false
+        rememberedVPNLinks = try container.decodeIfPresent([RouteManager.RememberedLink].self, forKey: .rememberedVPNLinks) ?? []
         pinnedVPNInterface = try container.decodeIfPresent(String.self, forKey: .pinnedVPNInterface)
         pinnedVPNProductHint = try container.decodeIfPresent(String.self, forKey: .pinnedVPNProductHint)
 

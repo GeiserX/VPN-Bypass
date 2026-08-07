@@ -468,6 +468,9 @@ struct RouteEditorSheet: View {
     @State private var selectedVPNInterface: String
     @State private var vpnProductHint: String
     @State private var vpnLinks: [RouteManager.VPNLink] = []
+    /// Live tunnels PLUS ones seen before, so a VPN that is currently disconnected can still
+    /// be chosen — live enumeration alone only ever reports tunnels that are UP.
+    @State private var selectableLinks: [(link: RouteManager.RememberedLink, isLive: Bool)] = []
 
     init(
         editingRoute: Route?,
@@ -586,7 +589,11 @@ struct RouteEditorSheet: View {
                                             Circle()
                                                 .fill(peer.online ? Theme.success : Theme.textTertiary)
                                                 .frame(width: 6, height: 6)
-                                            Text(peer.name)
+                                            // An exit-capable peer is usually a small minority
+                                            // of a tailnet, and it is the only kind that can
+                                            // carry general internet traffic without extra
+                                            // setup — so say which ones they are.
+                                            Text(peer.exitNodeCapable ? "\(peer.name) · exit node" : peer.name)
                                         }
                                         .tag(peer.ip)
                                     }
@@ -704,6 +711,7 @@ struct RouteEditorSheet: View {
         .task {
             peers = await RouteManager.shared.listTailscalePeers()
             vpnLinks = await RouteManager.shared.listVPNLinks()
+            selectableLinks = await RouteManager.shared.selectableVPNLinks()
         }
     }
 
@@ -711,7 +719,7 @@ struct RouteEditorSheet: View {
     /// tunnel. Selecting a specific one pins the route to that interface.
     @ViewBuilder
     private var vpnPickerField: some View {
-        let selectable = vpnLinks.filter { !$0.isTailscale }
+        let selectable = selectableLinks
         formField(label: "VPN", required: false) {
             if selectable.isEmpty {
                 HStack(alignment: .top, spacing: 6) {
@@ -728,12 +736,15 @@ struct RouteEditorSheet: View {
                     get: { selectedVPNInterface },
                     set: { iface in
                         selectedVPNInterface = iface
-                        vpnProductHint = vpnLinks.first(where: { $0.interface == iface })?.label ?? ""
+                        vpnProductHint = selectableLinks.first(where: { $0.link.interface == iface })?.link.label ?? ""
                     }
                 )) {
                     Text("Primary VPN (automatic)").tag("")
-                    ForEach(selectable) { link in
-                        Text("\(link.label) · \(link.interface)").tag(link.interface)
+                    ForEach(selectable, id: \.link.interface) { entry in
+                        Text(entry.isLive
+                             ? "\(entry.link.label) · \(entry.link.interface)"
+                             : "\(entry.link.label) · \(entry.link.interface) — not connected")
+                            .tag(entry.link.interface)
                     }
                 }
                 .pickerStyle(.menu)
