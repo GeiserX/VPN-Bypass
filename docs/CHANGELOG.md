@@ -5,6 +5,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.13] - 2026-08-07
+
+### Fixed
+- **A VPN reconnect no longer triggers a full route rebuild seconds later.** The app reads the VPN's gateway either as an address or, when it can't read one, as the interface name — two ways of writing the same thing. It was comparing them as text, so an unchanged tunnel looked like it had switched gateways, and the app responded by re-installing every route. Seen live: a "gateway changed" a few seconds after GlobalProtect reconnected, followed by 317 routes being written at once, which was enough to knock the freshly-established tunnel down again. Only a genuine change of address now counts.
+
 ## [3.1.12] - 2026-08-07
 
 ### Fixed
