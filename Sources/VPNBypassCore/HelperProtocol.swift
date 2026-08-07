@@ -205,3 +205,38 @@ public enum RouteCIDR {
         return "\((mask >> 24) & 0xFF).\((mask >> 16) & 0xFF).\((mask >> 8) & 0xFF).\(mask & 0xFF)"
     }
 }
+
+
+/// Parses `networksetup -listnetworkserviceorder` into the ordered list of enabled service names.
+///
+/// Lives here (compiled into both targets) so it is unit-testable.
+///
+/// Why this exists: gateway detection used to try a HARDCODED list of service names — "Wi-Fi",
+/// "Ethernet", "USB 10/100/1000 LAN", "Thunderbolt Ethernet", "USB-C LAN". Any Mac whose active
+/// link is named something else (docks in particular: "USB3.0 5K Graphic Docking", "Dell Universal
+/// Dock D6000") matched nothing, so detection fell through to `route -n get default` — which, once
+/// a VPN is connected, returns the VPN's OWN tunnel gateway. Every "bypass" route was then
+/// installed pointing INTO the tunnel, and every VPN state change moved the gateway and triggered a
+/// full re-apply. Enumerating the real services removes the guesswork.
+public enum NetworkServiceOrder {
+    /// Service names in the order macOS will use them. Disabled services (prefixed `*`) are skipped.
+    ///
+    /// Expected input lines look like:
+    ///   `(1) Wi-Fi`
+    ///   `(Hardware Port: Wi-Fi, Device: en0)`
+    ///   `(*2) Thunderbolt Bridge`      <- disabled
+    public static func parse(_ output: String) -> [String] {
+        var services: [String] = []
+        for rawLine in output.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            // Only the numbered heading lines name a service; the "(Hardware Port: …)" lines do not.
+            guard line.hasPrefix("("), let close = line.firstIndex(of: ")") else { continue }
+            let tag = String(line[line.index(after: line.startIndex)..<close])
+            // Skip disabled services, which macOS marks with a leading asterisk.
+            guard !tag.hasPrefix("*"), Int(tag) != nil else { continue }
+            let name = String(line[line.index(after: close)...]).trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty { services.append(name) }
+        }
+        return services
+    }
+}
