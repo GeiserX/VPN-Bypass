@@ -5,6 +5,23 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.9] - 2026-08-07
+
+### Fixed
+- **A route could be silently skipped and never installed.** The "is this route already correct?" check added in 3.1.8 didn't look at route flags, so a short-lived route the kernel creates automatically (which inherits its gateway from the default route) could be mistaken for one of ours. The app then recorded the route as applied, wrote nothing, and the temporary route later expired — leaving that destination going somewhere else entirely, with no error anywhere. The check is now much stricter about what counts as a match.
+- **VPN Only still rewrote its catch-all routes on every pass.** The 3.1.8 fix skipped network routes, which is exactly what VPN Only's two catch-alls are — so the churn that destabilises other VPN clients was never fixed in the mode where it matters most.
+- **VPN Only briefly sent protected traffic in the clear on every apply.** The catch-all routes were installed *before* the routes for your listed domains, so for the duration of an apply — hundreds of routes, one at a time — the very destinations you asked to protect fell back to your normal connection. Catch-alls are now installed last, mirroring teardown, which already removes them first.
+- **VPN Only left all traffic outside the tunnel when GlobalProtect appeared.** The app refuses to enable VPN Only under GlobalProtect, but it only refused to *add* the catch-alls — any already installed stayed, silently routing everything around the tunnel while the app looked healthy. They are now removed, and you're told why.
+- **Upgrading left every route behind.** Quitting the app cleans up its routes, but the Homebrew upgrade path stops the app with a signal that skipped that cleanup entirely — so an upgrade stranded the whole route set with nothing able to remove it afterwards. Routes are now cleaned up on that path too.
+- **A stuck `route` command could freeze all routing changes.** Since 3.1.7 route operations run one at a time, so a single hung command blocked every later change for as long as the helper stayed running. Commands are now bounded and cancelled if they overrun.
+- **Failing to route anything at all is no longer silent.** The one case guaranteed to produce no notification was total failure. You now get told when no routes could be applied — no gateway, no VPN for VPN Only, or the helper not being ready.
+- **Corrected the mode descriptions in the README and roadmap**, which had VPN Only backwards — they described it as sending everything *through* the VPN except your list, when it does the opposite.
+
+### Changed
+- Helper version 1.10.0 → 1.11.0 (one admin prompt on first launch after upgrading).
+- The privileged helper now rejects a `/0` route, matching the app.
+- Tests no longer read or write the real DNS cache file.
+
 ## [3.1.8] - 2026-08-06
 
 ### Fixed

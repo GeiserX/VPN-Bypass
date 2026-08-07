@@ -640,10 +640,15 @@ final class HelperManager: ObservableObject {
             ]
         }
         let allDests = routes.map { $0.destination }
-        // Budget 0.25s per route: helper does delete-before-add (2 subprocess calls
-        // at ~0.07s each ≈ 0.14s/route). 0.1s/route was too tight and caused timeouts
-        // for batches above ~250 routes, dropping all routes as failed.
-        let timeout = xpcTimeout + Double(routes.count) * 0.25
+        // Budget 0.6s per route. Since 1.10.0 the helper reads before it writes, so the worst
+        // realistic path for a route that must actually be installed is THREE subprocesses
+        // (`route get` + a failed `route change` + `route add`), not the two the old 0.25s figure
+        // assumed. Spawn cost is also far above the 0.07s that figure was calibrated against on
+        // machines running endpoint-security agents — which is precisely the population running a
+        // corporate VPN. Under-budgeting here does not just slow things down: the batch reports as
+        // indeterminate, the connection is dropped, and the retry queues behind the abandoned work.
+        // A steady-state re-apply costs one read and no writes, so this ceiling is rarely reached.
+let timeout = xpcTimeout + Double(routes.count) * 0.6
         // On a DEADLINE timeout (not an XPC error — the call DID reach the helper), the helper may
         // be slow rather than dead and have installed some/all routes without confirming. Reporting
         // them as failed strands orphaned kernel routes the app never tracks — a leak that survives

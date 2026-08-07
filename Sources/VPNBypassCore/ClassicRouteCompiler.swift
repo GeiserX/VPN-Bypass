@@ -71,9 +71,22 @@ enum ClassicRouteCompiler {
 
         // VPN Only: catch-all through the local gateway (0.0.0.0/1 + 128.0.0.0/1 cover all IPv4
         // with higher specificity than the default route), then inverse CIDRs through the VPN.
+        //
+        // INSTALL ORDER IS LEAK-CRITICAL. The helper writes this array strictly in order, so the
+        // catch-alls are deferred to the very END rather than emitted here. Installing them first
+        // — as this did originally — pointed ALL traffic at the local gateway before any of the
+        // listed destinations had their VPN route yet, so for the length of the apply (hundreds of
+        // routes, each a subprocess) the exact destinations the user asked to protect fell through
+        // to the clear. The apply made things worse before it made them better. Emitting them last
+        // means the VPN routes are already in place the instant the catch-alls take effect.
+        //
+        // This mirrors teardown, which already removes catch-alls FIRST (see removeAllRoutes and
+        // destinationsToUnstrand) so that traffic falls back to the VPN default, not out of it.
+        // Same principle, opposite end: the catch-alls are the last thing on and the first thing off.
+        var deferredCatchAlls: [Route] = []
         if isInverse {
-            routesToAdd.append(Route(destination: "0.0.0.0/1", gateway: localGateway, isNetwork: true, source: "VPN Only catch-all"))
-            routesToAdd.append(Route(destination: "128.0.0.0/1", gateway: localGateway, isNetwork: true, source: "VPN Only catch-all"))
+            deferredCatchAlls.append(Route(destination: "0.0.0.0/1", gateway: localGateway, isNetwork: true, source: "VPN Only catch-all"))
+            deferredCatchAlls.append(Route(destination: "128.0.0.0/1", gateway: localGateway, isNetwork: true, source: "VPN Only catch-all"))
             seenDestinations.insert("0.0.0.0/1")
             seenDestinations.insert("128.0.0.0/1")
             allSourceEntries.append(SourceEntry(destination: "0.0.0.0/1", gateway: localGateway, source: "VPN Only catch-all"))
@@ -124,6 +137,10 @@ enum ClassicRouteCompiler {
                 routesToAdd.append(Route(destination: sr.range, gateway: localGateway, isNetwork: true, source: sr.source))
             }
         }
+
+        // Catch-alls last (see the comment where they are built): the VPN routes must already be
+        // installed before all remaining traffic is pointed at the local gateway.
+        routesToAdd.append(contentsOf: deferredCatchAlls)
 
         return Build(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries)
     }

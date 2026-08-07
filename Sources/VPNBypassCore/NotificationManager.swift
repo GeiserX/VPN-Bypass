@@ -17,13 +17,23 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     @Published var notifyOnRouteFailure = true
     @Published var isAuthorized = false
     
-    private let notificationCenter = UNUserNotificationCenter.current()
+    /// Nil under XCTest. `UNUserNotificationCenter.current()` traps when the process has no app
+    /// bundle ("bundleProxyForCurrentProcess is nil"), so merely *touching* this singleton from a
+    /// test aborts the entire suite with signal 6. Guarding here, rather than at each call site,
+    /// means any code path is free to notify without knowing whether it is running under test —
+    /// which matters because the paths that most need to notify are error paths, and those are
+    /// exactly the ones tests drive. Mirrors the `underTests` redirect already used for config
+    /// storage in RouteManager.
+    private static let isUnderTests = NSClassFromString("XCTestCase") != nil
+        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    private let notificationCenter: UNUserNotificationCenter? =
+        NotificationManager.isUnderTests ? nil : .current()
     
     private override init() {
         super.init()
         
         // Set ourselves as delegate to handle foreground notifications
-        notificationCenter.delegate = self
+        notificationCenter?.delegate = self
         
         // Load saved preferences
         loadPreferences()
@@ -62,6 +72,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     
     func requestAuthorization() async {
         do {
+            guard let notificationCenter else { return }
             let granted = try await notificationCenter.requestAuthorization(options: [.alert, .sound, .badge])
             isAuthorized = granted
             
@@ -80,11 +91,13 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     }
     
     func updateAuthorizationStatus() async {
+        guard let notificationCenter else { return }
         let settings = await notificationCenter.notificationSettings()
         isAuthorized = settings.authorizationStatus == .authorized
     }
     
     func checkAuthorizationStatus() async -> Bool {
+        guard let notificationCenter else { return false }
         let settings = await notificationCenter.notificationSettings()
         let authorized = settings.authorizationStatus == .authorized
         isAuthorized = authorized
@@ -140,11 +153,32 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     
     func notifyRouteVerificationFailed(route: String, reason: String) {
         guard notificationsEnabled && notifyOnRouteFailure else { return }
-        
+
         sendNotification(
             title: String(localized: "Route Verification Failed"),
             body: "\(route): \(reason)",
             identifier: "route-failed-\(route.hashValue)"
+        )
+    }
+
+    /// Nothing at all could be enforced — the app is configured but not doing anything.
+    ///
+    /// This is the failure a user most needs to hear about, and it was the ONE case guaranteed to be
+    /// silent: `notifyRoutesApplied` is gated both on a non-zero success count and on
+    /// `notifyOnRoutesApplied`, which defaults OFF — so a total failure notified nothing, while
+    /// *partial* failures did get through. Every early return in the apply paths (no gateway, helper
+    /// not ready, VPN Only without a VPN gateway, VPN Only refused under GlobalProtect) now lands
+    /// here instead of only writing a log line the user has no reason to open.
+    ///
+    /// Gated on `notifyOnRouteFailure`, which defaults ON. The identifier is stable per reason so a
+    /// repeating condition coalesces into one notification rather than nagging on every retry.
+    func notifyEnforcementFailed(reason: String) {
+        guard notificationsEnabled && notifyOnRouteFailure else { return }
+
+        sendNotification(
+            title: String(localized: "VPN Bypass isn't routing anything"),
+            body: reason,
+            identifier: "enforcement-failed-\(reason.hashValue)"
         )
     }
     
@@ -167,6 +201,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let uniqueId = "\(identifier)-\(Date().timeIntervalSince1970)"
         let request = UNNotificationRequest(identifier: uniqueId, content: content, trigger: nil)
         
+        guard let notificationCenter else { return }
         notificationCenter.add(request) { error in
             if let error = error {
                 // The completion runs off the main actor; hop back to log (and pre-format

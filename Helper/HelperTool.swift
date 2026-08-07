@@ -291,35 +291,101 @@ class HelperTool: NSObject, HelperProtocol {
     /// `destination` to equal the host we asked about is what distinguishes "this exact route is
     /// present" from "something else would carry this traffic".
     ///
-    /// Network routes are deliberately excluded: `route get` normalises a network destination in
-    /// ways that are not reliably comparable to the CIDR string we were handed, and a wrong match
-    /// there would skip a write that was genuinely needed. They are few; host routes are where
-    /// the churn is.
+    /// Network routes are handled too, by comparing BOTH `destination:` and `mask:`. Excluding them
+    /// (as the first cut of this check did) left VPN Only mode churning on every single apply: its
+    /// `0.0.0.0/1` + `128.0.0.0/1` catch-alls are network routes, so they were rewritten every time
+    /// — which is exactly the leak-critical mode where a coexisting VPN client reacting to our
+    /// route-change events does the most damage. `route -n get -net <cidr>` reports the network in
+    /// `destination:` and the netmask in `mask:`, and reports the DEFAULT route (`destination:
+    /// default`, `mask: default`) when no such network route exists — so the same "did it echo back
+    /// what I asked about" discriminator that protects the host path protects this one.
     private func routeAlreadyCorrect(destination: String, gateway: String, isNetwork: Bool) -> Bool {
-        guard !isNetwork else { return false }
-        guard let output = routeOutput(args: ["-n", "get", destination]) else { return false }
+        let args = isNetwork ? ["-n", "get", "-net", destination] : ["-n", "get", destination]
+        guard let output = routeOutput(args: args) else { return false }
 
         var dest: String?
+        var mask: String?
         var gw: String?
         var iface: String?
+        var flags = ""
         for rawLine in output.split(separator: "\n") {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("destination:") {
                 dest = String(line.dropFirst("destination:".count)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("mask:") {
+                mask = String(line.dropFirst("mask:".count)).trimmingCharacters(in: .whitespaces)
             } else if line.hasPrefix("gateway:") {
                 gw = String(line.dropFirst("gateway:".count)).trimmingCharacters(in: .whitespaces)
             } else if line.hasPrefix("interface:") {
                 iface = String(line.dropFirst("interface:".count)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("flags:") {
+                flags = String(line.dropFirst("flags:".count)).trimmingCharacters(in: .whitespaces)
             }
         }
 
-        // No route specific to this destination -> it must be installed.
-        guard dest == destination else { return false }
+        // The route we matched must be a real, static entry of the KIND we are installing — not an
+        // ephemeral clone and not a wider route that merely covers this address.
+        //
+        // This is the subtle one. The default route carries PRCLONING, so macOS mints short-lived
+        // host routes to arbitrary destinations that inherit the parent's gateway. Such a clone
+        // echoes back `destination: <our exact IP>` with `gateway: <local gateway>` — and in Bypass
+        // mode the local gateway is precisely what we were about to install. Without this guard we
+        // would call that "already correct", skip the write, record the route as applied, and then
+        // watch the clone expire — leaving the destination silently on whatever the parent route
+        // says. No error, no log, no failed verification: exactly the silent bypass failure the
+        // destination check above exists to prevent.
+        guard !flags.contains("WASCLONED"),
+              !flags.contains("REJECT"),
+              !flags.contains("BLACKHOLE") else { return false }
+        if isNetwork {
+            guard !flags.contains("HOST") else { return false }
+        } else {
+            guard flags.contains("HOST") else { return false }
+        }
+
+        if isNetwork {
+            // `route get -net 10.0.0.0/8` echoes `destination: 10.0.0.0` + `mask: 255.0.0.0`, so the
+            // CIDR we were handed has to be split and the prefix expanded before comparing. BOTH must
+            // match: destination alone would treat 0.0.0.0/1 and a 0.0.0.0/8 as the same route.
+            guard let (network, prefix) = RouteCIDR.parse(destination),
+                  dest == network,
+                  mask == RouteCIDR.netmaskString(prefixLength: prefix)
+            else { return false }
+        } else {
+            // No route specific to this host -> it must be installed. (For a host with no route,
+            // `route get` reports the DEFAULT route, whose gateway in Bypass mode is the same local
+            // gateway we are about to install through — so this check, not the gateway one, is what
+            // stops us silently skipping a route that does not exist.)
+            guard dest == destination else { return false }
+        }
 
         if gateway.hasPrefix("iface:") {
             return iface == String(gateway.dropFirst(6))
         }
         return gw == gateway
+    }
+
+    /// Wait for `process`, but never longer than `timeout`. On expiry the process is terminated and
+    /// `false` is returned.
+    ///
+    /// Every route/hosts mutation runs on ONE serial queue (see `routeQueue`), so an unbounded
+    /// `waitUntilExit()` means a single wedged `/sbin/route` blocks every later add, remove, batch
+    /// and hosts update for the lifetime of the helper — with no watchdog and no recovery short of
+    /// restarting a root daemon. Bounding the wait keeps a stuck child from taking the pipeline
+    /// down with it; the caller sees an ordinary failure and can retry.
+    private func waitBounded(_ process: Process, timeout: TimeInterval = 10) -> Bool {
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            process.waitUntilExit()
+            done.signal()
+        }
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            helperLog.error("route command exceeded \(timeout, privacy: .public)s — terminating")
+            process.terminate()
+            _ = done.wait(timeout: .now() + 2)
+            return false
+        }
+        return true
     }
 
     /// Run `route` and capture stdout. Used only for read-only queries (`route -n get`).
@@ -335,8 +401,7 @@ class HelperTool: NSObject, HelperProtocol {
         do {
             try process.run()
             let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
+            guard waitBounded(process), process.terminationStatus == 0 else { return nil }
             return String(data: data, encoding: .utf8)
         } catch {
             return nil
@@ -354,8 +419,10 @@ class HelperTool: NSObject, HelperProtocol {
         
         do {
             try process.run()
-            process.waitUntilExit()
-            
+            guard waitBounded(process) else {
+                return (false, "route command timed out")
+            }
+
             if process.terminationStatus == 0 {
                 return (true, nil)
             } else {
@@ -532,7 +599,10 @@ class HelperTool: NSObject, HelperProtocol {
             guard parts.count == 2,
                   isValidIP(parts[0]),
                   let mask = Int(parts[1]),
-                  mask >= 0 && mask <= 32 else {
+                  mask >= 1 && mask <= 32 else {
+            // /0 is the entire default route. The app-side validator already rejects it; the root
+            // daemon must never be the MORE permissive layer, or a caller that slipped past the app
+            // could hand the kernel a route that captures everything.
                 return false
             }
             return true
