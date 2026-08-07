@@ -85,16 +85,22 @@ enum Theme {
 
     // MARK: - Brand Identity
 
+    /// The "Lanes" identity (2026-08). Electric blue on deep navy, with a sky accent that
+    /// matches the arrow in the mark. Kept in sync with docs/design/generate.py — the same
+    /// values generate the icon, wordmark and banner, so nothing drifts between code and art.
     enum Brand {
-        static let blue = Color(red: 0.15, green: 0.40, blue: 0.85)
-        static let blueLight = Color(red: 0.25, green: 0.55, blue: 0.95)
-        static let blueDark = Color(red: 0.05, green: 0.20, blue: 0.55)
+        static let blue = Color(hex: "2563EB")        // #2563EB — primary
+        static let blueLight = Color(hex: "60A5FA")
+        static let blueDark = Color(hex: "1E40AF")    // #1E40AF — secondary type
 
-        static let silver = Color(red: 0.75, green: 0.78, blue: 0.82)
-        static let silverLight = Color(red: 0.88, green: 0.90, blue: 0.92)
-        static let silverDark = Color(red: 0.45, green: 0.48, blue: 0.52)
+        /// The mark's arrow / accent, and the highlight in the icon gradient.
+        static let sky = Color(hex: "38BDF8")         // #38BDF8
 
-        static let arrowBlue = Color(red: 0.20, green: 0.65, blue: 0.95)
+        static let silver = Color(hex: "CBD5E1")
+        static let silverLight = Color(hex: "E2E8F0")
+        static let silverDark = Color(hex: "64748B")
+
+        static let arrowBlue = sky
 
         static let blueGradient = LinearGradient(
             colors: [blueLight, blue, blueDark],
