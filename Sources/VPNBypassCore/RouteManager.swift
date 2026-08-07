@@ -1632,7 +1632,18 @@ final class RouteManager: ObservableObject {
                     }
                 }
             } else {
-                log(.error, "Cannot remove routes: helper not ready (\(HelperManager.shared.helperState.statusText))")
+                log(.error, "Cannot remove routes: helper not ready (\(HelperManager.shared.helperState.statusText)) — retaining \(destinations.count) route(s) in the model so they can still be removed later")
+                // Every destination is still installed in the kernel: the helper never ran, so
+                // nothing was removed. Treat them ALL as failed.
+                //
+                // Falling through with an empty `failedDests` reached `activeRoutes.removeAll()`
+                // below, which stranded the routes AND destroyed the only record that they are
+                // ours — route ownership lives nowhere else. That is reachable on an ordinary
+                // quit (the helper can be booted out, or simply not ready), and it strands
+                // silently, immediately after logging that cleanup was impossible. In VPN Only
+                // the survivors can include the catch-alls, which then steer every connection
+                // around the tunnel with nothing left able to identify or remove them.
+                failedDests.formUnion(destinations)
             }
         }
 

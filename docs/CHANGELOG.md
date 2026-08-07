@@ -5,6 +5,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.11] - 2026-08-07
+
+### Fixed
+- **The app no longer forgets routes it failed to remove.** If the privileged helper wasn't available when routes were being cleaned up, the app logged that it couldn't remove them — and then cleared its own record of them anyway. Since that record is the only thing identifying those routes as ours, they were left in place with nothing able to find or remove them afterwards. This was reachable on an ordinary quit, and in VPN Only mode the leftovers could include the catch-all routes, which send every connection around the VPN. The record is now kept whenever removal didn't actually succeed.
+
 ## [3.1.10] - 2026-08-07
 
 ### Fixed
