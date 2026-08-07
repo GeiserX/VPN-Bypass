@@ -1,6 +1,6 @@
 # VPN Bypass - Product Roadmap
 
-## Current State (v3.1.11)
+## Current State (v3.1.12)
 
 Three routing modes ship today: **Bypass** (everything uses the VPN except the listed domains/services,
 which skip it), **VPN Only** (the inverse — everything goes direct except the listed items, which are

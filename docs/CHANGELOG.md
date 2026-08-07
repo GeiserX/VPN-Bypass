@@ -5,6 +5,12 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.12] - 2026-08-07
+
+### Fixed
+- **VPN Bypass can no longer mistake Tailscale for your VPN.** To tell apart the different services that share the `100.64.x` address range (Tailscale, Zscaler, Cloudflare WARP), the app asks Tailscale directly. If that question couldn't be answered — the command missing, or timing out under load — the app treated the address as your corporate VPN and would start re-routing traffic around your Tailscale mesh. It now declines whenever it can't be sure, because claiming another tool's tunnel is never the safe assumption.
+- **The app will no longer touch routes belonging to other network software.** Nothing previously stopped it writing a route for Tailscale's own address range or its DNS server. Listing Tailscale's range in VPN Only mode would have silently redirected the whole tailnet into the corporate tunnel, and removing it later would have deleted Tailscale's route outright — breaking mesh networking with nothing to indicate this app was responsible. Those destinations, along with loopback, link-local, multicast and broadcast, are now refused outright by the privileged helper, so the refusal holds no matter what the app asks for.
+
 ## [3.1.11] - 2026-08-07
 
 ### Fixed
