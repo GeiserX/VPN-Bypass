@@ -200,6 +200,10 @@ Set `VPNB_SOCKET` to override the socket path (default: `~/Library/Application S
 
 ### VPN Detection Logic
 
+> Running more than one VPN (e.g. a corporate client plus Tailscale), or local proxies? See
+> **[docs/COEXISTENCE.md](docs/COEXISTENCE.md)** for exactly what VPN Bypass will and will not
+> touch — one tunnel is acted on, Tailscale is never selected, loopback is never routed.
+
 The app intelligently detects corporate VPNs while avoiding false positives:
 
 | Interface Type | IP Range | Detection |
@@ -228,6 +232,9 @@ The app requires:
 - **Notifications**: Optional, for VPN status alerts (prompted on first launch)
 
 ## Troubleshooting
+
+Multi-VPN or proxy setups: **[docs/COEXISTENCE.md](docs/COEXISTENCE.md)** explains the selection
+and ownership rules, plus the commands to see what is actually happening.
 
 ### App won't open / "damaged" error (macOS Gatekeeper)
 

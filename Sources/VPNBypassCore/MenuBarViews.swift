@@ -145,6 +145,7 @@ struct MenuContent: View {
             // App title
             titleHeader
             helperDownBanner
+            nothingConfiguredHint
             
             // Header with VPN status
             headerSection
@@ -252,6 +253,30 @@ struct MenuContent: View {
             return (String(localized: "NO ROUTES"), Theme.warning)
         }
         return (String(localized: "ON"), Theme.success)
+    }
+
+    /// First-run honesty: a fresh install prompts for an admin password and then routes
+    /// NOTHING (empty domain list, every service disabled). Say so, instead of leaving a
+    /// silently inert app behind the most intrusive prompt it will ever show.
+    @ViewBuilder
+    private var nothingConfiguredHint: some View {
+        let nothingConfigured = routeManager.config.routingMode != .custom
+            && routeManager.config.domains.isEmpty
+            && !routeManager.config.services.contains(where: { $0.enabled })
+        if nothingConfigured && routeManager.activeRoutes.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .foregroundColor(Theme.blue)
+                Text(String(localized: "Nothing configured yet — add a domain below or enable a service in Settings to start bypassing."))
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+            }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.blue.opacity(0.08)))
+            .padding(.bottom, 8)
+        }
     }
 
     /// Shown at the top of the dropdown whenever the helper cannot enforce anything while a
