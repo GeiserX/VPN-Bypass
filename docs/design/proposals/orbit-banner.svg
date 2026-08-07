@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320">
+  <defs>
+    <linearGradient id="bbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B4F47"/><stop offset="100%" stop-color="#04201D"/>
+    </linearGradient>
+    <linearGradient id="bmk" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="24" y2="24">
+      <stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#5EEAD4"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="320" fill="url(#bbg)"/>
+  <circle cx="1040" cy="86" r="210" fill="#5EEAD4" opacity="0.10"/>
+  <circle cx="1040" cy="86" r="132" fill="#5EEAD4" opacity="0.07"/>
+  <g transform="translate(79.5,91.0) scale(6.000)">
+  <circle cx="12" cy="12.5" r="4.4" fill="url(#bmk)"/>
+  <g fill="none" stroke="url(#bmk)" stroke-width="2.6" stroke-linecap="round">
+    <path d="M2.5 20 C10 23.5 21 20 21 12.5 C21 7 17 4 12.5 4 C10 4 8 4.8 6.5 6"/>
+    <path d="M7.2 1.8 L6 6.6 L10.8 5.6"/>
+  </g></g>
+  <text x="252" y="163" font-family="-apple-system,Helvetica Neue,Arial" font-size="76"
+        font-weight="800" fill="#ffffff" letter-spacing="-2">VPN</text>
+  <text x="408" y="163" font-family="-apple-system,Helvetica Neue,Arial" font-size="76"
+        font-weight="200" fill="#5EEAD4" letter-spacing="-2">Bypass</text>
+  <text x="254" y="214" font-family="-apple-system,Helvetica Neue,Arial" font-size="27"
+        font-weight="400" fill="#B6C2D4">Send the sites you choose around your VPN. Everything else stays protected.</text>
+</svg>

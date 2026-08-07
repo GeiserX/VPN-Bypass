@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120">
+  <g transform="translate(17.0,24.5) scale(2.920)">
+  <path d="M7 20 V13.5 A5 5 0 0 1 17 13.5 V20 Z" fill="#4F46E5"/>
+  <g fill="none" stroke="#4F46E5" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 20 V9 C2 4 22 4 22 9 V20"/>
+  </g></g>
+  <text x="104" y="76" font-family="-apple-system,Helvetica Neue,Arial" font-size="52"
+        font-weight="800" fill="#4F46E5" letter-spacing="-1.5">VPN</text>
+  <text x="212" y="76" font-family="-apple-system,Helvetica Neue,Arial" font-size="52"
+        font-weight="300" fill="#3730A3" letter-spacing="-1.5">Bypass</text>
+</svg>

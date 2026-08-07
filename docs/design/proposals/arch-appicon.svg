@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <clipPath id="sq"><rect width="1024" height="1024" rx="230" ry="230"/></clipPath>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0%" stop-color="#2A2A2A"/><stop offset="100%" stop-color="#0A0A0A"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="55%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <!-- userSpaceOnUse is REQUIRED: an objectBoundingBox gradient has a degenerate box on a
+         zero-height path (a horizontal line) and paints nothing at all. -->
+    <linearGradient id="mk" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="24" y2="24">
+      <stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#sq)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <rect width="1024" height="1024" fill="url(#sheen)"/>
+    <circle cx="820" cy="180" r="300" fill="#10B981" opacity="0.10"/>
+  </g>
+  <g transform="translate(167.6,71.4) scale(28.704)">
+  <rect x="10.4" y="10" width="3.2" height="11" rx="1.2" fill="url(#mk)"/>
+  <g fill="none" stroke="url(#mk)" stroke-width="2.6" stroke-linecap="round">
+    <path d="M2.5 20 C2.5 8 21.5 8 21.5 20"/>
+  </g></g>
+</svg>
