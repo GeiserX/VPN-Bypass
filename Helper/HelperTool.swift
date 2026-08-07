@@ -593,6 +593,20 @@ class HelperTool: NSObject, HelperProtocol {
     }
     
     private func isValidDestination(_ string: String) -> Bool {
+        // Refuse destinations owned by other networking software on this machine — Tailscale's
+        // tailnet range and MagicDNS — plus kernel-reserved space. Enforced HERE, at the privileged
+        // boundary, so the root daemon is the strictest layer rather than the most permissive; the
+        // same reasoning that makes it reject /0.
+        //
+        // Without this, a VPN Only entry of exactly 100.64.0.0/10 reached `route change -net`,
+        // matched on destination, and silently repointed Tailscale's own route into the corporate
+        // tunnel — and teardown would then delete it outright. Mesh networking would break with
+        // nothing indicating this app was responsible.
+        if ProtectedDestinations.isProtected(string) {
+            helperLog.error("refusing protected destination \(string, privacy: .public) — it belongs to another network service")
+            return false
+        }
+
         // Can be IP or CIDR notation
         if string.contains("/") {
             let parts = string.components(separatedBy: "/")

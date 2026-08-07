@@ -240,3 +240,49 @@ public enum NetworkServiceOrder {
         return services
     }
 }
+
+/// Destinations this app must NEVER install, change, or delete, because they belong to other
+/// networking software sharing the machine — or to the kernel itself.
+///
+/// Enforced at the privileged boundary (the root daemon), deliberately: the helper must be the
+/// strictest layer, never the most permissive. Whatever the app asks for, these are refused.
+///
+/// The motivating case is Tailscale. It runs alongside this app in mesh mode, owns `100.64.0.0/10`
+/// and answers DNS on `100.100.100.100`. Nothing previously stopped a route for either from being
+/// written: a user CIDR of exactly `100.64.0.0/10` in VPN Only would reach `route change -net`,
+/// match on destination, and silently repoint Tailscale's own route into the corporate tunnel —
+/// and teardown would then delete it outright. Mesh networking would break with no indication that
+/// this app was responsible.
+///
+/// Note this is the UNCONDITIONAL list only. Individual host routes that merely fall inside CGNAT
+/// are a policy question for the app layer, which knows whether Tailscale is actually running;
+/// blocking them here would break legitimate Zscaler/WARP setups that share the same range.
+public enum ProtectedDestinations {
+    /// Tailscale's CGNAT range. A destination equal to it, or covering it, is refused.
+    public static let tailscaleCGNAT = (network: "100.64.0.0", prefix: 10)
+    /// Tailscale MagicDNS.
+    public static let magicDNS = "100.100.100.100"
+
+    public static func isProtected(_ destination: String) -> Bool {
+        let d = destination.trimmingCharacters(in: .whitespaces)
+
+        // MagicDNS, in host or /32 form.
+        if d == magicDNS || d == "\(magicDNS)/32" { return true }
+
+        if let (network, prefix) = RouteCIDR.parse(d) {
+            // The tailnet range itself, or any prefix that COVERS it — a shorter prefix on the same
+            // network wins longest-prefix match against Tailscale's own route just as surely.
+            if network == tailscaleCGNAT.network && prefix <= tailscaleCGNAT.prefix { return true }
+            // Kernel-reserved space nothing here should ever route.
+            if network == "127.0.0.0" { return true }
+            if network == "169.254.0.0" { return true }
+            if network == "224.0.0.0" { return true }
+        }
+
+        // Host forms of the same reserved space.
+        if d.hasPrefix("127.") || d.hasPrefix("169.254.") { return true }
+        if d == "255.255.255.255" { return true }
+
+        return false
+    }
+}
