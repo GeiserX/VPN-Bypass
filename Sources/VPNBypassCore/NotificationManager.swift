@@ -116,15 +116,29 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         )
     }
     
-    func notifyVPNDisconnected(wasInterface: String?, routesRemaining: Int = 0) {
-        guard notificationsEnabled && notifyOnVPNDisconnect else { return }
-
-        let suffix = routesRemaining > 0
-            ? String(localized: "\(routesRemaining) route(s) could not be removed.")
-            : String(localized: "Routes cleared.")
-        let body = wasInterface != nil
+    /// Kept-by-design and failed-removal are DIFFERENT facts and must read differently.
+    /// Bypass mode deliberately keeps local-gateway routes on disconnect (a reconnect finds
+    /// them already correct — zero churn); reporting that count as "could not be removed"
+    /// made the churn fix look like a malfunction.
+    nonisolated static func disconnectedBody(wasInterface: String?, routesKept: Int, routesFailed: Int) -> String {
+        let suffix: String
+        if routesFailed > 0 {
+            suffix = String(localized: "\(routesFailed) route(s) could not be removed.")
+        } else if routesKept > 0 {
+            suffix = String(localized: "Keeping \(routesKept) bypass route(s) — they use your normal connection and will be reused on reconnect.")
+        } else {
+            suffix = String(localized: "Routes cleared.")
+        }
+        return wasInterface != nil
             ? String(localized: "Disconnected from \(wasInterface!). \(suffix)")
             : String(localized: "VPN connection lost. \(suffix)")
+    }
+
+    func notifyVPNDisconnected(wasInterface: String?, routesKept: Int = 0, routesFailed: Int = 0) {
+        guard notificationsEnabled && notifyOnVPNDisconnect else { return }
+
+        let body = Self.disconnectedBody(wasInterface: wasInterface,
+                                         routesKept: routesKept, routesFailed: routesFailed)
 
         sendNotification(
             title: String(localized: "VPN Disconnected"),
