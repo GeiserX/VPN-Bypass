@@ -675,34 +675,68 @@ final class RouteManager: ObservableObject {
             }
         }
         
-        // Second pass: check corporate VPN IPs (async) and find valid VPN
-        var vpnCandidates: [(name: String, ip: String, isValid: Bool)] = []
-        
+        // Second pass: build the full candidate set, then choose deliberately.
+        //
+        // This used to return the FIRST interface that matched, in ifconfig order. Several tunnels
+        // being up at once is the ordinary case, not a corner case — a corporate client alongside
+        // Tailscale — and ifconfig order has nothing to do with which one carries traffic. Since
+        // Tailscale's utun usually sorts before a corporate client's, it won that race whenever an
+        // exit node made its address look like a VPN, and in VPN Only mode the catch-alls would
+        // then be installed to escape the WRONG tunnel, sending corporate traffic direct.
+        let tsIPs = await tailscaleSelfIPs()
+        var candidates: [VPNCandidate] = []
         for i in interfaces.indices {
             let isValid = await isCorporateVPNIP(interfaces[i].ip, hintType: hintType)
             interfaces[i].isValidCorporateIP = isValid
-            
-            // Track VPN candidates for debugging
-            if interfaces[i].isVPN {
-                vpnCandidates.append((interfaces[i].name, interfaces[i].ip, isValid))
-            }
-            
-            // Check if this is our VPN
-            if interfaces[i].isVPN && interfaces[i].hasUpFlag && isValid {
-                let vpnType = hintType ?? detectVPNTypeFromInterface(interfaces[i].name)
-                return (true, interfaces[i].name, vpnType)
-            }
+            guard interfaces[i].isVPN else { continue }
+            candidates.append(VPNCandidate(
+                interface: interfaces[i].name,
+                isUp: interfaces[i].hasUpFlag,
+                isTunnel: true,
+                isCorporateAddress: isValid,
+                isTailscale: tsIPs.contains(interfaces[i].ip)
+            ))
         }
-        
+
+        let defaultRouteInterface = await currentDefaultRouteInterface()
+        let selected = VPNInterfaceSelector.select(
+            candidates: candidates,
+            defaultRouteInterface: defaultRouteInterface,
+            current: vpnInterface
+        )
+
+        if let selected {
+            if candidates.filter({ $0.isUp && $0.isCorporateAddress && !$0.isTailscale }).count > 1 {
+                let all = candidates.map(\.interface).joined(separator: ", ")
+                await MainActor.run {
+                    log(.info, "Multiple tunnels up (\(all)) — using \(selected)" +
+                        (defaultRouteInterface == selected ? " (carries the default route)" : ""))
+                }
+            }
+            let type = hintType ?? detectVPNTypeFromInterface(selected)
+            return (true, selected, type)
+        }
+
         // Debug: log what we found if no VPN detected
-        if !vpnCandidates.isEmpty {
-            let summary = vpnCandidates.map { "\($0.name):\($0.ip) valid=\($0.isValid)" }.joined(separator: ", ")
+        if !candidates.isEmpty {
+            let summary = candidates.map {
+                "\($0.interface) up=\($0.isUp) corp=\($0.isCorporateAddress) tailscale=\($0.isTailscale)"
+            }.joined(separator: ", ")
             await MainActor.run { log(.info, "VPN candidates (none matched): \(summary)") }
         }
-        
+
         return (false, nil, nil)
     }
     
+    /// Which interface the default route currently exits through, or nil if unreadable.
+    /// This is the only direct evidence of which tunnel is actually carrying traffic.
+    private func currentDefaultRouteInterface() async -> String? {
+        guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", "default"], timeout: 5.0) else {
+            return nil
+        }
+        return VPNInterfaceSelector.parseDefaultRouteInterface(result.output)
+    }
+
     /// Check if interface name suggests it's a VPN interface
     private func isVPNInterface(_ iface: String) -> Bool {
         // Common VPN interface prefixes

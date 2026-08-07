@@ -286,3 +286,98 @@ public enum ProtectedDestinations {
         return false
     }
 }
+
+// MARK: - VPN interface selection
+
+/// One tunnel considered as "the VPN", with everything the choice depends on already resolved.
+public struct VPNCandidate: Equatable, Sendable {
+    public let interface: String
+    public let isUp: Bool
+    public let isTunnel: Bool
+    /// The address looks like a corporate VPN address (see `isCorporateVPNIP`).
+    public let isCorporateAddress: Bool
+    /// This is Tailscale's own utun.
+    public let isTailscale: Bool
+
+    public init(interface: String, isUp: Bool, isTunnel: Bool,
+                isCorporateAddress: Bool, isTailscale: Bool) {
+        self.interface = interface
+        self.isUp = isUp
+        self.isTunnel = isTunnel
+        self.isCorporateAddress = isCorporateAddress
+        self.isTailscale = isTailscale
+    }
+}
+
+/// Chooses which tunnel is "the VPN" when several are up at once.
+///
+/// This has to be deliberate because more than one tunnel is the normal case, not the exception:
+/// a corporate client and Tailscale routinely run together, and a Mac can easily show nine utun
+/// interfaces. Selection used to be "first match in `ifconfig` order", which is neither
+/// deterministic nor related to which tunnel carries traffic — and since Tailscale's utun usually
+/// sorts BEFORE a corporate client's, Tailscale won that race whenever an exit node made it look
+/// like a VPN. The consequence in VPN Only mode is a leak: the catch-alls are installed to escape
+/// the tunnel the app selected, sending the OTHER tunnel's corporate traffic direct.
+public enum VPNInterfaceSelector {
+
+    public static func select(candidates: [VPNCandidate],
+                              defaultRouteInterface: String?,
+                              current: String?) -> String? {
+        // Tailscale is excluded outright. In mesh mode it is not a VPN at all, and as an exit node
+        // it has its own egress route type — it must never become the tunnel whose traffic the app
+        // reroutes, because doing so silently changes what a corporate VPN policy applies to.
+        let eligible = candidates.filter {
+            $0.isUp && $0.isTunnel && $0.isCorporateAddress && !$0.isTailscale
+        }
+        guard !eligible.isEmpty else { return nil }
+
+        // 1. Ground truth. The tunnel carrying the default route is the one actually moving
+        //    traffic; no heuristic beats observing it. A change here is a real change worth acting
+        //    on, so this deliberately outranks hysteresis.
+        if let defaultRouteInterface,
+           eligible.contains(where: { $0.interface == defaultRouteInterface }) {
+            return defaultRouteInterface
+        }
+
+        // 2. Hysteresis. With the default route on neither tunnel (split tunnel — the common case
+        //    for GlobalProtect), several candidates stay equally valid indefinitely. Keeping the
+        //    existing choice is what stops the selection oscillating, and an oscillating selection
+        //    is not cosmetic: every flip is read as an interface change and re-issues the entire
+        //    route set, which is the feedback loop that destabilises the tunnel.
+        if let current, eligible.contains(where: { $0.interface == current }) {
+            return current
+        }
+
+        // 3. Deterministic tie-break, so two machines in the same state make the same choice and a
+        //    restart does not silently pick differently.
+        return eligible.map(\.interface).min(by: interfaceOrdersBefore)
+    }
+
+    /// Orders interfaces by NUMERIC suffix, not lexically — "utun10" must sort after "utun9",
+    /// which plain string comparison gets backwards.
+    static func interfaceOrdersBefore(_ a: String, _ b: String) -> Bool {
+        let sa = numericSuffix(a), sb = numericSuffix(b)
+        if let sa, let sb, sa != sb { return sa < sb }
+        let pa = a.prefix(while: { !$0.isNumber }), pb = b.prefix(while: { !$0.isNumber })
+        if pa != pb { return pa < pb }
+        return a < b
+    }
+
+    static func numericSuffix(_ s: String) -> Int? {
+        let digits = s.drop(while: { !$0.isNumber })
+        return digits.isEmpty ? nil : Int(digits)
+    }
+
+    /// The interface the default route exits through, from `route -n get default` output.
+    /// Pure so it can be tested without a routing table.
+    public static func parseDefaultRouteInterface(_ routeOutput: String) -> String? {
+        for line in routeOutput.components(separatedBy: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("interface:") {
+                let v = t.dropFirst("interface:".count).trimmingCharacters(in: .whitespaces)
+                return v.isEmpty ? nil : v
+            }
+        }
+        return nil
+    }
+}
