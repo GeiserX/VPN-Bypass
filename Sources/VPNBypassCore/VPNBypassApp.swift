@@ -168,11 +168,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         networkDebounceWorkItem?.cancel()
         RouteManager.shared.stopDNSRefreshTimer()
 
-        // Clean up routes and hosts file on quit, then allow termination
+        // Clean up routes and hosts file on quit, then allow termination.
+        //
+        // The safety deadline has to scale with the work, not sit at a flat 8s. Teardown removes
+        // one route per `/sbin/route` subprocess, and a normal config here installs 300+; at the
+        // measured per-route cost that ran well past 8s, so the app replied "go ahead" and was
+        // killed mid-teardown. Everything past the cut-off stayed installed — and because route
+        // ownership lives only in this process's memory, the next launch started with an empty
+        // model and could never remove it. In VPN Only the survivors can include the catch-alls,
+        // whose own batch budget (10.5s) already exceeded the old cap on its own.
+        //
+        // Catch-alls are torn down first (see removeAllRoutes), so the most leak-relevant work is
+        // done early; this budget is about not abandoning the remainder.
+        let trackedRouteCount = RouteManager.shared.activeRoutes.count
+        let quitDeadline = min(60.0, 8.0 + Double(trackedRouteCount) * 0.15)
         var didReply = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + quitDeadline) {
             guard !didReply else { return }
             didReply = true
+            RouteManager.shared.log(.warning, "Quit teardown exceeded \(Int(quitDeadline))s — some routes may remain installed")
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         Task { @MainActor in

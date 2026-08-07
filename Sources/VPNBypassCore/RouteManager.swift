@@ -378,6 +378,9 @@ final class RouteManager: ObservableObject {
     func checkVPNStatus() async {
         let wasVPNConnected = isVPNConnected
         let oldInterface = vpnInterface
+        // Captured BEFORE re-detection below overwrites it, so a same-interface gateway change is
+        // detectable at all — see `gatewayChanged` further down.
+        let oldVPNGateway = vpnGateway
         let oldTailscaleFingerprint = lastTailscaleSelfFingerprint
 
         // Detect current network first
@@ -467,9 +470,20 @@ final class RouteManager: ObservableObject {
             // Reason for logging; nil when this pass only drains an existing latch
             // (interfaceChanged / tailscaleChanged already false), in which case the
             // reason captured when the latch was set is reused.
+            // Same interface, different next-hop. A tunnel that renegotiates keeps utunN but can
+            // return on a new gateway; nothing else notices, because interfaceChanged compares
+            // names and the DNS refresh only schedules destinations it does not already track. The
+            // routes would stay pinned to a gateway that no longer exists.
+            let gatewayChanged = isVPNConnected && wasVPNConnected
+                && interface == oldInterface
+                && oldVPNGateway != nil && vpnGateway != nil
+                && oldVPNGateway != vpnGateway
+
             let rerouteReason: String? = interfaceChanged
                 ? "VPN interface changed: \(oldInterface ?? "?") → \(interface ?? "?")"
-                : (tailscaleChanged ? "Tailscale active account changed, refreshing routes" : nil)
+                : (gatewayChanged
+                    ? "VPN gateway changed on \(interface ?? "?"): \(oldVPNGateway ?? "?") → \(vpnGateway ?? "?")"
+                    : (tailscaleChanged ? "Tailscale active account changed, refreshing routes" : nil))
 
             switch RerouteDecider.decide(
                 interfaceChanged: interfaceChanged,
@@ -478,7 +492,8 @@ final class RouteManager: ObservableObject {
                 isLoading: isLoading,
                 isApplyingRoutes: isApplyingRoutes,
                 cooldownActive: rerouteCooldownActive(),
-                hasGateway: canApplyRoutes
+                hasGateway: canApplyRoutes,
+                gatewayChanged: gatewayChanged
             ) {
             case .reroute:
                 if let rerouteReason { pendingRerouteReason = rerouteReason }

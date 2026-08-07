@@ -30,15 +30,32 @@ struct MenuBarLabel: View {
         return Self.iconDefault
     }
 
+    /// States the routing CONTRACT, not just a count.
+    ///
+    /// Bypass and VPN Only are near-opposites — one sends everything through the VPN except your
+    /// list, the other sends everything direct except your list — and the menu bar rendered them
+    /// identically: same glyph, same number. A user who changed mode a week ago had no ambient way
+    /// to tell which one was running, which is precisely the confusion behind a user reporting that
+    /// their public IP was their real one "while the app was on".
     private var iconAccessibilityLabel: String {
         if helperManager.helperState.isFailed {
-            return "VPN Bypass: helper error"
-        } else if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty {
-            return "VPN Bypass: \(routeManager.uniqueRouteCount) active routes"
-        } else if routeManager.isVPNConnected {
-            return "VPN Bypass: VPN connected, no routes"
+            return String(localized: "VPN Bypass: helper error, nothing is being routed")
         }
-        return "VPN Bypass: inactive"
+        guard routeManager.isVPNConnected else {
+            return String(localized: "VPN Bypass: no VPN detected, nothing is being routed")
+        }
+        let count = routeManager.uniqueRouteCount
+        guard !routeManager.activeRoutes.isEmpty else {
+            return String(localized: "VPN Bypass: VPN connected but no routes are being enforced")
+        }
+        switch routeManager.config.routingMode {
+        case .vpnOnly:
+            return String(localized: "VPN Bypass — VPN Only: \(count) destinations use the VPN, everything else is direct")
+        case .custom:
+            return String(localized: "VPN Bypass — Custom: \(count) destinations routed by your rules")
+        default:
+            return String(localized: "VPN Bypass — Bypass: \(count) destinations skip the VPN, everything else is tunnelled")
+        }
     }
 
     private var menuBarIcon: some View {

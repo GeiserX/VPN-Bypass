@@ -6,7 +6,7 @@
 // never re-fire — a silent, persistent VPN leak. These tests pin the three-way
 // decision that now LATCHES a blocked re-route (via `pending`) and drains it later,
 // so a needed re-route is never lost. Each expected action is hand-computed from:
-//   needed    = interfaceChanged || tailscaleChanged || pending
+//   needed    = interfaceChanged || tailscaleChanged || pending || gatewayChanged
 //   canRunNow = !isLoading && !isApplyingRoutes && !cooldownActive && hasGateway
 //   result    = !needed ? .none : (canRunNow ? .reroute : .latch)
 
@@ -149,6 +149,38 @@ final class RerouteDeciderTests: XCTestCase {
             interfaceChanged: true, tailscaleChanged: false, pending: false,
             isLoading: true, isApplyingRoutes: true, cooldownActive: true, hasGateway: false
         ), .latch)
+    }
+
+
+    // MARK: - Gateway changed on the SAME interface
+
+    /// A tunnel that renegotiates keeps `utunN` but can return on a different next-hop. Nothing
+    /// else in the app notices: `interfaceChanged` compares names, and the DNS refresh only
+    /// schedules destinations it does not already track, so an installed route is never revisited.
+    /// The routes would stay pinned to a gateway that no longer exists — in VPN Only the listed
+    /// destinations blackhole rather than leak, so it fails safe, but silently and without healing.
+    func testGatewayChangedAloneNeedsAReroute() {
+        XCTAssertEqual(RerouteDecider.decide(
+            interfaceChanged: false, tailscaleChanged: false, pending: false,
+            isLoading: false, isApplyingRoutes: false, cooldownActive: false, hasGateway: true,
+            gatewayChanged: true
+        ), .reroute)
+    }
+
+    func testGatewayChangedLatchesWhenBlocked() {
+        XCTAssertEqual(RerouteDecider.decide(
+            interfaceChanged: false, tailscaleChanged: false, pending: false,
+            isLoading: false, isApplyingRoutes: true, cooldownActive: false, hasGateway: true,
+            gatewayChanged: true
+        ), .latch)
+    }
+
+    /// Default value keeps every pre-existing decision-table case meaning exactly what it did.
+    func testGatewayChangedDefaultsToFalse() {
+        XCTAssertEqual(RerouteDecider.decide(
+            interfaceChanged: false, tailscaleChanged: false, pending: false,
+            isLoading: false, isApplyingRoutes: false, cooldownActive: false, hasGateway: true
+        ), .none)
     }
 
     // MARK: - Premature-commit invariant
