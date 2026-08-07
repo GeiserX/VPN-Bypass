@@ -1151,6 +1151,10 @@ final class RouteManager: ObservableObject {
             }
         } else if !isVPNConnected {
             log(.info, "No VPN connection detected")
+            // With no VPN there is nothing this app should be routing — remove ANY tagged
+            // leftovers from a crashed/killed previous run, catch-alls included. This is the
+            // path that heals the "app off, public IP still wrong" report class on its own.
+            await startupSweepIfNeeded(desired: [])
             isLoading = false
         } else if localGateway == nil {
             log(.error, "Could not detect local gateway")
@@ -1898,6 +1902,10 @@ final class RouteManager: ObservableObject {
             build.routesToAdd.map { ($0.destination, $0.gateway, $0.isNetwork, $0.source) }
         let allSourceEntries: [(destination: String, gateway: String, source: String)] =
             build.allSourceEntries.map { ($0.destination, $0.gateway, $0.source) }
+
+        // Crash recovery first: clear tagged leftovers a previous run stranded, keeping what
+        // this apply wants (those become zero-event no-ops in the reconciling batch below).
+        await startupSweepIfNeeded(desired: routesToAdd.map { $0.destination })
 
         log(.info, "Applying \(routesToAdd.count) routes from cache (\(isInverse ? "VPN Only" : "Bypass") mode)...")
 
@@ -3691,6 +3699,35 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Private Methods
     
+    /// One sweep per launch: has the orphan sweep already run this session?
+    private var didStartupSweep = false
+
+    /// Which table entries are OUR orphans: tagged RTF_PROTO1 (only this app sets it) yet not
+    /// wanted by the current session. Pure so it can be unit-tested against synthetic tables.
+    nonisolated static func orphanedDestinations(
+        table: [RouteKernel.KernelRoute], desired: Set<String>
+    ) -> [String] {
+        table.filter { $0.isOurs }.map(\.destinationString).filter { !desired.contains($0) }
+    }
+
+    /// Startup crash/unclean-quit recovery — the permanent fix for the issue #67 class.
+    ///
+    /// Every route this app installs is tagged RTF_PROTO1 in the kernel, so a plain silent
+    /// table dump identifies ours with no journal and no prior state ("no other state needs to
+    /// be instantiated before this runs" — the property that makes this recovery reliable).
+    /// Anything tagged but not wanted by THIS session — including VPN Only catch-alls stranded
+    /// by a kill — is removed before the first apply. Wanted routes are left in place: the
+    /// snapshot-reconciling batch add makes them zero-event no-ops.
+    func startupSweepIfNeeded(desired: [String]) async {
+        guard !didStartupSweep else { return }
+        didStartupSweep = true
+        guard let table = RouteKernel.currentTable() else { return }
+        let orphans = Self.orphanedDestinations(table: table, desired: Set(desired))
+        guard !orphans.isEmpty else { return }
+        log(.warning, "Startup sweep: removing \(orphans.count) route(s) left by a previous run")
+        _ = await removeRoutesBatchVia(orphans)
+    }
+
     /// The only sanctioned way to batch-add routes to the kernel. Records destinations as
     /// pending BEFORE the write (so teardown can always find them) and refuses outright once
     /// shutdown has begun (so nothing lands mid-teardown).
@@ -3700,6 +3737,18 @@ final class RouteManager: ObservableObject {
         guard !isShuttingDown else {
             log(.warning, "Refusing batch add of \(routes.count) route(s): shutdown in progress")
             return (0, routes.count, routes.map { $0.destination }, "shutdown in progress")
+        }
+        // Never touch the route to the VPN's own gateway. Its client keeps the tunnel alive by
+        // reaching that address via the PHYSICAL interface; vendor documentation describes
+        // connect-then-flap-within-a-minute when that stops being true.
+        var routes = routes
+        if let gw = vpnGateway, !gw.hasPrefix("iface:") {
+            let protected = routes.filter { $0.destination == gw || $0.destination == gw + "/32" }
+            if !protected.isEmpty {
+                log(.warning, "Refusing \(protected.count) route(s) targeting the VPN gateway \(gw) — protected")
+                routes.removeAll { $0.destination == gw || $0.destination == gw + "/32" }
+                if routes.isEmpty { return (0, protected.count, protected.map { $0.destination }, "protected: VPN gateway") }
+            }
         }
         pendingKernelAdds.formUnion(routes.map { $0.destination })
         let result = await HelperManager.shared.addRoutesBatch(routes: routes)
