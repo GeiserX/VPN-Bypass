@@ -90,6 +90,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let helperReady = await HelperManager.shared.ensureHelperReady()
             if !helperReady {
                 RouteManager.shared.log(.error, "Helper not ready: \(HelperManager.shared.helperState.statusText). Route application skipped.")
+                // This is a FIRST-RUN-reachable state, and it used to be one log line nobody
+                // saw: the menu showed a green ON while nothing was enforced. Tell the user.
+                NotificationManager.shared.notifyEnforcementFailed(
+                    reason: String(localized: "The privileged helper is not running — no routes are being enforced. Open Settings → General to repair it.")
+                )
                 // Detect VPN state for display, but skip route mutations that
                 // require the helper. This clears the "Setting Up..." spinner
                 // instead of hanging on it forever when the helper is absent.

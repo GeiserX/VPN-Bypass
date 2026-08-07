@@ -1058,6 +1058,11 @@ final class RouteManager: ObservableObject {
     func refreshRoutes() {
         guard HelperManager.shared.isHelperInstalled else {
             log(.error, "Cannot refresh routes: helper not ready (\(HelperManager.shared.helperState.statusText))")
+            // The most prominent button in the menu must never fail silently — this was a
+            // click that did nothing, with the only evidence in a log nobody reads.
+            NotificationManager.shared.notifyEnforcementFailed(
+                reason: String(localized: "Can't refresh: the privileged helper is not running. Open Settings → General to repair it.")
+            )
             return
         }
         Task {

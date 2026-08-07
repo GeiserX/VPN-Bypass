@@ -27,7 +27,24 @@ public enum ControlSurface {
     @MainActor
     public static func handle(_ request: ControlRequest) async -> ControlResponse {
         let ports = ProxyListenerManager.shared.activePorts
-        let (newConfig, response) = CommandRouter.apply(request, to: RouteManager.shared.config, listenerPorts: ports)
+        var (newConfig, response) = CommandRouter.apply(request, to: RouteManager.shared.config, listenerPorts: ports)
+
+        // `status` additionally reports LIVE enforcement facts. The config alone cannot answer
+        // "is it actually working?" — a down helper with a connected VPN looks identical to a
+        // healthy install in config terms while enforcing nothing.
+        if request.cmd == "status", response.ok {
+            let rm = RouteManager.shared
+            let helper = HelperManager.shared
+            response.result?.runtime = RuntimeStatus(
+                helperReady: helper.helperState.isReady,
+                helperState: helper.helperState.statusText,
+                vpnConnected: rm.isVPNConnected,
+                vpnInterface: rm.vpnInterface,
+                vpnType: rm.vpnType?.rawValue,
+                enforcedRouteCount: rm.uniqueRouteCount,
+                enforcing: rm.isVPNConnected && helper.helperState.isReady && !rm.activeRoutes.isEmpty
+            )
+        }
 
         // Read verbs (and any errored verb) leave the config untouched — don't
         // write config.json or churn listeners for a `status`/`route.list`.
