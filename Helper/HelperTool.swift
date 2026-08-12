@@ -295,9 +295,7 @@ class HelperTool: NSObject, HelperProtocol {
         guard let table = RouteKernel.currentTable() else { return [:] }
         var index: [String: RouteKernel.KernelRoute] = [:]
         for route in table {
-            guard route.flags & RTF_WASCLONED == 0,
-                  route.flags & RTF_REJECT == 0,
-                  route.flags & RTF_BLACKHOLE == 0 else { continue }
+            guard RouteKernel.isComparableEntry(route.flags) else { continue }
             index[route.destinationString] = route
         }
         return index

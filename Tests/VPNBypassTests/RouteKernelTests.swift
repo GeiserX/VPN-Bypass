@@ -160,3 +160,46 @@ final class RouteKernelTests: XCTestCase {
         XCTAssertNil(RouteKernel.ipv4ToUInt32(""))
     }
 }
+
+// MARK: - Snapshot comparability (issue #69, requirement 4)
+
+extension RouteKernelTests {
+
+    /// A scoped route shares its destination STRING with the unscoped one — this machine
+    /// carries `default … en8` scoped alongside the real default. In a destination-keyed
+    /// snapshot the scoped entry would overwrite the one we actually need to compare against,
+    /// and the comparison could then answer "already correct" about a route that does not
+    /// serve ordinary traffic — silently skipping a write the bypass depends on.
+    func testScopedRoutesAreNotComparable() {
+        XCTAssertFalse(RouteKernel.isComparableEntry(RTF_UP | RTF_STATIC | RTF_IFSCOPE))
+    }
+
+    /// ARP entries are not routes: they carry an AF_LINK gateway and share destinations with
+    /// real routes, so they can shadow one in the index.
+    func testARPEntriesAreNotComparable() {
+        XCTAssertFalse(RouteKernel.isComparableEntry(RTF_UP | RTF_LLINFO))
+    }
+
+    func testClonedRejectBlackholeAndDownEntriesAreNotComparable() {
+        XCTAssertFalse(RouteKernel.isComparableEntry(RTF_UP | RTF_WASCLONED))
+        XCTAssertFalse(RouteKernel.isComparableEntry(RTF_UP | RTF_REJECT))
+        XCTAssertFalse(RouteKernel.isComparableEntry(RTF_UP | RTF_BLACKHOLE))
+        XCTAssertFalse(RouteKernel.isComparableEntry(RTF_STATIC), "a down route carries nothing")
+    }
+
+    /// The routes we actually install must remain comparable, or every apply would rewrite
+    /// everything and the zero-churn property would be lost.
+    func testOurOwnRoutesRemainComparable() {
+        XCTAssertTrue(RouteKernel.isComparableEntry(RTF_UP | RTF_STATIC | RTF_GATEWAY | RTF_HOST | RTF_PROTO1))
+        XCTAssertTrue(RouteKernel.isComparableEntry(RTF_UP | RTF_STATIC | RTF_PROTO1))
+    }
+
+    /// The live table must still yield usable entries after filtering — a filter that
+    /// excluded everything would silently turn every apply back into a blind write.
+    func testLiveTableStillYieldsComparableEntries() throws {
+        let table = try XCTUnwrap(RouteKernel.currentTable())
+        let comparable = table.filter { RouteKernel.isComparableEntry($0.flags) }
+        XCTAssertFalse(comparable.isEmpty, "a live machine must have comparable routes")
+        XCTAssertTrue(comparable.allSatisfy { $0.flags & RTF_IFSCOPE == 0 })
+    }
+}

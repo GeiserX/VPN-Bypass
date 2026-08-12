@@ -217,6 +217,30 @@ public enum RouteKernel {
         return routes
     }
 
+    /// Whether a table entry may be compared against a route we are about to install.
+    ///
+    /// Every exclusion here is a way the snapshot could otherwise answer "already correct"
+    /// about a DIFFERENT route than the one being installed — which silently skips a needed
+    /// write and leaves the bypass not working, with no error anywhere.
+    ///
+    /// - `RTF_WASCLONED`: kernel-minted clone of a parent route, expires on its own.
+    /// - `RTF_LLINFO`: an ARP entry, not a route. It carries an AF_LINK gateway and shares a
+    ///   destination with real routes, so it can shadow one in a destination-keyed index.
+    /// - `RTF_IFSCOPE`: bound to one interface, so it does NOT serve ordinary unbound traffic
+    ///   and is invisible to the lookups our routes must win. It shares the destination string
+    ///   with the unscoped route (this machine carries a scoped default alongside the real
+    ///   one), so without this it would overwrite the entry we actually needed to compare.
+    /// - `RTF_REJECT` / `RTF_BLACKHOLE`: placeholders that drop traffic rather than carry it.
+    /// - not `RTF_UP`: a down route carries nothing.
+    public static func isComparableEntry(_ flags: Int32) -> Bool {
+        flags & RTF_UP != 0
+            && flags & RTF_WASCLONED == 0
+            && flags & RTF_LLINFO == 0
+            && flags & RTF_IFSCOPE == 0
+            && flags & RTF_REJECT == 0
+            && flags & RTF_BLACKHOLE == 0
+    }
+
     /// Reads the live IPv4 routing table via sysctl — silent and unprivileged.
     public static func currentTable() -> [KernelRoute]? {
         var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP, 0]
