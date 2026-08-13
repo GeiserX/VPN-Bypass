@@ -1627,6 +1627,13 @@ final class RouteManager: ObservableObject {
         let desiredPairs = Set(routesToAdd.map { "\($0.destination)|\($0.gateway)" })
         let activePairs = Set(activeRoutes.map { "\($0.destination)|\($0.gateway)" })
         if Self.shouldSkipReapply(desiredPairs: desiredPairs, activePairs: activePairs, forceReassert: forceReassert) {
+            // active == desired means no graced orphan is outstanding, so any grace history
+            // left in the map belongs to destinations that are desired again (or gone) and
+            // must be forgiven here — this return skips commitAppliedRoutes, where that
+            // forgiveness normally happens. Without it, a retain → restore → rotate-out
+            // sequence would age the route from its ORIGINAL timestamp and delete it
+            // immediately instead of granting a fresh TTL.
+            orphanFirstSeen.removeAll()
             log(.info, "Routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
             lastUpdate = Date()
             return
@@ -1760,6 +1767,8 @@ final class RouteManager: ObservableObject {
         let desiredPairs = Set(routesToAdd.map { "\($0.destination)|\($0.gateway)" })
         let activePairs = Set(activeRoutes.map { "\($0.destination)|\($0.gateway)" })
         if Self.shouldSkipReapply(desiredPairs: desiredPairs, activePairs: activePairs, forceReassert: forceReassert) {
+            // Same grace-history forgiveness as the classic skip path (see there for why).
+            orphanFirstSeen.removeAll()
             log(.info, "Custom routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
             lastUpdate = Date()
             return true

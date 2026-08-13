@@ -375,6 +375,9 @@ extension RouteKernel {
         public init(chunkSize: Int = 32,
                     pauseMicroseconds: UInt32 = 200_000,
                     idleResetNanoseconds: UInt64 = 1_000_000_000) {
+            // recordWrite computes `burstCount % chunkSize` — a non-positive chunk would trap
+            // (or never pause); this is a programmer-error boundary, not runtime input.
+            precondition(chunkSize > 0, "WritePacer chunkSize must be positive")
             self.chunkSize = chunkSize
             self.pauseMicroseconds = pauseMicroseconds
             self.idleResetNanoseconds = idleResetNanoseconds
