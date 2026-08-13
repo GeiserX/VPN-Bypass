@@ -239,6 +239,13 @@ class HelperTool: NSObject, HelperProtocol {
 
     private var routeSocketFD: Int32 = -1
     private var routeSeq: Int32 = 0
+    /// Paces write bursts so other processes' routing sockets never overflow mid request/reply
+    /// (a lost reply is what the corporate VPN client misreads as "gateway route removed" — see
+    /// RouteKernel.WritePacer). STATIC like `routeQueue` and for the same reason: a fresh
+    /// `HelperTool` is created per XPC connection, and a per-instance pacer would give each
+    /// connection its own budget — alternating writes from two connections could then exceed a
+    /// chunk with no pause. One shared pacer, only ever touched on `routeQueue`.
+    private static var writePacer = RouteKernel.WritePacer()
 
     /// Writes one routing message; returns nil on success or the errno on failure.
     private func routeSocketPerform(type: Int32, spec: RouteKernel.Spec) -> Int32? {
@@ -256,6 +263,11 @@ class HelperTool: NSObject, HelperProtocol {
         }
         let written = msg.withUnsafeBytes { raw in
             write(routeSocketFD, raw.baseAddress, raw.count)
+        }
+        // Failed writes are broadcast to listeners exactly like successful ones, so every
+        // attempt counts toward the pacing budget.
+        if Self.writePacer.recordWrite(nowNS: DispatchTime.now().uptimeNanoseconds) {
+            usleep(Self.writePacer.pauseMicroseconds)
         }
         if written == msg.count { return nil }
         let err = errno

@@ -18,6 +18,8 @@
 // unit-testable without driving the @MainActor RouteManager, its subprocesses, or
 // real kernel routes. No @MainActor, no I/O — inputs in, action out.
 
+import Foundation
+
 enum RerouteDecider {
 
     /// What checkVPNStatus (or the latch-retry chain) should do this pass.
@@ -68,5 +70,26 @@ enum RerouteDecider {
 
         let canRunNow = !isLoading && !isApplyingRoutes && !cooldownActive && hasGateway
         return canRunNow ? .reroute : .latch
+    }
+}
+
+/// Pure delay policy for the reconnect settle gate (see RouteManager.reconnectSettleTask).
+///
+/// The moment a VPN tunnel (re)appears is when its client is most fragile — GlobalProtect
+/// re-checks its gateway route repeatedly for the first half minute after a restore, and a
+/// full apply fired into that window turned one external drop into a minutes-long flap loop.
+/// Warm restores (bypass routes still installed and working) can wait comfortably; a cold
+/// start (nothing installed, the user is waiting for their bypasses) waits less; and once a
+/// flap storm has cancelled the wait `maxDeferrals` times, the delay collapses so the apply
+/// can never be starved forever — by then the paced helper writes are the remaining shield.
+enum ReconnectSettle {
+    static let warmDelay: TimeInterval = 20
+    static let coldDelay: TimeInterval = 10
+    static let cappedDelay: TimeInterval = 5
+    static let maxDeferrals = 5
+
+    static func delay(deferrals: Int, hasInstalledRoutes: Bool) -> TimeInterval {
+        if deferrals >= maxDeferrals { return cappedDelay }
+        return hasInstalledRoutes ? warmDelay : coldDelay
     }
 }

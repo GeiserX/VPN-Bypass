@@ -721,8 +721,13 @@ let timeout = xpcTimeout + Double(routes.count) * 0.6
         let dictEntries = entries.map { ["domain": $0.domain, "ip": $0.ip] }
 
         let connection = getOrCreateConnection()
-        let fallback: (Bool, String?) = (false, "XPC timeout after \(Int(xpcTimeout))s")
-        let result = await withXPCDeadline(seconds: xpcTimeout, fallback: fallback) { once in
+        // Hosts updates queue on the helper's serial mutation queue BEHIND any in-flight route
+        // batch, and batches are now deliberately paced (a couple of seconds for hundreds of
+        // routes) — the flat 10s deadline was observed timing out exactly there. 30s covers the
+        // worst paced batch with margin; the helper stays responsive either way.
+        let hostsTimeout: TimeInterval = max(xpcTimeout, 30)
+        let fallback: (Bool, String?) = (false, "XPC timeout after \(Int(hostsTimeout))s")
+        let result = await withXPCDeadline(seconds: hostsTimeout, fallback: fallback) { once in
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
                 once.complete((false, "XPC error: \(error.localizedDescription)"))
             } as? HelperProtocol
