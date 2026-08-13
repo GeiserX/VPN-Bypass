@@ -3,13 +3,22 @@
 // and the privileged helper, and unit-tested from the app test target.
 //
 // WHY THIS EXISTS — the traced root cause of the VPN instability this app used to trigger was
-// never the route *writes* themselves (the corporate client debounces those and demonstrably
-// tolerates hundreds); it was SUBPROCESS CONTENTION: every `/sbin/route` invocation is a
-// fork+exec that opens its own routing socket and blocks with no timeout. Stacked invocations
-// starved other processes' route operations — including the VPN client's own periodic gateway
-// route *read*, whose timeout the client misreads as "my gateway route was removed" and tears
-// the tunnel down. Writing rt_msghdr structs to one owned socket makes that starvation
-// structurally impossible: no forks, one in-flight request, errno straight from write(2).
+// not route *writes* in steady state (the corporate client debounces those and demonstrably
+// tolerates hundreds); it was starving the client's periodic gateway-route *read*, whose
+// timeout the client misreads as "my gateway route was removed" and tears the tunnel down.
+// That starvation has two forms, both closed here:
+//   1. SUBPROCESS CONTENTION (v3): every `/sbin/route` invocation is a fork+exec that opens
+//      its own routing socket and blocks with no timeout; stacked invocations starved other
+//      processes' route operations. Fixed by writing rt_msghdr structs to one owned socket —
+//      no forks, one in-flight request, errno straight from write(2).
+//   2. RECEIVE-BUFFER OVERFLOW (v4.6 follow-up): every RTM write, failed ones included, is
+//      broadcast to every open routing socket, and the kernel silently DROPS messages for a
+//      socket whose small receive buffer is full. An uninterrupted several-hundred-message
+//      batch can therefore swallow the reply of a concurrent `route -n get` request/reply
+//      exchange — observed live as the VPN client's read timing out seconds after our batch,
+//      exactly while it was re-checking its gateway after a restore. Fixed by WritePacer
+//      (end of this file): a short pause every few dozen writes bounds any listener's
+//      backlog to well under one buffer.
 //
 // Layout notes that differ from other BSDs (the classic porting traps):
 //   - sockaddr alignment inside a routing message is FOUR bytes on macOS, not sizeof(long).
@@ -335,5 +344,51 @@ public enum RouteKernel {
             mask = (mask << 8) | UInt32(byte)
         }
         return mask.nonzeroBitCount
+    }
+}
+
+// MARK: - Write pacing
+
+extension RouteKernel {
+    /// Paces bursts of routing-socket writes so concurrent readers never lose messages.
+    ///
+    /// Every RTM write is broadcast to every open routing socket on the system, and a routing
+    /// socket's receive buffer is small (8 KB by default — roughly fifty messages). When a
+    /// socket's buffer is full the kernel silently drops further messages for it, which breaks
+    /// any process mid request/reply on its own routing socket: most critically the corporate
+    /// VPN client's forked gateway-route read, whose lost reply it misreads as "my gateway
+    /// route was removed" and tears the tunnel down (the #65 failure, resurfacing via bursts
+    /// instead of forks). Pausing after every `chunkSize` writes keeps any listener's backlog
+    /// well under one buffer and gives readers a drain window. Single interactive operations
+    /// never reach the chunk boundary, so they stay instant; a burst separated by more than
+    /// `idleResetNanoseconds` from the previous write starts a fresh chunk count.
+    ///
+    /// Pure value type — the caller supplies monotonic timestamps and performs the actual
+    /// sleep, so the pacing decision is unit-testable.
+    public struct WritePacer {
+        public let chunkSize: Int
+        public let pauseMicroseconds: UInt32
+        public let idleResetNanoseconds: UInt64
+        private var burstCount = 0
+        private var lastWriteNS: UInt64 = 0
+
+        public init(chunkSize: Int = 32,
+                    pauseMicroseconds: UInt32 = 200_000,
+                    idleResetNanoseconds: UInt64 = 1_000_000_000) {
+            self.chunkSize = chunkSize
+            self.pauseMicroseconds = pauseMicroseconds
+            self.idleResetNanoseconds = idleResetNanoseconds
+        }
+
+        /// Record one write occurring at `nowNS` (monotonic clock). Returns true when the
+        /// caller should pause for `pauseMicroseconds` before issuing the next write.
+        public mutating func recordWrite(nowNS: UInt64) -> Bool {
+            if lastWriteNS != 0 && nowNS &- lastWriteNS > idleResetNanoseconds {
+                burstCount = 0
+            }
+            lastWriteNS = nowNS
+            burstCount += 1
+            return burstCount % chunkSize == 0
+        }
     }
 }

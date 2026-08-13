@@ -73,6 +73,20 @@ final class RouteManager: ObservableObject {
     var pendingReroute = false
     var pendingRerouteReason: String?
     private var lastTailscaleSelfFingerprint: String?
+    /// Reconnect settle gate. The moment a VPN tunnel (re)appears is exactly when its client is
+    /// most fragile — GlobalProtect re-checks its gateway route repeatedly for the first half
+    /// minute after a restore, and a full apply fired into that window (hundreds of broadcast
+    /// route events) knocked the tunnel straight back down, turning one external drop into a
+    /// minutes-long flap loop (three drops in as many minutes, each seconds after our batch).
+    /// Bypass routes are KEPT across a drop, so there is no urgency to re-apply: wait for the
+    /// tunnel to hold before touching the kernel. A drop during the wait cancels the pending
+    /// apply and counts a deferral, so a flap storm coalesces into ONE apply once things hold;
+    /// after `ReconnectSettle.maxDeferrals` the delay shortens so we can never starve.
+    private var reconnectSettleTask: Task<Void, Never>?
+    private var reconnectDeferrals = 0
+    /// First-seen timestamps for routes that dropped out of the desired set during an
+    /// auto-triggered apply (DNS rotation, mostly). See `orphanGraceDecision`.
+    private var orphanFirstSeen: [String: Date] = [:]
     
     
     /// Set once in init from the SAME directory as `configURL`, so it follows the under-test
@@ -390,7 +404,30 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Single-flight gate for `checkVPNStatusCore`. The core awaits freely (detection passes,
+    /// a 1.5s flap recheck, route teardown), and it is triggered from several sources at once
+    /// during churn — the path monitor, the process poller, refreshStatus. Overlapping runs
+    /// each captured the same `wasVPNConnected` and each committed the same transition:
+    /// observed live as THREE "VPN disconnected" teardowns and three notifications for one
+    /// disconnect, four seconds apart. One run at a time; anything that fires mid-run queues
+    /// exactly one trailing re-check so a state change during the run is never missed.
+    private var vpnStatusCheckInFlight = false
+    private var vpnStatusRecheckQueued = false
+
     func checkVPNStatus() async {
+        if vpnStatusCheckInFlight {
+            vpnStatusRecheckQueued = true
+            return
+        }
+        vpnStatusCheckInFlight = true
+        defer { vpnStatusCheckInFlight = false }
+        repeat {
+            vpnStatusRecheckQueued = false
+            await checkVPNStatusCore()
+        } while vpnStatusRecheckQueued
+    }
+
+    private func checkVPNStatusCore() async {
         let wasVPNConnected = isVPNConnected
         let oldInterface = vpnInterface
         // Captured BEFORE re-detection below overwrites it, so a same-interface gateway change is
@@ -450,13 +487,19 @@ final class RouteManager: ObservableObject {
             if let lastUpdate = lastUpdate, Date().timeIntervalSince(lastUpdate) < 5 {
                 log(.info, "Skipping duplicate route application (applied \(Int(Date().timeIntervalSince(lastUpdate)))s ago)")
             } else {
-                log(.success, "VPN connected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type")), applying routes...")
+                // Settle gate: never fire the apply into the tunnel's fragile post-(re)connect
+                // window — see reconnectSettleTask. The notification still goes out now (the
+                // VPN *is* connected); only our kernel writes wait.
+                let delay = ReconnectSettle.delay(deferrals: reconnectDeferrals,
+                                                  hasInstalledRoutes: !activeRoutes.isEmpty)
+                log(.success, "VPN connected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type")) — applying routes in \(Int(delay))s once the tunnel settles")
                 NotificationManager.shared.notifyVPNConnected(interface: interface ?? "unknown")
-                
-                // Show loading indicator while applying routes
-                isLoading = true
-                await applyAllRoutes()
-                isLoading = false
+                reconnectSettleTask?.cancel()
+                reconnectSettleTask = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    guard !Task.isCancelled, let self else { return }
+                    await self.runSettledApply()
+                }
             }
         }
         
@@ -540,6 +583,15 @@ final class RouteManager: ObservableObject {
         
         if !isVPNConnected && wasVPNConnected {
             log(.warning, "VPN disconnected (was: \(oldInterface ?? "unknown"))")
+            // The tunnel dropped during a settle wait: cancel the pending apply (routes are
+            // kept, nothing is lost) and count the deferral so a long flap storm eventually
+            // shortens the wait instead of starving forever.
+            if reconnectSettleTask != nil {
+                reconnectSettleTask?.cancel()
+                reconnectSettleTask = nil
+                reconnectDeferrals += 1
+                log(.info, "Settle-gated apply cancelled — VPN dropped during the wait (deferral \(reconnectDeferrals))")
+            }
             cancelAllRetries()
             // Drop any latched re-route and stop its retry chain — there's nothing to
             // re-route once the VPN is gone. Prevents an orphaned retry Task and a
@@ -596,6 +648,24 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// The settle-gated apply scheduled by checkVPNStatusCore. Every precondition is
+    /// re-validated at fire time — the world may have moved during the wait. The cancellation
+    /// re-check closes a supersede race: an old task that passed its post-sleep check right as
+    /// a disconnect cancelled it must not run, and must not clear a newer task's reference.
+    private func runSettledApply() async {
+        guard !Task.isCancelled else { return }
+        reconnectSettleTask = nil
+        guard isVPNConnected, config.autoApplyOnVPN, !isLoading, !isApplyingRoutes,
+              HelperManager.shared.isHelperInstalled else {
+            log(.info, "Settle-gated apply skipped — preconditions changed during the wait")
+            return
+        }
+        reconnectDeferrals = 0
+        isLoading = true
+        await applyAllRoutes(orphanGrace: true)
+        isLoading = false
+    }
+
     private func detectVPNInterface() async -> (connected: Bool, interface: String?, type: VPNType?) {
         // First check for specific VPN processes to help identify type
         let runningVPNType = await detectRunningVPNProcess()
@@ -1287,14 +1357,17 @@ final class RouteManager: ObservableObject {
         schemaVersion >= 2 && routingMode == .custom
     }
 
-    /// Apply all routes — acquires exclusive gate, skips if another operation is running
-    func applyAllRoutes() async {
+    /// Apply all routes — acquires exclusive gate, skips if another operation is running.
+    /// `orphanGrace` is passed by AUTO-triggered applies only (the reconnect settle path):
+    /// it defers deleting routes that merely rotated out of DNS. User-initiated applies keep
+    /// immediate deletion so an explicit removal takes effect at once.
+    func applyAllRoutes(orphanGrace: Bool = false) async {
         guard acquireRouteOperation() else {
             log(.info, "Apply skipped: route operation in progress")
             return
         }
         defer { releaseRouteOperation() }
-        await applyAllRoutesInternal(sendNotification: false)
+        await applyAllRoutesInternal(sendNotification: false, orphanGrace: orphanGrace)
     }
 
     /// Apply all routes and send notification (called from Refresh button)
@@ -1376,7 +1449,8 @@ final class RouteManager: ObservableObject {
 
     /// Internal — gate-free, callers must hold the route operation lock.
     /// Checks routeEpoch before committing to detect preemption by removeAllRoutes.
-    private func applyAllRoutesInternal(sendNotification: Bool, forceReassert: Bool = false) async {
+    private func applyAllRoutesInternal(sendNotification: Bool, forceReassert: Bool = false,
+                                        orphanGrace: Bool = false) async {
         let epoch = routeEpoch
 
         guard let gateway = localGateway else {
@@ -1580,7 +1654,7 @@ final class RouteManager: ObservableObject {
             return
         }
 
-        let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "")
+        let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "", orphanGrace: orphanGrace)
         guard committed else { return }
 
         let confirmedUniqueCount = uniqueRouteCount
@@ -2112,12 +2186,59 @@ final class RouteManager: ObservableObject {
     /// "Cache " for the cached fast-path (log prefixing only). Runs on the class
     /// @MainActor; the epoch-guard→commit window stays await-free (updateHostsFile
     /// awaits only after the commit).
+    /// Orphan-grace tuning: how long a route that fell out of the desired set is kept before
+    /// deletion (rotating CDN answers usually return well within this) and a hard cap on how
+    /// many graced routes may accumulate (oldest evicted first past the cap).
+    static let orphanGraceTTL: TimeInterval = 30 * 60
+    static let orphanGraceCap = 400
+
+    struct OrphanGraceOutcome: Equatable {
+        var deleteNow: [String]
+        var retained: [String]
+        var updatedFirstSeen: [String: Date]
+    }
+
+    /// Pure grace decision for orphaned routes. An orphan is deleted only once it has stayed
+    /// out of the desired set for `ttl`; until then it is retained (still installed, still
+    /// tracked). History for a destination that is desired again — or gone from the orphan set
+    /// entirely — is dropped, so rotation-back costs zero kernel events. Past `cap` retained
+    /// entries, the oldest are evicted to deleteNow so the graced set stays bounded. Outputs
+    /// are sorted for determinism.
+    nonisolated static func orphanGraceDecision(orphaned: Set<String>, applied: Set<String>,
+                                                firstSeen: [String: Date], now: Date,
+                                                ttl: TimeInterval, cap: Int) -> OrphanGraceOutcome {
+        var seen = firstSeen.filter { !applied.contains($0.key) && orphaned.contains($0.key) }
+        var deleteNow: [String] = []
+        var retained: [String] = []
+        for dest in orphaned {
+            let first = seen[dest] ?? now
+            if now.timeIntervalSince(first) >= ttl {
+                deleteNow.append(dest)
+                seen.removeValue(forKey: dest)
+            } else {
+                seen[dest] = first
+                retained.append(dest)
+            }
+        }
+        if retained.count > cap {
+            let oldestFirst = retained.sorted { (seen[$0] ?? now, $0) < (seen[$1] ?? now, $1) }
+            for dest in oldestFirst.prefix(retained.count - cap) {
+                seen.removeValue(forKey: dest)
+                deleteNow.append(dest)
+            }
+            retained = Array(oldestFirst.dropFirst(retained.count - cap))
+        }
+        return OrphanGraceOutcome(deleteNow: deleteNow.sorted(), retained: retained.sorted(),
+                                  updatedFirstSeen: seen)
+    }
+
     func commitAppliedRoutes(
         routesToAdd: [(destination: String, gateway: String, isNetwork: Bool, source: String)],
         allSourceEntries: [(destination: String, gateway: String, source: String)],
         batchFailedDests: Set<String>,
         epoch: UInt64,
-        logLabel: String
+        logLabel: String,
+        orphanGrace: Bool = false
     ) async -> Bool {
         var newRoutes: [ActiveRoute] = []
 
@@ -2143,8 +2264,36 @@ final class RouteManager: ObservableObject {
             applied: newDestinations,
             attempted: Set(routesToAdd.map { $0.destination })
         )
-        let trulyOrphanedDests = Array(stalePartition.orphaned)
+        var trulyOrphanedDests = Array(stalePartition.orphaned)
         let addFailedStaleDests = Array(stalePartition.addFailed)
+
+        // Orphan grace (auto-triggered applies in classic bypass mode only): most "orphans"
+        // are CDN IPs that merely rotated out of this resolve — 100–150 per cycle observed —
+        // and deleting then re-adding them when rotation swings back doubles the broadcast
+        // burst the tunnel client has to sit through. Deferring the delete until an IP has
+        // stayed gone for the TTL removes that churn; graced routes keep working meanwhile
+        // (they egress the stable local gateway). User-initiated applies pass
+        // orphanGrace=false, so an explicit removal still takes effect immediately.
+        if orphanGrace && config.routingMode == .bypass {
+            let outcome = Self.orphanGraceDecision(orphaned: stalePartition.orphaned,
+                                                   applied: newDestinations,
+                                                   firstSeen: orphanFirstSeen,
+                                                   now: Date(),
+                                                   ttl: Self.orphanGraceTTL,
+                                                   cap: Self.orphanGraceCap)
+            orphanFirstSeen = outcome.updatedFirstSeen
+            trulyOrphanedDests = outcome.deleteNow
+            if !outcome.retained.isEmpty {
+                let retainSet = Set(outcome.retained)
+                for route in activeRoutes where retainSet.contains(route.destination) && !newDestinations.contains(route.destination) {
+                    newRoutes.append(route)
+                }
+                log(.info, "\(logLabel)Orphan grace: \(outcome.retained.count) recently-rotated route(s) kept, delete deferred")
+            }
+        } else {
+            // Immediate-delete path: any grace history is moot once the deletes go through.
+            orphanFirstSeen.removeAll()
+        }
 
         // Truly orphaned: re-attach on failure (route is genuinely still in kernel)
         if !trulyOrphanedDests.isEmpty {

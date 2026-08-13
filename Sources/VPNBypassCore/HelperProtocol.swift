@@ -112,7 +112,13 @@ struct HelperConstants {
     // replaces only as a last resort. Route/hosts mutations are also serialised across XPC
     // connections (concurrent handlers were producing simultaneous /sbin/route processes), and the
     // helper finally emits os_log records. Bumped from 1.8.0 so installed helpers pick this up.
-    static let helperVersion = "2.0.0"
+    // 2.1.0: kernel writes are PACED (RouteKernel.WritePacer). Every RTM write is broadcast to
+    // every open routing socket and the kernel silently drops messages for a full receive
+    // buffer, so an uninterrupted several-hundred-message batch could swallow the reply of a
+    // concurrent `route -n get` — observed as GlobalProtect's gateway-route read timing out
+    // seconds after our batch and tearing the tunnel down. A 200ms pause every 32 writes keeps
+    // any listener's backlog under one buffer. Bumped so installed helpers pick this up.
+    static let helperVersion = "2.1.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"
