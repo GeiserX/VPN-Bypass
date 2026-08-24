@@ -418,50 +418,58 @@ enum ProcessDeadline {
     /// under the app's 30s hosts-update XPC deadline.
     static let defaultSeconds: TimeInterval = 3
 
-    /// Launch `process` and wait up to `seconds`. Returns `true` if the child
-    /// exited on its own, `false` if it failed to start or was still running
-    /// at the deadline (in which case it is sent SIGTERM and reaped).
+    /// How `run` finished. Distinguishes a timely exit (with status) from a
+    /// start failure or a kill, so the helper can log nonzero exits.
+    enum Outcome: Equatable {
+        case failedToStart
+        case timedOut
+        case exited(Int32)
+    }
+
+    /// Launch `process` and wait up to `seconds`. Deadlines use `DispatchTime`
+    /// (monotonic) so a wall-clock step backward cannot stretch the wait.
     @discardableResult
-    static func run(_ process: Process, seconds: TimeInterval = defaultSeconds) -> Bool {
+    static func run(_ process: Process, seconds: TimeInterval = defaultSeconds) -> Outcome {
         do {
             try process.run()
         } catch {
-            return false
+            return .failedToStart
         }
         // Same 10ms poll as `DNSResolver.runProcessSyncSafe`: a nested GCD
         // semaphore on the helper's XPC thread has deadlocked this process
         // runner before; a deadline loop does not.
-        let deadline = Date().addingTimeInterval(seconds)
-        while process.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.01)
-        }
+        waitUntilNotRunning(process, seconds: seconds)
         if process.isRunning {
             process.terminate()
-            let grace = Date().addingTimeInterval(1)
-            while process.isRunning && Date() < grace {
-                Thread.sleep(forTimeInterval: 0.01)
-            }
+            waitUntilNotRunning(process, seconds: 1)
             if process.isRunning {
                 // SIGTERM is ignorable. A wedged dscacheutil that ignored it
                 // would recreate the original hang on waitUntilExit.
                 kill(process.processIdentifier, SIGKILL)
-                let reap = Date().addingTimeInterval(0.5)
-                while process.isRunning && Date() < reap {
-                    Thread.sleep(forTimeInterval: 0.01)
-                }
+                waitUntilNotRunning(process, seconds: 0.5)
             }
-            return false
+            return .timedOut
         }
-        return true
+        return .exited(process.terminationStatus)
     }
 
     @discardableResult
-    static func run(path: String, arguments: [String] = [], seconds: TimeInterval = defaultSeconds) -> Bool {
+    static func run(path: String, arguments: [String] = [], seconds: TimeInterval = defaultSeconds) -> Outcome {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         return run(process, seconds: seconds)
+    }
+
+    /// Poll `isRunning` until the child exits or `seconds` of monotonic
+    /// time elapse. Never uses `Date()`, which can move backward.
+    private static func waitUntilNotRunning(_ process: Process, seconds: TimeInterval) {
+        let ns = max(0, seconds) * 1_000_000_000
+        let deadline = DispatchTime.now() + .nanoseconds(Int(ns.rounded()))
+        while process.isRunning && DispatchTime.now() < deadline {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
     }
 }
