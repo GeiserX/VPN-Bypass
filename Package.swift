@@ -14,8 +14,13 @@ let package = Package(
     dependencies: [],
     targets: [
         .target(
+            name: "VPNBypassPeerAuth",
+            path: "Sources/VPNBypassPeerAuth",
+            publicHeadersPath: "include"
+        ),
+        .target(
             name: "VPNBypassCore",
-            dependencies: [],
+            dependencies: ["VPNBypassPeerAuth"],
             path: "Sources/VPNBypassCore",
             resources: [
                 .process("Resources")

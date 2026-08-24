@@ -41,13 +41,15 @@ final class ProxyForwarder {
     // Shared secret a LOCAL client must present as `Proxy-Authorization: Basic` before we
     // will spend the owner's UPSTREAM credentials on its behalf (GHSA-gm4h-95p9-9w7v).
     //
-    // The listener is plain TCP on 127.0.0.1, and macOS has no way to read the peer's uid
-    // on a TCP socket: getpeereid(3) requires a UNIX-domain socket (that is why the control
-    // socket can check uid and this cannot), and the sysctl route needs kernel struct
-    // layouts Apple does not publish. So the caller proves it is the owner by presenting a
-    // secret only the owner can read — it lives in the 0600 config and is handed to apps
-    // through the generated exports. nil means no secret is configured and the listener is
-    // open, which is the pre-4.6.3 behaviour and what the unit tests drive.
+    // The listener is plain TCP on 127.0.0.1: getpeereid(3) needs a UNIX-domain socket
+    // (the control socket uses that), and net.inet.tcp.pcblist64 needs unpublished
+    // kernel layouts. The caller still proves ownership with this secret (0600 config,
+    // handed out in generated exports). nil means no secret, which is the pre-4.6.3
+    // behaviour and what the unit tests drive.
+    //
+    // A second layer (LoopbackPeerAuth) drops the socket before we read a byte when
+    // libproc cannot name the source port's owner as getuid(). That uses the published
+    // PROC_PIDFDSOCKETINFO API, not pcblist. Lookup failure is a reject.
     private let localSecret: String?
 
     // The upstream a NEW tunnel chains through. Mutable so a route can be re-pointed
@@ -190,7 +192,30 @@ final class ProxyForwarder {
     // MARK: - Connection acceptance
 
     private func accept(_ connection: NWConnection) {
-        // Runs on `queue` (the listener's queue), so touching activeTunnels is safe.
+        // Runs on `queue`. Identify the peer before reading a byte (same policy
+        // as ControlSocketServer's getpeereid check). NWConnection is TCP, so
+        // wait until `.ready` then map the source port to a uid via libproc.
+        // The localSecret check still runs later on the first request.
+        connection.stateUpdateHandler = { [weak self] state in
+            guard let self = self else { return }
+            switch state {
+            case .ready:
+                guard LoopbackPeerAuth.allows(connection: connection) else {
+                    NSLog("VPN Bypass: rejected loopback proxy client (peer uid mismatch or unknown)")
+                    connection.cancel()
+                    return
+                }
+                self.startAuthorizedTunnel(connection)
+            case .failed, .cancelled:
+                break
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+    }
+
+    private func startAuthorizedTunnel(_ connection: NWConnection) {
         let tunnel = Tunnel(client: connection,
                             upstream: upstream,
                             boundInterface: resolvedInterface,
