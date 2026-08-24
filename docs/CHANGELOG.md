@@ -8,7 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A stuck DNS-cache flush can no longer hang the privileged helper.** After writing `/etc/hosts`, the helper waited forever for `dscacheutil -flushcache` and `killall -HUP mDNSResponder`. If either child wedged, that helper thread stayed blocked for the life of the daemon even after the app gave up at 30 seconds. Those two processes now have a 3-second deadline, then SIGTERM and SIGKILL if they do not exit.
 - **With two VPNs running, the app could pick the wrong one.** Several tunnels being up at once is ordinary — a corporate VPN alongside Tailscale — but the app took the first one it happened to see, which had nothing to do with which tunnel was carrying traffic. Because Tailscale usually appears earlier in that list, it could win, and in VPN Only mode the app would then install its rules to escape the wrong tunnel and send the other one's traffic straight out. It now prefers the tunnel actually carrying the default route, never picks Tailscale, keeps its choice stable while several remain valid, and breaks any remaining tie the same way every time.
+
+### Changed
+- Updating the helper to 2.1.1 asks for one admin prompt so already-installed helpers pick up the flush deadline.
 
 ## [3.1.13] - 2026-08-07
 

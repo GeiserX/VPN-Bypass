@@ -1,6 +1,7 @@
 // HelperProtocol.swift
 // XPC Protocol shared between main app and privileged helper.
 
+import Darwin
 import Foundation
 
 /// The bundle ID for the privileged helper tool
@@ -118,7 +119,11 @@ struct HelperConstants {
     // concurrent `route -n get` — observed as GlobalProtect's gateway-route read timing out
     // seconds after our batch and tearing the tunnel down. A 200ms pause every 32 writes keeps
     // any listener's backlog under one buffer. Bumped so installed helpers pick this up.
-    static let helperVersion = "2.1.0"
+    // 2.1.1: flushDNSCache bounds dscacheutil / killall -HUP mDNSResponder (3s each) instead
+    // of waitUntilExit() with no deadline. A wedged child used to park the XPC thread for
+    // the life of the daemon after the app had already dropped the 30s hosts-update
+    // connection. Bumped so installed 2.1.0 helpers reinstall and pick this up.
+    static let helperVersion = "2.1.1"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"
@@ -396,5 +401,67 @@ public enum VPNInterfaceSelector {
             }
         }
         return nil
+    }
+}
+
+// MARK: - Process deadline (pure, testable seam)
+
+/// Bounded wait around `Foundation.Process`. Lives in this file so the helper
+/// binary (`make build-helper` compiles this source) and the test target share
+/// one implementation (same reason as `HelperAuthPolicy` / `RouteCIDR`).
+///
+/// The app already bounds every subprocess via `DNSResolver.runProcessSyncSafe`.
+/// The privileged helper's DNS flush still used unbounded `waitUntilExit()`.
+enum ProcessDeadline {
+    /// Long enough for `dscacheutil -flushcache` / `killall -HUP mDNSResponder`
+    /// on a healthy box; short enough that two sequential flushes stay well
+    /// under the app's 30s hosts-update XPC deadline.
+    static let defaultSeconds: TimeInterval = 3
+
+    /// Launch `process` and wait up to `seconds`. Returns `true` if the child
+    /// exited on its own, `false` if it failed to start or was still running
+    /// at the deadline (in which case it is sent SIGTERM and reaped).
+    @discardableResult
+    static func run(_ process: Process, seconds: TimeInterval = defaultSeconds) -> Bool {
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+        // Same 10ms poll as `DNSResolver.runProcessSyncSafe`: a nested GCD
+        // semaphore on the helper's XPC thread has deadlocked this process
+        // runner before; a deadline loop does not.
+        let deadline = Date().addingTimeInterval(seconds)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        if process.isRunning {
+            process.terminate()
+            let grace = Date().addingTimeInterval(1)
+            while process.isRunning && Date() < grace {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            if process.isRunning {
+                // SIGTERM is ignorable. A wedged dscacheutil that ignored it
+                // would recreate the original hang on waitUntilExit.
+                kill(process.processIdentifier, SIGKILL)
+                let reap = Date().addingTimeInterval(0.5)
+                while process.isRunning && Date() < reap {
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+            }
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    static func run(path: String, arguments: [String] = [], seconds: TimeInterval = defaultSeconds) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        return run(process, seconds: seconds)
     }
 }
