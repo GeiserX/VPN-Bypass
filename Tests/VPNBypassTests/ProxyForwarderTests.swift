@@ -526,6 +526,90 @@ final class ProxyForwarderTests: XCTestCase {
         try assertMalformedConnectAuthorityReturns400(authority: "[2001:db8::1]")
     }
 
+    // MARK: - CONNECT authority header injection (GHSA-gm4h-95p9-9w7v)
+
+    // The authority is interpolated verbatim into BOTH the request line and the `Host:`
+    // header that connectRequest() sends upstream, on a hop that carries the owner's
+    // `Proxy-Authorization: Basic`. processClientHead cuts the client's request line at
+    // the first CR LF pair, so a *paired* CRLF cannot reach isValidAuthority — but a LONE
+    // LF, a LONE CR, and every other C0 control survive that cut, and a lenient upstream
+    // proxy treats a bare LF (and often a bare CR) as a line terminator. That is enough to
+    // append attacker-chosen headers, or a whole second request, to an authenticated
+    // upstream connection. Each of these must fail closed with 400 before any dial-out.
+
+    /// A LONE LF inside the authority: the reachable injection primitive. Without the
+    /// guard the upstream receives "CONNECT evil.com:443\nX-Injected:1 HTTP/1.1" followed
+    /// by the owner's Proxy-Authorization.
+    func testConnectAuthorityWithBareLineFeedReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: "evil.com:443\nX-Injected:1")
+    }
+
+    /// A LONE CR: same primitive against upstreams that accept a bare CR as a line break.
+    func testConnectAuthorityWithBareCarriageReturnReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: "evil.com:443\rX-Injected:1")
+    }
+
+    /// NUL: truncates the authority for any C-string consumer downstream of the proxy.
+    func testConnectAuthorityWithNULReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: "evil.com:443\u{0}X:1")
+    }
+
+    /// TAB is not a line break, so it cannot split a header — but it IS forbidden in a
+    /// request-target and is header-value whitespace, so it must not reach the wire either.
+    /// A CR/LF/NUL-only blocklist lets this through.
+    func testConnectAuthorityWithTabReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: "evil.com:443\tX:1")
+    }
+
+    /// DEL (0x7F) is a control character that is likewise illegal in a request-target and
+    /// likewise survives a CR/LF/NUL-only blocklist.
+    func testConnectAuthorityWithDELReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: "evil.com:443\u{7F}X:1")
+    }
+
+    /// End-to-end property, independent of WHICH layer enforces it: a client that embeds a
+    /// full CR LF pair in its CONNECT line must never get an extra header onto the
+    /// authenticated upstream hop. Today processClientHead truncates the request line at
+    /// that pair, so the CONNECT dialed upstream is the clean prefix and the injected text
+    /// is discarded with the rest of the client's head. This asserts the observable
+    /// outcome, so it stays meaningful if that truncation is ever refactored away — which
+    /// matters because Swift treats CR LF as ONE Character that equals neither "\r" nor
+    /// "\n", so a Character-level blocklist would silently pass the pair.
+    func testConnectAuthorityWithCRLFPairNeverInjectsAHeaderUpstream() throws {
+        let mockReady = expectation(description: "capturing mock ready")
+        let gotHead = expectation(description: "mock captured the CONNECT head")
+
+        var mockPort: UInt16 = 0
+        try startCapturingHTTPMock(onHead: { head in
+            XCTAssertFalse(head.contains("X-Injected"),
+                           "no client-supplied header may reach the authenticated upstream hop: \(head)")
+            XCTAssertTrue(head.hasPrefix("CONNECT evil.com:443 HTTP/1.1\r\n"),
+                          "the upstream CONNECT must carry only the clean authority: \(head)")
+            gotHead.fulfill()
+        }, ready: { port in mockPort = port; mockReady.fulfill() })
+        wait(for: [mockReady], timeout: 5.0)
+        XCTAssertNotEqual(mockPort, 0)
+
+        let forwarder = ProxyForwarder(
+            listenPort: 0,
+            upstream: .init(host: "127.0.0.1", port: mockPort, username: "", password: "", boundInterface: nil)
+        )
+        try forwarder.start()
+        self.forwarder = forwarder
+        let listenPort = try XCTUnwrap(forwarder.boundPort)
+
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: listenPort)!, using: .tcp)
+        self.clientConnection = client
+        client.stateUpdateHandler = { state in
+            if case .ready = state {
+                let request = "CONNECT evil.com:443\r\nX-Injected:1 HTTP/1.1\r\nHost: evil.com:443\r\n\r\n"
+                client.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
+            }
+        }
+        client.start(queue: clientQueue)
+        wait(for: [gotHead], timeout: 5.0)
+    }
+
     /// Shared driver for the 400-path tests above: no mock upstream is needed since
     /// isValidAuthority rejects before the forwarder ever dials out (mirrors the
     /// existing testMalformedConnectAuthorityReturns400, which covers a non-numeric port).

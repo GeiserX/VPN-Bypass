@@ -644,8 +644,28 @@ private final class Tunnel {
         Data("\(upstream.username):\(upstream.password)".utf8).base64EncodedString()
     }
 
+    /// Gate on the CONNECT authority BEFORE it is interpolated into the request line and
+    /// the `Host:` header that connectRequest() sends upstream — a hop that also carries
+    /// the owner's `Proxy-Authorization: Basic`. A local client that gets a line break in
+    /// here appends headers, or a whole second request, to that authenticated connection
+    /// (GHSA-gm4h-95p9-9w7v).
+    ///
+    /// Two details make the obvious check wrong, so they are spelled out:
+    ///
+    /// 1. Iterate `unicodeScalars`, NOT `Characters`. Swift treats CR LF as ONE extended
+    ///    grapheme cluster that compares equal to neither "\r" nor "\n", so a
+    ///    `contains(where: { $0 == "\r" || $0 == "\n" })` over Characters silently passes
+    ///    an embedded CRLF pair. processClientHead cuts the request line at the first CRLF
+    ///    today, so nothing on the wire reaches here with a pair — but this guard must hold
+    ///    on its own, not on that.
+    /// 2. Reject the whole C0 range, DEL and SP rather than just CR/LF/NUL. A bare LF (and,
+    ///    on lenient proxies, a bare CR) is the reachable injection; TAB and DEL are not
+    ///    line breaks but are still illegal in a request-target and in a header value, and
+    ///    a CR/LF-only blocklist lets them through to the upstream verbatim. Every scalar
+    ///    below 0x21 encodes to a single byte in UTF-8, so a scalar check here is exactly a
+    ///    byte check on the wire.
     private func isValidAuthority(_ authority: String) -> Bool {
-        if authority.contains(where: { $0 == "\r" || $0 == "\n" || $0 == "\0" }) {
+        if authority.unicodeScalars.contains(where: { $0.value <= 0x20 || $0.value == 0x7F }) {
             return false
         }
         guard let colon = authority.lastIndex(of: ":") else { return false }
