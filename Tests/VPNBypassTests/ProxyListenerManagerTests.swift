@@ -194,4 +194,17 @@ final class ProxyListenerManagerTests: XCTestCase {
         XCTAssertNotNil(manager.port(for: ts.id), "a Tailscale-peer route gets a loopback listener")
         manager.stopAll()
     }
+
+    /// A live ProxyForwarder captures localSecret at init and cannot be re-pointed, so the
+    /// secret belongs in the listener's identity: a rotated secret must restart it, or the
+    /// old credential keeps working and newly copied exports get a 407.
+    func testUpstreamFingerprintChangesWhenTheLocalSecretChanges() {
+        var route = Route(name: "p", egress: .proxyHTTP)
+        route.proxyHost = "h"; route.proxyPort = 8001
+        let a = ProxyListenerManager.upstreamFingerprint(route, boundInterface: nil, localSecret: "one")
+        let b = ProxyListenerManager.upstreamFingerprint(route, boundInterface: nil, localSecret: "two")
+        XCTAssertNotEqual(a, b)
+        XCTAssertEqual(a, ProxyListenerManager.upstreamFingerprint(route, boundInterface: nil, localSecret: "one"))
+    }
+
 }

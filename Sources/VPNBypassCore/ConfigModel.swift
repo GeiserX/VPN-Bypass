@@ -133,6 +133,10 @@ struct Config: Codable {
         defaultRouteId = try container.decodeIfPresent(UUID.self, forKey: .defaultRouteId)
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         multiRouteEnabled = try container.decodeIfPresent(Bool.self, forKey: .multiRouteEnabled) ?? false
+        // Must be decoded explicitly: this initialiser is hand-written, so a property left
+        // out here is encoded to disk and then silently read back as nil. For this one that
+        // would mint a fresh secret on every launch and 407 every previously copied export.
+        localProxySecret = try container.decodeIfPresent(String.self, forKey: .localProxySecret)
         rememberedVPNLinks = try container.decodeIfPresent([RouteManager.RememberedLink].self, forKey: .rememberedVPNLinks) ?? []
         pinnedVPNInterface = try container.decodeIfPresent(String.self, forKey: .pinnedVPNInterface)
         pinnedVPNProductHint = try container.decodeIfPresent(String.self, forKey: .pinnedVPNProductHint)
@@ -300,6 +304,7 @@ struct Config: Codable {
     /// in-app config keeps the live values; Import re-prompts for secrets.
     func sanitizedForExport() -> Config {
         var copy = self
+        copy.localProxySecret = nil        // a valid local proxy password — never share it
         copy.proxyConfig.username = ""
         copy.proxyConfig.password = ""
         copy.routes = copy.routes.map { route in

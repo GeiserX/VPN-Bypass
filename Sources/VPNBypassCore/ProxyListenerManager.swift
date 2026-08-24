@@ -59,7 +59,7 @@ final class ProxyListenerManager: ObservableObject {
         var toRepoint: [(id: UUID, route: Route)] = []
         for (id, _) in forwarders {
             if let route = byId[id] {
-                if fingerprints[id] != Self.upstreamFingerprint(route, boundInterface: boundInterface) {
+                if fingerprints[id] != Self.upstreamFingerprint(route, boundInterface: boundInterface, localSecret: localSecret) {
                     toRepoint.append((id, route))
                 }
             } else {
@@ -75,7 +75,7 @@ final class ProxyListenerManager: ObservableObject {
         for (id, route) in toRepoint {
             if let upstream = Self.makeUpstream(route: route, boundInterface: boundInterface) {
                 forwarders[id]?.updateUpstream(upstream)   // listener + ports[id] stay put
-                fingerprints[id] = Self.upstreamFingerprint(route, boundInterface: boundInterface)
+                fingerprints[id] = Self.upstreamFingerprint(route, boundInterface: boundInterface, localSecret: localSecret)
             } else {
                 forwarders[id]?.stop(); forwarders[id] = nil; ports[id] = nil; fingerprints[id] = nil
             }
@@ -95,7 +95,7 @@ final class ProxyListenerManager: ObservableObject {
                 guard let upstream = Self.makeUpstream(route: route, boundInterface: boundInterface) else { continue }
                 if let result = Self.startForwarder(route: route, upstream: upstream, localSecret: localSecret) {
                     started.append((route.id, result.forwarder, result.port,
-                                    Self.upstreamFingerprint(route, boundInterface: boundInterface)))
+                                    Self.upstreamFingerprint(route, boundInterface: boundInterface, localSecret: localSecret)))
                 }
             }
             Task { @MainActor [weak self] in
@@ -206,8 +206,14 @@ final class ProxyListenerManager: ObservableObject {
     /// excluded so a plain reconcile doesn't re-mint the session every pass; a future
     /// `rotate` verb restarts explicitly. Used only for in-process equality comparison, so
     /// Hasher's per-process seed is fine and no plaintext credential is retained.
-    nonisolated static func upstreamFingerprint(_ route: Route, boundInterface: String?) -> Int {
+    /// `localSecret` is part of the listener's identity, not just its upstream: a running
+    /// ProxyForwarder captured it at init and cannot be re-pointed at a new one, so a rotated
+    /// secret has to restart the listener or the old credential keeps working and every newly
+    /// copied export gets a 407.
+    nonisolated static func upstreamFingerprint(_ route: Route, boundInterface: String?,
+                                                localSecret: String? = nil) -> Int {
         var h = Hasher()
+        h.combine(localSecret ?? "")
         h.combine(route.egress)
         h.combine(route.proxyHost ?? "")
         h.combine(route.proxyPort ?? -1)
