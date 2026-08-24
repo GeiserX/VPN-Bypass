@@ -8,6 +8,19 @@ import XCTest
 
 final class ExportSanitizationTests: XCTestCase {
 
+    /// The local-hop secret is a working password for this machine's proxy listeners, so an
+    /// exported config must not carry it — exports get attached to bug reports.
+    func testSanitizedForExportClearsTheLocalProxySecret() throws {
+        var cfg = RouteManager.Config()
+        cfg.localProxySecret = "deadbeefcafe"
+        let sanitized = cfg.sanitizedForExport()
+        XCTAssertNil(sanitized.localProxySecret)
+        XCTAssertEqual(cfg.localProxySecret, "deadbeefcafe", "the running app keeps its own secret")
+        let json = String(data: try JSONEncoder().encode(sanitized), encoding: .utf8)!
+        XCTAssertFalse(json.contains("deadbeefcafe"))
+    }
+
+
     func testSanitizedForExportClearsAllCredentials() throws {
         var cfg = RouteManager.Config()
         cfg.proxyConfig.enabled = true

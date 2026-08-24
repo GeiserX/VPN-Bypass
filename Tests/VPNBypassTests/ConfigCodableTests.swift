@@ -11,6 +11,28 @@ import XCTest
 /// missing newer fields still decode correctly.
 final class ConfigBackwardCompatTests: XCTestCase {
 
+    /// Config hand-writes `init(from:)` while letting the encoder be synthesised, so a new
+    /// property is WRITTEN to disk and then silently read back as nil unless someone adds a
+    /// decode line for it. For localProxySecret that mints a fresh secret on every launch and
+    /// 407s every proxy address the user had already copied (GHSA-gm4h-95p9-9w7v).
+    func testLocalProxySecretSurvivesAnEncodeDecodeRoundTrip() throws {
+        var cfg = RouteManager.Config()
+        cfg.localProxySecret = "deadbeefcafe"
+        let decoded = try JSONDecoder().decode(RouteManager.Config.self,
+                                               from: try JSONEncoder().encode(cfg))
+        XCTAssertEqual(decoded.localProxySecret, "deadbeefcafe",
+                       "the secret must survive a save/load or every copied export breaks on restart")
+    }
+
+    /// A config written before the field existed must still decode, leaving it nil so
+    /// ensureLocalProxySecret() mints one.
+    func testConfigWithoutLocalProxySecretStillDecodes() throws {
+        let json = Data("{\"autoApplyOnVPN\":true}".utf8)
+        let decoded = try JSONDecoder().decode(RouteManager.Config.self, from: json)
+        XCTAssertNil(decoded.localProxySecret)
+    }
+
+
     // MARK: - Empty JSON → all defaults
 
     func testDecodeEmptyJSONProducesAllDefaults() throws {
