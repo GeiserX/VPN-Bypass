@@ -80,6 +80,14 @@ A **route** is a place traffic can exit:
 
 A **rule** maps traffic to a route by `domain`, `suffix`, `ip`, `cidr`, `service`, or `process`. The first matching rule wins; anything unmatched takes the **default** route. Direct and detected VPN routes appear automatically; proxy and Tailscale-peer routes are ones you add.
 
+A proxy route's `127.0.0.1` listener holds your upstream proxy credentials, so it will not serve a client that cannot prove it is you. Any process on the machine can reach a loopback port, and macOS gives a TCP listener no way to see who connected, so the listener asks for a password instead. Use the **Copy exports** button on the route — it hands you the address with the credentials already in it:
+
+```bash
+export HTTPS_PROXY="http://vpnb:<secret>@127.0.0.1:18042"
+```
+
+The secret is generated once and kept in the app's config file, which only your account can read. Copy the exports again if you ever reset your config.
+
 ## Installation
 
 ### Homebrew (Recommended)
@@ -268,6 +276,10 @@ The app will prompt for admin password when modifying `/etc/hosts`. If you deny,
 Some VPNs force DNS through the tunnel. The hosts file entries help bypass this, but you may also need to:
 - Disable "Route all DNS through VPN" in your VPN client
 - Use a local DNS resolver
+
+### Proxy route returns `407 Proxy Authentication Required`
+
+Your `HTTP(S)_PROXY` is pointing at the listener without its credentials — usually an address copied before you upgraded. Open the route and use **Copy exports** again, then re-source it wherever you keep it. The plain `http://127.0.0.1:<port>` form no longer works, by design: without it, any other account on the machine could spend your upstream proxy credentials.
 
 ### Route verification failing
 
