@@ -491,19 +491,17 @@ class HelperTool: NSObject, HelperProtocol {
         dscache.arguments = ["-flushcache"]
         dscache.standardOutput = FileHandle.nullDevice
         dscache.standardError = FileHandle.nullDevice
-        if !ProcessDeadline.run(dscache) {
-            helperLog.error("dscacheutil -flushcache did not finish in time; killed")
-        }
+        logFlushOutcome("dscacheutil -flushcache", ProcessDeadline.run(dscache))
 
         let mdns = Process()
         mdns.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
         mdns.arguments = ["-HUP", "mDNSResponder"]
         mdns.standardOutput = FileHandle.nullDevice
         mdns.standardError = FileHandle.nullDevice
-        if !ProcessDeadline.run(mdns) {
-            helperLog.error("killall -HUP mDNSResponder did not finish in time; killed")
-        }
+        logFlushOutcome("killall -HUP mDNSResponder", ProcessDeadline.run(mdns))
 
+        // Hosts write already succeeded; the app ignores this Bool. A
+        // nonzero killall (no matching process) must not fail the update.
         reply(true)
     }
     
@@ -511,6 +509,19 @@ class HelperTool: NSObject, HelperProtocol {
     
     func getVersion(withReply reply: @escaping (String) -> Void) {
         reply(HelperConstants.helperVersion)
+    }
+
+    private func logFlushOutcome(_ name: String, _ outcome: ProcessDeadline.Outcome) {
+        switch outcome {
+        case .failedToStart:
+            helperLog.error("\(name, privacy: .public) failed to start")
+        case .timedOut:
+            helperLog.error("\(name, privacy: .public) did not finish in time; killed")
+        case .exited(let code) where code != 0:
+            helperLog.error("\(name, privacy: .public) exited \(code, privacy: .public)")
+        case .exited:
+            break
+        }
     }
     
     // MARK: - Validation

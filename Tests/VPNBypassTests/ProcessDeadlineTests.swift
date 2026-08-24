@@ -11,7 +11,11 @@ import XCTest
 final class ProcessDeadlineTests: XCTestCase {
 
     func testFinishedProcessReturnsTrue() {
-        XCTAssertTrue(ProcessDeadline.run(path: "/usr/bin/true", seconds: 2))
+        XCTAssertEqual(ProcessDeadline.run(path: "/usr/bin/true", seconds: 2), .exited(0))
+    }
+
+    func testNonzeroExitIsReported() {
+        XCTAssertEqual(ProcessDeadline.run(path: "/usr/bin/false", seconds: 2), .exited(1))
     }
 
     /// A child that outlives the deadline must be killed and reported as a
@@ -23,15 +27,16 @@ final class ProcessDeadlineTests: XCTestCase {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 
-        XCTAssertFalse(
+        XCTAssertEqual(
             ProcessDeadline.run(process, seconds: 0.25),
-            "a child that outlives the deadline must return false, not wait it out"
+            .timedOut,
+            "a child that outlives the deadline must time out, not wait it out"
         )
         XCTAssertFalse(process.isRunning, "timed-out child must not be left running")
     }
 
     func testMissingExecutableReturnsFalse() {
-        XCTAssertFalse(ProcessDeadline.run(path: "/no/such/vpnb-deadline-binary", seconds: 1))
+        XCTAssertEqual(ProcessDeadline.run(path: "/no/such/vpnb-deadline-binary", seconds: 1), .failedToStart)
     }
 
     /// SIGTERM is ignorable. The deadline path must escalate to SIGKILL so a
@@ -43,7 +48,7 @@ final class ProcessDeadlineTests: XCTestCase {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 
-        XCTAssertFalse(ProcessDeadline.run(process, seconds: 0.25))
+        XCTAssertEqual(ProcessDeadline.run(process, seconds: 0.25), .timedOut)
         XCTAssertFalse(process.isRunning, "TERM-ignoring child must be SIGKILL'd")
     }
 }
