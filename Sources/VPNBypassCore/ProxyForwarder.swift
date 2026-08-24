@@ -658,14 +658,28 @@ private final class Tunnel {
     ///    an embedded CRLF pair. processClientHead cuts the request line at the first CRLF
     ///    today, so nothing on the wire reaches here with a pair — but this guard must hold
     ///    on its own, not on that.
-    /// 2. Reject the whole C0 range, DEL and SP rather than just CR/LF/NUL. A bare LF (and,
-    ///    on lenient proxies, a bare CR) is the reachable injection; TAB and DEL are not
-    ///    line breaks but are still illegal in a request-target and in a header value, and
-    ///    a CR/LF-only blocklist lets them through to the upstream verbatim. Every scalar
-    ///    below 0x21 encodes to a single byte in UTF-8, so a scalar check here is exactly a
+    /// 2. Reject more than CR/LF/NUL, because "what counts as a line break" depends on how
+    ///    the upstream parses. A byte-oriented parser breaks only on 0x0A/0x0D, so the C0
+    ///    range covers the real wire attack — a bare LF, or a bare CR on lenient proxies.
+    ///    But a parser that decodes the request to TEXT first also breaks on NEL and on
+    ///    LINE/PARAGRAPH SEPARATOR: Python's `str.splitlines()` splits on U+0085, U+2028 and
+    ///    U+2029 while `bytes.splitlines()` does not. We cannot know which kind of proxy is
+    ///    upstream, so all three are refused too. TAB and DEL are not breaks under either,
+    ///    but are illegal in a request-target and in a header value, so they go as well.
+    ///
+    ///    Other non-ASCII is deliberately still ALLOWED: a raw IDN host is not a break to
+    ///    any parser, and refusing it would be a behaviour change unrelated to this bug.
+    ///
+    ///    Every scalar at or below 0x20 encodes to a single byte in UTF-8 and no multi-byte
+    ///    sequence contains a byte below 0x80, so for that range a scalar check is exactly a
     ///    byte check on the wire.
     private func isValidAuthority(_ authority: String) -> Bool {
-        if authority.unicodeScalars.contains(where: { $0.value <= 0x20 || $0.value == 0x7F }) {
+        let forbidden: (Unicode.Scalar) -> Bool = {
+            $0.value <= 0x20 || $0.value == 0x7F        // C0 controls, SP, DEL
+                || (0x80...0x9F).contains($0.value)     // C1 controls, U+0085 NEL among them
+                || $0.value == 0x2028 || $0.value == 0x2029   // LINE / PARAGRAPH SEPARATOR
+        }
+        if authority.unicodeScalars.contains(where: forbidden) {
             return false
         }
         guard let colon = authority.lastIndex(of: ":") else { return false }
