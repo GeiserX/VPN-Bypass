@@ -39,8 +39,8 @@ final class HookGeneratorEdgeCaseTests: XCTestCase {
     /// The maximum UInt16 port value must be embedded correctly, with no truncation or
     /// overflow surprises in the generated proxy URL.
     func testShellExportsWithMaxPortValue() {
-        let s = HookGenerator.shellExports(port: 65535)
-        XCTAssertTrue(s.contains("HTTPS_PROXY=\"http://127.0.0.1:65535\""))
-        XCTAssertTrue(s.contains("HTTP_PROXY=\"http://127.0.0.1:65535\""))
+        let s = HookGenerator.shellExports(port: 65535, secret: "s3cr3t")
+        XCTAssertTrue(s.contains("HTTPS_PROXY=\"http://vpnb:s3cr3t@127.0.0.1:65535\""))
+        XCTAssertTrue(s.contains("HTTP_PROXY=\"http://vpnb:s3cr3t@127.0.0.1:65535\""))
     }
 }

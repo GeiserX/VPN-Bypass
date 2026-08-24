@@ -526,6 +526,147 @@ final class ProxyForwarderTests: XCTestCase {
         try assertMalformedConnectAuthorityReturns400(authority: "[2001:db8::1]")
     }
 
+    // MARK: - Local-caller authentication (GHSA-gm4h-95p9-9w7v, listener half)
+
+    // The listener is plain TCP on 127.0.0.1 and macOS exposes no peer uid for that, so the
+    // owner is identified by a secret only the owner can read (0600 config -> generated
+    // exports). Until a client proves it holds that secret we must not dial out and must not
+    // spend the owner's upstream credentials.
+
+    private static let testSecret = "s3cr3t"
+    private var authHeader: String { "Proxy-Authorization: Basic " + Data("vpnb:\(Self.testSecret)".utf8).base64EncodedString() }
+
+    /// No credential at all -> 407, and crucially nothing is dialed upstream.
+    func testConnectWithoutLocalSecretReturns407() throws {
+        try assertLocalAuth(clientAuthLine: nil, expect: "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"VPN Bypass\"\r\n\r\n")
+    }
+
+    /// A wrong credential is refused exactly like a missing one.
+    func testConnectWithWrongLocalSecretReturns407() throws {
+        let wrong = "Proxy-Authorization: Basic " + Data("vpnb:not-the-secret".utf8).base64EncodedString()
+        try assertLocalAuth(clientAuthLine: wrong, expect: "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"VPN Bypass\"\r\n\r\n")
+    }
+
+    /// A non-Basic scheme must not be accepted just because the header is present.
+    func testConnectWithNonBasicSchemeReturns407() throws {
+        try assertLocalAuth(clientAuthLine: "Proxy-Authorization: Bearer " + Self.testSecret,
+                            expect: "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"VPN Bypass\"\r\n\r\n")
+    }
+
+    /// Shared driver: a forwarder WITH a secret, pointed at a dead upstream port. If the
+    /// tunnel were opened we would never see a 407, so the assertion doubles as proof that
+    /// nothing was dialed.
+    private func assertLocalAuth(clientAuthLine: String?, expect: String) throws {
+        let got = expectation(description: "client received the expected refusal")
+        let forwarder = ProxyForwarder(
+            listenPort: 0,
+            upstream: .init(host: "127.0.0.1", port: 1, username: "up", password: "pw", boundInterface: nil),
+            localSecret: Self.testSecret
+        )
+        try forwarder.start()
+        self.forwarder = forwarder
+        let listenPort = try XCTUnwrap(forwarder.boundPort)
+
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: listenPort)!, using: .tcp)
+        self.clientConnection = client
+        client.stateUpdateHandler = { [weak self] state in
+            guard let self = self else { return }
+            if case .ready = state {
+                var request = "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n"
+                if let line = clientAuthLine { request += line + "\r\n" }
+                request += "\r\n"
+                client.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
+                self.receiveStatusHead(client, expected: expect, fulfill: got)
+            }
+        }
+        client.start(queue: clientQueue)
+        wait(for: [got], timeout: 5.0)
+    }
+
+    /// The correct secret opens the tunnel, and the LOCAL credential must not leak upstream:
+    /// the upstream sees exactly one Proxy-Authorization and it is the UPSTREAM's.
+    func testCorrectLocalSecretDialsUpstreamAndDoesNotForwardTheLocalCredential() throws {
+        let mockReady = expectation(description: "capturing mock ready")
+        let gotHead = expectation(description: "mock captured the CONNECT head")
+
+        var mockPort: UInt16 = 0
+        try startCapturingHTTPMock(onHead: { head in
+            let upstreamToken = Data("up:pw".utf8).base64EncodedString()
+            let localToken = Data("vpnb:\(Self.testSecret)".utf8).base64EncodedString()
+            XCTAssertTrue(head.contains("Proxy-Authorization: Basic \(upstreamToken)"),
+                          "the upstream's own credential must be present: \(head)")
+            XCTAssertFalse(head.contains(localToken),
+                           "the LOCAL hop secret must never be forwarded upstream: \(head)")
+            XCTAssertEqual(head.components(separatedBy: "Proxy-Authorization:").count - 1, 1,
+                           "exactly one Proxy-Authorization may reach the upstream: \(head)")
+            gotHead.fulfill()
+        }, ready: { port in mockPort = port; mockReady.fulfill() })
+        wait(for: [mockReady], timeout: 5.0)
+
+        let forwarder = ProxyForwarder(
+            listenPort: 0,
+            upstream: .init(host: "127.0.0.1", port: mockPort, username: "up", password: "pw", boundInterface: nil),
+            localSecret: Self.testSecret
+        )
+        try forwarder.start()
+        self.forwarder = forwarder
+        let listenPort = try XCTUnwrap(forwarder.boundPort)
+
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: listenPort)!, using: .tcp)
+        self.clientConnection = client
+        client.stateUpdateHandler = { [weak self] state in
+            guard let self = self else { return }
+            if case .ready = state {
+                let request = "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n"
+                    + self.authHeader + "\r\n\r\n"
+                client.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
+            }
+        }
+        client.start(queue: clientQueue)
+        wait(for: [gotHead], timeout: 5.0)
+    }
+
+    /// Same guarantee on the NON-CONNECT path, which forwards the client's head verbatim and
+    /// is the wider hole: it staples the owner's credential onto any absolute-URI request.
+    func testPlainPathStripsTheClientCredentialBeforeForwarding() throws {
+        let mockReady = expectation(description: "capturing mock ready")
+        let gotHead = expectation(description: "mock captured the plain head")
+
+        var mockPort: UInt16 = 0
+        try startCapturingHTTPMock(onHead: { head in
+            let localToken = Data("vpnb:\(Self.testSecret)".utf8).base64EncodedString()
+            XCTAssertFalse(head.contains(localToken),
+                           "the local secret must not be forwarded on the plain path: \(head)")
+            XCTAssertEqual(head.components(separatedBy: "Proxy-Authorization:").count - 1, 1,
+                           "exactly one Proxy-Authorization may reach the upstream: \(head)")
+            XCTAssertTrue(head.contains("X-Keep: yes"), "unrelated headers must survive: \(head)")
+            gotHead.fulfill()
+        }, ready: { port in mockPort = port; mockReady.fulfill() })
+        wait(for: [mockReady], timeout: 5.0)
+
+        let forwarder = ProxyForwarder(
+            listenPort: 0,
+            upstream: .init(host: "127.0.0.1", port: mockPort, username: "up", password: "pw", boundInterface: nil),
+            localSecret: Self.testSecret
+        )
+        try forwarder.start()
+        self.forwarder = forwarder
+        let listenPort = try XCTUnwrap(forwarder.boundPort)
+
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: listenPort)!, using: .tcp)
+        self.clientConnection = client
+        client.stateUpdateHandler = { [weak self] state in
+            guard let self = self else { return }
+            if case .ready = state {
+                let request = "GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n"
+                    + self.authHeader + "\r\nX-Keep: yes\r\n\r\n"
+                client.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
+            }
+        }
+        client.start(queue: clientQueue)
+        wait(for: [gotHead], timeout: 5.0)
+    }
+
     // MARK: - CONNECT authority header injection (GHSA-gm4h-95p9-9w7v)
 
     // The authority is interpolated verbatim into BOTH the request line and the `Host:`

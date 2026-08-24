@@ -392,7 +392,10 @@ struct RouteRow: View {
             // Copy shell exports — only available once listener is up
             if let port = listenerPort {
                 Button {
-                    let text = HookGenerator.shellExports(port: port)
+                    // RouteRow has no routeManager in scope; the singleton is what
+                    // ProxyListenerManager.shared above already uses from this file.
+                    let text = HookGenerator.shellExports(port: port,
+                                                          secret: RouteManager.shared.ensureLocalProxySecret())
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                     withAnimation { didCopy = true }

@@ -12,8 +12,12 @@ enum HookGenerator {
     /// Shell export block pointing HTTP(S)_PROXY at a route's local listener.
     /// Sourcing it routes that shell's HTTP(S) traffic through the route; the
     /// no_proxy entries keep loopback (incl. the listener itself) direct.
-    static func shellExports(port: UInt16) -> String {
-        let url = "http://127.0.0.1:\(port)"
+    /// `secret` is the local-hop credential the listener now demands (GHSA-gm4h-95p9-9w7v);
+    /// it rides in the URL's userinfo, which every HTTP(S)_PROXY consumer understands. It is
+    /// deliberately NOT optional — an exports block without it is a block that cannot talk to
+    /// the listener, and that must be a compile error rather than a silent runtime 407.
+    static func shellExports(port: UInt16, secret: String) -> String {
+        let url = "http://vpnb:\(secret)@127.0.0.1:\(port)"
         return """
         export HTTP_PROXY="\(url)"
         export HTTPS_PROXY="\(url)"

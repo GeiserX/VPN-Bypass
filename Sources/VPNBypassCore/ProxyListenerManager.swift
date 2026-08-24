@@ -40,7 +40,11 @@ final class ProxyListenerManager: ObservableObject {
     /// `boundInterface` is the physical interface (e.g. "en0") that upstream
     /// sockets bind to so the proxy hop escapes a full-tunnel VPN (nil = OS default).
     /// `completion` runs on the main actor once starts settle.
-    func reconcile(routes: [Route], boundInterface: String?, completion: (() -> Void)? = nil) {
+    /// `localSecret` is the shared secret each new listener will demand from its local
+    /// clients. Defaults to nil (open listener) so the unit tests, which drive reconcile
+    /// directly, keep exercising the transport without an auth step.
+    func reconcile(routes: [Route], boundInterface: String?, localSecret: String? = nil,
+                   completion: (() -> Void)? = nil) {
         let proxyRoutes = routes.filter {
             $0.enabled && Self.usesLocalListener($0.egress) && !($0.proxyHost ?? "").isEmpty
         }
@@ -89,7 +93,7 @@ final class ProxyListenerManager: ObservableObject {
             var started: [(id: UUID, forwarder: ProxyForwarder, port: UInt16, fingerprint: Int)] = []
             for route in toStart {
                 guard let upstream = Self.makeUpstream(route: route, boundInterface: boundInterface) else { continue }
-                if let result = Self.startForwarder(route: route, upstream: upstream) {
+                if let result = Self.startForwarder(route: route, upstream: upstream, localSecret: localSecret) {
                     started.append((route.id, result.forwarder, result.port,
                                     Self.upstreamFingerprint(route, boundInterface: boundInterface)))
                 }
@@ -122,11 +126,12 @@ final class ProxyListenerManager: ObservableObject {
     /// Start a single proxy forwarder and return it with its bound port.
     /// Returns nil if start() fails or no ephemeral port is assigned.
     /// Called from the startQueue background thread — must be nonisolated.
-    nonisolated static func startForwarder(route: Route, upstream: ProxyForwarder.Upstream) -> (forwarder: ProxyForwarder, port: UInt16)? {
+    nonisolated static func startForwarder(route: Route, upstream: ProxyForwarder.Upstream,
+                                           localSecret: String? = nil) -> (forwarder: ProxyForwarder, port: UInt16)? {
         // Try the route's STABLE preferred port first (so an app's HTTPS_PROXY
         // config survives restarts), then fall back to an OS-assigned port.
         for candidate in [preferredPort(for: route), 0] {
-            let forwarder = ProxyForwarder(listenPort: candidate, upstream: upstream)
+            let forwarder = ProxyForwarder(listenPort: candidate, upstream: upstream, localSecret: localSecret)
             if (try? forwarder.start()) != nil, let port = forwarder.boundPort {
                 return (forwarder, port)
             }

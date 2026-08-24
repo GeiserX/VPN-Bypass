@@ -227,6 +227,17 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// The local-hop secret every proxy listener demands, minted and persisted on first
+    /// use so the listener and the generated exports agree on it across restarts.
+    @discardableResult
+    func ensureLocalProxySecret() -> String {
+        if let existing = config.localProxySecret, !existing.isEmpty { return existing }
+        let minted = Config.makeLocalProxySecret()
+        config.localProxySecret = minted
+        saveConfig()
+        return minted
+    }
+
     func saveConfig() {
         // Daily backup - overwrite if older than 24 hours
         createDailyBackupIfNeeded()
@@ -4100,7 +4111,9 @@ final class RouteManager: ObservableObject {
             return
         }
         let iface = await detectPhysicalInterface()
-        ProxyListenerManager.shared.reconcile(routes: listenerRoutesRespectingGPShadow(), boundInterface: iface)
+        ProxyListenerManager.shared.reconcile(routes: listenerRoutesRespectingGPShadow(),
+                                             boundInterface: iface,
+                                             localSecret: ensureLocalProxySecret())
     }
 
     /// `config.routes` with any Tailscale-peer route whose IP is inside GlobalProtect's
