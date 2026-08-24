@@ -96,6 +96,12 @@ struct Config: Codable {
     var defaultRouteId: UUID? = nil
     var schemaVersion: Int = 1
     var multiRouteEnabled: Bool = false  // Opt-in experimental: show Routes tab and start proxy listeners
+    /// Shared secret a local client must present to a route's 127.0.0.1 listener before the
+    /// forwarder will spend this machine's upstream proxy credentials (GHSA-gm4h-95p9-9w7v).
+    /// It lives here because the config file is 0600 — the owner can read it, another local
+    /// account cannot, and a TCP listener has no peer uid to check instead. Optional so a
+    /// config written before 4.6.3 still decodes; RouteManager mints one on first use.
+    var localProxySecret: String? = nil
     /// Tunnels seen previously, so a VPN that is not connected right now can still be chosen
     /// for a route or a pin. Live enumeration only reports tunnels that are UP.
     var rememberedVPNLinks: [RouteManager.RememberedLink] = []
@@ -467,6 +473,14 @@ struct Config: Codable {
             ], ipRanges: [])
         ]
     }
+
+    /// A fresh 256-bit local-hop secret as lowercase hex. Hex, not base64: the secret is
+    /// interpolated into a proxy URL's userinfo (`http://vpnb:<secret>@127.0.0.1:port`) and
+    /// base64's `/` is not legal there, so it would need escaping at every call site.
+    static func makeLocalProxySecret() -> String {
+        (0..<32).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
+    }
+
 }
 
 struct DomainEntry: Codable, Identifiable, Equatable {

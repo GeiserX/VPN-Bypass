@@ -10,9 +10,9 @@ import JavaScriptCore
 final class HookGeneratorTests: XCTestCase {
 
     func testShellExportsContainsListenerAndNoProxy() {
-        let s = HookGenerator.shellExports(port: 18101)
-        XCTAssertTrue(s.contains("HTTPS_PROXY=\"http://127.0.0.1:18101\""))
-        XCTAssertTrue(s.contains("http_proxy=\"http://127.0.0.1:18101\""))
+        let s = HookGenerator.shellExports(port: 18101, secret: "s3cr3t")
+        XCTAssertTrue(s.contains("HTTPS_PROXY=\"http://vpnb:s3cr3t@127.0.0.1:18101\""))
+        XCTAssertTrue(s.contains("http_proxy=\"http://vpnb:s3cr3t@127.0.0.1:18101\""))
         XCTAssertTrue(s.contains("NO_PROXY=\"localhost,127.0.0.1,::1\""))
     }
 

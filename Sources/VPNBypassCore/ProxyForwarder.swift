@@ -38,6 +38,18 @@ final class ProxyForwarder {
 
     let listenPort: UInt16
 
+    // Shared secret a LOCAL client must present as `Proxy-Authorization: Basic` before we
+    // will spend the owner's UPSTREAM credentials on its behalf (GHSA-gm4h-95p9-9w7v).
+    //
+    // The listener is plain TCP on 127.0.0.1, and macOS has no way to read the peer's uid
+    // on a TCP socket: getpeereid(3) requires a UNIX-domain socket (that is why the control
+    // socket can check uid and this cannot), and the sysctl route needs kernel struct
+    // layouts Apple does not publish. So the caller proves it is the owner by presenting a
+    // secret only the owner can read — it lives in the 0600 config and is handed to apps
+    // through the generated exports. nil means no secret is configured and the listener is
+    // open, which is the pre-4.6.3 behaviour and what the unit tests drive.
+    private let localSecret: String?
+
     // The upstream a NEW tunnel chains through. Mutable so a route can be re-pointed
     // live (e.g. switch a residential proxy's port to change the exit IP) WITHOUT tearing down the
     // listener — the local port (and any app's HTTPS_PROXY) stays put; only connections
@@ -65,9 +77,10 @@ final class ProxyForwarder {
 
     private static let startTimeout: TimeInterval = 5.0
 
-    init(listenPort: UInt16, upstream: Upstream) {
+    init(listenPort: UInt16, upstream: Upstream, localSecret: String? = nil) {
         self.listenPort = listenPort
         self.upstream = upstream
+        self.localSecret = localSecret
     }
 
     /// Actual bound port — equals `listenPort` unless that was 0, in which case it is
@@ -181,6 +194,7 @@ final class ProxyForwarder {
         let tunnel = Tunnel(client: connection,
                             upstream: upstream,
                             boundInterface: resolvedInterface,
+                            localSecret: localSecret,
                             queue: queue)
         activeTunnels.append(tunnel)
         tunnel.onDone = { [weak self, weak tunnel] in
@@ -242,6 +256,7 @@ private final class Tunnel {
     private let client: NWConnection
     private let upstream: ProxyForwarder.Upstream
     private let boundInterface: NWInterface?
+    private let localSecret: String?
     private let queue: DispatchQueue
 
     private var server: NWConnection?
@@ -266,10 +281,12 @@ private final class Tunnel {
     init(client: NWConnection,
          upstream: ProxyForwarder.Upstream,
          boundInterface: NWInterface?,
+         localSecret: String?,
          queue: DispatchQueue) {
         self.client = client
         self.upstream = upstream
         self.boundInterface = boundInterface
+        self.localSecret = localSecret
         self.queue = queue
     }
 
@@ -320,6 +337,12 @@ private final class Tunnel {
         let requestLine = headString.components(separatedBy: "\r\n").first ?? ""
         let tokens = requestLine.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true).map(String.init)
         guard tokens.count >= 2 else { sendClient400(); return }
+
+        // Authenticate the LOCAL caller before anything else. Until this passes we have no
+        // reason to believe the client is the owner, so we neither dial out nor attach the
+        // owner's upstream credentials. Checked ahead of authority parsing so an
+        // unauthenticated caller cannot use our 400-vs-407 replies to probe the parser.
+        guard isLocalCallerAuthorized(head: headString) else { sendClient407(); return }
 
         let method = tokens[0].uppercased()
         let target = tokens[1]
@@ -590,13 +613,68 @@ private final class Tunnel {
         server.start(queue: queue)
     }
 
+    /// Rewrite the client's head for the upstream: drop any `Proxy-Authorization` the client
+    /// sent (it is the LOCAL hop's credential — ours, or a wrong guess — and must never be
+    /// forwarded or duplicated onto the upstream), then insert the upstream's own.
     private func injectProxyAuth(into head: Data) -> Data {
-        guard !upstream.username.isEmpty, let lineEnd = head.range(of: Self.crlf) else { return head }
+        let stripped = Self.removingProxyAuthorization(from: head)
+        guard !upstream.username.isEmpty, let lineEnd = stripped.range(of: Self.crlf) else { return stripped }
         var out = Data()
-        out.append(head.subdata(in: head.startIndex..<lineEnd.upperBound))               // request line + CRLF
+        out.append(stripped.subdata(in: stripped.startIndex..<lineEnd.upperBound))        // request line + CRLF
         out.append(Data("Proxy-Authorization: Basic \(basicAuthToken())\r\n".utf8))
-        out.append(head.subdata(in: lineEnd.upperBound..<head.endIndex))                  // remaining headers
+        out.append(stripped.subdata(in: lineEnd.upperBound..<stripped.endIndex))          // remaining headers
         return out
+    }
+
+    /// Remove every `Proxy-Authorization` header line from a request head, preserving the
+    /// request line and every other header byte-for-byte.
+    static func removingProxyAuthorization(from head: Data) -> Data {
+        guard let text = String(data: head, encoding: .utf8) else { return head }
+        let lines = text.components(separatedBy: "\r\n")
+        let kept = lines.enumerated().filter { index, line in
+            index == 0 || !line.lowercased().hasPrefix("proxy-authorization:")
+        }.map { $0.element }
+        return Data(kept.joined(separator: "\r\n").utf8)
+    }
+
+    // MARK: Local-caller authentication
+
+    /// True when no secret is configured (open listener, pre-4.6.3 behaviour) or the client
+    /// presented exactly it. The token is compared in constant time so a local attacker
+    /// cannot recover it byte-by-byte from response timing.
+    private func isLocalCallerAuthorized(head: String) -> Bool {
+        guard let secret = localSecret else { return true }
+        guard let presented = Self.basicProxyAuthorization(in: head) else { return false }
+        return Self.constantTimeEquals(presented, Self.expectedToken(for: secret))
+    }
+
+    /// The base64 blob from the first `Proxy-Authorization: Basic <token>` header, if any.
+    /// Header names are case-insensitive and the value may carry surrounding whitespace.
+    static func basicProxyAuthorization(in head: String) -> String? {
+        for line in head.components(separatedBy: "\r\n").dropFirst() {
+            guard line.lowercased().hasPrefix("proxy-authorization:") else { continue }
+            let value = line.drop { $0 != ":" }.dropFirst().trimmingCharacters(in: .whitespaces)
+            let parts = value.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            guard parts.count == 2, parts[0].lowercased() == "basic" else { return nil }
+            return String(parts[1]).trimmingCharacters(in: .whitespaces)
+        }
+        return nil
+    }
+
+    /// The base64 of `vpnb:<secret>` — what the generated exports make a client send.
+    static func expectedToken(for secret: String) -> String {
+        Data("vpnb:\(secret)".utf8).base64EncodedString()
+    }
+
+    /// Length-revealing but content-independent comparison: every byte of the longer input
+    /// is folded in, so the loop count depends only on lengths, never on where a mismatch is.
+    static func constantTimeEquals(_ a: String, _ b: String) -> Bool {
+        let x = Array(a.utf8), y = Array(b.utf8)
+        var diff = UInt8(x.count == y.count ? 0 : 1)
+        for i in 0..<max(x.count, y.count) {
+            diff |= (i < x.count ? x[i] : 0) ^ (i < y.count ? y[i] : 0)
+        }
+        return diff == 0
     }
 
     // MARK: Bidirectional relay
@@ -704,6 +782,14 @@ private final class Tunnel {
             if error != nil { self.cancel(); return }
             then?()
         })
+    }
+
+    /// Refuse an unauthenticated local caller. `Proxy-Authenticate` is included so a client
+    /// that can prompt (a browser pointed here by a PAC) has something to prompt against.
+    private func sendClient407() {
+        let response = "HTTP/1.1 407 Proxy Authentication Required\r\n"
+            + "Proxy-Authenticate: Basic realm=\"VPN Bypass\"\r\n\r\n"
+        send(Data(response.utf8), on: client) { [weak self] in self?.cancel() }
     }
 
     private func sendClient400() {
