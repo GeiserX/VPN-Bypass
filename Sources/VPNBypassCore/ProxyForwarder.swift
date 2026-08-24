@@ -645,6 +645,9 @@ private final class Tunnel {
     }
 
     private func isValidAuthority(_ authority: String) -> Bool {
+        if authority.contains(where: { $0 == "\r" || $0 == "\n" || $0 == "\0" }) {
+            return false
+        }
         guard let colon = authority.lastIndex(of: ":") else { return false }
         let host = authority[..<colon]
         let portText = authority[authority.index(after: colon)...]
