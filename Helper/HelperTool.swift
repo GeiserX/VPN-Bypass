@@ -484,29 +484,27 @@ class HelperTool: NSObject, HelperProtocol {
     }
     
     func flushDNSCache(withReply reply: @escaping (Bool) -> Void) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/dscacheutil")
-        process.arguments = ["-flushcache"]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        
-        do {
-            try process.run()
-            process.waitUntilExit()
-            
-            // Also run killall -HUP mDNSResponder for good measure
-            let mdnsProcess = Process()
-            mdnsProcess.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-            mdnsProcess.arguments = ["-HUP", "mDNSResponder"]
-            mdnsProcess.standardOutput = FileHandle.nullDevice
-            mdnsProcess.standardError = FileHandle.nullDevice
-            try? mdnsProcess.run()
-            mdnsProcess.waitUntilExit()
-            
-            reply(true)
-        } catch {
-            reply(false)
+        // Best-effort: the app ignores this Bool and already recorded the hosts
+        // write as success. A wedged child must not park this XPC thread.
+        let dscache = Process()
+        dscache.executableURL = URL(fileURLWithPath: "/usr/bin/dscacheutil")
+        dscache.arguments = ["-flushcache"]
+        dscache.standardOutput = FileHandle.nullDevice
+        dscache.standardError = FileHandle.nullDevice
+        if !ProcessDeadline.run(dscache) {
+            helperLog.error("dscacheutil -flushcache did not finish in time; killed")
         }
+
+        let mdns = Process()
+        mdns.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+        mdns.arguments = ["-HUP", "mDNSResponder"]
+        mdns.standardOutput = FileHandle.nullDevice
+        mdns.standardError = FileHandle.nullDevice
+        if !ProcessDeadline.run(mdns) {
+            helperLog.error("killall -HUP mDNSResponder did not finish in time; killed")
+        }
+
+        reply(true)
     }
     
     // MARK: - Version
