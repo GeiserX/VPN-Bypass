@@ -567,6 +567,61 @@ final class ProxyForwarderTests: XCTestCase {
         try assertMalformedConnectAuthorityReturns400(authority: "evil.com:443\u{7F}X:1")
     }
 
+    /// NEL (U+0085). Its UTF-8 bytes are C2 85 — no 0x0A, no 0x0D — so a byte-oriented
+    /// upstream parser does not break on it. One that decodes to text first does:
+    /// Python's `str.splitlines()` splits on it, `bytes.splitlines()` does not. We cannot
+    /// know which is upstream, so it must not reach the wire.
+    func testConnectAuthorityWithNELReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: "evil.com:443\u{85}X:1")
+    }
+
+    /// LINE SEPARATOR (U+2028) — same reasoning as NEL, UTF-8 bytes E2 80 A8.
+    func testConnectAuthorityWithLineSeparatorReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: "evil.com:443\u{2028}X:1")
+    }
+
+    /// PARAGRAPH SEPARATOR (U+2029) — same reasoning as NEL, UTF-8 bytes E2 80 A9.
+    func testConnectAuthorityWithParagraphSeparatorReturns400() throws {
+        try assertMalformedConnectAuthorityReturns400(authority: "evil.com:443\u{2029}X:1")
+    }
+
+    /// The guard stops at line-break-capable characters: an IDN host carries non-ASCII
+    /// that is not a break under ANY parser, so it must still be accepted and dialed
+    /// verbatim. This pins the deliberate decision not to blanket-reject non-ASCII, so a
+    /// later tightening has to break this test rather than break a user's route silently.
+    func testConnectAuthorityWithNonASCIIIDNHostIsStillAccepted() throws {
+        let mockReady = expectation(description: "capturing mock ready")
+        let gotHead = expectation(description: "mock captured the CONNECT head")
+
+        var mockPort: UInt16 = 0
+        try startCapturingHTTPMock(onHead: { head in
+            XCTAssertTrue(head.hasPrefix("CONNECT b\u{FC}cher.example:443 HTTP/1.1\r\n"),
+                          "a non-ASCII host must still reach the upstream verbatim: \(head)")
+            gotHead.fulfill()
+        }, ready: { port in mockPort = port; mockReady.fulfill() })
+        wait(for: [mockReady], timeout: 5.0)
+        XCTAssertNotEqual(mockPort, 0)
+
+        let forwarder = ProxyForwarder(
+            listenPort: 0,
+            upstream: .init(host: "127.0.0.1", port: mockPort, username: "", password: "", boundInterface: nil)
+        )
+        try forwarder.start()
+        self.forwarder = forwarder
+        let listenPort = try XCTUnwrap(forwarder.boundPort)
+
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: listenPort)!, using: .tcp)
+        self.clientConnection = client
+        client.stateUpdateHandler = { state in
+            if case .ready = state {
+                let request = "CONNECT b\u{FC}cher.example:443 HTTP/1.1\r\nHost: b\u{FC}cher.example:443\r\n\r\n"
+                client.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
+            }
+        }
+        client.start(queue: clientQueue)
+        wait(for: [gotHead], timeout: 5.0)
+    }
+
     /// End-to-end property, independent of WHICH layer enforces it: a client that embeds a
     /// full CR LF pair in its CONNECT line must never get an extra header onto the
     /// authenticated upstream hop. Today processClientHead truncates the request line at
