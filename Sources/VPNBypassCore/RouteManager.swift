@@ -4030,6 +4030,12 @@ final class RouteManager: ObservableObject {
         // Take the gate only once there is real work, so a no-op reconcile never blocks an apply.
         guard acquireRouteOperation() else { return }
         defer { releaseRouteOperation() }
+        // removeAllRoutes() does NOT take that gate — it bumps routeEpoch instead, so a teardown
+        // can complete while the batch below is in flight. Captured before the await, checked
+        // after, exactly as every other apply path does: without it a quit could clear
+        // activeRoutes and this add would then re-install routes the app no longer has any record
+        // of, which is the strand class of #61 and #67.
+        let epoch = routeEpoch
 
         log(.warning, "\(missing.count) route(s) vanished from the routing table — restoring")
         let batch = missing.compactMap { destination -> (destination: String, gateway: String, isNetwork: Bool)? in
@@ -4037,6 +4043,19 @@ final class RouteManager: ObservableObject {
             return (destination: destination, gateway: gateway, isNetwork: destination.contains("/"))
         }
         let result = await addRoutesBatchTracked(routes: batch)
+
+        // Epoch check and bookkeeping are atomic on @MainActor — no await between them.
+        guard routeEpoch == epoch else {
+            log(.warning, "Route restore aborted: routes were cleared during the operation")
+            await unstrandRoutes(attempted: Set(batch.map(\.destination)),
+                                 addFailed: Set(result.failedDestinations))
+            return
+        }
+        // These destinations were already in activeRoutes — restoring them only had to put them
+        // back in the kernel, so all that is left is to clear them from the pending set.
+        // addRoutesBatchTracked already removed the failures.
+        pendingKernelAdds.subtract(batch.map(\.destination))
+
         if result.failureCount > 0 {
             log(.error, "Restored \(result.successCount) of \(batch.count) vanished route(s); \(result.failureCount) failed")
         } else {
