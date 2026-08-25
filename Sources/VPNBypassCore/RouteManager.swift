@@ -4037,6 +4037,12 @@ final class RouteManager: ObservableObject {
         // of, which is the strand class of #61 and #67.
         let epoch = routeEpoch
 
+        // Restoring is an apply path like any other, so it takes the same refusal: in VPN Only
+        // under GlobalProtect the desired set IS the catch-alls, and putting those back would
+        // route every packet around the tunnel and tear GP down. The guard also sweeps any
+        // catch-alls already stranded, so reaching it is useful rather than merely defensive.
+        if refuseVPNOnlyUnderGlobalProtect() { return }
+
         log(.warning, "\(missing.count) route(s) vanished from the routing table — restoring")
         let batch = missing.compactMap { destination -> (destination: String, gateway: String, isNetwork: Bool)? in
             guard let gateway = gatewayFor[destination] else { return nil }
