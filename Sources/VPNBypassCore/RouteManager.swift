@@ -1347,6 +1347,9 @@ final class RouteManager: ObservableObject {
     func refreshStatus() {
         Task {
             await checkVPNStatus()
+            // After, not before: checkVPNStatus may itself re-route, and this only has to
+            // catch what the kernel dropped without any signal the app can otherwise see.
+            await reconcileMissingRoutes()
         }
     }
     
@@ -3975,6 +3978,70 @@ final class RouteManager: ObservableObject {
         table: [RouteKernel.KernelRoute], desired: Set<String>
     ) -> [String] {
         table.filter { $0.isOurs }.map(\.destinationString).filter { !desired.contains($0) }
+    }
+
+    /// The MIRROR of `orphanedDestinations`: destinations this session still wants that are no
+    /// longer in the kernel table. macOS drops an interface's routes when the effective physical
+    /// path changes, and nothing the app already watches survives that (issue #94): with Wi-Fi and
+    /// Ethernet both up on one subnet, switching primary keeps `NWPath.status` `.satisfied`, keeps
+    /// the same gateway, and keeps both interfaces in `availableInterfaces`, so the VPN interface,
+    /// the Tailscale profile and the gateway all compare equal and `RerouteDecider` correctly says
+    /// there is nothing to do. `shouldSkipReapply` then compares the desired set against the app's
+    /// OWN bookkeeping, which still claims the routes are installed.
+    ///
+    /// The kernel is the only witness that disagrees, so ask it. RTF_PROTO1 marks ours, exactly as
+    /// the startup sweep relies on, which makes this the same question asked the other way round.
+    /// Presence is tested by destination alone, deliberately NOT by the RTF_PROTO1 tag the
+    /// startup sweep uses, and not by gateway. Two reasons, both about not making things worse:
+    ///
+    /// - The helper skips the write when a correct route already exists, which leaves that
+    ///   destination UNTAGGED while the app still lists it as active. Requiring the tag would
+    ///   then report it missing on every pass, restore it as a no-op, and repeat every 30s
+    ///   forever.
+    /// - A destination that has any route at all is not the failure being fixed here. This
+    ///   restores routes that VANISHED; a route present but pointing at the wrong next hop is
+    ///   the reroute path's job, and duplicating that here would have the two fighting.
+    nonisolated static func missingDestinations(
+        table: [RouteKernel.KernelRoute], desired: Set<String>
+    ) -> [String] {
+        let present = Set(table.map(\.destinationString))
+        return desired.subtracting(present).sorted()
+    }
+
+    /// Re-install routes the kernel dropped underneath us, e.g. after the primary physical
+    /// interface changed. Runs on every status refresh (the 30s timer and each network change),
+    /// so recovery does not depend on correctly classifying WHY they went missing.
+    ///
+    /// Cheap when there is nothing to do: `currentTable()` is one silent NET_RT_DUMP — it forks
+    /// nothing and broadcasts nothing to routing-socket listeners, which is what makes it safe to
+    /// run on a timer next to a VPN client that reads its own gateway route. Zero missing routes
+    /// means zero writes.
+    func reconcileMissingRoutes() async {
+        guard !isShuttingDown, !activeRoutes.isEmpty, HelperManager.shared.isHelperInstalled else { return }
+        guard let table = RouteKernel.currentTable() else { return }
+
+        // Deduplicate first: activeRoutes can hold several entries for one destination when
+        // more than one domain resolves to the same address.
+        var gatewayFor: [String: String] = [:]
+        for r in activeRoutes where gatewayFor[r.destination] == nil { gatewayFor[r.destination] = r.gateway }
+        let missing = Self.missingDestinations(table: table, desired: Set(gatewayFor.keys))
+        guard !missing.isEmpty else { return }
+
+        // Take the gate only once there is real work, so a no-op reconcile never blocks an apply.
+        guard acquireRouteOperation() else { return }
+        defer { releaseRouteOperation() }
+
+        log(.warning, "\(missing.count) route(s) vanished from the routing table — restoring")
+        let batch = missing.compactMap { destination -> (destination: String, gateway: String, isNetwork: Bool)? in
+            guard let gateway = gatewayFor[destination] else { return nil }
+            return (destination: destination, gateway: gateway, isNetwork: destination.contains("/"))
+        }
+        let result = await addRoutesBatchTracked(routes: batch)
+        if result.failureCount > 0 {
+            log(.error, "Restored \(result.successCount) of \(batch.count) vanished route(s); \(result.failureCount) failed")
+        } else {
+            log(.success, "Restored \(result.successCount) vanished route(s)")
+        }
     }
 
     /// Startup crash/unclean-quit recovery — the permanent fix for the issue #67 class.
