@@ -46,6 +46,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastPathStatus: NWPath.Status?
     private var lastInterfaceTypes: Set<NWInterface.InterfaceType> = []
     private var lastInterfaceNames: Set<String> = []
+    /// The interface at the head of `availableInterfaces` — NWPath orders that list by
+    /// preference, so this is the path traffic actually takes. Tracked separately because the
+    /// three signals above are all SETS or scalars that stay identical when the primary flips
+    /// between two connected NICs on one subnet, which is exactly when macOS drops the routes
+    /// pinned to the old one (issue #94).
+    private var lastPrimaryInterface: String?
     private var networkDebounceWorkItem: DispatchWorkItem?
     private var appStartTime = Date()
 
@@ -258,13 +264,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let interfaceNames = Set(path.availableInterfaces.map { $0.name })
         let typesChanged = interfaceTypes != lastInterfaceTypes
         let namesChanged = interfaceNames != lastInterfaceNames
-        
-        let isSignificantChange = statusChanged || typesChanged || namesChanged
+        let primaryInterface = path.availableInterfaces.first?.name
+        let primaryChanged = primaryInterface != lastPrimaryInterface
+
+        let isSignificantChange = statusChanged || typesChanged || namesChanged || primaryChanged
         
         if isSignificantChange {
             lastPathStatus = path.status
             lastInterfaceTypes = interfaceTypes
             lastInterfaceNames = interfaceNames
+            lastPrimaryInterface = primaryInterface
             
             Task { @MainActor in
                 let statusStr = path.status == .satisfied ? "connected" : "disconnected"
@@ -326,6 +335,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Reset state
         lastPathStatus = nil
+        lastPrimaryInterface = nil
         lastInterfaceTypes = []
         lastInterfaceNames = []
         networkDebounceWorkItem?.cancel()
