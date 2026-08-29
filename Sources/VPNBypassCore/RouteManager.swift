@@ -14,11 +14,7 @@ final class RouteManager: ObservableObject {
     
     @Published var isVPNConnected = false
     @Published var vpnInterface: String?
-    @Published var vpnType: VPNType? {
-        didSet {
-            ensurePrimaryVPNRoute()
-        }
-    }
+    @Published var vpnType: VPNType?
     @Published var localGateway: String?
     @Published var vpnGateway: String?
     @Published var activeRoutes: [ActiveRoute] = []
@@ -174,9 +170,11 @@ final class RouteManager: ObservableObject {
         guard let data = try? Data(contentsOf: configURL),
               let loaded = try? JSONDecoder().decode(Config.self, from: data) else {
             log(.info, "Using default config")
+            ensurePrimaryVPNRoute()
             return
         }
         config = loaded
+        ensurePrimaryVPNRoute()
         mergeBuiltInServices()
         log(.info, "Config loaded")
     }
@@ -243,11 +241,20 @@ final class RouteManager: ObservableObject {
     }
 
     func saveConfig() {
+        do {
+            try saveConfigThrowing()
+        } catch {
+            log(.error, "Failed to save configuration: \(error.localizedDescription)")
+        }
+    }
+
+    func saveConfigThrowing() throws {
         // Daily backup - overwrite if older than 24 hours
         createDailyBackupIfNeeded()
         
-        guard let data = try? JSONEncoder().encode(config) else { return }
-        try? data.write(to: configURL)
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(config)
+        try data.write(to: configURL, options: .atomic)
         // config.json can hold proxy credentials — keep it owner-only (0600), tightening
         // any pre-existing 0644 file on every save.
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
@@ -256,13 +263,14 @@ final class RouteManager: ObservableObject {
 
     /// Ensure Rules has a real, persisted route for the currently detected primary VPN.
     /// A nil selector is already the legacy primary-VPN representation.
-    private func ensurePrimaryVPNRoute() {
-        guard vpnType != nil else { return }
+    @discardableResult
+    func ensurePrimaryVPNRoute() -> Bool {
+        guard vpnType != nil else { return false }
         let hasPrimaryVPN = config.routes.contains {
             $0.egress == .vpnDefault
                 && ($0.vpnSelector == nil || $0.vpnSelector?.kind == .primary)
         }
-        guard !hasPrimaryVPN else { return }
+        guard !hasPrimaryVPN else { return false }
 
         config.routes.append(Route(
             name: "Primary VPN",
@@ -270,6 +278,7 @@ final class RouteManager: ObservableObject {
             vpnSelector: VPNSelector(kind: .primary)
         ))
         saveConfig()
+        return true
     }
     
     private func createDailyBackupIfNeeded() {
@@ -1303,6 +1312,9 @@ final class RouteManager: ObservableObject {
         isVPNConnected = connected
         vpnInterface = connected ? interface : nil
         vpnType = connected ? detectedType : nil
+        if connected {
+            ensurePrimaryVPNRoute()
+        }
         
         log(.info, "VPN detection result: connected=\(connected), interface=\(interface ?? "none")")
         
