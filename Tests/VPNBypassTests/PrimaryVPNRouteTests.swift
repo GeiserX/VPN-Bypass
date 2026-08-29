@@ -140,7 +140,7 @@ final class PrimaryVPNRouteTests: XCTestCase {
         XCTAssertEqual(currentBackupContent, backupJSON, "existing config.json.bak must remain byte-for-byte unchanged after automatic apply pass")
     }
 
-    func testStatusDrivenVPNConnectPersistsPrimaryVPNRoute() {
+    func testEnsurePrimaryVPNRouteAppendsAndReportsThatItDid() {
         routeManager.config = Config()
         XCTAssertTrue(routeManager.config.routes.isEmpty)
 
@@ -148,7 +148,7 @@ final class PrimaryVPNRouteTests: XCTestCase {
         routeManager.vpnType = .tailscale
         let added = routeManager.ensurePrimaryVPNRoute()
 
-        XCTAssertTrue(added, "Primary VPN route must be added on VPN connect")
+        XCTAssertTrue(added, "a config with no VPN route must get one, and say so")
         XCTAssertEqual(routeManager.config.routes.count, 1)
         XCTAssertEqual(routeManager.config.routes.first?.name, "Primary VPN")
     }
@@ -161,11 +161,18 @@ final class PrimaryVPNRouteTests: XCTestCase {
         let configPerms = (configAttrs[.posixPermissions] as? NSNumber)?.uint16Value
         XCTAssertEqual(configPerms, 0o600, "config.json must have strict 0600 permissions")
 
-        if FileManager.default.fileExists(atPath: backupURL.path) {
-            let backupAttrs = try FileManager.default.attributesOfItem(atPath: backupURL.path)
-            let backupPerms = (backupAttrs[.posixPermissions] as? NSNumber)?.uint16Value
-            XCTAssertEqual(backupPerms, 0o600, "config.json.bak must have strict 0600 permissions")
-        }
+        // Force the backup to exist rather than skipping the assertion when it does not:
+        // wrapped in `if fileExists` this check never ran, so it could not fail. The source
+        // is deliberately 0644 — a backup copied from a loose file inherits that mode, so
+        // dropping the chmod in the backup path turns this red.
+        try Data("{}".utf8).write(to: routeManager.configURL, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: routeManager.configURL.path)
+        try routeManager.saveConfigThrowing()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: backupURL.path),
+                      "a save with an existing config must produce the daily backup")
+        let backupAttrs = try FileManager.default.attributesOfItem(atPath: backupURL.path)
+        XCTAssertEqual((backupAttrs[.posixPermissions] as? NSNumber)?.uint16Value, 0o600,
+                       "config.json.bak carries the same credentials and must be 0600 too")
     }
 
     func testImportConfigRecoversFromConfigLoadFailureAndPersistsToDisk() throws {
@@ -220,5 +227,69 @@ final class PrimaryVPNRouteTests: XCTestCase {
         // 4. Verify disk content remains completely untouched byte-for-byte
         let currentContent = try String(contentsOf: routeManager.configURL, encoding: .utf8)
         XCTAssertEqual(currentContent, invalidJSON, "config.json on disk must remain unchanged on import failure")
+    }
+
+    // MARK: - The production path
+
+    /// The reported gap (#96), reproduced at the level the app actually reaches it. `Config`'s
+    /// DECODER is the only place that derives the Direct + primary-VPN system routes, so a
+    /// brand-new install — which has no config.json to decode — showed an empty route picker
+    /// in Rules for its whole first session. Deleting the seed in `loadConfig()` turns this red.
+    func testFirstLaunchWithNoConfigFileSeedsTheSystemRoutes() {
+        cleanupConfigFiles()
+        routeManager.config = Config()
+        XCTAssertTrue(routeManager.config.routes.isEmpty, "precondition: a default Config has no routes")
+
+        routeManager.loadConfig()
+
+        XCTAssertTrue(routeManager.config.routes.contains { $0.egress == .direct },
+                      "a fresh install must get the Direct system route")
+        XCTAssertTrue(routeManager.config.routes.contains { $0.egress == .vpnDefault && $0.vpnSelector?.kind != .interface },
+                      "a fresh install must get the primary-VPN system route Rules selects")
+    }
+
+    /// A config that decodes but carries no VPN route at all gets one back at load, which is
+    /// the case `ensurePrimaryVPNRoute()` exists for. Deleting its call in `loadConfig()`
+    /// turns this red.
+    func testLoadingAConfigWithNoVPNRouteRestoresThePrimaryVPNRoute() throws {
+        var stored = Config()
+        stored.routes = [Route(name: "Direct", egress: .direct)]
+        try JSONEncoder().encode(stored).write(to: routeManager.configURL, options: .atomic)
+
+        routeManager.config = Config()
+        routeManager.loadConfig()
+
+        XCTAssertEqual(routeManager.config.routes.filter { $0.egress == .vpnDefault }.count, 1,
+                       "exactly one primary-VPN route, not zero and not a duplicate")
+    }
+
+    /// The 30s status timer (VPNBypassApp.swift:289) drives `checkVPNStatus()`. Seeding from
+    /// there re-created a route the user had deliberately deleted, and rewrote config.json,
+    /// every half minute. Seeding is load-time only, so a second pass must be inert.
+    func testSeedingIsIdempotentAndNeverDuplicatesTheRoute() {
+        routeManager.config = Config()
+        routeManager.loadConfig()
+        let afterFirst = routeManager.config.routes.count
+
+        routeManager.loadConfig()
+        routeManager.ensurePrimaryVPNRoute()
+
+        XCTAssertEqual(routeManager.config.routes.count, afterFirst,
+                       "repeat passes must not append another route")
+    }
+
+    /// config.json holds proxy credentials and localProxySecret (GHSA-gm4h-95p9-9w7v). It must
+    /// never exist at umask-default 0644, even briefly, inside a 0755 directory. Note that
+    /// `replaceItemAt` keeps the DESTINATION's mode, so a 0644 file already on disk is the
+    /// case that matters.
+    func testSaveTightensAPreexistingWorldReadableConfig() throws {
+        try Data("{}".utf8).write(to: routeManager.configURL, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: routeManager.configURL.path)
+
+        try routeManager.saveConfigThrowing()
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: routeManager.configURL.path)
+        XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.uint16Value, 0o600,
+                       "a save must tighten an existing 0644 config to 0600")
     }
 }

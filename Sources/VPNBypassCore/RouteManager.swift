@@ -172,6 +172,11 @@ final class RouteManager: ObservableObject {
             isConfigLoadFailed = false
             log(.info, "Config file absent, using default config")
             config = Config()
+            // Config's DECODER is the only place that derives the Direct and primary-VPN
+            // system routes, so a brand-new install — which never decodes anything — had an
+            // empty Rules route picker for its whole first session and only healed on the
+            // next launch. Seed the same two routes here.
+            seedSystemRoutesIfEmpty()
             ensurePrimaryVPNRoute()
             return
         }
@@ -181,12 +186,19 @@ final class RouteManager: ObservableObject {
             let loaded = try JSONDecoder().decode(Config.self, from: data)
             config = loaded
             isConfigLoadFailed = false
+            seedSystemRoutesIfEmpty()
             ensurePrimaryVPNRoute()
             mergeBuiltInServices()
             log(.info, "Config loaded")
         } catch {
             isConfigLoadFailed = true
             log(.error, "Failed to load config from \(configURL.path): \(error.localizedDescription). Preserving file on disk.")
+            // The latch below blocks every save and every route application, so without this
+            // the menu bar shows a healthy app that quietly enforces nothing — the same trap
+            // the helper-not-ready notification exists to close.
+            NotificationManager.shared.notifyEnforcementFailed(
+                reason: String(localized: "Your configuration file could not be read, so no routes are being enforced. It has been left untouched at ~/Library/Application Support/VPNBypass/config.json — repair it, or import a saved configuration from Settings.")
+            )
         }
     }
     
@@ -273,52 +285,55 @@ final class RouteManager: ObservableObject {
             throw NSError(domain: "VPNBypass", code: 1001, userInfo: [NSLocalizedDescriptionKey: "Configuration save blocked due to load failure"])
         }
 
-        // Daily backup - overwrite if older than 24 hours
-        try createDailyBackupIfNeededThrowing()
+        // Daily backup - overwrite if older than 24 hours. Best-effort on purpose: the
+        // backup is a convenience, and letting it fail the save would lose the user's
+        // actual change over a stale copy.
+        do {
+            try createDailyBackupIfNeededThrowing()
+        } catch {
+            log(.warning, "Daily config backup skipped: \(error.localizedDescription)")
+        }
 
         let encoder = JSONEncoder()
         let data = try encoder.encode(config)
 
         let dir = configURL.deletingLastPathComponent()
         let tempURL = dir.appendingPathComponent("config.json.tmp-\(UUID().uuidString)")
+        // Every throw below leaves the temp behind otherwise, and these accumulate in
+        // ~/Library/Application Support/VPNBypass/ forever.
+        defer { try? FileManager.default.removeItem(at: tempURL) }
 
-        // 1. Write data to temporary file
-        try data.write(to: tempURL, options: .atomic)
-
-        // 2. Set strict 0600 owner-only permissions BEFORE replacing target file
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempURL.path)
-
-        // 3. Verify permissions on temporary file
-        let attrs = try FileManager.default.attributesOfItem(atPath: tempURL.path)
-        guard let permissions = attrs[.posixPermissions] as? NSNumber, permissions.uint16Value == 0o600 else {
-            try? FileManager.default.removeItem(at: tempURL)
-            throw NSError(domain: "VPNBypass", code: 1002, userInfo: [NSLocalizedDescriptionKey: "Failed to verify 0600 permissions on temporary config file"])
+        // Create the temp file 0600 in one step. Writing first and chmod'ing after leaves a
+        // window where a file holding localProxySecret and proxy passwords is umask-default
+        // 0644 inside a 0755 directory. `replaceItemAt` then keeps the DESTINATION's mode,
+        // not the source's, so the mode that matters is the one set after the replace.
+        guard FileManager.default.createFile(
+            atPath: tempURL.path, contents: data, attributes: [.posixPermissions: 0o600]
+        ) else {
+            throw NSError(domain: "VPNBypass", code: 1002,
+                          userInfo: [NSLocalizedDescriptionKey: "Could not create the temporary config file"])
         }
 
-        // 4. Atomically replace target configURL with the secured temporary file
         if FileManager.default.fileExists(atPath: configURL.path) {
             _ = try FileManager.default.replaceItemAt(configURL, withItemAt: tempURL)
         } else {
             try FileManager.default.moveItem(at: tempURL, to: configURL)
         }
-
-        // 5. Ensure final destination permissions remain 0600
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
 
         log(.info, "Config saved")
     }
 
-    /// Ensure Rules has a real, persisted route for the currently detected primary VPN.
-    /// A nil selector is already the legacy primary-VPN representation.
+    /// Ensure Rules has a real, persisted route for the primary VPN, the way `Config.derive()`
+    /// already does for every config that has been decoded from disk. A nil selector is the
+    /// legacy representation of the same thing, so an existing "Corporate VPN" counts.
+    ///
+    /// Called only from `loadConfig()`. It used to run from the VPN-status path, which the
+    /// 30s refresh timer drives (VPNBypassApp.swift:289) — so a user who deleted this route
+    /// got it back, plus a config.json write, every half minute with no way to decline.
     @discardableResult
     func ensurePrimaryVPNRoute() -> Bool {
-        let underTests = NSClassFromString("XCTestCase") != nil
-            || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-        if !underTests {
-            guard HelperManager.shared.isHelperInstalled else { return false }
-        }
         guard !isConfigLoadFailed else { return false }
-        guard vpnType != nil else { return false }
         let hasPrimaryVPN = config.routes.contains {
             $0.egress == .vpnDefault
                 && ($0.vpnSelector == nil || $0.vpnSelector?.kind == .primary)
@@ -332,6 +347,19 @@ final class RouteManager: ObservableObject {
         ))
         saveConfig()
         return true
+    }
+
+    /// Populate the two auto-created system routes (Direct + the primary VPN) when a config
+    /// has none. Mirrors `Config.derive()`, which only ever runs inside `Config.init(from:)`.
+    private func seedSystemRoutesIfEmpty() {
+        guard config.routes.isEmpty else { return }
+        let derived = Config.derive(
+            domains: config.domains, services: config.services, mode: config.routingMode,
+            inverseDomains: config.inverseDomains, proxy: config.proxyConfig
+        )
+        config.routes = derived.routes
+        config.rules = derived.rules
+        config.defaultRouteId = derived.defaultRouteId
     }
     
     private func createDailyBackupIfNeededThrowing() throws {
@@ -494,7 +522,9 @@ final class RouteManager: ObservableObject {
 
         let directory = configURL.deletingLastPathComponent()
         let rollbackURL = directory.appendingPathComponent("config.json.rollback-\(UUID().uuidString)")
-        let restoredPermissions = permissions ?? 0o600
+        // Never restore a looser mode than we enforce. A config that was somehow 0644 must
+        // come back 0600, the same way every save tightens it (GHSA-gm4h-95p9-9w7v).
+        let restoredPermissions: UInt16 = min(permissions ?? 0o600, 0o600)
 
         try data.write(to: rollbackURL, options: .atomic)
         try fileManager.setAttributes([.posixPermissions: restoredPermissions], ofItemAtPath: rollbackURL.path)
@@ -641,9 +671,6 @@ final class RouteManager: ObservableObject {
         isVPNConnected = connected
         vpnInterface = connected ? interface : nil
         vpnType = connected ? detectedType : nil
-        if connected && HelperManager.shared.isHelperInstalled {
-            ensurePrimaryVPNRoute()
-        }
         let fetchedTailscaleFingerprint = isVPNConnected ? await currentTailscaleSelfFingerprintIfExitNode() : nil
         // Preserve last fingerprint if a single CLI read fails while VPN remains connected.
         let newTailscaleFingerprint = fetchedTailscaleFingerprint ?? (isVPNConnected ? oldTailscaleFingerprint : nil)
@@ -1438,7 +1465,15 @@ final class RouteManager: ObservableObject {
     func detectAndApplyRoutesAsync(sendNotification: Bool = false) async {
         guard !isConfigLoadFailed else {
             isLoading = false
-            log(.warning, "detectAndApplyRoutesAsync blocked because config.json failed to load")
+            log(.warning, "Config failed to load — enforcing nothing, and removing anything this app left behind")
+            // The latch blocks APPLY, never TEARDOWN. This method is the only caller of the
+            // no-VPN startup sweep (:1535), which is what heals a killed previous run's
+            // leftovers — VPN Only's 0.0.0.0/1 + 128.0.0.0/1 catch-alls included. Returning
+            // early here left those in the kernel with nothing able to remove them, so an
+            // unreadable config.json turned a recoverable state into a broken network.
+            if HelperManager.shared.isHelperInstalled {
+                await startupSweepIfNeeded(desired: [])
+            }
             return
         }
         isLoading = true
@@ -1455,9 +1490,6 @@ final class RouteManager: ObservableObject {
         isVPNConnected = connected
         vpnInterface = connected ? interface : nil
         vpnType = connected ? detectedType : nil
-        if connected {
-            ensurePrimaryVPNRoute()
-        }
         
         log(.info, "VPN detection result: connected=\(connected), interface=\(interface ?? "none")")
         
