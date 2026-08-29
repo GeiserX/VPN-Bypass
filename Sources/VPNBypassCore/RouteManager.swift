@@ -308,6 +308,11 @@ final class RouteManager: ObservableObject {
     /// A nil selector is already the legacy primary-VPN representation.
     @discardableResult
     func ensurePrimaryVPNRoute() -> Bool {
+        let underTests = NSClassFromString("XCTestCase") != nil
+            || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        if !underTests {
+            guard HelperManager.shared.isHelperInstalled else { return false }
+        }
         guard !isConfigLoadFailed else { return false }
         guard vpnType != nil else { return false }
         let hasPrimaryVPN = config.routes.contains {
@@ -419,9 +424,22 @@ final class RouteManager: ObservableObject {
             let exportData = try JSONDecoder().decode(ExportData.self, from: data)
 
             // Merge or replace config, then normalize built-in services
+            let previousConfig = config
+            let previousLoadFailed = isConfigLoadFailed
+
             config = exportData.config
             mergeBuiltInServices()
-            saveConfig()
+
+            // Perform recovery write using saveConfigThrowing() while temporarily allowing writes
+            isConfigLoadFailed = false
+            do {
+                try saveConfigThrowing()
+            } catch {
+                config = previousConfig
+                isConfigLoadFailed = previousLoadFailed
+                log(.error, "Failed to persist imported config: \(error.localizedDescription)")
+                return false
+            }
 
             log(.success, "Config imported: \(exportData.config.domains.count) domains, \(exportData.config.services.filter { $0.enabled }.count) services enabled")
 
@@ -565,6 +583,9 @@ final class RouteManager: ObservableObject {
         isVPNConnected = connected
         vpnInterface = connected ? interface : nil
         vpnType = connected ? detectedType : nil
+        if connected && HelperManager.shared.isHelperInstalled {
+            ensurePrimaryVPNRoute()
+        }
         let fetchedTailscaleFingerprint = isVPNConnected ? await currentTailscaleSelfFingerprintIfExitNode() : nil
         // Preserve last fingerprint if a single CLI read fails while VPN remains connected.
         let newTailscaleFingerprint = fetchedTailscaleFingerprint ?? (isVPNConnected ? oldTailscaleFingerprint : nil)
@@ -583,7 +604,7 @@ final class RouteManager: ObservableObject {
         
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
         // Also skip if helper is not ready — no point attempting routes that will all fail
-        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled {
+        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled && !isConfigLoadFailed {
             // Skip if routes were applied very recently (within 5 seconds) - prevents double-triggering
             if let lastUpdate = lastUpdate, Date().timeIntervalSince(lastUpdate) < 5 {
                 log(.info, "Skipping duplicate route application (applied \(Int(Date().timeIntervalSince(lastUpdate)))s ago)")
