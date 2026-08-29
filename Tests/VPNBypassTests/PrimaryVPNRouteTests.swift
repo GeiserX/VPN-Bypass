@@ -335,4 +335,39 @@ final class PrimaryVPNRouteTests: XCTestCase {
                           "recovering from a corrupt config must not copy it over the backup")
         XCTAssertEqual(backupAfter, goodBackup, "the last known-good backup must survive recovery")
     }
+
+    /// The rollback in importConfig had no test at all — `restoreConfigOnDisk` was referenced
+    /// only by its own call site. A read-only config directory makes the recovery write fail
+    /// after the transaction has begun, which is the shape of a disk-full or permission error.
+    /// Both halves must come back: the in-memory config and the file on disk.
+    func testAFailedImportRollsBackMemoryAndLeavesDiskUntouched() throws {
+        let original = #"{"domains":[],"schemaVersion":2}"#
+        try original.write(to: routeManager.configURL, atomically: true, encoding: .utf8)
+        routeManager.loadConfig()
+        let configBefore = routeManager.config
+        let latchBefore = routeManager.isConfigLoadFailed
+
+        var incoming = Config()
+        incoming.domains = [DomainEntry(domain: "should-not-land.example.com")]
+        let export = RouteManager.ExportData(version: "test", exportDate: Date(), config: incoming)
+        let exportURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rollback-import-\(UUID().uuidString).json")
+        try JSONEncoder().encode(export).write(to: exportURL, options: .atomic)
+        defer { removeFileIgnoringMissing(exportURL) }
+
+        // Block writes in the config directory so the recovery write cannot land.
+        let dir = routeManager.configURL.deletingLastPathComponent()
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path) }
+
+        XCTAssertFalse(routeManager.importConfig(from: exportURL), "the import cannot succeed here")
+
+        XCTAssertEqual(routeManager.config.domains.map(\.domain), configBefore.domains.map(\.domain),
+                       "a failed import must roll the in-memory config back")
+        XCTAssertFalse(routeManager.config.domains.contains { $0.domain == "should-not-land.example.com" },
+                       "the rejected import must not survive in memory")
+        XCTAssertEqual(routeManager.isConfigLoadFailed, latchBefore, "the latch must be restored")
+        XCTAssertEqual(try String(contentsOf: routeManager.configURL, encoding: .utf8), original,
+                       "config.json must be byte-for-byte unchanged after a failed import")
+    }
 }
