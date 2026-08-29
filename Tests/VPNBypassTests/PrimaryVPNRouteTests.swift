@@ -79,4 +79,21 @@ final class PrimaryVPNRouteTests: XCTestCase {
 
         XCTAssertTrue(routeManager.config.routes.isEmpty, "detectVPNStateOnly must be read-only and never mutate config")
     }
+
+    func testLoadConfigPreservesInvalidConfigFileAndBackupOnDisk() {
+        let invalidJSON = "{ invalid_json_syntax: true "
+        let backupJSON = "{ backup_json: true }"
+        let backupURL = routeManager.configURL.deletingLastPathComponent().appendingPathComponent("config.json.bak")
+
+        try? invalidJSON.write(to: routeManager.configURL, atomically: true, encoding: .utf8)
+        try? backupJSON.write(to: backupURL, atomically: true, encoding: .utf8)
+
+        routeManager.loadConfig()
+
+        let currentConfigContent = (try? String(contentsOf: routeManager.configURL, encoding: .utf8)) ?? ""
+        let currentBackupContent = (try? String(contentsOf: backupURL, encoding: .utf8)) ?? ""
+
+        XCTAssertEqual(currentConfigContent, invalidJSON, "Corrupted config.json must be preserved on disk and not overwritten on load failure")
+        XCTAssertEqual(currentBackupContent, backupJSON, "Existing config.json.bak must be preserved on disk and not overwritten on load failure")
+    }
 }
