@@ -136,7 +136,7 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Private
     
-    private let configURL: URL
+    let configURL: URL
     private var refreshTimer: Timer?
     
     private init() {
@@ -167,16 +167,23 @@ final class RouteManager: ObservableObject {
         // Load DNS cache for faster startup / fallback
         loadDNSCache()
         
-        guard let data = try? Data(contentsOf: configURL),
-              let loaded = try? JSONDecoder().decode(Config.self, from: data) else {
-            log(.info, "Using default config")
+        guard FileManager.default.fileExists(atPath: configURL.path) else {
+            log(.info, "Config file absent, using default config")
+            config = Config()
             ensurePrimaryVPNRoute()
             return
         }
-        config = loaded
-        ensurePrimaryVPNRoute()
-        mergeBuiltInServices()
-        log(.info, "Config loaded")
+
+        do {
+            let data = try Data(contentsOf: configURL)
+            let loaded = try JSONDecoder().decode(Config.self, from: data)
+            config = loaded
+            ensurePrimaryVPNRoute()
+            mergeBuiltInServices()
+            log(.info, "Config loaded")
+        } catch {
+            log(.error, "Failed to load config from \(configURL.path): \(error.localizedDescription). Preserving file on disk.")
+        }
     }
     
     /// Merge built-in service definitions with the user's saved config.
