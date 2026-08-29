@@ -49,6 +49,16 @@ final class PrimaryVPNRouteTests: XCTestCase {
         }
     }
 
+    /// The app version as the export path reads it. Hardcoding a version string here would
+    /// drift from the bundle and hide a real mismatch.
+    private func bundleAppVersion() throws -> String {
+        try XCTUnwrap(
+            (Bundle(for: Self.self).infoDictionary?["CFBundleShortVersionString"] as? String)
+                ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String),
+            "Expected CFBundleShortVersionString in bundle infoDictionary"
+        )
+    }
+
     private func cleanupConfigFiles() {
         removeFileIgnoringMissing(routeManager.configURL)
         removeFileIgnoringMissing(backupURL)
@@ -322,7 +332,7 @@ final class PrimaryVPNRouteTests: XCTestCase {
 
         var recovered = Config()
         recovered.domains = [DomainEntry(domain: "recovered.example.com")]
-        let export = RouteManager.ExportData(version: "test", exportDate: Date(), config: recovered)
+        let export = RouteManager.ExportData(version: try bundleAppVersion(), exportDate: Date(), config: recovered)
         let exportURL = routeManager.configURL.deletingLastPathComponent()
             .appendingPathComponent("import-recovery-test.json")
         try JSONEncoder().encode(export).write(to: exportURL, options: .atomic)
@@ -349,7 +359,7 @@ final class PrimaryVPNRouteTests: XCTestCase {
 
         var incoming = Config()
         incoming.domains = [DomainEntry(domain: "should-not-land.example.com")]
-        let export = RouteManager.ExportData(version: "test", exportDate: Date(), config: incoming)
+        let export = RouteManager.ExportData(version: try bundleAppVersion(), exportDate: Date(), config: incoming)
         let exportURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("rollback-import-\(UUID().uuidString).json")
         try JSONEncoder().encode(export).write(to: exportURL, options: .atomic)
@@ -357,8 +367,20 @@ final class PrimaryVPNRouteTests: XCTestCase {
 
         // Block writes in the config directory so the recovery write cannot land.
         let dir = routeManager.configURL.deletingLastPathComponent()
+        let originalMode = try XCTUnwrap(
+            (try FileManager.default.attributesOfItem(atPath: dir.path)[.posixPermissions] as? NSNumber)?.uint16Value,
+            "Expected a posix mode on the config directory"
+        )
         try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.path)
-        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path) }
+        defer {
+            // A leaked 0500 here makes every later test in the process fail to write, so put
+            // back exactly what was there and say so loudly if that is not possible.
+            do {
+                try FileManager.default.setAttributes([.posixPermissions: originalMode], ofItemAtPath: dir.path)
+            } catch {
+                XCTFail("Could not restore the config directory to \(String(originalMode, radix: 8)): \(error.localizedDescription)")
+            }
+        }
 
         XCTAssertFalse(routeManager.importConfig(from: exportURL), "the import cannot succeed here")
 
