@@ -181,8 +181,7 @@ final class PrimaryVPNRouteTests: XCTestCase {
         validConfig.domains = [DomainEntry(domain: "recovered.example.com")]
         let appVersion = try XCTUnwrap(
             (Bundle(for: Self.self).infoDictionary?["CFBundleShortVersionString"] as? String)
-                ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
-                ?? "1.0.0",
+                ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String),
             "Expected CFBundleShortVersionString in bundle infoDictionary"
         )
         let exportData = RouteManager.ExportData(version: appVersion, exportDate: Date(), config: validConfig)
