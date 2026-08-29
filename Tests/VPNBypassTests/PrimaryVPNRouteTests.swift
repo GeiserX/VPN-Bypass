@@ -179,12 +179,18 @@ final class PrimaryVPNRouteTests: XCTestCase {
         // 2. Prepare valid export file to import
         var validConfig = Config()
         validConfig.domains = [DomainEntry(domain: "recovered.example.com")]
-        let exportData = RouteManager.ExportData(version: "4.7.2", exportDate: Date(), config: validConfig)
+        let appVersion = try XCTUnwrap(
+            (Bundle(for: Self.self).infoDictionary?["CFBundleShortVersionString"] as? String)
+                ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
+                ?? "1.0.0",
+            "Expected CFBundleShortVersionString in bundle infoDictionary"
+        )
+        let exportData = RouteManager.ExportData(version: appVersion, exportDate: Date(), config: validConfig)
         let exportDataData = try JSONEncoder().encode(exportData)
 
         let tempExportURL = routeManager.configURL.deletingLastPathComponent().appendingPathComponent("export_test.json")
         try exportDataData.write(to: tempExportURL, options: .atomic)
-        defer { try? FileManager.default.removeItem(at: tempExportURL) }
+        defer { removeFileIgnoringMissing(tempExportURL) }
 
         // 3. Perform importConfig
         let success = routeManager.importConfig(from: tempExportURL)
@@ -195,5 +201,25 @@ final class PrimaryVPNRouteTests: XCTestCase {
         let reloadedData = try Data(contentsOf: routeManager.configURL)
         let reloadedConfig = try JSONDecoder().decode(Config.self, from: reloadedData)
         XCTAssertEqual(reloadedConfig.domains.first?.domain, "recovered.example.com")
+    }
+
+    func testImportConfigFailureDoesNotLeavePartiallyWrittenConfigOnDisk() throws {
+        let invalidJSON = "{ invalid_json_syntax: true "
+        try invalidJSON.write(to: routeManager.configURL, atomically: true, encoding: .utf8)
+
+        // 1. loadConfig fails due to invalid JSON
+        routeManager.loadConfig()
+        XCTAssertTrue(routeManager.isConfigLoadFailed)
+
+        // 2. Prepare an invalid export file path or unreadable file for import
+        let nonExistentURL = routeManager.configURL.deletingLastPathComponent().appendingPathComponent("non_existent_export.json")
+
+        // 3. Attempt importConfig from invalid URL
+        let success = routeManager.importConfig(from: nonExistentURL)
+        XCTAssertFalse(success, "importConfig must return false when source file is invalid/missing")
+
+        // 4. Verify disk content remains completely untouched byte-for-byte
+        let currentContent = try String(contentsOf: routeManager.configURL, encoding: .utf8)
+        XCTAssertEqual(currentContent, invalidJSON, "config.json on disk must remain unchanged on import failure")
     }
 }

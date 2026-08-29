@@ -194,7 +194,7 @@ final class RouteManager: ObservableObject {
     /// Preserves the user's enabled/disabled state while updating domains,
     /// ipRanges, and names from the latest source code definitions.
     /// Also adds any new built-in services that didn't exist when the user last saved.
-    private func mergeBuiltInServices() {
+    private func mergeBuiltInServices(autoSave: Bool = true) {
         let defaults = Config.defaultServices
         let savedById = Dictionary(uniqueKeysWithValues: config.services.map { ($0.id, $0) })
         let defaultById = Dictionary(uniqueKeysWithValues: defaults.map { ($0.id, $0) })
@@ -231,12 +231,16 @@ final class RouteManager: ObservableObject {
         
         if updated > 0 || added > 0 {
             config.services = merged
-            saveConfig()
+            if autoSave {
+                saveConfig()
+            }
             if updated > 0 { log(.info, "Updated \(updated) built-in service(s) with latest definitions") }
             if added > 0 { log(.info, "Added \(added) new built-in service(s)") }
         } else if config.services.count != merged.count {
             config.services = merged
-            saveConfig()
+            if autoSave {
+                saveConfig()
+            }
         }
     }
     
@@ -428,7 +432,7 @@ final class RouteManager: ObservableObject {
             let previousLoadFailed = isConfigLoadFailed
 
             config = exportData.config
-            mergeBuiltInServices()
+            mergeBuiltInServices(autoSave: false)
 
             // Perform recovery write using saveConfigThrowing() while temporarily allowing writes
             isConfigLoadFailed = false
