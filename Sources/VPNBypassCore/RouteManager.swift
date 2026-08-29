@@ -427,9 +427,19 @@ final class RouteManager: ObservableObject {
             let data = try Data(contentsOf: url)
             let exportData = try JSONDecoder().decode(ExportData.self, from: data)
 
-            // Merge or replace config, then normalize built-in services
+            // Save previous state for transactional rollback
             let previousConfig = config
             let previousLoadFailed = isConfigLoadFailed
+            let previousDiskData: Data?
+            let previousDiskPermissions: UInt16?
+            if FileManager.default.fileExists(atPath: configURL.path) {
+                previousDiskData = try Data(contentsOf: configURL)
+                let attributes = try FileManager.default.attributesOfItem(atPath: configURL.path)
+                previousDiskPermissions = (attributes[.posixPermissions] as? NSNumber)?.uint16Value
+            } else {
+                previousDiskData = nil
+                previousDiskPermissions = nil
+            }
 
             config = exportData.config
             mergeBuiltInServices(autoSave: false)
@@ -439,8 +449,17 @@ final class RouteManager: ObservableObject {
             do {
                 try saveConfigThrowing()
             } catch {
+                // Rollback in-memory state
                 config = previousConfig
                 isConfigLoadFailed = previousLoadFailed
+
+                // Roll back on-disk state, including restoring a previously missing file.
+                do {
+                    try restoreConfigOnDisk(data: previousDiskData, permissions: previousDiskPermissions)
+                } catch {
+                    log(.error, "Failed to restore previous config.json on disk: \(error.localizedDescription)")
+                }
+
                 log(.error, "Failed to persist imported config: \(error.localizedDescription)")
                 return false
             }
@@ -461,6 +480,41 @@ final class RouteManager: ObservableObject {
             log(.error, "Failed to import config: \(error.localizedDescription)")
             return false
         }
+    }
+
+    private func restoreConfigOnDisk(data: Data?, permissions: UInt16?) throws {
+        let fileManager = FileManager.default
+
+        guard let data else {
+            if fileManager.fileExists(atPath: configURL.path) {
+                try fileManager.removeItem(at: configURL)
+            }
+            return
+        }
+
+        let directory = configURL.deletingLastPathComponent()
+        let rollbackURL = directory.appendingPathComponent("config.json.rollback-\(UUID().uuidString)")
+        let restoredPermissions = permissions ?? 0o600
+
+        try data.write(to: rollbackURL, options: .atomic)
+        try fileManager.setAttributes([.posixPermissions: restoredPermissions], ofItemAtPath: rollbackURL.path)
+
+        let attributes = try fileManager.attributesOfItem(atPath: rollbackURL.path)
+        guard let actualPermissions = (attributes[.posixPermissions] as? NSNumber)?.uint16Value,
+              actualPermissions == restoredPermissions else {
+            throw NSError(
+                domain: "VPNBypass",
+                code: 1004,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to verify restored config file permissions"]
+            )
+        }
+
+        if fileManager.fileExists(atPath: configURL.path) {
+            _ = try fileManager.replaceItemAt(configURL, withItemAt: rollbackURL)
+        } else {
+            try fileManager.moveItem(at: rollbackURL, to: configURL)
+        }
+        try fileManager.setAttributes([.posixPermissions: restoredPermissions], ofItemAtPath: configURL.path)
     }
     
     struct ExportData: Codable {
