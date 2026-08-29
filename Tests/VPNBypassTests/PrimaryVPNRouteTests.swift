@@ -10,8 +10,17 @@ final class PrimaryVPNRouteTests: XCTestCase {
         routeManager.configURL.deletingLastPathComponent().appendingPathComponent("config.json.bak")
     }
 
+    private var savedVPNConnected = false
+    private var savedGateway: String?
+
     override func setUp() {
         super.setUp()
+        // RouteManager is a process-wide singleton and XCTest gives no ordering guarantee
+        // between classes, so anything this class writes must be put back. Leaking
+        // isVPNConnected == true arms the real route-application branch in every class that
+        // runs after, which on a machine with the helper installed writes kernel routes.
+        savedVPNConnected = routeManager.isVPNConnected
+        savedGateway = routeManager.localGateway
         routeManager.isConfigLoadFailed = false
         routeManager.vpnType = nil
         routeManager.config = Config()
@@ -23,6 +32,8 @@ final class PrimaryVPNRouteTests: XCTestCase {
         routeManager.isConfigLoadFailed = false
         routeManager.vpnType = nil
         routeManager.config = Config()
+        routeManager.isVPNConnected = savedVPNConnected
+        routeManager.localGateway = savedGateway
         super.tearDown()
     }
 
@@ -291,5 +302,37 @@ final class PrimaryVPNRouteTests: XCTestCase {
         let attrs = try FileManager.default.attributesOfItem(atPath: routeManager.configURL.path)
         XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.uint16Value, 0o600,
                        "a save must tighten an existing 0644 config to 0600")
+    }
+
+    /// Import is the one action a user takes to escape a corrupt config.json. It must not
+    /// destroy config.json.bak on the way — that backup is the only other copy of their
+    /// settings. `createDailyBackupIfNeededThrowing` guards on `isConfigLoadFailed` for
+    /// exactly this reason; clearing the latch to get past the save guard defeats it.
+    func testImportRecoveryDoesNotOverwriteTheBackupWithTheCorruptConfig() throws {
+        let corrupt = "{ invalid_json_syntax: true "
+        let goodBackup = #"{"domains":[],"schemaVersion":2}"#
+        try corrupt.write(to: routeManager.configURL, atomically: true, encoding: .utf8)
+        try goodBackup.write(to: backupURL, atomically: true, encoding: .utf8)
+        // Age the backup past the 24h freshness check so the save path tries to refresh it.
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-90_000)], ofItemAtPath: backupURL.path)
+
+        routeManager.loadConfig()
+        XCTAssertTrue(routeManager.isConfigLoadFailed, "precondition: the latch is set")
+
+        var recovered = Config()
+        recovered.domains = [DomainEntry(domain: "recovered.example.com")]
+        let export = RouteManager.ExportData(version: "test", exportDate: Date(), config: recovered)
+        let exportURL = routeManager.configURL.deletingLastPathComponent()
+            .appendingPathComponent("import-recovery-test.json")
+        try JSONEncoder().encode(export).write(to: exportURL, options: .atomic)
+        defer { removeFileIgnoringMissing(exportURL) }
+
+        XCTAssertTrue(routeManager.importConfig(from: exportURL), "the import itself must succeed")
+
+        let backupAfter = try String(contentsOf: backupURL, encoding: .utf8)
+        XCTAssertNotEqual(backupAfter, corrupt,
+                          "recovering from a corrupt config must not copy it over the backup")
+        XCTAssertEqual(backupAfter, goodBackup, "the last known-good backup must survive recovery")
     }
 }
