@@ -27,6 +27,7 @@ final class RouteManager: ObservableObject {
     @Published var routeVerificationResults: [String: RouteVerificationResult] = [:]
     @Published var isLoading = true
     @Published private(set) var isApplyingRoutes = false
+    @Published var isConfigLoadFailed = false
 
     /// True once shutdown has begun. Checked by the operation gate (so no new route
     /// operation can start) and by the tracked batch-add wrapper (so an operation
@@ -168,6 +169,7 @@ final class RouteManager: ObservableObject {
         loadDNSCache()
         
         guard FileManager.default.fileExists(atPath: configURL.path) else {
+            isConfigLoadFailed = false
             log(.info, "Config file absent, using default config")
             config = Config()
             ensurePrimaryVPNRoute()
@@ -178,10 +180,12 @@ final class RouteManager: ObservableObject {
             let data = try Data(contentsOf: configURL)
             let loaded = try JSONDecoder().decode(Config.self, from: data)
             config = loaded
+            isConfigLoadFailed = false
             ensurePrimaryVPNRoute()
             mergeBuiltInServices()
             log(.info, "Config loaded")
         } catch {
+            isConfigLoadFailed = true
             log(.error, "Failed to load config from \(configURL.path): \(error.localizedDescription). Preserving file on disk.")
         }
     }
@@ -248,6 +252,10 @@ final class RouteManager: ObservableObject {
     }
 
     func saveConfig() {
+        guard !isConfigLoadFailed else {
+            log(.warning, "Config save blocked: config.json failed to load and is preserved on disk")
+            return
+        }
         do {
             try saveConfigThrowing()
         } catch {
@@ -256,15 +264,43 @@ final class RouteManager: ObservableObject {
     }
 
     func saveConfigThrowing() throws {
+        guard !isConfigLoadFailed else {
+            log(.warning, "Config save blocked: config.json failed to load and is preserved on disk")
+            throw NSError(domain: "VPNBypass", code: 1001, userInfo: [NSLocalizedDescriptionKey: "Configuration save blocked due to load failure"])
+        }
+
         // Daily backup - overwrite if older than 24 hours
-        createDailyBackupIfNeeded()
-        
+        try createDailyBackupIfNeededThrowing()
+
         let encoder = JSONEncoder()
         let data = try encoder.encode(config)
-        try data.write(to: configURL, options: .atomic)
-        // config.json can hold proxy credentials — keep it owner-only (0600), tightening
-        // any pre-existing 0644 file on every save.
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
+
+        let dir = configURL.deletingLastPathComponent()
+        let tempURL = dir.appendingPathComponent("config.json.tmp-\(UUID().uuidString)")
+
+        // 1. Write data to temporary file
+        try data.write(to: tempURL, options: .atomic)
+
+        // 2. Set strict 0600 owner-only permissions BEFORE replacing target file
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempURL.path)
+
+        // 3. Verify permissions on temporary file
+        let attrs = try FileManager.default.attributesOfItem(atPath: tempURL.path)
+        guard let permissions = attrs[.posixPermissions] as? NSNumber, permissions.uint16Value == 0o600 else {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw NSError(domain: "VPNBypass", code: 1002, userInfo: [NSLocalizedDescriptionKey: "Failed to verify 0600 permissions on temporary config file"])
+        }
+
+        // 4. Atomically replace target configURL with the secured temporary file
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            _ = try FileManager.default.replaceItemAt(configURL, withItemAt: tempURL)
+        } else {
+            try FileManager.default.moveItem(at: tempURL, to: configURL)
+        }
+
+        // 5. Ensure final destination permissions remain 0600
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
+
         log(.info, "Config saved")
     }
 
@@ -272,6 +308,7 @@ final class RouteManager: ObservableObject {
     /// A nil selector is already the legacy primary-VPN representation.
     @discardableResult
     func ensurePrimaryVPNRoute() -> Bool {
+        guard !isConfigLoadFailed else { return false }
         guard vpnType != nil else { return false }
         let hasPrimaryVPN = config.routes.contains {
             $0.egress == .vpnDefault
@@ -288,7 +325,8 @@ final class RouteManager: ObservableObject {
         return true
     }
     
-    private func createDailyBackupIfNeeded() {
+    private func createDailyBackupIfNeededThrowing() throws {
+        guard !isConfigLoadFailed else { return }
         let backupURL = configURL.deletingLastPathComponent().appendingPathComponent("config.json.bak")
         
         // Check if backup exists and is less than 24 hours old
@@ -298,12 +336,26 @@ final class RouteManager: ObservableObject {
             return // Backup is recent enough
         }
         
-        // Create/overwrite backup
+        // Create/overwrite backup safely
         if FileManager.default.fileExists(atPath: configURL.path) {
-            try? FileManager.default.removeItem(at: backupURL)
-            try? FileManager.default.copyItem(at: configURL, to: backupURL)
-            // The backup carries the same proxy credentials — restrict it to 0600 too.
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backupURL.path)
+            let dir = configURL.deletingLastPathComponent()
+            let tempBackupURL = dir.appendingPathComponent("config.json.bak.tmp-\(UUID().uuidString)")
+            
+            try FileManager.default.copyItem(at: configURL, to: tempBackupURL)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempBackupURL.path)
+            
+            let attrs = try FileManager.default.attributesOfItem(atPath: tempBackupURL.path)
+            guard let permissions = attrs[.posixPermissions] as? NSNumber, permissions.uint16Value == 0o600 else {
+                try? FileManager.default.removeItem(at: tempBackupURL)
+                throw NSError(domain: "VPNBypass", code: 1003, userInfo: [NSLocalizedDescriptionKey: "Failed to verify 0600 permissions on temporary backup file"])
+            }
+
+            if FileManager.default.fileExists(atPath: backupURL.path) {
+                _ = try FileManager.default.replaceItemAt(backupURL, withItemAt: tempBackupURL)
+            } else {
+                try FileManager.default.moveItem(at: tempBackupURL, to: backupURL)
+            }
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backupURL.path)
             log(.info, "Daily config backup created")
         }
     }
@@ -1305,6 +1357,11 @@ final class RouteManager: ObservableObject {
     }
 
     func detectAndApplyRoutesAsync(sendNotification: Bool = false) async {
+        guard !isConfigLoadFailed else {
+            isLoading = false
+            log(.warning, "detectAndApplyRoutesAsync blocked because config.json failed to load")
+            return
+        }
         isLoading = true
         log(.info, "Starting VPN detection and route application...")
         

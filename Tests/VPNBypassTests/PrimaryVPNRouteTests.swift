@@ -6,27 +6,37 @@ final class PrimaryVPNRouteTests: XCTestCase {
 
     private let routeManager = RouteManager.shared
 
+    private var backupURL: URL {
+        routeManager.configURL.deletingLastPathComponent().appendingPathComponent("config.json.bak")
+    }
+
     override func setUp() {
         super.setUp()
+        routeManager.isConfigLoadFailed = false
         routeManager.vpnType = nil
         routeManager.config = Config()
+        cleanupConfigFiles()
     }
 
     override func tearDown() {
+        cleanupConfigFiles()
+        routeManager.isConfigLoadFailed = false
         routeManager.vpnType = nil
         routeManager.config = Config()
         super.tearDown()
     }
 
-    func testDetectedVPNAddsOnePersistedPrimaryRouteAndReloadsFromDisk() {
+    private func cleanupConfigFiles() {
+        try? FileManager.default.removeItem(at: routeManager.configURL)
+        try? FileManager.default.removeItem(at: backupURL)
+    }
+
+    func testDetectedVPNAddsOnePersistedPrimaryRouteAndReloadsFromDisk() throws {
         routeManager.vpnType = .tailscale
         routeManager.ensurePrimaryVPNRoute()
 
         XCTAssertEqual(routeManager.config.routes.count, 1)
-        guard let route = routeManager.config.routes.first else {
-            XCTFail("Expected a primary VPN route in memory")
-            return
-        }
+        let route = try XCTUnwrap(routeManager.config.routes.first, "Expected a primary VPN route in memory")
         XCTAssertEqual(route.egress, .vpnDefault)
         XCTAssertEqual(route.vpnSelector?.kind, .primary)
         XCTAssertEqual(route.name, "Primary VPN")
@@ -40,10 +50,7 @@ final class PrimaryVPNRouteTests: XCTestCase {
         routeManager.loadConfig()
 
         XCTAssertEqual(routeManager.config.routes.count, 1)
-        guard let reloadedRoute = routeManager.config.routes.first else {
-            XCTFail("Expected primary VPN route to be reloaded from disk")
-            return
-        }
+        let reloadedRoute = try XCTUnwrap(routeManager.config.routes.first, "Expected primary VPN route to be reloaded from disk")
         XCTAssertEqual(reloadedRoute.id, savedID)
         XCTAssertEqual(reloadedRoute.egress, .vpnDefault)
         XCTAssertEqual(reloadedRoute.vpnSelector?.kind, .primary)
@@ -80,20 +87,72 @@ final class PrimaryVPNRouteTests: XCTestCase {
         XCTAssertTrue(routeManager.config.routes.isEmpty, "detectVPNStateOnly must be read-only and never mutate config")
     }
 
-    func testLoadConfigPreservesInvalidConfigFileAndBackupOnDisk() {
+    func testLoadConfigPreservesInvalidConfigFileAndBackupOnDisk() throws {
         let invalidJSON = "{ invalid_json_syntax: true "
         let backupJSON = "{ backup_json: true }"
-        let backupURL = routeManager.configURL.deletingLastPathComponent().appendingPathComponent("config.json.bak")
 
-        try? invalidJSON.write(to: routeManager.configURL, atomically: true, encoding: .utf8)
-        try? backupJSON.write(to: backupURL, atomically: true, encoding: .utf8)
+        try invalidJSON.write(to: routeManager.configURL, atomically: true, encoding: .utf8)
+        try backupJSON.write(to: backupURL, atomically: true, encoding: .utf8)
 
         routeManager.loadConfig()
 
-        let currentConfigContent = (try? String(contentsOf: routeManager.configURL, encoding: .utf8)) ?? ""
-        let currentBackupContent = (try? String(contentsOf: backupURL, encoding: .utf8)) ?? ""
+        let currentConfigContent = try String(contentsOf: routeManager.configURL, encoding: .utf8)
+        let currentBackupContent = try String(contentsOf: backupURL, encoding: .utf8)
 
         XCTAssertEqual(currentConfigContent, invalidJSON, "Corrupted config.json must be preserved on disk and not overwritten on load failure")
         XCTAssertEqual(currentBackupContent, backupJSON, "Existing config.json.bak must be preserved on disk and not overwritten on load failure")
+    }
+
+    func testInvalidConfigBlocksAutomaticWritesAndPreservesFiles() async throws {
+        let invalidJSON = "{ invalid_json_syntax: true "
+        let backupJSON = "{ backup_json: true }"
+
+        try invalidJSON.write(to: routeManager.configURL, atomically: true, encoding: .utf8)
+        try backupJSON.write(to: backupURL, atomically: true, encoding: .utf8)
+
+        // 1. loadConfig fails due to invalid JSON
+        routeManager.loadConfig()
+        XCTAssertTrue(routeManager.isConfigLoadFailed, "isConfigLoadFailed state must be active after load failure")
+
+        // 2. Automatic VPN detection and apply path runs with VPN connected
+        routeManager.isVPNConnected = true
+        routeManager.vpnType = .tailscale
+
+        await routeManager.detectAndApplyRoutesAsync()
+
+        // 3. Verify no configuration write occurred and files remain byte-for-byte unchanged
+        let currentConfigContent = try String(contentsOf: routeManager.configURL, encoding: .utf8)
+        let currentBackupContent = try String(contentsOf: backupURL, encoding: .utf8)
+
+        XCTAssertEqual(currentConfigContent, invalidJSON, "invalid config.json must remain byte-for-byte unchanged after automatic apply pass")
+        XCTAssertEqual(currentBackupContent, backupJSON, "existing config.json.bak must remain byte-for-byte unchanged after automatic apply pass")
+    }
+
+    func testStatusDrivenVPNConnectPersistsPrimaryVPNRoute() {
+        routeManager.config = Config()
+        XCTAssertTrue(routeManager.config.routes.isEmpty)
+
+        // Simulate VPN connection detection
+        routeManager.vpnType = .tailscale
+        let added = routeManager.ensurePrimaryVPNRoute()
+
+        XCTAssertTrue(added, "Primary VPN route must be added on VPN connect")
+        XCTAssertEqual(routeManager.config.routes.count, 1)
+        XCTAssertEqual(routeManager.config.routes.first?.name, "Primary VPN")
+    }
+
+    func testSaveConfigSetsStrict0600PermissionsOnConfigAndBackup() throws {
+        routeManager.vpnType = .tailscale
+        try routeManager.saveConfigThrowing()
+
+        let configAttrs = try FileManager.default.attributesOfItem(atPath: routeManager.configURL.path)
+        let configPerms = (configAttrs[.posixPermissions] as? NSNumber)?.uint16Value
+        XCTAssertEqual(configPerms, 0o600, "config.json must have strict 0600 permissions")
+
+        if FileManager.default.fileExists(atPath: backupURL.path) {
+            let backupAttrs = try FileManager.default.attributesOfItem(atPath: backupURL.path)
+            let backupPerms = (backupAttrs[.posixPermissions] as? NSNumber)?.uint16Value
+            XCTAssertEqual(backupPerms, 0o600, "config.json.bak must have strict 0600 permissions")
+        }
     }
 }
