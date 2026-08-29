@@ -14,7 +14,11 @@ final class RouteManager: ObservableObject {
     
     @Published var isVPNConnected = false
     @Published var vpnInterface: String?
-    @Published var vpnType: VPNType?
+    @Published var vpnType: VPNType? {
+        didSet {
+            ensurePrimaryVPNRoute()
+        }
+    }
     @Published var localGateway: String?
     @Published var vpnGateway: String?
     @Published var activeRoutes: [ActiveRoute] = []
@@ -248,6 +252,24 @@ final class RouteManager: ObservableObject {
         // any pre-existing 0644 file on every save.
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
         log(.info, "Config saved")
+    }
+
+    /// Ensure Rules has a real, persisted route for the currently detected primary VPN.
+    /// A nil selector is already the legacy primary-VPN representation.
+    private func ensurePrimaryVPNRoute() {
+        guard vpnType != nil else { return }
+        let hasPrimaryVPN = config.routes.contains {
+            $0.egress == .vpnDefault
+                && ($0.vpnSelector == nil || $0.vpnSelector?.kind == .primary)
+        }
+        guard !hasPrimaryVPN else { return }
+
+        config.routes.append(Route(
+            name: "Primary VPN",
+            egress: .vpnDefault,
+            vpnSelector: VPNSelector(kind: .primary)
+        ))
+        saveConfig()
     }
     
     private func createDailyBackupIfNeeded() {
