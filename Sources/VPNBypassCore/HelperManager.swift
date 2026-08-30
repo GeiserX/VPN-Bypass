@@ -276,6 +276,33 @@ final class HelperManager: ObservableObject {
         return nil
     }
 
+    /// Which process owns each `utun`, via the helper.
+    ///
+    /// Empty means "we could not ask" — helper absent, too old to know the method, or the call
+    /// timed out — never "there are no tunnels". Callers must fall back to their previous
+    /// labelling rather than concluding a machine has no VPN, because this is cosmetic and must
+    /// never influence which tunnel gets routed.
+    func tunnelOwners() async -> [TunnelOwner] {
+        guard isHelperInstalled else { return [] }
+        let connection = getOrCreateConnection()
+        return await withXPCDeadline(seconds: xpcTimeout, fallback: [TunnelOwner]()) { once in
+            let proxy = connection.remoteObjectProxyWithErrorHandler { _ in
+                // An older helper simply has no such method; that is expected during the
+                // upgrade window and is not worth an error line on every status pass.
+                once.complete([])
+            } as? HelperProtocol
+
+            guard let helper = proxy else {
+                once.complete([])
+                return
+            }
+
+            helper.listTunnelOwners { rows in
+                once.complete(rows.compactMap(TunnelOwner.init(dictionary:)))
+            }
+        }
+    }
+
     // MARK: - Helper Installation
 
     func installHelper() async -> Bool {

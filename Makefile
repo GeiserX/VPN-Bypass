@@ -22,6 +22,7 @@ build-helper:
 		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-arm64 \
 		Sources/VPNBypassCore/HelperProtocol.swift \
 		Sources/VPNBypassCore/RouteKernel.swift \
+		Sources/VPNBypassCore/TunnelOwnership.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
 	@swiftc -O \
@@ -30,6 +31,7 @@ build-helper:
 		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-x86_64 \
 		Sources/VPNBypassCore/HelperProtocol.swift \
 		Sources/VPNBypassCore/RouteKernel.swift \
+		Sources/VPNBypassCore/TunnelOwnership.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
 	@lipo -create \
