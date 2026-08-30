@@ -80,4 +80,46 @@ final class CGNATClassificationTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - Reading the process list
+
+    /// The listing has to have succeeded before its silence means anything.
+    func testASuccessfulListingWithoutTailscaleMeansAbsent() {
+        XCTAssertFalse(RouteManager.tailscaleAppearsRunning(
+            psOutput: "/sbin/launchd\n/usr/sbin/netbird\n", psExitCode: 0))
+    }
+
+    func testASuccessfulListingNamingAnyTailscaleVariantMeansPresent() {
+        for comm in [
+            "/usr/local/bin/tailscaled",
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+            "/Library/SystemExtensions/X/io.tailscale.ipn.macsys.network-extension",
+            "/Library/SystemExtensions/X/io.tailscale.ipn.macos.network-extension",
+        ] {
+            XCTAssertTrue(RouteManager.tailscaleAppearsRunning(psOutput: "/sbin/launchd\n\(comm)\n", psExitCode: 0),
+                          "\(comm) must read as Tailscale present")
+        }
+    }
+
+    /// A truncated or killed `ps` mentions Tailscale no more than an honest absence does.
+    /// Reading that as "absent" would adopt an unverified CGNAT tunnel — possibly Tailscale's
+    /// own — as the corporate VPN, which is the failure #61 exists to prevent.
+    func testAFailedListingIsNotEvidenceOfAbsence() {
+        XCTAssertTrue(RouteManager.tailscaleAppearsRunning(psOutput: "", psExitCode: 1),
+                      "a nonzero exit means we could not look, not that Tailscale is gone")
+        XCTAssertTrue(RouteManager.tailscaleAppearsRunning(psOutput: "/sbin/launchd\n", psExitCode: 137),
+                      "a killed ps must not be read as a clean negative")
+        XCTAssertTrue(RouteManager.tailscaleAppearsRunning(psOutput: nil, psExitCode: nil),
+                      "no result at all must fail closed")
+    }
+
+    /// The two halves compose: a failed listing keeps the address undetermined rather than
+    /// handing it to the corporate-VPN path.
+    func testAFailedListingLeavesTheAddressUndetermined() {
+        let running = RouteManager.tailscaleAppearsRunning(psOutput: nil, psExitCode: nil)
+        XCTAssertEqual(
+            RouteManager.classifyCGNAT(tailscaleRunning: running, statusAnswered: false, statusClaimsAddress: false),
+            .undetermined
+        )
+    }
 }

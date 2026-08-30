@@ -1415,11 +1415,20 @@ final class RouteManager: ObservableObject {
     /// root without any privilege of our own, which is what makes this workable — every one
     /// of these daemons runs as uid 0.
     private func isTailscaleProcessRunning() async -> Bool {
-        guard let result = await runProcessAsync("/bin/ps", arguments: ["-eo", "comm"], timeout: 5.0) else {
-            // Could not look: say yes, so the caller stays on the fail-closed path.
-            return true
-        }
-        return result.output.lowercased().contains("tailscale")
+        let result = await runProcessAsync("/bin/ps", arguments: ["-eo", "comm"], timeout: 5.0)
+        return Self.tailscaleAppearsRunning(psOutput: result?.output, psExitCode: result?.exitCode)
+    }
+
+    /// Read a process listing for any sign of Tailscale, failing CLOSED on a bad read.
+    ///
+    /// "ps did not mention Tailscale" is only a negative when ps actually succeeded. A listing
+    /// that was truncated, killed or timed out mentions nothing either, and treating that as
+    /// "Tailscale is absent" would let an unverified CGNAT tunnel — possibly Tailscale's own —
+    /// be adopted as the corporate VPN. So a nil result or a nonzero exit means "could not
+    /// look", which is reported as running and keeps the caller on the undetermined path.
+    nonisolated static func tailscaleAppearsRunning(psOutput: String?, psExitCode: Int32?) -> Bool {
+        guard let psOutput, psExitCode == 0 else { return true }
+        return psOutput.lowercased().contains("tailscale")
     }
 
     private func isTailscaleIP(_ ip: String) async -> Bool {
