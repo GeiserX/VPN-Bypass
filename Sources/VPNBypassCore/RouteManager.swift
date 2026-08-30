@@ -1358,22 +1358,68 @@ final class RouteManager: ObservableObject {
     ///
     /// That distinction is the entire point. Collapsing the two is what allowed a failed status
     /// query to promote Tailscale's own tunnel to "corporate VPN" (see isCorporateVPNIP).
-    enum CGNATIdentity { case tailscale, notTailscale, undetermined }
+    enum CGNATIdentity: Equatable { case tailscale, notTailscale, undetermined }
+
+    /// Who owns a CGNAT address, decided from the only two things we can observe: whether
+    /// Tailscale is running on this machine at all, and what its status query said if it
+    /// answered.
+    ///
+    /// The third input is the whole point. "The status query did not answer" used to be the
+    /// only negative signal, and it was reached BOTH when Tailscale could not be asked AND
+    /// when there is no Tailscale here to ask — the CLI lookup only tries paths that exist.
+    /// So on a machine with no Tailscale, every 100.64/10 tunnel was declined as
+    /// undetermined, and NetBird / Netmaker / Twingate / self-hosted WireGuard meshes were
+    /// never detected at all (#99).
+    ///
+    /// A machine with no Tailscale process cannot own a Tailscale address. That is a
+    /// definitive answer, not an unknown. When Tailscale IS running and the query still
+    /// could not answer, we keep failing closed exactly as before — claiming another tool's
+    /// tunnel is never the safe default (#61).
+    nonisolated static func classifyCGNAT(
+        tailscaleRunning: Bool,
+        statusAnswered: Bool,
+        statusClaimsAddress: Bool
+    ) -> CGNATIdentity {
+        if statusAnswered { return statusClaimsAddress ? .tailscale : .notTailscale }
+        return tailscaleRunning ? .undetermined : .notTailscale
+    }
 
     private func classifyCGNATAddress(_ ip: String) async -> CGNATIdentity {
-        guard let json = await readTailscaleStatusJSON() else { return .undetermined }
+        let json = await readTailscaleStatusJSON()
+        let claims: Bool = {
+            guard let json else { return false }
+            if let selfStatus = json["Self"] as? [String: Any],
+               let selfIPs = selfStatus["TailscaleIPs"] as? [String],
+               selfIPs.contains(ip) {
+                return true
+            }
+            if let topLevelIPs = json["TailscaleIPs"] as? [String],
+               topLevelIPs.contains(ip) {
+                return true
+            }
+            return false
+        }()
+        // Only pay for the process scan when the status query came back empty — on a machine
+        // with a working Tailscale CLI this costs nothing.
+        let running = json != nil ? true : await isTailscaleProcessRunning()
+        return Self.classifyCGNAT(
+            tailscaleRunning: running, statusAnswered: json != nil, statusClaimsAddress: claims
+        )
+    }
 
-        if let selfStatus = json["Self"] as? [String: Any],
-           let selfIPs = selfStatus["TailscaleIPs"] as? [String],
-           selfIPs.contains(ip) {
-            return .tailscale
+    /// Whether any Tailscale process is live, across all three macOS distributions:
+    /// `tailscaled` (open source / Homebrew), `io.tailscale.ipn.macsys.*` (standalone app)
+    /// and `io.tailscale.ipn.macos.*` (App Store). Deliberately a process check rather than a
+    /// file check: the App Store build ships no CLI at any of `tailscaleCLIPaths`, and a
+    /// leftover CLI can outlive an uninstalled Tailscale. `ps` reports processes owned by
+    /// root without any privilege of our own, which is what makes this workable — every one
+    /// of these daemons runs as uid 0.
+    private func isTailscaleProcessRunning() async -> Bool {
+        guard let result = await runProcessAsync("/bin/ps", arguments: ["-eo", "comm"], timeout: 5.0) else {
+            // Could not look: say yes, so the caller stays on the fail-closed path.
+            return true
         }
-        if let topLevelIPs = json["TailscaleIPs"] as? [String],
-           topLevelIPs.contains(ip) {
-            return .tailscale
-        }
-        // Tailscale answered, and does not claim this address.
-        return .notTailscale
+        return result.output.lowercased().contains("tailscale")
     }
 
     private func isTailscaleIP(_ ip: String) async -> Bool {
