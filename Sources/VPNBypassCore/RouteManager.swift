@@ -279,8 +279,12 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    func saveConfigThrowing() throws {
-        guard !isConfigLoadFailed else {
+    /// - Parameter recoveringFromLoadFailure: set only by `importConfig`, which is replacing an
+    ///   unreadable config.json. It bypasses the save block WITHOUT clearing the latch, so the
+    ///   daily backup — which copies FROM the on-disk config.json — still skips itself and does
+    ///   not overwrite the last known-good `config.json.bak` with the corruption being escaped.
+    func saveConfigThrowing(recoveringFromLoadFailure: Bool = false) throws {
+        guard recoveringFromLoadFailure || !isConfigLoadFailed else {
             log(.warning, "Config save blocked: config.json failed to load and is preserved on disk")
             throw NSError(domain: "VPNBypass", code: 1001, userInfo: [NSLocalizedDescriptionKey: "Configuration save blocked due to load failure"])
         }
@@ -472,10 +476,13 @@ final class RouteManager: ObservableObject {
             config = exportData.config
             mergeBuiltInServices(autoSave: false)
 
-            // Perform recovery write using saveConfigThrowing() while temporarily allowing writes
-            isConfigLoadFailed = false
+            // Keep the latch SET across the write. Clearing it here to get past the save guard
+            // also defeated the backup guard, so recovering from a corrupt config.json copied
+            // that corruption over config.json.bak — destroying the user's only other copy with
+            // the one action they take to recover. The latch is cleared once the write lands.
             do {
-                try saveConfigThrowing()
+                try saveConfigThrowing(recoveringFromLoadFailure: true)
+                isConfigLoadFailed = false
             } catch {
                 // Rollback in-memory state
                 config = previousConfig
