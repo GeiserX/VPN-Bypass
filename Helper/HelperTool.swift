@@ -511,6 +511,12 @@ class HelperTool: NSObject, HelperProtocol {
         reply(HelperConstants.helperVersion)
     }
 
+    func listTunnelOwners(withReply reply: @escaping (Bool, [[String: String]]) -> Void) {
+        // Pure read of process/socket metadata — it changes nothing, so there is no gateway or
+        // destination to validate here, unlike every mutating method on this protocol.
+        reply(true, TunnelOwnership.sweep().map(\.asDictionary))
+    }
+
     private func logFlushOutcome(_ name: String, _ outcome: ProcessDeadline.Outcome) {
         switch outcome {
         case .failedToStart:

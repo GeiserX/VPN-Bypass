@@ -29,6 +29,11 @@ final class RouteManager: ObservableObject {
     @Published private(set) var isApplyingRoutes = false
     @Published var isConfigLoadFailed = false
 
+    /// Which process owns each `utun`, as the helper last reported it. Cosmetic only: it names
+    /// tunnels, and must never decide which one gets routed. Empty when the helper cannot be
+    /// asked, in which case labelling falls back to the interface-prefix guess.
+    private(set) var tunnelOwnersByInterface: [String: TunnelOwner] = [:]
+
     /// True once shutdown has begun. Checked by the operation gate (so no new route
     /// operation can start) and by the tracked batch-add wrapper (so an operation
     /// already past the gate cannot push more routes into the kernel mid-teardown).
@@ -881,6 +886,12 @@ final class RouteManager: ObservableObject {
     }
 
     private func detectVPNInterface() async -> (connected: Bool, interface: String?, type: VPNType?) {
+        // Before anything derives a type or a label from the map. This is the one funnel every
+        // detection path goes through — the status timer, the startup apply, and the
+        // display-only pass — so refreshing here means the first labels after launch are the
+        // real ones rather than the interface-name guess.
+        await refreshTunnelOwners()
+
         // First check for specific VPN processes to help identify type
         let runningVPNType = await detectRunningVPNProcess()
 
@@ -1094,7 +1105,38 @@ final class RouteManager: ObservableObject {
     }
     
     /// Try to detect VPN type from interface characteristics
+    /// Refresh the tunnel→owner map from the helper.
+    private func refreshTunnelOwners() async {
+        tunnelOwnersByInterface = Self.mergedTunnelOwners(
+            previous: tunnelOwnersByInterface,
+            fetched: await HelperManager.shared.tunnelOwners()
+        )
+    }
+
+    /// What the map should become after a sweep.
+    ///
+    /// `nil` means the helper could not be asked, so the previous map stands — dropping it
+    /// would make labels flicker between polls. An empty array is a real answer and must be
+    /// applied: utun numbers are recycled, so keeping a departed tunnel's entry would
+    /// eventually label an unrelated tunnel with it.
+    nonisolated static func mergedTunnelOwners(
+        previous: [String: TunnelOwner], fetched: [TunnelOwner]?
+    ) -> [String: TunnelOwner] {
+        guard let fetched else { return previous }
+        return Dictionary(fetched.map { ($0.interface, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
     private func detectVPNTypeFromInterface(_ iface: String) -> VPNType {
+        // Ask the OS who owns the tunnel before guessing from its name. Several product labels
+        // are already VPNType raw values, so a recognised owner names the type outright; the
+        // mesh VPNs have no case and stay .unknown, but their display label is still correct.
+        if let owner = tunnelOwnersByInterface[iface],
+           let label = TunnelOwnership.productLabel(processName: owner.processName,
+                                                    executablePath: owner.executablePath),
+           let known = VPNType(rawValue: label) {
+            return known
+        }
+
         // GlobalProtect typically uses gpd0 or specific utun
         if iface.hasPrefix("gpd") {
             return .globalProtect
@@ -1186,7 +1228,11 @@ final class RouteManager: ObservableObject {
         for p in parsed {
             guard p.isUp, !p.addresses.isEmpty else { continue }
             let label: String
-            if p.isTailscale {
+            if let owner = tunnelOwnersByInterface[p.interface] {
+                // The kernel knows who created this tunnel; that beats every heuristic below,
+                // and is the only thing that can name a mesh VPN like NetBird at all.
+                label = TunnelOwnership.displayLabel(for: owner)
+            } else if p.isTailscale {
                 label = "Tailscale"
             } else if vpnInterface == p.interface, let t = vpnType {
                 label = t.rawValue

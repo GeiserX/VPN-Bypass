@@ -9,7 +9,7 @@
 	<key>CFBundleName</key>
 	<string>VPNBypassHelper</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.1.1</string>
+	<string>2.2.0</string>
 	<key>CFBundleVersion</key>
 	<string>13</string>
 	<key>SMAuthorizedClients</key>

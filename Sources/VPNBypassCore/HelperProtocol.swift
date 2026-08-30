@@ -67,6 +67,18 @@ protocol HelperProtocol {
     /// Get the installed helper version
     /// - Parameter reply: Callback with version string
     func getVersion(withReply reply: @escaping (String) -> Void)
+
+    /// Every `utun` on the machine with the process that created it, as plist dictionaries.
+    ///
+    /// Read-only and privileged for one reason: the descriptor lists of root-owned VPN daemons
+    /// are unreadable to the app, which runs as the user. Measured on two machines, an
+    /// unprivileged sweep sees only Apple's own tunnels and never Tailscale, GlobalProtect or a
+    /// mesh VPN — the exact ones we need to name.
+    /// - Parameter reply: `(true, rows)` when the sweep ran — `rows` may legitimately be empty
+    ///   on a machine with no tunnels. The flag exists so a caller can tell that apart from
+    ///   "could not ask", which matters because utun numbers are recycled: keeping a stale map
+    ///   would paint a departed tunnel's label onto whatever claims its number next.
+    func listTunnelOwners(withReply reply: @escaping (Bool, [[String: String]]) -> Void)
 }
 
 // MARK: - Helper Constants
@@ -123,7 +135,7 @@ struct HelperConstants {
     // of waitUntilExit() with no deadline. A wedged child used to park the XPC thread for
     // the life of the daemon after the app had already dropped the 30s hosts-update
     // connection. Bumped so installed 2.1.0 helpers reinstall and pick this up.
-    static let helperVersion = "2.1.1"
+    static let helperVersion = "2.2.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"
