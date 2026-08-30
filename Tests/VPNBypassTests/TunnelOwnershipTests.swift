@@ -160,4 +160,37 @@ final class TunnelOwnershipTests: XCTestCase {
         XCTAssertNil(TunnelOwner(dictionary: ["interface": "utun5", "pid": "not-a-number",
                                               "processName": "x"]))
     }
+
+    // MARK: - Could-not-ask vs genuinely-none
+
+    /// utun numbers are recycled. If Tailscale releases utun2 and a mesh VPN later takes it,
+    /// a map that was never cleared would label the new tunnel "Tailscale". So a sweep that
+    /// ran and found nothing MUST clear, even though it looks like an empty answer.
+    func testAnEmptySweepClearsTheMapBecauseUtunNumbersAreRecycled() {
+        let stale = ["utun2": TunnelOwner(interface: "utun2", pid: 543,
+                                          processName: "io.tailscale.ipn.macsys.network",
+                                          executablePath: "/Library/SystemExtensions/X")]
+        XCTAssertTrue(RouteManager.mergedTunnelOwners(previous: stale, fetched: []).isEmpty,
+                      "a sweep that ran and found nothing is an answer, not a failure")
+    }
+
+    /// Whereas not being able to ask — no helper, an older helper without the method, a
+    /// timeout — must leave the map alone, or labels would flicker between polls.
+    func testAFailedSweepKeepsThePreviousMap() {
+        let known = ["utun2": TunnelOwner(interface: "utun2", pid: 543, processName: "tailscaled",
+                                          executablePath: "/opt/homebrew/bin/tailscaled")]
+        XCTAssertEqual(RouteManager.mergedTunnelOwners(previous: known, fetched: nil), known)
+    }
+
+    /// And a successful sweep replaces wholesale rather than merging, so a tunnel that went
+    /// away leaves no trace behind for a recycled number to inherit.
+    func testASuccessfulSweepReplacesRatherThanMerges() {
+        let stale = ["utun2": TunnelOwner(interface: "utun2", pid: 1, processName: "old",
+                                          executablePath: "/old")]
+        let fresh = [TunnelOwner(interface: "utun5", pid: 2, processName: "netbird",
+                                 executablePath: "/opt/homebrew/bin/netbird")]
+        let merged = RouteManager.mergedTunnelOwners(previous: stale, fetched: fresh)
+        XCTAssertNil(merged["utun2"], "the departed tunnel must not linger")
+        XCTAssertEqual(merged["utun5"].map(TunnelOwnership.displayLabel), "NetBird")
+    }
 }

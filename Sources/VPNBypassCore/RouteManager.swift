@@ -683,7 +683,6 @@ final class RouteManager: ObservableObject {
         isVPNConnected = connected
         vpnInterface = connected ? interface : nil
         vpnType = connected ? detectedType : nil
-        await refreshTunnelOwners()
         let fetchedTailscaleFingerprint = isVPNConnected ? await currentTailscaleSelfFingerprintIfExitNode() : nil
         // Preserve last fingerprint if a single CLI read fails while VPN remains connected.
         let newTailscaleFingerprint = fetchedTailscaleFingerprint ?? (isVPNConnected ? oldTailscaleFingerprint : nil)
@@ -887,6 +886,12 @@ final class RouteManager: ObservableObject {
     }
 
     private func detectVPNInterface() async -> (connected: Bool, interface: String?, type: VPNType?) {
+        // Before anything derives a type or a label from the map. This is the one funnel every
+        // detection path goes through — the status timer, the startup apply, and the
+        // display-only pass — so refreshing here means the first labels after launch are the
+        // real ones rather than the interface-name guess.
+        await refreshTunnelOwners()
+
         // First check for specific VPN processes to help identify type
         let runningVPNType = await detectRunningVPNProcess()
 
@@ -1100,14 +1105,25 @@ final class RouteManager: ObservableObject {
     }
     
     /// Try to detect VPN type from interface characteristics
-    /// Refresh the tunnel→owner map from the helper. Never clears a good map on a failed
-    /// call: an empty reply means "could not ask", and forgetting who owns a tunnel would make
-    /// labels flicker between polls.
+    /// Refresh the tunnel→owner map from the helper.
     private func refreshTunnelOwners() async {
-        let owners = await HelperManager.shared.tunnelOwners()
-        guard !owners.isEmpty else { return }
-        tunnelOwnersByInterface = Dictionary(owners.map { ($0.interface, $0) },
-                                             uniquingKeysWith: { first, _ in first })
+        tunnelOwnersByInterface = Self.mergedTunnelOwners(
+            previous: tunnelOwnersByInterface,
+            fetched: await HelperManager.shared.tunnelOwners()
+        )
+    }
+
+    /// What the map should become after a sweep.
+    ///
+    /// `nil` means the helper could not be asked, so the previous map stands — dropping it
+    /// would make labels flicker between polls. An empty array is a real answer and must be
+    /// applied: utun numbers are recycled, so keeping a departed tunnel's entry would
+    /// eventually label an unrelated tunnel with it.
+    nonisolated static func mergedTunnelOwners(
+        previous: [String: TunnelOwner], fetched: [TunnelOwner]?
+    ) -> [String: TunnelOwner] {
+        guard let fetched else { return previous }
+        return Dictionary(fetched.map { ($0.interface, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     private func detectVPNTypeFromInterface(_ iface: String) -> VPNType {

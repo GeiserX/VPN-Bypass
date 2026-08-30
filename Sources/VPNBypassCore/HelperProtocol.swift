@@ -74,7 +74,11 @@ protocol HelperProtocol {
     /// are unreadable to the app, which runs as the user. Measured on two machines, an
     /// unprivileged sweep sees only Apple's own tunnels and never Tailscale, GlobalProtect or a
     /// mesh VPN — the exact ones we need to name.
-    func listTunnelOwners(withReply reply: @escaping ([[String: String]]) -> Void)
+    /// - Parameter reply: `(true, rows)` when the sweep ran — `rows` may legitimately be empty
+    ///   on a machine with no tunnels. The flag exists so a caller can tell that apart from
+    ///   "could not ask", which matters because utun numbers are recycled: keeping a stale map
+    ///   would paint a departed tunnel's label onto whatever claims its number next.
+    func listTunnelOwners(withReply reply: @escaping (Bool, [[String: String]]) -> Void)
 }
 
 // MARK: - Helper Constants

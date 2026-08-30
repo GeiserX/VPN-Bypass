@@ -278,27 +278,28 @@ final class HelperManager: ObservableObject {
 
     /// Which process owns each `utun`, via the helper.
     ///
-    /// Empty means "we could not ask" — helper absent, too old to know the method, or the call
-    /// timed out — never "there are no tunnels". Callers must fall back to their previous
-    /// labelling rather than concluding a machine has no VPN, because this is cosmetic and must
-    /// never influence which tunnel gets routed.
-    func tunnelOwners() async -> [TunnelOwner] {
-        guard isHelperInstalled else { return [] }
+    /// `nil` means "could not ask" — helper absent, too old to know the method, or timed out.
+    /// An empty array means the sweep ran and found nothing, which is a real answer and must
+    /// clear the map: utun numbers are recycled, so holding a departed tunnel's label would
+    /// eventually apply it to an unrelated tunnel. Cosmetic either way — this never influences
+    /// which tunnel gets routed.
+    func tunnelOwners() async -> [TunnelOwner]? {
+        guard isHelperInstalled else { return nil }
         let connection = getOrCreateConnection()
-        return await withXPCDeadline(seconds: xpcTimeout, fallback: [TunnelOwner]()) { once in
+        return await withXPCDeadline(seconds: xpcTimeout, fallback: [TunnelOwner]?.none) { once in
             let proxy = connection.remoteObjectProxyWithErrorHandler { _ in
                 // An older helper simply has no such method; that is expected during the
                 // upgrade window and is not worth an error line on every status pass.
-                once.complete([])
+                once.complete(nil)
             } as? HelperProtocol
 
             guard let helper = proxy else {
-                once.complete([])
+                once.complete(nil)
                 return
             }
 
-            helper.listTunnelOwners { rows in
-                once.complete(rows.compactMap(TunnelOwner.init(dictionary:)))
+            helper.listTunnelOwners { ok, rows in
+                once.complete(ok ? rows.compactMap(TunnelOwner.init(dictionary:)) : nil)
             }
         }
     }
