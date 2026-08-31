@@ -19,6 +19,51 @@ import Foundation
 
 enum ClassicRouteCompiler {
 
+    /// The bypass-all routes VPN Only installs: four /2s covering all of IPv4 via the local
+    /// gateway. NOT the classic 0.0.0.0/1 + 128.0.0.0/1 pair, deliberately: wg-quick and
+    /// OpenVPN's redirect-gateway def1 capture traffic by installing that exact pair
+    /// themselves, so claiming it did not add routes — it REPOINTED the VPN's own routes to
+    /// the local gateway (the helper converges an existing destination in place) and teardown
+    /// then DELETED them out from under the VPN (#103: VPN Only under WireGuard inverted, and
+    /// WireGuard could not connect while the app ran, both sides fighting over the same two
+    /// kernel entries). The /2 quartet is additive: longest-prefix beats the VPN's /1s without
+    /// touching them, listed destinations still win over /2 with their /32s and CIDRs, and
+    /// removing the quartet hands traffic straight back to the tunnel.
+    static let bypassAllCatchAlls: [String] = [
+        "0.0.0.0/2", "64.0.0.0/2", "128.0.0.0/2", "192.0.0.0/2",
+    ]
+
+    /// The quartet minus every quarter an inverse CIDR claims (equals or covers). One kernel
+    /// entry exists per destination, and a broader listed CIDR must keep the whole space it
+    /// names on the VPN — installing a more-specific local /2 inside it would silently carve
+    /// that traffic back out of the tunnel. Shared by the compiler and the DNS refresh planner
+    /// so their ownership views can never diverge.
+    static func unclaimedCatchAlls(inverseCIDRs: [String]) -> [String] {
+        bypassAllCatchAlls.filter { quarter in
+            !inverseCIDRs.contains { covers($0, quarter) }
+        }
+    }
+
+    /// True when `outer` (a well-formed IPv4 CIDR) contains the whole of `inner`.
+    static func covers(_ outer: String, _ inner: String) -> Bool {
+        guard let o = RouteCIDR.parse(outer), let i = RouteCIDR.parse(inner),
+              o.prefixLength <= i.prefixLength,
+              let oAddr = ipv4Value(o.network), let iAddr = ipv4Value(i.network) else { return false }
+        let mask: UInt32 = o.prefixLength == 0 ? 0 : UInt32.max << (32 - UInt32(o.prefixLength))
+        return (oAddr & mask) == (iAddr & mask)
+    }
+
+    private static func ipv4Value(_ dotted: String) -> UInt32? {
+        let parts = dotted.split(separator: ".").compactMap { UInt32($0) }
+        guard parts.count == 4, parts.allSatisfy({ $0 <= 255 }) else { return nil }
+        return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+    }
+
+    /// The ownership `source` every bypass-all catch-all is recorded under. Stale-route
+    /// classification keys off destination AND this source, so a user's own route that merely
+    /// shares a catch-all destination string is never mistaken for one of ours.
+    static let catchAllSource = "VPN Only catch-all"
+
     /// A kernel route to install (matches the caller's `routesToAdd` tuple, as a testable value).
     struct Route: Equatable, Hashable {
         let destination: String
@@ -69,8 +114,9 @@ enum ClassicRouteCompiler {
         var allSourceEntries: [SourceEntry] = []
         var seenSourceDests: Set<String> = []        // dedup (source, destination) ownership pairs
 
-        // VPN Only: catch-all through the local gateway (0.0.0.0/1 + 128.0.0.0/1 cover all IPv4
-        // with higher specificity than the default route), then inverse CIDRs through the VPN.
+        // VPN Only: bypass-all through the local gateway (the /2 quartet covers all IPv4 with
+        // higher specificity than both a default route AND a /1-pair full tunnel — see
+        // bypassAllCatchAlls), then inverse CIDRs through the VPN.
         //
         // INSTALL ORDER IS LEAK-CRITICAL. The helper writes this array strictly in order, so the
         // catch-alls are deferred to the very END rather than emitted here. Installing them first
@@ -85,15 +131,6 @@ enum ClassicRouteCompiler {
         // Same principle, opposite end: the catch-alls are the last thing on and the first thing off.
         var deferredCatchAlls: [Route] = []
         if isInverse {
-            deferredCatchAlls.append(Route(destination: "0.0.0.0/1", gateway: localGateway, isNetwork: true, source: "VPN Only catch-all"))
-            deferredCatchAlls.append(Route(destination: "128.0.0.0/1", gateway: localGateway, isNetwork: true, source: "VPN Only catch-all"))
-            seenDestinations.insert("0.0.0.0/1")
-            seenDestinations.insert("128.0.0.0/1")
-            allSourceEntries.append(SourceEntry(destination: "0.0.0.0/1", gateway: localGateway, source: "VPN Only catch-all"))
-            allSourceEntries.append(SourceEntry(destination: "128.0.0.0/1", gateway: localGateway, source: "VPN Only catch-all"))
-            seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
-            seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
-
             for cidr in inverseCIDRs {
                 if !seenDestinations.contains(cidr) {
                     seenDestinations.insert(cidr)
@@ -104,6 +141,17 @@ enum ClassicRouteCompiler {
                     seenSourceDests.insert(key)
                     allSourceEntries.append(SourceEntry(destination: cidr, gateway: routeGateway, source: cidr))
                 }
+            }
+
+            // AFTER the inverse CIDRs, and only the quarters no listed CIDR claims: an exact
+            // /2 owns its kernel entry outright, and a broader CIDR (a /1) must keep every
+            // quarter inside it on the VPN — a more-specific local /2 would silently carve
+            // that traffic back out of the tunnel. Unclaimed quarters still go local.
+            for catchAll in unclaimedCatchAlls(inverseCIDRs: inverseCIDRs) where !seenDestinations.contains(catchAll) {
+                deferredCatchAlls.append(Route(destination: catchAll, gateway: localGateway, isNetwork: true, source: catchAllSource))
+                seenDestinations.insert(catchAll)
+                allSourceEntries.append(SourceEntry(destination: catchAll, gateway: localGateway, source: catchAllSource))
+                seenSourceDests.insert("\(catchAllSource)|\(catchAll)")
             }
         }
 

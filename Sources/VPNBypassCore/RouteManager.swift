@@ -1018,7 +1018,7 @@ final class RouteManager: ObservableObject {
             ))
         }
 
-        let defaultRouteInterface = await currentDefaultRouteInterface()
+        let defaultRouteInterface = await currentTrafficCarrierInterface()
 
         // Resolve the user's pin, if any. utun indices renumber across reconnects, so when the
         // pinned NAME is gone but a product label was stored, re-resolve by label against the
@@ -1060,7 +1060,7 @@ final class RouteManager: ObservableObject {
                 let all = candidates.map(\.interface).joined(separator: ", ")
                 await MainActor.run {
                     log(.info, "Multiple tunnels up (\(all)) — using \(selected)" +
-                        (defaultRouteInterface == selected ? " (carries the default route)" : ""))
+                        (defaultRouteInterface == selected ? " (carries the traffic)" : ""))
                 }
             }
             let type = hintType ?? detectVPNTypeFromInterface(selected)
@@ -1080,11 +1080,31 @@ final class RouteManager: ObservableObject {
     
     /// Which interface the default route currently exits through, or nil if unreadable.
     /// This is the only direct evidence of which tunnel is actually carrying traffic.
+    /// The plain `route get default` answer — what the coexistence diagnostics card shows.
     func currentDefaultRouteInterface() async -> String? {
         guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", "default"], timeout: 5.0) else {
             return nil
         }
         return VPNInterfaceSelector.parseDefaultRouteInterface(result.output)
+    }
+
+    /// The interface actually carrying the traffic — selection's ground truth.
+    ///
+    /// A wg-quick / OpenVPN-def1 style tunnel owns 0.0.0.0/1 + 128.0.0.0/1 and leaves
+    /// `default` on the physical link, so the default route's interface names the wrong
+    /// carrier: by longest-prefix the /1 owner is where the traffic actually goes. Consult
+    /// the kernel table for such an owner first (our own catch-alls are RTF_PROTO1-marked
+    /// and excluded), then fall back to the default route. Without this, selection rule 1
+    /// never fires for a /1-style VPN, and hysteresis pins whichever tunnel happened to
+    /// connect first — observed in #103 as NetBird staying "the VPN" while the user's
+    /// WireGuard carried the traffic. Kept separate from currentDefaultRouteInterface so
+    /// the diagnostics card keeps reporting the real default route.
+    func currentTrafficCarrierInterface() async -> String? {
+        if let table = RouteKernel.currentTable(),
+           let owner = RouteKernel.slashOneTunnelOwner(table) {
+            return owner
+        }
+        return await currentDefaultRouteInterface()
     }
 
     /// Check if interface name suggests it's a VPN interface
@@ -1576,7 +1596,7 @@ final class RouteManager: ObservableObject {
             log(.warning, "Config failed to load — enforcing nothing, and removing anything this app left behind")
             // The latch blocks APPLY, never TEARDOWN. This method is the only caller of the
             // no-VPN startup sweep (:1535), which is what heals a killed previous run's
-            // leftovers — VPN Only's 0.0.0.0/1 + 128.0.0.0/1 catch-alls included. Returning
+            // leftovers — VPN Only's bypass-all catch-alls included. Returning
             // early here left those in the kernel with nothing able to remove them, so an
             // unreadable config.json turned a recoverable state into a broken network.
             if HelperManager.shared.isHelperInstalled {
@@ -1713,7 +1733,7 @@ final class RouteManager: ObservableObject {
         await applyAllRoutesInternal(sendNotification: true, forceReassert: true)
     }
 
-    /// VPN Only mode installs 0.0.0.0/1 + 128.0.0.0/1 catch-all routes that
+    /// VPN Only mode installs bypass-all catch-all routes that
     /// structurally defeat a full-tunnel VPN. Under GlobalProtect that trips its
     /// route monitor and tears the tunnel down (the original incident), so EVERY
     /// route-applying path must refuse it. Returns true (and logs) when the apply
@@ -1735,7 +1755,11 @@ final class RouteManager: ObservableObject {
         catchAlls: Set<String>
     ) -> [String] {
         activeRoutes.compactMap { route in
-            if catchAlls.contains(route.destination) { return route.destination }
+            // Destination alone is not ownership: a user's Bypass range may spell exactly
+            // "0.0.0.0/2". Only OUR catch-alls (matched by their recorded source) are stale
+            // by fiat; the user's route is judged by its gateway like everything else.
+            if catchAlls.contains(route.destination),
+               route.source == ClassicRouteCompiler.catchAllSource { return route.destination }
             // Interface-scoped routes name a tunnel that is going away.
             if route.gateway.hasPrefix("iface:") { return route.destination }
             // Anything not egressing via the local gateway is VPN-bound.
@@ -1748,7 +1772,9 @@ final class RouteManager: ObservableObject {
     /// remove what is already installed rather than only declining to add more.
     private var installedCatchAllDestinations: [String] {
         let catchAlls = Set(RouteCompiler.catchAllDestinations)
-        return activeRoutes.map { $0.destination }.filter { catchAlls.contains($0) }
+        return activeRoutes
+            .filter { catchAlls.contains($0.destination) && $0.source == ClassicRouteCompiler.catchAllSource }
+            .map { $0.destination }
     }
 
     private func refuseVPNOnlyUnderGlobalProtect() -> Bool {
@@ -2260,7 +2286,7 @@ final class RouteManager: ObservableObject {
         var failedDests: Set<String> = []
         if !destinations.isEmpty {
             if HelperManager.shared.isHelperInstalled {
-                // Remove the catch-all routes (0.0.0.0/1 + 128.0.0.0/1, or a custom 0.0.0.0/0)
+                // Remove the catch-all routes (the bypass-all set, or a custom 0.0.0.0/0)
                 // FIRST, in their own fast batch. If a time-capped quit cuts teardown short,
                 // the full-tunnel-defeating catch-alls are already gone rather than stranded
                 // (leaving the machine forcing all traffic at a now-dead gateway).
@@ -2345,9 +2371,9 @@ final class RouteManager: ObservableObject {
 
         let isInverse = config.routingMode == .vpnOnly
 
-        // Refuse VPN Only under GlobalProtect on this startup fast-path too — it
-        // installs the same 0.0.0.0/1 + 128.0.0.0/1 catch-all and would tear down
-        // the GP tunnel on the common cached-launch path.
+        // Refuse VPN Only under GlobalProtect on this startup fast-path too — its
+        // bypass-all catch-alls route traffic around the corporate tunnel on the
+        // common cached-launch path.
         if refuseVPNOnlyUnderGlobalProtect() { return false }
 
         // Custom mode: compile from cached IPs (no live DNS) for instant startup.

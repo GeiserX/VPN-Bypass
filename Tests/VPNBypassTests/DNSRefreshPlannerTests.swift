@@ -115,7 +115,7 @@ final class DNSRefreshPlannerTests: XCTestCase {
 
     // MARK: - VPN Only (inverse) mode
 
-    /// Inverse mode injects the two catch-alls as expected (never added), seeds each CIDR as a
+    /// Inverse mode injects the bypass-all catch-alls as expected (never added), seeds each CIDR as a
     /// static expected entry (never added), and adds only the resolved domain IP via the VPN gateway.
     func testInverseSeedsCatchAllsAndCIDRsWhichAreExpectedNotAdded() {
         let plan = P.plan(
@@ -133,13 +133,33 @@ final class DNSRefreshPlannerTests: XCTestCase {
         XCTAssertEqual(plan.candidateActiveEntries, [ce("3.3.3.3", vpn, "x.com")])
         // Catch-alls + CIDR + resolved IP are all expected.
         XCTAssertEqual(plan.expectedEntries, [
-            sd("VPN Only catch-all", "0.0.0.0/1"),
-            sd("VPN Only catch-all", "128.0.0.0/1"),
+            sd("VPN Only catch-all", "0.0.0.0/2"),
+            sd("VPN Only catch-all", "64.0.0.0/2"),
+            sd("VPN Only catch-all", "128.0.0.0/2"),
+            sd("VPN Only catch-all", "192.0.0.0/2"),
             sd("172.16.0.0/12", "172.16.0.0/12"),
             sd("x.com", "3.3.3.3"),
         ])
         // The CIDR must never be scheduled for a host add here.
         XCTAssertFalse(plan.routesToAdd.contains { $0.destination == "172.16.0.0/12" })
+    }
+
+    /// #104 review: a quarter an inverse CIDR claims is never installed as a catch-all, so it
+    /// must not be EXPECTED as one either — a second ownership row for the same destination
+    /// would make the CIDR's later removal skip the kernel delete.
+    func testClaimedQuarterIsNotExpectedAsCatchAll() {
+        let plan = P.plan(
+            domainsToResolve: [], resolvedDomainIPs: [:], cachedDomainIPs: [:],
+            existingDestinations: [], existingSourceDests: [],
+            isInverse: true, routeGateway: vpn,
+            inverseCIDRs: ["0.0.0.0/2"]
+        )
+        XCTAssertEqual(plan.expectedEntries, [
+            sd("VPN Only catch-all", "64.0.0.0/2"),
+            sd("VPN Only catch-all", "128.0.0.0/2"),
+            sd("VPN Only catch-all", "192.0.0.0/2"),
+            sd("0.0.0.0/2", "0.0.0.0/2"),
+        ])
     }
 
     /// Inverse mode with no resolvable domains: catch-alls + every CIDR are expected, nothing is
@@ -158,8 +178,10 @@ final class DNSRefreshPlannerTests: XCTestCase {
         XCTAssertTrue(plan.routesToAdd.isEmpty)
         XCTAssertTrue(plan.candidateActiveEntries.isEmpty)
         XCTAssertEqual(plan.expectedEntries, [
-            sd("VPN Only catch-all", "0.0.0.0/1"),
-            sd("VPN Only catch-all", "128.0.0.0/1"),
+            sd("VPN Only catch-all", "0.0.0.0/2"),
+            sd("VPN Only catch-all", "64.0.0.0/2"),
+            sd("VPN Only catch-all", "128.0.0.0/2"),
+            sd("VPN Only catch-all", "192.0.0.0/2"),
             sd("172.16.0.0/12", "172.16.0.0/12"),
             sd("10.0.0.0/8", "10.0.0.0/8"),
         ])
@@ -201,7 +223,7 @@ final class DNSRefreshPlannerTests: XCTestCase {
 
     /// The VPN-Only leak path: an inverse domain whose DNS fails falls back to its cached IPs.
     /// Those cached IPs must be expected (reconcile-protected) but NEVER added to the kernel and
-    /// NEVER become ownership candidates — and the two catch-alls are still seeded.
+    /// NEVER become ownership candidates — and the four /2 catch-alls are still seeded.
     func testInverseDNSFailedFallsBackToCacheExpectedButNotAdded() {
         let plan = P.plan(
             domainsToResolve: [(domain: "v.com", source: "v.com")],
@@ -219,8 +241,10 @@ final class DNSRefreshPlannerTests: XCTestCase {
         XCTAssertFalse(plan.routesToAdd.contains { $0.destination == "7.7.7.7" || $0.destination == "6.6.6.6" })
         // ...but they ARE expected, alongside the always-seeded catch-alls.
         XCTAssertEqual(plan.expectedEntries, [
-            sd("VPN Only catch-all", "0.0.0.0/1"),
-            sd("VPN Only catch-all", "128.0.0.0/1"),
+            sd("VPN Only catch-all", "0.0.0.0/2"),
+            sd("VPN Only catch-all", "64.0.0.0/2"),
+            sd("VPN Only catch-all", "128.0.0.0/2"),
+            sd("VPN Only catch-all", "192.0.0.0/2"),
             sd("v.com", "7.7.7.7"), sd("v.com", "6.6.6.6"),
         ])
     }

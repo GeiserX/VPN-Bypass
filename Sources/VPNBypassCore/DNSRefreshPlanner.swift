@@ -71,7 +71,7 @@ enum DNSRefreshPlanner {
     ///   - cachedDomainIPs: the disk-cache snapshot, consulted only for the DNS-failed fallback.
     ///   - existingDestinations: kernel destinations already present (never re-added).
     ///   - existingSourceDests: ownership pairs already tracked (never re-recorded).
-    ///   - isInverse: `true` for VPN Only (seeds the two catch-alls), `false` for Bypass.
+    ///   - isInverse: `true` for VPN Only (seeds the bypass-all catch-alls), `false` for Bypass.
     ///   - routeGateway: the gateway every refreshed host route + ownership row rides.
     ///   - inverseCIDRs: enabled inverse CIDR entries (VPN Only). Seeded into `expectedEntries` as
     ///     `(cidr, cidr)`, never DNS-resolved or added here — the caller repairs their kernel route.
@@ -93,8 +93,13 @@ enum DNSRefreshPlanner {
         // Preserve catch-all routes in VPN Only mode (they aren't DNS-resolved), then seed the
         // static inverse CIDR entries. Both are expected but never added by this planner.
         if isInverse {
-            expectedEntries.insert(SourceDest(source: "VPN Only catch-all", destination: "0.0.0.0/1"))
-            expectedEntries.insert(SourceDest(source: "VPN Only catch-all", destination: "128.0.0.0/1"))
+            // Mirror the compiler's claim rules exactly: a quarter an inverse CIDR owns is
+            // never installed as a catch-all, so expecting it here would record a second
+            // ownership row for the same destination and make the CIDR's later removal skip
+            // the kernel delete ("another owner still wants it").
+            for catchAll in ClassicRouteCompiler.unclaimedCatchAlls(inverseCIDRs: inverseCIDRs) {
+                expectedEntries.insert(SourceDest(source: ClassicRouteCompiler.catchAllSource, destination: catchAll))
+            }
             for cidr in inverseCIDRs {
                 // CIDR entries: preserve as static routes, no DNS resolution.
                 expectedEntries.insert(SourceDest(source: cidr, destination: cidr))

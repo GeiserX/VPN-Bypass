@@ -53,12 +53,27 @@ final class VPNBoundRouteTests: XCTestCase {
     }
 
     /// VPN-Only catch-alls are always torn down, even though they egress the LOCAL gateway and so
-    /// would otherwise look "still valid" by the gateway test alone.
+    /// would otherwise look "still valid" by the gateway test alone. The /1 pair here is what
+    /// builds up to 4.8.0 installed — it stays recognised so an update cleans an old strand.
     func testCatchAllsAreAlwaysStaleEvenViaLocalGateway() {
         let routes = [route("0.0.0.0/1", local, "VPN Only catch-all"),
                       route("128.0.0.0/1", local, "VPN Only catch-all"),
                       route("7.7.7.7", local)]
         XCTAssertEqual(Set(stale(routes)), ["0.0.0.0/1", "128.0.0.0/1"])
+    }
+
+    /// #104 review: a user's own route that merely spells a catch-all destination is NOT ours
+    /// to tear down — classification is destination AND source.
+    func testUserRouteSharingACatchAllDestinationSurvives() {
+        let routes = [route("0.0.0.0/2", local, "my-range"), route("7.7.7.7", local)]
+        XCTAssertTrue(stale(routes).isEmpty)
+    }
+
+    /// The /2 quartet VPN Only installs since #103 is recognised the same way.
+    func testQuartetCatchAllsAreStale() {
+        let routes = ClassicRouteCompiler.bypassAllCatchAlls.map { route($0, local, "VPN Only catch-all") }
+            + [route("7.7.7.7", local)]
+        XCTAssertEqual(Set(stale(routes)), Set(ClassicRouteCompiler.bypassAllCatchAlls))
     }
 
     /// With no known local gateway we cannot prove any route is still valid, so everything is

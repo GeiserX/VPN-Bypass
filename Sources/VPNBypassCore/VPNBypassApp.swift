@@ -142,7 +142,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// sends (`pkill -x VPNBypass`) on every upgrade. Because `activeRoutes` lives only in memory
     /// and nothing reconciles against the kernel, an upgrade previously left the entire route set
     /// installed but *untracked*: the replacement binary started with an empty model, so no later
-    /// cleanup could ever remove them. In VPN Only that strands the `0.0.0.0/1`+`128.0.0.0/1`
+    /// cleanup could ever remove them. In VPN Only that strands the bypass-all
     /// catch-alls pointing at the local gateway — every subsequent connection silently leaves the
     /// tunnel while the app reports itself healthy. That is the most likely mechanism behind the
     /// "app is on but my public IP is my real one" reports.
