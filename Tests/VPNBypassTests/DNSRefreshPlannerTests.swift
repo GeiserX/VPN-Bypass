@@ -223,7 +223,7 @@ final class DNSRefreshPlannerTests: XCTestCase {
 
     /// The VPN-Only leak path: an inverse domain whose DNS fails falls back to its cached IPs.
     /// Those cached IPs must be expected (reconcile-protected) but NEVER added to the kernel and
-    /// NEVER become ownership candidates — and the two catch-alls are still seeded.
+    /// NEVER become ownership candidates — and the four /2 catch-alls are still seeded.
     func testInverseDNSFailedFallsBackToCacheExpectedButNotAdded() {
         let plan = P.plan(
             domainsToResolve: [(domain: "v.com", source: "v.com")],
