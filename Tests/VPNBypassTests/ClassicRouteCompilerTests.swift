@@ -176,6 +176,36 @@ final class ClassicRouteCompilerTests: XCTestCase {
                        [entry("0.0.0.0/2", vpn, "0.0.0.0/2")])
     }
 
+    /// #104 review: a listed /1 covers TWO quarters — both must stay on the VPN. Installing a
+    /// more-specific local /2 inside the user's /1 would silently carve traffic back out.
+    func testBroadInverseCIDRClaimsEveryQuarterItCovers() {
+        let b = C.build(isInverse: true, localGateway: local, routeGateway: vpn,
+                        inverseCIDRs: ["0.0.0.0/1"], resolvedGroups: [], serviceRanges: [])
+        XCTAssertEqual(b.routesToAdd, [
+            route("0.0.0.0/1", vpn, true, "0.0.0.0/1"),
+            route("128.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("192.0.0.0/2", local, true, "VPN Only catch-all"),
+        ])
+    }
+
+    /// A CIDR narrower than /2 claims nothing — the quarter still carries the REST of its
+    /// space to the local gateway, and the narrower CIDR wins inside itself by prefix length.
+    func testNarrowInverseCIDRClaimsNoQuarter() {
+        let b = C.build(isInverse: true, localGateway: local, routeGateway: vpn,
+                        inverseCIDRs: ["10.0.0.0/8"], resolvedGroups: [], serviceRanges: [])
+        XCTAssertEqual(b.routesToAdd.filter { $0.source == C.catchAllSource }.count, 4)
+    }
+
+    func testCoversMatrix() {
+        XCTAssertTrue(C.covers("0.0.0.0/1", "0.0.0.0/2"))
+        XCTAssertTrue(C.covers("0.0.0.0/1", "64.0.0.0/2"))
+        XCTAssertFalse(C.covers("0.0.0.0/1", "128.0.0.0/2"))
+        XCTAssertTrue(C.covers("128.0.0.0/1", "192.0.0.0/2"))
+        XCTAssertTrue(C.covers("64.0.0.0/2", "64.0.0.0/2"))
+        XCTAssertFalse(C.covers("0.0.0.0/3", "0.0.0.0/2"))
+        XCTAssertFalse(C.covers("garbage", "0.0.0.0/2"))
+    }
+
     func testVPNOnlyDuplicateInverseCIDRDeduped() {
         let b = C.build(isInverse: true, localGateway: local, routeGateway: vpn,
                         inverseCIDRs: ["172.16.0.0/12", "172.16.0.0/12"],

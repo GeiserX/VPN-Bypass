@@ -93,7 +93,11 @@ enum DNSRefreshPlanner {
         // Preserve catch-all routes in VPN Only mode (they aren't DNS-resolved), then seed the
         // static inverse CIDR entries. Both are expected but never added by this planner.
         if isInverse {
-            for catchAll in ClassicRouteCompiler.bypassAllCatchAlls {
+            // Mirror the compiler's claim rules exactly: a quarter an inverse CIDR owns is
+            // never installed as a catch-all, so expecting it here would record a second
+            // ownership row for the same destination and make the CIDR's later removal skip
+            // the kernel delete ("another owner still wants it").
+            for catchAll in ClassicRouteCompiler.unclaimedCatchAlls(inverseCIDRs: inverseCIDRs) {
                 expectedEntries.insert(SourceDest(source: ClassicRouteCompiler.catchAllSource, destination: catchAll))
             }
             for cidr in inverseCIDRs {

@@ -33,6 +33,32 @@ enum ClassicRouteCompiler {
         "0.0.0.0/2", "64.0.0.0/2", "128.0.0.0/2", "192.0.0.0/2",
     ]
 
+    /// The quartet minus every quarter an inverse CIDR claims (equals or covers). One kernel
+    /// entry exists per destination, and a broader listed CIDR must keep the whole space it
+    /// names on the VPN — installing a more-specific local /2 inside it would silently carve
+    /// that traffic back out of the tunnel. Shared by the compiler and the DNS refresh planner
+    /// so their ownership views can never diverge.
+    static func unclaimedCatchAlls(inverseCIDRs: [String]) -> [String] {
+        bypassAllCatchAlls.filter { quarter in
+            !inverseCIDRs.contains { covers($0, quarter) }
+        }
+    }
+
+    /// True when `outer` (a well-formed IPv4 CIDR) contains the whole of `inner`.
+    static func covers(_ outer: String, _ inner: String) -> Bool {
+        guard let o = RouteCIDR.parse(outer), let i = RouteCIDR.parse(inner),
+              o.prefixLength <= i.prefixLength,
+              let oAddr = ipv4Value(o.network), let iAddr = ipv4Value(i.network) else { return false }
+        let mask: UInt32 = o.prefixLength == 0 ? 0 : UInt32.max << (32 - UInt32(o.prefixLength))
+        return (oAddr & mask) == (iAddr & mask)
+    }
+
+    private static func ipv4Value(_ dotted: String) -> UInt32? {
+        let parts = dotted.split(separator: ".").compactMap { UInt32($0) }
+        guard parts.count == 4, parts.allSatisfy({ $0 <= 255 }) else { return nil }
+        return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+    }
+
     /// The ownership `source` every bypass-all catch-all is recorded under. Stale-route
     /// classification keys off destination AND this source, so a user's own route that merely
     /// shares a catch-all destination string is never mistaken for one of ours.
@@ -117,11 +143,11 @@ enum ClassicRouteCompiler {
                 }
             }
 
-            // AFTER the inverse CIDRs, so a listed CIDR that is exactly one of the quarters
-            // keeps its VPN route: one kernel entry exists per destination, and the user's
-            // explicit "this range through the VPN" must win it. The quarter is then simply
-            // not claimed for the local gateway — the other three still are.
-            for catchAll in bypassAllCatchAlls where !seenDestinations.contains(catchAll) {
+            // AFTER the inverse CIDRs, and only the quarters no listed CIDR claims: an exact
+            // /2 owns its kernel entry outright, and a broader CIDR (a /1) must keep every
+            // quarter inside it on the VPN — a more-specific local /2 would silently carve
+            // that traffic back out of the tunnel. Unclaimed quarters still go local.
+            for catchAll in unclaimedCatchAlls(inverseCIDRs: inverseCIDRs) where !seenDestinations.contains(catchAll) {
                 deferredCatchAlls.append(Route(destination: catchAll, gateway: localGateway, isNetwork: true, source: catchAllSource))
                 seenDestinations.insert(catchAll)
                 allSourceEntries.append(SourceEntry(destination: catchAll, gateway: localGateway, source: catchAllSource))

@@ -144,6 +144,24 @@ final class DNSRefreshPlannerTests: XCTestCase {
         XCTAssertFalse(plan.routesToAdd.contains { $0.destination == "172.16.0.0/12" })
     }
 
+    /// #104 review: a quarter an inverse CIDR claims is never installed as a catch-all, so it
+    /// must not be EXPECTED as one either — a second ownership row for the same destination
+    /// would make the CIDR's later removal skip the kernel delete.
+    func testClaimedQuarterIsNotExpectedAsCatchAll() {
+        let plan = P.plan(
+            domainsToResolve: [], resolvedDomainIPs: [:], cachedDomainIPs: [:],
+            existingDestinations: [], existingSourceDests: [],
+            isInverse: true, routeGateway: vpn,
+            inverseCIDRs: ["0.0.0.0/2"]
+        )
+        XCTAssertEqual(plan.expectedEntries, [
+            sd("VPN Only catch-all", "64.0.0.0/2"),
+            sd("VPN Only catch-all", "128.0.0.0/2"),
+            sd("VPN Only catch-all", "192.0.0.0/2"),
+            sd("0.0.0.0/2", "0.0.0.0/2"),
+        ])
+    }
+
     /// Inverse mode with no resolvable domains: catch-alls + every CIDR are expected, nothing is
     /// added, and there are no ownership candidates.
     func testInverseEmptyDomainsIsCatchAllsAndCIDRsOnly() {
