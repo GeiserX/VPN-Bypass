@@ -43,7 +43,7 @@ final class ClassicRouteCompilerTests: XCTestCase {
                         inverseCIDRs: [], resolvedGroups: [], serviceRanges: [])
         XCTAssertTrue(b.routesToAdd.isEmpty)
         XCTAssertTrue(b.allSourceEntries.isEmpty)
-        XCTAssertFalse(b.routesToAdd.contains { $0.destination == "0.0.0.0/1" })
+        XCTAssertFalse(b.routesToAdd.contains { RouteCompiler.catchAllDestinations.contains($0.destination) })
     }
 
     func testBypassSameIPFromTwoSourcesIsOneRouteButTwoOwnershipEntries() {
@@ -116,12 +116,16 @@ final class ClassicRouteCompilerTests: XCTestCase {
                         serviceRanges: [])
         XCTAssertEqual(b.routesToAdd, [
             route("3.3.3.3", vpn, false, "x.com"),   // domain IP rides the VPN gateway — installed FIRST
-            route("0.0.0.0/1", local, true, "VPN Only catch-all"),
-            route("128.0.0.0/1", local, true, "VPN Only catch-all"),
+            route("0.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("64.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("128.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("192.0.0.0/2", local, true, "VPN Only catch-all"),
         ])
         XCTAssertEqual(b.allSourceEntries, [
-            entry("0.0.0.0/1", local, "VPN Only catch-all"),
-            entry("128.0.0.0/1", local, "VPN Only catch-all"),
+            entry("0.0.0.0/2", local, "VPN Only catch-all"),
+            entry("64.0.0.0/2", local, "VPN Only catch-all"),
+            entry("128.0.0.0/2", local, "VPN Only catch-all"),
+            entry("192.0.0.0/2", local, "VPN Only catch-all"),
             entry("3.3.3.3", vpn, "x.com"),
         ])
     }
@@ -131,8 +135,10 @@ final class ClassicRouteCompilerTests: XCTestCase {
                         inverseCIDRs: ["172.16.0.0/12"], resolvedGroups: [], serviceRanges: [])
         XCTAssertEqual(b.routesToAdd, [
             route("172.16.0.0/12", vpn, true, "172.16.0.0/12"),
-            route("0.0.0.0/1", local, true, "VPN Only catch-all"),
-            route("128.0.0.0/1", local, true, "VPN Only catch-all"),
+            route("0.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("64.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("128.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("192.0.0.0/2", local, true, "VPN Only catch-all"),
         ])
     }
 
@@ -143,7 +149,7 @@ final class ClassicRouteCompilerTests: XCTestCase {
                         inverseCIDRs: ["172.16.0.0/12", "10.1.0.0/16"],
                         resolvedGroups: [C.ResolvedGroup(source: "a.com", ips: ["4.4.4.4", "5.5.5.5"])],
                         serviceRanges: [])
-        let catchAlls: Set<String> = ["0.0.0.0/1", "128.0.0.0/1"]
+        let catchAlls = Set(C.bypassAllCatchAlls)
         let firstCatchAll = b.routesToAdd.firstIndex { catchAlls.contains($0.destination) }
         let lastProtected = b.routesToAdd.lastIndex { !catchAlls.contains($0.destination) }
         XCTAssertNotNil(firstCatchAll, "VPN Only must install catch-alls")
@@ -170,8 +176,10 @@ final class ClassicRouteCompilerTests: XCTestCase {
                         inverseCIDRs: [], resolvedGroups: [],
                         serviceRanges: [(source: "svc", range: "10.0.0.0/8")])
         XCTAssertEqual(b.routesToAdd, [
-            route("0.0.0.0/1", local, true, "VPN Only catch-all"),
-            route("128.0.0.0/1", local, true, "VPN Only catch-all"),
+            route("0.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("64.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("128.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("192.0.0.0/2", local, true, "VPN Only catch-all"),
         ])
         XCTAssertFalse(b.routesToAdd.contains { $0.destination == "10.0.0.0/8" })
     }
@@ -180,10 +188,12 @@ final class ClassicRouteCompilerTests: XCTestCase {
         let b = C.build(isInverse: true, localGateway: local, routeGateway: vpn,
                         inverseCIDRs: [], resolvedGroups: [], serviceRanges: [])
         XCTAssertEqual(b.routesToAdd, [
-            route("0.0.0.0/1", local, true, "VPN Only catch-all"),
-            route("128.0.0.0/1", local, true, "VPN Only catch-all"),
+            route("0.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("64.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("128.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("192.0.0.0/2", local, true, "VPN Only catch-all"),
         ])
-        XCTAssertEqual(b.allSourceEntries.count, 2)
+        XCTAssertEqual(b.allSourceEntries.count, C.bypassAllCatchAlls.count)
     }
 
     // MARK: - Invariants that guard against a leak

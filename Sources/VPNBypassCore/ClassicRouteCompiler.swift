@@ -19,6 +19,20 @@ import Foundation
 
 enum ClassicRouteCompiler {
 
+    /// The bypass-all routes VPN Only installs: four /2s covering all of IPv4 via the local
+    /// gateway. NOT the classic 0.0.0.0/1 + 128.0.0.0/1 pair, deliberately: wg-quick and
+    /// OpenVPN's redirect-gateway def1 capture traffic by installing that exact pair
+    /// themselves, so claiming it did not add routes — it REPOINTED the VPN's own routes to
+    /// the local gateway (the helper converges an existing destination in place) and teardown
+    /// then DELETED them out from under the VPN (#103: VPN Only under WireGuard inverted, and
+    /// WireGuard could not connect while the app ran, both sides fighting over the same two
+    /// kernel entries). The /2 quartet is additive: longest-prefix beats the VPN's /1s without
+    /// touching them, listed destinations still win over /2 with their /32s and CIDRs, and
+    /// removing the quartet hands traffic straight back to the tunnel.
+    static let bypassAllCatchAlls: [String] = [
+        "0.0.0.0/2", "64.0.0.0/2", "128.0.0.0/2", "192.0.0.0/2",
+    ]
+
     /// A kernel route to install (matches the caller's `routesToAdd` tuple, as a testable value).
     struct Route: Equatable, Hashable {
         let destination: String
@@ -69,8 +83,9 @@ enum ClassicRouteCompiler {
         var allSourceEntries: [SourceEntry] = []
         var seenSourceDests: Set<String> = []        // dedup (source, destination) ownership pairs
 
-        // VPN Only: catch-all through the local gateway (0.0.0.0/1 + 128.0.0.0/1 cover all IPv4
-        // with higher specificity than the default route), then inverse CIDRs through the VPN.
+        // VPN Only: bypass-all through the local gateway (the /2 quartet covers all IPv4 with
+        // higher specificity than both a default route AND a /1-pair full tunnel — see
+        // bypassAllCatchAlls), then inverse CIDRs through the VPN.
         //
         // INSTALL ORDER IS LEAK-CRITICAL. The helper writes this array strictly in order, so the
         // catch-alls are deferred to the very END rather than emitted here. Installing them first
@@ -85,14 +100,12 @@ enum ClassicRouteCompiler {
         // Same principle, opposite end: the catch-alls are the last thing on and the first thing off.
         var deferredCatchAlls: [Route] = []
         if isInverse {
-            deferredCatchAlls.append(Route(destination: "0.0.0.0/1", gateway: localGateway, isNetwork: true, source: "VPN Only catch-all"))
-            deferredCatchAlls.append(Route(destination: "128.0.0.0/1", gateway: localGateway, isNetwork: true, source: "VPN Only catch-all"))
-            seenDestinations.insert("0.0.0.0/1")
-            seenDestinations.insert("128.0.0.0/1")
-            allSourceEntries.append(SourceEntry(destination: "0.0.0.0/1", gateway: localGateway, source: "VPN Only catch-all"))
-            allSourceEntries.append(SourceEntry(destination: "128.0.0.0/1", gateway: localGateway, source: "VPN Only catch-all"))
-            seenSourceDests.insert("VPN Only catch-all|0.0.0.0/1")
-            seenSourceDests.insert("VPN Only catch-all|128.0.0.0/1")
+            for catchAll in bypassAllCatchAlls {
+                deferredCatchAlls.append(Route(destination: catchAll, gateway: localGateway, isNetwork: true, source: "VPN Only catch-all"))
+                seenDestinations.insert(catchAll)
+                allSourceEntries.append(SourceEntry(destination: catchAll, gateway: localGateway, source: "VPN Only catch-all"))
+                seenSourceDests.insert("VPN Only catch-all|\(catchAll)")
+            }
 
             for cidr in inverseCIDRs {
                 if !seenDestinations.contains(cidr) {

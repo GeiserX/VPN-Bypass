@@ -320,6 +320,34 @@ public enum RouteKernel {
         return value
     }
 
+    /// The tunnel that owns the 0.0.0.0/1 + 128.0.0.0/1 full-tunnel pair, if any.
+    ///
+    /// wg-quick and OpenVPN's redirect-gateway def1 capture traffic by installing that pair and
+    /// leaving `default` on the physical link, so `route get default` — selection's usual ground
+    /// truth — keeps naming the physical interface while every packet actually enters the tunnel.
+    /// By longest-prefix match the /1 owner IS the traffic carrier. Our own routes are excluded
+    /// by their RTF_PROTO1 mark (and are /2s besides). Only interface-gatewayed (AF_LINK) rows
+    /// are attributable — an OpenVPN-style /1 via an AF_INET next hop carries no interface index
+    /// in the dump, and returning nil there falls back to today's behaviour.
+    public static func slashOneTunnelOwnerIndex(_ table: [KernelRoute]) -> UInt16? {
+        for route in table where !route.isOurs && route.prefix == 1 {
+            guard route.destination == 0 || route.destination == 0x8000_0000 else { continue }
+            if let index = route.gatewayInterfaceIndex { return index }
+        }
+        return nil
+    }
+
+    /// `slashOneTunnelOwnerIndex` resolved to a name, kept only when it names a tunnel-class
+    /// interface — a /1 pinned to a physical link is not a VPN and must not steer selection.
+    public static func slashOneTunnelOwner(_ table: [KernelRoute]) -> String? {
+        guard let index = slashOneTunnelOwnerIndex(table) else { return nil }
+        var buffer = [CChar](repeating: 0, count: Int(IFNAMSIZ) + 1)
+        guard if_indextoname(UInt32(index), &buffer) != nil else { return nil }
+        let name = String(cString: buffer)
+        let tunnelPrefixes = ["utun", "tun", "tap", "ppp", "ipsec"]
+        return tunnelPrefixes.contains(where: { name.hasPrefix($0) }) ? name : nil
+    }
+
     static func dotted(_ ip: UInt32) -> String {
         "\((ip >> 24) & 0xff).\((ip >> 16) & 0xff).\((ip >> 8) & 0xff).\(ip & 0xff)"
     }

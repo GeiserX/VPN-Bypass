@@ -115,7 +115,7 @@ final class DNSRefreshPlannerTests: XCTestCase {
 
     // MARK: - VPN Only (inverse) mode
 
-    /// Inverse mode injects the two catch-alls as expected (never added), seeds each CIDR as a
+    /// Inverse mode injects the bypass-all catch-alls as expected (never added), seeds each CIDR as a
     /// static expected entry (never added), and adds only the resolved domain IP via the VPN gateway.
     func testInverseSeedsCatchAllsAndCIDRsWhichAreExpectedNotAdded() {
         let plan = P.plan(
@@ -133,8 +133,10 @@ final class DNSRefreshPlannerTests: XCTestCase {
         XCTAssertEqual(plan.candidateActiveEntries, [ce("3.3.3.3", vpn, "x.com")])
         // Catch-alls + CIDR + resolved IP are all expected.
         XCTAssertEqual(plan.expectedEntries, [
-            sd("VPN Only catch-all", "0.0.0.0/1"),
-            sd("VPN Only catch-all", "128.0.0.0/1"),
+            sd("VPN Only catch-all", "0.0.0.0/2"),
+            sd("VPN Only catch-all", "64.0.0.0/2"),
+            sd("VPN Only catch-all", "128.0.0.0/2"),
+            sd("VPN Only catch-all", "192.0.0.0/2"),
             sd("172.16.0.0/12", "172.16.0.0/12"),
             sd("x.com", "3.3.3.3"),
         ])
@@ -158,8 +160,10 @@ final class DNSRefreshPlannerTests: XCTestCase {
         XCTAssertTrue(plan.routesToAdd.isEmpty)
         XCTAssertTrue(plan.candidateActiveEntries.isEmpty)
         XCTAssertEqual(plan.expectedEntries, [
-            sd("VPN Only catch-all", "0.0.0.0/1"),
-            sd("VPN Only catch-all", "128.0.0.0/1"),
+            sd("VPN Only catch-all", "0.0.0.0/2"),
+            sd("VPN Only catch-all", "64.0.0.0/2"),
+            sd("VPN Only catch-all", "128.0.0.0/2"),
+            sd("VPN Only catch-all", "192.0.0.0/2"),
             sd("172.16.0.0/12", "172.16.0.0/12"),
             sd("10.0.0.0/8", "10.0.0.0/8"),
         ])
@@ -219,8 +223,10 @@ final class DNSRefreshPlannerTests: XCTestCase {
         XCTAssertFalse(plan.routesToAdd.contains { $0.destination == "7.7.7.7" || $0.destination == "6.6.6.6" })
         // ...but they ARE expected, alongside the always-seeded catch-alls.
         XCTAssertEqual(plan.expectedEntries, [
-            sd("VPN Only catch-all", "0.0.0.0/1"),
-            sd("VPN Only catch-all", "128.0.0.0/1"),
+            sd("VPN Only catch-all", "0.0.0.0/2"),
+            sd("VPN Only catch-all", "64.0.0.0/2"),
+            sd("VPN Only catch-all", "128.0.0.0/2"),
+            sd("VPN Only catch-all", "192.0.0.0/2"),
             sd("v.com", "7.7.7.7"), sd("v.com", "6.6.6.6"),
         ])
     }

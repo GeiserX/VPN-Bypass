@@ -189,7 +189,16 @@ enum RouteCompiler {
     /// trips its route monitor and tears the tunnel down (the original incident that
     /// motivates the whole project). Custom mode is per-rule and should never produce
     /// these, but the guard is the custom-engine analog of refuseVPNOnlyUnderGlobalProtect.
-    static let catchAllDestinations: Set<String> = ["0.0.0.0/0", "0.0.0.0/1", "128.0.0.0/1"]
+    /// The set carries everything this app has EVER installed as a bypass-all: the /2 quartet
+    /// VPN Only installs today, the 0.0.0.0/1 + 128.0.0.0/1 pair every build up to 4.8.0
+    /// installed (teardown and strand-sweeps must still recognise what an older build left
+    /// behind), and the custom 0.0.0.0/0. Cleanup ordering, unstranding and stale-route
+    /// recognition key off this set; the structural-shadow predicate below deliberately
+    /// does not.
+    static let catchAllDestinations: Set<String> = [
+        "0.0.0.0/0", "0.0.0.0/1", "128.0.0.0/1",
+        "0.0.0.0/2", "64.0.0.0/2", "128.0.0.0/2", "192.0.0.0/2",
+    ]
 
     /// A destination that structurally shadows a full-tunnel VPN's default route.
     /// The canonical trio, PLUS any CIDR with prefix length <= 1 (a /0 or /1 covers
@@ -198,7 +207,11 @@ enum RouteCompiler {
     /// not a replacement, so it doesn't trip GP's route monitor — that's the user's
     /// explicit choice, not a teardown vector. Covers IPv4 and IPv6 (::/0) alike.
     static func isCatchAll(_ destination: String) -> Bool {
-        if catchAllDestinations.contains(destination) { return true }
+        // Deliberately NOT keyed off catchAllDestinations: that set now also carries the /2
+        // quartet VPN Only installs (and must clean up), and a /2 is additive, not a shadow —
+        // a user's explicit /2 rule under GlobalProtect stays allowed, exactly as before.
+        // For every input this is byte-identical to the old set-plus-prefix check: the old
+        // set's members all had prefix <= 1 themselves.
         let parts = destination.split(separator: "/")
         if parts.count == 2, let prefix = Int(parts[1]), prefix <= 1 { return true }
         return false

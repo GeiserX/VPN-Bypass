@@ -1060,7 +1060,7 @@ final class RouteManager: ObservableObject {
                 let all = candidates.map(\.interface).joined(separator: ", ")
                 await MainActor.run {
                     log(.info, "Multiple tunnels up (\(all)) — using \(selected)" +
-                        (defaultRouteInterface == selected ? " (carries the default route)" : ""))
+                        (defaultRouteInterface == selected ? " (carries the traffic)" : ""))
                 }
             }
             let type = hintType ?? detectVPNTypeFromInterface(selected)
@@ -1081,6 +1081,18 @@ final class RouteManager: ObservableObject {
     /// Which interface the default route currently exits through, or nil if unreadable.
     /// This is the only direct evidence of which tunnel is actually carrying traffic.
     func currentDefaultRouteInterface() async -> String? {
+        // A wg-quick / OpenVPN-def1 style tunnel owns 0.0.0.0/1 + 128.0.0.0/1 and leaves
+        // `default` on the physical link, so the default route's interface names the wrong
+        // carrier: by longest-prefix the /1 owner is where the traffic actually goes. Consult
+        // the kernel table for such an owner first (our own catch-alls are RTF_PROTO1-marked
+        // and excluded), and only then fall back to the default route. Without this, selection
+        // rule 1 (ground truth) never fires for a /1-style VPN, and hysteresis pins whichever
+        // tunnel happened to connect first — observed in #103 as NetBird staying "the VPN"
+        // while the user's WireGuard carried the traffic.
+        if let table = RouteKernel.currentTable(),
+           let owner = RouteKernel.slashOneTunnelOwner(table) {
+            return owner
+        }
         guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", "default"], timeout: 5.0) else {
             return nil
         }
@@ -1576,7 +1588,7 @@ final class RouteManager: ObservableObject {
             log(.warning, "Config failed to load — enforcing nothing, and removing anything this app left behind")
             // The latch blocks APPLY, never TEARDOWN. This method is the only caller of the
             // no-VPN startup sweep (:1535), which is what heals a killed previous run's
-            // leftovers — VPN Only's 0.0.0.0/1 + 128.0.0.0/1 catch-alls included. Returning
+            // leftovers — VPN Only's bypass-all catch-alls included. Returning
             // early here left those in the kernel with nothing able to remove them, so an
             // unreadable config.json turned a recoverable state into a broken network.
             if HelperManager.shared.isHelperInstalled {
@@ -1713,7 +1725,7 @@ final class RouteManager: ObservableObject {
         await applyAllRoutesInternal(sendNotification: true, forceReassert: true)
     }
 
-    /// VPN Only mode installs 0.0.0.0/1 + 128.0.0.0/1 catch-all routes that
+    /// VPN Only mode installs bypass-all catch-all routes that
     /// structurally defeat a full-tunnel VPN. Under GlobalProtect that trips its
     /// route monitor and tears the tunnel down (the original incident), so EVERY
     /// route-applying path must refuse it. Returns true (and logs) when the apply
@@ -2260,7 +2272,7 @@ final class RouteManager: ObservableObject {
         var failedDests: Set<String> = []
         if !destinations.isEmpty {
             if HelperManager.shared.isHelperInstalled {
-                // Remove the catch-all routes (0.0.0.0/1 + 128.0.0.0/1, or a custom 0.0.0.0/0)
+                // Remove the catch-all routes (the bypass-all set, or a custom 0.0.0.0/0)
                 // FIRST, in their own fast batch. If a time-capped quit cuts teardown short,
                 // the full-tunnel-defeating catch-alls are already gone rather than stranded
                 // (leaving the machine forcing all traffic at a now-dead gateway).
@@ -2345,9 +2357,9 @@ final class RouteManager: ObservableObject {
 
         let isInverse = config.routingMode == .vpnOnly
 
-        // Refuse VPN Only under GlobalProtect on this startup fast-path too — it
-        // installs the same 0.0.0.0/1 + 128.0.0.0/1 catch-all and would tear down
-        // the GP tunnel on the common cached-launch path.
+        // Refuse VPN Only under GlobalProtect on this startup fast-path too — its
+        // bypass-all catch-alls route traffic around the corporate tunnel on the
+        // common cached-launch path.
         if refuseVPNOnlyUnderGlobalProtect() { return false }
 
         // Custom mode: compile from cached IPs (no live DNS) for instant startup.
