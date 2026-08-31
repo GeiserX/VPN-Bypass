@@ -62,6 +62,13 @@ final class VPNBoundRouteTests: XCTestCase {
         XCTAssertEqual(Set(stale(routes)), ["0.0.0.0/1", "128.0.0.0/1"])
     }
 
+    /// #104 review: a user's own route that merely spells a catch-all destination is NOT ours
+    /// to tear down — classification is destination AND source.
+    func testUserRouteSharingACatchAllDestinationSurvives() {
+        let routes = [route("0.0.0.0/2", local, "my-range"), route("7.7.7.7", local)]
+        XCTAssertTrue(stale(routes).isEmpty)
+    }
+
     /// The /2 quartet VPN Only installs since #103 is recognised the same way.
     func testQuartetCatchAllsAreStale() {
         let routes = ClassicRouteCompiler.bypassAllCatchAlls.map { route($0, local, "VPN Only catch-all") }

@@ -94,7 +94,7 @@ enum DNSRefreshPlanner {
         // static inverse CIDR entries. Both are expected but never added by this planner.
         if isInverse {
             for catchAll in ClassicRouteCompiler.bypassAllCatchAlls {
-                expectedEntries.insert(SourceDest(source: "VPN Only catch-all", destination: catchAll))
+                expectedEntries.insert(SourceDest(source: ClassicRouteCompiler.catchAllSource, destination: catchAll))
             }
             for cidr in inverseCIDRs {
                 // CIDR entries: preserve as static routes, no DNS resolution.

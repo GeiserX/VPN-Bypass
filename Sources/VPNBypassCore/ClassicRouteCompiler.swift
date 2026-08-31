@@ -33,6 +33,11 @@ enum ClassicRouteCompiler {
         "0.0.0.0/2", "64.0.0.0/2", "128.0.0.0/2", "192.0.0.0/2",
     ]
 
+    /// The ownership `source` every bypass-all catch-all is recorded under. Stale-route
+    /// classification keys off destination AND this source, so a user's own route that merely
+    /// shares a catch-all destination string is never mistaken for one of ours.
+    static let catchAllSource = "VPN Only catch-all"
+
     /// A kernel route to install (matches the caller's `routesToAdd` tuple, as a testable value).
     struct Route: Equatable, Hashable {
         let destination: String
@@ -100,13 +105,6 @@ enum ClassicRouteCompiler {
         // Same principle, opposite end: the catch-alls are the last thing on and the first thing off.
         var deferredCatchAlls: [Route] = []
         if isInverse {
-            for catchAll in bypassAllCatchAlls {
-                deferredCatchAlls.append(Route(destination: catchAll, gateway: localGateway, isNetwork: true, source: "VPN Only catch-all"))
-                seenDestinations.insert(catchAll)
-                allSourceEntries.append(SourceEntry(destination: catchAll, gateway: localGateway, source: "VPN Only catch-all"))
-                seenSourceDests.insert("VPN Only catch-all|\(catchAll)")
-            }
-
             for cidr in inverseCIDRs {
                 if !seenDestinations.contains(cidr) {
                     seenDestinations.insert(cidr)
@@ -117,6 +115,17 @@ enum ClassicRouteCompiler {
                     seenSourceDests.insert(key)
                     allSourceEntries.append(SourceEntry(destination: cidr, gateway: routeGateway, source: cidr))
                 }
+            }
+
+            // AFTER the inverse CIDRs, so a listed CIDR that is exactly one of the quarters
+            // keeps its VPN route: one kernel entry exists per destination, and the user's
+            // explicit "this range through the VPN" must win it. The quarter is then simply
+            // not claimed for the local gateway — the other three still are.
+            for catchAll in bypassAllCatchAlls where !seenDestinations.contains(catchAll) {
+                deferredCatchAlls.append(Route(destination: catchAll, gateway: localGateway, isNetwork: true, source: catchAllSource))
+                seenDestinations.insert(catchAll)
+                allSourceEntries.append(SourceEntry(destination: catchAll, gateway: localGateway, source: catchAllSource))
+                seenSourceDests.insert("\(catchAllSource)|\(catchAll)")
             }
         }
 

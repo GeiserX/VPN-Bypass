@@ -160,6 +160,22 @@ final class ClassicRouteCompilerTests: XCTestCase {
         }
     }
 
+    /// #104 review: a listed inverse CIDR that is exactly one of the quarters must keep its
+    /// VPN route — that quarter is simply not claimed for the local gateway (one kernel entry
+    /// exists per destination, and the user's explicit choice wins it).
+    func testExactQuarterInverseCIDRKeepsItsVPNRoute() {
+        let b = C.build(isInverse: true, localGateway: local, routeGateway: vpn,
+                        inverseCIDRs: ["0.0.0.0/2"], resolvedGroups: [], serviceRanges: [])
+        XCTAssertEqual(b.routesToAdd, [
+            route("0.0.0.0/2", vpn, true, "0.0.0.0/2"),
+            route("64.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("128.0.0.0/2", local, true, "VPN Only catch-all"),
+            route("192.0.0.0/2", local, true, "VPN Only catch-all"),
+        ])
+        XCTAssertEqual(b.allSourceEntries.filter { $0.destination == "0.0.0.0/2" },
+                       [entry("0.0.0.0/2", vpn, "0.0.0.0/2")])
+    }
+
     func testVPNOnlyDuplicateInverseCIDRDeduped() {
         let b = C.build(isInverse: true, localGateway: local, routeGateway: vpn,
                         inverseCIDRs: ["172.16.0.0/12", "172.16.0.0/12"],
