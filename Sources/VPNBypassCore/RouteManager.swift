@@ -87,9 +87,18 @@ final class RouteManager: ObservableObject {
     /// Bypass routes are KEPT across a drop, so there is no urgency to re-apply: wait for the
     /// tunnel to hold before touching the kernel. A drop during the wait cancels the pending
     /// apply and counts a deferral, so a flap storm coalesces into ONE apply once things hold;
-    /// after `ReconnectSettle.maxDeferrals` the delay shortens so we can never starve.
+    /// after `ReconnectSettle.maxDeferrals` the delay shortens so we can never starve — unless
+    /// apply-kill strikes are on the board (below), which override the collapse on purpose.
     private var reconnectSettleTask: Task<Void, Never>?
     private var reconnectDeferrals = 0
+    /// Apply-kill backoff (the resonance breaker). `lastKernelBurstAt` is stamped by the two
+    /// batch funnels every kernel write goes through; a VPN drop detected within
+    /// `ReconnectSettle.killWindow` of it counts a strike, and each strike doubles the next
+    /// settle delay. Deferrals count drops DURING the wait (apply is the victim); strikes
+    /// count drops AFTER the apply (apply is the suspected cause) — opposite responses.
+    private var applyKillStrikes = 0
+    private var lastApplyKillAt: Date?
+    private var lastKernelBurstAt: Date?
     /// First-seen timestamps for routes that dropped out of the desired set during an
     /// auto-triggered apply (DNS rotation, mostly). See `orphanGraceDecision`.
     private var orphanFirstSeen: [String: Date] = [:]
@@ -709,9 +718,16 @@ final class RouteManager: ObservableObject {
                 // Settle gate: never fire the apply into the tunnel's fragile post-(re)connect
                 // window — see reconnectSettleTask. The notification still goes out now (the
                 // VPN *is* connected); only our kernel writes wait.
+                applyKillStrikes = ReconnectSettle.effectiveStrikes(applyKillStrikes,
+                                                                    lastStrikeAt: lastApplyKillAt,
+                                                                    now: Date())
                 let delay = ReconnectSettle.delay(deferrals: reconnectDeferrals,
-                                                  hasInstalledRoutes: !activeRoutes.isEmpty)
-                log(.success, "VPN connected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type")) — applying routes in \(Int(delay))s once the tunnel settles")
+                                                  hasInstalledRoutes: !activeRoutes.isEmpty,
+                                                  killStrikes: applyKillStrikes)
+                let backoffNote = applyKillStrikes > 0
+                    ? " (backed off — \(applyKillStrikes) suspected apply-kill\(applyKillStrikes == 1 ? "" : "s"))"
+                    : ""
+                log(.success, "VPN connected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type")) — applying routes in \(Int(delay))s once the tunnel settles\(backoffNote)")
                 NotificationManager.shared.notifyVPNConnected(interface: interface ?? "unknown")
                 reconnectSettleTask?.cancel()
                 reconnectSettleTask = Task { [weak self] in
@@ -802,6 +818,22 @@ final class RouteManager: ObservableObject {
         
         if !isVPNConnected && wasVPNConnected {
             log(.warning, "VPN disconnected (was: \(oldInterface ?? "unknown"))")
+            // Apply-kill attribution: a drop this soon after our own kernel-write burst means
+            // the burst most likely starved the VPN client's gateway-route read (the #65
+            // signature). Count a strike so the NEXT post-reconnect apply waits exponentially
+            // longer — without this, restore → apply → drop → restore re-arms the apply and
+            // the loop self-sustains until the client gives up and logs out of its gateway.
+            // The burst is CONSUMED by its strike (one strike per batch): a reconnect that
+            // drops again during the settle wait fired no new writes, so blaming the same
+            // burst twice would escalate the delay for a single incident. Drops with no
+            // live burst stay attributed to the outside world.
+            if let burstAt = lastKernelBurstAt,
+               ReconnectSettle.isSuspectedApplyKill(dropAt: Date(), lastBurstAt: burstAt) {
+                applyKillStrikes += 1
+                lastApplyKillAt = Date()
+                lastKernelBurstAt = nil
+                log(.warning, "VPN dropped \(Int(Date().timeIntervalSince(burstAt)))s after our last route write — suspected apply-kill (strike \(applyKillStrikes)); backing off the next post-reconnect apply")
+            }
             // The tunnel dropped during a settle wait: cancel the pending apply (routes are
             // kept, nothing is lost) and count the deferral so a long flap storm eventually
             // shortens the wait instead of starving forever.
@@ -2293,11 +2325,11 @@ final class RouteManager: ObservableObject {
                 let catchAlls = destinations.filter { RouteCompiler.catchAllDestinations.contains($0) }
                 let rest = destinations.filter { !RouteCompiler.catchAllDestinations.contains($0) }
                 if !catchAlls.isEmpty {
-                    let r = await HelperManager.shared.removeRoutesBatch(destinations: catchAlls)
+                    let r = await removeRoutesBatchVia(catchAlls)
                     failedDests.formUnion(r.failedDestinations)
                 }
                 if !rest.isEmpty {
-                    let result = await HelperManager.shared.removeRoutesBatch(destinations: rest)
+                    let result = await removeRoutesBatchVia(rest)
                     failedDests.formUnion(result.failedDestinations)
                     if result.failureCount > 0 {
                         log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
@@ -2503,6 +2535,12 @@ final class RouteManager: ObservableObject {
     /// HelperManager.removeRoutesBatch.
     private func removeRoutesBatchVia(_ destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
         if let override = removeRoutesBatchOverrideForTests { return await override(destinations) }
+        // Apply-kill attribution anchor (see addRoutesBatchTracked): deletes are broadcast to
+        // every open routing socket just like adds. Stamped at SUBMISSION, not completion — a
+        // status check can interleave at the await below, and a drop caused by the in-flight
+        // batch must not be judged against a pre-batch timestamp. Not stamped on the test
+        // override — that path writes nothing to the kernel.
+        if !destinations.isEmpty { lastKernelBurstAt = Date() }
         return await HelperManager.shared.removeRoutesBatch(destinations: destinations)
     }
 
@@ -2860,7 +2898,7 @@ final class RouteManager: ObservableObject {
                 }
 
                 if !kernelRemovalDests.isEmpty {
-                    let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovalDests)
+                    let result = await removeRoutesBatchVia(kernelRemovalDests)
                     if result.failureCount > 0 {
                         // Re-add activeRoute entries for destinations that failed kernel removal
                         let failedSet = Set(result.failedDestinations)
@@ -3272,7 +3310,7 @@ final class RouteManager: ObservableObject {
             // Attempt kernel removal first
             var failedKernelRemovals: Set<String> = []
             if !kernelRemovals.isEmpty {
-                let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovals)
+                let result = await removeRoutesBatchVia(kernelRemovals)
                 failedKernelRemovals = Set(result.failedDestinations)
             }
 
@@ -4453,6 +4491,12 @@ final class RouteManager: ObservableObject {
             }
         }
         pendingKernelAdds.formUnion(routes.map { $0.destination })
+        // Apply-kill attribution anchor: every add path funnels through here, and even a
+        // failed RTM write is broadcast to every open routing socket, so a submitted batch
+        // is a burst whether or not it stuck. Stamped at SUBMISSION — a status check can
+        // interleave at the await below, and a drop caused by the in-flight batch must not
+        // be judged against a pre-batch timestamp.
+        if !routes.isEmpty { lastKernelBurstAt = Date() }
         let result = await HelperManager.shared.addRoutesBatch(routes: routes)
         // Failed destinations never reached the kernel — nothing to sweep for them.
         pendingKernelAdds.subtract(result.failedDestinations)
