@@ -823,12 +823,15 @@ final class RouteManager: ObservableObject {
             // signature). Count a strike so the NEXT post-reconnect apply waits exponentially
             // longer — without this, restore → apply → drop → restore re-arms the apply and
             // the loop self-sustains until the client gives up and logs out of its gateway.
-            // Drops during the settle wait (below) never land here as strikes: no apply has
-            // fired yet, so the last burst is old and attribution correctly stays external.
+            // The burst is CONSUMED by its strike (one strike per batch): a reconnect that
+            // drops again during the settle wait fired no new writes, so blaming the same
+            // burst twice would escalate the delay for a single incident. Drops with no
+            // live burst stay attributed to the outside world.
             if let burstAt = lastKernelBurstAt,
                ReconnectSettle.isSuspectedApplyKill(dropAt: Date(), lastBurstAt: burstAt) {
                 applyKillStrikes += 1
                 lastApplyKillAt = Date()
+                lastKernelBurstAt = nil
                 log(.warning, "VPN dropped \(Int(Date().timeIntervalSince(burstAt)))s after our last route write — suspected apply-kill (strike \(applyKillStrikes)); backing off the next post-reconnect apply")
             }
             // The tunnel dropped during a settle wait: cancel the pending apply (routes are
@@ -2322,11 +2325,11 @@ final class RouteManager: ObservableObject {
                 let catchAlls = destinations.filter { RouteCompiler.catchAllDestinations.contains($0) }
                 let rest = destinations.filter { !RouteCompiler.catchAllDestinations.contains($0) }
                 if !catchAlls.isEmpty {
-                    let r = await HelperManager.shared.removeRoutesBatch(destinations: catchAlls)
+                    let r = await removeRoutesBatchVia(catchAlls)
                     failedDests.formUnion(r.failedDestinations)
                 }
                 if !rest.isEmpty {
-                    let result = await HelperManager.shared.removeRoutesBatch(destinations: rest)
+                    let result = await removeRoutesBatchVia(rest)
                     failedDests.formUnion(result.failedDestinations)
                     if result.failureCount > 0 {
                         log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
@@ -2532,12 +2535,13 @@ final class RouteManager: ObservableObject {
     /// HelperManager.removeRoutesBatch.
     private func removeRoutesBatchVia(_ destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
         if let override = removeRoutesBatchOverrideForTests { return await override(destinations) }
-        let result = await HelperManager.shared.removeRoutesBatch(destinations: destinations)
         // Apply-kill attribution anchor (see addRoutesBatchTracked): deletes are broadcast to
-        // every open routing socket just like adds. Not stamped on the test override — that
-        // path writes nothing to the kernel.
+        // every open routing socket just like adds. Stamped at SUBMISSION, not completion — a
+        // status check can interleave at the await below, and a drop caused by the in-flight
+        // batch must not be judged against a pre-batch timestamp. Not stamped on the test
+        // override — that path writes nothing to the kernel.
         if !destinations.isEmpty { lastKernelBurstAt = Date() }
-        return result
+        return await HelperManager.shared.removeRoutesBatch(destinations: destinations)
     }
 
     /// #61 self-remediation: on epoch-preemption abort, remove from the kernel exactly the
@@ -2894,7 +2898,7 @@ final class RouteManager: ObservableObject {
                 }
 
                 if !kernelRemovalDests.isEmpty {
-                    let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovalDests)
+                    let result = await removeRoutesBatchVia(kernelRemovalDests)
                     if result.failureCount > 0 {
                         // Re-add activeRoute entries for destinations that failed kernel removal
                         let failedSet = Set(result.failedDestinations)
@@ -3306,7 +3310,7 @@ final class RouteManager: ObservableObject {
             // Attempt kernel removal first
             var failedKernelRemovals: Set<String> = []
             if !kernelRemovals.isEmpty {
-                let result = await HelperManager.shared.removeRoutesBatch(destinations: kernelRemovals)
+                let result = await removeRoutesBatchVia(kernelRemovals)
                 failedKernelRemovals = Set(result.failedDestinations)
             }
 
@@ -4487,13 +4491,15 @@ final class RouteManager: ObservableObject {
             }
         }
         pendingKernelAdds.formUnion(routes.map { $0.destination })
+        // Apply-kill attribution anchor: every add path funnels through here, and even a
+        // failed RTM write is broadcast to every open routing socket, so a submitted batch
+        // is a burst whether or not it stuck. Stamped at SUBMISSION — a status check can
+        // interleave at the await below, and a drop caused by the in-flight batch must not
+        // be judged against a pre-batch timestamp.
+        if !routes.isEmpty { lastKernelBurstAt = Date() }
         let result = await HelperManager.shared.addRoutesBatch(routes: routes)
         // Failed destinations never reached the kernel — nothing to sweep for them.
         pendingKernelAdds.subtract(result.failedDestinations)
-        // Apply-kill attribution anchor: every add path funnels through here, and even a
-        // failed RTM write is broadcast to every open routing socket, so a submitted batch
-        // is a burst whether or not it stuck.
-        if !routes.isEmpty { lastKernelBurstAt = Date() }
         return result
     }
 
