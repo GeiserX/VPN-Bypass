@@ -2,18 +2,40 @@
 
 #include <arpa/inet.h>
 #include <libproc.h>
+#include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/proc_info.h>
 #include <unistd.h>
 
-int loopback_peer_uid_for_tcp_port(uint16_t host_order_port, uid_t *out_uid) {
+static int local_addr_is_loopback(const struct in_sockinfo *in) {
+    if (in->insi_vflag & INI_IPV4) {
+        return in->insi_laddr.ina_46.i46a_addr4.s_addr == htonl(INADDR_LOOPBACK);
+    }
+    if (in->insi_vflag & INI_IPV6) {
+        const struct in6_addr *a6 = &in->insi_laddr.ina_6;
+        if (IN6_IS_ADDR_LOOPBACK(a6)) {
+            return 1;
+        }
+        if (IN6_IS_ADDR_V4MAPPED(a6)) {
+            uint32_t v4;
+            memcpy(&v4, &a6->s6_addr[12], sizeof(v4));
+            return v4 == htonl(INADDR_LOOPBACK);
+        }
+    }
+    return 0;
+}
+
+int loopback_peer_uid_for_tcp_port(uint16_t host_order_port,
+                                   uint16_t host_order_foreign_port,
+                                   uid_t *out_uid) {
     if (out_uid == NULL || host_order_port == 0) {
         return -1;
     }
 
-    // insi_lport is stored in network byte order (same as inp_lport).
+    // insi_lport / insi_fport are stored in network byte order (same as inp_lport).
     const int port_nbo = (int)htons(host_order_port);
+    const int foreign_nbo = host_order_foreign_port == 0 ? 0 : (int)htons(host_order_foreign_port);
 
     int list_bytes = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
     if (list_bytes <= 0) {
@@ -73,6 +95,12 @@ int loopback_peer_uid_for_tcp_port(uint16_t host_order_port, uid_t *out_uid) {
             }
             // pri_in and pri_tcp.tcpsi_ini share the same leading in_sockinfo.
             if (si.psi.soi_proto.pri_in.insi_lport != port_nbo) {
+                continue;
+            }
+            if (!local_addr_is_loopback(&si.psi.soi_proto.pri_in)) {
+                continue;
+            }
+            if (foreign_nbo != 0 && si.psi.soi_proto.pri_in.insi_fport != foreign_nbo) {
                 continue;
             }
 

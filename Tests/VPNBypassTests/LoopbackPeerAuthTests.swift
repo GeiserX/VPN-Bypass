@@ -21,7 +21,9 @@ final class LoopbackPeerAuthTests: XCTestCase {
     }
 
     func testUidLookupFindsOwnListeningPort() throws {
-        let listener = try NWListener(using: .tcp)
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+        let listener = try NWListener(using: parameters)
         let ready = expectation(description: "listener ready")
         var bound: UInt16 = 0
         listener.stateUpdateHandler = { state in
@@ -37,8 +39,33 @@ final class LoopbackPeerAuthTests: XCTestCase {
         XCTAssertNotEqual(bound, 0)
 
         let uid = try XCTUnwrap(LoopbackPeerAuth.uidOwningLocalTCPPort(bound),
-                                "libproc must see this process's listen socket")
+                                "libproc must see this process's loopback listen socket")
         XCTAssertEqual(uid, getuid())
+    }
+
+    /// A wildcard bind on port P must not satisfy a loopback peer lookup
+    /// for P. Matching local port alone would treat a non-loopback socket
+    /// as the 127.0.0.1 client.
+    func testUidLookupIgnoresNonLoopbackLocalPort() throws {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "0.0.0.0", port: .any)
+        let listener = try NWListener(using: parameters)
+        let ready = expectation(description: "wildcard listener ready")
+        var bound: UInt16 = 0
+        listener.stateUpdateHandler = { state in
+            if case .ready = state, let port = listener.port?.rawValue {
+                bound = port
+                ready.fulfill()
+            }
+        }
+        listener.newConnectionHandler = { _ in }
+        listener.start(queue: DispatchQueue(label: "test.loopback.peer.wildcard"))
+        defer { listener.cancel() }
+        wait(for: [ready], timeout: 5.0)
+        XCTAssertNotEqual(bound, 0)
+
+        XCTAssertNil(LoopbackPeerAuth.uidOwningLocalTCPPort(bound),
+                     "a non-loopback bind on \(bound) must not count as a loopback peer")
     }
 
     func testUidLookupReturnsNilForUnusedPort() {

@@ -24,21 +24,33 @@ enum LoopbackPeerAuth {
     }
 
     static func uid(of connection: NWConnection) -> uid_t? {
-        guard let port = remoteTCPPort(of: connection) else { return nil }
-        return uidOwningLocalTCPPort(port)
+        guard let clientPort = remoteTCPPort(of: connection) else { return nil }
+        // The server's local port is the client's foreign port. Passing it
+        // stops an unrelated loopback socket on the same source port from
+        // counting as this connection.
+        return uidOwningLocalTCPPort(clientPort, foreignPort: localTCPPort(of: connection) ?? 0)
     }
 
     static func remoteTCPPort(of connection: NWConnection) -> UInt16? {
-        guard let endpoint = connection.currentPath?.remoteEndpoint else { return nil }
+        port(of: connection.currentPath?.remoteEndpoint)
+    }
+
+    static func localTCPPort(of connection: NWConnection) -> UInt16? {
+        port(of: connection.currentPath?.localEndpoint)
+    }
+
+    private static func port(of endpoint: NWEndpoint?) -> UInt16? {
+        guard let endpoint else { return nil }
         if case .hostPort(_, let port) = endpoint {
             return port.rawValue
         }
         return nil
     }
 
-    static func uidOwningLocalTCPPort(_ port: UInt16) -> uid_t? {
+    /// `foreignPort` 0 skips the far-side filter (a listen socket has none).
+    static func uidOwningLocalTCPPort(_ port: UInt16, foreignPort: UInt16 = 0) -> uid_t? {
         var uid: uid_t = 0
-        guard loopback_peer_uid_for_tcp_port(port, &uid) == 0 else { return nil }
+        guard loopback_peer_uid_for_tcp_port(port, foreignPort, &uid) == 0 else { return nil }
         return uid
     }
 }
