@@ -270,8 +270,10 @@ final class IsValidCIDREdgeCaseTests: XCTestCase {
 
     // MARK: - Boundary masks
 
-    func testSlash1Accepted() {
-        XCTAssertTrue(rm.isValidCIDR("10.0.0.0/1"))
+    func testSlash1Rejected() {
+        XCTAssertFalse(rm.isValidCIDR("10.0.0.0/1"))
+        XCTAssertFalse(rm.isValidCIDR("0.0.0.0/1"))
+        XCTAssertFalse(rm.isValidCIDR("128.0.0.0/1"))
     }
 
     func testSlash32Accepted() {
@@ -302,8 +304,8 @@ final class IsValidCIDREdgeCaseTests: XCTestCase {
     }
 
     func testLeadingZeroInMaskZeroOne() {
-        // Int("01") = 1, which is valid (1..32)
-        XCTAssertTrue(rm.isValidCIDR("10.0.0.0/01"))
+        // Int("01") = 1. /1 is dest-unsafe (full-tunnel half).
+        XCTAssertFalse(rm.isValidCIDR("10.0.0.0/01"))
     }
 
     func testLeadingZeroInMaskDouble() {

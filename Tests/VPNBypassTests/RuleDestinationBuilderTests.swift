@@ -45,6 +45,20 @@ final class RuleDestinationBuilderTests: XCTestCase {
         XCTAssertTrue(out[1].dests[0].isNetwork, "a CIDR is a network route")
     }
 
+    /// Already-saved `/0` or `/1` rules must not become kernel dests. The helper
+    /// refuses ADD/CHANGE of those, but the builder is the app-side stop.
+    func testFullTunnelSlashOneCIDRYieldsNoDests() {
+        for pattern in ["0.0.0.0/0", "0.0.0.0/1", "128.0.0.0/1", "64.0.0.0/1"] {
+            let out = RuleDestinationBuilder.build(
+                rules: [rule(.cidr, pattern)],
+                services: [],
+                resolved: [:]
+            )
+            XCTAssertEqual(out.count, 1, "\(pattern) still appears as a rule")
+            XCTAssertTrue(out[0].dests.isEmpty, "\(pattern) must not become a kernel dest")
+        }
+    }
+
     // MARK: - service expansion
 
     func testServiceExpandsDomainsAndStaticIPRanges() {

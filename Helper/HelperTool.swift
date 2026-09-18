@@ -125,7 +125,7 @@ class HelperTool: NSObject, HelperProtocol {
 
     func addRoute(destination: String, gateway: String, isNetwork: Bool, withReply reply: @escaping (Bool, String?) -> Void) {
         // Validate inputs
-        guard isValidDestination(destination), isValidGateway(gateway) else {
+        guard allowsInstall(destination), isValidGateway(gateway) else {
             reply(false, "Invalid destination or gateway format")
             return
         }
@@ -176,7 +176,7 @@ class HelperTool: NSObject, HelperProtocol {
                 let isNetwork = route["isNetwork"] as? Bool ?? false
 
                 // Validate inputs
-                guard self.isValidDestination(destination), self.isValidGateway(gateway) else {
+                guard self.allowsInstall(destination), self.isValidGateway(gateway) else {
                     failureCount += 1
                     failedDestinations.append(destination)
                     continue
@@ -557,6 +557,17 @@ class HelperTool: NSObject, HelperProtocol {
         }
     }
     
+    /// ADD/CHANGE only. DELETE still uses `isValidDestination` so leftover `/1`
+    /// catch-alls from before 4.8.0 can be removed.
+    private func allowsInstall(_ string: String) -> Bool {
+        guard isValidDestination(string) else { return false }
+        if DestinationInstallPolicy.refusesInstall(string) {
+            helperLog.error("refusing install of \(string, privacy: .public) — /0 and /1 collide with full-tunnel VPN catch-alls")
+            return false
+        }
+        return true
+    }
+
     private func isValidDestination(_ string: String) -> Bool {
         // Refuse destinations owned by other networking software on this machine — Tailscale's
         // tailnet range and MagicDNS — plus kernel-reserved space. Enforced HERE, at the privileged
