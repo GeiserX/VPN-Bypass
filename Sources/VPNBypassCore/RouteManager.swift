@@ -5101,13 +5101,13 @@ final class RouteManager: ObservableObject {
     }
 
     /// Validate CIDR notation (e.g., "192.168.1.0/24")
-    /// Rejects /0 which would conflict with VPN Only catch-all routes.
+    /// Rejects /0 and /1, which collide with full-tunnel VPN catch-alls.
     nonisolated func isValidCIDR(_ string: String) -> Bool {
         let parts = string.components(separatedBy: "/")
         guard parts.count == 2,
               isValidIP(parts[0]),
               let mask = Int(parts[1]),
-              mask >= 1 && mask <= 32 else {
+              mask >= 2 && mask <= 32 else {
             return false
         }
         return true

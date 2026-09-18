@@ -135,7 +135,11 @@ struct HelperConstants {
     // of waitUntilExit() with no deadline. A wedged child used to park the XPC thread for
     // the life of the daemon after the app had already dropped the 30s hosts-update
     // connection. Bumped so installed 2.1.0 helpers reinstall and pick this up.
-    static let helperVersion = "2.2.0"
+    // 2.2.1: ADD/CHANGE refuses prefix <= 1 (`0.0.0.0/1`, `128.0.0.0/1`, and any other
+    // /0 or /1). Those collide with wg-quick / OpenVPN `redirect-gateway def1`. DELETE
+    // of the same destinations stays allowed so leftover pre-4.8.0 catch-alls can be
+    // cleaned up. Bumped so installed 2.2.0 helpers reinstall and pick this up.
+    static let helperVersion = "2.2.1"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"
@@ -226,6 +230,22 @@ public enum RouteCIDR {
         guard (1...32).contains(prefixLength) else { return "default" }
         let mask = UInt32.max << (32 - UInt32(prefixLength))
         return "\((mask >> 24) & 0xFF).\((mask >> 16) & 0xFF).\((mask >> 8) & 0xFF).\(mask & 0xFF)"
+    }
+}
+
+/// Destinations the privileged helper must not ADD or CHANGE.
+///
+/// A `/0` or `/1` covers half or all of IPv4. WireGuard (`wg-quick`) and OpenVPN
+/// `redirect-gateway def1` already own `0.0.0.0/1` + `128.0.0.0/1`. An ADD/CHANGE
+/// of those (or of `10.0.0.0/1`, which the kernel stores as `0.0.0.0/1`) rewrites
+/// the VPN's own catch-alls; teardown then deletes them. DELETE stays allowed so
+/// leftover pre-4.8.0 `/1`s can still be removed. Lives here so the helper, the
+/// app, and tests share one decision (same reason `HelperAuthPolicy` lives here).
+public enum DestinationInstallPolicy {
+    public static func refusesInstall(_ destination: String) -> Bool {
+        let d = destination.trimmingCharacters(in: .whitespaces)
+        guard let (_, prefix) = RouteCIDR.parse(d) else { return false }
+        return prefix <= 1
     }
 }
 

@@ -257,6 +257,25 @@ final class CommandRouterTests: XCTestCase {
         }
     }
 
+    /// A CIDR `/0` or `/1` is a well-formed match pattern, but the custom engine
+    /// installs the pattern as a kernel destination. That would RTM_CHANGE a
+    /// WireGuard / OpenVPN `def1` pair. Reject at rule.add so it never lands
+    /// in config.
+    func testRuleAddRejectsFullTunnelSlashOneCIDRAndDoesNotMutate() {
+        let route = Route(name: "R", egress: .direct)
+        var config = RouteManager.Config()
+        config.routes = [route]
+
+        for badPattern in ["0.0.0.0/0", "0.0.0.0/1", "128.0.0.0/1", "10.0.0.0/1"] {
+            let req = ControlRequest(cmd: "rule.add", args: ["match": "cidr", "pattern": badPattern, "routeId": route.id.uuidString])
+            let (updated, response) = CommandRouter.apply(req, to: config)
+
+            XCTAssertFalse(response.ok, "expected \(badPattern) to be rejected")
+            XCTAssertEqual(response.error?.code, "invalid_args")
+            XCTAssertTrue(updated.rules.isEmpty, "\(badPattern) must not create a rule")
+        }
+    }
+
     func testRuleAddAcceptsWellFormedIPAndCIDRPatterns() {
         let route = Route(name: "R", egress: .direct)
         var config = RouteManager.Config()
