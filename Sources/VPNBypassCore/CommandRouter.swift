@@ -394,8 +394,14 @@ enum CommandRouter {
         if matchType == .ip, !isValidIPv4(pattern) {
             return errorResponse(config, code: "invalid_args", message: "malformed IP/CIDR pattern")
         }
-        if matchType == .cidr, !isValidCIDR(pattern) {
-            return errorResponse(config, code: "invalid_args", message: "malformed IP/CIDR pattern")
+        if matchType == .cidr {
+            if !isValidCIDR(pattern) {
+                return errorResponse(config, code: "invalid_args", message: "malformed IP/CIDR pattern")
+            }
+            if DestinationInstallPolicy.refusesInstall(pattern) {
+                return errorResponse(config, code: "invalid_args",
+                                     message: "CIDR /0 and /1 cannot be installed as routes")
+            }
         }
         guard let routeId = uuid(request.args, "routeId"), config.routes.contains(where: { $0.id == routeId }) else {
             return errorResponse(config, code: "not_found", message: "no route with that id")
@@ -493,11 +499,10 @@ enum CommandRouter {
         return octets.allSatisfy { UInt32($0).map { $0 <= 255 } ?? false }
     }
 
-    /// Validates a rule MATCH pattern (RuleResolver matches traffic IPs against it), NOT a
-    /// kernel route destination. `/0` is intentionally allowed here — it means "match any
-    /// IPv4" (a catch-all rule) — whereas RouteManager.isValidCIDR rejects `/0` for route
-    /// *destinations* because it collides with the VPN-Only bypass-all
-    /// catch-alls. Different purposes; the `/0` difference is deliberate, not drift.
+    /// Validates a rule MATCH pattern (RuleResolver matches traffic IPs against it).
+    /// Prefix 0 and 1 are syntactically a CIDR, but `rule.add` also compiles the
+    /// pattern as a kernel destination, so dest-unsafe prefixes are rejected in
+    /// `ruleAdd` via `DestinationInstallPolicy` rather than here.
     private static func isValidCIDR(_ s: String) -> Bool {
         let parts = s.split(separator: "/", omittingEmptySubsequences: false)
         guard parts.count == 2, let bits = Int(parts[1]), (0...32).contains(bits) else { return false }

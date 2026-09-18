@@ -210,7 +210,8 @@ final class CIDRValidationTests: XCTestCase {
     }
 
     func testValidCIDRBoundaryMasks() {
-        XCTAssertTrue(rm.isValidCIDR("10.0.0.0/1"))
+        XCTAssertFalse(rm.isValidCIDR("10.0.0.0/1"))
+        XCTAssertTrue(rm.isValidCIDR("10.0.0.0/2"))
         XCTAssertTrue(rm.isValidCIDR("10.0.0.0/31"))
         XCTAssertTrue(rm.isValidCIDR("10.0.0.0/32"))
     }

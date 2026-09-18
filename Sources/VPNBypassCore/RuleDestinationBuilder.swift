@@ -58,7 +58,9 @@ enum RuleDestinationBuilder {
             case .ip:
                 add(rule.pattern, false)
             case .cidr:
-                add(rule.pattern, true)
+                if !DestinationInstallPolicy.refusesInstall(rule.pattern) {
+                    add(rule.pattern, true)
+                }
             case .domain:
                 for ip in resolved[rule.pattern] ?? [] { add(ip, false) }
             case .service:
