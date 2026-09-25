@@ -115,4 +115,96 @@ final class ReconnectSettleTests: XCTestCase {
         XCTAssertEqual(ReconnectSettle.effectiveStrikes(0, lastStrikeAt: hot, now: now), 0)
         XCTAssertEqual(ReconnectSettle.effectiveStrikes(3, lastStrikeAt: nil, now: now), 0)
     }
+
+    // MARK: - What a reconnect needs (fix 1)
+
+    /// Bypass routes egress the local gateway and are kept across a drop; while they are
+    /// fresher than the refresh interval a reconnect has nothing to write.
+    func testWarmBypassReconnectReconcilesOnly() {
+        let now = Date()
+        XCTAssertEqual(ReconnectSettle.reconnectAction(routingMode: .bypass, hasInstalledRoutes: true,
+                                                       lastApplyAt: now.addingTimeInterval(-600),
+                                                       refreshInterval: 3600, now: now),
+                       .reconcileOnly)
+    }
+
+    /// Every other shape keeps the full apply: cold start, routes older than the refresh
+    /// interval, an unknown apply time, and the two modes whose routes point at the tunnel.
+    func testEverythingElseFullyApplies() {
+        let now = Date()
+        let fresh = now.addingTimeInterval(-600)
+        XCTAssertEqual(ReconnectSettle.reconnectAction(routingMode: .bypass, hasInstalledRoutes: false,
+                                                       lastApplyAt: fresh, refreshInterval: 3600, now: now),
+                       .fullApply, "cold start")
+        XCTAssertEqual(ReconnectSettle.reconnectAction(routingMode: .bypass, hasInstalledRoutes: true,
+                                                       lastApplyAt: now.addingTimeInterval(-3600),
+                                                       refreshInterval: 3600, now: now),
+                       .fullApply, "routes as old as the refresh interval")
+        XCTAssertEqual(ReconnectSettle.reconnectAction(routingMode: .bypass, hasInstalledRoutes: true,
+                                                       lastApplyAt: nil, refreshInterval: 3600, now: now),
+                       .fullApply, "never applied")
+        XCTAssertEqual(ReconnectSettle.reconnectAction(routingMode: .bypass, hasInstalledRoutes: true,
+                                                       lastApplyAt: now.addingTimeInterval(60),
+                                                       refreshInterval: 3600, now: now),
+                       .fullApply, "apply time in the future (clock moved)")
+        for mode: RoutingMode in [.vpnOnly, .custom] {
+            XCTAssertEqual(ReconnectSettle.reconnectAction(routingMode: mode, hasInstalledRoutes: true,
+                                                           lastApplyAt: fresh, refreshInterval: 3600, now: now),
+                           .fullApply, "\(mode) routes point at the tunnel gateway")
+        }
+    }
+
+    // MARK: - Abstaining (fix 3)
+
+    /// Below the threshold the apply is only delayed (existing backoff); at it and above, it is
+    /// withheld for exactly the time left until the strikes decay — and that wait shrinks as
+    /// the tunnel holds, never grows.
+    func testStrikesAtThresholdWithholdUntilDecay() {
+        let now = Date()
+        let last = now.addingTimeInterval(-600)
+        XCTAssertNil(ReconnectSettle.withheldDelay(killStrikes: ReconnectSettle.abstainStrikes - 1,
+                                                   lastStrikeAt: last, now: now))
+        XCTAssertNil(ReconnectSettle.withheldDelay(killStrikes: ReconnectSettle.abstainStrikes,
+                                                   lastStrikeAt: nil, now: now))
+        XCTAssertEqual(ReconnectSettle.withheldDelay(killStrikes: ReconnectSettle.abstainStrikes,
+                                                     lastStrikeAt: last, now: now),
+                       ReconnectSettle.strikeExpiry - 600)
+        XCTAssertEqual(ReconnectSettle.withheldDelay(killStrikes: 9,
+                                                     lastStrikeAt: now.addingTimeInterval(-ReconnectSettle.strikeExpiry - 5),
+                                                     now: now),
+                       0, "already decayed: no wait, and effectiveStrikes reports 0 anyway")
+    }
+
+    /// The withheld wait must always exceed the capped backoff it replaces, otherwise abstaining
+    /// would be a shorter wait than delaying (observed: capped 240 s applies still killed the tunnel).
+    func testWithheldWaitExceedsBackoffCapWhileHot() throws {
+        let now = Date()
+        let justStruck = now.addingTimeInterval(-1)
+        let wait = try XCTUnwrap(ReconnectSettle.withheldDelay(killStrikes: ReconnectSettle.abstainStrikes,
+                                                               lastStrikeAt: justStruck, now: now))
+        XCTAssertGreaterThan(wait, ReconnectSettle.maxBackoffDelay)
+    }
+
+    // MARK: - The DNS refresh waits for a calm tunnel (fix 2)
+
+    func testRefreshRunsOnCalmTunnel() {
+        let now = Date()
+        XCTAssertNil(ReconnectSettle.refreshDeferral(lastConnectAt: nil, killStrikes: 0, now: now))
+        XCTAssertNil(ReconnectSettle.refreshDeferral(
+            lastConnectAt: now.addingTimeInterval(-ReconnectSettle.refreshCalmWindow),
+            killStrikes: 0, now: now))
+    }
+
+    /// Reconnected inside the calm window → wait out the rest of it; any live strike → wait a
+    /// full window; a connect time in the future is not "recent".
+    func testRefreshDefersAfterReconnectOrStrike() {
+        let now = Date()
+        XCTAssertEqual(ReconnectSettle.refreshDeferral(lastConnectAt: now.addingTimeInterval(-100),
+                                                       killStrikes: 0, now: now),
+                       ReconnectSettle.refreshCalmWindow - 100)
+        XCTAssertEqual(ReconnectSettle.refreshDeferral(lastConnectAt: nil, killStrikes: 1, now: now),
+                       ReconnectSettle.refreshCalmWindow)
+        XCTAssertNil(ReconnectSettle.refreshDeferral(lastConnectAt: now.addingTimeInterval(30),
+                                                     killStrikes: 0, now: now))
+    }
 }
