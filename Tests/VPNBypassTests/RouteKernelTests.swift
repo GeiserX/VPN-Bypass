@@ -150,6 +150,103 @@ final class RouteKernelTests: XCTestCase {
         XCTAssertTrue(table.contains { $0.gatewayAddress != nil || $0.gatewayInterfaceIndex != nil })
     }
 
+    // MARK: - RTM_GET lookup (replaces the `route -n get` child process)
+
+    /// Byte layout of the request: RTM_GET, DST + IFP for a host; "default" adds an all-zero
+    /// netmask so the kernel returns the exact 0.0.0.0/0 entry, as route(8) does.
+    func testGetMessageLayout() throws {
+        let host = try XCTUnwrap(RouteKernel.getMessage(destination: "10.1.2.3", seq: 7))
+        var h = header(of: host)
+        XCTAssertEqual(Int32(h.rtm_type), RTM_GET)
+        XCTAssertEqual(h.rtm_seq, 7)
+        XCTAssertEqual(h.rtm_addrs, RTA_DST | RTA_IFP)
+        XCTAssertEqual(Int(h.rtm_msglen), host.count)
+        XCTAssertEqual(host.count, hdrSize + 16 + 20)  // sockaddr_in(16) + sockaddr_dl(20)
+
+        let def = try XCTUnwrap(RouteKernel.getMessage(destination: "default", seq: 8))
+        h = header(of: def)
+        XCTAssertEqual(h.rtm_addrs, RTA_DST | RTA_NETMASK | RTA_IFP)
+        XCTAssertEqual(def.count, hdrSize + 16 + 16 + 20)
+        XCTAssertNil(RouteKernel.getMessage(destination: "not-an-ip", seq: 1))
+    }
+
+    /// A reply built by hand: gateway inet, interface "en0" in the IFP sockaddr_dl.
+    func testParseGetReplyReadsGatewayAndInterface() throws {
+        var hdr = rt_msghdr()
+        hdr.rtm_version = u_char(RTM_VERSION)
+        hdr.rtm_type = u_char(RTM_GET)
+        hdr.rtm_flags = RTF_UP | RTF_GATEWAY
+        hdr.rtm_addrs = RTA_DST | RTA_GATEWAY | RTA_IFP
+        var body = Data()
+        body.append(RouteKernel.paddedSockaddr(RouteKernel.sockaddrInData(0x0A010203)))
+        body.append(RouteKernel.paddedSockaddr(RouteKernel.sockaddrInData(0xC0A80101)))
+        var dl = sockaddr_dl()
+        dl.sdl_len = u_char(MemoryLayout<sockaddr_dl>.size)
+        dl.sdl_family = sa_family_t(AF_LINK)
+        dl.sdl_index = 4
+        dl.sdl_nlen = 3
+        withUnsafeMutableBytes(of: &dl.sdl_data) { raw in
+            raw[0] = UInt8(ascii: "e"); raw[1] = UInt8(ascii: "n"); raw[2] = UInt8(ascii: "0")
+        }
+        body.append(RouteKernel.paddedSockaddr(withUnsafeBytes(of: &dl) { Data($0) }))
+        hdr.rtm_msglen = u_short(hdrSize + body.count)
+        var reply = withUnsafeBytes(of: &hdr) { Data($0) }
+        reply.append(body)
+
+        let parsed = try XCTUnwrap(RouteKernel.parseGetReply(reply))
+        XCTAssertEqual(parsed.gatewayAddress, "192.168.1.1")
+        XCTAssertEqual(parsed.interfaceName, "en0")
+        XCTAssertEqual(parsed.interfaceIndex, 4)
+        XCTAssertEqual(parsed.flags & RTF_GATEWAY, RTF_GATEWAY)
+    }
+
+    /// A link-level gateway (an ARP entry, `link#N`) yields no address — the caller must not
+    /// mistake it for a next hop.
+    func testParseGetReplyLinkGatewayHasNoAddress() throws {
+        var hdr = rt_msghdr()
+        hdr.rtm_version = u_char(RTM_VERSION)
+        hdr.rtm_type = u_char(RTM_GET)
+        hdr.rtm_addrs = RTA_DST | RTA_GATEWAY
+        var body = Data()
+        body.append(RouteKernel.paddedSockaddr(RouteKernel.sockaddrInData(0xC0A80101)))
+        body.append(RouteKernel.paddedSockaddr(RouteKernel.sockaddrDLData(index: 9)))
+        hdr.rtm_msglen = u_short(hdrSize + body.count)
+        var reply = withUnsafeBytes(of: &hdr) { Data($0) }
+        reply.append(body)
+        let parsed = try XCTUnwrap(RouteKernel.parseGetReply(reply))
+        XCTAssertNil(parsed.gatewayAddress)
+        XCTAssertNil(RouteKernel.parseGetReply(Data(count: 10)), "truncated header")
+    }
+
+    /// Live, unprivileged, deterministic on every Mac: loopback leaves via lo0.
+    func testLiveLookupOfLoopbackNamesLo0() throws {
+        let hit = try XCTUnwrap(RouteKernel.lookup("127.0.0.1"))
+        XCTAssertEqual(hit.interfaceName, "lo0")
+        XCTAssertEqual(hit.interfaceIndex, 1)
+    }
+
+    /// The same question `route -n get` asks must get the same answer. Compared live against the
+    /// command's output, on whatever this machine's default route happens to be.
+    func testLiveDefaultLookupMatchesRouteCommand() throws {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/sbin/route")
+        proc.arguments = ["-n", "get", "default"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+        try proc.run()
+        proc.waitUntilExit()
+        let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        guard proc.terminationStatus == 0, let iface = VPNInterfaceSelector.parseDefaultRouteInterface(text) else {
+            throw XCTSkip("no default route on this machine")
+        }
+        let gw = text.components(separatedBy: "\n").first { $0.trimmingCharacters(in: .whitespaces).hasPrefix("gateway:") }?
+            .components(separatedBy: ":").last?.trimmingCharacters(in: .whitespaces)
+        let hit = try XCTUnwrap(RouteKernel.lookup("default"))
+        XCTAssertEqual(hit.interfaceName, iface)
+        if let gw, gw.first?.isNumber == true { XCTAssertEqual(hit.gatewayAddress, gw) }
+    }
+
     // MARK: - Helpers
 
     func testIPv4Conversions() {

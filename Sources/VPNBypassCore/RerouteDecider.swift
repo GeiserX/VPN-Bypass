@@ -142,4 +142,76 @@ enum ReconnectSettle {
               now.timeIntervalSince(last) < strikeExpiry else { return 0 }
         return strikes
     }
+
+    // MARK: - What a reconnect actually needs
+
+    enum ReconnectAction: Equatable {
+        /// Re-resolve every domain and rebuild the route set (cold start, or the routes are
+        /// older than the refresh interval, or a mode whose routes point at the tunnel).
+        case fullApply
+        /// Bypass routes are installed and fresh: they egress the local gateway and survived
+        /// the drop, so the reconnect has nothing to write. The silent missing-route reconcile
+        /// that runs on every status pass covers anything the kernel dropped.
+        case reconcileOnly
+    }
+
+    /// Whether a (re)connect must re-apply at all. In Bypass mode every route egresses the
+    /// LOCAL gateway, so a drop leaves them all correct and the app already keeps them
+    /// ("VPN gone; N bypass route(s) still egress the local gateway — keeping them"). The old
+    /// post-reconnect apply then re-resolved DNS anyway, and because CDN answers rotate the
+    /// desired set never matched the installed set, so `shouldSkipReapply` never fired and
+    /// every reconnect became a burst of ~80 adds + ~70 orphan deletes — observed 7 for 7 to
+    /// be followed by a GlobalProtect gateway-route timeout within 20 s. Only the hourly
+    /// refresh needs fresh DNS; a reconnect needs nothing. VPN Only and Custom keep the apply:
+    /// their routes point at the tunnel gateway, which a reconnect may have moved. A config
+    /// saved after the last apply (a domain toggled or added while the VPN was down — those
+    /// edits only reach the kernel while connected) also keeps the full apply: the installed
+    /// routes are fresh but no longer what the user asked for.
+    static func reconnectAction(routingMode: RoutingMode, hasInstalledRoutes: Bool,
+                                lastApplyAt: Date?, configChangedAt: Date? = nil,
+                                refreshInterval: TimeInterval, now: Date) -> ReconnectAction {
+        guard routingMode == .bypass, hasInstalledRoutes, let last = lastApplyAt,
+              now.timeIntervalSince(last) >= 0,
+              now.timeIntervalSince(last) < refreshInterval else { return .fullApply }
+        if let changed = configChangedAt, changed > last { return .fullApply }
+        return .reconcileOnly
+    }
+
+    // MARK: - Abstaining (strikes past the threshold)
+
+    /// From this many live strikes on, the post-reconnect apply is withheld outright instead
+    /// of merely delayed: on 2026-09-25 the backoff reached its 240 s cap and every capped apply
+    /// still knocked the tunnel down (strike 6, 7...). Delaying a write that is going to kill
+    /// the reader only spaces the kills out.
+    static let abstainStrikes = 3
+
+    /// Seconds to hold the apply back when strikes are at or past `abstainStrikes`: the time
+    /// left until they decay, i.e. until the tunnel has held `strikeExpiry` without a strike.
+    /// Nil means "not withheld, use `delay`". The wait is bounded by construction — no writes
+    /// while withheld means no new strikes, so the expiry never moves.
+    static func withheldDelay(killStrikes: Int, lastStrikeAt: Date?, now: Date) -> TimeInterval? {
+        guard killStrikes >= abstainStrikes, let last = lastStrikeAt else { return nil }
+        return max(0, strikeExpiry - now.timeIntervalSince(last))
+    }
+
+    // MARK: - The hourly DNS refresh waits for a calm tunnel
+
+    /// A tunnel that (re)connected this recently is still fragile; the refresh's write burst
+    /// waits. Also the retry spacing while deferred.
+    static let refreshCalmWindow: TimeInterval = 600
+
+    /// Seconds to postpone the periodic DNS refresh, or nil to run it now. Deferred while the
+    /// VPN reconnected inside `refreshCalmWindow` or any apply-kill strike is live: with the
+    /// reconnect apply gone (see `reconnectAction`), the refresh was the last write source that
+    /// could fire into a flap storm. Stale bypass routes for a few more minutes cost far less
+    /// than a dead tunnel. Bounded: strikes decay 30 min after the last one, and a tunnel that
+    /// stops reconnecting leaves the calm window on its own.
+    static func refreshDeferral(lastConnectAt: Date?, killStrikes: Int, now: Date) -> TimeInterval? {
+        if killStrikes > 0 { return refreshCalmWindow }
+        if let connectAt = lastConnectAt {
+            let since = now.timeIntervalSince(connectAt)
+            if since >= 0 && since < refreshCalmWindow { return refreshCalmWindow - since }
+        }
+        return nil
+    }
 }

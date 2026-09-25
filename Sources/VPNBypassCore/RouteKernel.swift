@@ -375,6 +375,148 @@ public enum RouteKernel {
     }
 }
 
+// MARK: - Route lookup (RTM_GET, in-process)
+
+extension RouteKernel {
+
+    /// The kernel's answer to "how would a packet to X leave?" — the question `route -n get X`
+    /// asks, minus the fork, the exec and the text parse.
+    public struct RouteLookup: Equatable, Sendable {
+        /// AF_INET next hop; nil for a direct or link-level route (an ARP entry, `link#N`).
+        public let gatewayAddress: String?
+        /// "en0", "utun5" — the RTA_IFP the kernel fills in when asked for it.
+        public let interfaceName: String?
+        public let interfaceIndex: UInt16?
+        public let flags: Int32
+
+        public init(gatewayAddress: String?, interfaceName: String?, interfaceIndex: UInt16?, flags: Int32) {
+            self.gatewayAddress = gatewayAddress
+            self.interfaceName = interfaceName
+            self.interfaceIndex = interfaceIndex
+            self.flags = flags
+        }
+    }
+
+    /// The RTM_GET request `route -n get` sends: DST plus an empty IFP the kernel fills with the
+    /// outgoing interface. "default" adds an all-zero netmask, which asks for the exact 0.0.0.0/0
+    /// entry (the unscoped default) instead of a longest-prefix match on 0.0.0.0 — the same
+    /// distinction route(8) makes, so the answer is identical to its output.
+    public static func getMessage(destination: String, seq: Int32) -> Data? {
+        let isDefault = destination == "default"
+        let dst: UInt32
+        if isDefault {
+            dst = 0
+        } else {
+            guard let ip = ipv4ToUInt32(destination) else { return nil }
+            dst = ip
+        }
+        var hdr = rt_msghdr()
+        hdr.rtm_version = u_char(RTM_VERSION)
+        hdr.rtm_type = u_char(RTM_GET)
+        hdr.rtm_flags = RTF_UP
+        hdr.rtm_addrs = RTA_DST | RTA_IFP | (isDefault ? RTA_NETMASK : 0)
+        hdr.rtm_seq = seq
+
+        var body = Data()
+        body.append(paddedSockaddr(sockaddrInData(dst)))
+        if isDefault { body.append(paddedSockaddr(sockaddrInData(0))) }
+        body.append(paddedSockaddr(sockaddrDLData(index: 0)))
+
+        hdr.rtm_msglen = u_short(MemoryLayout<rt_msghdr>.size + body.count)
+        var out = withUnsafeBytes(of: &hdr) { Data($0) }
+        out.append(body)
+        return out
+    }
+
+    /// Parses one RTM_GET reply. Sockaddrs are positional in RTA bit order, like the dump; the
+    /// interface comes from RTA_IFP's `sockaddr_dl` (name at `sdl_data`, length `sdl_nlen`),
+    /// falling back to the header's `rtm_index` when the kernel left the name empty.
+    public static func parseGetReply(_ data: Data) -> RouteLookup? {
+        let hdrSize = MemoryLayout<rt_msghdr>.size
+        guard data.count >= hdrSize else { return nil }
+        let hdr: rt_msghdr = data.withUnsafeBytes { $0.loadUnaligned(as: rt_msghdr.self) }
+        guard hdr.rtm_version == u_char(RTM_VERSION), hdr.rtm_type == u_char(RTM_GET) else { return nil }
+        let end = min(Int(hdr.rtm_msglen), data.count)
+        var cursor = hdrSize
+        var gateway: String? = nil
+        var ifName: String? = nil
+        var ifIndex: UInt16? = nil
+
+        for bit in 0..<31 {
+            let rta = Int32(1) << bit
+            guard hdr.rtm_addrs & rta != 0 else { continue }
+            guard cursor < end else { break }
+            let saLen = Int(data[cursor])
+            let family = cursor + 1 < end ? data[cursor + 1] : 0
+            switch rta {
+            case RTA_GATEWAY:
+                if family == u_char(AF_INET), let ip = readIPv4(data, at: cursor, saLen: saLen) {
+                    gateway = dotted(ip)
+                }
+            case RTA_IFP:
+                if family == u_char(AF_LINK), saLen >= 8 {
+                    ifIndex = UInt16(data[cursor + 2]) | (UInt16(data[cursor + 3]) << 8)
+                    let nameLen = Int(data[cursor + 5])
+                    let start = cursor + 8
+                    if nameLen > 0, start + nameLen <= end {
+                        ifName = String(decoding: data[start..<(start + nameLen)], as: UTF8.self)
+                    }
+                }
+            default:
+                break
+            }
+            cursor += roundup(saLen)
+        }
+
+        if ifIndex == nil, hdr.rtm_index != 0 { ifIndex = hdr.rtm_index }
+        if ifName == nil, let index = ifIndex {
+            var buf = [CChar](repeating: 0, count: Int(IF_NAMESIZE))
+            if if_indextoname(UInt32(index), &buf) != nil { ifName = String(cString: buf) }
+        }
+        return RouteLookup(gatewayAddress: gateway, interfaceName: ifName, interfaceIndex: ifIndex, flags: hdr.rtm_flags)
+    }
+
+    /// Asks the kernel over a routing socket. Unprivileged, no child process, a few hundred
+    /// microseconds. A write error (ESRCH — "not in table") or no matching reply within
+    /// `timeout` yields nil, exactly the cases where `route -n get` printed nothing useful.
+    /// The socket is opened per call so it never sits accumulating everyone else's broadcasts
+    /// between calls; the reply is matched by sequence AND pid because every routing socket
+    /// sees every message.
+    public static func lookup(_ destination: String, timeout: TimeInterval = 3) -> RouteLookup? {
+        let seq = Int32.random(in: 1...Int32.max)
+        guard let request = getMessage(destination: destination, seq: seq) else { return nil }
+        let fd = socket(PF_ROUTE, SOCK_RAW, AF_INET)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var rcvbuf: Int32 = 256 * 1024
+        _ = setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, socklen_t(MemoryLayout<Int32>.size))
+
+        let written = request.withUnsafeBytes { raw -> Int in
+            write(fd, raw.baseAddress, request.count)
+        }
+        guard written == request.count else { return nil }
+
+        let pid = getpid()
+        let deadline = Date().addingTimeInterval(timeout)
+        var buf = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { return nil }
+            var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            let ready = poll(&pfd, 1, Int32(remaining * 1000))
+            if ready < 0 { if errno == EINTR { continue }; return nil }
+            if ready == 0 { return nil }
+            let n = read(fd, &buf, buf.count)
+            guard n >= MemoryLayout<rt_msghdr>.size else { if n <= 0 { return nil }; continue }
+            let data = Data(buf.prefix(n))
+            let hdr: rt_msghdr = data.withUnsafeBytes { $0.loadUnaligned(as: rt_msghdr.self) }
+            guard hdr.rtm_type == u_char(RTM_GET), hdr.rtm_seq == seq, hdr.rtm_pid == pid else { continue }
+            guard hdr.rtm_errno == 0 else { return nil }
+            return parseGetReply(data)
+        }
+    }
+}
+
 // MARK: - Write pacing
 
 extension RouteKernel {

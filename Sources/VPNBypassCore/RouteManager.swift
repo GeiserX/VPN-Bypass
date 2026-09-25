@@ -99,6 +99,15 @@ final class RouteManager: ObservableObject {
     private var applyKillStrikes = 0
     private var lastApplyKillAt: Date?
     private var lastKernelBurstAt: Date?
+    /// When the VPN last went from disconnected to connected. The periodic DNS refresh keeps
+    /// clear of the `ReconnectSettle.refreshCalmWindow` that follows it.
+    private var lastVPNConnectAt: Date?
+    /// When the config was last saved. An edit made while the VPN was down (a domain toggled
+    /// off, a new one added) has not reached the kernel yet, so the next reconnect must run
+    /// the full apply even though the installed routes look fresh.
+    private var configChangedAt: Date?
+    /// One-shot retry armed when the periodic refresh was deferred (see performDNSRefresh).
+    private var dnsRefreshRetryTask: Task<Void, Never>?
     /// First-seen timestamps for routes that dropped out of the desired set during an
     /// auto-triggered apply (DNS rotation, mostly). See `orphanGraceDecision`.
     private var orphanFirstSeen: [String: Date] = [:]
@@ -338,6 +347,7 @@ final class RouteManager: ObservableObject {
             try FileManager.default.moveItem(at: tempURL, to: configURL)
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
+        configChangedAt = Date()
 
         log(.info, "Config saved")
     }
@@ -583,6 +593,17 @@ final class RouteManager: ObservableObject {
     // MARK: - Process Helper
     
     /// Runs a process asynchronously on a background thread with timeout to prevent UI freezing
+    /// `route -n get <destination>` without the child process: the same RTM_GET, answered by
+    /// the kernel over a routing socket (see RouteKernel.lookup). Off the main actor because
+    /// the reply wait can block up to its timeout.
+    private func routeLookupAsync(_ destination: String) async -> RouteKernel.RouteLookup? {
+        await withCheckedContinuation { continuation in
+            vpnBypassProcessQueue.async {
+                continuation.resume(returning: RouteKernel.lookup(destination))
+            }
+        }
+    }
+
     private func runProcessAsync(
         _ executablePath: String,
         arguments: [String] = [],
@@ -708,26 +729,61 @@ final class RouteManager: ObservableObject {
             vpnGateway = nil
         }
         
+        if isVPNConnected && !wasVPNConnected { lastVPNConnectAt = Date() }
+
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
         // Also skip if helper is not ready — no point attempting routes that will all fail
         if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled && !isConfigLoadFailed {
+            let now = Date()
+            let vpnLabel = "\(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type"))"
+            // Fresh routes = the newer of the last full apply and the last DNS refresh.
+            let lastApplyAt = [lastUpdate, lastDNSRefresh].compactMap { $0 }.max()
             // Skip if routes were applied very recently (within 5 seconds) - prevents double-triggering
-            if let lastUpdate = lastUpdate, Date().timeIntervalSince(lastUpdate) < 5 {
-                log(.info, "Skipping duplicate route application (applied \(Int(Date().timeIntervalSince(lastUpdate)))s ago)")
+            if let lastUpdate = lastUpdate, now.timeIntervalSince(lastUpdate) < 5 {
+                log(.info, "Skipping duplicate route application (applied \(Int(now.timeIntervalSince(lastUpdate)))s ago)")
+            } else if ReconnectSettle.reconnectAction(routingMode: config.routingMode,
+                                                     hasInstalledRoutes: !activeRoutes.isEmpty,
+                                                     lastApplyAt: lastApplyAt,
+                                                     configChangedAt: configChangedAt,
+                                                     refreshInterval: config.dnsRefreshInterval,
+                                                     now: now) == .reconcileOnly {
+                // Warm Bypass reconnect: the routes were kept across the drop and are fresher
+                // than the refresh interval, so there is nothing to write. Re-resolving DNS here
+                // was the burst that kept knocking a fragile tunnel straight back down (see
+                // ReconnectSettle.reconnectAction). reconcileMissingRoutes runs on this same
+                // status pass and restores anything the kernel actually dropped.
+                let ageMin = lastApplyAt.map { Int(now.timeIntervalSince($0) / 60) } ?? 0
+                log(.success, "VPN connected via \(vpnLabel) — \(activeRoutes.count) bypass route(s) still installed (applied \(ageMin) min ago), nothing to re-apply")
+                NotificationManager.shared.notifyVPNConnected(interface: interface ?? "unknown")
+                reconnectSettleTask?.cancel()
+                reconnectSettleTask = nil
+                reconnectDeferrals = 0
             } else {
                 // Settle gate: never fire the apply into the tunnel's fragile post-(re)connect
                 // window — see reconnectSettleTask. The notification still goes out now (the
                 // VPN *is* connected); only our kernel writes wait.
                 applyKillStrikes = ReconnectSettle.effectiveStrikes(applyKillStrikes,
                                                                     lastStrikeAt: lastApplyKillAt,
-                                                                    now: Date())
-                let delay = ReconnectSettle.delay(deferrals: reconnectDeferrals,
+                                                                    now: now)
+                let delay: TimeInterval
+                if let withheld = ReconnectSettle.withheldDelay(killStrikes: applyKillStrikes,
+                                                                lastStrikeAt: lastApplyKillAt,
+                                                                now: now) {
+                    // Past the abstain threshold the apply is not slower, it is withheld until
+                    // the strikes decay — until the tunnel has held for `strikeExpiry` without
+                    // one. The task below sleeps exactly that long; a drop meanwhile cancels it
+                    // and the next connect recomputes from the same, unmoved expiry.
+                    delay = withheld
+                    log(.warning, "VPN connected via \(vpnLabel) — post-reconnect apply withheld: \(applyKillStrikes) suspected apply-kills; applying once the tunnel has held for \(Int(withheld / 60)) more min")
+                } else {
+                    delay = ReconnectSettle.delay(deferrals: reconnectDeferrals,
                                                   hasInstalledRoutes: !activeRoutes.isEmpty,
                                                   killStrikes: applyKillStrikes)
-                let backoffNote = applyKillStrikes > 0
-                    ? " (backed off — \(applyKillStrikes) suspected apply-kill\(applyKillStrikes == 1 ? "" : "s"))"
-                    : ""
-                log(.success, "VPN connected via \(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type")) — applying routes in \(Int(delay))s once the tunnel settles\(backoffNote)")
+                    let backoffNote = applyKillStrikes > 0
+                        ? " (backed off — \(applyKillStrikes) suspected apply-kill\(applyKillStrikes == 1 ? "" : "s"))"
+                        : ""
+                    log(.success, "VPN connected via \(vpnLabel) — applying routes in \(Int(delay))s once the tunnel settles\(backoffNote)")
+                }
                 NotificationManager.shared.notifyVPNConnected(interface: interface ?? "unknown")
                 reconnectSettleTask?.cancel()
                 reconnectSettleTask = Task { [weak self] in
@@ -1114,10 +1170,7 @@ final class RouteManager: ObservableObject {
     /// This is the only direct evidence of which tunnel is actually carrying traffic.
     /// The plain `route get default` answer — what the coexistence diagnostics card shows.
     func currentDefaultRouteInterface() async -> String? {
-        guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", "default"], timeout: 5.0) else {
-            return nil
-        }
-        return VPNInterfaceSelector.parseDefaultRouteInterface(result.output)
+        await routeLookupAsync("default")?.interfaceName
     }
 
     /// The interface actually carrying the traffic — selection's ground truth.
@@ -3056,10 +3109,26 @@ final class RouteManager: ObservableObject {
     func stopDNSRefreshTimer() {
         dnsRefreshTimer?.invalidate()
         dnsRefreshTimer = nil
+        dnsRefreshRetryTask?.cancel()
+        dnsRefreshRetryTask = nil
+    }
+
+    /// Re-attempt a deferred periodic refresh after `wait`; the attempt re-runs the calm gate.
+    private func scheduleDNSRefreshRetry(after wait: TimeInterval) {
+        dnsRefreshRetryTask?.cancel()
+        dnsRefreshRetryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.dnsRefreshRetryTask = nil
+            await self.performDNSRefresh()
+        }
     }
     
     /// Perform DNS refresh - re-resolve all domains and update routes
-    private func performDNSRefresh() async {
+    ///
+    /// `userInitiated` (the Refresh action) skips the calm-tunnel gate: a person asking for it
+    /// now gets it now. The periodic timer and its deferred retry go through the gate.
+    private func performDNSRefresh(userInitiated: Bool = false) async {
         let epoch = routeEpoch
         guard acquireRouteOperation() else {
             log(.info, "DNS refresh skipped: another route operation is in progress")
@@ -3072,6 +3141,29 @@ final class RouteManager: ObservableObject {
             nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
             return
         }
+
+        // With a warm Bypass reconnect writing nothing (ReconnectSettle.reconnectAction), this
+        // refresh is the last write source that can fire into a flap storm. Keep it clear of a
+        // tunnel that just reconnected or is marked by apply-kill strikes, and come back later.
+        if !userInitiated {
+            let now = Date()
+            let liveStrikes = ReconnectSettle.effectiveStrikes(applyKillStrikes,
+                                                               lastStrikeAt: lastApplyKillAt,
+                                                               now: now)
+            if let wait = ReconnectSettle.refreshDeferral(lastConnectAt: lastVPNConnectAt,
+                                                          killStrikes: liveStrikes, now: now) {
+                let why = liveStrikes > 0
+                    ? "\(liveStrikes) suspected apply-kill\(liveStrikes == 1 ? "" : "s") outstanding"
+                    : "VPN reconnected \(Int(now.timeIntervalSince(lastVPNConnectAt ?? now)))s ago"
+                log(.info, "DNS refresh deferred \(Int(wait / 60)) min — \(why)")
+                nextDNSRefresh = now.addingTimeInterval(wait)
+                scheduleDNSRefreshRetry(after: wait)
+                return
+            }
+        }
+        // A refresh that proceeds supersedes any deferred retry still pending.
+        dnsRefreshRetryTask?.cancel()
+        dnsRefreshRetryTask = nil
 
         // Custom mode: re-resolve rules + recompile + reconcile (full replace), then
         // refresh the timestamps. The legacy incremental diff below is untouched.
@@ -3361,7 +3453,7 @@ final class RouteManager: ObservableObject {
     /// Force an immediate DNS refresh
     func forceDNSRefresh() {
         Task {
-            await performDNSRefresh()
+            await performDNSRefresh(userInitiated: true)
         }
     }
     
@@ -4667,15 +4759,7 @@ final class RouteManager: ObservableObject {
     /// instead of a full-tunnel VPN's utun.
     private func detectPhysicalInterface() async -> String? {
         guard let gateway = localGateway else { return nil }
-        guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", gateway], timeout: 3.0) else { return nil }
-        for line in result.output.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("interface:") {
-                let iface = trimmed.replacingOccurrences(of: "interface:", with: "").trimmingCharacters(in: .whitespaces)
-                return iface.isEmpty ? nil : iface
-            }
-        }
-        return nil
+        return await routeLookupAsync(gateway)?.interfaceName
     }
 
     /// Detect user's real DNS server (from primary non-VPN interface)
@@ -4740,7 +4824,7 @@ final class RouteManager: ObservableObject {
     }
     
     private func parseDefaultGateway() async -> String? {
-        guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", "default"], timeout: 3.0) else {
+        guard let route = await routeLookupAsync("default") else {
             return nil
         }
 
@@ -4750,16 +4834,8 @@ final class RouteManager: ObservableObject {
         // supposed to avoid. Returning nil is the safe answer: the apply paths already refuse to
         // install without a gateway and say so, which is a visible failure rather than a silent
         // one that quietly stops bypassing while reporting success.
-        var iface: String?
-        var gateway: String?
-        for line in result.output.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("interface:") {
-                iface = String(trimmed.dropFirst("interface:".count)).trimmingCharacters(in: .whitespaces)
-            } else if trimmed.hasPrefix("gateway:") {
-                gateway = String(trimmed.dropFirst("gateway:".count)).trimmingCharacters(in: .whitespaces)
-            }
-        }
+        let iface = route.interfaceName
+        let gateway = route.gatewayAddress
 
         if let iface, isVPNInterface(iface) {
             log(.warning, "Default route exits via \(iface) (a tunnel) — not using it as the local gateway")
@@ -4773,33 +4849,17 @@ final class RouteManager: ObservableObject {
     }
 
     /// Detect VPN gateway for VPN Only mode routing.
-    /// Parses `route -n get default` for both gateway IP and interface.
+    /// Reads the default route (the kernel's RTM_GET answer) for both gateway IP and interface.
     /// Falls back to interface-based routing when no IP gateway is available
     /// (e.g., Cisco Secure Client routes via link# without setting an IP gateway).
     private func detectVPNGateway() async -> String? {
-        guard let result = await runProcessAsync("/sbin/route", arguments: ["-n", "get", "default"], timeout: 3.0) else {
+        guard let route = await routeLookupAsync("default") else {
             if let iface = vpnInterface { return "iface:\(iface)" }
             return nil
         }
 
-        var gateway: String?
-        var routeInterface: String?
-
-        for line in result.output.components(separatedBy: "\n") {
-            if line.contains("gateway:") {
-                let parts = line.components(separatedBy: ":")
-                if parts.count >= 2 {
-                    let gw = parts[1].trimmingCharacters(in: .whitespaces)
-                    if isValidIP(gw) { gateway = gw }
-                }
-            }
-            if line.contains("interface:") {
-                let parts = line.components(separatedBy: ":")
-                if parts.count >= 2 {
-                    routeInterface = parts[1].trimmingCharacters(in: .whitespaces)
-                }
-            }
-        }
+        let gateway = route.gatewayAddress.flatMap { isValidIP($0) ? $0 : nil }
+        let routeInterface = route.interfaceName
 
         // Prefer IP gateway when available and different from local gateway
         // (same IP means route -n get default still shows pre-VPN default — race condition)
