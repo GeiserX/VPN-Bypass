@@ -163,13 +163,17 @@ enum ReconnectSettle {
     /// every reconnect became a burst of ~80 adds + ~70 orphan deletes — observed 7 for 7 to
     /// be followed by a GlobalProtect gateway-route timeout within 20 s. Only the hourly
     /// refresh needs fresh DNS; a reconnect needs nothing. VPN Only and Custom keep the apply:
-    /// their routes point at the tunnel gateway, which a reconnect may have moved.
+    /// their routes point at the tunnel gateway, which a reconnect may have moved. A config
+    /// saved after the last apply (a domain toggled or added while the VPN was down — those
+    /// edits only reach the kernel while connected) also keeps the full apply: the installed
+    /// routes are fresh but no longer what the user asked for.
     static func reconnectAction(routingMode: RoutingMode, hasInstalledRoutes: Bool,
-                                lastApplyAt: Date?, refreshInterval: TimeInterval,
-                                now: Date) -> ReconnectAction {
+                                lastApplyAt: Date?, configChangedAt: Date? = nil,
+                                refreshInterval: TimeInterval, now: Date) -> ReconnectAction {
         guard routingMode == .bypass, hasInstalledRoutes, let last = lastApplyAt,
               now.timeIntervalSince(last) >= 0,
               now.timeIntervalSince(last) < refreshInterval else { return .fullApply }
+        if let changed = configChangedAt, changed > last { return .fullApply }
         return .reconcileOnly
     }
 

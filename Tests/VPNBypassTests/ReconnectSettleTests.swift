@@ -154,6 +154,24 @@ final class ReconnectSettleTests: XCTestCase {
         }
     }
 
+    /// A domain toggled or added while the VPN was down only reaches the kernel on the next
+    /// apply; a config save newer than the last apply must keep the full apply. Edits older
+    /// than the apply were already honoured and change nothing.
+    func testConfigEditedSinceLastApplyKeepsFullApply() {
+        let now = Date()
+        let applied = now.addingTimeInterval(-600)
+        XCTAssertEqual(ReconnectSettle.reconnectAction(routingMode: .bypass, hasInstalledRoutes: true,
+                                                       lastApplyAt: applied,
+                                                       configChangedAt: now.addingTimeInterval(-60),
+                                                       refreshInterval: 3600, now: now),
+                       .fullApply)
+        XCTAssertEqual(ReconnectSettle.reconnectAction(routingMode: .bypass, hasInstalledRoutes: true,
+                                                       lastApplyAt: applied,
+                                                       configChangedAt: now.addingTimeInterval(-900),
+                                                       refreshInterval: 3600, now: now),
+                       .reconcileOnly)
+    }
+
     // MARK: - Abstaining (fix 3)
 
     /// Below the threshold the apply is only delayed (existing backoff); at it and above, it is
