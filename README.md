@@ -13,12 +13,14 @@
 <p align="center">
   <a href="https://github.com/GeiserX/VPN-Bypass/releases"><img src="https://img.shields.io/github/v/release/GeiserX/VPN-Bypass?style=flat-square&color=green" alt="Version"></a>
   <a href="https://github.com/GeiserX/VPN-Bypass/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/GeiserX/VPN-Bypass/ci.yml?style=flat-square&logo=github&label=CI" alt="CI"></a>
-  <img src="https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square&logo=apple&logoColor=white" alt="macOS 13+">
+  <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square&logo=apple&logoColor=white" alt="macOS 13+"></a>
   <a href="https://github.com/GeiserX/VPN-Bypass/stargazers"><img src="https://img.shields.io/github/stars/GeiserX/VPN-Bypass?style=flat-square&logo=github" alt="Stars"></a>
   <a href="https://github.com/GeiserX/VPN-Bypass/blob/main/LICENSE"><img src="https://img.shields.io/github/license/GeiserX/VPN-Bypass?style=flat-square" alt="License"></a>
 </p>
 
 Corporate VPNs often send all traffic through the tunnel, so streaming slows down, AirPlay and Chromecast break, and personal traffic crosses corporate infrastructure. VPN Bypass routes the services you pick straight to the internet and keeps business traffic on the VPN.
+
+<p align="center"><img src="docs/images/screenshots/menu-bar.png" alt="VPN Bypass menu bar dropdown" width="300"></p>
 
 ## Features
 
@@ -32,17 +34,6 @@ Corporate VPNs often send all traffic through the tunnel, so streaming slows dow
 - Optional `/etc/hosts` DNS bypass, route verification, notifications, logs, import/export and launch at login.
 - A small root helper does the routing. It is cdhash-pinned to this app and needs no Network Extension entitlements.
 
-<details>
-<summary><h3>📸 Screenshots</h3></summary>
-
-<p align="center">
-  <img src="assets/screenshot-dropdown.png" alt="Menu Bar Dropdown" width="300">
-  &nbsp;&nbsp;&nbsp;
-  <img src="assets/screenshot-settings.png" alt="Settings Window" width="400">
-</p>
-
-</details>
-
 ## Quick start
 
 ```bash
@@ -51,21 +42,19 @@ brew trust --cask geiserx/vpn-bypass/vpn-bypass
 brew install --cask vpn-bypass
 ```
 
-Needs macOS 13 or later. The DMG download and building from source are in [Installation](docs/installation.md). If macOS says the app is damaged, see [Troubleshooting](docs/troubleshooting.md).
+Needs macOS 13 or later. The DMG download and building from source are in [Getting started](docs/getting-started.md). If macOS says the app is damaged, see [Troubleshooting](docs/troubleshooting.md).
 
 ## Documentation
 
-- [Installation](docs/installation.md): Homebrew, DMG, source, Xcode, requirements and permissions
+- [Getting started](docs/getting-started.md): Homebrew, DMG, source, Xcode, requirements and permissions
 - [Routing modes, routes and rules](docs/routing.md)
 - [Usage](docs/usage.md): menu bar, settings tabs and the `vpnb` CLI
 - [How it works](docs/how-it-works.md): supported VPNs and detection logic
-- [Running alongside other VPNs and proxies](docs/COEXISTENCE.md)
+- [Coexistence with other VPNs and proxies](docs/coexistence.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Development and contributing](docs/development.md)
 - [Changelog](docs/CHANGELOG.md) and [roadmap](ROADMAP.md)
 
 ## License
 
-This project is licensed under the [GPL-3.0 License](LICENSE).
-
-This project is made possible by generous supporters: **Lee**.
+[GPL-3.0-or-later](LICENSE). Made possible by generous supporters: **Lee**.

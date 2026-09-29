@@ -1,4 +1,4 @@
-# Installation
+# Getting started
 
 ## Homebrew (Recommended)
 
