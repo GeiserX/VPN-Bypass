@@ -5,46 +5,32 @@
 <h1 align="center">VPN Bypass</h1>
 
 <p align="center">
-  A macOS menu bar app for fine-grained control over what goes through your VPN. Route specific domains
-  and services <em>around</em> the VPN, force only some things <em>through</em> it, or — in Custom mode —
-  send each domain, service, or subnet out a route of your choice: direct, a specific VPN, an HTTP/SOCKS5
-  proxy, or a Tailscale peer.
+  A macOS menu bar app that controls what goes through your VPN. Route specific domains and services
+  <em>around</em> the VPN, force only some <em>through</em> it, or, in Custom mode, send each domain,
+  service or subnet out a route you choose: direct, a specific VPN, an HTTP/SOCKS5 proxy, or a Tailscale peer.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square&logo=apple&logoColor=white" alt="macOS 13+">
-  <img src="https://img.shields.io/badge/Swift-5.9-orange?style=flat-square&logo=swift&logoColor=white" alt="Swift 5.9">
   <a href="https://github.com/GeiserX/VPN-Bypass/releases"><img src="https://img.shields.io/github/v/release/GeiserX/VPN-Bypass?style=flat-square&color=green" alt="Version"></a>
+  <a href="https://github.com/GeiserX/VPN-Bypass/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/GeiserX/VPN-Bypass/ci.yml?style=flat-square&logo=github&label=CI" alt="CI"></a>
+  <img src="https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square&logo=apple&logoColor=white" alt="macOS 13+">
   <a href="https://github.com/GeiserX/VPN-Bypass/stargazers"><img src="https://img.shields.io/github/stars/GeiserX/VPN-Bypass?style=flat-square&logo=github" alt="Stars"></a>
   <a href="https://github.com/GeiserX/VPN-Bypass/blob/main/LICENSE"><img src="https://img.shields.io/github/license/GeiserX/VPN-Bypass?style=flat-square" alt="License"></a>
-  <a href="https://codecov.io/gh/GeiserX/VPN-Bypass"><img src="https://codecov.io/gh/GeiserX/VPN-Bypass/graph/badge.svg" alt="codecov"></a>
 </p>
 
-## Why?
-
-Corporate VPNs often route all traffic through the tunnel, which can cause issues:
-
-- **Performance**: Streaming and messaging apps become slow or buffer constantly
-- **Broken features**: Chromecast, AirPlay, and location-based features fail
-- **Unnecessary load**: Non-business traffic clogs the VPN tunnel
-- **Privacy**: Personal services don't need to go through corporate infrastructure
-
-VPN Bypass intelligently routes selected services directly to the internet while keeping business traffic secure through VPN.
+Corporate VPNs often send all traffic through the tunnel, so streaming slows down, AirPlay and Chromecast break, and personal traffic crosses corporate infrastructure. VPN Bypass routes the services you pick straight to the internet and keeps business traffic on the VPN.
 
 ## Features
 
-- 🎯 **Menu bar app** — quick access to status, mode, and controls
-- 🧭 **Three routing modes** — **Bypass** *(default)*: everything uses the VPN **except** the domains you list. **VPN Only**: the inverse — everything goes **direct** except the domains you list, which are forced through the VPN. **Custom**: per-rule routing.
-- 🌐 **Custom domains & built-in services** — add any domain, or toggle bundled service packs (Telegram, YouTube, WhatsApp, Spotify, Tailscale, and more)
-- 🧩 **Custom rules & routes** — map each domain, suffix, IP/CIDR, service, or process to a specific route; first match wins
-- 🔀 **Multiple egresses** — send traffic out the local gateway, a specific VPN interface (multi-VPN), an **HTTP/SOCKS5 proxy**, or a **Tailscale peer** used as an exit
-- ⌨️ **`vpnb` CLI** — script the app over a user-only socket (status, routes, rules, mode)
-- 🔄 **Auto-apply** — routes are (re)applied automatically as the VPN connects, disconnects, or the network changes
-- 🔁 **Auto DNS refresh** — periodically re-resolves domains and updates routes as IPs rotate
-- 📋 **Hosts file management** — optional DNS bypass via `/etc/hosts`
-- 🔍 **VPN detection** — GlobalProtect, Cisco, Fortinet, Zscaler, Cloudflare WARP, Tailscale exit nodes, and more
-- 🔔 **Notifications**, ✅ **route verification**, 🪵 **activity logs**, 💾 **import/export**, 🚀 **launch at login**
-- 🔐 **Hardened privileged helper** — a small root helper performs the routing; it's cdhash-pinned to this app and uses **no Network Extension entitlements**
+- Menu bar app with status, mode and controls.
+- Three routing modes: **Bypass** (default), **VPN Only**, and **Custom** per-rule routing where the first match wins.
+- Custom domains plus built-in service packs (Telegram, YouTube, WhatsApp, Spotify, Tailscale and more).
+- Egress through the local gateway, a specific VPN interface (multi-VPN), an HTTP/SOCKS5 proxy, or a Tailscale peer.
+- `vpnb` CLI that scripts the app over a user-only socket.
+- Re-applies routes when the VPN connects or the network changes, and re-resolves domains as IPs rotate.
+- Detects GlobalProtect, Cisco, Fortinet, Zscaler, Cloudflare WARP, Tailscale exit nodes and more.
+- Optional `/etc/hosts` DNS bypass, route verification, notifications, logs, import/export and launch at login.
+- A small root helper does the routing. It is cdhash-pinned to this app and needs no Network Extension entitlements.
 
 <details>
 <summary><h3>📸 Screenshots</h3></summary>
@@ -57,252 +43,29 @@ VPN Bypass intelligently routes selected services directly to the internet while
 
 </details>
 
-## Routing modes
-
-VPN Bypass has three modes; switch anytime from the menu bar or Settings.
-
-- **Bypass** *(default)* — everything uses the VPN as usual, and only the domains/services you list are routed *around* it to your regular connection. Best when your VPN carries all traffic but a few apps misbehave through it.
-- **VPN Only** — the inverse: your regular connection is the default, and only the domains/services you list are forced *through* the VPN. Best for a mostly-direct machine with a few things tunneled.
-- **Custom** — a per-rule engine: you define **routes** (egresses) and **rules** that map traffic to them. Rules are evaluated top-to-bottom, first match wins, with a pinned "everything else → default" rule. This is what unlocks multi-VPN, proxy, and Tailscale-peer routing.
-
-**Bypass and VPN Only work exactly as they did in earlier versions** — if that's all you need, nothing changes. Custom mode is entirely opt-in.
-
-### Routes and rules (Custom mode)
-
-A **route** is a place traffic can exit:
-
-| Route type | Traffic exits via |
-|------------|-------------------|
-| **Direct** | your local gateway (around the VPN) |
-| **VPN** | a specific VPN interface — pick *which* tunnel when several are up (multi-VPN) |
-| **HTTP / SOCKS5 proxy** | a local `127.0.0.1` listener that forwards to your proxy |
-| **Tailscale peer** | out through a chosen Tailscale device used as an exit |
-
-A **rule** maps traffic to a route by `domain`, `suffix`, `ip`, `cidr`, `service`, or `process`. The first matching rule wins; anything unmatched takes the **default** route. Direct and detected VPN routes appear automatically; proxy and Tailscale-peer routes are ones you add.
-
-A proxy route's `127.0.0.1` listener holds your upstream proxy credentials, so it will not serve a client that cannot prove it is you. Any process on the machine can reach a loopback port, and macOS gives a TCP listener no way to see who connected, so the listener asks for a password instead. Use the **Copy exports** button on the route — it hands you the address with the credentials already in it:
+## Quick start
 
 ```bash
-export HTTPS_PROXY="http://vpnb:<secret>@127.0.0.1:18042"
-```
-
-The secret is generated once and kept in the app's config file, which only your account can read. Copy the exports again if you ever reset your config.
-
-## Installation
-
-### Homebrew (Recommended)
-
-```bash
-# Add the tap (first time only)
 brew tap geiserx/vpn-bypass
-
-# Trust the tap (first time only, required on Homebrew 6+)
 brew trust --cask geiserx/vpn-bypass/vpn-bypass
-
-# Install VPN Bypass
 brew install --cask vpn-bypass
 ```
 
-The **tap is the canonical install path** — it always tracks the latest release and auto-updates with `brew upgrade`. On Homebrew 6+, trust the tap first (as shown above) or the install will be blocked.
-
-> **Note:** Don't `brew install --cask` the raw `Casks/vpn-bypass.rb` in this repo — that in-repo cask is a frozen snapshot and will install an old build. Always use the tap above.
-
-### Manual Download
-
-Download the latest `.dmg` from [Releases](https://github.com/GeiserX/VPN-Bypass/releases), open it, and drag **VPN Bypass** to your Applications folder.
-
-### Build from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/GeiserX/VPN-Bypass.git
-cd VPN-Bypass
-
-# Build and create release DMG
-make release
-
-# Or just build and run
-make run
-```
-
-### Xcode
-
-Open `Package.swift` in Xcode and run the project.
-
-> **CI note:** The `test` job (`swift test`) requires **full Xcode** — XCTest ships only with Xcode, not with the Command Line Tools. CI runs on GitHub-hosted `macos-latest` runners (free and unlimited for public repos), which ship full Xcode, and selects the toolchain via the `maxim-lobanov/setup-xcode` action.
-
-## Usage
-
-### Menu Bar
-
-Click the shield icon in the menu bar to:
-- See VPN connection status and type
-- View active bypass routes
-- Quick-add domains to bypass
-- Refresh or clear routes
-- Verify routes are working
-
-### Settings
-
-Click the gear icon to access settings. The visible tabs depend on the active mode:
-
-**Domains** — add custom domains, enable/disable them individually, see resolved IPs.
-
-**Services** — toggle built-in service packs (Telegram, YouTube, Spotify, …); each bundles known domains and IP ranges.
-
-**Rules** *(Custom mode)* — the ordered rule list (first match wins) mapping domains/suffixes/IPs/CIDRs/services/processes to routes.
-
-**Routes** *(Custom mode)* — your egresses: auto-detected Direct + VPN links, plus any proxy or Tailscale-peer routes you add.
-
-**General** — launch at login, auto-apply on connect, `/etc/hosts` management, route verification, notification preferences, import/export, and network status (VPN type, interface, gateway, Wi-Fi SSID).
-
-**Logs** — recent activity for debugging.
-
-**Info** — version and helper status.
-
-## Command-line control (`vpnb`)
-
-A bundled `vpnb` CLI drives the same routing the GUI does, over a user-only UNIX socket — handy for scripting or headless tweaks. It needs no extra privilege (the app already holds it).
-
-`vpnb` ships inside the app bundle (`VPN Bypass.app/Contents/MacOS/vpnb`). Installing via the Homebrew **tap** (`brew tap geiserx/vpn-bypass && brew install --cask vpn-bypass`) symlinks it onto your `PATH`. With a manual DMG install, call it by its full path (`"/Applications/VPN Bypass.app/Contents/MacOS/vpnb"`) or symlink it onto your `PATH` yourself.
-
-```bash
-vpnb status                                   # current mode, routes, schema/version
-vpnb mode mode=custom                         # switch modes: bypass | vpnOnly | custom
-vpnb route.add name=work type=socks5 host=127.0.0.1 port=1080
-vpnb rule.add match=suffix pattern=example.com routeId=<uuid>
-vpnb route.list ; vpnb rule.list
-```
-
-Secrets are never passed on the command line (argv is world-visible via `ps`). Pass the bare token `pass:-` and pipe the password on stdin:
-
-```bash
-read -rs PASS && printf '%s' "$PASS" | vpnb route.set id=<uuid> pass:-
-```
-
-Set `VPNB_SOCKET` to override the socket path (default: `~/Library/Application Support/VPNBypass/control.sock`).
-
-## Supported VPN Types
-
-| VPN Client | Detection |
-|------------|-----------|
-| GlobalProtect | ✅ Full |
-| Cisco AnyConnect | ✅ Full |
-| OpenVPN | ✅ Full |
-| WireGuard | ✅ Full |
-| Fortinet FortiClient | ✅ Full |
-| Zscaler | ✅ Full |
-| Cloudflare WARP | ✅ Full |
-| Pulse Secure | ✅ Full |
-| Check Point | ✅ Full |
-| Tailscale (exit node) | ✅ Full |
-| Tailscale (mesh only) | ❌ Not VPN |
-
-## How It Works
-
-1. **VPN Detection**: Monitors network interfaces and running processes to detect VPN type
-2. **Gateway Detection**: Identifies your local gateway (Wi-Fi/Ethernet router)
-3. **Route Management**: A small privileged helper adds/removes host routes to steer traffic per your mode — around the VPN (Bypass), through it (VPN Only), or to the route a rule selects (Custom). The helper is cdhash-pinned to this app and uses no Network Extension entitlements.
-4. **Route Verification**: Optionally pings routes to verify they're working
-5. **DNS Bypass**: Optionally adds entries to `/etc/hosts` to bypass VPN DNS
-
-### VPN Detection Logic
-
-> Running more than one VPN (e.g. a corporate client plus Tailscale), or local proxies? See
-> **[docs/COEXISTENCE.md](docs/COEXISTENCE.md)** for exactly what VPN Bypass will and will not
-> touch — one tunnel is acted on, Tailscale is never selected, loopback is never routed.
-
-The app intelligently detects corporate VPNs while avoiding false positives:
-
-| Interface Type | IP Range | Detection |
-|---------------|----------|-----------|
-| **Corporate VPN** (GlobalProtect, Cisco, etc.) | `10.x.x.x`, `172.16-31.x.x` | ✅ Detected as VPN |
-| **Cloudflare WARP** | `100.96-111.x.x` | ✅ Detected as VPN |
-| **Tailscale** (mesh networking) | `100.64-127.x.x` | ❌ Not detected* |
-| **Tailscale** (exit node active) | `100.64-127.x.x` | ✅ Detected as VPN |
-
-**\*Tailscale in normal mode** only routes traffic to other Tailscale devices. It's not a "full VPN" because your regular internet traffic still goes through your normal connection. The app only considers Tailscale as a VPN when you're using an **exit node** (routing all traffic through another Tailscale device).
-
-The detection also requires:
-- The interface must have the `UP` flag (actually connected, not just configured)
-- The interface must have an IPv4 address in a VPN range
-
-## Requirements
-
-- macOS 13.0 (Ventura) or later
-- Admin privileges (for route management and hosts file)
-
-## Permissions
-
-The app requires:
-- **Network access**: To detect VPN connections and resolve domains
-- **Admin privileges**: To add routes and modify `/etc/hosts` (prompted when needed)
-- **Notifications**: Optional, for VPN status alerts (prompted on first launch)
-
-## Troubleshooting
-
-Multi-VPN or proxy setups: **[docs/COEXISTENCE.md](docs/COEXISTENCE.md)** explains the selection
-and ownership rules, plus the commands to see what is actually happening.
-
-### App won't open / "damaged" error (macOS Gatekeeper)
-
-The app is ad-hoc signed and not notarized with Apple, so macOS Gatekeeper may block it on first launch. You'll see errors like *"VPN Bypass is damaged and can't be opened"* or *"Apple cannot check it for malicious software"*.
-
-**Fix:** Remove the quarantine attribute:
-
-```bash
-xattr -cr /Applications/VPN\ Bypass.app
-```
-
-**Prevention:** Install with the `--no-quarantine` flag:
-
-```bash
-brew install --cask --no-quarantine vpn-bypass
-```
-
-### Routes not being applied
-
-1. Check if VPN is actually connected (look for utun interface)
-2. Verify local gateway is detected in Settings → General
-3. Check Logs tab for errors
-4. Use "Verify Routes" button to test connectivity
-
-### Hosts file not updating
-
-The app will prompt for admin password when modifying `/etc/hosts`. If you deny, disable this feature in Settings → General.
-
-### DNS still going through VPN
-
-Some VPNs force DNS through the tunnel. The hosts file entries help bypass this, but you may also need to:
-- Disable "Route all DNS through VPN" in your VPN client
-- Use a local DNS resolver
-
-### Proxy route returns `407 Proxy Authentication Required`
-
-Your `HTTP(S)_PROXY` is pointing at the listener without its credentials — usually an address copied before you upgraded. Open the route and use **Copy exports** again, then re-source it wherever you keep it. The plain `http://127.0.0.1:<port>` form no longer works, by design: without it, any other account on the machine could spend your upstream proxy credentials.
-
-### Route verification failing
-
-If routes are applied but verification fails:
-- The destination host may be blocking ping (ICMP)
-- Try accessing the service directly - it may still work
-- Check if the service is actually accessible from your network
-
-## Contributing
-
-Contributions are welcome! Here's how you can help:
-
-1. **Report bugs** - Open an [issue](https://github.com/GeiserX/VPN-Bypass/issues) with details
-2. **Suggest features** - Use the feature request template
-3. **Submit PRs** - Fork, create a branch, and submit a pull request
-
-Please read the issue templates before submitting.
-
-## Supporters
-
-> This project is made possible by generous supporters:
-> **Lee**
+Needs macOS 13 or later. The DMG download and building from source are in [Installation](docs/installation.md). If macOS says the app is damaged, see [Troubleshooting](docs/troubleshooting.md).
+
+## Documentation
+
+- [Installation](docs/installation.md): Homebrew, DMG, source, Xcode, requirements and permissions
+- [Routing modes, routes and rules](docs/routing.md)
+- [Usage](docs/usage.md): menu bar, settings tabs and the `vpnb` CLI
+- [How it works](docs/how-it-works.md): supported VPNs and detection logic
+- [Running alongside other VPNs and proxies](docs/COEXISTENCE.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Development and contributing](docs/development.md)
+- [Changelog](docs/CHANGELOG.md) and [roadmap](ROADMAP.md)
 
 ## License
 
 This project is licensed under the [GPL-3.0 License](LICENSE).
+
+This project is made possible by generous supporters: **Lee**.
