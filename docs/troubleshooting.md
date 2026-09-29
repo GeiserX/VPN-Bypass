@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Multi-VPN or proxy setups: **[docs/COEXISTENCE.md](COEXISTENCE.md)** explains the selection
+Multi-VPN or proxy setups: **[Coexistence with other VPNs and proxies](coexistence.md)** explains the selection
 and ownership rules, plus the commands to see what is actually happening.
 
 ## App won't open / "damaged" error (macOS Gatekeeper)

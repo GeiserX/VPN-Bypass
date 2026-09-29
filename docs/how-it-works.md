@@ -27,7 +27,7 @@
 ### VPN Detection Logic
 
 > Running more than one VPN (e.g. a corporate client plus Tailscale), or local proxies? See
-> **[docs/COEXISTENCE.md](COEXISTENCE.md)** for exactly what VPN Bypass will and will not
+> **[Coexistence with other VPNs and proxies](coexistence.md)** for exactly what VPN Bypass will and will not
 > touch — one tunnel is acted on, Tailscale is never selected, loopback is never routed.
 
 The app intelligently detects corporate VPNs while avoiding false positives:

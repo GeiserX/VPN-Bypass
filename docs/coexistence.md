@@ -1,4 +1,4 @@
-# Running alongside other VPNs and local proxies
+# Coexistence with other VPNs and proxies
 
 VPN Bypass is rarely the only thing touching the network. A typical machine runs a corporate VPN
 client, a mesh VPN such as Tailscale, and one or more local proxies at the same time. This page

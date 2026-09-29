@@ -13,6 +13,8 @@ Click the shield icon in the menu bar to:
 
 Click the gear icon to access settings. The visible tabs depend on the active mode:
 
+<p align="center"><img src="images/screenshots/settings.png" alt="VPN Bypass settings window" width="400"></p>
+
 **Domains** — add custom domains, enable/disable them individually, see resolved IPs.
 
 **Services** — toggle built-in service packs (Telegram, YouTube, Spotify, …); each bundles known domains and IP ranges.

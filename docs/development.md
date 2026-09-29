@@ -2,7 +2,7 @@
 
 ## Building
 
-See [Build from source](installation.md#build-from-source) and [Xcode](installation.md#xcode).
+See [Build from source](getting-started.md#build-from-source) and [Xcode](getting-started.md#xcode).
 
 > **CI note:** The `test` job (`swift test`) requires **full Xcode** — XCTest ships only with Xcode, not with the Command Line Tools. CI runs on GitHub-hosted `macos-latest` runners (free and unlimited for public repos), which ship full Xcode, and selects the toolchain via the `maxim-lobanov/setup-xcode` action.
 

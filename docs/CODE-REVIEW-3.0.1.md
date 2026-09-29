@@ -24,11 +24,11 @@ failures, 0 warnings on a clean rebuild):
 - plus the log-subsystem hardening, `print`→logger consolidation, DNS-cache error surfacing, helper
   slow-vs-broken probe, dead-code removal, and a 0-warning build.
 
-**Held for Sergio (need his machine or his decision — NOT shipped un-validated):**
+**Held for the maintainer (need a live machine or a decision — NOT shipped un-validated):**
 
 - **Audit-token XPC caller auth** (root helper) — a bug could reject the real app and break routing
   for everyone on update, and it can't be live-tested from the build pod. To be implemented with an
-  anti-brick fallback + one admin-install XPC round-trip on Sergio's Mac before it ships. Until then
+  anti-brick fallback + one admin-install XPC round-trip on a real Mac before it ships. Until then
   the PID-based check (documented ad-hoc tradeoff) stands. This is the `feat:` that would make the
   release a **3.1.0** minor; without it this batch is a **3.0.1** patch.
 - **God-class split** (US-013) — recommended as its own follow-up PR so a huge pure-code-motion diff
