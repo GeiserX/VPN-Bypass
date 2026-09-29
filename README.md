@@ -46,6 +46,8 @@ Needs macOS 13 or later. The DMG download and building from source are in [Getti
 
 ## Documentation
 
+The documentation is published as a site at [geiserx.github.io/VPN-Bypass](https://geiserx.github.io/VPN-Bypass/). The same pages on GitHub:
+
 - [Getting started](docs/getting-started.md): Homebrew, DMG, source, Xcode, requirements and permissions
 - [Routing modes, routes and rules](docs/routing.md)
 - [Usage](docs/usage.md): menu bar, settings tabs and the `vpnb` CLI

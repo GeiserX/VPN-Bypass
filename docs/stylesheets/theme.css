@@ -1,0 +1,38 @@
+/* docs/stylesheets/theme.css: the site takes its two colours from the banner.
+ *
+ * mkdocs.yml sets `primary: custom` and `accent: custom`, which means Material
+ * paints nothing until these variables exist. Replace the two hex values with
+ * the banner's background and accent, then check the light-scheme link colour
+ * against white: anything under 4.5:1 contrast is too faint for body links.
+ */
+:root {
+  --md-primary-fg-color:        #0B1220;  /* banner background */
+  --md-primary-fg-color--light: #152A4E;
+  --md-primary-fg-color--dark:  #060A12;
+  --md-primary-bg-color:        #F2F6FA;  /* text on the header */
+  --md-primary-bg-color--light: #B6C2D4;
+
+  --md-accent-fg-color:         #38BDF8;  /* banner accent */
+  --md-accent-fg-color--transparent: #38BDF81a;
+}
+
+/* Dark scheme: the page body uses the banner background too, so the header
+   and the page read as one surface. */
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color:        #0B1220;
+  --md-code-bg-color:           #152A4E;
+  --md-typeset-a-color:         #38BDF8;
+}
+
+/* Light scheme: the accent on white is usually too faint for body links. Use
+   the same hue, darkened until it passes 4.5:1. */
+[data-md-color-scheme="default"] {
+  --md-typeset-a-color:         #0369A1;
+}
+
+/* Fixed logo size so it does not crowd the site name. */
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.6rem;
+  width: 1.6rem;
+}
