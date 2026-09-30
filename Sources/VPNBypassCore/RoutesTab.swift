@@ -4,6 +4,18 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Local listener address
+
+/// The loopback address a proxy route listens on, as a user types it into an
+/// app's proxy settings. Built as a plain String: a port interpolated into a
+/// `Text` literal goes through locale number formatting and prints 18.168.
+enum LocalListenerAddress {
+    static func string(port: UInt16) -> String { "127.0.0.1:\(port)" }
+
+    /// Verbatim, so no locale can group the port's digits.
+    static func text(port: UInt16) -> Text { Text(verbatim: string(port: port)) }
+}
+
 // MARK: - Sheet state wrapper
 
 private enum RouteSheetState: Identifiable {
@@ -76,7 +88,7 @@ struct RoutesTab: View {
                     .font(.system(size: 11))
                     .foregroundColor(Theme.textTertiary)
                     .padding(.top, 1)
-                Text("Point an app at a route: paste the copied proxy exports into your shell, or enter 127.0.0.1:<port> in your browser's manual proxy settings.")
+                Text("Point an app at a route: paste the copied shell exports into a shell, or the copied proxy URL into an app's proxy setting. A browser set to 127.0.0.1 and the port asks you to sign in: the user is vpnb, the password is the part between vpnb: and @ in the proxy URL.")
                     .font(.system(size: 11))
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -269,7 +281,27 @@ struct RouteRow: View {
     let onDelete: () -> Void
     let onToggle: (Bool) -> Void
 
-    @State private var didCopy = false
+    /// The two things a user copies from a listener route. Both carry the local
+    /// secret: the listener answers a bare `127.0.0.1:<port>` with 407.
+    enum CopyKind {
+        case proxyURL, exports
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .proxyURL: return "Copy Proxy URL"
+            case .exports:  return "Copy Shell Exports"
+            }
+        }
+
+        func text(port: UInt16, secret: String) -> String {
+            switch self {
+            case .proxyURL: return HookGenerator.proxyURL(port: port, secret: secret)
+            case .exports:  return HookGenerator.shellExports(port: port, secret: secret)
+            }
+        }
+    }
+    /// Which Copy button last copied, so only that one flips to "Copied".
+    @State private var copied: CopyKind?
 
     private var typeLabel: String {
         switch route.egress {
@@ -321,7 +353,7 @@ struct RouteRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             // Enabled toggle
             Toggle("", isOn: Binding(
                 get: { route.enabled },
@@ -349,74 +381,14 @@ struct RouteRow: View {
                         .cornerRadius(4)
                 }
 
-                HStack(spacing: 12) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "server.rack")
-                            .font(.system(size: 10))
-                            .foregroundColor(Theme.textTertiary)
-                        Text(upstreamDisplay)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(Theme.textSecondary)
-                    }
-
-                    HStack(spacing: 4) {
-                        if ProxyListenerManager.usesLocalListener(route.egress) {
-                            Image(systemName: "antenna.radiowaves.left.and.right")
-                                .font(.system(size: 10))
-                                .foregroundColor(route.enabled ? Theme.success : Theme.textTertiary)
-                            if let port = listenerPort {
-                                Text("127.0.0.1:\(port)")
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(route.enabled ? Theme.success : Theme.textSecondary)
-                            } else {
-                                Text(route.enabled ? "starting…" : "inactive")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(Theme.textTertiary)
-                            }
-                        } else {
-                            // No loopback listener for this egress (.vpnDefault / .direct) —
-                            // show what it actually targets instead of a fake "starting…".
-                            Image(systemName: route.egress == .vpnDefault ? "lock.shield" : "arrow.up.right")
-                                .font(.system(size: 10))
-                                .foregroundColor(route.enabled ? Theme.success : Theme.textTertiary)
-                            Text(nonListenerStatusLabel)
-                                .font(.system(size: 11))
-                                .foregroundColor(route.enabled ? Theme.success : Theme.textTertiary)
-                        }
-                    }
+                if ProxyListenerManager.usesLocalListener(route.egress) {
+                    listenerDetails
+                } else {
+                    nonListenerDetails
                 }
             }
 
             Spacer()
-
-            // Copy shell exports — only available once listener is up
-            if let port = listenerPort {
-                Button {
-                    // RouteRow has no routeManager in scope; the singleton is what
-                    // ProxyListenerManager.shared above already uses from this file.
-                    let text = HookGenerator.shellExports(port: port,
-                                                          secret: RouteManager.shared.ensureLocalProxySecret())
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                    withAnimation { didCopy = true }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        withAnimation { didCopy = false }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 10))
-                        Text(didCopy ? "Copied" : "Copy")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(didCopy ? Theme.success : Theme.blue)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background((didCopy ? Theme.success : Theme.blue).opacity(0.15))
-                    .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-            }
 
             // Edit
             Button(action: onEdit) {
@@ -444,6 +416,93 @@ struct RouteRow: View {
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
+    }
+
+    /// Proxy and Tailscale-peer routes: where the route goes, the local address an
+    /// app points at, and one button per thing a user copies.
+    @ViewBuilder
+    private var listenerDetails: some View {
+        HStack(spacing: 14) {
+            HStack(spacing: 4) {
+                Text("Upstream")
+                    .foregroundColor(Theme.textTertiary)
+                Text(verbatim: upstreamDisplay)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Theme.textSecondary)
+            }
+            HStack(spacing: 4) {
+                if let port = listenerPort {
+                    Text("Listening on")
+                        .foregroundColor(Theme.textTertiary)
+                    LocalListenerAddress.text(port: port)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(route.enabled ? Theme.success : Theme.textSecondary)
+                        .textSelection(.enabled)
+                } else {
+                    Text(route.enabled ? "Listener starting…" : "Listener off")
+                        .foregroundColor(Theme.textTertiary)
+                }
+            }
+        }
+        .font(.system(size: 11))
+
+        if let port = listenerPort {
+            HStack(spacing: 6) {
+                copyButton(.proxyURL, port: port)
+                copyButton(.exports, port: port)
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    /// `.vpnDefault` / `.direct` routes have no loopback listener: show what they target.
+    private var nonListenerDetails: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 4) {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.textTertiary)
+                Text(verbatim: upstreamDisplay)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Theme.textSecondary)
+            }
+            HStack(spacing: 4) {
+                Image(systemName: route.egress == .vpnDefault ? "lock.shield" : "arrow.up.right")
+                    .font(.system(size: 10))
+                    .foregroundColor(route.enabled ? Theme.success : Theme.textTertiary)
+                Text(verbatim: nonListenerStatusLabel)
+                    .font(.system(size: 11))
+                    .foregroundColor(route.enabled ? Theme.success : Theme.textTertiary)
+            }
+        }
+    }
+
+    private func copyButton(_ kind: CopyKind, port: UInt16) -> some View {
+        let done = copied == kind
+        return Button {
+            // RouteRow has no routeManager in scope; the singleton is what
+            // ProxyListenerManager.shared above already uses from this file.
+            let text = kind.text(port: port, secret: RouteManager.shared.ensureLocalProxySecret())
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            withAnimation { copied = kind }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                withAnimation { if copied == kind { copied = nil } }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: done ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 10))
+                Text(done ? "Copied" : kind.title)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundColor(done ? Theme.success : Theme.blue)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background((done ? Theme.success : Theme.blue).opacity(0.15))
+            .cornerRadius(6)
+        }
+        .buttonStyle(.plain)
     }
 }
 
