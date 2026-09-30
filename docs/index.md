@@ -1,7 +1,6 @@
 ---
 hide:
   - navigation
-  - toc
 ---
 
 # VPN Bypass { .vb-visually-hidden }
