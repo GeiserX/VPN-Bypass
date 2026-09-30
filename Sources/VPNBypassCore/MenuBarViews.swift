@@ -1075,7 +1075,10 @@ enum DropdownCopy {
             return (String(localized: "\(routes(outcome.routeCount)) applied \(when), \(outcome.failedCount) failed."), true)
         case .removedAll:
             if outcome.failedCount == 0 {
-                return (String(localized: "All routes removed \(when). Refresh Routes puts them back."), true)
+                // No promise that Refresh brings them back: when the removal came from a mode
+                // switch or re-route whose apply was then refused (VPN Only under GlobalProtect),
+                // Refresh is refused the same way.
+                return (String(localized: "All routes removed \(when)."), true)
             }
             return (String(localized: "Routes removed \(when), \(outcome.failedCount) could not be removed."), true)
         }
