@@ -69,6 +69,11 @@
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   font-size: var(--vb-wordmark-size);
   letter-spacing: -0.026em;
+  /* The parent has font size 0, so its baseline sits higher than the drawn
+   * words' baseline and the line box grows past the 48 px header, where the
+   * span would catch taps meant for the page. Top alignment keeps the line
+   * box at the header height; the glyphs stay on the same pixel rows. */
+  vertical-align: top;
 }
 
 .md-header__topic:first-child .md-ellipsis::before,
@@ -85,7 +90,8 @@
   content: "Bypass" / "";
   color: #38BDF8;
   font-weight: 200;
-  margin-left: 0.22em;
+  /* The banner gap: 18 px at a cap height of 54 px, about 0.06em. */
+  margin-left: 0.06em;
 }
 
 /* Keep the mark and the name close, so they read as one unit. */
