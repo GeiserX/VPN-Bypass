@@ -51,26 +51,37 @@ extension RouteManager {
 
 /// What a rule does when its route is served by a local listener (HTTP CONNECT,
 /// SOCKS5, Tailscale peer). Those routes emit no kernel route, so the rule only
-/// reaches apps set to use the route's 127.0.0.1 address. Direct and VPN rules
-/// change the routing table and reach every app, so they get no note.
+/// reaches apps set to use the route's 127.0.0.1 address. The rule still claims its
+/// hosts first-match (RouteCompiler), so a Direct or VPN rule below it for the same
+/// hosts adds no kernel route either. Direct and VPN rules change the routing table
+/// and reach every app, so they get no note.
 struct ProxyReachNote: Equatable {
     let routeName: String
     /// `127.0.0.1:<port>`, or nil while the route's listener is not up.
     let address: String?
-
-    static let lead = "Only apps set to use "
-    static let tail = " go this way. Other apps are not affected by this rule."
+    /// The route is switched off: no listener runs and the compiler skips the rule.
+    var routeOff = false
 
     /// nil for a Direct or VPN route, and for a rule whose route was deleted.
     static func forRoute(_ route: Route?, listenerPort: UInt16?) -> ProxyReachNote? {
         guard let route, ProxyListenerManager.usesLocalListener(route.egress) else { return nil }
+        guard route.enabled else { return ProxyReachNote(routeName: route.name, address: nil, routeOff: true) }
         return ProxyReachNote(routeName: route.name,
                               address: listenerPort.map { LocalListenerAddress.string(port: $0) })
     }
 
-    var addressPart: String { address.map { " (\($0))" } ?? "" }
-
-    var plainText: String { Self.lead + routeName + addressPart + Self.tail }
+    /// The line under the rule. One catalog sentence per case, with the route name as
+    /// an argument, so a translation can put the name where its grammar wants it.
+    var text: Text {
+        let name = Text(verbatim: routeName).foregroundColor(.white).fontWeight(.medium)
+        if routeOff {
+            return Text("\(name) is off, so this rule does nothing.")
+        }
+        if let address {
+            return Text("Only apps set to use \(name) (\(Text(verbatim: address))) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them.")
+        }
+        return Text("Only apps set to use \(name) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them.")
+    }
 }
 
 // MARK: - Sheet state wrappers
@@ -402,10 +413,7 @@ struct RuleRow: View {
         VStack(alignment: .leading, spacing: 2) {
             ruleLine
             if let reachNote {
-                (Text(ProxyReachNote.lead)
-                    + Text(verbatim: reachNote.routeName).foregroundColor(.white).fontWeight(.medium)
-                    + Text(verbatim: reachNote.addressPart)
-                    + Text(ProxyReachNote.tail))
+                reachNote.text
                     .font(.system(size: 11))
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

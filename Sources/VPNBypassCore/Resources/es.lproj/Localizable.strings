@@ -224,3 +224,11 @@
 "The app needs to restart to apply the language change." = "La aplicación necesita reiniciarse para aplicar el cambio de idioma.";
 "Restart Now" = "Reiniciar ahora";
 "Later" = "Más tarde";
+
+/* ===== Settings — Routes and Rules (Custom mode) ===== */
+"Copy Proxy URL" = "Copiar URL del proxy";
+"Copy Shell Exports" = "Copiar exports de shell";
+"Copied" = "Copiado";
+"Only apps set to use %@ (%@) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Solo las apps configuradas para usar %@ (%@) salen por aquí. Las demás apps llegan a estos hosts por la ruta habitual del Mac, aunque una regla de más abajo también los incluya.";
+"Only apps set to use %@ go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Solo las apps configuradas para usar %@ salen por aquí. Las demás apps llegan a estos hosts por la ruta habitual del Mac, aunque una regla de más abajo también los incluya.";
+"%@ is off, so this rule does nothing." = "La ruta %@ está desactivada, así que esta regla no hace nada.";

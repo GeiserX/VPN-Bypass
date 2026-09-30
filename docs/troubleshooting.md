@@ -38,7 +38,7 @@ Some VPNs force DNS through the tunnel. The hosts file entries help bypass this,
 
 ## Proxy route returns `407 Proxy Authentication Required`
 
-Your `HTTP(S)_PROXY` is pointing at the listener without its credentials — usually an address copied before you upgraded. Open the route and use **Copy exports** again, then re-source it wherever you keep it. The plain `http://127.0.0.1:<port>` form no longer works, by design: without it, any other account on the machine could spend your upstream proxy credentials.
+Your `HTTP(S)_PROXY` is pointing at the listener without its credentials — usually an address copied before you upgraded. Open the route and use **Copy Shell Exports** (or **Copy Proxy URL**) again, then re-source it wherever you keep it. The plain `http://127.0.0.1:<port>` form no longer works, by design: without it, any other account on the machine could spend your upstream proxy credentials.
 
 ## Route verification failing
 
