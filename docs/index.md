@@ -73,7 +73,7 @@ Everything lives in the dropdown: the VPN it found, a pill that says whether rou
 
 Bypass and VPN Only use the Domains and Services tabs. Custom mode swaps them for Rules and Routes. General holds launch at login, the helper, `/etc/hosts` and notifications; Logs and Info are for debugging. See [Settings](usage.md#settings).
 
-![The Services tab: built-in packs such as Telegram, YouTube, Spotify and WhatsApp, each with a switch, four of them on](images/screenshots/services.png)
+![The Services tab: built-in packs such as Telegram, YouTube, Spotify and WhatsApp, each with a switch, four of them on](images/screenshots/services.png){ width="580" }
 
 <div class="vb-gallery vb-gallery--2" markdown>
 <figure markdown>

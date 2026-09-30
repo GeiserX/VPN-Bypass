@@ -18,7 +18,13 @@
 
 Corporate VPN clients send everything through the tunnel, so streaming stalls, AirPlay and Chromecast break, and personal traffic crosses the company network. Most clients lock their own split tunnelling, and a route added by hand is gone at the next reconnect or when a CDN moves. VPN Bypass adds the routes for you from a menu bar dropdown and puts them back every time the VPN or the network changes.
 
-<p align="center"><img src="docs/images/screenshots/menu-bar.png" alt="The VPN Bypass dropdown in Bypass mode: VPN Connected, ON, four services and two domains routed around the VPN" width="340"></p>
+<p align="center">
+  <img src="docs/images/screenshots/menu-bar.png" alt="The VPN Bypass dropdown in Bypass mode: VPN Connected, ON, four services and two domains routed around the VPN" width="300">
+  &nbsp;&nbsp;
+  <img src="docs/images/screenshots/services.png" alt="The Settings window on the Services tab: 4 of 37 built-in packs enabled, Telegram, WhatsApp and YouTube switched on" width="400">
+  <br>
+  <sub>The dropdown in Bypass mode, and the Settings window on the Services tab</sub>
+</p>
 
 ## Features
 
