@@ -132,13 +132,21 @@ final class ClassicControlTests: XCTestCase {
         XCTAssertEqual(rm.config.domains.count, 1)
     }
 
-    func testDomainAddRejectsSlashOnBypassList() async {
-        for value in ["10.0.0.0/8", "https://example.com/path"] {
+    func testDomainAddRejectsARangeOnBypassList() async {
+        for value in ["10.0.0.0/8", "10.0.0/8"] {
             let resp = await send("domain.add", ["domain": value])
             XCTAssertFalse(resp.ok, value)
             XCTAssertEqual(resp.error?.code, "invalid_args", value)
         }
         XCTAssertTrue(rm.config.domains.isEmpty, "nothing saved")
+    }
+
+    /// The Domains tab takes a pasted link and saves its host; the socket does the same.
+    func testDomainAddTakesALinkOnBypassListLikeTheGUI() async throws {
+        let resp = await send("domain.add", ["domain": "https://example.com/path"])
+        XCTAssertTrue(resp.ok, "\(String(describing: resp.error))")
+        XCTAssertEqual(resp.result?.domains?.first?.domain, "example.com")
+        XCTAssertEqual(rm.config.domains.map(\.domain), ["example.com"])
     }
 
     func testDomainAddRejectsEmptyAfterCleaningAndMissingDomain() async {

@@ -194,8 +194,21 @@ struct TabItem: View {
 
 struct DomainsTab: View {
     @EnvironmentObject var routeManager: RouteManager
-    @State private var newDomain = ""
+    @State private var newDomain: String
+    /// What the last add did, shown under the field.
+    @State private var feedback: AddDomainFeedback?
     @FocusState private var isInputFocused: Bool
+
+    /// The arguments seed the field and the line under it, for a rendered screenshot.
+    init(newDomain: String = "", feedback: AddDomainFeedback? = nil) {
+        _newDomain = State(initialValue: newDomain)
+        _feedback = State(initialValue: feedback)
+    }
+
+    private var fieldOutline: Color {
+        if feedback?.isError == true { return Theme.error.opacity(0.8) }
+        return isInputFocused ? Theme.success.opacity(0.5) : Color.clear
+    }
 
     private var isInverse: Bool { routeManager.config.routingMode == .vpnOnly }
     private var activeDomains: [RouteManager.DomainEntry] {
@@ -222,60 +235,71 @@ struct DomainsTab: View {
                     .foregroundColor(Theme.textSecondary)
             }
 
-            // Add domain input
-            HStack(spacing: 10) {
-                HStack {
-                    Image(systemName: "link")
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.textSecondary)
+            // Add domain input, and what the last add did
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    HStack {
+                        Image(systemName: "link")
+                            .font(.system(size: 12))
+                            .foregroundColor(Theme.textSecondary)
 
-                    TextField(isInverse ? "e.g., example.com or 10.0.0.0/24" : "e.g., example.com", text: $newDomain)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .focused($isInputFocused)
-                        .onSubmit { addDomain() }
-                        .disabled(routeManager.isApplyingRoutes)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Theme.bgInput)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(isInputFocused ? Theme.success.opacity(0.5) : Color.clear, lineWidth: 1)
-                        )
-                )
-
-                // Loading indicator or add button
-                if routeManager.isApplyingRoutes {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
-                        .frame(width: 42, height: 42)
-                        .background(Theme.bgDisabled)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                } else {
-                    Button(action: addDomain) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 42, height: 42)
-                            .background(
-                                LinearGradient(
-                                    colors: newDomain.isEmpty ? [Theme.textDisabled, Theme.textDisabled] : [Theme.success, Theme.successDark],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .shadow(color: newDomain.isEmpty ? .clear : Theme.success.opacity(0.3), radius: 6, y: 2)
+                        TextField(isInverse ? "e.g., example.com or 10.0.0.0/24" : "e.g., example.com", text: $newDomain)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13))
+                            .focused($isInputFocused)
+                            .onSubmit { addDomain() }
+                            .disabled(routeManager.isApplyingRoutes)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(newDomain.isEmpty)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Theme.bgInput)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(fieldOutline, lineWidth: 1)
+                            )
+                    )
+
+                    // Loading indicator or add button
+                    if routeManager.isApplyingRoutes {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
+                            .frame(width: 42, height: 42)
+                            .background(Theme.bgDisabled)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    } else {
+                        Button(action: addDomain) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 42, height: 42)
+                                .background(
+                                    LinearGradient(
+                                        colors: newDomain.isEmpty ? [Theme.textDisabled, Theme.textDisabled] : [Theme.success, Theme.successDark],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .shadow(color: newDomain.isEmpty ? .clear : Theme.success.opacity(0.3), radius: 6, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(newDomain.isEmpty)
+                    }
+                }
+
+                if let feedback {
+                    AddDomainFeedbackLine(feedback: feedback)
                 }
             }
-            
+            // Editing the text the line talks about, or switching lists, makes it stale.
+            .onChange(of: newDomain) { text in
+                if text != feedback?.fieldText { feedback = nil }
+            }
+            .onChange(of: routeManager.config.routingMode) { _ in feedback = nil }
+
             // Domain list
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -379,12 +403,48 @@ struct DomainsTab: View {
 
     private func addDomain() {
         guard !newDomain.isEmpty else { return }
-        if isInverse {
-            routeManager.addInverseDomain(newDomain)
-        } else {
-            routeManager.addDomain(newDomain)
+        let result = isInverse ? routeManager.addInverseDomain(newDomain) : routeManager.addDomain(newDomain)
+        let shown = AddDomainFeedback(result, typed: newDomain)
+        feedback = shown
+        newDomain = shown.fieldText
+    }
+}
+
+/// The line under the Domains tab's add field: what the last add saved, or why it saved
+/// nothing. A failed add keeps the text so it can be fixed; a saved one empties the field.
+struct AddDomainFeedback: Equatable {
+    let isError: Bool
+    let message: String
+    /// The field's text while this line shows. Typing something else clears the line.
+    let fieldText: String
+
+    init(_ result: Result<AddedDomain, AddDomainError>, typed: String) {
+        switch result {
+        case .success(let added):
+            isError = false
+            message = added.message
+            fieldText = ""
+        case .failure(let error):
+            isError = true
+            message = error.message
+            fieldText = typed
         }
-        newDomain = ""
+    }
+}
+
+struct AddDomainFeedbackLine: View {
+    let feedback: AddDomainFeedback
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: feedback.isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+            Text(feedback.message)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.system(size: 12))
+        .foregroundColor(feedback.isError ? Theme.error : Theme.success)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
     }
 }
 

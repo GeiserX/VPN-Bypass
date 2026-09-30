@@ -8,8 +8,9 @@
 // Every mutation calls the SAME RouteManager method the GUI button calls
 // (addDomain, toggleService, removeAllRoutes, ...). Nothing here applies routes on its
 // own: a full re-apply writes hundreds of kernel routes at once, which is exactly the
-// burst that knocked GlobalProtect down before 4.8.5. The GUI methods return silently
-// on bad or duplicate input, so each verb validates first and answers with an error code.
+// burst that knocked GlobalProtect down before 4.8.5. Some GUI methods return silently
+// on bad input, so those verbs validate first and answer with an error code; domain.add
+// maps the result addDomain / addInverseDomain return.
 //
 // Never logs an argument value: only the verb, the same rule as ControlSurface.
 
@@ -85,10 +86,7 @@ public struct ControlLogEntry: Codable, Equatable, Sendable {
 @MainActor
 enum ClassicControl {
 
-    enum DomainList: String {
-        case bypass
-        case vpnOnly
-    }
+    typealias DomainList = VPNBypassCore.DomainList
 
     /// Verbs this file answers. Anything else goes on to CommandRouter.
     static let verbs: Set<String> = [
@@ -160,51 +158,40 @@ enum ClassicControl {
         }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // The same cleaning addDomain / addInverseDomain apply, done here first so a value
-        // they would drop silently gets an answer instead.
-        let cleaned: String
-        switch list {
-        case .bypass:
-            // cleanDomain would cut "10.0.0.0/8" down to "10.0.0.0" and save that: a
-            // different destination than the one asked for.
-            if trimmed.contains("/") {
-                return fail("invalid_args",
-                            "the bypass list takes a domain name, not a URL or a CIDR (a CIDR goes on list=vpnOnly)")
-            }
-            cleaned = rm.cleanDomain(trimmed)
-        case .vpnOnly:
-            if trimmed.contains("/") {
-                guard rm.isValidCIDR(trimmed) else {
-                    if isCIDRWithPrefixZeroOrOne(trimmed, rm) {
-                        return fail("invalid_args", "CIDR /0 and /1 cannot be installed as routes")
-                    }
-                    return fail("invalid_args", "malformed CIDR (expected a.b.c.d/n with n from 2 to 32)")
-                }
-                cleaned = trimmed
-            } else {
-                cleaned = rm.cleanDomain(trimmed)
-            }
-        }
-        guard !cleaned.isEmpty else {
-            return fail("invalid_args", "domain is empty after cleaning")
+        // The same check addDomain / addInverseDomain run, done before the wait so a bad
+        // value is answered at once.
+        if case .failure(let error) = rm.checkDomainInput(trimmed, list: list) {
+            return fail(error)
         }
 
-        // Only what depends on the lists waits for a running route operation; a bad
-        // argument is answered at once.
+        // Only what depends on the lists waits for a running route operation.
         await waitForRouteIdle()
-        guard !entries(list, rm).contains(where: { $0.domain == cleaned }) else {
-            return fail("already_exists", "\(cleaned) is already on the \(list.rawValue) list")
-        }
-
+        let outcome: Result<AddedDomain, AddDomainError>
         switch list {
-        case .bypass: rm.addDomain(trimmed)
-        case .vpnOnly: rm.addInverseDomain(trimmed)
+        case .bypass: outcome = rm.addDomain(trimmed)
+        case .vpnOnly: outcome = rm.addInverseDomain(trimmed)
         }
-        guard let added = entries(list, rm).first(where: { $0.domain == cleaned }) else {
-            // Only reachable if the GUI method's own checks drifted from the ones above.
-            return fail("invalid_args", "the app did not accept this value")
+        switch outcome {
+        case .failure(let error): return fail(error)
+        case .success(let added): return ok(ControlResult(domains: [ControlDomain(added.entry, list: list)]))
         }
-        return ok(ControlResult(domains: [ControlDomain(added, list: list)]))
+    }
+
+    /// The socket's code and message for a refused add. The GUI shows `error.message`
+    /// instead; the decision behind both is the same.
+    private static func fail(_ error: AddDomainError) -> ControlResponse {
+        switch error {
+        case .empty:
+            return fail("invalid_args", "domain is empty after cleaning")
+        case .rangeOnBypassList:
+            return fail("invalid_args", "the bypass list takes a domain name, not a CIDR (a CIDR goes on list=vpnOnly)")
+        case .malformedRange:
+            return fail("invalid_args", "malformed CIDR (expected a.b.c.d/n with n from 2 to 32)")
+        case .catchAllRange:
+            return fail("invalid_args", "CIDR /0 and /1 cannot be installed as routes")
+        case .alreadyListed(let value, let list):
+            return fail("already_exists", "\(value) is already on the \(list.rawValue) list")
+        }
     }
 
     private static func domainRemove(_ args: [String: String]) async -> ControlResponse {
@@ -454,14 +441,6 @@ enum ClassicControl {
             return .failure(VerbError(code: "invalid_args",
                                       message: "that domain is on both lists; add list=bypass or list=vpnOnly"))
         }
-    }
-
-    /// "a.b.c.d/0" or "a.b.c.d/1": a well-formed CIDR the app refuses to install, so it gets
-    /// its own message rather than "malformed".
-    private static func isCIDRWithPrefixZeroOrOne(_ s: String, _ rm: RouteManager) -> Bool {
-        let parts = s.components(separatedBy: "/")
-        guard parts.count == 2, rm.isValidIP(parts[0]), let bits = Int(parts[1]) else { return false }
-        return bits == 0 || bits == 1
     }
 
     private static func waitForRouteIdle() async {
