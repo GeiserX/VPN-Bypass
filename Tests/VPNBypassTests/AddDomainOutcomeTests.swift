@@ -44,7 +44,10 @@ final class AddDomainOutcomeTests: XCTestCase {
     // MARK: - checkDomainInput
 
     func testBypassListRefusesAnIPRangeInsteadOfSavingItsFirstAddress() {
-        for value in ["10.0.0.0/24", "10.0.0/8", "192.168.1.0/33", " 10.0.0.0/24 "] {
+        // IPv6 and a space before the "/" used to get through: cleanDomain cut them to
+        // "2001", "fd00" and "10.0.0.0".
+        for value in ["10.0.0.0/24", "10.0.0/8", "192.168.1.0/33", " 10.0.0.0/24 ",
+                      "10.0.0.0 /24", "2001:db8::/32", "fd00::/8", "::ffff:10.0.0.0/104"] {
             let trimmed = value.trimmingCharacters(in: .whitespaces)
             XCTAssertEqual(rm.checkDomainInput(value, list: .bypass), .failure(.rangeOnBypassList(input: trimmed)), value)
         }
@@ -56,6 +59,8 @@ final class AddDomainOutcomeTests: XCTestCase {
             ("example.com/page", "example.com"),
             ("https://10.0.0.1/admin", "10.0.0.1"),
             ("user@Example.COM:443", "example.com"),
+            ("example.com:8080/page", "example.com"),
+            ("cafe.be:80/menu", "cafe.be"),
         ]
         for (typed, saved) in cases {
             XCTAssertEqual(rm.checkDomainInput(typed, list: .bypass),
@@ -137,7 +142,9 @@ final class AddDomainOutcomeTests: XCTestCase {
         XCTAssertEqual(AddDomainError.alreadyListed(value: "en.wikipedia.org", list: .bypass).message,
                        "en.wikipedia.org is already on your Bypass list.")
         XCTAssertEqual(AddDomainError.rangeOnBypassList(input: "10.0.0.0/24").message,
-                       "10.0.0.0/24 is an IP range. The Bypass list takes domains; add ranges on the VPN Only list or as a Custom rule.")
+                       "10.0.0.0/24 is an IP range. The Bypass list takes domains; to send a range around the VPN, add it as a rule on the Direct route in Custom mode.")
+        XCTAssertFalse(AddDomainError.rangeOnBypassList(input: "10.0.0.0/24").message.contains("VPN Only"),
+                       "the VPN Only list sends a range through the VPN, the opposite of bypassing it")
         XCTAssertEqual(AddDomainError.empty(input: "!!!").message, "\u{201C}!!!\u{201D} is not a domain name.")
         XCTAssertEqual(AddDomainError.empty(input: "").message, "Type a domain first.")
         XCTAssertTrue(AddDomainError.malformedRange(input: "10.0.0.0/33").message.hasPrefix("10.0.0.0/33 is not an IP range"))
@@ -159,6 +166,59 @@ final class AddDomainOutcomeTests: XCTestCase {
         XCTAssertEqual(saved.message, "Added example.com to your Bypass list.")
     }
 
+    // MARK: - The line in Spanish and French
+
+    /// A language folder from the source tree; a test run has no app bundle to take it from.
+    private func lproj(_ language: String) throws -> Bundle {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try XCTUnwrap(Bundle(url: root.appendingPathComponent("Sources/VPNBypassCore/Resources/\(language).lproj")))
+    }
+
+    func testTheLineUnderTheFieldIsTranslated() throws {
+        let en = try lproj("en"), es = try lproj("es"), fr = try lproj("fr")
+
+        XCTAssertEqual(AddDomainError.alreadyListed(value: "en.wikipedia.org", list: .vpnOnly).message(in: es),
+                       "en.wikipedia.org ya está en tu lista Solo VPN.")
+        XCTAssertEqual(AddedDomain(entry: DomainEntry(domain: "example.com"), list: .bypass, typed: "user@example.com:443").message(in: fr),
+                       "example.com ajouté, nettoyé à partir de « user@example.com:443 ».")
+        XCTAssertEqual(AddDomainError.rangeOnBypassList(input: "10.0.0.0/24").message(in: en),
+                       AddDomainError.rangeOnBypassList(input: "10.0.0.0/24").message)
+
+        let errors: [AddDomainError] = [
+            .empty(input: ""), .empty(input: "!!!"), .rangeOnBypassList(input: "10.0.0.0/24"),
+            .malformedRange(input: "10.0.0.0/33"), .catchAllRange(input: "0.0.0.0/0"),
+            .alreadyListed(value: "example.com", list: .bypass),
+        ]
+        let added: [AddedDomain] = [
+            AddedDomain(entry: DomainEntry(domain: "10.0.0.0/24", isCIDR: true), list: .vpnOnly, typed: "10.0.0.0/24"),
+            AddedDomain(entry: DomainEntry(domain: "example.com"), list: .bypass, typed: "example.com"),
+            AddedDomain(entry: DomainEntry(domain: "example.com"), list: .bypass, typed: "https://example.com/a"),
+            AddedDomain(entry: DomainEntry(domain: "example.com"), list: .bypass, typed: "user@example.com"),
+        ]
+        let english = errors.map { $0.message(in: en) } + added.map { $0.message(in: en) }
+        for (name, bundle) in [("es", es), ("fr", fr)] {
+            let translated = errors.map { $0.message(in: bundle) } + added.map { $0.message(in: bundle) }
+            for (line, original) in zip(translated, english) {
+                XCTAssertNotEqual(line, original, "\(name) has no translation for: \(original)")
+                XCTAssertFalse(line.contains("%"), "\(name) left a placeholder in: \(line)")
+            }
+        }
+    }
+
+    // MARK: - The menu bar quick-add
+
+    func testQuickAddStaysOpenOnARefusalAndClosesOnASave() {
+        let refused = MenuContent.quickAdd(after: .failure(.rangeOnBypassList(input: "10.0.0.0/24")), typed: "10.0.0.0/24")
+        XCTAssertTrue(refused.isOpen, "closing would look like it worked")
+        XCTAssertEqual(refused.text, "10.0.0.0/24")
+        XCTAssertEqual(refused.error?.message, AddDomainError.rangeOnBypassList(input: "10.0.0.0/24").message)
+
+        let saved = MenuContent.quickAdd(after: .success(AddedDomain(entry: DomainEntry(domain: "example.com"), list: .bypass,
+                                                                    typed: "example.com")), typed: "example.com")
+        XCTAssertEqual(saved, .closed)
+        XCTAssertEqual(MenuContent.quickAdd(after: nil, typed: "example.com"), .closed, "Custom mode's rule add")
+    }
+
     // MARK: - GUI and socket agree
 
     /// The same input gets the same outcome from the Domains tab (addDomain /
@@ -168,6 +228,9 @@ final class AddDomainOutcomeTests: XCTestCase {
             ("example.com", .bypass),
             ("https://news.ycombinator.com/item?id=1", .bypass),
             ("10.0.0.0/24", .bypass),
+            ("10.0.0.0 /24", .bypass),
+            ("2001:db8::/32", .bypass),
+            ("example.com:8080/page", .bypass),
             ("!!!", .bypass),
             ("10.1.0.0/16", .vpnOnly),
             ("10.0.0.0/33", .vpnOnly),

@@ -133,7 +133,7 @@ final class ClassicControlTests: XCTestCase {
     }
 
     func testDomainAddRejectsARangeOnBypassList() async {
-        for value in ["10.0.0.0/8", "10.0.0/8"] {
+        for value in ["10.0.0.0/8", "10.0.0/8", "10.0.0.0 /8", "2001:db8::/32"] {
             let resp = await send("domain.add", ["domain": value])
             XCTAssertFalse(resp.ok, value)
             XCTAssertEqual(resp.error?.code, "invalid_args", value)

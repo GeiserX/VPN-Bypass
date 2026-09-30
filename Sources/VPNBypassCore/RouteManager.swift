@@ -5214,12 +5214,16 @@ final class RouteManager: ObservableObject {
         return .success(CheckedDomainInput(value: cleaned, isCIDR: false))
     }
 
-    /// "10.0.0.0/24", "10.0.0/8": digits and dots, then a "/", with no scheme in front.
-    /// A pasted link ("https://10.0.0.1/admin", "example.com/page") is not a range.
+    /// An address, then a "/", with no scheme in front: "10.0.0.0/24", "10.0.0/8",
+    /// "10.0.0.0 /24", or an IPv6 range such as "2001:db8::/32" (hex digits with at least
+    /// two colons). A pasted link ("https://10.0.0.1/admin", "example.com/page",
+    /// "example.com:8080/page") is not a range.
     nonisolated static func looksLikeIPRange(_ s: String) -> Bool {
         guard !s.contains("://"), let slash = s.firstIndex(of: "/") else { return false }
-        let head = s[..<slash]
-        return !head.isEmpty && head.allSatisfy { $0 == "." || ("0"..."9").contains($0) }
+        let head = s[..<slash].trimmingCharacters(in: .whitespaces)
+        guard !head.isEmpty else { return false }
+        if head.allSatisfy({ $0 == "." || ("0"..."9").contains($0) }) { return true }
+        return head.filter { $0 == ":" }.count >= 2 && head.allSatisfy { $0 == ":" || $0 == "." || $0.isHexDigit }
     }
 
     /// "a.b.c.d/0" or "a.b.c.d/1": a well-formed CIDR the app refuses to install, so it gets
@@ -5309,11 +5313,12 @@ enum DomainList: String {
     case bypass
     case vpnOnly
 
-    /// The list's name as the settings window shows it.
-    var displayName: String {
+    /// The list's name as the settings window shows it, in the app's language. `bundle`
+    /// holds the translations; tests pass one language's folder.
+    func displayName(in bundle: Bundle = .main) -> String {
         switch self {
-        case .bypass: return "Bypass"
-        case .vpnOnly: return "VPN Only"
+        case .bypass: return String(localized: "Bypass", bundle: bundle)
+        case .vpnOnly: return String(localized: "VPN Only", bundle: bundle)
         }
     }
 }
@@ -5337,19 +5342,25 @@ enum AddDomainError: Error, Equatable {
     /// The cleaned value is already on the list.
     case alreadyListed(value: String, list: DomainList)
 
-    /// One line for under the add field, in the user's words.
-    var message: String {
+    /// One line for under the add field, in the user's words and the app's language.
+    var message: String { message(in: .main) }
+
+    func message(in bundle: Bundle) -> String {
         switch self {
         case .empty(let input):
-            return input.isEmpty ? "Type a domain first." : "\u{201C}\(input)\u{201D} is not a domain name."
+            return input.isEmpty
+                ? String(localized: "Type a domain first.", bundle: bundle)
+                : String(localized: "\u{201C}\(input)\u{201D} is not a domain name.", bundle: bundle)
         case .rangeOnBypassList(let input):
-            return "\(input) is an IP range. The Bypass list takes domains; add ranges on the VPN Only list or as a Custom rule."
+            // The VPN Only list would send the range through the VPN, the opposite of
+            // what the user asked, so only the Custom rule is named.
+            return String(localized: "\(input) is an IP range. The Bypass list takes domains; to send a range around the VPN, add it as a rule on the Direct route in Custom mode.", bundle: bundle)
         case .malformedRange(let input):
-            return "\(input) is not an IP range the app can route. Write it as 10.0.0.0/24, with a prefix from /2 to /32."
+            return String(localized: "\(input) is not an IP range the app can route. Write it as 10.0.0.0/24, with a prefix from /2 to /32.", bundle: bundle)
         case .catchAllRange(let input):
-            return "\(input) would clash with the VPN's own catch-all routes. Use a prefix from /2 to /32."
+            return String(localized: "\(input) would clash with the VPN's own catch-all routes. Use a prefix from /2 to /32.", bundle: bundle)
         case .alreadyListed(let value, let list):
-            return "\(value) is already on your \(list.displayName) list."
+            return String(localized: "\(value) is already on your \(list.displayName(in: bundle)) list.", bundle: bundle)
         }
     }
 }
@@ -5368,17 +5379,20 @@ struct AddedDomain: Equatable {
         rewrittenFrom = typed.lowercased() == entry.domain ? nil : typed
     }
 
-    /// One line for under the add field.
-    var message: String {
+    /// One line for under the add field, in the app's language.
+    var message: String { message(in: .main) }
+
+    func message(in bundle: Bundle) -> String {
+        let listName = list.displayName(in: bundle)
         if entry.isCIDR {
-            return "Added the range \(entry.domain) to your \(list.displayName) list."
+            return String(localized: "Added the range \(entry.domain) to your \(listName) list.", bundle: bundle)
         }
         guard let typed = rewrittenFrom else {
-            return "Added \(entry.domain) to your \(list.displayName) list."
+            return String(localized: "Added \(entry.domain) to your \(listName) list.", bundle: bundle)
         }
         if typed.contains("://") {
-            return "Added \(entry.domain), from the link you pasted."
+            return String(localized: "Added \(entry.domain), from the link you pasted.", bundle: bundle)
         }
-        return "Added \(entry.domain), cleaned up from \u{201C}\(typed)\u{201D}."
+        return String(localized: "Added \(entry.domain), cleaned up from \u{201C}\(typed)\u{201D}.", bundle: bundle)
     }
 }

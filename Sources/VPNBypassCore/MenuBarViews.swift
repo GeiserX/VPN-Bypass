@@ -139,6 +139,61 @@ struct BrandedAppName: View {
     }
 }
 
+// MARK: - Quick add
+
+/// The dropdown's quick-add field, with why the last add saved nothing under it.
+struct QuickAddField: View {
+    @Binding var text: String
+    let error: AddDomainFeedback?
+    let onAdd: () -> Void
+    let onCancel: () -> Void
+
+    private let accentGradient = LinearGradient(
+        colors: [Theme.success, Theme.successDark],
+        startPoint: .leading,
+        endPoint: .trailing
+    )
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                TextField("domain.com", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.secondary.opacity(0.12))
+                    .cornerRadius(6)
+                    .onSubmit {
+                        onAdd()
+                    }
+
+                Button {
+                    onAdd()
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(accentGradient)
+                }
+                .buttonStyle(.plain)
+                .disabled(text.isEmpty)
+
+                Button {
+                    onCancel()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            if let error {
+                AddDomainFeedbackLine(feedback: error)
+            }
+        }
+    }
+}
+
 // MARK: - Menu Content
 
 struct MenuContent: View {
@@ -148,6 +203,8 @@ struct MenuContent: View {
     @ObservedObject private var helperManager = HelperManager.shared
     @State private var newDomain = ""
     @State private var isAddingDomain = false
+    /// Why the last quick-add saved nothing, shown under the field, which stays open.
+    @State private var quickAddError: AddDomainFeedback?
     @State private var isVerifying = false
     /// The mode a tap wants to switch to, pending confirmation. Mirrors
     /// RoutingModePicker in SettingsView so both surfaces behave identically —
@@ -392,38 +449,10 @@ struct MenuContent: View {
         VStack(spacing: 12) {
             // Quick add domain
             if isAddingDomain {
-                HStack(spacing: 8) {
-                    TextField("domain.com", text: $newDomain)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Color.secondary.opacity(0.12))
-                        .cornerRadius(6)
-                        .onSubmit {
-                            addDomainAndClose()
-                        }
-                    
-                    Button {
-                        addDomainAndClose()
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(accentGradient)
+                QuickAddField(text: $newDomain, error: quickAddError, onAdd: addDomainAndClose, onCancel: closeQuickAdd)
+                    .onChange(of: newDomain) { text in
+                        if text != quickAddError?.fieldText { quickAddError = nil }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(newDomain.isEmpty)
-                    
-                    Button {
-                        isAddingDomain = false
-                        newDomain = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
             } else {
                 Button {
                     withAnimation(.spring(response: 0.3)) {
@@ -917,14 +946,41 @@ struct MenuContent: View {
     
     private func addDomainAndClose() {
         guard !newDomain.isEmpty else { return }
+        let result: Result<AddedDomain, AddDomainError>?
         if routeManager.config.routingMode == .vpnOnly {
-            routeManager.addInverseDomain(newDomain)
+            result = routeManager.addInverseDomain(newDomain)
         } else if RouteManager.usesCustomEngine(schemaVersion: routeManager.config.schemaVersion, routingMode: routeManager.config.routingMode) {
             addDomainRuleToDirect(newDomain)
+            result = nil
         } else {
-            routeManager.addDomain(newDomain)
+            result = routeManager.addDomain(newDomain)
         }
+        let next = Self.quickAdd(after: result, typed: newDomain)
+        newDomain = next.text
+        quickAddError = next.error
+        isAddingDomain = next.isOpen
+    }
+
+    /// The quick-add after an add. A refused one stays open with the text and says why,
+    /// as the Domains tab does, because closing would look like it worked. A saved one
+    /// closes. nil is Custom mode's rule add, which says nothing back.
+    static func quickAdd(after result: Result<AddedDomain, AddDomainError>?, typed: String) -> QuickAddState {
+        guard let result else { return .closed }
+        let shown = AddDomainFeedback(result, typed: typed)
+        return shown.isError ? QuickAddState(text: shown.fieldText, isOpen: true, error: shown) : .closed
+    }
+
+    struct QuickAddState: Equatable {
+        let text: String
+        let isOpen: Bool
+        let error: AddDomainFeedback?
+
+        static let closed = QuickAddState(text: "", isOpen: false, error: nil)
+    }
+
+    private func closeQuickAdd() {
         newDomain = ""
+        quickAddError = nil
         isAddingDomain = false
     }
 

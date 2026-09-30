@@ -299,6 +299,12 @@ struct DomainsTab: View {
                 if text != feedback?.fieldText { feedback = nil }
             }
             .onChange(of: routeManager.config.routingMode) { _ in feedback = nil }
+            // A refusal such as "already on your list" stops being true once the list
+            // changes (the trash button below, `vpnb domain.rm`). A saved add changes the
+            // list itself, so its line stays.
+            .onChange(of: activeDomains.map(\.domain)) { _ in
+                if feedback?.isError == true { feedback = nil }
+            }
 
             // Domain list
             VStack(alignment: .leading, spacing: 10) {

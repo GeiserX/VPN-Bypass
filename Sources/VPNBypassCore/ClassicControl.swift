@@ -184,7 +184,7 @@ enum ClassicControl {
         case .empty:
             return fail("invalid_args", "domain is empty after cleaning")
         case .rangeOnBypassList:
-            return fail("invalid_args", "the bypass list takes a domain name, not a CIDR (a CIDR goes on list=vpnOnly)")
+            return fail("invalid_args", "the bypass list takes a domain name, not a CIDR (to send a range around the VPN, use rule.add match=cidr with the Direct route, in custom mode)")
         case .malformedRange:
             return fail("invalid_args", "malformed CIDR (expected a.b.c.d/n with n from 2 to 32)")
         case .catchAllRange:

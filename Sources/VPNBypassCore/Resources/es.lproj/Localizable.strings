@@ -224,3 +224,15 @@
 "The app needs to restart to apply the language change." = "La aplicación necesita reiniciarse para aplicar el cambio de idioma.";
 "Restart Now" = "Reiniciar ahora";
 "Later" = "Más tarde";
+
+/* ===== Añadir un dominio: la línea bajo el campo ===== */
+"Type a domain first." = "Escribe primero un dominio.";
+"“%@” is not a domain name." = "“%@” no es un nombre de dominio.";
+"%@ is an IP range. The Bypass list takes domains; to send a range around the VPN, add it as a rule on the Direct route in Custom mode." = "%@ es un rango de IP. La lista Bypass solo admite dominios; para que un rango no pase por la VPN, añádelo como regla en la ruta Direct del modo Personalizado.";
+"%@ is not an IP range the app can route. Write it as 10.0.0.0/24, with a prefix from /2 to /32." = "%@ no es un rango de IP que la app pueda enrutar. Escríbelo como 10.0.0.0/24, con un prefijo de /2 a /32.";
+"%@ would clash with the VPN's own catch-all routes. Use a prefix from /2 to /32." = "%@ chocaría con las rutas generales de la propia VPN. Usa un prefijo de /2 a /32.";
+"%@ is already on your %@ list." = "%1$@ ya está en tu lista %2$@.";
+"Added the range %@ to your %@ list." = "Se añadió el rango %1$@ a tu lista %2$@.";
+"Added %@ to your %@ list." = "Se añadió %1$@ a tu lista %2$@.";
+"Added %@, from the link you pasted." = "Se añadió %@, sacado del enlace que pegaste.";
+"Added %@, cleaned up from “%@”." = "Se añadió %1$@, limpiado a partir de “%2$@”.";
