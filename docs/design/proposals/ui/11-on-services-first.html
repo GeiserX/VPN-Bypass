@@ -1,0 +1,60 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  .pane { width:556px; border-radius:12px; border:1px solid #2C2C2C; background: linear-gradient(#14151d, #191b25); padding:16px 24px 0; overflow:hidden; }
+  .h1 { display:flex; align-items:center; gap:10px; font: 700 18px "SFRounded", system-ui; }
+  .h1 .r { margin-left:auto; font: 500 11px system-ui; color: var(--text2); }
+  .sbar { display:flex; align-items:center; gap:8px; margin-top:14px; }
+  .search { flex:1; display:flex; align-items:center; gap:8px; background: rgba(255,255,255,.08); border-radius:8px; padding:7px 10px; font-size:12px; color: var(--text3); }
+  .chip { font-size:11px; font-weight:500; padding:6px 10px; border-radius:6px; }
+  .list { margin-top:14px; background:#1d1e26; border-radius:10px 10px 0 0; padding:8px 0 0; }
+  .sh { display:flex; align-items:center; gap:8px; font: 700 10px "SFRounded", system-ui; color: var(--text2); padding:4px 12px 4px; letter-spacing:.3px; }
+  .sh .c { font: 500 10px system-ui; color: var(--text3); letter-spacing:0; }
+  .srow { display:flex; align-items:center; gap:12px; padding:8px 20px 8px 12px; }
+  .sdot { width:7px; height:7px; border-radius:50%; flex:none; background:#6B7280; }
+  .sdot.on { background: var(--success); }
+  .srow .n { font-size:13px; font-weight:600; color: var(--text2); }
+  .srow.on .n { color:#fff; }
+  .srow .s { font-size:11px; color: var(--text2); margin-top:1px; }
+  .sw { width:38px; height:20px; border-radius:99px; background: rgba(255,255,255,.22); position:relative; flex:none; }
+  .sw::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#EDEDED; }
+  .sw.on { background: var(--success); }
+  .sw.on::after { left:auto; right:3px; width:22px; border-radius:99px; background:#E6F6EF; }
+  .gap { height:1px; background: rgba(255,255,255,.07); margin:6px 12px 4px; }
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="grid" viewBox="0 0 20 20"><rect x="2" y="2" width="7" height="7" rx="1.6" fill="#8B5CF6"/><rect x="11" y="2" width="7" height="7" rx="1.6" fill="#8B5CF6"/><rect x="2" y="11" width="7" height="7" rx="1.6" fill="#8B5CF6"/><rect x="11" y="11" width="7" height="7" rx="1.6" fill="#8B5CF6"/></symbol>
+  <symbol id="mag" viewBox="0 0 12 12"><circle cx="5" cy="5" r="3.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7.7 7.7 10.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+  <symbol id="plus" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7.5" fill="#8B5CF6"/><path d="M8 4.8v6.4M4.8 8h6.4" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></symbol>
+</svg>
+<div class="head"><span class="num">11</span><span class="title">The services that are on come first</span></div>
+<p class="caption" style="max-width:1164px">The Services page lists all 37 built-in services in one fixed order, and the four that are on are spread through it: Telegram, WhatsApp and YouTube near the top, the fourth further down. To answer "what am I bypassing?" the user scrolls the whole list or reads the count. The proposal puts an On section at the top with the enabled services, then the rest in the usual order. Turning a service off moves it down on the next visit, not while the pointer is on it.</p>
+<div class="cols">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="shot" style="width:556px;height:470px;background-image:url(../../../images/screenshots/services.png);background-position:-12px -192px;"></div>
+    <div class="note" style="max-width:540px">Signal sits between WhatsApp and YouTube. The fourth service that is on is below the fold.</div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; proposal</div>
+    <div class="pane" style="height:470px">
+      <div class="h1"><svg width="20" height="20"><use href="#grid"/></svg>Services<span class="r">4/37 enabled</span><svg width="16" height="16"><use href="#plus"/></svg></div>
+      <div class="sbar"><div class="search"><svg width="12" height="12"><use href="#mag"/></svg>Search services&hellip;</div><span class="chip" style="color:var(--success);background:rgba(16,185,129,.15)">All</span><span class="chip" style="color:var(--error);background:rgba(239,68,68,.15)">None</span></div>
+      <div class="list">
+        <div class="sh">ON<span class="c">4</span></div>
+        <div class="srow on"><span class="sdot on"></span><div><div class="n">Telegram</div><div class="s">6 domains &middot; 8 IPs</div></div><span class="spacer"></span><span class="sw on"></span></div>
+        <div class="srow on"><span class="sdot on"></span><div><div class="n">WhatsApp</div><div class="s">4 domains &middot; 3 IPs</div></div><span class="spacer"></span><span class="sw on"></span></div>
+        <div class="srow on"><span class="sdot on"></span><div><div class="n">YouTube</div><div class="s">8 domains</div></div><span class="spacer"></span><span class="sw on"></span></div>
+        <div class="srow on"><span class="sdot on"></span><div><div class="n">Slack</div><div class="s">5 domains</div></div><span class="spacer"></span><span class="sw on"></span></div>
+        <div class="gap"></div>
+        <div class="sh">BUILT-IN SERVICES<span class="c">33</span></div>
+        <div class="srow"><span class="sdot"></span><div><div class="n">Signal</div><div class="s">4 domains</div></div><span class="spacer"></span><span class="sw"></span></div>
+        <div class="srow"><span class="sdot"></span><div><div class="n">Netflix</div><div class="s">4 domains</div></div><span class="spacer"></span><span class="sw"></span></div>
+        <div class="srow"><span class="sdot"></span><div><div class="n">Amazon Prime Video</div><div class="s">5 domains</div></div><span class="spacer"></span><span class="sw"></span></div>
+      </div>
+    </div>
+    <div class="note" style="max-width:540px">The On section holds every enabled service. The rest keep their order, so the list still reads as the catalogue it is.</div>
+  </div>
+</div>
+</body></html>

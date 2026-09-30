@@ -1,0 +1,89 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  .pane { width:556px; border-radius:12px; border:1px solid #2C2C2C; background: linear-gradient(#13141c, #191b25); padding:18px 24px 22px; }
+  .lcard { background: var(--card); border:1px solid var(--cardBorder); border-radius:14px; padding:16px; }
+  .lhead { display:flex; align-items:center; gap:8px; }
+  .lhead .t { font: 700 10px "SFRounded", system-ui; letter-spacing:1px; color: var(--text2); }
+  .cnt { font: 700 10px "SFRounded", system-ui; color: var(--success); background: rgba(16,185,129,.15); padding:3px 8px; border-radius:99px; }
+  .pull { display:inline-flex; align-items:center; gap:3px; color: var(--text2); padding:2px 5px; border-radius:5px; }
+  .pull.open { background: rgba(255,255,255,.10); color:#fff; }
+  .pull svg { width:15px; height:15px; }
+  .drow { display:flex; align-items:center; gap:12px; padding:10px 14px; border-radius:10px; }
+  .dot { width:8px; height:8px; border-radius:50%; background: var(--success); box-shadow: 0 0 4px rgba(16,185,129,.5); flex:none; }
+  .drow .n { font-size:13px; font-weight:500; }
+  .trash { width:12px; height:12px; color: rgba(239,68,68,.6); }
+  .undo { display:flex; align-items:center; gap:10px; padding:9px 14px; border-radius:10px; background: rgba(255,255,255,.04); border:1px dashed rgba(255,255,255,.12); font-size:12px; color: var(--text2); }
+  .undo .k { font-size:11px; color: var(--text3); }
+  .sbar { display:flex; align-items:center; gap:8px; }
+  .search { flex:1; display:flex; align-items:center; gap:8px; background: rgba(255,255,255,.08); border-radius:8px; padding:7px 10px; font-size:12px; color: var(--text3); }
+  .h1 { display:flex; align-items:center; gap:10px; font: 700 18px "SFRounded", system-ui; margin-bottom:12px; }
+  .h1 .r { margin-left:auto; font: 500 11px system-ui; color: var(--text2); }
+  .menuwrap { position:relative; height:0; }
+  .nmenu.pos { position:absolute; right:0; top:4px; width:190px; z-index:2; }
+  .alert { width:272px; background:#2A2A2D; border:0.5px solid rgba(255,255,255,.18); border-radius:12px; padding:18px 16px 16px; box-shadow: 0 16px 40px rgba(0,0,0,.6); text-align:center; }
+  .alert .ai { width:44px; height:44px; margin:0 auto 10px; border-radius:10px; background: linear-gradient(135deg,#1e3a5f,#0f1f33); display:flex; align-items:center; justify-content:center; }
+  .alert h3 { margin:0 0 6px; font-size:13px; font-weight:700; }
+  .alert p { margin:0 0 14px; font-size:11px; line-height:1.4; color:#D1D1D6; }
+  .alert .b { display:block; font-size:12.5px; padding:5px 0; border-radius:6px; margin-top:7px; }
+  .alert .b.plain { background:#4A4A4D; }
+  .alert .b.def { background: var(--accent); }
+  .pair { display:flex; gap:24px; align-items:flex-start; }
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="trash" viewBox="0 0 12 12"><path d="M2 3h8M4.5 3V1.8h3V3M3 3l.6 7.2h4.8L9 3" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ell" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="5" cy="8" r=".95" fill="currentColor"/><circle cx="8" cy="8" r=".95" fill="currentColor"/><circle cx="11" cy="8" r=".95" fill="currentColor"/></symbol>
+  <symbol id="chev" viewBox="0 0 8 8"><path d="M1.5 3 4 5.5 6.5 3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></symbol>
+  <symbol id="mag" viewBox="0 0 12 12"><circle cx="5" cy="5" r="3.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7.7 7.7 10.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+  <symbol id="grid" viewBox="0 0 20 20"><rect x="2" y="2" width="7" height="7" rx="1.6" fill="#8B5CF6"/><rect x="11" y="2" width="7" height="7" rx="1.6" fill="#8B5CF6"/><rect x="2" y="11" width="7" height="7" rx="1.6" fill="#8B5CF6"/><rect x="11" y="11" width="7" height="7" rx="1.6" fill="#8B5CF6"/></symbol>
+</svg>
+<div class="head"><span class="num">8</span><span class="title">Deletes and All/None can be taken back</span></div>
+<p class="caption" style="max-width:604px">Every trash icon deletes on the first click, with nothing to undo. Deleting a custom service takes its whole domain list with it. All turns on 37 services at once, Netflix and Steam included, so all their traffic leaves the VPN. None is red, like a delete, though it only turns things off. The proposal keeps delete at one click but leaves an Undo line in the list, with &#8984;Z. All and None move into a small menu, and turning on many services at once asks first.</p>
+<div class="rows" style="width:604px">
+  <div class="col">
+    <div class="stateTag" style="margin:0">Deleting a domain</div>
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="shot" style="width:556px;height:160px;background-image:url(../../../images/screenshots/domains.png);background-position:-12px -324px;"></div>
+    <div class="note" style="max-width:580px">The trash icon removes the domain and its routes at once. All and None sit next to the count as two chips, None in red.</div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; proposal, right after the delete</div>
+    <div class="pane">
+      <div class="lcard">
+        <div class="lhead"><span class="t">CONFIGURED DOMAINS</span><span class="spacer"></span><span class="cnt">1/1</span><span class="pull"><svg><use href="#ell"/></svg><svg style="width:8px;height:8px"><use href="#chev"/></svg></span></div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+          <div class="drow"><span class="dot"></span><span class="n">en.wikipedia.org</span><span class="spacer"></span><span class="nswitch on"></span><svg class="trash"><use href="#trash"/></svg></div>
+          <div class="undo">Removed news.ycombinator.com.<span class="spacer"></span><span class="nbtn" style="font-size:11px;padding:2px 10px">Undo</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="max-width:580px">The line stays until the next change or until Settings closes, and &#8984;Z does the same as Undo. All and None move into the &#8943; menu. A custom service says what went with it: "Removed Work Tools and its 5 domains." Rules and routes work the same way.</div>
+  </div>
+  <div class="col" style="margin-top:8px">
+    <div class="stateTag" style="margin:0">Turning on every service</div>
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="shot" style="width:556px;height:80px;background-image:url(../../../images/screenshots/services.png);background-position:-12px -194px;"></div>
+    <div class="note" style="max-width:580px">One click on All sends 37 services around the VPN.</div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; proposal</div>
+    <div class="pair">
+      <div class="pane" style="width:300px;padding:16px 18px">
+        <div class="h1"><svg width="20" height="20"><use href="#grid"/></svg>Services<span class="r">4/37 enabled</span></div>
+        <div class="sbar"><div class="search"><svg width="12" height="12"><use href="#mag"/></svg>Search services&hellip;</div><span class="pull open"><svg><use href="#ell"/></svg><svg style="width:8px;height:8px"><use href="#chev"/></svg></span></div>
+        <div class="menuwrap"><div class="nmenu pos" style="width:170px"><div class="hl">Turn All On&hellip;</div><div>Turn All Off</div></div></div>
+        <div style="height:62px"></div>
+      </div>
+      <div class="alert">
+        <div class="ai"><svg width="26" height="26" viewBox="0 0 16 16"><path d="M2 5h8.5M8 2.5 10.5 5 8 7.5M14 11H5.5M8 8.5 5.5 11 8 13.5" fill="none" stroke="#38BDF8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <h3>Send 37 services around the VPN?</h3>
+        <p>Netflix, Steam and 35 more will use your normal connection instead of the VPN. You can turn them off again here.</p>
+        <span class="b plain">Turn On 37 Services</span>
+        <span class="b def">Cancel</span>
+      </div>
+    </div>
+    <div class="note" style="max-width:580px">Cancel is the default button. Turn All Off does not ask: it only puts traffic back through the VPN, and Undo covers it.</div>
+  </div>
+</div>
+</body></html>

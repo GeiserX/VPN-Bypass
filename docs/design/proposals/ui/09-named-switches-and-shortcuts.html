@@ -1,0 +1,87 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  .grid2 { display:grid; grid-template-columns: 532px 532px; column-gap:28px; row-gap:8px; align-items:start; }
+  .sec { font: 700 12.5px "SFRounded", system-ui; color:#fff; margin-top:14px; }
+  .rel { position:relative; }
+  .vo { position:absolute; border-radius:7px; box-shadow: 0 0 0 1.5px #fff, 0 0 0 4.5px #111, 0 0 0 5.5px rgba(255,255,255,.5); }
+  .cap { display:inline-block; background: rgba(28,28,30,.94); border:0.5px solid rgba(255,255,255,.22); border-radius:8px; padding:7px 14px; font-size:14px; color:#fff; box-shadow: 0 8px 22px rgba(0,0,0,.5); }
+  .capl { font-size:10px; color: var(--text3); margin:10px 0 5px; }
+  .scard { background:#1d1e26; border-radius:10px 10px 0 0; padding:4px 0; }
+  .srow { display:flex; align-items:center; gap:12px; padding:9px 14px 9px 12px; }
+  .sdot { width:7px; height:7px; border-radius:50%; flex:none; }
+  .srow .n { font-size:13px; font-weight:600; }
+  .srow .s { font-size:11px; color: var(--text2); margin-top:1px; }
+  .drow { display:flex; align-items:center; gap:12px; padding:10px 14px; background: var(--card); border:1px solid var(--cardBorder); border-radius:10px; }
+  .trash { width:12px; height:12px; color: rgba(239,68,68,.75); }
+  .acts { display:flex; gap:8px; }
+  .acts .btn { padding:8px 10px; }
+  .ib { width:34px; flex:none; }
+  .foot { display:flex; align-items:center; gap:12px; margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,.10); color: var(--text2); }
+  .tip { position:absolute; background:#2B2B2E; border:0.5px solid rgba(255,255,255,.2); border-radius:5px; padding:3px 8px; font-size:11.5px; color:#eee; white-space:nowrap; box-shadow: 0 4px 12px rgba(0,0,0,.5); }
+  .tip .k { color: rgba(255,255,255,.55); margin-left:10px; }
+  .nmenu.pos { position:absolute; right:0; top:44px; width:230px; }
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="trash" viewBox="0 0 12 12"><path d="M2 3h8M4.5 3V1.8h3V3M3 3l.6 7.2h4.8L9 3" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="gear" viewBox="0 0 16 16"><path fill="currentColor" d="M6.9 1h2.2l.4 1.9 1.3.6 1.7-1 1.5 1.5-1 1.7.6 1.3 1.9.4v2.2l-1.9.4-.6 1.3 1 1.7-1.5 1.5-1.7-1-1.3.6-.4 1.9H6.9l-.4-1.9-1.3-.6-1.7 1-1.5-1.5 1-1.7-.6-1.3L.5 9.1V6.9l1.9-.4.6-1.3-1-1.7 1.5-1.5 1.7 1 1.3-.6z"/><circle cx="8" cy="8" r="2.3" fill="#0F0F0F"/></symbol>
+  <symbol id="power" viewBox="0 0 16 16"><path d="M8 1.8v6M4.6 3.9a5.2 5.2 0 1 0 6.8 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+  <symbol id="refresh" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="check" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.4 8.2 7.2 10l3.4-3.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+<div class="head"><span class="num">9</span><span class="title">Switches with names, and keyboard shortcuts</span></div>
+<p class="caption" style="max-width:1092px">Every row switch is an unlabelled <span class="mono">Toggle("")</span> shrunk with <span class="mono">scaleEffect</span>, so VoiceOver reads 37 identical "switch, on" on the Services page, and the drawn switch is smaller than the space it takes. Icon-only buttons have no label of their own, and the app has no keyboard shortcut at all. The proposal names every switch and icon button for VoiceOver, uses the native small switch, and adds &#8984;R (Refresh), &#8984;, (Settings) and &#8984;Q (Quit) in the dropdown and &#8984;F (search) on Services, listed where macOS lists shortcuts.</p>
+<div class="grid2">
+  <div class="label">Before &middot; 4.8.x</div>
+  <div class="label after">After &middot; proposal</div>
+
+  <div class="sec">What VoiceOver reads on the Services page</div><div class="sec">What VoiceOver reads on the Services page</div>
+  <div class="col">
+    <div class="rel">
+      <div class="shot" style="width:532px;height:56px;background-image:url(../../../images/screenshots/services.png);background-position:-24px -308px;border-radius:10px 10px 0 0;border-bottom:0;"></div>
+      <div class="vo" style="left:469px;top:15px;width:46px;height:25px"></div>
+    </div>
+    <div class="capl">VoiceOver caption, cursor on Telegram's switch</div>
+    <div><span class="cap">switch, on</span></div>
+    <div class="note" style="max-width:520px">All 37 switches read the same. The name is a separate element one step back.</div>
+  </div>
+  <div class="col">
+    <div class="scard">
+      <div class="srow"><span class="sdot" style="background:var(--success)"></span><div><div class="n">Telegram</div><div class="s">6 domains &middot; 8 IPs</div></div><span class="spacer"></span><span class="rel" style="display:inline-flex;margin-right:10px"><span class="nswitch on"></span><span class="vo" style="left:-5px;top:-5px;width:36px;height:25px"></span></span></div>
+    </div>
+    <div class="capl">VoiceOver caption, cursor on Telegram's switch</div>
+    <div><span class="cap">Telegram, switch, on</span></div>
+    <div class="note" style="max-width:520px">A named <span class="mono">Toggle</span> with <span class="mono">.labelsHidden()</span> looks the same and carries the name. <span class="mono">.controlSize(.small)</span> draws the native small switch at its real size.</div>
+    <div class="drow" style="margin-top:10px"><span class="sdot" style="background:var(--success);width:8px;height:8px"></span><span style="font-size:13px;font-weight:500">en.wikipedia.org</span><span class="spacer"></span><span class="nswitch on"></span><span class="rel" style="display:inline-flex;margin-left:4px"><svg class="trash"><use href="#trash"/></svg><span class="vo" style="left:-6px;top:-6px;width:24px;height:24px"></span></span></div>
+    <div class="capl">VoiceOver caption, cursor on the Domains page's delete button</div>
+    <div><span class="cap">Delete en.wikipedia.org, button</span></div>
+  </div>
+
+  <div class="sec">Keyboard, with the dropdown open</div><div class="sec">Keyboard, with the dropdown open</div>
+  <div class="col">
+    <div class="shot" style="width:340px;height:132px;background-image:url(../../../images/screenshots/menu-bar.png);background-position:0 -424px;"></div>
+    <div class="note" style="max-width:520px">No shortcut works: &#8984;R, &#8984;, (comma) and &#8984;Q do nothing. The gear's tooltip says "Settings" and the power button's says "Quit VPN Bypass", with no key next to them.</div>
+  </div>
+  <div class="col">
+    <div class="rel" style="width:532px;height:232px">
+      <div class="menu clip" style="position:absolute;left:0;top:0">
+        <div class="acts"><span class="btn primary" style="flex:1"><svg class="icon"><use href="#refresh"/></svg>Refresh Routes</span><span class="btn ib"><svg class="icon"><use href="#check"/></svg></span><span class="btn ib" style="background:#343436">&middot;&middot;&middot;</span></div>
+        <div class="foot"><span class="tiny">62 routes applied 23 s ago, none failed.</span><span class="spacer"></span><svg class="icon" style="width:14px;height:14px"><use href="#gear"/></svg><svg class="icon" style="width:14px;height:14px"><use href="#power"/></svg></div>
+      </div>
+      <div class="nmenu" style="position:absolute;left:250px;top:44px;width:250px">
+        <div>Refresh Routes<span class="k">&#8984;R</span></div>
+        <div class="hl">Verify Routes</div>
+        <div>Re-resolve DNS Now</div>
+        <div>Open Logs</div>
+        <hr>
+        <div>Settings&hellip;<span class="k">&#8984;,</span></div>
+        <div>Quit VPN Bypass<span class="k">&#8984;Q</span></div>
+        <hr>
+        <div>Remove All Routes&hellip;</div>
+      </div>
+    </div>
+    <div class="note" style="max-width:520px">The buttons are laid out as in proposal 3. The &middot;&middot;&middot; menu lists each shortcut, as a macOS menu does, and the gear and power tooltips add their keys. &#8984;F puts the cursor in the Services search field.</div>
+  </div>
+</div>
+</body></html>
