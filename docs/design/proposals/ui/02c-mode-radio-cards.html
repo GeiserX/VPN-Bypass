@@ -1,0 +1,100 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  .titlebar { text-align:center; font: 800 13px "SFRounded", system-ui; margin-top:-13px; }
+  .titlebar .b { font-weight:300; margin-left:2px; color: var(--sky); }
+  .toolbar { display:flex; justify-content:center; gap:4px; padding: 14px 16px 10px; border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(15,15,20,.8); }
+  .tb { width:74px; padding:6px 0 5px; border-radius:7px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11px; color: var(--text2); }
+  .tb svg { width:20px; height:20px; }
+  .tb.sel { background: rgba(255,255,255,.10); color:#fff; }
+  .tb.sel svg { color: var(--sky); }
+  .content { padding: 18px 24px 22px; }
+  .h2 { font: 700 18px "SFRounded", system-ui; margin: 0 0 4px; display:flex; gap:8px; align-items:center; }
+  .lead { font-size:13px; color: var(--text2); }
+  .addrow { display:flex; gap:10px; margin-top:14px; }
+  .addrow .f { flex:1; height:40px; border-radius:10px; background: var(--input); display:flex; align-items:center; gap:10px; padding:0 14px; font-size:13px; color: var(--text3); }
+  .addrow .p { width:42px; height:40px; border-radius:10px; background: rgba(255,255,255,.12); display:flex; align-items:center; justify-content:center; color: var(--text2); font-size:20px; }
+  /* System Settings style grouped form */
+  .group { background: var(--card); border:1px solid var(--cardBorder); border-radius:10px; margin-bottom:18px; }
+  .grow { display:flex; align-items:center; padding: 10px 12px; min-height:40px; font-size:13px; }
+  .gfoot { font-size:11.5px; color: var(--text2); line-height:1.4; padding: 0 12px 11px; margin-top:-3px; }
+  /* NSPopUpButton, dark */
+  .popup { display:inline-flex; align-items:center; gap:7px; font-size:13px; padding:3px 5px 3px 9px; border-radius:6px; background:#4A4A4D; box-shadow: inset 0 0.5px 0 rgba(255,255,255,.25), 0 0.5px 1px rgba(0,0,0,.4); }
+  .popup .cv { width:16px; height:16px; border-radius:4px; background: var(--accent); display:inline-flex; align-items:center; justify-content:center; }
+  .popup svg.sym { width:14px; height:14px; color:#E5E5E7; }
+  /* menus with subtitles (NSMenuItem.subtitle, macOS 14) */
+  .smenu { position:absolute; background: #2A2A2D; border: 0.5px solid rgba(255,255,255,.18); border-radius:8px; padding:5px; box-shadow: 0 12px 32px rgba(0,0,0,.6); z-index:5; }
+  .smenu .it { display:flex; gap:7px; padding:4px 10px 5px 6px; border-radius:5px; }
+  .smenu .it.hl { background: var(--accent); }
+  .smenu .ck { width:12px; flex:none; padding-top:2px; }
+  .smenu .ic { width:16px; height:16px; flex:none; margin-top:1px; color:#E5E5E7; }
+  .smenu .t { font-size:13px; }
+  .smenu .s { font-size:11px; color: rgba(255,255,255,.55); line-height:1.3; margin-top:1px; }
+  .smenu .it.hl .s { color: rgba(255,255,255,.85); }
+  .smenu .it.hl .ic { color:#fff; }
+  /* the sheet Sergio liked, kept as the confirmation step */
+  .sheet { width: 330px; background:#232326; border:0.5px solid rgba(255,255,255,.18); border-radius:12px; padding:18px; box-shadow: 0 16px 40px rgba(0,0,0,.6); }
+  .sheet h3 { margin:0 0 12px; font-size:13px; font-weight:700; }
+  .opt { display:flex; gap:9px; padding:8px 0; border-top: 1px solid rgba(255,255,255,.07); }
+  .opt:first-of-type { border-top:0; }
+  .radio { width:14px; height:14px; border-radius:50%; background: rgba(255,255,255,.12); border:0.5px solid rgba(255,255,255,.3); flex:none; margin-top:1px; }
+  .radio.on { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 0 0 4px var(--accent), inset 0 0 0 7px #fff; }
+  .opt .t { font-size:13px; font-weight:600; }
+  .opt .x { font-size:11px; color: var(--text2); margin-top:2px; line-height:1.35; }
+  .btns { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+  .verdict { font-size:12.5px; color: var(--text2); line-height:1.45; max-width: 900px; margin: -8px 0 18px; }
+  .verdict b { color:#fff; font-weight:600; }
+  .rec { font: 700 10.5px "SFRounded", system-ui; letter-spacing:1.2px; text-transform:uppercase; color: var(--sky); margin-left:4px; }
+  .rel { position:relative; }
+  .smenu.static { position:static; box-shadow: 0 8px 22px rgba(0,0,0,.5); }
+
+  .cards { display:flex; gap:10px; margin-bottom:18px; }
+  .mcard { flex:1; border-radius:10px; background: var(--card); border:1px solid var(--cardBorder); padding:10px 10px 11px; }
+  .mcard.sel { border: 1px solid var(--accent); box-shadow: 0 0 0 2px rgba(10,132,255,.35); background: rgba(10,132,255,.07); }
+  .mcard .pic { height:64px; border-radius:6px; background: rgba(0,0,0,.25); display:flex; align-items:center; justify-content:center; margin-bottom:9px; }
+  .mcard .nm { display:flex; gap:7px; align-items:center; font-size:13px; font-weight:600; }
+  .mcard .ds { font-size:11px; color: var(--text2); line-height:1.35; margin-top:4px; }
+  .pic text { font-family: -apple-system, system-ui, sans-serif; }
+  .glabel { font-size:13px; font-weight:600; margin: 0 0 8px 2px; }
+</style></head>
+<body>
+<div class="head"><span class="num">2C</span><span class="title">Routing mode as three cards in a radio group</span></div>
+<p class="caption">Each mode gets a card with a small diagram of where traffic goes: blue through the VPN, green direct, purple through a proxy. Under it sit a radio button, the mode name and one sentence. The layout follows the Appearance choice in System Settings, and the current mode has the accent outline. Clicking another card opens the sheet. Navigation moves into a native toolbar in all four alternatives, so the page buttons no longer look like the mode.</p>
+<p class="verdict"><b>Good.</b> You see how the modes differ before reading a word, which helps a first-time user most. <b>Bad.</b> It is the tallest of the four and pushes the list down on every visit, for a setting most people change once.</p>
+<div class="rows">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="shot" style="width:580px;height:186px;background-image:url(../../../images/screenshots/domains.png);background-position:0 0;"></div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; 2C</div>
+    <div class="cols" style="gap:24px">
+      <div class="win rel">
+        <div class="tl"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#3A3A3C"></i></div>
+        <div class="titlebar">VPN <span class="b">Bypass</span></div>
+        <div class="toolbar"><div class="tb sel"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><ellipse cx="10" cy="10" rx="3.3" ry="7.5"/><path d="M2.8 7.5h14.4M2.8 12.5h14.4"/></svg>Domains</div><div class="tb"><svg viewBox="0 0 20 20" fill="currentColor"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.5"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1.5"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1.5"/><rect x="11" y="11" width="6.5" height="6.5" rx="1.5"/></svg>Services</div><div class="tb"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="2.75 2.75"/><circle cx="10" cy="10" r="5.8" fill="currentColor"/><circle cx="10" cy="10" r="2.3" fill="#141419"/></svg>General</div><div class="tb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8h8M6 11h8M6 14h5"/></svg>Logs</div><div class="tb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r=".6" fill="currentColor"/></svg>Info</div></div>
+        <div class="content"><div class="glabel">Routing mode</div>
+          <div class="cards">
+            <div class="mcard sel"><div class="pic"><svg width="136" height="60" viewBox="0 0 136 60"><path d="M31 34 C45 34 50 19 62 19 M98 19 C112 19 115 14 128 14 M98 19 C112 19 115 24 128 24 M98 19 C112 19 115 34 128 34" stroke="#3B82F6" stroke-width="1.6" fill="none"/><path d="M31 42 C60 42 90 52 128 52" stroke="#10B981" stroke-width="1.6" fill="none"/><rect x="8" y="30" width="22" height="15" rx="2.5" fill="none" stroke="#9CA3AF" stroke-width="1.4"/><path d="M5 48h28" stroke="#9CA3AF" stroke-width="1.4" stroke-linecap="round"/><rect x="62" y="12" width="36" height="14" rx="7" fill="rgba(59,130,246,.18)" stroke="#3B82F6" stroke-width="1"/><text x="80" y="22" font-size="8" font-weight="700" fill="#60A5FA" text-anchor="middle">VPN</text><circle cx="129" cy="14" r="2.3" fill="#3B82F6"/><circle cx="129" cy="24" r="2.3" fill="#3B82F6"/><circle cx="129" cy="34" r="2.3" fill="#3B82F6"/><circle cx="129" cy="52" r="2.3" fill="#10B981"/></svg></div><div class="nm"><span class="radio on"></span>Bypass</div><div class="ds">Everything uses the VPN except what you list.</div></div>
+            <div class="mcard"><div class="pic"><svg width="136" height="60" viewBox="0 0 136 60"><path d="M31 34 C45 34 50 19 62 19 M98 19 C112 19 115 14 128 14" stroke="#3B82F6" stroke-width="1.6" fill="none"/><path d="M31 42 C60 42 90 30 128 30 M31 42 C60 42 90 41 128 41 M31 42 C60 42 90 52 128 52" stroke="#10B981" stroke-width="1.6" fill="none"/><rect x="8" y="30" width="22" height="15" rx="2.5" fill="none" stroke="#9CA3AF" stroke-width="1.4"/><path d="M5 48h28" stroke="#9CA3AF" stroke-width="1.4" stroke-linecap="round"/><rect x="62" y="12" width="36" height="14" rx="7" fill="rgba(59,130,246,.18)" stroke="#3B82F6" stroke-width="1"/><text x="80" y="22" font-size="8" font-weight="700" fill="#60A5FA" text-anchor="middle">VPN</text><circle cx="129" cy="14" r="2.3" fill="#3B82F6"/><circle cx="129" cy="30" r="2.3" fill="#10B981"/><circle cx="129" cy="41" r="2.3" fill="#10B981"/><circle cx="129" cy="52" r="2.3" fill="#10B981"/></svg></div><div class="nm"><span class="radio"></span>VPN Only</div><div class="ds">Only what you list uses the VPN.</div></div>
+            <div class="mcard"><div class="pic"><svg width="136" height="60" viewBox="0 0 136 60"><path d="M31 34 C45 34 50 12 62 12 M98 12 C112 12 115 12 128 12" stroke="#3B82F6" stroke-width="1.6" fill="none"/><path d="M31 38 C45 38 50 30 62 30 M98 30 C112 30 115 30 128 30" stroke="#8B5CF6" stroke-width="1.6" fill="none"/><path d="M31 42 C60 42 90 50 128 50" stroke="#10B981" stroke-width="1.6" fill="none"/><rect x="8" y="30" width="22" height="15" rx="2.5" fill="none" stroke="#9CA3AF" stroke-width="1.4"/><path d="M5 48h28" stroke="#9CA3AF" stroke-width="1.4" stroke-linecap="round"/><rect x="62" y="6" width="36" height="12" rx="6" fill="rgba(59,130,246,.18)" stroke="#3B82F6" stroke-width="1"/><text x="80" y="15" font-size="7.5" font-weight="700" fill="#60A5FA" text-anchor="middle">VPN</text><rect x="62" y="24" width="36" height="12" rx="6" fill="rgba(139,92,246,.18)" stroke="#8B5CF6" stroke-width="1"/><text x="80" y="33" font-size="7.5" font-weight="700" fill="#A78BFA" text-anchor="middle">Proxy</text><circle cx="129" cy="12" r="2.3" fill="#3B82F6"/><circle cx="129" cy="30" r="2.3" fill="#8B5CF6"/><circle cx="129" cy="50" r="2.3" fill="#10B981"/></svg></div><div class="nm"><span class="radio"></span>Custom Routes</div><div class="ds">Pick a route for each destination.</div></div>
+          </div>
+          <div class="h2"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#10B981" stroke-width="1.7"><circle cx="10" cy="10" r="8"/><ellipse cx="10" cy="10" rx="3.5" ry="8"/><path d="M2.3 7.3h15.4M2.3 12.7h15.4"/></svg>Custom Domains</div>
+          <div class="lead">Add domains that should bypass VPN and use your regular connection.</div>
+          <div class="addrow"><div class="f"><svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="#6B7280" stroke-width="2" stroke-linecap="round"><path d="M8.5 11.5l3-3M7 9.5 5.2 11.3a3 3 0 0 0 4.2 4.2L11.2 14M13 10.5l1.8-1.8a3 3 0 0 0-4.2-4.2L8.8 6.3"/></svg>e.g., example.com</div><div class="p">+</div></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="note" style="margin-bottom:2px">Clicking the VPN Only card opens this sheet with VPN Only selected. The Bypass card stays selected until Switch.</div>
+        <div class="sheet">
+          <h3>Routing mode</h3>
+          <div class="opt"><span class="radio"></span><div><div class="t">Bypass</div><div class="x">Everything uses the VPN except what you list. 4 services and 2 domains.</div></div></div>
+          <div class="opt"><span class="radio on"></span><div><div class="t">VPN Only</div><div class="x">Only what you list uses the VPN; everything else goes direct. 3 entries.</div></div></div>
+          <div class="opt"><span class="radio"></span><div><div class="t">Custom Routes</div><div class="x">Send each destination through a route you pick: direct, a VPN, a proxy or a Tailscale peer. Your lists become rules.</div></div></div>
+          <div class="btns"><span class="nbtn">Cancel</span><span class="nbtn default">Switch</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>
