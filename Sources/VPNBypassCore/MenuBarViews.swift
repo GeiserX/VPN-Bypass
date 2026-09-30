@@ -149,6 +149,8 @@ struct MenuContent: View {
     @State private var newDomain = ""
     @State private var isAddingDomain = false
     @State private var isVerifying = false
+    /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
+    @State private var confirmingRemoveAll = false
     /// The mode a tap wants to switch to, pending confirmation. Mirrors
     /// RoutingModePicker in SettingsView so both surfaces behave identically —
     /// switching mode changes how ALL traffic routes (and entering Custom
@@ -178,7 +180,7 @@ struct MenuContent: View {
                 .padding(.vertical, 8)
 
             // Main content
-            if routeManager.isLoading {
+            if routeManager.isLoading && routeManager.lastUpdate == nil {
                 loadingContent
             } else if routeManager.isVPNConnected {
                 connectedContent
@@ -461,15 +463,46 @@ struct MenuContent: View {
                 routeVerificationSection
             }
             
-            // Action buttons
+            actionButtons
+        }
+        .alert(removeAllCopy.title, isPresented: $confirmingRemoveAll) {
+            Button(String(localized: "Remove Routes"), role: .destructive) {
+                Task { await routeManager.removeAllRoutes() }
+            }
+            Button(String(localized: "Cancel"), role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+        } message: {
+            Text(removeAllCopy.message)
+        }
+    }
+
+    // MARK: - Actions
+
+    /// Refresh, apply or DNS work is running (the route-operation gate is held, or a refresh
+    /// is still detecting the network before it takes the gate).
+    private var isBusy: Bool {
+        routeManager.isLoading || routeManager.isApplyingRoutes
+    }
+
+    /// One primary action. Verify sits next to it as an icon; everything else, and the one
+    /// action that removes every route, lives behind the "…" menu.
+    private var actionButtons: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Button {
                     routeManager.refreshRoutes()
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11))
-                        Text("Refresh Routes")
+                        if isBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.7)
+                                .frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11))
+                        }
+                        Text(isBusy ? String(localized: "Refreshing routes…") : String(localized: "Refresh Routes"))
                             .font(.system(size: 12, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
@@ -477,61 +510,102 @@ struct MenuContent: View {
                     .background(accentGradient)
                     .foregroundColor(.white)
                     .cornerRadius(6)
+                    .opacity(isBusy ? 0.85 : 1)
                 }
                 .buttonStyle(.plain)
-                
+                .disabled(isBusy)
+
                 Button {
-                    Task {
-                        await routeManager.removeAllRoutes()
-                    }
+                    verify()
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11))
-                        Text("Clear")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.red.opacity(0.15))
-                    .foregroundColor(.red)
-                    .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-            }
-            
-            // Verify routes button
-            if !routeManager.activeRoutes.isEmpty {
-                Button {
-                    isVerifying = true
-                    Task {
-                        await routeManager.verifyRoutes()
-                        isVerifying = false
-                    }
-                } label: {
-                    HStack(spacing: 6) {
+                    Group {
                         if isVerifying {
                             ProgressView()
+                                .controlSize(.small)
                                 .scaleEffect(0.7)
-                                .frame(width: 14, height: 14)
                         } else {
                             Image(systemName: "checkmark.circle")
-                                .font(.system(size: 11))
+                                .font(.system(size: 13))
                         }
-                        Text(isVerifying ? String(localized: "Verifying...") : String(localized: "Verify Routes"))
-                            .font(.system(size: 12, weight: .medium))
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                    .frame(width: 34, height: 30)
                     .background(Color.secondary.opacity(0.12))
                     .cornerRadius(6)
                 }
                 .buttonStyle(.plain)
-                .disabled(isVerifying)
+                .disabled(isVerifying || routeManager.activeRoutes.isEmpty)
+                .help(String(localized: "Verify Routes"))
+                .accessibilityLabel(String(localized: "Verify Routes"))
+
+                Menu {
+                    Button(String(localized: "Verify Routes")) { verify() }
+                        .disabled(isVerifying || routeManager.activeRoutes.isEmpty)
+                    Button(String(localized: "Re-resolve DNS Now")) { routeManager.forceDNSRefresh() }
+                        .disabled(isBusy)
+                    Divider()
+                    Button(String(localized: "Remove All Routes…")) { confirmingRemoveAll = true }
+                        .disabled(routeManager.activeRoutes.isEmpty)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 34, height: 30)
+                .background(Color.secondary.opacity(0.12))
+                .cornerRadius(6)
+                .help(String(localized: "More actions"))
+                .accessibilityLabel(String(localized: "More actions"))
             }
+
+            routeChangeLine
         }
     }
-    
+
+    /// The result of the last apply (or Remove All), under the buttons. Ticks once a second so
+    /// the age stays true while the dropdown is open.
+    @ViewBuilder
+    private var routeChangeLine: some View {
+        if let outcome = routeManager.lastRouteChange {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let line = DropdownCopy.routeChangeLine(outcome, now: context.date)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: line.isProblem ? "exclamationmark.triangle.fill" : "checkmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(line.isProblem ? Theme.warning : Theme.success)
+                    Text(line.text)
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            }
+            .help(String(localized: "Failures are domains that did not resolve and routes the system refused. Settings > Logs has the details."))
+        }
+    }
+
+    private var removeAllCopy: (title: String, message: String) {
+        let config = routeManager.config
+        return DropdownCopy.removeAllConfirmation(
+            mode: RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) ? .custom : (config.routingMode == .vpnOnly ? .vpnOnly : .bypass),
+            routeCount: routeManager.uniqueRouteCount,
+            serviceCount: config.services.filter { $0.enabled }.count,
+            domainCount: config.routingMode == .vpnOnly
+                ? config.inverseDomains.filter { $0.enabled }.count
+                : config.domains.filter { $0.enabled }.count,
+            autoDNSRefresh: config.autoDNSRefresh
+        )
+    }
+
+    private func verify() {
+        guard !isVerifying else { return }
+        isVerifying = true
+        Task {
+            await routeManager.verifyRoutes()
+            isVerifying = false
+        }
+    }
+
     // MARK: - Loading Content
     
     private var loadingContent: some View {
@@ -878,12 +952,9 @@ struct MenuContent: View {
 
     private var footerActions: some View {
         HStack {
-            if let lastUpdate = routeManager.lastUpdate {
-                Text("Updated \(lastUpdate, style: .relative) ago")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
-            
+            // No "Updated … ago" here: it did not say what was updated, and Clear stamped it
+            // too, so it read fresh right after every route was removed. The result line under
+            // Refresh Routes says what the last apply did.
             Spacer()
             
             Button {
@@ -965,6 +1036,80 @@ struct MenuContent: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             SettingsWindowController.shared.show()
         }
+    }
+}
+
+// MARK: - Dropdown copy
+
+/// The dropdown's sentences, kept pure so the wording and its edge cases are unit-tested.
+enum DropdownCopy {
+    enum Mode: Equatable {
+        case bypass, vpnOnly, custom
+    }
+
+    /// A short age: "just now", "23 s ago", "4 min ago", "2 h ago". A date in the future
+    /// (clock moved back) reads as "just now" rather than a negative age.
+    static func age(since date: Date, now: Date) -> String {
+        let seconds = Int(now.timeIntervalSince(date))
+        if seconds < 5 { return String(localized: "just now") }
+        if seconds < 60 { return String(localized: "\(seconds) s ago") }
+        if seconds < 3600 { return String(localized: "\(seconds / 60) min ago") }
+        return String(localized: "\(seconds / 3600) h ago")
+    }
+
+    private static func routes(_ count: Int) -> String {
+        count == 1 ? String(localized: "1 route") : String(localized: "\(count) routes")
+    }
+
+    /// The line under Refresh Routes. `isProblem` turns its mark amber.
+    static func routeChangeLine(_ outcome: RouteManager.RouteChangeOutcome, now: Date) -> (text: String, isProblem: Bool) {
+        let when = age(since: outcome.at, now: now)
+        switch outcome.kind {
+        case .applied:
+            if outcome.routeCount == 0 && outcome.failedCount == 0 {
+                return (String(localized: "No routes to install, checked \(when)."), false)
+            }
+            if outcome.failedCount == 0 {
+                return (String(localized: "\(routes(outcome.routeCount)) applied \(when), none failed."), false)
+            }
+            return (String(localized: "\(routes(outcome.routeCount)) applied \(when), \(outcome.failedCount) failed."), true)
+        case .removedAll:
+            if outcome.failedCount == 0 {
+                return (String(localized: "All routes removed \(when). Refresh Routes puts them back."), true)
+            }
+            return (String(localized: "Routes removed \(when), \(outcome.failedCount) could not be removed."), true)
+        }
+    }
+
+    /// Remove All Routes… asks this before it runs. The message says what the removal costs in
+    /// the user's own terms: which of their entries lose their route, and until when.
+    static func removeAllConfirmation(mode: Mode, routeCount: Int, serviceCount: Int, domainCount: Int,
+                                      autoDNSRefresh: Bool) -> (title: String, message: String) {
+        let title = routeCount == 1
+            ? String(localized: "Remove the 1 route?")
+            : String(localized: "Remove all \(routeCount) routes?")
+        let until = autoDNSRefresh
+            ? String(localized: "until you refresh routes, the VPN reconnects, or DNS is next refreshed")
+            : String(localized: "until you refresh routes or the VPN reconnects")
+        let message: String
+        switch mode {
+        case .bypass:
+            let services = serviceCount == 1 ? String(localized: "1 service") : String(localized: "\(serviceCount) services")
+            let domains = domainCount == 1 ? String(localized: "1 domain") : String(localized: "\(domainCount) domains")
+            let what: String
+            switch (serviceCount > 0, domainCount > 0) {
+            case (true, true): what = String(localized: "Your \(services) and \(domains)")
+            case (true, false): what = String(localized: "Your \(services)")
+            case (false, true): what = String(localized: "Your \(domains)")
+            case (false, false): what = String(localized: "Everything this app sends around the VPN")
+            }
+            message = String(localized: "\(what) will go through the VPN \(until).")
+        case .vpnOnly:
+            message = String(localized: "VPN Only stops: all traffic follows your VPN's own routing \(until).")
+        case .custom:
+            message = String(localized: "Traffic your rules send direct or to a specific VPN will follow your VPN's own routing \(until). Rules that use a proxy keep working.")
+        }
+        return (title, message)
     }
 }
 

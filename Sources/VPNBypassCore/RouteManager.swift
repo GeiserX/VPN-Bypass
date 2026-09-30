@@ -57,6 +57,29 @@ final class RouteManager: ObservableObject {
         let success: Bool
         let message: String
     }
+
+    /// What the last full apply or Remove All Routes did, for the dropdown's result line.
+    /// Written only where an apply commits and where `removeAllRoutes` finishes; nothing reads
+    /// it to decide routing.
+    @Published var lastRouteChange: RouteChangeOutcome?
+
+    struct RouteChangeOutcome: Equatable {
+        enum Kind: Equatable {
+            /// A full apply committed (live, from the DNS cache, or Custom mode).
+            case applied
+            /// `removeAllRoutes` ran with routes installed.
+            case removedAll
+        }
+        let kind: Kind
+        let at: Date
+        /// Unique destinations installed after the change: what the apply put in, or what a
+        /// removal could not take out.
+        let routeCount: Int
+        /// `.applied`: domains that resolved to nothing plus routes the kernel refused, the
+        /// same number the "routes applied" notification reports. `.removedAll`: routes that
+        /// could not be removed.
+        let failedCount: Int
+    }
     
     // MARK: - Private
     
@@ -2122,6 +2145,7 @@ final class RouteManager: ObservableObject {
 
         let confirmedUniqueCount = uniqueRouteCount
         let totalFailures = failedCount + batchFailureCount
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: confirmedUniqueCount, failedCount: totalFailures)
 
         if failedCount > 0 {
             log(.warning, "Applied \(confirmedUniqueCount) unique routes (\(failedCount) domains failed DNS)")
@@ -2253,6 +2277,7 @@ final class RouteManager: ObservableObject {
         guard committed else { return false }
 
         let confirmedUniqueCount = uniqueRouteCount
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: confirmedUniqueCount, failedCount: batchFailureCount)
         if batchFailureCount > 0 {
             log(.warning, "Applied custom routes (\(batchFailureCount) kernel failures — counts approximate until verified)")
         } else {
@@ -2438,6 +2463,10 @@ final class RouteManager: ObservableObject {
         routeVerificationResults.removeAll()
         dnsCache.removeAll()
         lastUpdate = Date()
+        // A removal with nothing installed is a no-op and must not hide the last apply's result.
+        if !destinations.isEmpty {
+            lastRouteChange = RouteChangeOutcome(kind: .removedAll, at: Date(), routeCount: uniqueRouteCount, failedCount: failedDests.count)
+        }
 
         if config.manageHostsFile {
             if activeRoutes.isEmpty {
@@ -2566,6 +2595,7 @@ final class RouteManager: ObservableObject {
 
         let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Cache ")
         guard committed else { return false }
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: uniqueRouteCount, failedCount: batchFailureCount)
 
         if batchFailureCount > 0 {
             log(.warning, "Applied routes from cache (\(batchFailureCount) kernel failures — counts approximate)")

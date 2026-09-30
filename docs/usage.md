@@ -8,7 +8,9 @@ Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow he
 - the Mode switch, Bypass or VPN Only; in Custom mode a button back to Bypass;
 - a field to add a domain to the current mode's list;
 - the active services and routes;
-- Refresh Routes, Clear and Verify Routes, and the gear that opens Settings.
+- Refresh Routes, a Verify Routes icon, and a "…" menu with Verify Routes, Re-resolve DNS Now and Remove All Routes…, which asks before it removes anything;
+- one line under the buttons with the result of the last apply, for example "62 routes applied 23 s ago, none failed";
+- the gear that opens Settings.
 
 ![The dropdown in Bypass mode: VPN Connected over WireGuard, the pill reads ON, four services and two domains are routed around the VPN](images/screenshots/menu-bar.png){ width="340" }
 
@@ -83,7 +85,7 @@ vpnb logs limit=20 level=error
 - `service.list id=netflix` shows one service with its domains and IP ranges. `service.disable` turns a service off.
 - Enabling something that is already on, or disabling something already off, succeeds and changes nothing.
 - A domain or service change is saved before `vpnb` returns. The routes for that entry are added or removed a moment later, and only while a VPN is connected and the app is in the mode that uses that list: Bypass mode for the Bypass list and the services, VPN Only mode for the VPN Only list. Run `vpnb routes.active` or `vpnb logs` to see them.
-- `routes.active` lists the routes the app has installed; `source=<domain or service name>` keeps one source. `routes.clear` is the Clear button in the dropdown, and the routes it removes come back at the next refresh, VPN reconnect or DNS refresh.
+- `routes.active` lists the routes the app has installed; `source=<domain or service name>` keeps one source. `routes.clear` is Remove All Routes… in the dropdown's "…" menu, without the question, and the routes it removes come back at the next refresh, VPN reconnect or DNS refresh.
 - `refresh` is the Refresh Routes button and `dns.refresh` is Settings > General > Refresh Now. Both start the work and return at once. `refresh` fails with `helper_not_ready` when the privileged helper is not ready.
 - `vpnb status` prints the running app's version as `app: <version>` (the `appVersion` field on the socket).
 - `logs` prints the newest entries first. It takes `limit` from 1 to 200 (default 50) and `level` as `info`, `success`, `warning` or `error`.
