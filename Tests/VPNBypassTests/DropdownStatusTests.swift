@@ -131,6 +131,39 @@ final class DropdownStatusTests: XCTestCase {
                        "Nothing is routed until a VPN connects.")
     }
 
+    /// Only Bypass keeps routes across a drop. In VPN Only and Custom anything still installed
+    /// after a disconnect is a removal that failed, and must not read as intended.
+    func testDisconnectedOutsideBypassReportsLeftoversAsFailedRemovals() {
+        for mode in [DropdownCopy.Mode.vpnOnly, .custom] {
+            let s = status { $0.isVPNConnected = false; $0.mode = mode; $0.installedRoutes = 3 }
+            XCTAssertEqual(s.pill, "OFF")
+            XCTAssertEqual(s.sentence, "3 routes could not be removed.", "\(mode)")
+            XCTAssertEqual(status { $0.isVPNConnected = false; $0.mode = mode; $0.installedRoutes = 0 }.sentence,
+                           "Nothing is routed until a VPN connects.", "\(mode)")
+        }
+    }
+
+    /// Refresh Routes (which HELD BACK tells the user to press), a mode switch or a re-route can
+    /// apply routes during the wait. The header then shows what is installed, not the wait.
+    func testRouteChangeAfterTheReconnectEndsTheWaitingHeader() {
+        for reason in [RouteManager.PendingReconnectApply.Reason.settling, .heldBack(strikes: 3)] {
+            let s = status {
+                $0.pending = .init(reason: reason, connectedAt: self.now.addingTimeInterval(-30),
+                                   appliesAt: self.now.addingTimeInterval(90))
+                $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-4), routeCount: 62, failedCount: 0)
+            }
+            XCTAssertEqual(s.pill, "ON", "\(reason)")
+            XCTAssertEqual(s.facts.first { $0.label == "Routes" }?.value, "62 applied just now, none failed", "\(reason)")
+            XCTAssertEqual(s.note, "The scheduled re-apply still runs in 2 min.", "\(reason)")
+        }
+        // A change from BEFORE the reconnect does not end the wait.
+        let waiting = status {
+            $0.pending = .init(reason: .settling, connectedAt: self.now.addingTimeInterval(-12),
+                               appliesAt: self.now.addingTimeInterval(38))
+        }
+        XCTAssertEqual(waiting.pill, "WAITING")
+    }
+
     func testHelperDownIsNotEnforcing() {
         let s = status { $0.helperReady = false }
         XCTAssertEqual(s.pill, "NOT ENFORCING")
@@ -181,6 +214,58 @@ final class DropdownStatusTests: XCTestCase {
                        "not checked yet, next in 18 min")
         XCTAssertEqual(DropdownStatus.dnsFact(input { $0.nextDNSRefresh = self.now.addingTimeInterval(-5) }, now: now),
                        "checked 12 min ago, next one due now")
+    }
+
+    // MARK: Translations
+
+    /// The app ships es and fr. Every string the header can show must have an entry in both,
+    /// or a Spanish or French user gets an English header next to translated labels.
+    func testEveryHeaderStringIsTranslated() throws {
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while !FileManager.default.fileExists(atPath: dir.appendingPathComponent("Package.swift").path) {
+            guard dir.pathComponents.count > 1 else { throw XCTSkip("repo root not found from \(#filePath)") }
+            dir = dir.deletingLastPathComponent()
+        }
+        let core = dir.appendingPathComponent("Sources/VPNBypassCore")
+        let source = try String(contentsOf: core.appendingPathComponent("MenuBarViews.swift"), encoding: .utf8)
+        func region(_ start: String, _ end: String) throws -> Substring {
+            let a = try XCTUnwrap(source.range(of: start), start)
+            let b = try XCTUnwrap(source.range(of: end, range: a.upperBound..<source.endIndex), end)
+            return source[a.lowerBound..<b.lowerBound]
+        }
+        let header = try region("static func age(since", "private static func routes(")
+            + region("struct DropdownStatus: Equatable", "// MARK: - Supporting Views")
+
+        // String(localized: "…") literals, turned into their lookup keys: an interpolated String
+        // becomes %@ and an Int %lld. The String-typed interpolations are the named locals
+        // below and every call except max(…); a wrong guess fails here, never silently.
+        let stringLocals: Set<String> = ["name", "services", "domains", "when", "checked"]
+        let literal = try NSRegularExpression(pattern: #"String\(localized: "((?:[^"\\]|\\.)*)"\)"#)
+        let interpolation = try NSRegularExpression(pattern: #"\\\((.*?)\)(?=[^)]|$)"#)
+        let text = String(header)
+        var keys: [String] = []
+        for m in literal.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            var key = String(text[Range(m.range(at: 1), in: text)!])
+            for i in interpolation.matches(in: key, range: NSRange(key.startIndex..., in: key)).reversed() {
+                let expr = String(key[Range(i.range(at: 1), in: key)!])
+                let isString = stringLocals.contains(expr) || (expr.contains("(") && !expr.hasPrefix("max("))
+                key.replaceSubrange(Range(i.range, in: key)!, with: isString ? "%@" : "%lld")
+            }
+            keys.append(key)
+        }
+        XCTAssertGreaterThan(keys.count, 50, "the scan found too few strings; the regions moved")
+
+        for lang in ["es", "fr"] {
+            let url = core.appendingPathComponent("Resources/\(lang).lproj/Localizable.strings")
+            let table = try XCTUnwrap(NSDictionary(contentsOf: url) as? [String: String], lang)
+            for key in keys {
+                XCTAssertNotNil(table[key], "\(lang).lproj has no entry for \"\(key)\"")
+            }
+            // The derived key forms are the ones Foundation looks up at run time.
+            let bundle = try XCTUnwrap(Bundle(url: url.deletingLastPathComponent()), lang)
+            XCTAssertNotEqual(String(localized: "\(3) entries use the VPN.", bundle: bundle), "3 entries use the VPN.", lang)
+            XCTAssertNotEqual(String(localized: "\("WireGuard") connected", bundle: bundle), "WireGuard connected", lang)
+        }
     }
 
     func testCountdownFormatting() {

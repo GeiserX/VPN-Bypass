@@ -1187,9 +1187,16 @@ struct DropdownStatus: Equatable {
         let modeFact = Fact(label: String(localized: "Mode"), value: modeDescription(input.mode))
 
         guard input.isVPNConnected else {
-            let sentence = input.installedRoutes == 0
-                ? String(localized: "Nothing is routed until a VPN connects.")
-                : String(localized: "\(routeCount(input.installedRoutes)) stay in place for when it reconnects.")
+            // Only Bypass keeps its routes across a drop on purpose. VPN Only and Custom tear
+            // everything down, so anything still installed is a removal that failed.
+            let sentence: String
+            if input.installedRoutes == 0 {
+                sentence = String(localized: "Nothing is routed until a VPN connects.")
+            } else if input.mode == .bypass {
+                sentence = String(localized: "\(routeCount(input.installedRoutes)) stay in place for when it reconnects.")
+            } else {
+                sentence = String(localized: "\(routeCount(input.installedRoutes)) could not be removed.")
+            }
             return DropdownStatus(pill: String(localized: "OFF"), tone: .bad,
                                   headline: String(localized: "No VPN connected"),
                                   sentence: sentence, note: nil, facts: [modeFact])
@@ -1202,7 +1209,17 @@ struct DropdownStatus: Equatable {
                                   note: nil, facts: [modeFact])
         }
 
-        if let pending = input.pending {
+        // Once something applied or removed routes after the reconnect (Refresh Routes, a mode
+        // switch, a re-route), the WAITING / HELD BACK wording is out of date: show the normal
+        // state and only mention that the scheduled apply still runs.
+        var scheduledNote: String?
+        if let pending = input.pending,
+           let change = input.lastRouteChange, change.at > pending.connectedAt {
+            let left = pending.appliesAt.timeIntervalSince(now)
+            scheduledNote = left > 0
+                ? String(localized: "The scheduled re-apply still runs in \(countdown(left)).")
+                : String(localized: "The scheduled re-apply runs now.")
+        } else if let pending = input.pending {
             let left = pending.appliesAt.timeIntervalSince(now)
             switch pending.reason {
             case .heldBack(let strikes):
@@ -1233,11 +1250,11 @@ struct DropdownStatus: Equatable {
             return DropdownStatus(pill: String(localized: "NO ROUTES"), tone: .warn,
                                   headline: String(localized: "\(name) connected"),
                                   sentence: String(localized: "Nothing is routed right now."),
-                                  note: nil, facts: facts)
+                                  note: scheduledNote, facts: facts)
         }
         return DropdownStatus(pill: String(localized: "ON"), tone: .ok,
                               headline: String(localized: "\(name) connected"),
-                              sentence: whatIsRouted(input), note: nil, facts: facts)
+                              sentence: whatIsRouted(input), note: scheduledNote, facts: facts)
     }
 
     // MARK: Pieces
