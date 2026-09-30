@@ -55,3 +55,35 @@ read -rs PASS && printf '%s' "$PASS" | vpnb route.set id=<uuid> pass:-
 ```
 
 Set `VPNB_SOCKET` to override the socket path (default: `~/Library/Application Support/VPNBypass/control.sock`).
+
+### Domains, services and logs (4.9.0 and later)
+
+From VPN Bypass 4.9.0, `vpnb` also reaches the Bypass and VPN Only modes: the two domain lists, the services, the routes the app has installed, the refresh buttons and the log.
+
+```bash
+vpnb domain.list                        # both lists; list=bypass or list=vpnOnly
+vpnb domain.add domain=example.com      # the Bypass list
+vpnb domain.add domain=10.0.0.0/8 list=vpnOnly
+vpnb domain.disable domain=example.com  # domain.enable turns it back on
+vpnb domain.rm domain=example.com       # or id=<uuid>
+vpnb service.list                       # id=netflix adds domains and IP ranges
+vpnb service.enable id=netflix          # service.disable turns it off
+vpnb routes.active                      # source=<domain or service name> filters
+vpnb routes.clear                       # the Clear button in the dropdown
+vpnb refresh                            # the Refresh Routes button
+vpnb dns.refresh                        # Settings > General > Refresh Now
+vpnb logs limit=20 level=error          # newest first
+```
+
+- `domain.list` without `list=` shows the Bypass list first. The VPN Only list also takes a CIDR.
+- `domain.add` cleans and checks the value the way the Domains tab does. The Bypass list refuses a value with `/`, and the VPN Only list refuses a malformed CIDR and a `/0` or `/1`. Adding a domain that is already on the list returns `already_exists`.
+- `domain.rm`, `domain.enable` and `domain.disable` look in both lists unless you pass `list=`. When the same domain is on both lists, pass `list=bypass` or `list=vpnOnly`.
+- Enabling something that is already on, or disabling something already off, succeeds and changes nothing.
+- A domain or service change is saved before `vpnb` returns. The routes for that entry are added or removed a moment later, and only while a VPN is connected. Run `vpnb routes.active` or `vpnb logs` to see them.
+- `refresh` and `dns.refresh` start the work and return at once. `refresh` fails with `helper_not_ready` when the privileged helper is not ready.
+- Routes removed by `routes.clear` come back at the next refresh, VPN reconnect or DNS refresh.
+- The `status` result carries the running app's version as `appVersion`.
+- `logs` takes `limit` from 1 to 200 (default 50) and `level` as `info`, `success`, `warning` or `error`.
+- An app older than 4.9.0 answers these commands with `unknown_command`.
+
+The [MCP server](mcp-server.md) uses the same socket, so an AI agent can do all of this too.

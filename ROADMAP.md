@@ -106,7 +106,7 @@ path, **no Network Extension** — so the app remains ad-hoc-signable.
 | **Blocklists Integration** | Block ads/trackers/malware domains |
 | **Network-based Profiles** | Auto-switch profile based on WiFi SSID |
 | **Bandwidth Monitor** | Track data through VPN vs bypassed |
-| ~~**CLI Interface**~~ | ✅ Done in v3.0 — `vpnb` command-line control over a user-only socket (`status`, `route`/`rule`/`mode`/`default` verbs) for automation |
+| ~~**CLI Interface**~~ | ✅ Done in v3.0 — `vpnb` command-line control over a user-only socket (`status`, `route`/`rule`/`mode`/`default` verbs) for automation. v4.9.0 adds the Bypass and VPN Only verbs (`domain.*`, `service.*`, `routes.active`, `routes.clear`, `refresh`, `dns.refresh`, `logs`), and the [vpn-bypass-mcp](https://github.com/GeiserX/vpn-bypass-mcp) MCP server lets an AI agent drive the same socket |
 | **API/Webhooks** | Integration with other tools |
 | **Statistics Dashboard** | Detailed analytics and history |
 | **Traffic Verification** | Verify traffic actually goes through correct interface |

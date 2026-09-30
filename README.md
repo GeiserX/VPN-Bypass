@@ -49,12 +49,17 @@ Everything is at [geiserx.github.io/VPN-Bypass](https://geiserx.github.io/VPN-By
 - [Getting started](https://geiserx.github.io/VPN-Bypass/getting-started/): Homebrew, DMG, source, and the first run
 - [Routing modes](https://geiserx.github.io/VPN-Bypass/routing/): Bypass, VPN Only and Custom; routes and rules
 - [Usage](https://geiserx.github.io/VPN-Bypass/usage/): the dropdown, the Settings tabs and the `vpnb` CLI
+- [MCP server](https://geiserx.github.io/VPN-Bypass/mcp-server/): let an AI agent read and change VPN Bypass
 - [How it works](https://geiserx.github.io/VPN-Bypass/how-it-works/): supported VPN clients and how they are detected
 - [Other VPNs and proxies](https://geiserx.github.io/VPN-Bypass/coexistence/): what it touches when several tunnels or proxies run
 - [Troubleshooting](https://geiserx.github.io/VPN-Bypass/troubleshooting/): Gatekeeper, routes, DNS and proxy errors
 - [Development](https://geiserx.github.io/VPN-Bypass/development/): build, test, contribute
 
 What changed between versions is on the [Releases](https://github.com/GeiserX/VPN-Bypass/releases) page; planned work is in the [roadmap](ROADMAP.md).
+
+## Related projects
+
+[vpn-bypass-mcp](https://github.com/GeiserX/vpn-bypass-mcp): an MCP server that lets an AI agent such as Claude Code read and change VPN Bypass through the same socket as `vpnb`.
 
 ## License
 
