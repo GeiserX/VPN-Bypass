@@ -1,0 +1,95 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  /* Lane-local styles for proposal 15. */
+  .term { width:340px; background:#161618; border:0.5px solid rgba(255,255,255,.16); border-radius:10px; overflow:hidden; }
+  .term .bar { height:24px; display:flex; align-items:center; gap:6px; padding:0 10px; background:#232326; }
+  .term .bar i { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .term pre { margin:0; padding:10px 12px; font: 11px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color:#D1D1D6; white-space:pre-wrap; }
+  .term .p { color: var(--success); }
+  .term .o { color: var(--text3); }
+  .loglist { background: rgba(255,255,255,.04); border-radius:12px; padding:4px; }
+  .lr { display:flex; align-items:center; gap:10px; padding:6px 10px; }
+  .lr .ts { font: 10px ui-monospace, "SF Mono", Menlo, monospace; color: var(--text3); width:62px; flex:none; }
+  .lr .m { font: 11px ui-monospace, "SF Mono", Menlo, monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lr .src { margin-left:auto; font-size:11px; color: var(--text2); white-space:nowrap; }
+  .lr svg { width:10px; height:10px; flex:none; }
+  .logwin { width:520px; border-radius:12px; border:1px solid #2C2C2C; background: linear-gradient(var(--winTop), var(--winBottom)); padding:14px; }
+  .h14 { font: 700 13px "SFRounded", system-ui; margin: 0 0 10px 2px; color: var(--text2); }
+  .actrow { display:flex; gap:8px; }
+  .actrow .btn.primary { flex:1; }
+  .ib { width:34px; padding:8px 0; }
+  .result { font-size:11px; color: var(--text2); margin-top:8px; }
+  .foot { display:flex; align-items:center; gap:8px; color: var(--text2); }
+  .foot .lc { font-size:10.5px; color: var(--text2); line-height:1.35; }
+  .foot .lc b { font-weight:500; color:#E5E5E7; }
+  .foot .gl { display:flex; gap:12px; margin-left:auto; flex:none; }
+  .state + .state { margin-top: 14px; }
+</style></head>
+<body>
+<div class="head"><span class="num">15</span><span class="title">Changes made through vpnb or an AI agent show up in the app</span></div>
+<p class="caption">An agent or a script can add domains, turn services on and switch modes through the <span class="mono">vpnb</span> socket. The app runs the same code as its own buttons and logs the same lines, so the list just changes and nothing says it came from outside. Someone who lets an agent manage the app has to open the log and guess which lines were theirs. The proposal tags socket changes in the log and adds one line to the dropdown footer after an outside change.</p>
+<div class="cols">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="stateTag">Dropdown footer, after an agent added a domain</div>
+    <div class="shot" style="width:340px;height:92px;background-image:url(../../../images/screenshots/menu-bar.png);background-position:0 -464px;"></div>
+    <div class="stateTag" style="margin-top:10px">Settings &gt; Logs <span style="text-transform:none;letter-spacing:0;font-weight:500">(redrawn from SettingsView.swift:2638-2680)</span></div>
+    <div class="loglist" id="before" style="width:340px"></div>
+    <div class="note">"Updated 23 sec ago" is the only trace. In the log, the agent's add at 18:04:11 and the user's own add at 17:30:55 read the same.</div>
+  </div>
+
+  <div class="col">
+    <div class="label after">After &middot; proposal</div>
+    <div class="stateTag">An agent runs</div>
+    <div class="term">
+      <div class="bar"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#28C840"></i></div>
+<pre><span class="p">$</span> vpnb domain.add domain=en.wikipedia.org</pre>
+    </div>
+    <div class="stateTag" style="margin-top:10px">The dropdown, two minutes later</div>
+    <div class="menu clip">
+      <div class="actrow">
+        <div class="btn primary"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M12 1.8v3h-3"/></svg>Refresh Routes</div>
+        <div class="btn ib"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.2"/><path d="M5.3 8.2l1.9 1.9 3.6-3.9"/></svg></div>
+        <div class="btn ib" style="font-weight:700;letter-spacing:1px">&middot;&middot;&middot;</div>
+      </div>
+      <div class="result">63 routes applied 2 min ago, none failed.</div>
+      <div class="divider"></div>
+      <div class="foot">
+        <span class="lc">Added <b>en.wikipedia.org</b> via vpnb, 2 min ago</span>
+        <span class="gl">
+          <svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-dasharray="2.2 2.2"/><circle cx="8" cy="8" r="4.6" fill="currentColor"/><circle cx="8" cy="8" r="1.8" fill="#0F0F0F"/></svg>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 1.5v6"/><path d="M4.4 3.8a5.5 5.5 0 1 0 7.2 0"/></svg>
+        </span>
+      </div>
+    </div>
+    <div class="note">The footer names the last change when it came from outside the app, where "Updated &hellip; ago" sits today. A change made in the app clears it. Clicking the line opens the log filtered to vpnb.</div>
+  </div>
+
+  <div class="col">
+    <div class="label after">&nbsp;</div>
+    <div class="stateTag">Settings &gt; Logs</div>
+    <div class="logwin">
+      <div class="h14">Activity Log</div>
+      <div class="loglist" id="after"></div>
+    </div>
+    <div class="note" style="max-width:520px">Every line that came through the socket says so, in plain text at the end. Lines from the app's own buttons and timers stay as they are. Later, once proposal 1 exists, <span class="mono">vpnb status</span> can return the same status sentence the dropdown shows, so the agent reads what the person sees.</div>
+  </div>
+</div>
+<script>
+  const icon = {
+    info: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7.5" fill="#6B7280"/><path d="M8 7v5" stroke="#15161d" stroke-width="1.8"/><circle cx="8" cy="4.6" r="1" fill="#15161d"/></svg>',
+    success: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7.5" fill="#10B981"/><path d="M4.8 8.3l2.2 2.2 4.2-4.6" stroke="#0b1f18" stroke-width="1.8" fill="none"/></svg>'
+  };
+  const log = [
+    ['info',    '18:04:12', 'Config saved', 'via vpnb'],
+    ['success', '18:04:11', 'Added domain: en.wikipedia.org', 'via vpnb'],
+    ['success', '17:52:03', 'Added 8 route entries for Telegram', 'via vpnb'],
+    ['success', '17:45:02', 'DNS refresh complete: 2 added, 1 removed', ''],
+    ['success', '17:30:55', 'Added domain: news.ycombinator.com', ''],
+  ];
+  const row = (l, withSrc) => `<div class="lr">${icon[l[0]]}<span class="ts">${l[1]}</span><span class="m">${l[2]}</span>${withSrc && l[3] ? `<span class="src">${l[3]}</span>` : ''}</div>`;
+  document.getElementById('before').innerHTML = log.map(l => row(l, false)).join('');
+  document.getElementById('after').innerHTML = log.map(l => row(l, true)).join('');
+</script>
+</body></html>
