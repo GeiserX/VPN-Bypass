@@ -1,37 +1,42 @@
 # Usage
 
-## Menu Bar
+## Menu bar
 
-Click the shield icon in the menu bar to:
-- See VPN connection status and type
-- View active bypass routes
-- Quick-add domains to bypass
-- Refresh or clear routes
-- Verify routes are working
+Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow head on the top line while routes are enforced. The dropdown shows:
+
+- the VPN it found and its type, and a pill that reads ON, NO ROUTES (nothing configured), NOT ENFORCING (the helper is down) or OFF (no VPN);
+- the Mode switch, Bypass or VPN Only; in Custom mode a button back to Bypass;
+- a field to add a domain to the current mode's list;
+- the active services and routes;
+- Refresh Routes, Clear and Verify Routes, and the gear that opens Settings.
+
+![The dropdown in Bypass mode: VPN Connected over WireGuard, the pill reads ON, four services and two domains are routed around the VPN](images/screenshots/menu-bar.png){ width="340" }
 
 ## Settings
 
-Click the gear icon to access settings. The visible tabs depend on the active mode:
+Click the gear icon to access settings. The tabs depend on the mode. Bypass: Domains, Services, General, Logs, Info. VPN Only: Domains, General, Logs, Info. Custom: Rules, Routes, General, Logs, Info.
 
-<p align="center"><img src="images/screenshots/settings.png" alt="VPN Bypass settings window" width="400"></p>
+![The Services tab: built-in packs such as Telegram, YouTube, Spotify and WhatsApp, each with a switch, four of them on](images/screenshots/services.png)
 
-**Domains** — add custom domains, enable/disable them individually, see resolved IPs.
+![The Domains tab: two domains, each with its switch on, and the field to add another](images/screenshots/domains.png)
 
-**Services** — toggle built-in service packs (Telegram, YouTube, Spotify, …); each bundles known domains and IP ranges.
+Domains: add custom domains, enable/disable them individually, see resolved IPs.
 
-**Rules** *(Custom mode)* — the ordered rule list (first match wins) mapping domains/suffixes/IPs/CIDRs/services/processes to routes.
+Services: toggle built-in service packs (Telegram, YouTube, Spotify, …); each bundles known domains and IP ranges.
 
-**Routes** *(Custom mode)* — your egresses: auto-detected Direct + VPN links, plus any proxy or Tailscale-peer routes you add.
+Rules (Custom mode): the ordered rule list (first match wins) mapping domains/suffixes/IPs/CIDRs/services/processes to routes.
 
-**General** — launch at login, auto-apply on connect, `/etc/hosts` management, route verification, notification preferences, import/export, and network status (VPN type, interface, gateway, Wi-Fi SSID).
+Routes (Custom mode): your egresses: auto-detected Direct + VPN links, plus any proxy or Tailscale-peer routes you add.
 
-**Logs** — recent activity for debugging.
+General: launch at login, auto-apply on connect, `/etc/hosts` management, route verification, notification preferences, import/export, and network status (VPN type, interface, gateway, Wi-Fi SSID).
 
-**Info** — version and helper status.
+Logs: recent activity for debugging.
+
+Info: version and helper status.
 
 ## Command-line control (`vpnb`)
 
-A bundled `vpnb` CLI drives the same routing the GUI does, over a user-only UNIX socket — handy for scripting or headless tweaks. It needs no extra privilege (the app already holds it).
+A bundled `vpnb` CLI drives the same routing the GUI does, over a user-only UNIX socket, for scripting or a headless Mac. It needs no extra privilege (the app already holds it).
 
 `vpnb` ships inside the app bundle (`VPN Bypass.app/Contents/MacOS/vpnb`). Installing via the Homebrew **tap** (`brew tap geiserx/vpn-bypass && brew install --cask vpn-bypass`) symlinks it onto your `PATH`. With a manual DMG install, call it by its full path (`"/Applications/VPN Bypass.app/Contents/MacOS/vpnb"`) or symlink it onto your `PATH` yourself.
 

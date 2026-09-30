@@ -1,12 +1,12 @@
-# Coexistence with other VPNs and proxies
+# Other VPNs and proxies
 
 VPN Bypass is rarely the only thing touching the network. A typical machine runs a corporate VPN
 client, a mesh VPN such as Tailscale, and one or more local proxies at the same time. This page
 states exactly what VPN Bypass will and will not do in that situation, so you can predict its
 behaviour instead of discovering it.
 
-The short version: **VPN Bypass acts on one tunnel — the corporate VPN — and leaves everything else
-alone.**
+The short version: VPN Bypass acts on one tunnel, the corporate VPN, and leaves everything else
+alone.
 
 ---
 
