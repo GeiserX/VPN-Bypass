@@ -281,7 +281,7 @@ enum ClassicControl {
         return ok(ControlResult(activeRoutes: result))
     }
 
-    /// The menu's Clear button. removeAllRoutes also sweeps destinations pushed to the kernel
+    /// The menu's Remove All Routes…, without the question. removeAllRoutes also sweeps destinations pushed to the kernel
     /// but not yet recorded, so count those too; what it could not remove it keeps recorded.
     private static func clearRoutes() async -> ControlResponse {
         let rm = RouteManager.shared
