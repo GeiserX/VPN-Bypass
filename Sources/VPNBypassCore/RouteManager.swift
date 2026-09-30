@@ -75,9 +75,10 @@ final class RouteManager: ObservableObject {
         /// Unique destinations installed after the change: what the apply put in, or what a
         /// removal could not take out.
         let routeCount: Int
-        /// `.applied`: domains that resolved to nothing plus routes the kernel refused, the
-        /// same number the "routes applied" notification reports. `.removedAll`: routes that
-        /// could not be removed.
+        /// `.applied`: routes the kernel refused, plus domains that resolved to nothing when the
+        /// apply resolved live (an apply from the DNS cache skips uncached domains uncounted);
+        /// the same number the "routes applied" notification reports. `.removedAll`: routes
+        /// that could not be removed.
         let failedCount: Int
     }
     
