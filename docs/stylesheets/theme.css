@@ -37,17 +37,61 @@
   width: 1.6rem;
 }
 
-/* The site name, set the way banner.svg sets "VPN": heavy, tight, white.
+/* The site name, drawn as the banner wordmark: "VPN" in weight 800 white,
+ * "Bypass" in weight 200 sky #38BDF8, in the banner's font stack and its
+ * letter spacing (-2 at size 76 in banner.svg, so -0.026em).
  *
- * Only the first topic is styled. Material puts the site name in one
- * .md-header__topic and the page title in a second one, and swaps them on
- * scroll. Styling both would change every page title too. The banner's
- * two-tone wordmark (light sky "Bypass") would need a template override;
- * one tone is enough in the header. */
-.md-header__topic:first-child .md-ellipsis {
-  color: #F2F6FA;
+ * site_name stays the plain text "VPN Bypass", so the browser tab, search and
+ * social metadata keep it. Here the text is set to size 0 and the two words
+ * are drawn by ::before and ::after. The "/ ''" in content gives the drawn
+ * words an empty alt text, so a screen reader reads the real text once and
+ * skips the drawing. A browser without that syntax falls back to the first
+ * content line.
+ *
+ * Two places show the name:
+ *   - the header. Material puts the site name in the first .md-header__topic
+ *     and the page title in the second, and swaps them on scroll, so only
+ *     the first one is styled and page titles keep their own look;
+ *   - the title of the navigation drawer on a narrow screen
+ *     (label[for=__drawer]), where the name is a bare text node.
+ * Both sit on --md-primary-fg-color (#0B1220) in the dark and the light
+ * scheme, so one set of colours holds in both. */
+.md-header__topic:first-child .md-ellipsis,
+.md-nav--primary > .md-nav__title[for="__drawer"] {
+  --vb-wordmark-size: 0.9rem;
+  font-size: 0;
+}
+
+.md-header__topic:first-child .md-ellipsis::before,
+.md-header__topic:first-child .md-ellipsis::after,
+.md-nav--primary > .md-nav__title[for="__drawer"]::before,
+.md-nav--primary > .md-nav__title[for="__drawer"]::after {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  font-size: var(--vb-wordmark-size);
+  letter-spacing: -0.026em;
+  /* The parent has font size 0, so its baseline sits higher than the drawn
+   * words' baseline and the line box grows past the 48 px header, where the
+   * span would catch taps meant for the page. Top alignment keeps the line
+   * box at the header height; the glyphs stay on the same pixel rows. */
+  vertical-align: top;
+}
+
+.md-header__topic:first-child .md-ellipsis::before,
+.md-nav--primary > .md-nav__title[for="__drawer"]::before {
+  content: "VPN";
+  content: "VPN" / "";
+  color: #FFFFFF;
   font-weight: 800;
-  letter-spacing: -0.02em;
+}
+
+.md-header__topic:first-child .md-ellipsis::after,
+.md-nav--primary > .md-nav__title[for="__drawer"]::after {
+  content: "Bypass";
+  content: "Bypass" / "";
+  color: #38BDF8;
+  font-weight: 200;
+  /* The banner gap: 18 px at a cap height of 54 px, about 0.06em. */
+  margin-left: 0.06em;
 }
 
 /* Keep the mark and the name close, so they read as one unit. */
