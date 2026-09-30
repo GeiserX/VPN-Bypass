@@ -40,19 +40,13 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 
     ---
 
-    The dropdown, the Settings tabs and the `vpnb` command line.
+    The dropdown, the Settings tabs, the `vpnb` command line and the [MCP server](mcp-server.md) for AI agents.
 
 -   :material-source-branch: **[Routing modes](routing.md)**
 
     ---
 
     Bypass, VPN Only and Custom: routes, rules and the first-match order.
-
--   :material-robot-outline: **[MCP server](mcp-server.md)**
-
-    ---
-
-    Let an AI agent such as Claude Code read and change VPN Bypass through [vpn-bypass-mcp](https://github.com/GeiserX/vpn-bypass-mcp).
 
 </div>
 
