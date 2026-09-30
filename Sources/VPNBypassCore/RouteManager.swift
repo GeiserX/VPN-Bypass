@@ -102,10 +102,13 @@ final class RouteManager: ObservableObject {
     /// When the VPN last went from disconnected to connected. The periodic DNS refresh keeps
     /// clear of the `ReconnectSettle.refreshCalmWindow` that follows it.
     private var lastVPNConnectAt: Date?
-    /// When the config was last saved. An edit made while the VPN was down (a domain toggled
+    /// When the config was last saved while the VPN was down. Such an edit (a domain toggled
     /// off, a new one added) has not reached the kernel yet, so the next reconnect must run
-    /// the full apply even though the installed routes look fresh.
-    private var configChangedAt: Date?
+    /// the full apply even though the installed routes look fresh. A save made while the VPN
+    /// is up does not move it: that edit is applied by its own path, one entry at a time, and
+    /// forcing a full re-apply on the next reconnect as well would bring back the burst of
+    /// route writes the warm reconnect exists to avoid.
+    private(set) var configChangedAt: Date?
     /// One-shot retry armed when the periodic refresh was deferred (see performDNSRefresh).
     private var dnsRefreshRetryTask: Task<Void, Never>?
     /// First-seen timestamps for routes that dropped out of the desired set during an
@@ -347,7 +350,7 @@ final class RouteManager: ObservableObject {
             try FileManager.default.moveItem(at: tempURL, to: configURL)
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
-        configChangedAt = Date()
+        if !isVPNConnected { configChangedAt = Date() }
 
         log(.info, "Config saved")
     }
