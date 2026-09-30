@@ -1793,6 +1793,17 @@ final class RouteManager: ObservableObject {
         schemaVersion >= 2 && routingMode == .custom
     }
 
+    /// Whether the Bypass domain list and the services are what the kernel routes right now:
+    /// the same test the menu bar uses before it calls `addDomain`. The GUI only shows these
+    /// lists in that state, but the control socket can edit them in any mode, so the per-entry
+    /// kernel work in addDomain/toggleDomain/removeDomain/toggleService checks it. Without it,
+    /// a scripted edit in VPN Only or Custom mode would install a bypass route those modes do
+    /// not want, or delete a route of the same name that belongs to the other list.
+    var bypassListIsLive: Bool {
+        config.routingMode != .vpnOnly
+            && !Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
+    }
+
     /// Apply all routes — acquires exclusive gate, skips if another operation is running.
     /// `orphanGrace` is passed by AUTO-triggered applies only (the reconnect settle path):
     /// it defers deleting routes that merely rotated out of DNS. User-initiated applies keep
@@ -3528,7 +3539,7 @@ final class RouteManager: ObservableObject {
         saveConfig()
         log(.success, "Added domain: \(cleaned)")
 
-        if isVPNConnected && acquireRouteOperation() {
+        if isVPNConnected && bypassListIsLive && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 let epoch = routeEpoch
@@ -3797,18 +3808,23 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    func removeDomain(_ domain: DomainEntry) {
+    /// Returns the route-cleanup task when one was started, so the control socket can answer
+    /// only after the entry is gone from the config (the GUI ignores it).
+    @discardableResult
+    func removeDomain(_ domain: DomainEntry) -> Task<Void, Never>? {
         pendingRetryTasks[domain.domain]?.cancel()
         pendingRetryTasks.removeValue(forKey: domain.domain)
 
-        guard acquireRouteOperation() else {
+        // Outside the modes that route this list there is nothing of it in the kernel, and a
+        // route with the same source name belongs to the other list; leave the kernel alone.
+        guard bypassListIsLive, acquireRouteOperation() else {
             // Config still updated even if routes can't be removed right now
             config.domains.removeAll { $0.id == domain.id }
             saveConfig()
             log(.info, "Removed domain: \(domain.domain) (route cleanup deferred)")
-            return
+            return nil
         }
-        Task {
+        return Task {
             defer { releaseRouteOperation() }
             await removeRoutesForSource(domain.domain)
             config.domains.removeAll { $0.id == domain.id }
@@ -3827,7 +3843,7 @@ final class RouteManager: ObservableObject {
         let domain = config.domains[index]
         log(.info, "\(domain.domain) \(domain.enabled ? "enabled" : "disabled")")
         
-        if isVPNConnected && acquireRouteOperation() {
+        if isVPNConnected && bypassListIsLive && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 let epoch = routeEpoch
@@ -4008,14 +4024,17 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    func removeInverseDomain(_ domain: DomainEntry) {
-        guard acquireRouteOperation() else {
+    /// Returns the route-cleanup task when one was started (see `removeDomain`).
+    @discardableResult
+    func removeInverseDomain(_ domain: DomainEntry) -> Task<Void, Never>? {
+        // Same guard as `removeDomain`: only VPN Only routes this list.
+        guard config.routingMode == .vpnOnly, acquireRouteOperation() else {
             config.inverseDomains.removeAll { $0.id == domain.id }
             saveConfig()
             log(.info, "Removed VPN Only \(domain.isCIDR ? "CIDR" : "domain"): \(domain.domain) (route cleanup deferred)")
-            return
+            return nil
         }
-        Task {
+        return Task {
             defer { releaseRouteOperation() }
             await removeRoutesForSource(domain.domain)
             config.inverseDomains.removeAll { $0.id == domain.id }
@@ -4205,7 +4224,7 @@ final class RouteManager: ObservableObject {
         log(.info, "\(service.name) \(service.enabled ? "enabled" : "disabled")")
         
         // Incremental route apply/remove
-        if isVPNConnected && acquireRouteOperation() {
+        if isVPNConnected && bypassListIsLive && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 if service.enabled {

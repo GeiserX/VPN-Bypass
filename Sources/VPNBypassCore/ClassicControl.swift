@@ -1,0 +1,431 @@
+// ClassicControl.swift
+// The control-socket verbs for the Bypass and VPN Only modes: the two domain lists,
+// the services, the kernel routes the app has installed, the refresh actions and the
+// log. CommandRouter (pure, config in, config out) covers the Custom-mode routes and
+// rules; these verbs need live RouteManager state instead, so they live here and
+// ControlSurface dispatches to them before falling through to CommandRouter.
+//
+// Every mutation calls the SAME RouteManager method the GUI button calls
+// (addDomain, toggleService, removeAllRoutes, ...). Nothing here applies routes on its
+// own: a full re-apply writes hundreds of kernel routes at once, which is exactly the
+// burst that knocked GlobalProtect down before 4.8.5. The GUI methods return silently
+// on bad or duplicate input, so each verb validates first and answers with an error code.
+//
+// Never logs an argument value: only the verb, the same rule as ControlSurface.
+
+import Foundation
+
+// MARK: - Wire DTOs
+
+/// One entry of the Bypass list or the VPN Only list.
+public struct ControlDomain: Codable, Equatable, Sendable {
+    public var id: UUID
+    public var domain: String
+    public var enabled: Bool
+    /// "bypass" or "vpnOnly".
+    public var list: String
+    public var isCIDR: Bool
+    public var isWildcard: Bool
+
+    init(_ entry: DomainEntry, list: ClassicControl.DomainList) {
+        id = entry.id
+        domain = entry.domain
+        enabled = entry.enabled
+        self.list = list.rawValue
+        isCIDR = entry.isCIDR
+        isWildcard = entry.isWildcard
+    }
+}
+
+/// A service (built-in or custom). `domains`/`ipRanges` are only filled for
+/// `service.list id=<id>`; the list form carries the counts alone.
+public struct ControlService: Codable, Equatable, Sendable {
+    public var id: String
+    public var name: String
+    public var enabled: Bool
+    public var isCustom: Bool
+    public var domainCount: Int
+    public var ipRangeCount: Int
+    public var domains: [String]? = nil
+    public var ipRanges: [String]? = nil
+
+    init(_ service: ServiceEntry, detail: Bool = false) {
+        id = service.id
+        name = service.name
+        enabled = service.enabled
+        isCustom = service.isCustom
+        domainCount = service.domains.count
+        ipRangeCount = service.ipRanges.count
+        if detail {
+            domains = service.domains
+            ipRanges = service.ipRanges
+        }
+    }
+}
+
+/// A kernel route VPN Bypass has installed (RouteManager.activeRoutes).
+public struct ControlActiveRoute: Codable, Equatable, Sendable {
+    public var destination: String
+    public var gateway: String
+    /// The domain or service name the route was installed for.
+    public var source: String
+}
+
+/// One line of the in-app log, newest first in `logs`.
+public struct ControlLogEntry: Codable, Equatable, Sendable {
+    /// ISO 8601, UTC.
+    public var time: String
+    /// "INFO", "SUCCESS", "WARNING" or "ERROR".
+    public var level: String
+    public var message: String
+}
+
+// MARK: - Verbs
+
+@MainActor
+enum ClassicControl {
+
+    enum DomainList: String {
+        case bypass
+        case vpnOnly
+    }
+
+    /// Verbs this file answers. Anything else goes on to CommandRouter.
+    static let verbs: Set<String> = [
+        "domain.list", "domain.add", "domain.rm", "domain.enable", "domain.disable",
+        "service.list", "service.enable", "service.disable",
+        "routes.active", "routes.clear", "refresh", "dns.refresh", "logs",
+    ]
+
+    /// How long a domain/service mutation waits for a running route operation to finish.
+    /// The GUI disables these controls while one runs, because the RouteManager method
+    /// would then only save the config and leave the kernel for the next apply. Past the
+    /// wait the method runs anyway, with that same config-only outcome.
+    static var busyWait: TimeInterval = 30
+
+    /// Answers a request for one of `verbs`, or returns nil so the caller falls through
+    /// to CommandRouter. The caller has already checked the envelope version.
+    static func handle(_ request: ControlRequest) async -> ControlResponse? {
+        guard verbs.contains(request.cmd) else { return nil }
+        let args = request.args ?? [:]
+        let response: ControlResponse
+        switch request.cmd {
+        case "domain.list": response = domainList(args)
+        case "domain.add": response = await domainAdd(args)
+        case "domain.rm": response = await domainRemove(args)
+        case "domain.enable": response = await domainSetEnabled(args, enabled: true)
+        case "domain.disable": response = await domainSetEnabled(args, enabled: false)
+        case "service.list": response = serviceList(args)
+        case "service.enable": response = await serviceSetEnabled(args, enabled: true)
+        case "service.disable": response = await serviceSetEnabled(args, enabled: false)
+        case "routes.active": response = activeRoutes(args)
+        case "routes.clear": response = await clearRoutes()
+        case "refresh": response = refresh()
+        case "dns.refresh": response = dnsRefresh()
+        case "logs": response = logs(args)
+        default: return nil
+        }
+        if response.ok, CommandRouter.isMutating(request.cmd) {
+            RouteManager.shared.log(.info, "Control: '\(request.cmd)' applied via the command line")
+        }
+        return response
+    }
+
+    // MARK: - domain.*
+
+    private static func domainList(_ args: [String: String]) -> ControlResponse {
+        let rm = RouteManager.shared
+        let lists: [DomainList]
+        switch parseList(args) {
+        case .failure(let e): return e.response
+        case .success(let list): lists = list.map { [$0] } ?? [.bypass, .vpnOnly]
+        }
+        let domains = lists.flatMap { list in entries(list, rm).map { ControlDomain($0, list: list) } }
+        return ok(ControlResult(domains: domains))
+    }
+
+    private static func domainAdd(_ args: [String: String]) async -> ControlResponse {
+        let rm = RouteManager.shared
+        let list: DomainList
+        switch parseList(args) {
+        case .failure(let e): return e.response
+        case .success(let l): list = l ?? .bypass
+        }
+        guard let raw = args["domain"] else {
+            return fail("invalid_args", "domain is required")
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        await waitForRouteIdle()
+
+        // The same cleaning addDomain / addInverseDomain apply, done here first so a value
+        // they would drop silently gets an answer instead.
+        let cleaned: String
+        switch list {
+        case .bypass:
+            // cleanDomain would cut "10.0.0.0/8" down to "10.0.0.0" and save that: a
+            // different destination than the one asked for.
+            if trimmed.contains("/") {
+                return fail("invalid_args",
+                            "the bypass list takes a domain name, not a URL or a CIDR (a CIDR goes on list=vpnOnly)")
+            }
+            cleaned = rm.cleanDomain(trimmed)
+        case .vpnOnly:
+            if trimmed.contains("/") {
+                guard rm.isValidCIDR(trimmed) else {
+                    if isCIDRWithPrefixZeroOrOne(trimmed, rm) {
+                        return fail("invalid_args", "CIDR /0 and /1 cannot be installed as routes")
+                    }
+                    return fail("invalid_args", "malformed CIDR (expected a.b.c.d/n with n from 2 to 32)")
+                }
+                cleaned = trimmed
+            } else {
+                cleaned = rm.cleanDomain(trimmed)
+            }
+        }
+        guard !cleaned.isEmpty else {
+            return fail("invalid_args", "domain is empty after cleaning")
+        }
+        guard !entries(list, rm).contains(where: { $0.domain == cleaned }) else {
+            return fail("already_exists", "\(cleaned) is already on the \(list.rawValue) list")
+        }
+
+        switch list {
+        case .bypass: rm.addDomain(trimmed)
+        case .vpnOnly: rm.addInverseDomain(trimmed)
+        }
+        guard let added = entries(list, rm).first(where: { $0.domain == cleaned }) else {
+            // Only reachable if the GUI method's own checks drifted from the ones above.
+            return fail("invalid_args", "the app did not accept this value")
+        }
+        return ok(ControlResult(domains: [ControlDomain(added, list: list)]))
+    }
+
+    private static func domainRemove(_ args: [String: String]) async -> ControlResponse {
+        let rm = RouteManager.shared
+        await waitForRouteIdle()
+        let entry: DomainEntry, list: DomainList
+        switch findDomain(args, rm) {
+        case .failure(let e): return e.response
+        case .success(let found): (entry, list) = found
+        }
+        let cleanup: Task<Void, Never>?
+        switch list {
+        case .bypass: cleanup = rm.removeDomain(entry)
+        case .vpnOnly: cleanup = rm.removeInverseDomain(entry)
+        }
+        // When the method removes routes first, the config change lands after them; wait,
+        // so a domain.list sent right after this answer no longer shows the entry.
+        await cleanup?.value
+        return ok(ControlResult(message: "domain removed"))
+    }
+
+    private static func domainSetEnabled(_ args: [String: String], enabled: Bool) async -> ControlResponse {
+        let rm = RouteManager.shared
+        await waitForRouteIdle()
+        let entry: DomainEntry, list: DomainList
+        switch findDomain(args, rm) {
+        case .failure(let e): return e.response
+        case .success(let found): (entry, list) = found
+        }
+        if entry.enabled != enabled {
+            switch list {
+            case .bypass: rm.toggleDomain(entry.id)
+            case .vpnOnly: rm.toggleInverseDomain(entry.id)
+            }
+        }
+        let after = entries(list, rm).first(where: { $0.id == entry.id }) ?? entry
+        return ok(ControlResult(domains: [ControlDomain(after, list: list)]))
+    }
+
+    // MARK: - service.*
+
+    private static func serviceList(_ args: [String: String]) -> ControlResponse {
+        let services = RouteManager.shared.config.services
+        if let id = args["id"] {
+            guard let service = services.first(where: { $0.id == id }) else {
+                return fail("not_found", "no service with that id")
+            }
+            return ok(ControlResult(services: [ControlService(service, detail: true)]))
+        }
+        return ok(ControlResult(services: services.map { ControlService($0) }))
+    }
+
+    private static func serviceSetEnabled(_ args: [String: String], enabled: Bool) async -> ControlResponse {
+        let rm = RouteManager.shared
+        guard let id = args["id"], !id.isEmpty else {
+            return fail("invalid_args", "id is required")
+        }
+        await waitForRouteIdle()
+        guard let service = rm.config.services.first(where: { $0.id == id }) else {
+            return fail("not_found", "no service with that id")
+        }
+        if service.enabled != enabled {
+            rm.toggleService(id)
+        }
+        let after = rm.config.services.first(where: { $0.id == id }) ?? service
+        return ok(ControlResult(services: [ControlService(after)]))
+    }
+
+    // MARK: - routes / refresh
+
+    private static func activeRoutes(_ args: [String: String]) -> ControlResponse {
+        var routes = RouteManager.shared.activeRoutes
+        if let source = args["source"] {
+            routes = routes.filter { $0.source.caseInsensitiveCompare(source) == .orderedSame }
+        }
+        let result = routes.map { ControlActiveRoute(destination: $0.destination, gateway: $0.gateway, source: $0.source) }
+        return ok(ControlResult(activeRoutes: result))
+    }
+
+    /// The menu's Clear button. removeAllRoutes also sweeps destinations pushed to the kernel
+    /// but not yet recorded, so count those too; what it could not remove it keeps recorded.
+    private static func clearRoutes() async -> ControlResponse {
+        let rm = RouteManager.shared
+        let before = Set(rm.activeRoutes.map(\.destination)).union(rm.pendingKernelAdds).count
+        await rm.removeAllRoutes()
+        let left = rm.uniqueRouteCount
+        let removed = max(0, before - left)
+        var message = "removed \(removed) route\(removed == 1 ? "" : "s")"
+        if left > 0 {
+            message += "; \(left) could not be removed and \(left == 1 ? "is" : "are") still installed"
+        }
+        return ok(ControlResult(message: message))
+    }
+
+    /// The menu's Refresh Routes button, without the user notification.
+    private static func refresh() -> ControlResponse {
+        let rm = RouteManager.shared
+        let helper = HelperManager.shared
+        guard helper.isHelperInstalled else {
+            return fail("helper_not_ready",
+                        "the privileged helper is not ready (\(helper.helperState.statusText)); repair it in Settings > General")
+        }
+        Task { await rm.detectAndApplyRoutesAsync(sendNotification: false) }
+        return ok(ControlResult(message: "refresh started"))
+    }
+
+    /// Settings > Refresh DNS now.
+    private static func dnsRefresh() -> ControlResponse {
+        RouteManager.shared.forceDNSRefresh()
+        return ok(ControlResult(message: "DNS refresh started"))
+    }
+
+    // MARK: - logs
+
+    private static func logs(_ args: [String: String]) -> ControlResponse {
+        var limit = 50
+        if let s = args["limit"] {
+            guard let n = Int(s), (1...200).contains(n) else {
+                return fail("invalid_args", "limit must be an integer from 1 to 200")
+            }
+            limit = n
+        }
+        var level: RouteManager.LogEntry.LogLevel?
+        if let s = args["level"] {
+            guard let l = RouteManager.LogEntry.LogLevel(rawValue: s.uppercased()) else {
+                return fail("invalid_args", "level must be info, success, warning or error")
+            }
+            level = l
+        }
+        let formatter = ISO8601DateFormatter()   // UTC, "2026-09-30T10:00:00Z"
+        let lines = RouteManager.shared.recentLogs   // already newest first
+            .filter { level == nil || $0.level == level }
+            .prefix(limit)
+            .map { ControlLogEntry(time: formatter.string(from: $0.timestamp), level: $0.level.rawValue, message: $0.message) }
+        return ok(ControlResult(logs: Array(lines)))
+    }
+
+    // MARK: - Helpers
+
+    private struct VerbError: Error {
+        let code: String
+        let message: String
+        var response: ControlResponse { ControlResponse(ok: false, error: ControlError(code: code, message: message)) }
+    }
+
+    private static func ok(_ result: ControlResult) -> ControlResponse {
+        ControlResponse(ok: true, result: result)
+    }
+
+    private static func fail(_ code: String, _ message: String) -> ControlResponse {
+        ControlResponse(ok: false, error: ControlError(code: code, message: message))
+    }
+
+    private static func entries(_ list: DomainList, _ rm: RouteManager) -> [DomainEntry] {
+        switch list {
+        case .bypass: return rm.config.domains
+        case .vpnOnly: return rm.config.inverseDomains
+        }
+    }
+
+    /// `list` absent is `.success(nil)`; an unknown value is invalid_args.
+    private static func parseList(_ args: [String: String]) -> Result<DomainList?, VerbError> {
+        guard let s = args["list"] else { return .success(nil) }
+        guard let list = DomainList(rawValue: s) else {
+            return .failure(VerbError(code: "invalid_args", message: "list must be \"bypass\" or \"vpnOnly\""))
+        }
+        return .success(list)
+    }
+
+    /// The target of domain.rm / domain.enable / domain.disable. With `list`, only that list
+    /// is searched. Without it, an id is searched in both (ids are unique), and a domain is
+    /// searched in both too, but a domain on both lists needs `list` to say which.
+    private static func findDomain(_ args: [String: String], _ rm: RouteManager) -> Result<(DomainEntry, DomainList), VerbError> {
+        let lists: [DomainList]
+        switch parseList(args) {
+        case .failure(let e): return .failure(e)
+        case .success(let list): lists = list.map { [$0] } ?? [.bypass, .vpnOnly]
+        }
+        let id = args["id"], raw = args["domain"]
+        if id != nil && raw != nil {
+            return .failure(VerbError(code: "invalid_args", message: "give id or domain, not both"))
+        }
+        var matches: [(DomainEntry, DomainList)] = []
+        if let id {
+            // A malformed id cannot name an entry: not_found, as for the route verbs.
+            if let uuid = UUID(uuidString: id) {
+                for list in lists {
+                    if let e = entries(list, rm).first(where: { $0.id == uuid }) { matches.append((e, list)) }
+                }
+            }
+        } else if let raw {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Stored values are cleaned (lowercase, no scheme or port); a CIDR is stored as typed.
+            let key = rm.isValidCIDR(trimmed) ? trimmed : rm.cleanDomain(trimmed)
+            guard !key.isEmpty else {
+                return .failure(VerbError(code: "invalid_args", message: "domain is empty after cleaning"))
+            }
+            for list in lists {
+                if let e = entries(list, rm).first(where: { $0.domain == key }) { matches.append((e, list)) }
+            }
+        } else {
+            return .failure(VerbError(code: "invalid_args", message: "id or domain is required"))
+        }
+        switch matches.count {
+        case 0:
+            return .failure(VerbError(code: "not_found", message: "no domain entry matches"))
+        case 1:
+            return .success(matches[0])
+        default:
+            return .failure(VerbError(code: "invalid_args",
+                                      message: "that domain is on both lists; add list=bypass or list=vpnOnly"))
+        }
+    }
+
+    /// "a.b.c.d/0" or "a.b.c.d/1": a well-formed CIDR the app refuses to install, so it gets
+    /// its own message rather than "malformed".
+    private static func isCIDRWithPrefixZeroOrOne(_ s: String, _ rm: RouteManager) -> Bool {
+        let parts = s.components(separatedBy: "/")
+        guard parts.count == 2, rm.isValidIP(parts[0]), let bits = Int(parts[1]) else { return false }
+        return bits == 0 || bits == 1
+    }
+
+    private static func waitForRouteIdle() async {
+        let rm = RouteManager.shared
+        let deadline = Date().addingTimeInterval(busyWait)
+        while rm.isApplyingRoutes && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+}

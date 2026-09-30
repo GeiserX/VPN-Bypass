@@ -39,6 +39,30 @@ func printUsage() {
       mode mode=<bypass|vpnOnly|custom>          Set the routing mode (custom carries
                                                  your listed domains into rules)
       default routeId=<uuid>                    Set the default route
+
+    Bypass and VPN Only modes:
+      domain.list [list=bypass|vpnOnly]         List the domain lists (both when list= is omitted)
+      domain.add domain=<value> [list=bypass|vpnOnly]
+                                                 Add a domain (vpnOnly also takes a CIDR); list defaults to bypass
+      domain.rm (id=<uuid> | domain=<value>) [list=]
+                                                 Remove a domain
+      domain.enable (id=<uuid> | domain=<value>) [list=]
+                                                 Enable a domain
+      domain.disable (id=<uuid> | domain=<value>) [list=]
+                                                 Disable a domain
+                                                 (a domain on both lists needs list=)
+      service.list [id=<service id>]            List the services (with id=: its domains and IP ranges)
+      service.enable id=<service id>            Enable a service
+      service.disable id=<service id>           Disable a service
+      routes.active [source=<domain or service>]
+                                                 Kernel routes VPN Bypass has installed now
+      routes.clear                              Remove every installed route (the menu's Clear);
+                                                 they come back on the next refresh
+      refresh                                   Re-detect the VPN and re-apply every route (Refresh Routes)
+      dns.refresh                               Re-resolve every domain and apply only what changed
+      logs [limit=1..200] [level=info|success|warning|error]
+                                                 Recent log lines, newest first (default 50)
+
       help | --help | -h                        Show this help
 
     Secrets:
@@ -222,6 +246,60 @@ func printResult(_ response: ControlResponse) {
                 print("\(rule.order)  \(rule.id)  \(rule.matchType.rawValue):\(rule.pattern) -> \(rule.routeId)  \(state)")
             }
         }
+    }
+
+    if let domains = result.domains {
+        if domains.isEmpty {
+            print("no domains")
+        } else {
+            for d in domains {
+                var line = "\(d.id)  \(d.domain)  [\(d.list)]  \(d.enabled ? "enabled" : "disabled")"
+                if d.isCIDR { line += "  cidr" }
+                if d.isWildcard { line += "  wildcard" }
+                print(line)
+            }
+        }
+    }
+
+    if let services = result.services {
+        if services.isEmpty {
+            print("no services")
+        } else {
+            for s in services {
+                var line = "\(s.id)  \(s.name)  \(s.enabled ? "enabled" : "disabled")  domains:\(s.domainCount)  ipRanges:\(s.ipRangeCount)"
+                if s.isCustom { line += "  custom" }
+                print(line)
+                for d in s.domains ?? [] { print("  domain  \(d)") }
+                for r in s.ipRanges ?? [] { print("  ipRange  \(r)") }
+            }
+        }
+    }
+
+    if let activeRoutes = result.activeRoutes {
+        if activeRoutes.isEmpty {
+            print("no active routes")
+        } else {
+            for r in activeRoutes {
+                print("\(r.destination) -> \(r.gateway)  (\(r.source))")
+            }
+        }
+    }
+
+    if let logs = result.logs {
+        if logs.isEmpty {
+            print("no log lines")
+        } else {
+            for l in logs {
+                print("\(l.time)  \(l.level)  \(l.message)")
+            }
+        }
+    }
+
+    if let runtime = result.runtime {
+        var line = "helper: \(runtime.helperState)  vpn: \(runtime.vpnConnected ? (runtime.vpnInterface ?? "connected") : "disconnected")"
+        line += "  routes: \(runtime.enforcedRouteCount)  enforcing: \(runtime.enforcing)"
+        if let version = runtime.appVersion { line += "  app: \(version)" }
+        print(line)
     }
 
     if let mode = result.mode { print("mode: \(mode)") }

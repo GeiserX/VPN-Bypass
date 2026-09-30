@@ -389,10 +389,13 @@ final class CommandRouterTests: XCTestCase {
     /// an edit that moves a verb into the wrong branch (or typos a case string)
     /// fails here instead of silently under/over-persisting+reconciling.
     func testIsMutatingClassifiesEveryKnownVerbCorrectly() {
-        let readVerbs = ["status", "route.list", "rule.list"]
+        let readVerbs = ["status", "route.list", "rule.list",
+                         "domain.list", "service.list", "routes.active", "logs"]
         let writeVerbs = [
             "route.set", "route.enable", "route.disable", "route.rm", "route.add",
-            "rule.add", "rule.rm", "mode", "default"
+            "rule.add", "rule.rm", "mode", "default",
+            "domain.add", "domain.rm", "domain.enable", "domain.disable",
+            "service.enable", "service.disable", "routes.clear", "refresh", "dns.refresh"
         ]
 
         for verb in readVerbs {
