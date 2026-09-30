@@ -47,6 +47,32 @@ extension RouteManager {
     }
 }
 
+// MARK: - Proxy rule reach
+
+/// What a rule does when its route is served by a local listener (HTTP CONNECT,
+/// SOCKS5, Tailscale peer). Those routes emit no kernel route, so the rule only
+/// reaches apps set to use the route's 127.0.0.1 address. Direct and VPN rules
+/// change the routing table and reach every app, so they get no note.
+struct ProxyReachNote: Equatable {
+    let routeName: String
+    /// `127.0.0.1:<port>`, or nil while the route's listener is not up.
+    let address: String?
+
+    static let lead = "Only apps set to use "
+    static let tail = " go this way. Other apps are not affected by this rule."
+
+    /// nil for a Direct or VPN route, and for a rule whose route was deleted.
+    static func forRoute(_ route: Route?, listenerPort: UInt16?) -> ProxyReachNote? {
+        guard let route, ProxyListenerManager.usesLocalListener(route.egress) else { return nil }
+        return ProxyReachNote(routeName: route.name,
+                              address: listenerPort.map { LocalListenerAddress.string(port: $0) })
+    }
+
+    var addressPart: String { address.map { " (\($0))" } ?? "" }
+
+    var plainText: String { Self.lead + routeName + addressPart + Self.tail }
+}
+
 // MARK: - Sheet state wrappers
 
 private enum RuleSheetState: Identifiable {
@@ -70,6 +96,7 @@ private enum RuleSheetState: Identifiable {
 
 struct RulesTab: View {
     @EnvironmentObject var routeManager: RouteManager
+    @ObservedObject private var listenerManager = ProxyListenerManager.shared
     @State private var sheetState: RuleSheetState?
     @State private var showingNewRouteSheet = false
     @State private var pendingNewRouteCompletion: ((Route) -> Void)?
@@ -203,6 +230,7 @@ struct RulesTab: View {
                 ForEach(Array(sortedRules.enumerated()), id: \.element.id) { idx, rule in
                     RuleRow(
                         rule: rule,
+                        listenerPort: listenerManager.port(for: rule.routeId),
                         showDragHandle: sortedRules.count >= 2,
                         onEdit: { sheetState = .edit(rule) },
                         onDelete: { deleteRule(rule) },
@@ -327,6 +355,8 @@ struct RulesTab: View {
 struct RuleRow: View {
     @EnvironmentObject var routeManager: RouteManager
     let rule: Rule
+    /// Port of the assigned route's local listener, if it is up.
+    let listenerPort: UInt16?
     let showDragHandle: Bool
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -359,21 +389,42 @@ struct RuleRow: View {
         routeManager.config.routes.first { $0.id == rule.routeId }
     }
 
-    /// True when the assigned route is served by a local 127.0.0.1 listener
-    /// (proxy/Tailscale-exit) rather than a kernel route (direct/VPN): such a rule
-    /// only takes effect for apps explicitly pointed at the route's proxy hook, unlike
-    /// a direct/VPN rule which is transparent. Drives the info affordance below.
-    private var needsProxyHook: Bool {
-        guard let assignedRoute else { return false }
-        return ProxyListenerManager.usesLocalListener(assignedRoute.egress)
+    /// Set when the assigned route is served by a local listener, so the rule only
+    /// reaches apps pointed at that listener. Drawn as a line under the row.
+    private var reachNote: ProxyReachNote? {
+        ProxyReachNote.forRoute(assignedRoute, listenerPort: listenerPort)
     }
 
+    /// Lines the reach note up with the pattern: drag handle + toggle + spacing.
+    private var noteIndent: CGFloat { showDragHandle ? 68 : 44 }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ruleLine
+            if let reachNote {
+                (Text(ProxyReachNote.lead)
+                    + Text(verbatim: reachNote.routeName).foregroundColor(.white).fontWeight(.medium)
+                    + Text(verbatim: reachNote.addressPart)
+                    + Text(ProxyReachNote.tail))
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, noteIndent)
+                    .padding(.trailing, 36)
+                    .padding(.bottom, 2)
+            }
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+    }
+
+    private var ruleLine: some View {
         HStack(spacing: 10) {
             if showDragHandle {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 11))
                     .foregroundColor(Theme.textTertiary)
+                    .frame(width: 14)
             }
 
             Toggle("", isOn: Binding(
@@ -411,13 +462,6 @@ struct RuleRow: View {
 
             RouteChipMenu(selectedRouteId: rule.routeId, onSelect: onReassign, onNewRoute: onNewRoute)
 
-            if needsProxyHook {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 10))
-                    .foregroundColor(Theme.textTertiary)
-                    .help("Apps must use this route's proxy env vars (copy them from the Routes tab) — this rule is not applied transparently at the network layer.")
-            }
-
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .font(.system(size: 12))
@@ -429,8 +473,6 @@ struct RuleRow: View {
             .buttonStyle(.plain)
             .help("Delete rule")
         }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
     }
 }
 
