@@ -1,0 +1,88 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  /* Lane-local styles for proposal 16. */
+  .grid { display:grid; grid-template-columns: 190px 560px 560px; column-gap:24px; row-gap:16px; align-items:center; }
+  .grid .gh { font: 700 10.5px "SFRounded", system-ui; letter-spacing:1.2px; text-transform:uppercase; color: var(--text3); }
+  .grid .gh.after { color: var(--sky); }
+  .where { font-size:12px; color: var(--text2); line-height:1.4; }
+  .where b { color:#fff; font-weight:600; display:block; margin-bottom:2px; }
+  .where .mono { font-size:10.5px; color: var(--text3); }
+  .sep { grid-column: 1 / -1; height:1px; background: rgba(255,255,255,.07); }
+  .surface { background: var(--menuBg); border:1px solid #2C2C2C; border-radius:12px; padding:14px 16px; }
+  .surface.win { width:auto; background: linear-gradient(var(--winTop), var(--winBottom)); padding:16px 20px; }
+  .dcard { background: var(--menuCard); border-radius:8px; padding:10px; width:308px; }
+  .dcard .t { font-size:11px; font-weight:500; color: var(--text2); display:flex; align-items:center; gap:6px; }
+  .dcard .t .n { margin-left:auto; font: 700 10px "SFRounded", system-ui; color: var(--success); }
+  .dcard .r { display:flex; align-items:center; gap:6px; margin-top:8px; }
+  .dcard .r i { width:4px; height:4px; border-radius:50%; background: var(--success); display:inline-block; }
+  .dcard .r .d { font: 10px ui-monospace, "SF Mono", Menlo, monospace; }
+  .dcard .r .s { margin-left:auto; font-size:9px; color: var(--text3); }
+  .h18 { font: 700 18px "SFRounded", system-ui; display:flex; gap:8px; align-items:center; }
+  .sub13 { font-size:13px; color: var(--text2); margin-top:6px; }
+  .srow { display:flex; font-size:12px; color: var(--text2); }
+  .srow .v { margin-left:auto; color:#fff; font: 500 12px ui-monospace, "SF Mono", Menlo, monospace; }
+  .stat { width:150px; border-radius:10px; padding:12px 0; display:flex; flex-direction:column; align-items:center; gap:4px; background: rgba(16,185,129,.1); }
+  .stat b { font: 700 20px "SFRounded", system-ui; }
+  .stat s { text-decoration:none; font-size:10px; color: var(--text3); }
+  .same { font-size:12px; color: var(--text2); line-height:1.45; }
+  .changed { color: var(--sky); }
+  .legend { display:flex; gap:28px; margin: 0 0 18px; font-size:12px; color: var(--text2); max-width:1100px; }
+  .legend b { color:#fff; }
+</style></head>
+<body>
+<div class="head"><span class="num">16</span><span class="title">"Route" means one thing, and the Bypass list stops sounding like Custom mode</span></div>
+<p class="caption" style="max-width:1100px">Today "route" names three things: the kernel entries the app installs (the dropdown's Active Routes, "62 routes"), the ways out in Custom mode (Direct, a VPN, a proxy, a Tailscale peer), and the ways out that have rules (Routes In Use). A user who reads "62 routes" in the dropdown and "1/1 active" on the Routes page is counting two different things under one word. The Bypass list is titled Custom Domains, although Custom is also the name of a mode. The proposal keeps "route" for the Custom-mode ways out, which the socket verbs <span class="mono">route.*</span> already use, calls the kernel entries addresses, and names each list after its mode. Only on-screen words change; the socket verbs keep their names.</p>
+<div class="legend">
+  <span><b>Route</b>: a way out for traffic. Direct, your VPN, a proxy or a Tailscale peer.</span>
+  <span><b>Address</b>: one IP address or range the app has sent a certain way. Telegram is 8 of them.</span>
+</div>
+<div class="grid">
+  <div class="gh">Where</div><div class="gh">Before &middot; 4.8.x</div><div class="gh after">After &middot; proposal</div>
+
+  <div class="where"><b>Dropdown, kernel entries</b><span class="mono">MenuBarViews.swift:716</span></div>
+  <div class="shot" style="width:310px;height:92px;background-image:url(../../../images/screenshots/menu-bar.png);background-position:-15px -282px;"></div>
+  <div class="dcard">
+    <div class="t"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 15V8M8 8 3 2M8 8l5-6"/></svg><span class="changed">Routed addresses</span><span class="n">62</span></div>
+    <div class="r"><i></i><span class="d">185.15.58.224</span><span class="s">en.wikipedia.org</span></div>
+    <div class="r"><i></i><span class="d">209.216.230.207</span><span class="s">news.ycombinator.com</span></div>
+    <div class="r"><i></i><span class="d">91.108.56.0/22</span><span class="s">Telegram</span></div>
+  </div>
+  <div class="sep"></div>
+
+  <div class="where"><b>Settings, kernel entries</b><span class="mono">SettingsView.swift:1881, :2262</span><br>Network Status and Route Health (redrawn)</div>
+  <div class="surface win" style="display:flex;gap:18px;align-items:center">
+    <div style="flex:1"><div class="srow">Active Routes<span class="v">62</span></div></div>
+    <div class="stat"><b>62</b><s>Active Routes</s></div>
+  </div>
+  <div class="surface win" style="display:flex;gap:18px;align-items:center">
+    <div style="flex:1"><div class="srow"><span class="changed">Routed addresses</span><span class="v">62</span></div></div>
+    <div class="stat"><b>62</b><s class="changed">Routed addresses</s></div>
+  </div>
+  <div class="sep"></div>
+
+  <div class="where"><b>Bypass list page</b><span class="mono">SettingsView.swift:214</span></div>
+  <div class="shot" style="width:560px;height:66px;background-image:url(../../../images/screenshots/domains.png);background-position:-12px -192px;"></div>
+  <div class="surface win" style="padding:12px 12px 12px">
+    <div class="h18"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#10B981" stroke-width="1.7"><circle cx="10" cy="10" r="8"/><ellipse cx="10" cy="10" rx="3.5" ry="8"/><path d="M2.3 7.3h15.4M2.3 12.7h15.4"/></svg><span class="changed">Bypass list</span></div>
+    <div class="sub13">Add domains that should bypass VPN and use your regular connection.</div>
+  </div>
+  <div class="sep"></div>
+
+  <div class="where"><b>VPN Only list page</b><span class="mono">SettingsView.swift:214</span><br>(redrawn)</div>
+  <div class="surface win" style="padding:12px">
+    <div class="h18"><svg width="22" height="22" viewBox="0 0 20 20"><path d="M10 1.5 17 4v5.2c0 4.3-3 7.6-7 9.3-4-1.7-7-5-7-9.3V4z" fill="#F59E0B"/><rect x="7" y="9" width="6" height="5" rx="1" fill="#3a2605"/><path d="M8.2 9V7.6a1.8 1.8 0 0 1 3.6 0V9" stroke="#3a2605" stroke-width="1.3" fill="none"/></svg>VPN Only Domains</div>
+    <div class="sub13">Only these domains will use the VPN. Everything else bypasses it.</div>
+  </div>
+  <div class="surface win" style="padding:12px">
+    <div class="h18"><svg width="22" height="22" viewBox="0 0 20 20"><path d="M10 1.5 17 4v5.2c0 4.3-3 7.6-7 9.3-4-1.7-7-5-7-9.3V4z" fill="#F59E0B"/><rect x="7" y="9" width="6" height="5" rx="1" fill="#3a2605"/><path d="M8.2 9V7.6a1.8 1.8 0 0 1 3.6 0V9" stroke="#3a2605" stroke-width="1.3" fill="none"/></svg><span class="changed">VPN Only list</span></div>
+    <div class="sub13">Only these domains will use the VPN. Everything else bypasses it.</div>
+  </div>
+  <div class="sep"></div>
+
+  <div class="where"><b>Routes page, Custom mode</b><span class="mono">RoutesTab.swift:56</span></div>
+  <div class="shot" style="width:560px;height:44px;background-image:url(../../../images/screenshots/routes.png);background-position:-12px -192px;"></div>
+  <div class="same">Unchanged. "Routes" now means only these, the ways out, so "1/1 active" no longer sits beside a different count of routes. The dropdown's Routes In Use in Custom mode stays too.</div>
+</div>
+<p class="note" style="max-width:1100px;margin-top:18px">Changed words are in blue here only to point them out; the app shows them in its normal colours. The three Localizable string tables (English, Spanish, French) change with them. The socket verb <span class="mono">routes.active</span> keeps its name, since the 4.9.0 wire contract is frozen.</p>
+</body></html>
