@@ -136,6 +136,7 @@ nav:
   - Get started:
       - Getting started: getting-started.md
       - Usage: usage.md
+      - MCP server: mcp-server.md
   - Routing:
       - Routing modes: routing.md
       - Other VPNs and proxies: coexistence.md

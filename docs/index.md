@@ -40,7 +40,7 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 
     ---
 
-    The dropdown, the Settings tabs and the `vpnb` command line.
+    The dropdown, the Settings tabs, the `vpnb` command line and the [MCP server](mcp-server.md) for AI agents.
 
 -   :material-source-branch: **[Routing modes](routing.md)**
 
@@ -91,7 +91,7 @@ Bypass and VPN Only use the Domains and Services tabs. Custom mode swaps them fo
 - Host routes in the system routing table, one per resolved address of each domain or service pack you turned on. In Bypass mode they point at your local gateway, in VPN Only mode at the VPN interface, in Custom mode at whatever the matching rule says. The app removes its routes when you quit, when you press Clear, and when the VPN goes away.
 - Entries in `/etc/hosts`, only if you turn on DNS bypass in Settings > General.
 - One small root helper, installed once with your admin password as a launchd daemon. It is the only part that runs as root, it does nothing but add and remove routes and hosts entries, and it accepts requests from this app alone (pinned to the app's code hash). There is no Network Extension and no kernel extension, so nothing to approve in System Settings beyond the Login Items entry on macOS 13 and later.
-- A config file and a log under `~/Library/Application Support/VPNBypass/`, plus a socket there that only your account can open, which is what `vpnb` talks to.
+- A config file and a log under `~/Library/Application Support/VPNBypass/`, plus a socket there that only your account can open, which is what `vpnb` and the [MCP server](mcp-server.md) talk to.
 
 ## How it runs
 
@@ -99,6 +99,7 @@ Bypass and VPN Only use the Domains and Services tabs. Custom mode swaps them fo
 flowchart LR
     U[You] --> M[Menu bar app]
     C[vpnb CLI] -->|user-only socket| M
+    A[MCP server] -->|user-only socket| M
     N[VPN connects, disconnects,<br/>network changes] --> M
     M -->|resolves| D[Domains and service packs]
     M -->|XPC| H[Root helper]
