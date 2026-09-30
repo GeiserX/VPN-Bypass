@@ -80,7 +80,7 @@ vpnb logs limit=20 level=error
 ```
 
 - `domain.list` shows both lists, the Bypass list first; `list=bypass` or `list=vpnOnly` shows one. The VPN Only list also takes a CIDR.
-- `domain.add` adds to the Bypass list unless you pass `list=vpnOnly`. It cleans and checks the value the way the Domains tab does. The Bypass list refuses a value with `/`, and the VPN Only list refuses a malformed CIDR and a `/0` or `/1`. Adding a domain that is already on the list returns `already_exists`.
+- `domain.add` adds to the Bypass list unless you pass `list=vpnOnly`. It cleans and checks the value the way the Domains tab does. The Bypass list refuses an IP range such as `10.0.0.0/24` and takes a pasted link as its host name, and the VPN Only list refuses a malformed CIDR and a `/0` or `/1`. Adding a domain that is already on the list returns `already_exists`.
 - `domain.rm`, `domain.enable` and `domain.disable` take `domain=` or `id=<uuid>`, and look in both lists unless you pass `list=`. When the same domain is on both lists, pass `list=bypass` or `list=vpnOnly`.
 - `service.list id=netflix` shows one service with its domains and IP ranges. `service.disable` turns a service off.
 - Enabling something that is already on, or disabling something already off, succeeds and changes nothing.

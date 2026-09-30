@@ -3559,13 +3559,23 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    func addDomain(_ domain: String) {
+    /// Adds to the Bypass list and says what happened: the entry saved, or why nothing
+    /// was. The Domains tab shows the answer under its field; the control socket's
+    /// `domain.add` maps it to its error codes.
+    @discardableResult
+    func addDomain(_ domain: String) -> Result<AddedDomain, AddDomainError> {
         let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleaned = cleanDomain(trimmed)
-        guard !cleaned.isEmpty else { return }
+        let cleaned: String
+        switch checkDomainInput(trimmed, list: .bypass) {
+        case .failure(let error):
+            log(.warning, error.message)
+            return .failure(error)
+        case .success(let checked):
+            cleaned = checked.value
+        }
         guard !config.domains.contains(where: { $0.domain == cleaned }) else {
             log(.warning, "Domain \(cleaned) already exists")
-            return
+            return .failure(.alreadyListed(value: cleaned, list: .bypass))
         }
 
         let entry = DomainEntry(domain: cleaned)
@@ -3596,6 +3606,7 @@ final class RouteManager: ObservableObject {
                 }
             }
         }
+        return .success(AddedDomain(entry: entry, list: .bypass, typed: trimmed))
     }
 
     func scheduleRetry(for domain: String) {
@@ -4003,25 +4014,24 @@ final class RouteManager: ObservableObject {
 
     // MARK: - Inverse Domain Management
 
-    func addInverseDomain(_ domain: String) {
+    /// Adds a domain or an IP range to the VPN Only list and says what happened, like
+    /// `addDomain`.
+    @discardableResult
+    func addInverseDomain(_ domain: String) -> Result<AddedDomain, AddDomainError> {
         let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Detect CIDR input (e.g., "192.168.1.0/24") — bypass domain cleaning
-        let cidr = isValidCIDR(trimmed)
-        let cleaned: String
-        if cidr {
-            cleaned = trimmed
-        } else if trimmed.contains("/") {
-            log(.warning, "Invalid CIDR notation: \(trimmed)")
-            return
-        } else {
-            cleaned = cleanDomain(trimmed)
-            guard !cleaned.isEmpty else { return }
+        let cleaned: String, cidr: Bool
+        switch checkDomainInput(trimmed, list: .vpnOnly) {
+        case .failure(let error):
+            log(.warning, error.message)
+            return .failure(error)
+        case .success(let checked):
+            cleaned = checked.value
+            cidr = checked.isCIDR
         }
 
         guard !config.inverseDomains.contains(where: { $0.domain == cleaned }) else {
             log(.warning, "VPN Only entry \(cleaned) already exists")
-            return
+            return .failure(.alreadyListed(value: cleaned, list: .vpnOnly))
         }
         let inverseEntry = DomainEntry(domain: cleaned, isCIDR: cidr)
         config.inverseDomains.append(inverseEntry)
@@ -4060,6 +4070,7 @@ final class RouteManager: ObservableObject {
                 }
             }
         }
+        return .success(AddedDomain(entry: inverseEntry, list: .vpnOnly, typed: trimmed))
     }
 
     /// Returns the route-cleanup task when one was started (see `removeDomain`).
@@ -5207,6 +5218,53 @@ final class RouteManager: ObservableObject {
         return domain.lowercased()
     }
     
+    /// The value an add to `list` would save, or why it saves nothing. It does not look at
+    /// the lists (the duplicate check is `addDomain`'s), so the control socket can answer a
+    /// bad value at once, without waiting for a running route operation.
+    nonisolated func checkDomainInput(_ input: String, list: DomainList) -> Result<CheckedDomainInput, AddDomainError> {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch list {
+        case .bypass:
+            // cleanDomain cuts at the first "/" as if it were a URL path, so "10.0.0.0/24"
+            // would be saved as the one host 10.0.0.0.
+            if Self.looksLikeIPRange(trimmed) {
+                return .failure(.rangeOnBypassList(input: trimmed))
+            }
+        case .vpnOnly:
+            if trimmed.contains("/") {
+                if isValidCIDR(trimmed) {
+                    return .success(CheckedDomainInput(value: trimmed, isCIDR: true))
+                }
+                return .failure(isCIDRWithPrefixZeroOrOne(trimmed)
+                                ? .catchAllRange(input: trimmed)
+                                : .malformedRange(input: trimmed))
+            }
+        }
+        let cleaned = cleanDomain(trimmed)
+        guard !cleaned.isEmpty else { return .failure(.empty(input: trimmed)) }
+        return .success(CheckedDomainInput(value: cleaned, isCIDR: false))
+    }
+
+    /// An address, then a "/", with no scheme in front: "10.0.0.0/24", "10.0.0/8",
+    /// "10.0.0.0 /24", or an IPv6 range such as "2001:db8::/32" (hex digits with at least
+    /// two colons). A pasted link ("https://10.0.0.1/admin", "example.com/page",
+    /// "example.com:8080/page") is not a range.
+    nonisolated static func looksLikeIPRange(_ s: String) -> Bool {
+        guard !s.contains("://"), let slash = s.firstIndex(of: "/") else { return false }
+        let head = s[..<slash].trimmingCharacters(in: .whitespaces)
+        guard !head.isEmpty else { return false }
+        if head.allSatisfy({ $0 == "." || ("0"..."9").contains($0) }) { return true }
+        return head.filter { $0 == ":" }.count >= 2 && head.allSatisfy { $0 == ":" || $0 == "." || $0.isHexDigit }
+    }
+
+    /// "a.b.c.d/0" or "a.b.c.d/1": a well-formed CIDR the app refuses to install, so it gets
+    /// its own message rather than "malformed".
+    nonisolated func isCIDRWithPrefixZeroOrOne(_ s: String) -> Bool {
+        let parts = s.components(separatedBy: "/")
+        guard parts.count == 2, isValidIP(parts[0]), let bits = Int(parts[1]) else { return false }
+        return bits == 0 || bits == 1
+    }
+
     nonisolated func isValidIP(_ string: String) -> Bool {
         let parts = string.components(separatedBy: ".")
         guard parts.count == 4 else { return false }
@@ -5276,5 +5334,96 @@ final class RouteManager: ObservableObject {
             try? handle.close()
             logFileHandle = nil
         }
+    }
+}
+
+// MARK: - Adding to the Bypass and VPN Only lists
+
+/// The two lists a domain can be added to. The raw values are the control socket's `list=`.
+enum DomainList: String {
+    case bypass
+    case vpnOnly
+
+    /// The list's name as the settings window shows it, in the app's language. `bundle`
+    /// holds the translations; tests pass one language's folder.
+    func displayName(in bundle: Bundle = .main) -> String {
+        switch self {
+        case .bypass: return String(localized: "Bypass", bundle: bundle)
+        case .vpnOnly: return String(localized: "VPN Only", bundle: bundle)
+        }
+    }
+}
+
+/// What `RouteManager.checkDomainInput` would save.
+struct CheckedDomainInput: Equatable {
+    let value: String
+    let isCIDR: Bool
+}
+
+/// Why an add to the Bypass or VPN Only list saved nothing.
+enum AddDomainError: Error, Equatable {
+    /// Nothing a domain name can use is left after cleaning ("   ", "!!!").
+    case empty(input: String)
+    /// An IP range on the Bypass list, which takes names only.
+    case rangeOnBypassList(input: String)
+    /// A value with "/" on the VPN Only list that is not a.b.c.d/n with n from 2 to 32.
+    case malformedRange(input: String)
+    /// a.b.c.d/0 or /1, which collide with a full-tunnel VPN's own catch-all routes.
+    case catchAllRange(input: String)
+    /// The cleaned value is already on the list.
+    case alreadyListed(value: String, list: DomainList)
+
+    /// One line for under the add field, in the user's words and the app's language.
+    var message: String { message(in: .main) }
+
+    func message(in bundle: Bundle) -> String {
+        switch self {
+        case .empty(let input):
+            return input.isEmpty
+                ? String(localized: "Type a domain first.", bundle: bundle)
+                : String(localized: "\u{201C}\(input)\u{201D} is not a domain name.", bundle: bundle)
+        case .rangeOnBypassList(let input):
+            // The VPN Only list would send the range through the VPN, the opposite of
+            // what the user asked, so only the Custom rule is named.
+            return String(localized: "\(input) is an IP range. The Bypass list takes domains; to send a range around the VPN, add it as a rule on the Direct route in Custom mode.", bundle: bundle)
+        case .malformedRange(let input):
+            return String(localized: "\(input) is not an IP range the app can route. Write it as 10.0.0.0/24, with a prefix from /2 to /32.", bundle: bundle)
+        case .catchAllRange(let input):
+            return String(localized: "\(input) would clash with the VPN's own catch-all routes. Use a prefix from /2 to /32.", bundle: bundle)
+        case .alreadyListed(let value, let list):
+            return String(localized: "\(value) is already on your \(list.displayName(in: bundle)) list.", bundle: bundle)
+        }
+    }
+}
+
+/// What an add to the Bypass or VPN Only list saved.
+struct AddedDomain: Equatable {
+    let entry: DomainEntry
+    let list: DomainList
+    /// What the user typed, when cleaning changed more than letter case: a pasted link, a
+    /// port, a user name. nil when the entry is what they typed.
+    let rewrittenFrom: String?
+
+    init(entry: DomainEntry, list: DomainList, typed: String) {
+        self.entry = entry
+        self.list = list
+        rewrittenFrom = typed.lowercased() == entry.domain ? nil : typed
+    }
+
+    /// One line for under the add field, in the app's language.
+    var message: String { message(in: .main) }
+
+    func message(in bundle: Bundle) -> String {
+        let listName = list.displayName(in: bundle)
+        if entry.isCIDR {
+            return String(localized: "Added the range \(entry.domain) to your \(listName) list.", bundle: bundle)
+        }
+        guard let typed = rewrittenFrom else {
+            return String(localized: "Added \(entry.domain) to your \(listName) list.", bundle: bundle)
+        }
+        if typed.contains("://") {
+            return String(localized: "Added \(entry.domain), from the link you pasted.", bundle: bundle)
+        }
+        return String(localized: "Added \(entry.domain), cleaned up from \u{201C}\(typed)\u{201D}.", bundle: bundle)
     }
 }
