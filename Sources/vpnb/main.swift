@@ -56,8 +56,9 @@ func printUsage() {
       service.disable id=<service id>           Disable a service
       routes.active [source=<domain or service>]
                                                  Kernel routes VPN Bypass has installed now
-      routes.clear                              Remove every installed route (the menu's Clear);
-                                                 they come back on the next refresh
+      routes.clear                              Remove every installed route (the menu's Remove All
+                                                 Routes…, without the question); they come back on
+                                                 the next refresh
       refresh                                   Re-detect the VPN and re-apply every route (Refresh Routes)
       dns.refresh                               Re-resolve every domain and apply only what changed
       logs [limit=1..200] [level=info|success|warning|error]

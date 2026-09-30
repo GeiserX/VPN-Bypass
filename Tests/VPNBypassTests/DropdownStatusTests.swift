@@ -200,7 +200,14 @@ final class DropdownStatusTests: XCTestCase {
     func testRoutesFactAfterRemovalAndBeforeAnyApply() {
         XCTAssertEqual(DropdownStatus.routesFact(input {
             $0.lastRouteChange = .init(kind: .removedAll, at: self.now.addingTimeInterval(-4), routeCount: 0, failedCount: 0)
+            $0.installedRoutes = 0
         }, now: now), "all removed just now")
+        // Routes came back without a full apply (a DNS refresh, a new domain): the removal is
+        // no longer true, the same rule the line under Refresh Routes follows.
+        XCTAssertEqual(DropdownStatus.routesFact(input {
+            $0.lastRouteChange = .init(kind: .removedAll, at: self.now.addingTimeInterval(-4), routeCount: 0, failedCount: 0)
+            $0.installedRoutes = 62
+        }, now: now), "62 installed")
         XCTAssertEqual(DropdownStatus.routesFact(input { $0.lastRouteChange = nil }, now: now), "62 installed")
         XCTAssertEqual(DropdownStatus.routesFact(input { $0.lastRouteChange = nil; $0.installedRoutes = 0 }, now: now),
                        "none applied yet")

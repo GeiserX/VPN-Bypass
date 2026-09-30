@@ -139,6 +139,61 @@ struct BrandedAppName: View {
     }
 }
 
+// MARK: - Quick add
+
+/// The dropdown's quick-add field, with why the last add saved nothing under it.
+struct QuickAddField: View {
+    @Binding var text: String
+    let error: AddDomainFeedback?
+    let onAdd: () -> Void
+    let onCancel: () -> Void
+
+    private let accentGradient = LinearGradient(
+        colors: [Theme.success, Theme.successDark],
+        startPoint: .leading,
+        endPoint: .trailing
+    )
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                TextField("domain.com", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.secondary.opacity(0.12))
+                    .cornerRadius(6)
+                    .onSubmit {
+                        onAdd()
+                    }
+
+                Button {
+                    onAdd()
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(accentGradient)
+                }
+                .buttonStyle(.plain)
+                .disabled(text.isEmpty)
+
+                Button {
+                    onCancel()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            if let error {
+                AddDomainFeedbackLine(feedback: error)
+            }
+        }
+    }
+}
+
 // MARK: - Menu Content
 
 struct MenuContent: View {
@@ -148,6 +203,8 @@ struct MenuContent: View {
     @ObservedObject private var helperManager = HelperManager.shared
     @State private var newDomain = ""
     @State private var isAddingDomain = false
+    /// Why the last quick-add saved nothing, shown under the field, which stays open.
+    @State private var quickAddError: AddDomainFeedback?
     @State private var isVerifying = false
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
@@ -336,38 +393,10 @@ struct MenuContent: View {
         VStack(spacing: 12) {
             // Quick add domain
             if isAddingDomain {
-                HStack(spacing: 8) {
-                    TextField("domain.com", text: $newDomain)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Color.secondary.opacity(0.12))
-                        .cornerRadius(6)
-                        .onSubmit {
-                            addDomainAndClose()
-                        }
-                    
-                    Button {
-                        addDomainAndClose()
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(accentGradient)
+                QuickAddField(text: $newDomain, error: quickAddError, onAdd: addDomainAndClose, onCancel: closeQuickAdd)
+                    .onChange(of: newDomain) { text in
+                        if text != quickAddError?.fieldText { quickAddError = nil }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(newDomain.isEmpty)
-                    
-                    Button {
-                        isAddingDomain = false
-                        newDomain = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
             } else {
                 Button {
                     withAnimation(.spring(response: 0.3)) {
@@ -508,7 +537,8 @@ struct MenuContent: View {
     /// the age stays true while the dropdown is open.
     @ViewBuilder
     private var routeChangeLine: some View {
-        if let outcome = routeManager.lastRouteChange {
+        if let outcome = DropdownCopy.shownRouteChange(routeManager.lastRouteChange,
+                                                       currentRouteCount: routeManager.uniqueRouteCount) {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let line = DropdownCopy.routeChangeLine(outcome, now: context.date)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -522,7 +552,7 @@ struct MenuContent: View {
                     Spacer(minLength: 0)
                 }
             }
-            .help(String(localized: "Failures are domains that did not resolve and routes the system refused. Settings > Logs has the details."))
+            .help(String(localized: "Failures are routes the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details."))
         }
     }
 
@@ -535,6 +565,7 @@ struct MenuContent: View {
             domainCount: config.routingMode == .vpnOnly
                 ? config.inverseDomains.filter { $0.enabled }.count
                 : config.domains.filter { $0.enabled }.count,
+            autoApplyOnVPN: config.autoApplyOnVPN,
             autoDNSRefresh: config.autoDNSRefresh
         )
     }
@@ -926,14 +957,41 @@ struct MenuContent: View {
     
     private func addDomainAndClose() {
         guard !newDomain.isEmpty else { return }
+        let result: Result<AddedDomain, AddDomainError>?
         if routeManager.config.routingMode == .vpnOnly {
-            routeManager.addInverseDomain(newDomain)
+            result = routeManager.addInverseDomain(newDomain)
         } else if RouteManager.usesCustomEngine(schemaVersion: routeManager.config.schemaVersion, routingMode: routeManager.config.routingMode) {
             addDomainRuleToDirect(newDomain)
+            result = nil
         } else {
-            routeManager.addDomain(newDomain)
+            result = routeManager.addDomain(newDomain)
         }
+        let next = Self.quickAdd(after: result, typed: newDomain)
+        newDomain = next.text
+        quickAddError = next.error
+        isAddingDomain = next.isOpen
+    }
+
+    /// The quick-add after an add. A refused one stays open with the text and says why,
+    /// as the Domains tab does, because closing would look like it worked. A saved one
+    /// closes. nil is Custom mode's rule add, which says nothing back.
+    static func quickAdd(after result: Result<AddedDomain, AddDomainError>?, typed: String) -> QuickAddState {
+        guard let result else { return .closed }
+        let shown = AddDomainFeedback(result, typed: typed)
+        return shown.isError ? QuickAddState(text: shown.fieldText, isOpen: true, error: shown) : .closed
+    }
+
+    struct QuickAddState: Equatable {
+        let text: String
+        let isOpen: Bool
+        let error: AddDomainFeedback?
+
+        static let closed = QuickAddState(text: "", isOpen: false, error: nil)
+    }
+
+    private func closeQuickAdd() {
         newDomain = ""
+        quickAddError = nil
         isAddingDomain = false
     }
 
@@ -999,6 +1057,17 @@ enum DropdownCopy {
         count == 1 ? String(localized: "1 route") : String(localized: "\(count) routes")
     }
 
+    /// The outcome the result line shows, or nil to show none. A removal is a claim about what
+    /// is installed now, so it stops showing once the route count moves: a DNS refresh, a new
+    /// domain or a newly enabled service brings routes back without a full apply, and the line
+    /// would otherwise keep saying "All routes removed" under a list of live routes.
+    static func shownRouteChange(_ outcome: RouteManager.RouteChangeOutcome?,
+                                 currentRouteCount: Int) -> RouteManager.RouteChangeOutcome? {
+        guard let outcome else { return nil }
+        if outcome.kind == .removedAll && outcome.routeCount != currentRouteCount { return nil }
+        return outcome
+    }
+
     /// The line under Refresh Routes. `isProblem` turns its mark amber.
     static func routeChangeLine(_ outcome: RouteManager.RouteChangeOutcome, now: Date) -> (text: String, isProblem: Bool) {
         let when = age(since: outcome.at, now: now)
@@ -1024,14 +1093,26 @@ enum DropdownCopy {
 
     /// Remove All Routes… asks this before it runs. The message says what the removal costs in
     /// the user's own terms: which of their entries lose their route, and until when.
+    ///
+    /// The until-clause names only the recoveries that will happen: a reconnect re-applies only
+    /// with auto-apply on VPN connect on, and a DNS refresh only with the automatic refresh on
+    /// and never in VPN Only, where it does not reinstall the catch-all routes.
     static func removeAllConfirmation(mode: Mode, routeCount: Int, serviceCount: Int, domainCount: Int,
-                                      autoDNSRefresh: Bool) -> (title: String, message: String) {
+                                      autoApplyOnVPN: Bool, autoDNSRefresh: Bool) -> (title: String, message: String) {
         let title = routeCount == 1
             ? String(localized: "Remove the 1 route?")
             : String(localized: "Remove all \(routeCount) routes?")
-        let until = autoDNSRefresh
-            ? String(localized: "until you refresh routes, the VPN reconnects, or DNS is next refreshed")
-            : String(localized: "until you refresh routes or the VPN reconnects")
+        let until: String
+        switch (autoApplyOnVPN, autoDNSRefresh && mode != .vpnOnly) {
+        case (true, true):
+            until = String(localized: "until you refresh routes, the VPN reconnects, or DNS is next refreshed")
+        case (true, false):
+            until = String(localized: "until you refresh routes or the VPN reconnects")
+        case (false, true):
+            until = String(localized: "until you refresh routes or DNS is next refreshed")
+        case (false, false):
+            until = String(localized: "until you refresh routes")
+        }
         let message: String
         switch mode {
         case .bypass:
@@ -1292,7 +1373,10 @@ struct DropdownStatus: Equatable {
     }
 
     static func routesFact(_ input: Input, now: Date) -> String {
-        guard let change = input.lastRouteChange else {
+        // Same rule as the line under Refresh Routes: a removal stops being reported once
+        // routes are back, so the two never disagree.
+        guard let change = DropdownCopy.shownRouteChange(input.lastRouteChange,
+                                                         currentRouteCount: input.installedRoutes) else {
             return input.installedRoutes > 0
                 ? String(localized: "\(input.installedRoutes) installed")
                 : String(localized: "none applied yet")

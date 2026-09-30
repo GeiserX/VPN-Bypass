@@ -81,14 +81,14 @@ Bypass and VPN Only use the Domains and Services tabs. Custom mode swaps them fo
 <figcaption>Rules, first match wins</figcaption>
 </figure>
 <figure markdown>
-![The Routes tab in Custom mode: Direct, the detected VPN, and a SOCKS5 proxy route with its Copy button](images/screenshots/routes.png)
+![The Routes tab in Custom mode: Direct, the detected VPN, and a SOCKS5 proxy route](images/screenshots/routes.png)
 <figcaption>Routes: where traffic can exit</figcaption>
 </figure>
 </div>
 
 ## What it changes on your Mac
 
-- Host routes in the system routing table, one per resolved address of each domain or service pack you turned on. In Bypass mode they point at your local gateway, in VPN Only mode at the VPN interface, in Custom mode at whatever the matching rule says. The app removes its routes when you quit, when you press Clear, and when the VPN goes away.
+- Host routes in the system routing table, one per resolved address of each domain or service pack you turned on. In Bypass mode they point at your local gateway, in VPN Only mode at the VPN interface, in Custom mode at whatever the matching rule says. The app removes its routes when you quit, when you choose Remove All Routes…, and when the VPN goes away.
 - Entries in `/etc/hosts`, only if you turn on DNS bypass in Settings > General.
 - One small root helper, installed once with your admin password as a launchd daemon. It is the only part that runs as root, it does nothing but add and remove routes and hosts entries, and it accepts requests from this app alone (pinned to the app's code hash). There is no Network Extension and no kernel extension, so nothing to approve in System Settings beyond the Login Items entry on macOS 13 and later.
 - A config file and a log under `~/Library/Application Support/VPNBypass/`, plus a socket there that only your account can open, which is what `vpnb` and the [MCP server](mcp-server.md) talk to.
