@@ -77,6 +77,12 @@
   color: #ffffff;
 }
 
+/* White on the dark scheme's #38BDF8 is 2.0:1; dark text is well above 4.5:1. */
+[data-md-color-scheme="slate"] .md-typeset .md-button:not(.md-button--primary):focus,
+[data-md-color-scheme="slate"] .md-typeset .md-button:not(.md-button--primary):hover {
+  color: #0B1220;
+}
+
 .md-typeset .md-button--primary,
 .md-typeset .md-button--primary:focus,
 .md-typeset .md-button--primary:hover {

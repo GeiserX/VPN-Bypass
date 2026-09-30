@@ -108,7 +108,7 @@ flowchart LR
 
 - The app watches the network interfaces and running processes. A tunnel counts as a VPN when it is up and has an IPv4 address in a VPN range; Tailscale counts only when it is an exit node. See [Supported VPN types](how-it-works.md#supported-vpn-types).
 - When the VPN connects, disconnects, or the network changes, the routes are rebuilt. Domains are re-resolved on a schedule, so a route follows a CDN when its addresses rotate.
-- With several tunnels up, the app acts on one and leaves the others alone. See [Other VPNs and proxies](coexistence.md).
+- With several tunnels up, Bypass and VPN Only act on one and leave the others alone; in Custom mode a VPN route can name a specific tunnel. See [Other VPNs and proxies](coexistence.md).
 - Route verification, when on, pings the routed destinations and shows which ones answer.
 - A proxy route is a listener on `127.0.0.1` that forwards to the proxy you gave it; a Tailscale peer route sends traffic out through a device already in your tailnet. The app runs no VPN of its own.
 
@@ -121,7 +121,7 @@ flowchart LR
 
 ## Privacy
 
-- The app talks to no server of its own: no telemetry, no update check, no account. The only network activity it starts is resolving the domains you list and, when route verification is on, pinging the routed destinations.
+- The app talks to no server of its own: no telemetry, no update check, no account. The only network activity it starts is resolving the domains you list, forwarding traffic to a proxy you configured, and, when route verification is on, pinging the routed destinations.
 - Config, logs and proxy credentials stay in your account's Application Support folder. The Logs tab shows local events only.
 - Proxy credentials live in the config file, readable by your account alone, and the local listener asks for them, so another account on the same Mac cannot spend them. `vpnb` reads passwords from standard input, never from the command line.
 

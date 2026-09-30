@@ -5,8 +5,9 @@ client, a mesh VPN such as Tailscale, and one or more local proxies at the same 
 states exactly what VPN Bypass will and will not do in that situation, so you can predict its
 behaviour instead of discovering it.
 
-The short version: VPN Bypass acts on one tunnel, the corporate VPN, and leaves everything else
-alone.
+The short version: in Bypass and VPN Only modes, VPN Bypass acts on one tunnel, the corporate VPN,
+and leaves everything else alone. In Custom mode a VPN route can name a specific tunnel, so rules
+can send traffic through more than one.
 
 ---
 
