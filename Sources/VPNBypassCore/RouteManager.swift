@@ -81,6 +81,26 @@ final class RouteManager: ObservableObject {
         /// that could not be removed.
         let failedCount: Int
     }
+
+    /// The post-reconnect apply the settle gate is holding, for the dropdown's WAITING and
+    /// HELD BACK states. Nil when none is pending. Mirrors `reconnectSettleTask` and never
+    /// feeds back into routing.
+    @Published private(set) var pendingReconnectApply: PendingReconnectApply?
+
+    struct PendingReconnectApply: Equatable {
+        enum Reason: Equatable {
+            /// The normal settle wait (10 to 240 s, see `ReconnectSettle.delay`).
+            case settling
+            /// Withheld after this many apply-kill strikes, until they decay
+            /// (`ReconnectSettle.withheldDelay`).
+            case heldBack(strikes: Int)
+        }
+        let reason: Reason
+        /// When the VPN (re)connected, which is when the wait started.
+        let connectedAt: Date
+        /// When the settle task fires the apply, unless the VPN drops first.
+        let appliesAt: Date
+    }
     
     // MARK: - Private
     
@@ -113,7 +133,10 @@ final class RouteManager: ObservableObject {
     /// apply and counts a deferral, so a flap storm coalesces into ONE apply once things hold;
     /// after `ReconnectSettle.maxDeferrals` the delay shortens so we can never starve — unless
     /// apply-kill strikes are on the board (below), which override the collapse on purpose.
-    private var reconnectSettleTask: Task<Void, Never>?
+    private var reconnectSettleTask: Task<Void, Never>? {
+        // The dropdown's WAITING / HELD BACK state lives exactly as long as the task does.
+        didSet { if reconnectSettleTask == nil { pendingReconnectApply = nil } }
+    }
     private var reconnectDeferrals = 0
     /// Apply-kill backoff (the resonance breaker). `lastKernelBurstAt` is stamped by the two
     /// batch funnels every kernel write goes through; a VPN drop detected within
@@ -793,6 +816,7 @@ final class RouteManager: ObservableObject {
                                                                     lastStrikeAt: lastApplyKillAt,
                                                                     now: now)
                 let delay: TimeInterval
+                var reason = PendingReconnectApply.Reason.settling
                 if let withheld = ReconnectSettle.withheldDelay(killStrikes: applyKillStrikes,
                                                                 lastStrikeAt: lastApplyKillAt,
                                                                 now: now) {
@@ -801,6 +825,7 @@ final class RouteManager: ObservableObject {
                     // one. The task below sleeps exactly that long; a drop meanwhile cancels it
                     // and the next connect recomputes from the same, unmoved expiry.
                     delay = withheld
+                    reason = .heldBack(strikes: applyKillStrikes)
                     log(.warning, "VPN connected via \(vpnLabel) — post-reconnect apply withheld: \(applyKillStrikes) suspected apply-kills; applying once the tunnel has held for \(Int(withheld / 60)) more min")
                 } else {
                     delay = ReconnectSettle.delay(deferrals: reconnectDeferrals,
@@ -818,6 +843,8 @@ final class RouteManager: ObservableObject {
                     guard !Task.isCancelled, let self else { return }
                     await self.runSettledApply()
                 }
+                pendingReconnectApply = PendingReconnectApply(reason: reason, connectedAt: now,
+                                                              appliesAt: now.addingTimeInterval(delay))
             }
         }
         
