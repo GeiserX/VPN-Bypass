@@ -72,7 +72,7 @@ final class DropdownCopyTests: XCTestCase {
         let outcome = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now.addingTimeInterval(-3),
                                                       routeCount: 0, failedCount: 0)
         let line = DropdownCopy.routeChangeLine(outcome, now: now)
-        XCTAssertEqual(line.text, "All routes removed just now. Refresh Routes puts them back.")
+        XCTAssertEqual(line.text, "All routes removed just now.")
         XCTAssertTrue(line.isProblem)
     }
 
