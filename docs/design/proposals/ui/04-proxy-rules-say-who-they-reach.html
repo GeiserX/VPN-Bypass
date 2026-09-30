@@ -1,0 +1,60 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  .panel { width:532px; background: var(--card); border:1px solid var(--cardBorder); border-radius:12px; padding:10px 16px; }
+  .rrow { display:flex; align-items:center; gap:10px; padding:6px 0; }
+  .grip { color: var(--text3); font-size:12px; }
+  .pat { font-size:13px; font-weight:500; }
+  .tag { font: 700 9px system-ui; padding:1px 5px; border-radius:4px; }
+  .tag.d { color: var(--warning); background: rgba(245,158,11,.15); }
+  .tag.s { color: #A78BFA; background: rgba(139,92,246,.15); }
+  .chip { font-size:11px; font-weight:600; color:#fff; display:inline-flex; gap:4px; align-items:center; }
+  .trash { width:26px; height:26px; border-radius:6px; background: rgba(239,68,68,.1); display:flex; align-items:center; justify-content:center; }
+  .edit { width:26px; height:26px; border-radius:6px; background: rgba(255,255,255,.08); display:flex; align-items:center; justify-content:center; }
+  .explain { margin: -2px 0 6px 72px; font-size:11px; color: var(--text2); line-height:1.4; }
+  .explain b { color:#E5E7EB; font-weight:500; }
+  .kv { font-size:11px; color: var(--text2); display:flex; gap:14px; margin-top:4px; }
+  .kv .mono { color: var(--text2); }
+  .kv .live { color: var(--success); }
+  .cbtn { font-size:11px; font-weight:500; color: var(--blue); background: rgba(59,130,246,.15); padding:4px 8px; border-radius:6px; }
+  .fix { font-size:11px; color: var(--text2); margin-top:6px; }
+  .fix s { color: var(--error); }
+  .fix .good { color: var(--success); }
+</style></head>
+<body>
+<div class="head"><span class="num">4</span><span class="title">Proxy rules say which apps they reach, and the port reads right</span></div>
+<p class="caption">In Custom mode a rule that points at a proxy route only affects apps set to use that proxy. The screen draws it the same way as a Direct or VPN rule, which applies to every app; the difference hides in an info icon that only speaks on hover. On the Routes tab the local address prints as 127.0.0.1:18.168 (as in the docs screenshot) because the port goes through locale number formatting (RoutesTab.swift:368). Typed into a browser's proxy settings, that address does not work.</p>
+<div class="rows">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="shot" style="width:532px;height:52px;background-image:url(../../../images/screenshots/rules.png);background-position:-24px -346px;"></div>
+    <div class="shot" style="width:532px;height:108px;background-image:url(../../../images/screenshots/routes.png);background-position:-24px -481px;"></div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; proposal</div>
+    <div class="panel">
+      <div class="rrow">
+        <span class="grip">&#8801;</span><span class="nswitch on"></span>
+        <span class="pat">en.wikipedia.org</span><span class="tag d">DOMAIN</span><span style="color:var(--text3)">&rarr;</span>
+        <span class="spacer"></span>
+        <span class="chip"><span style="color:var(--text3)">&#8964;</span> office-proxy</span>
+        <span class="trash"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#EF4444" stroke-width="1.5"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4"/></svg></span>
+      </div>
+      <div class="explain">Only apps set to use <b>office-proxy</b> (127.0.0.1:18168) go this way. Other apps are not affected by this rule.</div>
+    </div>
+    <div class="panel" style="margin-top:10px;padding:12px 16px">
+      <div class="row" style="gap:10px;align-items:flex-start">
+        <span class="nswitch on" style="margin-top:2px"></span>
+        <div style="flex:1">
+          <div class="row"><span class="pat" style="font-weight:600">office-proxy</span><span class="tag s">SOCKS5</span></div>
+          <div class="kv"><span>Upstream <span class="mono">127.0.0.1:1080</span></span><span>Listening on <span class="mono live">127.0.0.1:18168</span></span></div>
+          <div class="row" style="margin-top:8px;gap:6px"><span class="cbtn">Copy Address</span><span class="cbtn">Copy Shell Exports</span></div>
+        </div>
+        <span class="edit"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#9CA3AF" stroke-width="1.5"><path d="M10.5 2.5l3 3L6 13H3v-3z"/></svg></span>
+        <span class="trash"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#EF4444" stroke-width="1.5"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4"/></svg></span>
+      </div>
+    </div>
+    <div class="fix">Port: <s class="mono">127.0.0.1:18.168</s> &rarr; <span class="mono good">127.0.0.1:18168</span>. The fix is <span class="mono">Text(verbatim:)</span>. "Copy" becomes two buttons that say what they copy.</div>
+  </div>
+</div>
+</body></html>

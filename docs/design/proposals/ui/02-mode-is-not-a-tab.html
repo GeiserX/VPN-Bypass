@@ -1,0 +1,71 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  .titlebar { text-align:center; font: 800 13px "SFRounded", system-ui; margin-top:-13px; }
+  .titlebar .b { font-weight:300; margin-left:2px; color: var(--sky); }
+  .toolbar { display:flex; justify-content:center; gap:4px; padding: 14px 16px 10px; border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(15,15,20,.8); }
+  .tb { width:74px; padding:6px 0 5px; border-radius:7px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11px; color: var(--text2); }
+  .tb svg { width:20px; height:20px; }
+  .tb.sel { background: rgba(255,255,255,.10); color:#fff; }
+  .tb.sel svg { color: var(--sky); }
+  .content { padding: 18px 24px 22px; }
+  .modecard { background: var(--card); border:1px solid var(--cardBorder); border-radius:12px; padding:12px 14px; }
+  .modecard .k { font: 700 10px "SFRounded", system-ui; letter-spacing:1px; color: var(--text2); }
+  .modecard .m { font: 700 15px "SFRounded", system-ui; }
+  .modecard .d { font-size:12px; color: var(--text2); margin-top:2px; }
+  .h2 { font: 700 18px "SFRounded", system-ui; margin: 18px 0 4px; display:flex; gap:8px; align-items:center; }
+  .sheet { width: 330px; background:#232326; border:0.5px solid rgba(255,255,255,.18); border-radius:12px; padding:18px; box-shadow: 0 16px 40px rgba(0,0,0,.6); }
+  .sheet h3 { margin:0 0 12px; font-size:13px; font-weight:700; }
+  .opt { display:flex; gap:9px; padding:8px 0; border-top: 1px solid rgba(255,255,255,.07); }
+  .opt:first-of-type { border-top:0; }
+  .radio { width:14px; height:14px; border-radius:50%; background: rgba(255,255,255,.12); border:0.5px solid rgba(255,255,255,.3); flex:none; margin-top:1px; }
+  .radio.on { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 0 0 4px var(--accent), inset 0 0 0 7px #fff; }
+  .opt .t { font-size:13px; font-weight:600; }
+  .opt .x { font-size:11px; color: var(--text2); margin-top:2px; line-height:1.35; }
+  .btns { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+</style></head>
+<body>
+<div class="head"><span class="num">2</span><span class="title">The routing mode stops looking like a tab</span></div>
+<p class="caption">The Settings window has two rows of identical green pills. The top row changes how all traffic is routed; the row under it only switches pages. Clicking VPN Only to look at that list asks to switch the mode for the whole Mac, and there is no way to view or edit the other mode's list without switching. The proposal moves navigation into a native toolbar and shows the mode as a setting with a Change&hellip; button that explains each choice before switching.</p>
+<div class="rows">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="shot" style="width:580px;height:186px;background-image:url(../../../images/screenshots/domains.png);background-position:0 0;"></div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; proposal</div>
+    <div class="cols" style="gap:24px">
+      <div class="win">
+        <div class="tl"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#3A3A3C"></i></div>
+        <div class="titlebar">VPN <span class="b">Bypass</span></div>
+        <div class="toolbar">
+          <div class="tb sel"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><ellipse cx="10" cy="10" rx="3.3" ry="7.5"/><path d="M2.8 7.5h14.4M2.8 12.5h14.4"/></svg>Domains</div>
+          <div class="tb"><svg viewBox="0 0 20 20" fill="currentColor"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.5"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1.5"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1.5"/><rect x="11" y="11" width="6.5" height="6.5" rx="1.5"/></svg>Services</div>
+          <div class="tb"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="2.75 2.75"/><circle cx="10" cy="10" r="5.8" fill="currentColor"/><circle cx="10" cy="10" r="2.3" fill="#141419"/></svg>General</div>
+          <div class="tb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8h8M6 11h8M6 14h5"/></svg>Logs</div>
+          <div class="tb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r=".6" fill="currentColor"/></svg>Info</div>
+        </div>
+        <div class="content">
+          <div class="modecard">
+            <div class="row"><span class="k">ROUTING MODE</span></div>
+            <div class="row" style="margin-top:4px"><span class="m">Bypass</span><span class="spacer"></span><span class="nbtn">Change&hellip;</span></div>
+            <div class="d">Everything goes through your VPN except the domains and services you list. Your VPN Only list (3 entries) is kept for when you switch.</div>
+          </div>
+          <div class="h2"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#10B981" stroke-width="1.7"><circle cx="10" cy="10" r="8"/><ellipse cx="10" cy="10" rx="3.5" ry="8"/><path d="M2.3 7.3h15.4M2.3 12.7h15.4"/></svg>Custom Domains</div>
+          <div style="font-size:13px;color:var(--text2)">Add domains that should bypass VPN and use your regular connection.</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="note" style="margin-bottom:2px">Change&hellip; opens this sheet. Switch applies only after a choice and a click, as the alert does today.</div>
+        <div class="sheet">
+          <h3>Routing mode</h3>
+          <div class="opt"><span class="radio on"></span><div><div class="t">Bypass</div><div class="x">Everything uses the VPN except what you list. 4 services and 2 domains.</div></div></div>
+          <div class="opt"><span class="radio"></span><div><div class="t">VPN Only</div><div class="x">Only what you list uses the VPN; everything else goes direct. 3 entries.</div></div></div>
+          <div class="opt"><span class="radio"></span><div><div class="t">Custom Routes</div><div class="x">Send each destination through a route you pick: direct, a VPN, a proxy or a Tailscale peer. Your lists become rules.</div></div></div>
+          <div class="btns"><span class="nbtn">Cancel</span><span class="nbtn default">Switch</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>

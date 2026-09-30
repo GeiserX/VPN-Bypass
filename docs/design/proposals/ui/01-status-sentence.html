@@ -1,0 +1,77 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  .hdr { display:flex; gap:10px; align-items:flex-start; margin-top:12px; }
+  .vicon { width:36px; height:36px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; }
+  .vicon.ok { background: rgba(16,185,129,.15); color: var(--success); }
+  .vicon.wait { background: rgba(245,158,11,.15); color: var(--warning); }
+  .facts { margin-top:8px; display:grid; grid-template-columns: auto 1fr; column-gap:10px; row-gap:2px; font-size:11px; }
+  .facts dt { color: var(--text3); }
+  .facts dd { margin:0; color: var(--text2); }
+  .who { font: 600 13px "SFRounded", system-ui; }
+  .who.ok { color: var(--success); }
+  .who.wait { color: var(--warning); }
+  .modeRow { margin-top:12px; }
+  .modeRow .k { font: 700 10px "SFRounded", system-ui; color: var(--text2); }
+  .state + .state { margin-top: 14px; }
+</style></head>
+<body>
+<div class="head"><span class="num">1</span><span class="title">One status sentence that says what the app is doing</span></div>
+<p class="caption">Today the top of the dropdown shows ON, VPN Connected and 62 routes, three signals that stay green while the app is deliberately waiting after a reconnect (up to 4 minutes, or longer when it withholds the apply). The waiting is only in the log. The proposal replaces the three signals with one sentence and a short fact list: mode, what is routed, when routes were applied, when DNS runs next.</p>
+<div class="cols">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="shot" style="width:340px;height:132px;background-image:url(../../../images/screenshots/menu-bar.png);background-position:0 0;"></div>
+    <div class="note">The pill, the title and the badge all read healthy. Nothing says whether routes were re-applied after the last drop, or when DNS is checked next.</div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; proposal</div>
+    <div class="state">
+      <div class="stateTag">Normal</div>
+      <div class="menu clip">
+        <div class="row"><span class="brand">VPN<span class="b">Bypass</span></span><span class="spacer"></span><span class="pill on"><i></i>ON</span></div>
+        <div class="hdr">
+          <div class="vicon ok"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="5.5" r="4"/><rect x="7.5" y="7.2" width="2.2" height="8" rx="1" transform="rotate(-45 8.6 11.2)"/><circle cx="5" cy="5" r="1.4" fill="#12261f"/></svg></div>
+          <div>
+            <div class="who ok">WireGuard connected</div>
+            <div class="statusline">4 services and 2 domains skip the VPN.</div>
+            <dl class="facts">
+              <dt>Mode</dt><dd>Bypass: everything else uses the VPN</dd>
+              <dt>Routes</dt><dd>62 applied 23 s ago, none failed</dd>
+              <dt>DNS</dt><dd>checked 12 min ago, next in 18 min</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="state">
+      <div class="stateTag">Right after a reconnect</div>
+      <div class="menu clip">
+        <div class="row"><span class="brand">VPN<span class="b">Bypass</span></span><span class="spacer"></span><span class="pill warn"><i></i>WAITING</span></div>
+        <div class="hdr">
+          <div class="vicon wait"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="5.5" r="4"/><rect x="7.5" y="7.2" width="2.2" height="8" rx="1" transform="rotate(-45 8.6 11.2)"/><circle cx="5" cy="5" r="1.4" fill="#2a1f0c"/></svg></div>
+          <div>
+            <div class="who wait">WireGuard reconnected 12 s ago</div>
+            <div class="statusline">Waiting for the tunnel to hold before re-applying routes, in 38 s.</div>
+            <div class="sub" style="margin-top:4px">The 62 routes from before the drop are still in place.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="state">
+      <div class="stateTag">Apply held back</div>
+      <div class="menu clip">
+        <div class="row"><span class="brand">VPN<span class="b">Bypass</span></span><span class="spacer"></span><span class="pill warn"><i></i>HELD BACK</span></div>
+        <div class="hdr">
+          <div class="vicon wait"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="5.5" r="4"/><rect x="7.5" y="7.2" width="2.2" height="8" rx="1" transform="rotate(-45 8.6 11.2)"/><circle cx="5" cy="5" r="1.4" fill="#2a1f0c"/></svg></div>
+          <div>
+            <div class="who wait">WireGuard keeps dropping</div>
+            <div class="statusline">It dropped 3 times right after routes were applied, so the app is not applying again until the tunnel has held for 6 more minutes.</div>
+            <div class="sub" style="margin-top:4px">Refresh Routes applies now anyway.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>

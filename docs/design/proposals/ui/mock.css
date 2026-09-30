@@ -1,0 +1,106 @@
+/* Shared styles for the UI/UX proposal mockups. Colours, sizes and weights come from
+   Sources/VPNBypassCore/Theme.swift, MenuBarViews.swift and SettingsView.swift so a
+   mockup reads as this app. Rendered to PNG at 2x with the Playwright CLI (see README). */
+@font-face { font-family: "SFRounded"; src: local("SF Pro Rounded"), url("file:///System/Library/Fonts/SFNSRounded.ttf"); font-weight: 100 900; }
+
+:root {
+  --text: #FFFFFF;
+  --text2: #9CA3AF;          /* Theme.textSecondary */
+  --text3: #6B7280;          /* Theme.textTertiary */
+  --success: #10B981;        /* Theme.success */
+  --successDark: #059669;
+  --error: #EF4444;
+  --warning: #F59E0B;
+  --blue: #3B82F6;
+  --sky: #38BDF8;            /* Theme.Brand.sky */
+  --purple: #8B5CF6;
+  --menuBg: #0F0F0F;         /* sampled from docs/images/screenshots/menu-bar.png */
+  --menuCard: #1A1A1A;       /* Color.secondary.opacity(0.08) on the menu */
+  --menuBtn: #1F1F1F;        /* Color.secondary.opacity(0.12) on the menu */
+  --winTop: #0F0F14;         /* Theme.bgPrimary */
+  --winBottom: #1A1B26;      /* Theme.bgSecondary */
+  --card: rgba(255,255,255,.05);
+  --cardBorder: rgba(255,255,255,.10);
+  --input: rgba(255,255,255,.08);
+  --accent: #0A84FF;         /* macOS system accent (native controls) */
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: #08080A;
+  color: var(--text);
+  font-family: -apple-system, system-ui, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding: 26px 28px 28px;
+  display: inline-block;
+}
+.rounded { font-family: "SFRounded", -apple-system, system-ui, sans-serif; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+/* Frame around each proposal */
+.head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.num { font: 800 15px "SFRounded", system-ui; color: #0F0F14; background: var(--sky); border-radius: 7px; padding: 2px 8px; }
+.title { font: 700 18px "SFRounded", system-ui; }
+.caption { font-size: 12.5px; color: var(--text2); margin: 0 0 18px; max-width: 760px; line-height: 1.45; }
+.cols { display: flex; gap: 28px; align-items: flex-start; }
+.rows { display: flex; flex-direction: column; gap: 18px; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.label { font: 700 10.5px "SFRounded", system-ui; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text3); }
+.label.after { color: var(--sky); }
+.note { font-size: 11px; color: var(--text3); max-width: 340px; line-height: 1.4; }
+
+/* A crop of a real screenshot: set width, height and background-position inline. */
+.shot { background-repeat: no-repeat; border-radius: 12px; border: 1px solid #2C2C2C; }
+
+/* Menu bar dropdown */
+.menu { width: 340px; background: var(--menuBg); border: 1px solid #2C2C2C; border-radius: 12px; padding: 16px; }
+.menu.clip { padding-bottom: 12px; }
+.row { display: flex; align-items: center; gap: 8px; }
+.spacer { flex: 1; }
+.brand { font: 800 15px "SFRounded", system-ui; }
+.brand .b { font-weight: 300; color: var(--sky); margin-left: 2px; }
+.pill { display: inline-flex; align-items: center; gap: 4px; font: 700 9px "SFRounded", system-ui; padding: 4px 8px; border-radius: 99px; }
+.pill i { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.pill.on { color: var(--success); background: rgba(16,185,129,.15); }
+.pill.on i { background: var(--success); box-shadow: 0 0 4px rgba(16,185,129,.7); }
+.pill.warn { color: var(--warning); background: rgba(245,158,11,.15); }
+.pill.warn i { background: var(--warning); }
+.pill.idle { color: var(--text2); background: rgba(156,163,175,.14); }
+.pill.idle i { background: transparent; border: 1.3px solid var(--text2); width: 7px; height: 7px; }
+.statusline { font-size: 12.5px; line-height: 1.4; }
+.sub { font-size: 11px; color: var(--text2); line-height: 1.4; }
+.tiny { font-size: 10px; color: var(--text3); }
+.card { background: var(--menuCard); border-radius: 8px; padding: 10px; }
+.btn { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; font-weight: 500; padding: 8px 10px; border-radius: 6px; background: var(--menuBtn); color: var(--text); }
+.btn.primary { background: linear-gradient(90deg, var(--success), var(--successDark)); color: #fff; }
+.divider { height: 1px; background: rgba(255,255,255,.10); margin: 10px 0; }
+.icon { width: 13px; height: 13px; display: inline-block; vertical-align: -2px; }
+.stateTag { font: 700 9.5px "SFRounded", system-ui; letter-spacing: 1px; color: var(--text3); text-transform: uppercase; margin: 0 0 6px 2px; }
+
+/* Native-looking macOS controls */
+.nseg { display: inline-flex; background: rgba(255,255,255,.10); border-radius: 6px; padding: 2px; gap: 2px; }
+.nseg span { font-size: 12px; padding: 3px 12px; border-radius: 5px; color: #E5E5E7; }
+.nseg span.sel { background: #636366; color: #fff; box-shadow: 0 1px 1px rgba(0,0,0,.3); }
+.nbtn { display: inline-block; font-size: 12px; padding: 3px 11px; border-radius: 5px; background: #4A4A4D; color: #fff; box-shadow: inset 0 0.5px 0 rgba(255,255,255,.25); }
+.nbtn.default { background: var(--accent); }
+.nmenu { background: rgba(38,38,40,.97); border: 0.5px solid rgba(255,255,255,.18); border-radius: 7px; padding: 5px; box-shadow: 0 10px 28px rgba(0,0,0,.55); font-size: 13px; }
+.nmenu div { padding: 3px 10px; border-radius: 4px; display: flex; gap: 20px; }
+.nmenu div.hl { background: var(--accent); }
+.nmenu div .k { margin-left: auto; color: rgba(255,255,255,.55); }
+.nmenu div.hl .k { color: rgba(255,255,255,.8); }
+.nmenu hr { border: 0; height: 1px; background: rgba(255,255,255,.12); margin: 4px 8px; }
+.ncheck { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.ncheck b { width: 14px; height: 14px; border-radius: 3.5px; background: rgba(255,255,255,.12); border: 0.5px solid rgba(255,255,255,.25); display: inline-flex; align-items: center; justify-content: center; font: 700 10px system-ui; color: #fff; }
+.ncheck b.on { background: var(--accent); border-color: var(--accent); }
+.nfield { background: rgba(255,255,255,.07); border: 0.5px solid rgba(255,255,255,.18); border-radius: 5px; font-size: 12.5px; padding: 4px 7px; color: #fff; }
+.nfield.err { border: 1px solid var(--error); box-shadow: 0 0 0 2.5px rgba(239,68,68,.25); }
+.nswitch { width: 26px; height: 15px; border-radius: 99px; background: rgba(255,255,255,.2); position: relative; display: inline-block; flex: none; }
+.nswitch::after { content: ""; position: absolute; top: 1.5px; left: 1.5px; width: 12px; height: 12px; border-radius: 50%; background: #fff; }
+.nswitch.on { background: var(--success); }
+.nswitch.on::after { left: 12.5px; }
+
+/* Settings window */
+.win { width: 580px; border-radius: 12px; border: 1px solid #2C2C2C; background: linear-gradient(var(--winTop), var(--winBottom)); overflow: hidden; }
+.tl { display: flex; gap: 8px; padding: 12px 14px 0; }
+.tl i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
