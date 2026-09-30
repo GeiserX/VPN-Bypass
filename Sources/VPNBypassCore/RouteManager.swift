@@ -102,10 +102,13 @@ final class RouteManager: ObservableObject {
     /// When the VPN last went from disconnected to connected. The periodic DNS refresh keeps
     /// clear of the `ReconnectSettle.refreshCalmWindow` that follows it.
     private var lastVPNConnectAt: Date?
-    /// When the config was last saved. An edit made while the VPN was down (a domain toggled
+    /// When the config was last saved while the VPN was down. Such an edit (a domain toggled
     /// off, a new one added) has not reached the kernel yet, so the next reconnect must run
-    /// the full apply even though the installed routes look fresh.
-    private var configChangedAt: Date?
+    /// the full apply even though the installed routes look fresh. A save made while the VPN
+    /// is up does not move it: that edit is applied by its own path, one entry at a time, and
+    /// forcing a full re-apply on the next reconnect as well would bring back the burst of
+    /// route writes the warm reconnect exists to avoid.
+    private(set) var configChangedAt: Date?
     /// One-shot retry armed when the periodic refresh was deferred (see performDNSRefresh).
     private var dnsRefreshRetryTask: Task<Void, Never>?
     /// First-seen timestamps for routes that dropped out of the desired set during an
@@ -347,7 +350,7 @@ final class RouteManager: ObservableObject {
             try FileManager.default.moveItem(at: tempURL, to: configURL)
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
-        configChangedAt = Date()
+        if !isVPNConnected { configChangedAt = Date() }
 
         log(.info, "Config saved")
     }
@@ -1791,6 +1794,17 @@ final class RouteManager: ObservableObject {
     /// and the fail-safe is unit-testable without driving the actor.
     nonisolated static func usesCustomEngine(schemaVersion: Int, routingMode: RoutingMode) -> Bool {
         schemaVersion >= 2 && routingMode == .custom
+    }
+
+    /// Whether the Bypass domain list and the services are what the kernel routes right now:
+    /// the same test the menu bar uses before it calls `addDomain`. The GUI only shows these
+    /// lists in that state, but the control socket can edit them in any mode, so the per-entry
+    /// kernel work in addDomain/toggleDomain/removeDomain/toggleService checks it. Without it,
+    /// a scripted edit in VPN Only or Custom mode would install a bypass route those modes do
+    /// not want, or delete a route of the same name that belongs to the other list.
+    var bypassListIsLive: Bool {
+        config.routingMode != .vpnOnly
+            && !Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
     }
 
     /// Apply all routes — acquires exclusive gate, skips if another operation is running.
@@ -3528,7 +3542,7 @@ final class RouteManager: ObservableObject {
         saveConfig()
         log(.success, "Added domain: \(cleaned)")
 
-        if isVPNConnected && acquireRouteOperation() {
+        if isVPNConnected && bypassListIsLive && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 let epoch = routeEpoch
@@ -3553,7 +3567,7 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    private func scheduleRetry(for domain: String) {
+    func scheduleRetry(for domain: String) {
         pendingRetryTasks[domain]?.cancel()
         pendingRetryTasks[domain] = Task { [weak self] in
             do {
@@ -3626,7 +3640,7 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    private func cancelAllRetries() {
+    func cancelAllRetries() {
         pendingRetryTasks.values.forEach { $0.cancel() }
         pendingRetryTasks.removeAll()
     }
@@ -3797,18 +3811,27 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    func removeDomain(_ domain: DomainEntry) {
-        pendingRetryTasks[domain.domain]?.cancel()
-        pendingRetryTasks.removeValue(forKey: domain.domain)
+    /// Returns the route-cleanup task when one was started, so the control socket can answer
+    /// only after the entry is gone from the config (the GUI ignores it).
+    @discardableResult
+    func removeDomain(_ domain: DomainEntry) -> Task<Void, Never>? {
+        // Outside the modes that route this list there is nothing of it in the kernel, and a
+        // route or a DNS retry with the same name belongs to a Custom rule or the other list;
+        // leave both alone.
+        let live = bypassListIsLive
+        if live {
+            pendingRetryTasks[domain.domain]?.cancel()
+            pendingRetryTasks.removeValue(forKey: domain.domain)
+        }
 
-        guard acquireRouteOperation() else {
+        guard live, acquireRouteOperation() else {
             // Config still updated even if routes can't be removed right now
             config.domains.removeAll { $0.id == domain.id }
             saveConfig()
             log(.info, "Removed domain: \(domain.domain) (route cleanup deferred)")
-            return
+            return nil
         }
-        Task {
+        return Task {
             defer { releaseRouteOperation() }
             await removeRoutesForSource(domain.domain)
             config.domains.removeAll { $0.id == domain.id }
@@ -3827,7 +3850,7 @@ final class RouteManager: ObservableObject {
         let domain = config.domains[index]
         log(.info, "\(domain.domain) \(domain.enabled ? "enabled" : "disabled")")
         
-        if isVPNConnected && acquireRouteOperation() {
+        if isVPNConnected && bypassListIsLive && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 let epoch = routeEpoch
@@ -4008,14 +4031,17 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    func removeInverseDomain(_ domain: DomainEntry) {
-        guard acquireRouteOperation() else {
+    /// Returns the route-cleanup task when one was started (see `removeDomain`).
+    @discardableResult
+    func removeInverseDomain(_ domain: DomainEntry) -> Task<Void, Never>? {
+        // Same guard as `removeDomain`: only VPN Only routes this list.
+        guard config.routingMode == .vpnOnly, acquireRouteOperation() else {
             config.inverseDomains.removeAll { $0.id == domain.id }
             saveConfig()
             log(.info, "Removed VPN Only \(domain.isCIDR ? "CIDR" : "domain"): \(domain.domain) (route cleanup deferred)")
-            return
+            return nil
         }
-        Task {
+        return Task {
             defer { releaseRouteOperation() }
             await removeRoutesForSource(domain.domain)
             config.inverseDomains.removeAll { $0.id == domain.id }
@@ -4205,7 +4231,7 @@ final class RouteManager: ObservableObject {
         log(.info, "\(service.name) \(service.enabled ? "enabled" : "disabled")")
         
         // Incremental route apply/remove
-        if isVPNConnected && acquireRouteOperation() {
+        if isVPNConnected && bypassListIsLive && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 if service.enabled {
@@ -4886,7 +4912,7 @@ final class RouteManager: ObservableObject {
     private static let rerouteRetryDelayNs: UInt64 = 2_000_000_000 // 2 seconds
     private static let rerouteRetryMaxAttempts = 15
 
-    private var pendingRetryTasks: [String: Task<Void, Never>] = [:]
+    private(set) var pendingRetryTasks: [String: Task<Void, Never>] = [:]
     /// Single in-flight retry chain draining a latched re-route (never more than one).
     private var rerouteRetryTask: Task<Void, Never>?
     /// Test-only override for the re-route apply body (nil in production). When set,

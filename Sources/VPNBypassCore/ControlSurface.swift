@@ -26,6 +26,13 @@ public enum ControlSurface {
     /// return the sanitized response. Never logs args or secrets — only the verb.
     @MainActor
     public static func handle(_ request: ControlRequest) async -> ControlResponse {
+        // The Bypass / VPN Only verbs act through RouteManager's own methods and never
+        // reach the save + reconcile below. A wrong envelope version falls through to
+        // CommandRouter, which answers unsupported_version for every verb.
+        if request.v == 1, let response = await ClassicControl.handle(request) {
+            return response
+        }
+
         let ports = ProxyListenerManager.shared.activePorts
         var (newConfig, response) = CommandRouter.apply(request, to: RouteManager.shared.config, listenerPorts: ports)
 
@@ -42,13 +49,22 @@ public enum ControlSurface {
                 vpnInterface: rm.vpnInterface,
                 vpnType: rm.vpnType?.rawValue,
                 enforcedRouteCount: rm.uniqueRouteCount,
-                enforcing: rm.isVPNConnected && helper.helperState.isReady && !rm.activeRoutes.isEmpty
+                enforcing: rm.isVPNConnected && helper.helperState.isReady && !rm.activeRoutes.isEmpty,
+                appVersion: appVersion(from: Bundle.main.infoDictionary)
             )
         }
 
         // Read verbs (and any errored verb) leave the config untouched — don't
         // write config.json or churn listeners for a `status`/`route.list`.
         guard response.ok, CommandRouter.isMutating(request.cmd) else { return response }
+
+        // `mode` with the mode already in use changes nothing, exactly like the GUI picker
+        // (RouteManager.setRoutingMode returns early). Without this the verb saved the config
+        // and re-applied every kernel route, a burst a script asking "make sure it is bypass"
+        // never meant to cause.
+        if request.cmd == "mode", newConfig.routingMode == RouteManager.shared.config.routingMode {
+            return response
+        }
 
         RouteManager.shared.config = newConfig
         RouteManager.shared.saveConfig()
@@ -66,5 +82,13 @@ public enum ControlSurface {
         await RouteManager.shared.reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: reapply)
 
         return response
+    }
+
+    /// The running app's CFBundleShortVersionString, or nil when the bundle has none
+    /// (a bare `swift run`, or a blank value).
+    nonisolated static func appVersion(from info: [String: Any]?) -> String? {
+        guard let v = info?["CFBundleShortVersionString"] as? String,
+              !v.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return v
     }
 }

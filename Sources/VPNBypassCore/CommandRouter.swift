@@ -93,6 +93,12 @@ public struct ControlResult: Codable, Equatable, Sendable {
     public var listenerPort: UInt16? = nil
     public var message: String? = nil
     public var runtime: RuntimeStatus? = nil
+    // Bypass / VPN Only verbs (ClassicControl, 4.9.0). Optional, so older payloads still
+    // decode and older clients ignore them.
+    public var domains: [ControlDomain]? = nil
+    public var services: [ControlService]? = nil
+    public var activeRoutes: [ControlActiveRoute]? = nil
+    public var logs: [ControlLogEntry]? = nil
 }
 
 /// Live enforcement facts for `status` — the answer to "is it actually working?", which the
@@ -107,10 +113,12 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
     public var enforcedRouteCount: Int
     /// The single honest headline: VPN up AND helper ready AND routes installed.
     public var enforcing: Bool
+    /// CFBundleShortVersionString of the running app; nil (omitted) when unknown.
+    public var appVersion: String? = nil
 
     public init(helperReady: Bool, helperState: String, vpnConnected: Bool,
                 vpnInterface: String? = nil, vpnType: String? = nil,
-                enforcedRouteCount: Int, enforcing: Bool) {
+                enforcedRouteCount: Int, enforcing: Bool, appVersion: String? = nil) {
         self.helperReady = helperReady
         self.helperState = helperState
         self.vpnConnected = vpnConnected
@@ -118,6 +126,7 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
         self.vpnType = vpnType
         self.enforcedRouteCount = enforcedRouteCount
         self.enforcing = enforcing
+        self.appVersion = appVersion
     }
 }
 
@@ -233,7 +242,8 @@ enum CommandRouter {
     /// on `response.ok` too).
     static func isMutating(_ cmd: String) -> Bool {
         switch cmd {
-        case "status", "route.list", "rule.list": return false
+        case "status", "route.list", "rule.list",
+             "domain.list", "service.list", "routes.active", "logs": return false
         default: return true
         }
     }
