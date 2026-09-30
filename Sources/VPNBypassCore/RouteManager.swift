@@ -3564,7 +3564,7 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    private func scheduleRetry(for domain: String) {
+    func scheduleRetry(for domain: String) {
         pendingRetryTasks[domain]?.cancel()
         pendingRetryTasks[domain] = Task { [weak self] in
             do {
@@ -3637,7 +3637,7 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    private func cancelAllRetries() {
+    func cancelAllRetries() {
         pendingRetryTasks.values.forEach { $0.cancel() }
         pendingRetryTasks.removeAll()
     }
@@ -3812,12 +3812,16 @@ final class RouteManager: ObservableObject {
     /// only after the entry is gone from the config (the GUI ignores it).
     @discardableResult
     func removeDomain(_ domain: DomainEntry) -> Task<Void, Never>? {
-        pendingRetryTasks[domain.domain]?.cancel()
-        pendingRetryTasks.removeValue(forKey: domain.domain)
-
         // Outside the modes that route this list there is nothing of it in the kernel, and a
-        // route with the same source name belongs to the other list; leave the kernel alone.
-        guard bypassListIsLive, acquireRouteOperation() else {
+        // route or a DNS retry with the same name belongs to a Custom rule or the other list;
+        // leave both alone.
+        let live = bypassListIsLive
+        if live {
+            pendingRetryTasks[domain.domain]?.cancel()
+            pendingRetryTasks.removeValue(forKey: domain.domain)
+        }
+
+        guard live, acquireRouteOperation() else {
             // Config still updated even if routes can't be removed right now
             config.domains.removeAll { $0.id == domain.id }
             saveConfig()
@@ -4905,7 +4909,7 @@ final class RouteManager: ObservableObject {
     private static let rerouteRetryDelayNs: UInt64 = 2_000_000_000 // 2 seconds
     private static let rerouteRetryMaxAttempts = 15
 
-    private var pendingRetryTasks: [String: Task<Void, Never>] = [:]
+    private(set) var pendingRetryTasks: [String: Task<Void, Never>] = [:]
     /// Single in-flight retry chain draining a latched re-route (never more than one).
     private var rerouteRetryTask: Task<Void, Never>?
     /// Test-only override for the re-route apply body (nil in production). When set,

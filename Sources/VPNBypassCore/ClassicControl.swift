@@ -103,6 +103,10 @@ enum ClassicControl {
     /// wait the method runs anyway, with that same config-only outcome.
     static var busyWait: TimeInterval = 30
 
+    /// Whether a route operation holds the gate. A seam so a test can hold it; the app
+    /// never changes it.
+    static var routeOperationRunning: @MainActor () -> Bool = { RouteManager.shared.isApplyingRoutes }
+
     /// Answers a request for one of `verbs`, or returns nil so the caller falls through
     /// to CommandRouter. The caller has already checked the envelope version.
     static func handle(_ request: ControlRequest) async -> ControlResponse? {
@@ -156,8 +160,6 @@ enum ClassicControl {
         }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        await waitForRouteIdle()
-
         // The same cleaning addDomain / addInverseDomain apply, done here first so a value
         // they would drop silently gets an answer instead.
         let cleaned: String
@@ -186,6 +188,10 @@ enum ClassicControl {
         guard !cleaned.isEmpty else {
             return fail("invalid_args", "domain is empty after cleaning")
         }
+
+        // Only what depends on the lists waits for a running route operation; a bad
+        // argument is answered at once.
+        await waitForRouteIdle()
         guard !entries(list, rm).contains(where: { $0.domain == cleaned }) else {
             return fail("already_exists", "\(cleaned) is already on the \(list.rawValue) list")
         }
@@ -203,9 +209,14 @@ enum ClassicControl {
 
     private static func domainRemove(_ args: [String: String]) async -> ControlResponse {
         let rm = RouteManager.shared
+        let target: DomainTarget
+        switch parseTarget(args, rm) {
+        case .failure(let e): return e.response
+        case .success(let t): target = t
+        }
         await waitForRouteIdle()
         let entry: DomainEntry, list: DomainList
-        switch findDomain(args, rm) {
+        switch findDomain(target, rm) {
         case .failure(let e): return e.response
         case .success(let found): (entry, list) = found
         }
@@ -222,9 +233,14 @@ enum ClassicControl {
 
     private static func domainSetEnabled(_ args: [String: String], enabled: Bool) async -> ControlResponse {
         let rm = RouteManager.shared
+        let target: DomainTarget
+        switch parseTarget(args, rm) {
+        case .failure(let e): return e.response
+        case .success(let t): target = t
+        }
         await waitForRouteIdle()
         let entry: DomainEntry, list: DomainList
-        switch findDomain(args, rm) {
+        switch findDomain(target, rm) {
         case .failure(let e): return e.response
         case .success(let found): (entry, list) = found
         }
@@ -368,10 +384,17 @@ enum ClassicControl {
         return .success(list)
     }
 
-    /// The target of domain.rm / domain.enable / domain.disable. With `list`, only that list
-    /// is searched. Without it, an id is searched in both (ids are unique), and a domain is
-    /// searched in both too, but a domain on both lists needs `list` to say which.
-    private static func findDomain(_ args: [String: String], _ rm: RouteManager) -> Result<(DomainEntry, DomainList), VerbError> {
+    /// The target of domain.rm / domain.enable / domain.disable, checked without looking at
+    /// the lists: `lists` to search and exactly one key.
+    private struct DomainTarget {
+        let lists: [DomainList]
+        /// nil when the id is malformed: it cannot name an entry, so it ends as not_found.
+        let id: UUID?
+        let domain: String?
+    }
+
+    /// With `list`, only that list is searched. Without it, both are (see `findDomain`).
+    private static func parseTarget(_ args: [String: String], _ rm: RouteManager) -> Result<DomainTarget, VerbError> {
         let lists: [DomainList]
         switch parseList(args) {
         case .failure(let e): return .failure(e)
@@ -381,26 +404,46 @@ enum ClassicControl {
         if id != nil && raw != nil {
             return .failure(VerbError(code: "invalid_args", message: "give id or domain, not both"))
         }
-        var matches: [(DomainEntry, DomainList)] = []
         if let id {
             // A malformed id cannot name an entry: not_found, as for the route verbs.
-            if let uuid = UUID(uuidString: id) {
-                for list in lists {
-                    if let e = entries(list, rm).first(where: { $0.id == uuid }) { matches.append((e, list)) }
-                }
-            }
-        } else if let raw {
-            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Stored values are cleaned (lowercase, no scheme or port); a CIDR is stored as typed.
-            let key = rm.isValidCIDR(trimmed) ? trimmed : rm.cleanDomain(trimmed)
-            guard !key.isEmpty else {
-                return .failure(VerbError(code: "invalid_args", message: "domain is empty after cleaning"))
-            }
-            for list in lists {
-                if let e = entries(list, rm).first(where: { $0.domain == key }) { matches.append((e, list)) }
-            }
-        } else {
+            return .success(DomainTarget(lists: lists, id: UUID(uuidString: id), domain: nil))
+        }
+        guard let raw else {
             return .failure(VerbError(code: "invalid_args", message: "id or domain is required"))
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Stored values are cleaned (lowercase, no scheme or port); a CIDR is stored as typed.
+        // A "/" outside a URL is a CIDR attempt: cleanDomain would cut "10.0.0.0/33" down to
+        // "10.0.0.0" and hit a different entry than the one named, so refuse it, as domain.add does.
+        let key: String
+        if rm.isValidCIDR(trimmed) {
+            key = trimmed
+        } else if trimmed.contains("/") && !trimmed.contains("://") {
+            return .failure(VerbError(code: "invalid_args",
+                                      message: "malformed CIDR (expected a.b.c.d/n with n from 2 to 32)"))
+        } else {
+            key = rm.cleanDomain(trimmed)
+        }
+        guard !key.isEmpty else {
+            return .failure(VerbError(code: "invalid_args", message: "domain is empty after cleaning"))
+        }
+        return .success(DomainTarget(lists: lists, id: nil, domain: key))
+    }
+
+    /// An id is searched in every list of the target (ids are unique). A domain is too, but a
+    /// domain on both lists needs `list` to say which.
+    private static func findDomain(_ target: DomainTarget, _ rm: RouteManager) -> Result<(DomainEntry, DomainList), VerbError> {
+        var matches: [(DomainEntry, DomainList)] = []
+        for list in target.lists {
+            let found: DomainEntry?
+            if let key = target.domain {
+                found = entries(list, rm).first(where: { $0.domain == key })
+            } else if let uuid = target.id {
+                found = entries(list, rm).first(where: { $0.id == uuid })
+            } else {
+                found = nil
+            }
+            if let found { matches.append((found, list)) }
         }
         switch matches.count {
         case 0:
@@ -422,9 +465,8 @@ enum ClassicControl {
     }
 
     private static func waitForRouteIdle() async {
-        let rm = RouteManager.shared
         let deadline = Date().addingTimeInterval(busyWait)
-        while rm.isApplyingRoutes && Date() < deadline {
+        while routeOperationRunning() && Date() < deadline {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }

@@ -15,12 +15,15 @@ final class ClassicControlTests: XCTestCase {
     private var savedConfig: RouteManager.Config!
     private var savedActiveRoutes: [RouteManager.ActiveRoute] = []
     private var savedLogs: [RouteManager.LogEntry] = []
+    private var savedVPNConnected = false
 
     override func setUp() async throws {
         let rm = RouteManager.shared
         savedConfig = rm.config
         savedActiveRoutes = rm.activeRoutes
         savedLogs = rm.recentLogs
+        savedVPNConnected = rm.isVPNConnected
+        rm.isVPNConnected = false
 
         var cfg = RouteManager.Config()
         cfg.routingMode = .bypass
@@ -42,6 +45,10 @@ final class ClassicControlTests: XCTestCase {
         rm.config = savedConfig
         rm.activeRoutes = savedActiveRoutes
         rm.recentLogs = savedLogs
+        rm.isVPNConnected = savedVPNConnected
+        rm.cancelAllRetries()
+        ClassicControl.busyWait = 30
+        ClassicControl.routeOperationRunning = { RouteManager.shared.isApplyingRoutes }
     }
 
     private func send(_ cmd: String, _ args: [String: String]? = nil) async -> ControlResponse {
@@ -292,6 +299,107 @@ final class ClassicControlTests: XCTestCase {
                        "the Bypass entry's route must not be touched: \(rm.recentLogs.map(\.message))")
     }
 
+    /// With a VPN connected, addDomain / toggleDomain / toggleService take the route gate
+    /// synchronously when they go on to install routes. In VPN Only and in Custom (schema 2)
+    /// the Bypass list and the services are not routed, so a scripted edit must leave the
+    /// gate alone: no bypass route is installed.
+    func testScriptedEditsInstallNoBypassRouteWhereTheListIsNotLive() async {
+        ClassicControl.busyWait = 0.5   // a broken guard holds the gate; do not wait 30 s on it
+        rm.isVPNConnected = true
+        for (schema, mode) in [(1, RoutingMode.vpnOnly), (2, .custom)] {
+            rm.config.schemaVersion = schema
+            rm.config.routingMode = mode
+            rm.config.domains = [DomainEntry(domain: "off.example.com", enabled: false)]
+            rm.config.services[1].enabled = false
+            XCTAssertFalse(rm.bypassListIsLive, "precondition for \(mode)")
+            XCTAssertFalse(rm.isApplyingRoutes, "precondition for \(mode)")
+
+            let add = await send("domain.add", ["domain": "new.example.com"])
+            XCTAssertTrue(add.ok)
+            XCTAssertFalse(rm.isApplyingRoutes, "domain.add in \(mode) must not start a bypass route apply")
+
+            let enable = await send("domain.enable", ["domain": "off.example.com", "list": "bypass"])
+            XCTAssertTrue(enable.ok)
+            XCTAssertFalse(rm.isApplyingRoutes, "domain.enable in \(mode) must not start a bypass route apply")
+
+            let service = await send("service.enable", ["id": "custom_b"])
+            XCTAssertTrue(service.ok)
+            XCTAssertFalse(rm.isApplyingRoutes, "service.enable in \(mode) must not start a bypass route apply")
+        }
+    }
+
+    /// In Custom mode a DNS retry is keyed by a rule's host, which is often the same name as
+    /// a Bypass entry. Removing that (unrouted) Bypass entry must keep the rule's retry.
+    func testRemovingABypassEntryKeepsTheRetryWhenTheListIsNotLive() async {
+        rm.config.schemaVersion = 2
+        rm.config.routingMode = .custom
+        rm.config.domains = [DomainEntry(domain: "example.com")]
+        rm.scheduleRetry(for: "example.com")
+
+        let resp = await send("domain.rm", ["domain": "example.com", "list": "bypass"])
+        XCTAssertTrue(resp.ok)
+        XCTAssertNotNil(rm.pendingRetryTasks["example.com"], "the Custom rule's retry must survive")
+
+        // Mirror: where the Bypass list is live the retry is that entry's own, so it goes.
+        rm.config.routingMode = .bypass
+        rm.config.domains = [DomainEntry(domain: "example.com")]
+        let live = await send("domain.rm", ["domain": "example.com"])
+        XCTAssertTrue(live.ok)
+        XCTAssertNil(rm.pendingRetryTasks["example.com"])
+    }
+
+    /// Argument errors do not depend on the lists, so they answer at once even while a route
+    /// operation runs; only a valid request waits for it.
+    func testBadArgumentsDoNotWaitForARunningRouteOperation() async {
+        rm.config.domains = [DomainEntry(domain: "example.com")]
+        ClassicControl.busyWait = 2
+        ClassicControl.routeOperationRunning = { true }
+
+        let bad: [(String, [String: String])] = [
+            ("domain.rm", ["domain": "example.com", "list": "bogus"]),
+            ("domain.rm", ["id": UUID().uuidString, "domain": "example.com"]),
+            ("domain.enable", [:]),
+            ("domain.disable", ["domain": "10.0.0.0/33"]),
+            ("domain.add", ["domain": "10.0.0.0/8"]),
+            ("domain.add", ["domain": "   "]),
+            ("domain.add", ["domain": "10.0.0.0/1", "list": "vpnOnly"]),
+        ]
+        for (cmd, args) in bad {
+            let start = Date()
+            let resp = await send(cmd, args)
+            XCTAssertEqual(resp.error?.code, "invalid_args", "\(cmd) \(args)")
+            XCTAssertLessThan(Date().timeIntervalSince(start), 1, "\(cmd) \(args) waited for the route operation")
+        }
+
+        // Positive control: a valid request does wait.
+        let start = Date()
+        let good = await send("domain.disable", ["domain": "example.com"])
+        XCTAssertTrue(good.ok)
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 1.5)
+    }
+
+    /// cleanDomain cuts at the first "/", so "10.0.0.0/33" would look up the plain entry
+    /// "10.0.0.0". A value with "/" that is neither a URL nor a valid CIDR is refused.
+    func testDomainLookupRefusesAMalformedCIDR() async {
+        let plain = DomainEntry(domain: "10.0.0.0")
+        rm.config.domains = [plain]
+        for value in ["10.0.0.0/33", "10.0.0.0/1", "10.0.0.0/0", "10.0.0.0/x"] {
+            let rmResp = await send("domain.rm", ["domain": value])
+            XCTAssertEqual(rmResp.error?.code, "invalid_args", value)
+            let disable = await send("domain.disable", ["domain": value])
+            XCTAssertEqual(disable.error?.code, "invalid_args", value)
+        }
+        XCTAssertEqual(rm.config.domains, [plain], "the entry nobody named is untouched")
+
+        // A valid CIDR and a URL still resolve.
+        rm.config.inverseDomains = [DomainEntry(domain: "10.0.0.0/8", isCIDR: true)]
+        let cidr = await send("domain.rm", ["domain": "10.0.0.0/8"])
+        XCTAssertTrue(cidr.ok, "\(String(describing: cidr.error))")
+        let url = await send("domain.rm", ["domain": "https://10.0.0.0/path"])
+        XCTAssertTrue(url.ok, "\(String(describing: url.error))")
+        XCTAssertTrue(rm.config.domains.isEmpty)
+    }
+
     func testBypassListIsLiveOnlyWhereTheGUIShowsIt() {
         rm.config.schemaVersion = 2
         rm.config.routingMode = .bypass
@@ -428,10 +536,21 @@ final class ClassicControlTests: XCTestCase {
         XCTAssertEqual(resp.error?.code, "helper_not_ready")
     }
 
+    /// The answer is a constant, so check the refresh really ran: with no VPN it logs that
+    /// it skipped. Waiting for that line also drains the started task inside this test.
     func testDNSRefreshStarts() async {
+        rm.recentLogs = []
         let resp = await send("dns.refresh")
         XCTAssertTrue(resp.ok)
         XCTAssertEqual(resp.result?.message, "DNS refresh started")
+
+        let deadline = Date().addingTimeInterval(5)
+        while !rm.recentLogs.contains(where: { $0.message == "DNS refresh skipped: VPN not connected" }),
+              Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(rm.recentLogs.contains { $0.message == "DNS refresh skipped: VPN not connected" },
+                      "dns.refresh must start the refresh: \(rm.recentLogs.map(\.message))")
     }
 
     // MARK: - logs
