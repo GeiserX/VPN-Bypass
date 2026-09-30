@@ -1,16 +1,16 @@
-/* docs/stylesheets/theme.css: the site takes its two colours from the banner.
+/* Match the docs to the banner and the app icon.
  *
- * mkdocs.yml sets `primary: custom` and `accent: custom`, which means Material
- * paints nothing until these variables exist. Replace the two hex values with
- * the banner's background and accent, then check the light-scheme link colour
- * against white: anything under 4.5:1 contrast is too faint for body links.
+ * banner.svg paints a navy gradient from #152A4E to #0B1220, sets "VPN" in
+ * weight 800 white and "Bypass" in weight 200 sky #38BDF8, and the tagline in
+ * #B6C2D4. The app icon is the same navy plate with the Lanes mark. These
+ * values keep the header, the logo and the page in one palette.
  */
 :root {
   --md-primary-fg-color:        #0B1220;  /* banner background */
-  --md-primary-fg-color--light: #152A4E;
+  --md-primary-fg-color--light: #152A4E;  /* banner gradient start */
   --md-primary-fg-color--dark:  #060A12;
   --md-primary-bg-color:        #F2F6FA;  /* text on the header */
-  --md-primary-bg-color--light: #B6C2D4;
+  --md-primary-bg-color--light: #B6C2D4;  /* banner tagline */
 
   --md-accent-fg-color:         #38BDF8;  /* banner accent */
   --md-accent-fg-color--transparent: #38BDF81a;
@@ -24,15 +24,171 @@
   --md-typeset-a-color:         #38BDF8;
 }
 
-/* Light scheme: the accent on white is usually too faint for body links. Use
-   the same hue, darkened until it passes 4.5:1. */
+/* Light scheme: #38BDF8 on white is 2.0:1, too faint for body links.
+   #0369A1 is the same hue at 5.9:1. */
 [data-md-color-scheme="default"] {
   --md-typeset-a-color:         #0369A1;
 }
 
-/* Fixed logo size so it does not crowd the site name. */
+/* Fixed logo size so the mark does not crowd the site name. */
 .md-header__button.md-logo img,
 .md-header__button.md-logo svg {
   height: 1.6rem;
   width: 1.6rem;
+}
+
+/* The site name, set the way banner.svg sets "VPN": heavy, tight, white.
+ *
+ * Only the first topic is styled. Material puts the site name in one
+ * .md-header__topic and the page title in a second one, and swaps them on
+ * scroll. Styling both would change every page title too. The banner's
+ * two-tone wordmark (light sky "Bypass") would need a template override;
+ * one tone is enough in the header. */
+.md-header__topic:first-child .md-ellipsis {
+  color: #F2F6FA;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/* Keep the mark and the name close, so they read as one unit. */
+.md-header__button.md-logo {
+  padding-right: 0.2rem;
+}
+
+.md-header__title {
+  margin-left: 0.2rem;
+}
+
+/* Buttons.
+ *
+ * Material paints .md-button in --md-primary-fg-color, the header colour. On
+ * the dark page that is also the page background, so a button would show as
+ * plain text. Outline buttons take the link colour instead. */
+.md-typeset .md-button {
+  color: var(--md-typeset-a-color);
+  border-color: var(--md-typeset-a-color);
+  border-radius: 0.5rem;
+}
+
+.md-typeset .md-button:focus,
+.md-typeset .md-button:hover {
+  background-color: var(--md-typeset-a-color);
+  border-color: var(--md-typeset-a-color);
+  color: #ffffff;
+}
+
+/* White on the dark scheme's #38BDF8 is 2.0:1; dark text is well above 4.5:1. */
+[data-md-color-scheme="slate"] .md-typeset .md-button:not(.md-button--primary):focus,
+[data-md-color-scheme="slate"] .md-typeset .md-button:not(.md-button--primary):hover {
+  color: #0B1220;
+}
+
+.md-typeset .md-button--primary,
+.md-typeset .md-button--primary:focus,
+.md-typeset .md-button--primary:hover {
+  /* White on #38BDF8 is 2.0:1. #0369A1 -> #075985 keeps every point above 4.5:1. */
+  background: linear-gradient(90deg, #0369A1 0%, #075985 100%);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.md-typeset .md-button--primary:focus,
+.md-typeset .md-button--primary:hover {
+  box-shadow: 0 0.2rem 0.8rem #38BDF859;
+}
+
+/* Grid cards: the border picks up the accent on hover, so the cards match
+   the buttons and links. */
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid > .card {
+  border-radius: 0.5rem;
+}
+
+.md-typeset .grid.cards > ul > li:focus-within,
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid > .card:focus-within,
+.md-typeset .grid > .card:hover {
+  border-color: #38BDF8;
+}
+
+/* FAQ entries (??? question). Material draws them lime green, a colour that
+   appears nowhere else here; use the accent instead. */
+.md-typeset .admonition.question,
+.md-typeset details.question {
+  border-color: #38BDF8;
+}
+
+.md-typeset .admonition.question:focus-within,
+.md-typeset details.question:focus-within {
+  box-shadow: 0 0 0 0.2rem #38BDF81a;
+}
+
+.md-typeset .question > .admonition-title::after,
+.md-typeset .question > summary::after {
+  color: #38BDF8;
+}
+
+.md-typeset .question > .admonition-title,
+.md-typeset .question > summary {
+  background-color: #38BDF81a;
+}
+
+.md-typeset .question > .admonition-title::before,
+.md-typeset .question > summary::before {
+  background-color: #38BDF8;
+}
+
+/* The home page keeps an H1 for search, screen readers and the browser tab.
+   The banner under it already shows the name, so the H1 is hidden visually.
+   Use it as: # VPN Bypass { .vb-visually-hidden } */
+.md-typeset h1.vb-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Setting names in tables, such as VPNB_SOCKET, must not wrap mid-word.
+   Material sets word-break: break-word on code; normal keeps a name whole. */
+.md-typeset table:not([class]) code {
+  word-break: normal;
+}
+
+/* Screenshot galleries on the home page. The default is three dropdown shots
+   in a row (they are tall and narrow, like phone shots); --2 is two Settings
+   windows side by side. One column on a narrow screen. */
+.md-typeset .vb-gallery {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.8rem;
+  margin: 1em 0;
+}
+
+.md-typeset .vb-gallery--2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.md-typeset .vb-gallery figure {
+  margin: 0;
+}
+
+.md-typeset .vb-gallery img {
+  border-radius: 0.4rem;
+}
+
+.md-typeset .vb-gallery figcaption {
+  margin-top: 0.3rem;
+  font-size: 0.7rem;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .vb-gallery,
+  .md-typeset .vb-gallery--2 {
+    grid-template-columns: 1fr;
+  }
 }

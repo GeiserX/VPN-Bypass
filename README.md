@@ -5,34 +5,32 @@
 <h1 align="center">VPN Bypass</h1>
 
 <p align="center">
-  A macOS menu bar app that controls what goes through your VPN. Route specific domains and services
-  <em>around</em> the VPN, force only some <em>through</em> it, or, in Custom mode, send each domain,
-  service or subnet out a route you choose: direct, a specific VPN, an HTTP/SOCKS5 proxy, or a Tailscale peer.
+  A macOS menu bar app that decides which traffic goes through your VPN. Pick the services and domains that should skip it, or the few that must use it, and it keeps the routes right as the VPN reconnects and addresses change.
 </p>
 
 <p align="center">
-  <a href="https://github.com/GeiserX/VPN-Bypass/releases"><img src="https://img.shields.io/github/v/release/GeiserX/VPN-Bypass?style=flat-square&color=green" alt="Version"></a>
+  <a href="https://github.com/GeiserX/VPN-Bypass/releases"><img src="https://img.shields.io/github/v/release/GeiserX/VPN-Bypass?style=flat-square" alt="Release"></a>
   <a href="https://github.com/GeiserX/VPN-Bypass/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/GeiserX/VPN-Bypass/ci.yml?style=flat-square&logo=github&label=CI" alt="CI"></a>
-  <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square&logo=apple&logoColor=white" alt="macOS 13+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/GeiserX/VPN-Bypass?style=flat-square" alt="License"></a>
+  <a href="https://github.com/GeiserX/VPN-Bypass/releases"><img src="https://img.shields.io/github/downloads/GeiserX/VPN-Bypass/total?style=flat-square&logo=apple&logoColor=white" alt="Downloads"></a>
   <a href="https://github.com/GeiserX/VPN-Bypass/stargazers"><img src="https://img.shields.io/github/stars/GeiserX/VPN-Bypass?style=flat-square&logo=github" alt="Stars"></a>
-  <a href="https://github.com/GeiserX/VPN-Bypass/blob/main/LICENSE"><img src="https://img.shields.io/github/license/GeiserX/VPN-Bypass?style=flat-square" alt="License"></a>
 </p>
 
-Corporate VPNs often send all traffic through the tunnel, so streaming slows down, AirPlay and Chromecast break, and personal traffic crosses corporate infrastructure. VPN Bypass routes the services you pick straight to the internet and keeps business traffic on the VPN.
+Corporate VPN clients send everything through the tunnel, so streaming stalls, AirPlay and Chromecast break, and personal traffic crosses the company network. Most clients lock their own split tunnelling, and a route added by hand is gone at the next reconnect or when a CDN moves. VPN Bypass adds the routes for you from a menu bar dropdown and puts them back every time the VPN or the network changes.
 
-<p align="center"><img src="docs/images/screenshots/menu-bar.png" alt="VPN Bypass menu bar dropdown" width="300"></p>
+<p align="center"><img src="docs/images/screenshots/menu-bar.png" alt="The VPN Bypass dropdown in Bypass mode: VPN Connected, ON, four services and two domains routed around the VPN" width="340"></p>
 
 ## Features
 
-- Menu bar app with status, mode and controls.
-- Three routing modes: **Bypass** (default), **VPN Only**, and **Custom** per-rule routing where the first match wins.
-- Custom domains plus built-in service packs (Telegram, YouTube, WhatsApp, Spotify, Tailscale and more).
-- Egress through the local gateway, a specific VPN interface (multi-VPN), an HTTP/SOCKS5 proxy, or a Tailscale peer.
-- `vpnb` CLI that scripts the app over a user-only socket.
-- Re-applies routes when the VPN connects or the network changes, and re-resolves domains as IPs rotate.
-- Detects GlobalProtect, Cisco, Fortinet, Zscaler, Cloudflare WARP, Tailscale exit nodes and more.
-- Optional `/etc/hosts` DNS bypass, route verification, notifications, logs, import/export and launch at login.
-- A small root helper does the routing. It is cdhash-pinned to this app and needs no Network Extension entitlements.
+- Three modes: Bypass sends the destinations you list around the VPN, VPN Only sends only them through it, and Custom routes each rule where you say, first match wins.
+- 37 built-in service packs (Telegram, WhatsApp, YouTube, Netflix, Spotify, Zoom, GitHub and more) plus any domain, wildcard or subnet you add.
+- In Custom mode a rule can exit direct, through a specific VPN when several are up, through an HTTP or SOCKS5 proxy, or through a Tailscale peer.
+- Routes come back on their own when the VPN reconnects or the network changes, and domains are re-resolved as their addresses rotate.
+- Detects GlobalProtect, Cisco AnyConnect, OpenVPN, WireGuard, FortiClient, Zscaler, Cloudflare WARP, Pulse Secure, Check Point and Tailscale exit nodes.
+- Leaves Tailscale's own range, loopback and the other tunnels alone, so a mesh VPN and local proxies keep working next to it.
+- `vpnb` scripts everything the app does over a socket only your account can open, and reads passwords from standard input, never from the command line.
+- No kernel or system extension to approve: one small root helper does the routing, and only this app can talk to it.
+- Optional `/etc/hosts` DNS bypass, route verification, notifications, launch at login, and config import and export.
 
 ## Quick start
 
@@ -42,20 +40,21 @@ brew trust --cask geiserx/vpn-bypass/vpn-bypass
 brew install --cask vpn-bypass
 ```
 
-Needs macOS 13 or later. The DMG download and building from source are in [Getting started](docs/getting-started.md). If macOS says the app is damaged, see [Troubleshooting](docs/troubleshooting.md).
+Then open VPN Bypass from Applications, approve the one admin prompt that installs the root helper, connect your VPN, and turn on a service in Settings > Services or type a domain into the dropdown. It worked when the pill in the dropdown reads ON and the menu bar mark shows its arrow. Needs macOS 13 or later; the DMG, building from source and the fix for "the app is damaged" are in [Getting started](https://geiserx.github.io/VPN-Bypass/getting-started/).
 
 ## Documentation
 
-The documentation is published as a site at [geiserx.github.io/VPN-Bypass](https://geiserx.github.io/VPN-Bypass/). The same pages on GitHub:
+Everything is at [geiserx.github.io/VPN-Bypass](https://geiserx.github.io/VPN-Bypass/).
 
-- [Getting started](docs/getting-started.md): Homebrew, DMG, source, Xcode, requirements and permissions
-- [Routing modes, routes and rules](docs/routing.md)
-- [Usage](docs/usage.md): menu bar, settings tabs and the `vpnb` CLI
-- [How it works](docs/how-it-works.md): supported VPNs and detection logic
-- [Coexistence with other VPNs and proxies](docs/coexistence.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Development and contributing](docs/development.md)
-- [Changelog](docs/CHANGELOG.md) and [roadmap](ROADMAP.md)
+- [Getting started](https://geiserx.github.io/VPN-Bypass/getting-started/): Homebrew, DMG, source, and the first run
+- [Routing modes](https://geiserx.github.io/VPN-Bypass/routing/): Bypass, VPN Only and Custom; routes and rules
+- [Usage](https://geiserx.github.io/VPN-Bypass/usage/): the dropdown, the Settings tabs and the `vpnb` CLI
+- [How it works](https://geiserx.github.io/VPN-Bypass/how-it-works/): supported VPN clients and how they are detected
+- [Other VPNs and proxies](https://geiserx.github.io/VPN-Bypass/coexistence/): what it touches when several tunnels or proxies run
+- [Troubleshooting](https://geiserx.github.io/VPN-Bypass/troubleshooting/): Gatekeeper, routes, DNS and proxy errors
+- [Development](https://geiserx.github.io/VPN-Bypass/development/): build, test, contribute
+
+What changed between versions is on the [Releases](https://github.com/GeiserX/VPN-Bypass/releases) page; planned work is in the [roadmap](ROADMAP.md).
 
 ## License
 

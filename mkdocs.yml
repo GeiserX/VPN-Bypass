@@ -1,18 +1,6 @@
-# mkdocs.yml for a GeiserX repo. Copy to the repo root, then:
-#   1. replace {{REPO}}, {{NAME}} and {{PITCH}};
-#   2. delete every nav line whose page the repo does not have (the strict
-#      build fails on a nav entry for a missing file, so a stale nav cannot
-#      deploy);
-#   3. copy templates/docs-theme.css to docs/stylesheets/theme.css and put the
-#      banner's two colours in it;
-#   4. write `mkdocs-material==9.7.7` to docs/requirements-docs.txt (exact pin; Material 9.7.x
-#      pins mkdocs<2 itself, and 9.7 is Material's last feature line).
-#   5. a docs site that lives under a product site (DeclaRenta) sets site_url to that
-#      subpath, e.g. https://declarenta.com/docs/, and builds into the product artifact.
-# The docs/ contract this file assumes is in new-repo/README-STANDARD.md.
 site_name: VPN Bypass
 site_url: https://geiserx.github.io/VPN-Bypass/
-site_description: A macOS menu bar app that routes chosen domains and services around your VPN, or only them through it.
+site_description: A macOS menu bar app that sends the services and domains you pick around your VPN, or only them through it.
 repo_url: https://github.com/GeiserX/VPN-Bypass
 repo_name: GeiserX/VPN-Bypass
 edit_uri: edit/main/docs/
@@ -24,9 +12,8 @@ strict: true
 theme:
   name: material
   language: en  # es for a Spanish repo: it changes the UI strings, not the content.
-  # Uncomment when the repo has them. Both live under docs/images/.
-  # logo: images/logo.svg
-  # favicon: images/icon.svg
+  logo: images/logo.svg
+  favicon: images/icon.svg
   # Dark first: the first palette entry is the default, and the banners are dark.
   palette:
     - scheme: slate
@@ -79,8 +66,6 @@ validation:
 
 plugins:
   - search
-  # When a page is renamed (installation.md -> getting-started.md), keep the old URL alive:
-  # add `mkdocs-redirects==1.2.2` to docs/requirements-docs.txt and uncomment.
   - redirects:
       redirect_maps:
         installation.md: getting-started.md
@@ -124,8 +109,10 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/GeiserX/VPN-Bypass
-    # - icon: fontawesome/brands/docker
-    #   link: https://hub.docker.com/r/drumsergio/{{IMAGE}}
+    - icon: simple/homebrew
+      link: https://github.com/GeiserX/homebrew-vpn-bypass
+    - icon: material/download
+      link: https://github.com/GeiserX/VPN-Bypass/releases
 
 extra_css:
   - stylesheets/theme.css
@@ -143,16 +130,16 @@ exclude_docs: |
   notes/
   requirements-docs.txt
 
-# One entry per canonical page, in the contract's order. Delete the lines for
-# pages the repo does not have. A repo-specific page goes after the canonical
-# one it extends (a `Metrics` page after Usage, a `Security` page after
-# Configuration). The nav title must equal the page's H1.
+# Four tabs, each a section. The nav title equals the page's H1.
 nav:
   - Home: index.md
-  - Getting started: getting-started.md
-  - Routing modes, routes and rules: routing.md
-  - Usage: usage.md
-  - How it works: how-it-works.md
-  - Coexistence with other VPNs and proxies: coexistence.md
-  - Troubleshooting: troubleshooting.md
-  - Development and contributing: development.md
+  - Get started:
+      - Getting started: getting-started.md
+      - Usage: usage.md
+  - Routing:
+      - Routing modes: routing.md
+      - Other VPNs and proxies: coexistence.md
+  - Reference:
+      - How it works: how-it-works.md
+      - Troubleshooting: troubleshooting.md
+      - Development: development.md

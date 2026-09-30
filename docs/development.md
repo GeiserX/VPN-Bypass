@@ -1,4 +1,4 @@
-# Development and contributing
+# Development
 
 ## Building
 
@@ -15,10 +15,3 @@ Contributions are welcome! Here's how you can help:
 3. **Submit PRs** - Fork, create a branch, and submit a pull request
 
 Please read the issue templates before submitting.
-
-## Badges
-
-<p>
-  <img src="https://img.shields.io/badge/Swift-5.9-orange?style=flat-square&logo=swift&logoColor=white" alt="Swift 5.9">
-  <a href="https://codecov.io/gh/GeiserX/VPN-Bypass"><img src="https://codecov.io/gh/GeiserX/VPN-Bypass/graph/badge.svg" alt="codecov"></a>
-</p>
