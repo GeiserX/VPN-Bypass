@@ -236,3 +236,11 @@
 "Added %@ to your %@ list." = "%1$@ ajouté à votre liste %2$@.";
 "Added %@, from the link you pasted." = "%@ ajouté, à partir du lien collé.";
 "Added %@, cleaned up from “%@”." = "%1$@ ajouté, nettoyé à partir de « %2$@ ».";
+
+/* ===== Settings — Routes and Rules (Custom mode) ===== */
+"Copy Proxy URL" = "Copier l'URL du proxy";
+"Copy Shell Exports" = "Copier les exports shell";
+"Copied" = "Copié";
+"Only apps set to use %@ (%@) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Seules les apps configurées pour utiliser %@ (%@) passent par ici. Les autres apps joignent ces hôtes par la route habituelle du Mac, même si une règle plus bas les couvre aussi.";
+"Only apps set to use %@ go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Seules les apps configurées pour utiliser %@ passent par ici. Les autres apps joignent ces hôtes par la route habituelle du Mac, même si une règle plus bas les couvre aussi.";
+"%@ is off, so this rule does nothing." = "La route %@ est désactivée, cette règle n'a donc aucun effet.";

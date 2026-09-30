@@ -81,7 +81,7 @@ Bypass and VPN Only use the Domains and Services tabs. Custom mode swaps them fo
 <figcaption>Rules, first match wins</figcaption>
 </figure>
 <figure markdown>
-![The Routes tab in Custom mode: Direct, the detected VPN, and a SOCKS5 proxy route with its Copy button](images/screenshots/routes.png)
+![The Routes tab in Custom mode: Direct, the detected VPN, and a SOCKS5 proxy route](images/screenshots/routes.png)
 <figcaption>Routes: where traffic can exit</figcaption>
 </figure>
 </div>
