@@ -14,7 +14,7 @@ Logo and icon work is a separate lane, in [`IDENTITY-PROPOSALS.md`](IDENTITY-PRO
 
 ## 1. One status sentence that says what the app is doing
 
-**Approved, being built.**
+**Built and merged in [#127](https://github.com/GeiserX/VPN-Bypass/pull/127).**
 
 ![Before and after: the top of the dropdown](proposals/ui/01-status-sentence.png)
 
@@ -70,7 +70,7 @@ A "Mode Bypass" menu button at the right end of the title bar, with the same men
 
 ## 3. Clear moves behind a menu, and Refresh says what it did
 
-**Approved, being built.**
+**Built and merged in [#125](https://github.com/GeiserX/VPN-Bypass/pull/125).**
 
 ![Before and after: the dropdown's action buttons](proposals/ui/03-clear-behind-a-menu.png)
 
@@ -86,7 +86,7 @@ A "Mode Bypass" menu button at the right end of the title bar, with the same men
 
 ## 4. Proxy rules say which apps they reach, and the port reads right
 
-**Approved, being built.**
+**Built and merged in [#124](https://github.com/GeiserX/VPN-Bypass/pull/124).**
 
 ![Before and after: a proxy rule and a proxy route in Custom mode](proposals/ui/04-proxy-rules-say-who-they-reach.png)
 
@@ -102,7 +102,7 @@ A "Mode Bypass" menu button at the right end of the title bar, with the same men
 
 ## 5. Adding a domain says what happened
 
-**Approved, being built.**
+**Built and merged in [#126](https://github.com/GeiserX/VPN-Bypass/pull/126).**
 
 ![Before and after: the add field](proposals/ui/05-add-domain-says-what-happened.png)
 
