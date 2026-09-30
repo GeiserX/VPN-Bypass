@@ -58,6 +58,14 @@ public enum ControlSurface {
         // write config.json or churn listeners for a `status`/`route.list`.
         guard response.ok, CommandRouter.isMutating(request.cmd) else { return response }
 
+        // `mode` with the mode already in use changes nothing, exactly like the GUI picker
+        // (RouteManager.setRoutingMode returns early). Without this the verb saved the config
+        // and re-applied every kernel route, a burst a script asking "make sure it is bypass"
+        // never meant to cause.
+        if request.cmd == "mode", newConfig.routingMode == RouteManager.shared.config.routingMode {
+            return response
+        }
+
         RouteManager.shared.config = newConfig
         RouteManager.shared.saveConfig()
         RouteManager.shared.log(.info, "Control: '\(request.cmd)' applied via the command line")

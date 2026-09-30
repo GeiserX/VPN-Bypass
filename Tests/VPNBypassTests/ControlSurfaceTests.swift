@@ -103,6 +103,26 @@ final class ControlSurfaceTests: XCTestCase {
         XCTAssertFalse(runtime?.helperState.isEmpty ?? true, "state text must name the reason")
     }
 
+    /// `mode` naming the mode already in use must be a no-op like the GUI picker: no save,
+    /// no "applied" log line, and so no full kernel re-apply behind it.
+    func testModeWithTheCurrentModeChangesNothing() async {
+        var cfg = RouteManager.shared.config
+        cfg.routingMode = .bypass
+        RouteManager.shared.config = cfg
+        let applied = { RouteManager.shared.recentLogs.filter { $0.message.contains("Control: 'mode' applied") }.count }
+        let before = applied()
+
+        let same = await ControlSurface.handle(ControlRequest(cmd: "mode", args: ["mode": "bypass"]))
+        XCTAssertTrue(same.ok)
+        XCTAssertEqual(same.result?.mode, "bypass")
+        XCTAssertEqual(applied(), before, "an unchanged mode must not save or re-apply")
+
+        let changed = await ControlSurface.handle(ControlRequest(cmd: "mode", args: ["mode": "vpnOnly"]))
+        XCTAssertTrue(changed.ok)
+        XCTAssertEqual(RouteManager.shared.config.routingMode, .vpnOnly)
+        XCTAssertEqual(applied(), before + 1, "a real mode change still goes through the apply path")
+    }
+
     func testUnknownCommandErrorsWithoutMutating() async {
         var cfg = RouteManager.shared.config
         cfg.routes = [Route(name: "r", egress: .proxyHTTP, proxyHost: "h", proxyPort: 8001)]
