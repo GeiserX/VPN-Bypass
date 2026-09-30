@@ -36,6 +36,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# One run at a time per ref, in push order, never cancelled. Locking only the
+# deploy job is not enough: an older push whose build finishes later would
+# deploy last and publish a stale site. Pull requests get their own group.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -47,6 +54,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job never pushes; a persisted token is readable by pip and every MkDocs plugin.
+          persist-credentials: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -79,11 +89,6 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    # Two deploys at once leave the site at whichever finished last. Queue
-    # them; never cancel, a cancelled deploy can leave a half-published site.
-    concurrency:
-      group: pages
-      cancel-in-progress: false
     steps:
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
