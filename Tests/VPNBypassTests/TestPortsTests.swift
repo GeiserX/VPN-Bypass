@@ -22,17 +22,31 @@ final class TestPortsTests: XCTestCase {
     func testRefusesAPortLeftInTimeWait() throws {
         let port = TestPorts.nextListenPort().rawValue
         let listener = try listenOnLoopback(port: port)
+        // Each step throws on failure, so accept() never blocks waiting for a client
+        // that did not connect.
         let client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
-        XCTAssertGreaterThanOrEqual(client, 0)
+        guard client >= 0 else {
+            let err = errno
+            close(listener)
+            throw SocketError(call: "socket", errno: err)
+        }
         var addr = loopback(port: port)
         let connected = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.connect(client, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        XCTAssertEqual(connected, 0, "connect: errno \(errno)")
+        guard connected == 0 else {
+            let err = errno
+            close(client); close(listener)
+            throw SocketError(call: "connect to \(port)", errno: err)
+        }
         let accepted = Darwin.accept(listener, nil, nil)
-        XCTAssertGreaterThanOrEqual(accepted, 0, "accept: errno \(errno)")
+        guard accepted >= 0 else {
+            let err = errno
+            close(client); close(listener)
+            throw SocketError(call: "accept on \(port)", errno: err)
+        }
         close(accepted)
         close(listener)
         close(client)
