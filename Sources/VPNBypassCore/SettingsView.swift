@@ -369,7 +369,7 @@ struct DomainsTab: View {
                 }
 
                 if let change = settingsUndo.last, change.page == .domains {
-                    UndoLine(message: change.message) { settingsUndo.undoLast() }
+                    UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
                 }
             }
             .padding(16)
@@ -760,7 +760,7 @@ struct ServicesTab: View {
                 }
 
                 if let change = settingsUndo.last, change.page == .services {
-                    UndoLine(message: change.message) { settingsUndo.undoLast() }
+                    UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
                 }
 
                 // Services list: the services that were on when the page opened, then the rest

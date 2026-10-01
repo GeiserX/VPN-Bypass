@@ -386,6 +386,37 @@ final class SettingsUndoManagerTests: RouteManagerTestCase {
         XCTAssertFalse(manager.canUndo)
     }
 
+    /// An undo that outlasts its wait while a route operation still holds the gate changes
+    /// nothing: the switches stay as they are, the line and Edit > Undo keep the change, and
+    /// it goes through once the gate is free.
+    func testAnUndoThatCannotGetTheGateKeepsTheChange() {
+        let ids = rm.config.services.map(\.id)
+        for i in rm.config.services.indices { rm.config.services[i].enabled = true }
+        let manager = UndoManager()
+        let undo = SettingsUndo(routeManager: rm)
+        undo.undoManager = manager
+        undo.gateWaitPolls = 2
+        undo.record(.servicesSwitched(ids: ids, on: true))
+        settle()   // closes the undo group the registration opened
+        XCTAssertTrue(rm.tryAcquireRouteOperationForTests())
+        var held = true
+        defer { if held { rm.releaseRouteOperationForTests() } }
+
+        undo.undoLast()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        XCTAssertTrue(rm.config.services.allSatisfy(\.enabled), "nothing may switch while the gate is held")
+        XCTAssertNotNil(undo.last, "the line keeps the change")
+        XCTAssertEqual(undo.undoneCount, 0)
+        XCTAssertTrue(manager.canUndo, "Edit > Undo keeps it too")
+
+        rm.releaseRouteOperationForTests()
+        held = false
+        undo.undoLast()
+        XCTAssertFalse(rm.config.services.contains(where: \.enabled))
+        XCTAssertNil(undo.last)
+        XCTAssertEqual(undo.undoneCount, 1)
+    }
+
     func testClearingDropsTheLineAndTheUndoMenuItem() {
         let manager = UndoManager()
         let undo = SettingsUndo(routeManager: rm)

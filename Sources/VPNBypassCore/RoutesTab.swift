@@ -104,7 +104,7 @@ struct RoutesTab: View {
             }
 
             if let change = settingsUndo.last, change.page == .routes {
-                UndoLine(message: change.message) { settingsUndo.undoLast() }
+                UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
             }
         }
         .sheet(item: $sheetState) { state in

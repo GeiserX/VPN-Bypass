@@ -169,7 +169,7 @@ struct RulesTab: View {
             }
 
             if let change = settingsUndo.last, change.page == .rules {
-                UndoLine(message: change.message) { settingsUndo.undoLast() }
+                UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
             }
 
             defaultRouteFooter

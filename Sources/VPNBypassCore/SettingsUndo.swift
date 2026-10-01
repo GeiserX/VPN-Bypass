@@ -121,6 +121,9 @@ final class SettingsUndo: ObservableObject {
         }
     }
     private let routeManager: RouteManager
+    /// How many 100 ms polls an undo waits for a running route operation (10 s). Tests
+    /// shorten it.
+    var gateWaitPolls = 100
 
     /// `last` seeds the line, for a rendered screenshot.
     init(routeManager: RouteManager? = nil, last: UndoableChange? = nil) {
@@ -152,7 +155,8 @@ final class SettingsUndo: ObservableObject {
     /// A delete takes its entry out of the config only once its route cleanup ends, and the
     /// route methods skip their work while another operation holds the gate. So while one
     /// runs this waits for it (at most 10 s, as long as a delete's cleanup can take), then
-    /// puts the change back.
+    /// puts the change back. If it is still running then, the change stays on its line and
+    /// in Edit > Undo: putting it back now would change the config with no route work.
     private func perform() {
         guard let change = last else { return }
         last = nil
@@ -162,9 +166,16 @@ final class SettingsUndo: ObservableObject {
         }
         Task { @MainActor in
             var polls = 0
-            while routeManager.isApplyingRoutes && polls < 100 {
+            while routeManager.isApplyingRoutes && polls < gateWaitPolls {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 polls += 1
+            }
+            guard !routeManager.isApplyingRoutes else {
+                if last == nil {
+                    last = change
+                    register()
+                }
+                return
             }
             finish(change)
         }
@@ -179,6 +190,8 @@ final class SettingsUndo: ObservableObject {
 /// The line a delete or bulk switch leaves in its list: what changed, and Undo.
 struct UndoLine: View {
     let message: String
+    /// True while a route operation runs, as the rows' switches and trash are.
+    var isDisabled = false
     let onUndo: () -> Void
 
     var body: some View {
@@ -198,6 +211,8 @@ struct UndoLine: View {
                     .cornerRadius(5)
             }
             .buttonStyle(.plain)
+            .disabled(isDisabled)
+            .opacity(isDisabled ? 0.5 : 1)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
