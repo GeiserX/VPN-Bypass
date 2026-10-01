@@ -384,6 +384,12 @@
 "Added %@, from the link you pasted." = "Added %@, from the link you pasted.";
 "Added %@, cleaned up from “%@”." = "Added %1$@, cleaned up from “%2$@”.";
 
+/* ===== Custom service name: the line under the field, and import ===== */
+"A service named “%@” already exists. Choose another name, so their routes stay apart." = "A service named “%@” already exists. Choose another name, so their routes stay apart.";
+"%@ is on your Bypass list. Choose another name, so their routes stay apart." = "%@ is on your Bypass list. Choose another name, so their routes stay apart.";
+"Nothing was imported. The custom service “%@” has the same name as the service “%@”. Rename it in the file and import again." = "Nothing was imported. The custom service “%1$@” has the same name as the service “%2$@”. Rename it in the file and import again.";
+"Nothing was imported. The custom service “%@” has the same name as %@ on the Bypass list. Rename it in the file and import again." = "Nothing was imported. The custom service “%1$@” has the same name as %2$@ on the Bypass list. Rename it in the file and import again.";
+
 /* ===== Settings — Routes and Rules (Custom mode) ===== */
 "Copy Proxy URL" = "Copy Proxy URL";
 "Copy Shell Exports" = "Copy Shell Exports";

@@ -563,10 +563,25 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Why the last `importConfig` saved nothing, when the app can say it in the user's words;
+    /// nil after an import that worked or failed for a reason with no such line.
+    private(set) var lastImportRefusal: String?
+
     func importConfig(from url: URL) -> Bool {
+        lastImportRefusal = nil
         do {
             let data = try Data(contentsOf: url)
             let exportData = try JSONDecoder().decode(ExportData.self, from: data)
+
+            // A custom service sharing its name with another service or a Bypass list entry
+            // would share its routes too (see ServiceNameClash). Refuse the file whole, before
+            // anything changes, rather than load it and guess which one to rename.
+            if let found = ServiceNameClash.firstInImport(exportData.config) {
+                let refusal = found.clash.importMessage(service: found.service)
+                lastImportRefusal = refusal
+                log(.error, "Config not imported: \(refusal)")
+                return false
+            }
 
             // Save previous state for transactional rollback
             let previousConfig = config
@@ -4326,22 +4341,40 @@ final class RouteManager: ObservableObject {
 
     // MARK: - Custom Service Management
 
-    func addCustomService(name: String, domains: [String], ipRanges: [String]) {
+    /// The service or Bypass list entry a custom service called `name` would share its routes
+    /// with, or nil when the name is free. `excluding` is the service being edited.
+    func customServiceNameClash(_ name: String, excluding id: String? = nil) -> ServiceNameClash? {
+        ServiceNameClash.find(name, excluding: id, services: config.services, domains: config.domains)
+    }
+
+    /// Saves nothing and returns the clash when `name` is taken (see `ServiceNameClash`).
+    @discardableResult
+    func addCustomService(name: String, domains: [String], ipRanges: [String]) -> ServiceNameClash? {
+        if let clash = customServiceNameClash(name) {
+            log(.warning, "Custom service not added: \(clash.message)")
+            return clash
+        }
         let id = "custom_\(UUID().uuidString.prefix(8).lowercased())"
         let service = ServiceEntry(id: id, name: name, enabled: true, domains: domains, ipRanges: ipRanges, isCustom: true)
         config.services.append(service)
         saveConfig()
         log(.success, "Added custom service: \(name)")
         routeNewCustomService(service)
+        return nil
     }
 
     /// Puts back a custom service that a delete in Settings took out, domains and all, at its
     /// old place and switch. Its routes go in by the same path as `addCustomService`'s.
-    /// Returns false, and changes nothing, while a service with that id is still listed.
+    /// Returns false, and changes nothing, while a service with that id is still listed, or
+    /// once another service or a Bypass list entry has taken its name (see `ServiceNameClash`).
     @discardableResult
     func restoreCustomService(_ service: ServiceEntry, at index: Int) -> Bool {
         guard service.isCustom, !config.services.contains(where: { $0.id == service.id }) else {
             log(.warning, "Custom service \(service.name) is still listed, nothing to restore")
+            return false
+        }
+        if let clash = customServiceNameClash(service.name, excluding: service.id) {
+            log(.warning, "Custom service \(service.name) not restored: \(clash.message)")
             return false
         }
         config.services.insert(service, at: min(max(index, 0), config.services.count))
@@ -4363,8 +4396,15 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    func updateCustomService(id: String, name: String, domains: [String], ipRanges: [String]) {
-        guard let index = config.services.firstIndex(where: { $0.id == id && $0.isCustom }) else { return }
+    /// Saves nothing and returns the clash when another service or a Bypass list entry has
+    /// `name` (see `ServiceNameClash`). Keeping the service's own name is not a clash.
+    @discardableResult
+    func updateCustomService(id: String, name: String, domains: [String], ipRanges: [String]) -> ServiceNameClash? {
+        guard let index = config.services.firstIndex(where: { $0.id == id && $0.isCustom }) else { return nil }
+        if let clash = customServiceNameClash(name, excluding: id) {
+            log(.warning, "Custom service not updated: \(clash.message)")
+            return clash
+        }
         let oldName = config.services[index].name
         let wasEnabled = config.services[index].enabled
         config.services[index] = ServiceEntry(id: id, name: name, enabled: wasEnabled, domains: domains, ipRanges: ipRanges, isCustom: true)
@@ -4388,6 +4428,7 @@ final class RouteManager: ObservableObject {
                 if config.manageHostsFile { await updateHostsFile() }
             }
         }
+        return nil
     }
 
     func removeCustomService(_ serviceId: String) {
