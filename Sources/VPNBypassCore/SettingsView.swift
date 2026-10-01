@@ -16,6 +16,8 @@ struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .status
     /// What the Logs page shows when it opens: All, or Warnings after the Status page's Show in Log.
     @State private var logsFilter = LogFilter()
+    /// Bumped when a filter is asked for from outside, so a Logs page already open takes it.
+    @State private var logsFilterRequest = 0
 
     // MARK: - Tab model
 
@@ -109,6 +111,11 @@ struct SettingsView: View {
         .onReceive(SettingsPageRequest.shared.$page) { page in
             guard let page else { return }
             SettingsPageRequest.shared.page = nil
+            if let filter = SettingsPageRequest.shared.logFilter {
+                SettingsPageRequest.shared.logFilter = nil
+                logsFilter = filter
+                logsFilterRequest += 1
+            }
             selectedTab = page
             clampSelectedTabIfNeeded()
         }
@@ -170,7 +177,7 @@ struct SettingsView: View {
                 case .rules:    RulesTab()
                 case .routes:   RoutesTab()
                 case .general:  GeneralTab()
-                case .logs:     LogsTab(filter: logsFilter)
+                case .logs:     LogsTab(filter: logsFilter).id(logsFilterRequest)
                 case .info:     InfoTab()
                 }
             }
@@ -1970,10 +1977,15 @@ struct LogsTab: View {
                     filterBar(shown: shown)
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(filter.countLine(shown: shown.count, total: routeManager.recentLogs.count))
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.textTertiary)
-                            .padding(.leading, 2)
+                        HStack(spacing: 8) {
+                            Text(filter.countLine(shown: shown.count, total: routeManager.recentLogs.count))
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.textTertiary)
+                                .padding(.leading, 2)
+                            if filter.onlyControlSocket {
+                                sourceToken
+                            }
+                        }
 
                         if let empty = filter.emptyLine(shown: shown.count) {
                             Text(empty)
@@ -2003,6 +2015,28 @@ struct LogsTab: View {
                 }
             }
         }
+    }
+
+    /// Shown while only the control socket's lines show (proposal 15 of #119); a click shows
+    /// every line again.
+    private var sourceToken: some View {
+        Button {
+            filter.onlyControlSocket = false
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "terminal")
+                Text(LogFilter.sourceTokenTitle)
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(Theme.textTertiary)
+            }
+            .font(.system(size: 11))
+            .foregroundColor(Theme.textSecondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Theme.bgElevated))
+        }
+        .buttonStyle(.plain)
+        .help(LogFilter.sourceTokenHelp)
     }
 
     /// The level filter, the search field, and Copy and Clear, as in proposal 14 of #119.
@@ -2342,6 +2376,15 @@ struct LogRow: View {
                 .lineLimit(1)
             
             Spacer()
+
+            if let tag = entry.source.tag {
+                Text(tag)
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.textSecondary)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .help(LogSource.tagHelp)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -2392,6 +2435,8 @@ struct LogSearchField: NSViewRepresentable {
 final class SettingsPageRequest: ObservableObject {
     static let shared = SettingsPageRequest()
     @Published var page: SettingsView.SettingsTab?
+    /// The filter the Logs page opens with, read together with `page`.
+    var logFilter: LogFilter?
 }
 
 @MainActor

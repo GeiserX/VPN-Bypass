@@ -9,8 +9,16 @@
 
 import Foundation
 
-/// The bridge between the control socket and RouteManager. Namespaced enum; no state.
+/// The bridge between the control socket and RouteManager. Namespaced enum; its only state
+/// is the two counters that tell `handle` whether mutating requests overlapped.
 public enum ControlSurface {
+
+    /// Mutating requests running now, and how many have started. Each connection has its own
+    /// queue, so two requests interleave on the main actor at every await, and one's
+    /// before/after comparison can hold the other's change. A request that overlapped another
+    /// does not name itself in the footer: a missing line, never a false one.
+    @MainActor private static var mutatingInFlight = 0
+    @MainActor private static var mutatingStarted = 0
 
     /// A ready-to-start socket server bound to the default user-only socket path,
     /// dispatching every request through `handle`. The caller (the app delegate)
@@ -24,8 +32,39 @@ public enum ControlSurface {
     /// Apply one request on the main actor (so it serializes with the GUI's own
     /// RouteManager mutations), persist + reconcile if it changed something, and
     /// return the sanitized response. Never logs args or secrets — only the verb.
+    ///
+    /// Everything the request does runs marked as coming from the socket, so its log lines are
+    /// tagged, and a setting it changed becomes the dropdown footer's "Last change" line.
     @MainActor
     public static func handle(_ request: ControlRequest) async -> ControlResponse {
+        await ControlOrigin.$isControlSocket.withValue(true) {
+            let rm = RouteManager.shared
+            let before = rm.config
+            let routesBefore = Set(rm.activeRoutes.map(\.destination)).union(rm.pendingKernelAdds).count
+            let appSaves = rm.appSaveCount
+            let mutating = CommandRouter.isMutating(request.cmd)
+            let joinedAnother = mutating && mutatingInFlight > 0
+            if mutating { mutatingInFlight += 1; mutatingStarted &+= 1 }
+            let started = mutatingStarted
+            let response = await apply(request)
+            if mutating { mutatingInFlight -= 1 }
+            let ranAlone = !joinedAnother && mutatingStarted == started
+            guard response.ok, mutating, rm.appSaveCount == appSaves else { return response }
+            if !ranAlone {
+                // The comparison may hold the other request's change, so name neither, and drop
+                // an older line: it is no longer the last change.
+                if !OutsideChange.sameSettings(before, rm.config) { rm.lastOutsideChange = nil }
+            } else if let change = OutsideChange.make(cmd: request.cmd, result: response.result,
+                                                      before: before, after: rm.config,
+                                                      routesBefore: routesBefore, routesLeft: rm.uniqueRouteCount, at: Date()) {
+                rm.lastOutsideChange = change
+            }
+            return response
+        }
+    }
+
+    @MainActor
+    private static func apply(_ request: ControlRequest) async -> ControlResponse {
         // The Bypass / VPN Only verbs act through RouteManager's own methods and never
         // reach the save + reconcile below. A wrong envelope version falls through to
         // CommandRouter, which answers unsupported_version for every verb.
@@ -68,7 +107,7 @@ public enum ControlSurface {
 
         RouteManager.shared.config = newConfig
         RouteManager.shared.saveConfig()
-        RouteManager.shared.log(.info, "Control: '\(request.cmd)' applied via the command line")
+        RouteManager.shared.log(.info, "Control: '\(request.cmd)' applied")
 
         // Reconcile proxy/Tailscale listeners live, then re-apply KERNEL routes for anything
         // that changes what gets routed where — otherwise a scripted `rule.add`/`route.*`/`default`

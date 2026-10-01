@@ -13,6 +13,7 @@ Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow he
 - Refresh Routes, a Verify Routes icon, and a "…" menu with Verify Routes, Re-resolve DNS Now and Remove All Routes…, which asks before it removes anything;
 - after Verify Routes, a Route check card above the buttons. Verify pings at most 10 of the routed addresses: single addresses only, because ping cannot test a range, and the first 10 in sort order. The card says how many of how many routes it checked, for example "Checked 10 of 62 routes (single addresses only).", lists the addresses that did not answer first, up to three with what each is routed for and why it failed and then "+ N more", then one line for the rest with their response times. "Show all 10 results in Logs" opens Settings on the Logs page, where each address has its own line. With only address ranges routed, the card says there was nothing ping could check;
 - one line under the buttons with the result of the last apply, for example "62 routes applied 23 s ago, none failed";
+- after a change made through `vpnb` or an [MCP server](mcp-server.md), a line at the foot that names it, for example "Last change: added en.wikipedia.org via the command line, 2 min ago". Click it to open Logs showing only the lines that came through the control socket. A change you make in the app removes the line;
 - the gear that opens Settings.
 
 ![The dropdown in Bypass mode: VPN Connected over WireGuard, the pill reads ON, four services and two domains are routed around the VPN](images/screenshots/menu-bar.png){ width="340" }
@@ -48,7 +49,7 @@ Status: whether the app is working right now, on one page. A line at the top giv
 
 General: settings only. Launch at login, auto-apply on connect, `/etc/hosts` management, route verification, the DNS refresh schedule, fallback DNS, notification preferences, the SOCKS5 proxy, and import/export.
 
-Logs: the last 200 log entries, newest first. The segmented control above the list shows All, Warnings (warnings and errors) or Errors, and the search field keeps the entries whose text contains what you type, ignoring case and accents, with the match marked. A line above the list says how many entries match, for example "3 of 200 entries". Copy copies only the entries shown. Clear removes every entry, including the ones the filter hides.
+Logs: the last 200 log entries, newest first. The segmented control above the list shows All, Warnings (warnings and errors) or Errors, and the search field keeps the entries whose text contains what you type, ignoring case and accents, with the match marked. A line above the list says how many entries match, for example "3 of 200 entries". Copy copies only the entries shown. Clear removes every entry, including the ones the filter hides. A line written while the app served a request on the control socket, from `vpnb` or an MCP server, ends in "via the command line", and so do the lines of the work that request started. The dropdown's "Last change" line opens the page with a "From the command line" token that shows only those lines; click the token to show every line again.
 
 Info: version and helper status.
 

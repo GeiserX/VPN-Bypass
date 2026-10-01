@@ -17,7 +17,16 @@ final class RouteManager: ObservableObject {
     @Published var vpnType: VPNType?
     @Published var localGateway: String?
     @Published var vpnGateway: String?
-    @Published var activeRoutes: [ActiveRoute] = []
+    @Published var activeRoutes: [ActiveRoute] = [] {
+        // A "removed all routes" footer line is a claim about what is installed. Once the count
+        // moves the line is gone for good; only hiding it let it come back, hours later, when
+        // the app's own removal brought the count back to the same number.
+        didSet {
+            if case .removedAllRoutes(let left)? = lastOutsideChange?.kind, left != uniqueRouteCount {
+                lastOutsideChange = nil
+            }
+        }
+    }
     /// Unique kernel route count (activeRoutes may have multiple entries per destination for multi-source tracking)
     var uniqueRouteCount: Int { Set(activeRoutes.map { $0.destination }).count }
     @Published var lastUpdate: Date?
@@ -73,6 +82,15 @@ final class RouteManager: ObservableObject {
     /// Written only where an apply commits and where `removeAllRoutes` finishes; nothing reads
     /// it to decide routing.
     @Published var lastRouteChange: RouteChangeOutcome?
+
+    /// The last settings change a control-socket request made, for the dropdown footer. A
+    /// save made outside a socket request (the app's own controls) clears it, so the footer
+    /// never names a change that a later one in the app has replaced.
+    @Published var lastOutsideChange: OutsideChange?
+    /// Saves made outside a socket request. A request that sees this move while it runs does
+    /// not name itself in the footer: an app save in between may be the later change, or may
+    /// sit in the request's before/after comparison.
+    private(set) var appSaveCount = 0
 
     struct RouteChangeOutcome: Equatable {
         enum Kind: Equatable {
@@ -210,6 +228,8 @@ final class RouteManager: ObservableObject {
         let timestamp: Date
         let level: LogLevel
         let message: String
+        /// The control socket's lines say so on the Logs page (proposal 15 of #119).
+        var source: LogSource = .app
         
         enum LogLevel: String {
             case info = "INFO"
@@ -409,6 +429,10 @@ final class RouteManager: ObservableObject {
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
         if !isVPNConnected { configChangedAt = Date() }
+        if !ControlOrigin.isControlSocket {
+            lastOutsideChange = nil
+            appSaveCount &+= 1
+        }
 
         log(.info, "Config saved")
     }
@@ -5474,7 +5498,8 @@ final class RouteManager: ObservableObject {
     private var logFileHandle: FileHandle?
 
     func log(_ level: LogEntry.LogLevel, _ message: String) {
-        let entry = LogEntry(timestamp: Date(), level: level, message: message)
+        let source: LogSource = ControlOrigin.isControlSocket ? .controlSocket : .app
+        let entry = LogEntry(timestamp: Date(), level: level, message: message, source: source)
         recentLogs.insert(entry, at: 0)
         if recentLogs.count > 200 {
             recentLogs.removeLast()
@@ -5482,7 +5507,7 @@ final class RouteManager: ObservableObject {
 
         // Log to file (owner-only, never following a planted symlink).
         guard let url = logFileURL,
-              let data = "[\(Self.logFormatter.string(from: entry.timestamp))] [\(level.rawValue)] \(message)\n".data(using: .utf8)
+              let data = "[\(Self.logFormatter.string(from: entry.timestamp))] [\(level.rawValue)] \(message)\(source.fileSuffix)\n".data(using: .utf8)
         else { return }
 
         if logFileHandle == nil {

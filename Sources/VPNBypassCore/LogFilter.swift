@@ -51,19 +51,22 @@ enum LogLevelFilter: String, CaseIterable, Identifiable {
     }
 }
 
-/// What the Logs page shows: a level and a search term.
+/// What the Logs page shows: a level, a search term, and whether only the control socket's
+/// lines show (the dropdown's "Last change" line opens the page that way).
 struct LogFilter: Equatable {
     var level: LogLevelFilter = .all
     var query: String = ""
+    var onlyControlSocket = false
 
     /// The search term without the spaces around it; empty means no search.
     var term: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     /// True when the filter hides anything at all.
-    var isActive: Bool { level != .all || !term.isEmpty }
+    var isActive: Bool { level != .all || !term.isEmpty || onlyControlSocket }
 
     func matches(_ entry: RouteManager.LogEntry) -> Bool {
         guard level.admits(entry.level) else { return false }
+        guard !onlyControlSocket || entry.source == .controlSocket else { return false }
         return term.isEmpty || Self.ranges(of: term, in: entry.message).isEmpty == false
     }
 
@@ -89,6 +92,11 @@ struct LogFilter: Equatable {
 
     func emptyLine(shown: Int, in bundle: Bundle) -> String? {
         guard shown == 0, isActive else { return nil }
+        if onlyControlSocket {
+            return level == .all && term.isEmpty
+                ? String(localized: "Nothing came through the command line.", bundle: bundle)
+                : String(localized: "Nothing from the command line matches this filter.", bundle: bundle)
+        }
         if !term.isEmpty {
             switch level {
             case .all: return String(localized: "No entries match “\(term)”.", bundle: bundle)
@@ -101,6 +109,20 @@ struct LogFilter: Equatable {
         case .warnings: return String(localized: "No warnings or errors.", bundle: bundle)
         case .errors: return String(localized: "No errors.", bundle: bundle)
         }
+    }
+
+    /// The token above the list while only the control socket's lines show; clicking it
+    /// shows every line again.
+    static var sourceTokenTitle: String { sourceTokenTitle(in: .main) }
+
+    static func sourceTokenTitle(in bundle: Bundle) -> String {
+        String(localized: "From the command line", bundle: bundle)
+    }
+
+    static var sourceTokenHelp: String { sourceTokenHelp(in: .main) }
+
+    static func sourceTokenHelp(in bundle: Bundle) -> String {
+        String(localized: "Show entries from the app too", bundle: bundle)
     }
 
     /// Where `term` appears in `message`, ignoring case and accents, without overlaps.
@@ -124,7 +146,7 @@ struct LogFilter: Equatable {
         formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return entries.map { log in
-            "[\(formatter.string(from: log.timestamp))] [\(log.level.rawValue)] \(log.message)"
+            "[\(formatter.string(from: log.timestamp))] [\(log.level.rawValue)] \(log.message)\(log.source.fileSuffix)"
         }.joined(separator: "\n")
     }
 }

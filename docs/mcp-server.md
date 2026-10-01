@@ -63,4 +63,4 @@ In a JSON config, add an `env` block to the entry:
 
 ## Security
 
-The control socket accepts connections from your own macOS account only, and the MCP server runs as you, so it can do what you can do in the app and nothing more. It cannot install the privileged helper or reach another account's app. Anything the agent changes shows up in the dropdown and in Settings like a change you made by hand, and you can undo it there.
+The control socket accepts connections from your own macOS account only, and the MCP server runs as you, so it can do what you can do in the app and nothing more. It cannot install the privileged helper or reach another account's app. Anything the agent changes shows up in the dropdown and in Settings, and you can undo it there. The dropdown names the agent's last change at its foot ("Last change: added en.wikipedia.org via the command line, 2 min ago"), and in Settings > Logs every line the agent's requests wrote ends in "via the command line".
