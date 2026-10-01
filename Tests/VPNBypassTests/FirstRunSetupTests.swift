@@ -266,7 +266,7 @@ final class FirstRunSetupViewTests: XCTestCase {
     /// that is switched off, so nothing here can install a route on this machine.
     func testTheDropdownLeavesAndReturnsToTheQuestionWithoutReopening() throws {
         rm.isLoading = false
-        let view = host(MenuContent(refreshesOnOpen: false)
+        let view = host(MenuContent(onOpen: {})
                             .environmentObject(rm)
                             .environmentObject(NotificationManager.shared)
                             .environmentObject(LaunchAtLoginManager.shared),
