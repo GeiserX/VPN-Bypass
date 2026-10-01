@@ -58,8 +58,10 @@ struct OutsideChange: Equatable {
         case turnedOn(String)
         case turnedOff(String)
         case switchedMode(RouteManager.RoutingMode)
-        /// `routes.clear`. `routesLeft` is what the removal could not take out.
-        case removedAllRoutes(routesLeft: Int)
+        /// `routes.clear`. `routesLeft` is what the removal could not take out, counted as the
+        /// screen counts (`routedAddressCount`); `everythingElseDirect` is VPN Only's catch-alls,
+        /// which that count leaves out, still installed.
+        case removedAllRoutes(routesLeft: Int, everythingElseDirect: Bool = false)
         /// `route.add`, `route.set`, `route.enable`, `route.disable`, `route.rm`, `default`.
         case changedRoutes
         /// `rule.add`, `rule.rm`.
@@ -74,8 +76,10 @@ struct OutsideChange: Equatable {
     /// what is on), or `routes.clear` with no routes installed.
     static func make(cmd: String, result: ControlResult?,
                      before: RouteManager.Config, after: RouteManager.Config,
-                     routesBefore: Int, routesLeft: Int, at: Date) -> OutsideChange? {
-        guard let kind = kind(cmd: cmd, result: result, before: before, after: after, routesLeft: routesLeft) else {
+                     routesBefore: Int, routesLeft: Int, everythingElseDirect: Bool = false,
+                     at: Date) -> OutsideChange? {
+        guard let kind = kind(cmd: cmd, result: result, before: before, after: after,
+                              routesLeft: routesLeft, everythingElseDirect: everythingElseDirect) else {
             return nil
         }
         if case .removedAllRoutes = kind {
@@ -99,7 +103,8 @@ struct OutsideChange: Equatable {
     /// never reach the log, but a domain or service name is not a secret and the footer is not
     /// the log.
     static func kind(cmd: String, result: ControlResult?,
-                     before: RouteManager.Config, after: RouteManager.Config, routesLeft: Int) -> Kind? {
+                     before: RouteManager.Config, after: RouteManager.Config, routesLeft: Int,
+                     everythingElseDirect: Bool = false) -> Kind? {
         switch cmd {
         case "domain.add":
             return result?.domains?.first.map { .addedDomain($0.domain) }
@@ -119,7 +124,7 @@ struct OutsideChange: Equatable {
         case "mode":
             return .switchedMode(after.routingMode)
         case "routes.clear":
-            return .removedAllRoutes(routesLeft: routesLeft)
+            return .removedAllRoutes(routesLeft: routesLeft, everythingElseDirect: everythingElseDirect)
         case "route.add", "route.set", "route.enable", "route.disable", "route.rm", "default":
             return .changedRoutes
         case "rule.add", "rule.rm":
@@ -132,8 +137,10 @@ struct OutsideChange: Equatable {
     /// Whether the footer still shows this change. A removal is a claim about what is
     /// installed, so it stops showing once the route count moves, the same rule as the result
     /// line under Refresh Routes (`DropdownCopy.shownRouteChange`).
-    func isShown(currentRouteCount: Int) -> Bool {
-        if case .removedAllRoutes(let left) = kind { return left == currentRouteCount }
+    func isShown(currentRouteCount: Int, everythingElseDirect: Bool = false) -> Bool {
+        if case .removedAllRoutes(let left, let direct) = kind {
+            return left == currentRouteCount && direct == everythingElseDirect
+        }
         return true
     }
 
@@ -154,9 +161,12 @@ struct OutsideChange: Equatable {
         case .switchedMode(let mode):
             let name = DropdownModePicker.label(mode, in: bundle)
             return (String(localized: "Last change: switched to \(name) via the command line, \(when)", bundle: bundle), name)
-        case .removedAllRoutes(let left) where left == 0:
+        case .removedAllRoutes(0, false):
             return (String(localized: "Last change: removed all routed addresses via the command line, \(when)", bundle: bundle), nil)
-        case .removedAllRoutes(let left):
+        case .removedAllRoutes(0, true):
+            // VPN Only's catch-alls could not be removed: something is still routed.
+            return (String(localized: "Last change: removed routed addresses via the command line, \(when); everything else still goes direct", bundle: bundle), nil)
+        case .removedAllRoutes(let left, _):
             // Some could not be removed; "all" would be false. The count is a label, so no plural.
             return (String(localized: "Last change: removed routed addresses via the command line, \(when); still routed: \(left)", bundle: bundle), nil)
         case .changedRoutes:

@@ -22,13 +22,28 @@ final class RouteManager: ObservableObject {
         // moves the line is gone for good; only hiding it let it come back, hours later, when
         // the app's own removal brought the count back to the same number.
         didSet {
-            if case .removedAllRoutes(let left)? = lastOutsideChange?.kind, left != uniqueRouteCount {
+            if case .removedAllRoutes(let left, let direct)? = lastOutsideChange?.kind,
+               left != routedAddressCount || direct != everythingElseDirect {
                 lastOutsideChange = nil
             }
         }
     }
     /// Unique kernel route count (activeRoutes may have multiple entries per destination for multi-source tracking)
     var uniqueRouteCount: Int { Set(activeRoutes.map { $0.destination }).count }
+    /// The installed routes as the dropdown's card reads them.
+    var installedRoutes: [RoutedBySource.InstalledRoute] {
+        activeRoutes.map { .init(destination: $0.destination, source: $0.source) }
+    }
+    /// The address count every screen shows (`RoutedBySource.addressCount`): VPN Only's
+    /// catch-alls are left out, as the card leaves them out. `uniqueRouteCount` stays the
+    /// kernel count for logs and the control socket.
+    var routedAddressCount: Int {
+        RoutedBySource.addressCount(installedRoutes, vpnOnly: config.routingMode == .vpnOnly)
+    }
+    /// VPN Only's catch-alls are installed, so everything not listed goes direct.
+    var everythingElseDirect: Bool {
+        RoutedBySource.everythingElseDirect(installedRoutes, vpnOnly: config.routingMode == .vpnOnly)
+    }
     @Published var lastUpdate: Date?
     @Published var config: Config = Config()
     @Published var recentLogs: [LogEntry] = []
@@ -101,8 +116,8 @@ final class RouteManager: ObservableObject {
         }
         let kind: Kind
         let at: Date
-        /// Unique destinations installed after the change: what the apply put in, or what a
-        /// removal could not take out.
+        /// Addresses routed after the change (`routedAddressCount`, so VPN Only's catch-alls
+        /// are not in it): what the apply put in, or what a removal could not take out.
         let routeCount: Int
         /// `.applied`: routes the kernel refused, plus domains that resolved to nothing when the
         /// apply resolved live (an apply from the DNS cache skips uncached domains uncounted);
@@ -2224,7 +2239,7 @@ final class RouteManager: ObservableObject {
 
         let confirmedUniqueCount = uniqueRouteCount
         let totalFailures = failedCount + batchFailureCount
-        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: confirmedUniqueCount, failedCount: totalFailures)
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: totalFailures)
 
         if failedCount > 0 {
             log(.warning, "Applied \(confirmedUniqueCount) unique routes (\(failedCount) domains failed DNS)")
@@ -2241,8 +2256,8 @@ final class RouteManager: ObservableObject {
         }
 
         // Only send notification when explicitly requested (Refresh button)
-        if sendNotification && confirmedUniqueCount > 0 {
-            NotificationManager.shared.notifyRoutesApplied(count: confirmedUniqueCount, failedCount: totalFailures)
+        if sendNotification && routedAddressCount > 0 {
+            NotificationManager.shared.notifyRoutesApplied(count: routedAddressCount, failedCount: totalFailures)
         }
 
         // Verify routes — always when batch had failures, otherwise per config
@@ -2356,15 +2371,15 @@ final class RouteManager: ObservableObject {
         guard committed else { return false }
 
         let confirmedUniqueCount = uniqueRouteCount
-        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: confirmedUniqueCount, failedCount: batchFailureCount)
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount)
         if batchFailureCount > 0 {
             log(.warning, "Applied custom routes (\(batchFailureCount) kernel failures — counts approximate until verified)")
         } else {
             log(.success, "Applied \(confirmedUniqueCount) unique custom route(s)")
         }
 
-        if sendNotification && confirmedUniqueCount > 0 {
-            NotificationManager.shared.notifyRoutesApplied(count: confirmedUniqueCount, failedCount: batchFailureCount)
+        if sendNotification && routedAddressCount > 0 {
+            NotificationManager.shared.notifyRoutesApplied(count: routedAddressCount, failedCount: batchFailureCount)
         }
 
         if config.verifyRoutesAfterApply || batchFailureCount > 0 {
@@ -2544,7 +2559,7 @@ final class RouteManager: ObservableObject {
         lastUpdate = Date()
         // A removal with nothing installed is a no-op and must not hide the last apply's result.
         if !destinations.isEmpty {
-            lastRouteChange = RouteChangeOutcome(kind: .removedAll, at: Date(), routeCount: uniqueRouteCount, failedCount: failedDests.count)
+            lastRouteChange = RouteChangeOutcome(kind: .removedAll, at: Date(), routeCount: routedAddressCount, failedCount: failedDests.count)
         }
 
         if config.manageHostsFile {
@@ -2674,7 +2689,7 @@ final class RouteManager: ObservableObject {
 
         let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Cache ")
         guard committed else { return false }
-        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: uniqueRouteCount, failedCount: batchFailureCount)
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount)
 
         if batchFailureCount > 0 {
             log(.warning, "Applied routes from cache (\(batchFailureCount) kernel failures — counts approximate)")

@@ -56,7 +56,8 @@ public enum ControlSurface {
                 if !OutsideChange.sameSettings(before, rm.config) { rm.lastOutsideChange = nil }
             } else if let change = OutsideChange.make(cmd: request.cmd, result: response.result,
                                                       before: before, after: rm.config,
-                                                      routesBefore: routesBefore, routesLeft: rm.uniqueRouteCount, at: Date()) {
+                                                      routesBefore: routesBefore, routesLeft: rm.routedAddressCount,
+                                                      everythingElseDirect: rm.everythingElseDirect, at: Date()) {
                 rm.lastOutsideChange = change
             }
             return response

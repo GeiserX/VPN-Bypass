@@ -44,7 +44,7 @@ struct MenuBarLabel: View {
         guard routeManager.isVPNConnected else {
             return String(localized: "VPN Bypass: no VPN detected, nothing is being routed")
         }
-        let count = routeManager.uniqueRouteCount
+        let count = routeManager.routedAddressCount
         guard !routeManager.activeRoutes.isEmpty else {
             return String(localized: "VPN Bypass: VPN connected but nothing is being routed")
         }
@@ -317,7 +317,7 @@ struct MenuContent: View {
         FirstRunSetup.isFresh(mode: routeManager.config.routingMode,
                               domains: routeManager.config.domains,
                               services: routeManager.config.services,
-                              installedRoutes: routeManager.uniqueRouteCount)
+                              installedRoutes: routeManager.routedAddressCount)
     }
 
     /// The first-run question shows once the app has finished its first detection, while
@@ -420,7 +420,7 @@ struct MenuContent: View {
             // What is routed, one row per entry the user added
             if let routed = RoutedBySource.make(
                 mode: statusInput.mode, config: routeManager.config,
-                routes: routeManager.activeRoutes.map { .init(destination: $0.destination, source: $0.source) },
+                routes: routeManager.installedRoutes,
                 busy: RoutedBySource.mayStillAddRoutes(running: isBusy, pending: routeManager.pendingReconnectApply)) {
                 RoutedBySourceCard(summary: routed)
             }
@@ -549,7 +549,7 @@ struct MenuContent: View {
     @ViewBuilder
     private var routeChangeLine: some View {
         if let outcome = DropdownCopy.shownRouteChange(routeManager.lastRouteChange,
-                                                       currentRouteCount: routeManager.uniqueRouteCount) {
+                                                       currentRouteCount: routeManager.routedAddressCount) {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let line = DropdownCopy.routeChangeLine(outcome, now: context.date)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -571,7 +571,7 @@ struct MenuContent: View {
         let config = routeManager.config
         return DropdownCopy.removeAllConfirmation(
             mode: RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) ? .custom : (config.routingMode == .vpnOnly ? .vpnOnly : .bypass),
-            routeCount: routeManager.uniqueRouteCount,
+            routeCount: routeManager.routedAddressCount,
             serviceCount: config.services.filter { $0.enabled }.count,
             domainCount: config.routingMode == .vpnOnly
                 ? config.inverseDomains.filter { $0.enabled }.count
@@ -732,7 +732,8 @@ struct MenuContent: View {
             // Refresh Routes says what the last apply did. What a script or an agent changed
             // through the control socket shows here instead (proposal 15 of #119).
             if let change = routeManager.lastOutsideChange,
-               change.isShown(currentRouteCount: routeManager.uniqueRouteCount) {
+               change.isShown(currentRouteCount: routeManager.routedAddressCount,
+                              everythingElseDirect: routeManager.everythingElseDirect) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     OutsideChangeLine(change: change, now: context.date) {
                         SettingsPageRequest.shared.logFilter = LogFilter(onlyControlSocket: true)
@@ -940,9 +941,16 @@ enum DropdownCopy {
     /// and never in VPN Only, where it does not reinstall the catch-all routes.
     static func removeAllConfirmation(mode: Mode, routeCount: Int, serviceCount: Int, domainCount: Int,
                                       autoApplyOnVPN: Bool, autoDNSRefresh: Bool) -> (title: String, message: String) {
-        let title = routeCount == 1
-            ? String(localized: "Stop routing the 1 address?")
-            : String(localized: "Stop routing all \(routeCount) addresses?")
+        let title: String
+        if routeCount == 0 && mode == .vpnOnly {
+            // Only the catch-alls are installed (the item is off with nothing installed), and
+            // the count leaves them out.
+            title = String(localized: "Stop sending everything else direct?")
+        } else if routeCount == 1 {
+            title = String(localized: "Stop routing the 1 address?")
+        } else {
+            title = String(localized: "Stop routing all \(routeCount) addresses?")
+        }
         let until: String
         switch (autoApplyOnVPN, autoDNSRefresh && mode != .vpnOnly) {
         case (true, true):
@@ -1036,7 +1044,7 @@ enum RouteCheck {
     /// as the first one.
     static func plan(routes: [RoutedBySource.InstalledRoute], vpnOnly: Bool,
                      isSingleAddress: (String) -> Bool) -> Plan {
-        let counted = vpnOnly ? routes.filter { !RoutedBySource.isCatchAll($0) } : routes
+        let counted = RoutedBySource.counted(routes, vpnOnly: vpnOnly)
         var sources: [String: String] = [:]
         for route in counted where sources[route.destination] == nil {
             sources[route.destination] = route.source
@@ -1162,6 +1170,25 @@ enum RoutedBySource {
             && RouteCompiler.catchAllDestinations.contains(route.destination)
     }
 
+    /// The routes every count on screen counts: in VPN Only, all but the catch-alls, which show
+    /// only as the "Everything else" line. Left installed in another mode (a switch whose
+    /// clean-up has not run yet), they are routes like any other.
+    static func counted(_ routes: [InstalledRoute], vpnOnly: Bool) -> [InstalledRoute] {
+        vpnOnly ? routes.filter { !isCatchAll($0) } : routes
+    }
+
+    /// How many addresses the app routes, as the card, the header, the result line, the
+    /// status sentence and the Status page all show it: each destination once, without VPN
+    /// Only's catch-alls.
+    static func addressCount(_ routes: [InstalledRoute], vpnOnly: Bool) -> Int {
+        Set(counted(routes, vpnOnly: vpnOnly).map(\.destination)).count
+    }
+
+    /// VPN Only's catch-alls are installed: everything not listed goes direct.
+    static func everythingElseDirect(_ routes: [InstalledRoute], vpnOnly: Bool) -> Bool {
+        vpnOnly && routes.contains(where: isCatchAll)
+    }
+
     static func title(_ mode: DropdownCopy.Mode) -> String {
         switch mode {
         case .bypass: return String(localized: "Skipping the VPN")
@@ -1205,9 +1232,8 @@ enum RoutedBySource {
             }
         }
 
-        // Only VPN Only shows its catch-alls as the "Everything else" line. Left installed in
-        // another mode (a switch whose clean-up has not run yet), they are routes like any other.
-        let counted = mode == .vpnOnly ? routes.filter { !isCatchAll($0) } : routes
+        // Only VPN Only shows its catch-alls, as the "Everything else" line.
+        let counted = Self.counted(routes, vpnOnly: mode == .vpnOnly)
         // A destination can be recorded more than once for a source; count it once.
         var bySource: [String: [String]] = [:]
         var seen: Set<String> = []
@@ -1243,10 +1269,10 @@ enum RoutedBySource {
                             destinations: leftover, expectsRoutes: false))
         }
 
-        let everythingElseDirect = mode == .vpnOnly && routes.contains(where: isCatchAll)
+        let everythingElseDirect = Self.everythingElseDirect(routes, vpnOnly: mode == .vpnOnly)
         if rows.isEmpty && !everythingElseDirect { return nil }
         return Summary(title: title(mode),
-                       routeCount: Set(counted.map(\.destination)).count,
+                       routeCount: addressCount(routes, vpnOnly: mode == .vpnOnly),
                        rows: Array(rows.prefix(visibleRows)),
                        hiddenRows: max(0, rows.count - visibleRows),
                        everythingElseDirect: everythingElseDirect)
@@ -1456,7 +1482,8 @@ struct DropdownStatus: Equatable {
         /// Enabled entries on the list the mode routes: Bypass domains, or VPN Only entries.
         var enabledDomains: Int
         var enabledRules: Int
-        /// Unique destinations installed now.
+        /// Addresses routed now, counted as the routes card counts them
+        /// (`RoutedBySource.addressCount`): VPN Only's catch-alls are not in it.
         var installedRoutes: Int
         var pending: RouteManager.PendingReconnectApply?
         var lastRouteChange: RouteManager.RouteChangeOutcome?
@@ -1466,6 +1493,9 @@ struct DropdownStatus: Equatable {
         /// A fresh install: Bypass mode, an empty domain list and every service off
         /// (`FirstRunSetup.isFresh`). The dropdown asks what should skip the VPN.
         var nothingConfigured: Bool = false
+        /// VPN Only's catch-alls are installed. They are not counted, but they are routed, so
+        /// with them in place the app is routing even when `installedRoutes` is 0.
+        var everythingElseDirect: Bool = false
     }
 
     let pill: String
@@ -1482,7 +1512,9 @@ struct DropdownStatus: Equatable {
             // Only Bypass keeps its routes across a drop on purpose. VPN Only and Custom tear
             // everything down, so anything still installed is a removal that failed.
             let sentence: String
-            if input.installedRoutes == 0 {
+            if input.installedRoutes == 0 && input.everythingElseDirect {
+                sentence = String(localized: "Everything else still goes direct: removing that failed.")
+            } else if input.installedRoutes == 0 {
                 sentence = String(localized: "Nothing is routed until a VPN connects.")
             } else if input.mode == .bypass {
                 sentence = input.installedRoutes == 1
@@ -1531,6 +1563,8 @@ struct DropdownStatus: Equatable {
                     : String(localized: "Re-applying routes now.")
                 let note: String
                 switch input.installedRoutes {
+                case 0 where input.everythingElseDirect:
+                    note = String(localized: "Everything else still goes direct, as before the drop.")
                 case 0: note = String(localized: "Nothing is routed until then.")
                 case 1: note = String(localized: "The 1 address routed before the drop stays routed.")
                 default: note = String(localized: "The \(input.installedRoutes) addresses routed before the drop stay routed.")
@@ -1552,7 +1586,7 @@ struct DropdownStatus: Equatable {
                                   sentence: String(localized: "Nothing skips the VPN yet."),
                                   note: scheduledNote, facts: [])
         }
-        if input.installedRoutes == 0 {
+        if input.installedRoutes == 0 && !input.everythingElseDirect {
             return DropdownStatus(pill: String(localized: "NOTHING ROUTED"), tone: .warn,
                                   headline: String(localized: "\(name) connected"),
                                   sentence: String(localized: "Nothing is routed right now."),
