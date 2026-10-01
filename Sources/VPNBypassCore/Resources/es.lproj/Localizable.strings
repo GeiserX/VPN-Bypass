@@ -529,5 +529,6 @@
 "%@ routed %@, %lld failed." = "Enrutado %2$@: %1$@, %3$lld fallaron.";
 "Removed all routed addresses %@." = "Se quitaron todas las direcciones enrutadas %@.";
 "Removed routed addresses %@, %lld could not be removed." = "Se quitaron las direcciones enrutadas %1$@; %2$lld no se pudieron quitar.";
+"Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details." = "Los errores son direcciones que el sistema rechazó y, en una aplicación que resolvió el DNS, dominios que no se resolvieron. Ajustes > Registros tiene los detalles.";
 "Stop routing the 1 address?" = "¿Dejar de enrutar la única dirección?";
 "Stop routing all %lld addresses?" = "¿Dejar de enrutar las %lld direcciones?";

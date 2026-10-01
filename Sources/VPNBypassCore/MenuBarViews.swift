@@ -528,7 +528,7 @@ struct MenuContent: View {
                     Spacer(minLength: 0)
                 }
             }
-            .help(String(localized: "Failures are routes the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details."))
+            .help(DropdownCopy.routeChangeHelp)
         }
     }
 
@@ -867,6 +867,11 @@ enum DropdownCopy {
         guard let outcome else { return nil }
         if outcome.kind == .removedAll && outcome.routeCount != currentRouteCount { return nil }
         return outcome
+    }
+
+    /// The tooltip on the result line. Its failed count counts addresses, so the tooltip says so.
+    static var routeChangeHelp: String {
+        String(localized: "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details.")
     }
 
     /// The line under Refresh Routes. `isProblem` turns its mark amber.

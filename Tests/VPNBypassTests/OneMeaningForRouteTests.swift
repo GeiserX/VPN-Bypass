@@ -50,6 +50,7 @@ final class OneMeaningForRouteTests: XCTestCase {
             DropdownCopy.routeChangeLine(failed, now: now).text,
             DropdownCopy.routeChangeLine(removed, now: now).text,
             DropdownCopy.routeChangeLine(removedSome, now: now).text,
+            DropdownCopy.routeChangeHelp,
             DropdownCopy.removeAllConfirmation(mode: .bypass, routeCount: n, serviceCount: 1, domainCount: 0,
                                                autoApplyOnVPN: false, autoDNSRefresh: false).title,
             RouteCheck.scope(checked: 0, singleAddresses: 0, routeCount: n).text,
@@ -74,7 +75,7 @@ final class OneMeaningForRouteTests: XCTestCase {
     func testNoKernelCountSaysRoute() {
         for n in [1, 62] {
             let texts = kernelCountTexts(n)
-            XCTAssertGreaterThan(texts.count, 18, "a count went missing from the list")
+            XCTAssertGreaterThan(texts.count, 19, "a count went missing from the list")
             for text in texts {
                 // "routed" is the verb and stays; the noun "route" or "routes" may not appear.
                 XCTAssertNil(text.range(of: #"\b[Rr]outes?\b"#, options: .regularExpression), "n=\(n): \(text)")
@@ -149,6 +150,7 @@ final class OneMeaningForRouteTests: XCTestCase {
         "VPN Bypass: VPN connected but nothing is being routed",
         "No addresses to route, checked %@.", "%@ routed %@, none failed.", "%@ routed %@, %lld failed.",
         "Removed all routed addresses %@.", "Removed routed addresses %@, %lld could not be removed.",
+        "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details.",
         "Stop routing the 1 address?", "Stop routing all %lld addresses?",
         "Nothing to check: the only address is a range, which ping cannot test",
         "Nothing to check: all %lld addresses are ranges, which ping cannot test",

@@ -529,5 +529,6 @@
 "%@ routed %@, %lld failed." = "Routage %2$@ : %1$@, %3$lld en échec.";
 "Removed all routed addresses %@." = "Toutes les adresses routées ont été retirées %@.";
 "Removed routed addresses %@, %lld could not be removed." = "Adresses routées retirées %1$@ ; %2$lld n'ont pas pu l'être.";
+"Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details." = "Les échecs sont des adresses que le système a refusées et, lors d'une application qui a résolu le DNS, des domaines qui n'ont pas été résolus. Réglages > Journaux donne les détails.";
 "Stop routing the 1 address?" = "Ne plus router la seule adresse ?";
 "Stop routing all %lld addresses?" = "Ne plus router les %lld adresses ?";

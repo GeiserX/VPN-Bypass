@@ -529,5 +529,6 @@
 "%@ routed %@, %lld failed." = "%1$@ routed %2$@, %3$lld failed.";
 "Removed all routed addresses %@." = "Removed all routed addresses %@.";
 "Removed routed addresses %@, %lld could not be removed." = "Removed routed addresses %1$@, %2$lld could not be removed.";
+"Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details." = "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details.";
 "Stop routing the 1 address?" = "Stop routing the 1 address?";
 "Stop routing all %lld addresses?" = "Stop routing all %lld addresses?";
