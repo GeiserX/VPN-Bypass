@@ -18,6 +18,17 @@ python3 scripts/check-localizations.py
 
 The compiler only sees literals. A literal passed through a `String` parameter, or returned as a `String`, is shown as typed and never translated. Take a `LocalizedStringKey` instead, and the literal becomes a key.
 
+## Screenshots
+
+The images in `docs/images/screenshots/` are offscreen renders of the real views with fixed, made-up state: WireGuard on `utun4`, four services and two domains, addresses from the documentation ranges. `Tests/VPNBypassTests/DocScreenshotsTests.swift` draws them and is skipped unless `VPNB_DOC_SCREENSHOTS` names an output directory:
+
+```bash
+VPNB_DOC_SCREENSHOTS=/tmp/shots swift test --filter DocScreenshotsTests
+pngquant --quality 95-100 --speed 1 --force --ext .png /tmp/shots/*.png
+```
+
+Run it on a Mac with a 2x display, since the images are 2x. Each window draws as the key window of the active app, in the dark appearance, so the traffic lights and switches are in colour even when the test runs over ssh. A test fails if the close button comes out grey. Copy the files over the old ones and read each one before you commit it. Re-render after a change to any view the images show.
+
 ## Contributing
 
 Contributions are welcome! Here's how you can help:

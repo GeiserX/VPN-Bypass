@@ -56,7 +56,7 @@ Everything lives in the dropdown: the VPN it found, a pill that says whether rou
 
 <div class="vb-gallery" markdown>
 <figure markdown>
-![The dropdown in Bypass mode: VPN Connected over WireGuard, the pill reads ON, four services and two domains are routed around the VPN](images/screenshots/menu-bar.png)
+![The dropdown in Bypass mode: WireGuard connected, the pill reads ON, and four services and two domains skip the VPN, each with how many addresses it routes](images/screenshots/menu-bar.png)
 <figcaption>Bypass mode</figcaption>
 </figure>
 <figure markdown>
@@ -64,7 +64,7 @@ Everything lives in the dropdown: the VPN it found, a pill that says whether rou
 <figcaption>First run</figcaption>
 </figure>
 <figure markdown>
-![The dropdown in VPN Only mode: the Mode switch on VPN Only, the pill reads ON, and the catch-all routes that send everything but the listed domains direct](images/screenshots/vpn-only.png)
+![The dropdown in VPN Only mode: the Mode control on VPN Only, the pill reads ON, two domains go through the VPN, and everything else goes direct](images/screenshots/vpn-only.png)
 <figcaption>VPN Only mode</figcaption>
 </figure>
 </div>
@@ -73,7 +73,7 @@ Everything lives in the dropdown: the VPN it found, a pill that says whether rou
 
 Status comes first and says whether it is working right now: the helper, the VPN and gateway, the routes, DNS, the tunnels and recent warnings. Bypass and VPN Only use the Domains and Services tabs. Custom mode swaps them for Rules and Routes. General holds launch at login, `/etc/hosts` and notifications; Logs and Info are for debugging. See [Settings](usage.md#settings).
 
-![The Services tab: built-in packs such as Telegram, YouTube, Spotify and WhatsApp, each with a switch, four of them on](images/screenshots/services.png){ width="580" }
+![The Services tab: the four services that are on, Telegram, WhatsApp, YouTube and Spotify, listed first under On, then the other built-in services, each with a switch](images/screenshots/services.png){ width="580" }
 
 <div class="vb-gallery vb-gallery--2" markdown>
 <figure markdown>
@@ -81,7 +81,7 @@ Status comes first and says whether it is working right now: the helper, the VPN
 <figcaption>Rules, first match wins</figcaption>
 </figure>
 <figure markdown>
-![The Routes tab in Custom mode: Direct, the detected VPN, and a SOCKS5 proxy route](images/screenshots/routes.png)
+![The Routes tab in Custom mode: Direct, the detected VPN, and a SOCKS5 proxy route with its local address and copy buttons](images/screenshots/routes.png)
 <figcaption>Routes: where traffic can exit</figcaption>
 </figure>
 </div>
