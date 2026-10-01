@@ -26,6 +26,9 @@ final class RouteManager: ObservableObject {
     @Published var currentNetworkSSID: String?
     /// The last Verify Routes, or nil before the first one and after routes are removed.
     @Published var lastRouteCheck: RouteCheck.Run?
+    /// Bumped when a check starts and when routes are removed, so a check still pinging then
+    /// does not publish a card for routes that are gone.
+    private var routeCheckGeneration = 0
     /// The last check's results by address, for the Info page.
     var routeVerificationResults: [String: RouteVerificationResult] {
         Dictionary((lastRouteCheck?.results ?? []).map { ($0.destination, $0) }, uniquingKeysWith: { first, _ in first })
@@ -1003,7 +1006,7 @@ final class RouteManager: ObservableObject {
                 // Whatever teardown retained is a genuine failed removal (see removeAllRoutes).
                 failedCount = activeRoutes.count
             }
-            lastRouteCheck = nil
+            clearRouteCheck()
             lastTailscaleSelfFingerprint = nil
             vpnGateway = nil
             // Notify after cleanup so the notification reflects the ACTUAL state — and names
@@ -2493,7 +2496,7 @@ final class RouteManager: ObservableObject {
         } else {
             activeRoutes.removeAll()
         }
-        lastRouteCheck = nil
+        clearRouteCheck()
         dnsCache.removeAll()
         lastUpdate = Date()
         // A removal with nothing installed is a no-op and must not hide the last apply's result.
@@ -4572,7 +4575,8 @@ final class RouteManager: ObservableObject {
     /// result, so the card's "Show all results in Logs" has them all.
     func verifyRoutes() async {
         log(.info, "Verifying routes...")
-        lastRouteCheck = nil
+        clearRouteCheck()
+        let generation = routeCheckGeneration
 
         // A Custom service rule records its routes under the service id; show the name.
         let serviceNames = Dictionary(config.services.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
@@ -4598,6 +4602,10 @@ final class RouteManager: ObservableObject {
                 )
             }
         }
+        guard generation == routeCheckGeneration else {
+            log(.info, "Route check: result dropped, routes were removed or another check started while it ran")
+            return
+        }
         lastRouteCheck = RouteCheck.Run(plan: plan, results: results, at: Date())
 
         let checked = results.count
@@ -4612,6 +4620,12 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Drops the card, and the result of any check still running.
+    func clearRouteCheck() {
+        routeCheckGeneration += 1
+        lastRouteCheck = nil
+    }
+
     func verifyRoute(_ destination: String) async -> RouteVerificationResult {
         let startTime = Date()
         

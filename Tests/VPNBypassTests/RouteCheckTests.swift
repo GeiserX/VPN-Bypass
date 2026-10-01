@@ -237,6 +237,29 @@ final class VerifyRoutesLoggingTests: XCTestCase {
                        "Route check: nothing to check, all 2 routes are address ranges, which ping cannot test")
     }
 
+    /// Routes removed while a check is still pinging: the check must not bring the card back.
+    func testACheckClearedWhileRunningPublishesNothing() async throws {
+        let rm = RouteManager.shared
+        rm.config.routingMode = .bypass
+        rm.activeRoutes = [route("127.0.0.1", "Loopback")]
+        rm.recentLogs = []
+
+        let check = Task { await rm.verifyRoutes() }
+        // verifyRoutes logs before its first await, so once the line is there it is waiting on ping.
+        var spins = 0
+        while !rm.recentLogs.contains(where: { $0.message == "Verifying routes..." }) {
+            spins += 1
+            XCTAssertLessThan(spins, 10_000, "the check never started")
+            await Task.yield()
+        }
+        rm.clearRouteCheck()
+        await check.value
+
+        XCTAssertNil(rm.lastRouteCheck)
+        XCTAssertEqual(rm.recentLogs.first?.message,
+                       "Route check: result dropped, routes were removed or another check started while it ran")
+    }
+
     /// No routes, no card.
     func testNoRoutesNoCard() async {
         let rm = RouteManager.shared
