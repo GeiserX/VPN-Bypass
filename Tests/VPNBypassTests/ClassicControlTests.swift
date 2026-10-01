@@ -542,6 +542,9 @@ final class ClassicControlTests: XCTestCase {
         let resp = await send("refresh")
         XCTAssertFalse(resp.ok)
         XCTAssertEqual(resp.error?.code, "helper_not_ready")
+        // The helper's Install button lives on the Status page, so the socket sends the user there.
+        XCTAssertTrue(resp.error?.message.hasSuffix("repair it in Settings > Status") ?? false,
+                      resp.error?.message ?? "no error")
     }
 
     /// The answer is a constant, so check the refresh really ran: with no VPN it logs that

@@ -19,7 +19,7 @@ Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow he
 
 ## Settings
 
-Click the gear icon to access settings. The pages are in a toolbar under the title bar, and which ones appear depends on the mode. Bypass: Domains, Services, General, Logs, Info. VPN Only: Domains, General, Logs, Info. Custom: Rules, Routes, General, Logs, Info.
+Click the gear icon to access settings. The pages are in a toolbar under the title bar, and which ones appear depends on the mode. Status comes first in every mode and is the page Settings opens on. Bypass: Status, Domains, Services, General, Logs, Info. VPN Only: Status, Domains, General, Logs, Info. Custom: Status, Rules, Routes, General, Logs, Info.
 
 The routing mode is the Mode menu at the right end of the title bar, for example "Mode Bypass". Picking another mode in it opens a sheet that lists the three modes, each with one sentence and what your lists hold for it ("4 services and 2 domains"). Nothing changes until you click Switch, and the title bar keeps showing the mode in use until then.
 
@@ -37,9 +37,18 @@ Rules (Custom mode): the ordered rule list (first match wins) mapping domains/su
 
 Routes (Custom mode): your egresses: auto-detected Direct + VPN links, plus any proxy or Tailscale-peer routes you add.
 
-General: launch at login, auto-apply on connect, `/etc/hosts` management, route verification, notification preferences, import/export, and network status (VPN type, interface, gateway, Wi-Fi SSID).
+Status: whether the app is working right now, on one page. A line at the top gives the verdict ("Working", "Not working", "No VPN connected") and the same sentence as the dropdown, for example "4 services and 2 domains skip the VPN. 62 routes applied 23 s ago, none failed." Under it:
 
-Logs: the last 200 log entries, newest first, under Route Health. The segmented control above the list shows All, Warnings (warnings and errors) or Errors, and the search field keeps the entries whose text contains what you type, ignoring case and accents, with the match marked. A line above the list says how many entries match, for example "3 of 200 entries". Copy copies only the entries shown. Clear removes every entry, including the ones the filter hides.
+- Helper: the privileged helper's state and version. When it is not ready, its box turns red and the row has an Install, Update or Retry button. This is the page the dropdown's Fix… button opens.
+- Connection: the VPN and its interface, the normal connection (Wi-Fi network and gateway), and which interface carries the default route.
+- Routes: what the last apply did ("62 routes, 23 s ago, none failed"), what the routes come from ("4 services, 2 domains"), and the last Verify Routes ("10 of 62 checked, all reachable, 4 min ago"), with a Verify button.
+- DNS: the resolver used outside the VPN, when DNS was last refreshed and when it is next due, with Refresh Now.
+- Tunnels: every tunnel that is up, each with one sentence ("The app acts on this one. It carries the default route.", "Never touched." for Tailscale), the Act on menu that pins one tunnel, and how many kernel routes carry the app's tag. The tunnels are read when the page opens, when the VPN changes, and on Refresh.
+- Recent warnings: the three newest warnings and errors. Show in Log opens Logs with Warnings selected.
+
+General: settings only. Launch at login, auto-apply on connect, `/etc/hosts` management, route verification, the DNS refresh schedule, fallback DNS, notification preferences, the SOCKS5 proxy, and import/export.
+
+Logs: the last 200 log entries, newest first. The segmented control above the list shows All, Warnings (warnings and errors) or Errors, and the search field keeps the entries whose text contains what you type, ignoring case and accents, with the match marked. A line above the list says how many entries match, for example "3 of 200 entries". Copy copies only the entries shown. Clear removes every entry, including the ones the filter hides.
 
 Info: version and helper status.
 
@@ -93,7 +102,7 @@ vpnb logs limit=20 level=error
 - Enabling something that is already on, or disabling something already off, succeeds and changes nothing.
 - A domain or service change is saved before `vpnb` returns. The routes for that entry are added or removed a moment later, and only while a VPN is connected and the app is in the mode that uses that list: Bypass mode for the Bypass list and the services, VPN Only mode for the VPN Only list. Run `vpnb routes.active` or `vpnb logs` to see them.
 - `routes.active` lists the routes the app has installed; `source=<domain or service name>` keeps one source. `routes.clear` is Remove All Routes… in the dropdown's "…" menu, without the question, and the routes it removes come back at the next refresh, VPN reconnect or DNS refresh.
-- `refresh` is the Refresh Routes button and `dns.refresh` is Settings > General > Refresh Now. Both start the work and return at once. `refresh` fails with `helper_not_ready` when the privileged helper is not ready.
+- `refresh` is the Refresh Routes button and `dns.refresh` is Settings > Status > Refresh Now. Both start the work and return at once. `refresh` fails with `helper_not_ready` when the privileged helper is not ready.
 - `vpnb status` prints the running app's version as `app: <version>` (the `appVersion` field on the socket).
 - `logs` prints the newest entries first. It takes `limit` from 1 to 200 (default 50) and `level` as `info`, `success`, `warning` or `error`.
 - An app older than 4.9.0 answers these commands with `unknown_command`.

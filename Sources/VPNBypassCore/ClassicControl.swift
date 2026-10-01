@@ -302,7 +302,7 @@ enum ClassicControl {
         let helper = HelperManager.shared
         guard helper.isHelperInstalled else {
             return fail("helper_not_ready",
-                        "the privileged helper is not ready (\(helper.helperState.statusText)); repair it in Settings > General")
+                        "the privileged helper is not ready (\(helper.helperState.statusText)); repair it in Settings > Status")
         }
         Task { await rm.detectAndApplyRoutesAsync(sendNotification: false) }
         return ok(ControlResult(message: "refresh started"))

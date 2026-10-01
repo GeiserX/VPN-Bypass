@@ -1709,7 +1709,7 @@ final class RouteManager: ObservableObject {
             // The most prominent button in the menu must never fail silently — this was a
             // click that did nothing, with the only evidence in a log nobody reads.
             NotificationManager.shared.notifyEnforcementFailed(
-                reason: String(localized: "Can't refresh: the privileged helper is not running. Open Settings → General to repair it.")
+                reason: String(localized: "Can't refresh: the privileged helper is not running. Open Settings → Status to repair it.")
             )
             return
         }
