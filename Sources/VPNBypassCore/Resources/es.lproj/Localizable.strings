@@ -468,3 +468,22 @@
 "No errors." = "No hay errores.";
 "Copy the entries shown" = "Copiar las entradas que se ven";
 "Remove every entry, including any the filter hides" = "Borrar todas las entradas, también las que oculta el filtro";
+
+/* ===== Barra de menús: qué comprobó Verificar rutas ===== */
+"Route check" = "Comprobación de rutas";
+"Nothing to check: the only route is an address range, which ping cannot test" = "Nada que comprobar: la única ruta es un rango de direcciones, y ping no puede comprobar rangos";
+"Nothing to check: all %lld routes are address ranges, which ping cannot test" = "Nada que comprobar: las %lld rutas son rangos de direcciones, y ping no puede comprobar rangos";
+"Checked the only route" = "Comprobada la única ruta";
+"Checked all %lld routes" = "Comprobadas las %lld rutas";
+"Checked %lld of %lld routes" = "Comprobadas %1$lld de %2$lld rutas";
+"Checked 1 of %lld routes" = "Comprobada 1 de %lld rutas";
+"(single addresses only)" = "(solo direcciones sueltas)";
+"All reachable." = "Todas son accesibles.";
+"1 not reachable" = "1 no accesible";
+"%lld not reachable" = "%lld no accesibles";
+"1 reachable" = "1 accesible";
+"%lld reachable" = "%lld accesibles";
+"%lld ms" = "%lld ms";
+"%lld to %lld ms" = "de %1$lld a %2$lld ms";
+"Show the result in Logs" = "Ver el resultado en Registros";
+"Show all %lld results in Logs" = "Ver los %lld resultados en Registros";

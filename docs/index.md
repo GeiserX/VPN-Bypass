@@ -110,7 +110,7 @@ flowchart LR
 - The app watches the network interfaces and running processes. A tunnel counts as a VPN when it is up and has an IPv4 address in a VPN range; Tailscale counts only when it is an exit node. See [Supported VPN types](how-it-works.md#supported-vpn-types).
 - When the VPN connects, disconnects, or the network changes, the routes are rebuilt. Domains are re-resolved on a schedule, so a route follows a CDN when its addresses rotate.
 - With several tunnels up, Bypass and VPN Only act on one and leave the others alone; in Custom mode a VPN route can name a specific tunnel. See [Other VPNs and proxies](coexistence.md).
-- Route verification, when on, pings the routed destinations and shows which ones answer.
+- Route verification pings up to 10 routed single addresses, shows which ones answer, and says how many of the routes it checked.
 - A proxy route is a listener on `127.0.0.1` that forwards to the proxy you gave it; a Tailscale peer route sends traffic out through a device already in your tailnet. The app runs no VPN of its own.
 
 ## What it does not do

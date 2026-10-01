@@ -21,7 +21,7 @@
 1. **VPN Detection**: Monitors network interfaces and running processes to detect VPN type
 2. **Gateway Detection**: Identifies your local gateway (Wi-Fi/Ethernet router)
 3. **Route Management**: A small privileged helper adds/removes host routes to steer traffic per your mode — around the VPN (Bypass), through it (VPN Only), or to the route a rule selects (Custom). The helper is cdhash-pinned to this app and uses no Network Extension entitlements.
-4. **Route Verification**: Optionally pings routes to verify they're working
+4. **Route Verification**: Pings up to 10 routed single addresses (ping cannot test a range) to check they answer, after an apply when that option is on or when the apply had failures, or from Verify Routes in the menu
 5. **DNS Bypass**: Optionally adds entries to `/etc/hosts` to bypass VPN DNS
 
 ### VPN Detection Logic
