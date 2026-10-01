@@ -50,6 +50,8 @@ final class DocScreenshotsTests: XCTestCase {
         Self.serveBrandMark(true)
         XCTAssertNotNil(Bundle.main.image(forResource: "menubar-icon-active"), "the title bar's mark loads")
         Self.drawAsFrontmost(true)
+        XCTAssertNotEqual(NSApplication.shared.appearance?.name, .darkAqua,
+                          "an earlier render's tearDown left the app forced dark")
         savedAppearance = NSApplication.shared.appearance
         NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
 
@@ -67,7 +69,6 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertNil(Bundle.main.image(forResource: "menubar-icon-active"),
                      "the test runner's own bundle answers again once the renders are done")
         NSApplication.shared.appearance = savedAppearance
-        XCTAssertNil(NSApplication.shared.appearance, "the app follows the system appearance again")
         if startedListener { ProxyListenerManager.shared.stopAll() }
         startedListener = false
         windows.forEach { $0.orderOut(nil) }
