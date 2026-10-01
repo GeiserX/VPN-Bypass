@@ -279,6 +279,34 @@ final class VerifyRoutesLoggingTests: XCTestCase {
         XCTAssertFalse(rm.isCheckingRoutes)
     }
 
+    /// Settings > Status shows a check it did not start, such as one after an apply: a spinner,
+    /// "Checking now…" and a greyed-out Verify while it pings, then the result.
+    func testTheStatusPageShowsACheckItDidNotStart() async {
+        let rm = RouteManager.shared
+        rm.config.routingMode = .bypass
+        rm.activeRoutes = [route("127.0.0.1", "Loopback")]
+        rm.recentLogs = []
+
+        let check = Task { await rm.verifyRoutes() }
+        await waitForStart(rm)
+        XCTAssertEqual(StatusPage.lastCheck(rm, now: Date()),
+                       .init(line: .init(text: "Checking now…"), isChecking: true, canVerify: false))
+        await check.value
+        let done = StatusPage.lastCheck(rm, now: Date())
+        XCTAssertFalse(done.isChecking)
+        XCTAssertTrue(done.canVerify)
+        XCTAssertTrue(done.line.text.hasPrefix("1 of 1 checked, all reachable"), done.line.text)
+    }
+
+    /// No routes: nothing to verify, and no spinner.
+    func testTheStatusPageCannotVerifyWithNoRoutes() {
+        let rm = RouteManager.shared
+        rm.activeRoutes = []
+        rm.clearRouteCheck()
+        XCTAssertEqual(StatusPage.lastCheck(rm, now: Date()),
+                       .init(line: .init(text: "Not checked yet"), isChecking: false, canVerify: false))
+    }
+
     /// A check dropped by a newer one must not turn the newer one's spinner off when it ends.
     /// The newer one pings a TEST-NET address that never answers, so it is still running then.
     func testADroppedCheckLeavesTheNewerSpinnerOn() async {

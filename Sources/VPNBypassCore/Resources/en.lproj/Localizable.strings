@@ -213,6 +213,7 @@
 "%lld rules" = "%lld rules";
 "Last check" = "Last check";
 "Not checked yet" = "Not checked yet";
+"Checking now…" = "Checking now…";
 "%lld of %lld checked, all reachable, %@" = "%1$lld of %2$lld checked, all reachable, %3$@";
 "%lld of %lld checked, %lld not reachable, %@" = "%1$lld of %2$lld checked, %3$lld not reachable, %4$@";
 "Verify" = "Verify";
