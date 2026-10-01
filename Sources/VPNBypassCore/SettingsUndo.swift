@@ -124,6 +124,9 @@ final class SettingsUndo: ObservableObject {
     /// How many 100 ms polls an undo waits for a running route operation (10 s). Tests
     /// shorten it.
     var gateWaitPolls = 100
+    /// Moves on with every recorded or dropped change, so an undo that outlasted its wait
+    /// puts its line back only if nothing replaced or dropped it meanwhile.
+    private var generation = 0
 
     /// `last` seeds the line, for a rendered screenshot.
     init(routeManager: RouteManager? = nil, last: UndoableChange? = nil) {
@@ -132,12 +135,14 @@ final class SettingsUndo: ObservableObject {
     }
 
     func record(_ change: UndoableChange) {
+        generation += 1
         undoManager?.removeAllActions(withTarget: self)
         last = change
         register()
     }
 
     func clear() {
+        generation += 1
         undoManager?.removeAllActions(withTarget: self)
         last = nil
     }
@@ -156,10 +161,12 @@ final class SettingsUndo: ObservableObject {
     /// route methods skip their work while another operation holds the gate. So while one
     /// runs this waits for it (at most 10 s, as long as a delete's cleanup can take), then
     /// puts the change back. If it is still running then, the change stays on its line and
-    /// in Edit > Undo: putting it back now would change the config with no route work.
+    /// in Edit > Undo (unless a newer change or a page or mode switch dropped it meanwhile):
+    /// putting it back now would change the config with no route work.
     private func perform() {
         guard let change = last else { return }
         last = nil
+        let started = generation
         guard routeManager.isApplyingRoutes else {
             finish(change)
             return
@@ -171,7 +178,7 @@ final class SettingsUndo: ObservableObject {
                 polls += 1
             }
             guard !routeManager.isApplyingRoutes else {
-                if last == nil {
+                if generation == started {
                     last = change
                     register()
                 }

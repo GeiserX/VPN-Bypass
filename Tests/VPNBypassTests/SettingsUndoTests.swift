@@ -417,6 +417,28 @@ final class SettingsUndoManagerTests: RouteManagerTestCase {
         XCTAssertEqual(undo.undoneCount, 1)
     }
 
+    /// A page or mode switch while that undo waits drops it for good: the line does not come
+    /// back when the wait ends.
+    func testAWaitingUndoDroppedByAPageSwitchStaysDropped() {
+        let ids = rm.config.services.map(\.id)
+        for i in rm.config.services.indices { rm.config.services[i].enabled = true }
+        let manager = UndoManager()
+        let undo = SettingsUndo(routeManager: rm)
+        undo.undoManager = manager
+        undo.gateWaitPolls = 2
+        undo.record(.servicesSwitched(ids: ids, on: true))
+        settle()
+        XCTAssertTrue(rm.tryAcquireRouteOperationForTests())
+        defer { rm.releaseRouteOperationForTests() }
+
+        undo.undoLast()
+        undo.clear()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        XCTAssertNil(undo.last, "the dropped change must not come back on the line")
+        XCTAssertFalse(manager.canUndo)
+        XCTAssertTrue(rm.config.services.allSatisfy(\.enabled))
+    }
+
     func testClearingDropsTheLineAndTheUndoMenuItem() {
         let manager = UndoManager()
         let undo = SettingsUndo(routeManager: rm)
