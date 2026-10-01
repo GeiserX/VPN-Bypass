@@ -99,6 +99,49 @@ struct MenuBarLabel: View {
     }
 }
 
+// MARK: - Dropdown opens
+
+/// Runs `action` each time the window holding it becomes key. A MenuBarExtra(.window) reuses one
+/// window and one view tree for the app's life: `.onAppear` runs on the first open only and
+/// `.onDisappear` never runs, but the window becomes key on every open. Use this, not
+/// `.onAppear`, for anything the dropdown should do each time it opens.
+struct WindowBecameKeyObserver: NSViewRepresentable {
+    let action: () -> Void
+
+    func makeNSView(context: Context) -> ObserverView {
+        let view = ObserverView()
+        view.action = action
+        return view
+    }
+
+    func updateNSView(_ view: ObserverView, context: Context) {
+        view.action = action
+    }
+
+    final class ObserverView: NSView {
+        var action: (() -> Void)?
+        private var observer: NSObjectProtocol?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+            guard let window else { return }
+            observer = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.action?() }
+            }
+            // The first open can make the window key before this view is in it.
+            if window.isKeyWindow { action?() }
+        }
+
+        deinit {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+        }
+    }
+}
+
 // MARK: - Branded App Name View (for use in dropdowns/settings)
 
 struct BrandedAppName: View {
@@ -209,13 +252,6 @@ struct MenuContent: View {
     @State private var quickAddError: AddDomainFeedback?
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
-    /// A test hosting the dropdown passes false, so the real VPN check does not run against
-    /// the shared RouteManager after the test ends.
-    private let refreshesOnOpen: Bool
-
-    init(refreshesOnOpen: Bool = true) {
-        self.refreshesOnOpen = refreshesOnOpen
-    }
 
     private let accentGradient = LinearGradient(
         colors: [Theme.success, Theme.successDark],
@@ -271,10 +307,9 @@ struct MenuContent: View {
         }
         .padding(16)
         .frame(width: 340)
-        .onAppear {
-            // Refresh VPN status when menu opens
-            if refreshesOnOpen { routeManager.refreshStatus() }
-        }
+        // Refresh the VPN status on every open. Not `.onAppear`: a MenuBarExtra(.window) keeps
+        // one window and one view for the app's life, so `.onAppear` runs on the first open only.
+        .background(WindowBecameKeyObserver { routeManager.refreshStatus() })
     }
 
     /// Nothing configured yet (`FirstRunSetup.isFresh`), read now.

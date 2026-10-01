@@ -18,6 +18,8 @@ Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow he
 - after a change made through `vpnb` or an [MCP server](mcp-server.md), a line at the foot that names it, for example "Last change: added en.wikipedia.org via the command line, 2 min ago". Click it to open Logs showing only the lines that came through the control socket. A change you make in the app removes the line;
 - the gear that opens Settings and the power button that quits the app.
 
+Each time you open the dropdown, the app checks the VPN again and puts back any route macOS dropped, so the dropdown shows the state as it is now. It also runs the same check every 30 seconds, whether the dropdown is open or not.
+
 While the dropdown is open, ⌘, opens Settings and ⌘Q quits. ⌘R refreshes routes only while the Refresh Routes button shows, which is when a VPN is connected; with no VPN, on first run and during the first check it does nothing. Holding ⌘R refreshes once. The "…" menu lists each shortcut next to its item, and the gear's and power button's tooltips name theirs.
 
 ![The dropdown in Bypass mode: VPN Connected over WireGuard, the pill reads ON, four services and two domains are routed around the VPN](images/screenshots/menu-bar.png){ width="340" }
