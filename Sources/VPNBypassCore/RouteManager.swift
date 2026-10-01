@@ -24,7 +24,12 @@ final class RouteManager: ObservableObject {
     @Published var config: Config = Config()
     @Published var recentLogs: [LogEntry] = []
     @Published var currentNetworkSSID: String?
-    @Published var routeVerificationResults: [String: RouteVerificationResult] = [:]
+    /// The last Verify Routes, or nil before the first one and after routes are removed.
+    @Published var lastRouteCheck: RouteCheck.Run?
+    /// The last check's results by address, for the Info page.
+    var routeVerificationResults: [String: RouteVerificationResult] {
+        Dictionary((lastRouteCheck?.results ?? []).map { ($0.destination, $0) }, uniquingKeysWith: { first, _ in first })
+    }
     @Published var isLoading = true
     @Published private(set) var isApplyingRoutes = false
     @Published var isConfigLoadFailed = false
@@ -998,7 +1003,7 @@ final class RouteManager: ObservableObject {
                 // Whatever teardown retained is a genuine failed removal (see removeAllRoutes).
                 failedCount = activeRoutes.count
             }
-            routeVerificationResults.removeAll()
+            lastRouteCheck = nil
             lastTailscaleSelfFingerprint = nil
             vpnGateway = nil
             // Notify after cleanup so the notification reflects the ACTUAL state — and names
@@ -2488,7 +2493,7 @@ final class RouteManager: ObservableObject {
         } else {
             activeRoutes.removeAll()
         }
-        routeVerificationResults.removeAll()
+        lastRouteCheck = nil
         dnsCache.removeAll()
         lastUpdate = Date()
         // A removal with nothing installed is a no-op and must not hide the last apply's result.
@@ -4563,40 +4568,47 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Route Verification
     
+    /// Pings a sample of the routed single addresses (`RouteCheck.plan`) and logs one line per
+    /// result, so the card's "Show all results in Logs" has them all.
     func verifyRoutes() async {
         log(.info, "Verifying routes...")
-        routeVerificationResults.removeAll()
-        
-        // Get unique destinations to verify
-        var destinationsToVerify: Set<String> = []
-        for route in activeRoutes {
-            // Only verify actual IPs, not CIDR ranges
-            if isValidIP(route.destination) {
-                destinationsToVerify.insert(route.destination)
-            }
-        }
-        
-        var failedCount = 0
-        let sortedDestinations = destinationsToVerify.sorted()
+        lastRouteCheck = nil
 
-        for destination in sortedDestinations.prefix(10) { // Limit to 10 to avoid too many pings
+        // A Custom service rule records its routes under the service id; show the name.
+        let serviceNames = Dictionary(config.services.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        let plan = RouteCheck.plan(
+            routes: activeRoutes.map { .init(destination: $0.destination, source: serviceNames[$0.source] ?? $0.source) },
+            vpnOnly: config.routingMode == .vpnOnly,
+            isSingleAddress: { self.isValidIP($0) })
+        guard plan.routeCount > 0 else { return }
+
+        var results: [RouteVerificationResult] = []
+        for destination in plan.destinations {
             let result = await verifyRoute(destination)
-            routeVerificationResults[destination] = result
-            
-            if !result.isReachable {
-                failedCount += 1
+            results.append(result)
+            let source = plan.sources[destination].map { " (\($0))" } ?? ""
+            if result.isReachable {
+                let time = result.latency.map { " in \(Int($0.rounded())) ms" } ?? ""
+                log(.info, "Route check: \(destination)\(source) reachable\(time)")
+            } else {
+                log(.warning, "Route check: \(destination)\(source) not reachable: \(result.error ?? "Unreachable")")
                 NotificationManager.shared.notifyRouteVerificationFailed(
                     route: destination,
                     reason: result.error ?? "Unreachable"
                 )
             }
         }
-        
-        let testedCount = min(destinationsToVerify.count, 10)
-        if failedCount > 0 {
-            log(.warning, "Route verification: \(failedCount) of \(testedCount) tested routes failed\(destinationsToVerify.count > 10 ? " (\(destinationsToVerify.count) total, sampled 10)" : "")")
-        } else if testedCount > 0 {
-            log(.success, "Route verification: All \(testedCount) tested routes are reachable\(destinationsToVerify.count > 10 ? " (\(destinationsToVerify.count) total)" : "")")
+        lastRouteCheck = RouteCheck.Run(plan: plan, results: results, at: Date())
+
+        let checked = results.count
+        let failedCount = results.filter { !$0.isReachable }.count
+        let scope = "checked \(checked) of \(plan.routeCount) routes\(plan.singleAddresses < plan.routeCount ? ", single addresses only" : "")"
+        if checked == 0 {
+            log(.info, "Route check: nothing to check, all \(plan.routeCount) routes are address ranges, which ping cannot test")
+        } else if failedCount > 0 {
+            log(.warning, "Route check: \(failedCount) of \(checked) not reachable (\(scope))")
+        } else {
+            log(.success, "Route check: all \(checked) reachable (\(scope))")
         }
     }
     

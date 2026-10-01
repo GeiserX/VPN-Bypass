@@ -409,9 +409,9 @@ struct MenuContent: View {
                 RoutedBySourceCard(summary: routed)
             }
             
-            // Route verification status
-            if !routeManager.routeVerificationResults.isEmpty {
-                routeVerificationSection
+            // The last Verify Routes: what it checked, failures first
+            if let run = routeManager.lastRouteCheck {
+                RouteCheckCard(run: run, onShowLogs: { openSettings(page: .logs) })
             }
             
             actionButtons
@@ -683,59 +683,6 @@ struct MenuContent: View {
         .cornerRadius(8)
     }
 
-    // MARK: - Route Verification Section
-    
-    private var routeVerificationSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "checkmark.circle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                Text("Route Verification")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                
-                let passedCount = routeManager.routeVerificationResults.values.filter { $0.isReachable }.count
-                let totalCount = routeManager.routeVerificationResults.count
-                
-                Text("\(passedCount)/\(totalCount)")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(passedCount == totalCount ? Theme.success : Theme.warning)
-            }
-            
-            // Show verification results
-            ForEach(Array(routeManager.routeVerificationResults.values.prefix(3))) { result in
-                HStack(spacing: 6) {
-                    Image(systemName: result.isReachable ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundColor(result.isReachable ? Theme.success : Theme.error)
-                    
-                    Text(result.destination)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    
-                    Spacer()
-                    
-                    if let latency = result.latency {
-                        Text("\(Int(latency))ms")
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    } else if let error = result.error {
-                        Text(error)
-                            .font(.system(size: 9))
-                            .foregroundColor(Theme.error)
-                            .lineLimit(1)
-                    }
-                }
-            }
-        }
-        .padding(10)
-        .background(Color.secondary.opacity(0.08))
-        .cornerRadius(8)
-    }
-    
     // MARK: - Footer
 
     private var footerActions: some View {
@@ -947,6 +894,117 @@ enum DropdownCopy {
             message = String(localized: "Traffic your rules send direct or to a specific VPN will follow your VPN's own routing \(until). Rules that use a proxy keep working.")
         }
         return (title, message)
+    }
+}
+
+// MARK: - Route check
+
+/// What Verify Routes checks and how its card words the result. Verify pings a sample: single
+/// addresses only, because ping cannot test a range, and at most `sampleSize` of them, the first
+/// in sort order. The card says how many of how many routes that was, lists failures first, and
+/// keeps the order the addresses were pinged in. Pure, so the scope and the wording are tested.
+enum RouteCheck {
+    /// Addresses pinged per check, so a check stays short: each ping can wait 4 s.
+    static let sampleSize = 10
+    /// Failures listed in the card before "+ N more".
+    static let visibleFailures = 3
+
+    struct Plan: Equatable {
+        /// The addresses to ping, in the order they are pinged.
+        let destinations: [String]
+        /// What each of them is routed for: the service, domain or rule that added its route.
+        let sources: [String: String]
+        /// Routed single addresses, the pool the sample is taken from.
+        let singleAddresses: Int
+        /// Unique routed destinations, counted as the dropdown's list counts them.
+        let routeCount: Int
+    }
+
+    /// The result of one check, as the card shows it.
+    struct Run {
+        /// In the order the addresses were pinged.
+        let results: [RouteVerificationResult]
+        let sources: [String: String]
+        let singleAddresses: Int
+        let routeCount: Int
+        let at: Date
+
+        init(plan: Plan, results: [RouteVerificationResult], at: Date) {
+            self.results = results
+            self.sources = plan.sources
+            self.singleAddresses = plan.singleAddresses
+            self.routeCount = plan.routeCount
+            self.at = at
+        }
+
+        var failures: [RouteVerificationResult] { results.filter { !$0.isReachable } }
+        var reachable: [RouteVerificationResult] { results.filter(\.isReachable) }
+    }
+
+    /// What to ping. In VPN Only the app's catch-all ranges are left out of the count, as the
+    /// list above the card leaves them out. A destination recorded under several sources reads
+    /// as the first one.
+    static func plan(routes: [RoutedBySource.InstalledRoute], vpnOnly: Bool,
+                     isSingleAddress: (String) -> Bool) -> Plan {
+        let counted = vpnOnly ? routes.filter { !RoutedBySource.isCatchAll($0) } : routes
+        var sources: [String: String] = [:]
+        for route in counted where sources[route.destination] == nil {
+            sources[route.destination] = route.source
+        }
+        let singles = sources.keys.filter(isSingleAddress).sorted()
+        let sample = Array(singles.prefix(sampleSize))
+        return Plan(destinations: sample,
+                    sources: sources.filter { sample.contains($0.key) },
+                    singleAddresses: singles.count,
+                    routeCount: sources.count)
+    }
+
+    /// The card's first sentence. `qualifier` is drawn dimmer, between `main` and the full stop.
+    struct Scope: Equatable {
+        let main: String
+        let qualifier: String?
+        var text: String { main + (qualifier.map { " " + $0 } ?? "") + "." }
+    }
+
+    static func scope(checked: Int, singleAddresses: Int, routeCount: Int) -> Scope {
+        if checked == 0 {
+            return Scope(main: routeCount == 1
+                ? String(localized: "Nothing to check: the only route is an address range, which ping cannot test")
+                : String(localized: "Nothing to check: all \(routeCount) routes are address ranges, which ping cannot test"),
+                         qualifier: nil)
+        }
+        if checked >= routeCount {
+            return Scope(main: checked == 1
+                ? String(localized: "Checked the only route")
+                : String(localized: "Checked all \(routeCount) routes"),
+                         qualifier: nil)
+        }
+        // Ranges were left out only when there are fewer single addresses than routes; when the
+        // sample size alone cut the list, the two numbers already say so.
+        return Scope(main: String(localized: "Checked \(checked) of \(routeCount) routes"),
+                     qualifier: singleAddresses < routeCount ? String(localized: "(single addresses only)") : nil)
+    }
+
+    static var title: String { String(localized: "Route check") }
+    static var allReachable: String { String(localized: "All reachable.") }
+
+    static func notReachable(_ count: Int) -> String {
+        count == 1 ? String(localized: "1 not reachable") : String(localized: "\(count) not reachable")
+    }
+
+    static func reachable(_ count: Int) -> String {
+        count == 1 ? String(localized: "1 reachable") : String(localized: "\(count) reachable")
+    }
+
+    /// "24 to 118 ms", "24 ms", or nil when no reachable address reported a time.
+    static func latencyRange(_ results: [RouteVerificationResult]) -> String? {
+        let times = results.filter(\.isReachable).compactMap(\.latency).map { Int($0.rounded()) }
+        guard let low = times.min(), let high = times.max() else { return nil }
+        return low == high ? String(localized: "\(low) ms") : String(localized: "\(low) to \(high) ms")
+    }
+
+    static func logsLink(_ checked: Int) -> String {
+        checked == 1 ? String(localized: "Show the result in Logs") : String(localized: "Show all \(checked) results in Logs")
     }
 }
 
@@ -1890,6 +1948,120 @@ struct RoutedBySourceCard: View {
         case .rule: return "list.bullet.indent"
         case .leftover: return "clock.arrow.circlepath"
         }
+    }
+}
+
+/// The last Verify Routes: what it checked, the failures first, then one line for the rest.
+struct RouteCheckCard: View {
+    let run: RouteCheck.Run
+    let onShowLogs: () -> Void
+
+    var body: some View {
+        let failures = run.failures
+        let reachable = run.reachable
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle")
+                    .font(.system(size: 10))
+                Text(RouteCheck.title)
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+                // Ticks so the age stays true while the dropdown is open.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(DropdownCopy.age(since: run.at, now: context.date))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .foregroundStyle(.secondary)
+
+            scopeText
+                .font(.system(size: 12))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !failures.isEmpty {
+                Text(RouteCheck.notReachable(failures.count))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Theme.error)
+                    .padding(.top, 2)
+                ForEach(failures.prefix(RouteCheck.visibleFailures)) { result in
+                    HStack(spacing: 6) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(Theme.error)
+                        Text(result.destination)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .lineLimit(1)
+                        if let source = run.sources[result.destination] {
+                            Text(source)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        Spacer(minLength: 6)
+                        if let error = result.error {
+                            Text(error)
+                                .font(.system(size: 10.5))
+                                .foregroundColor(Theme.error)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                if failures.count > RouteCheck.visibleFailures {
+                    Text("+ \(failures.count - RouteCheck.visibleFailures) more")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                if !reachable.isEmpty {
+                    Divider()
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(Theme.success)
+                        Text(RouteCheck.reachable(reachable.count))
+                            .font(.system(size: 11))
+                            .foregroundColor(Theme.textSecondary)
+                        Spacer(minLength: 6)
+                        if let range = RouteCheck.latencyRange(reachable) {
+                            Text(range)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+
+            // Every result is one line in Settings > Logs.
+            if !run.results.isEmpty {
+                Button(action: onShowLogs) {
+                    Text(RouteCheck.logsLink(run.results.count))
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.Brand.sky)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .cornerRadius(8)
+    }
+
+    /// "Checked 10 of 62 routes (single addresses only)." with the qualifier dimmer, and
+    /// "All reachable." after it when nothing failed.
+    private var scopeText: Text {
+        let scope = RouteCheck.scope(checked: run.results.count, singleAddresses: run.singleAddresses,
+                                     routeCount: run.routeCount)
+        var text = Text(scope.main).foregroundColor(Theme.textPrimary)
+        if let qualifier = scope.qualifier {
+            text = text + Text(" " + qualifier).foregroundColor(Theme.textSecondary)
+        }
+        text = text + Text(".").foregroundColor(Theme.textPrimary)
+        if !run.results.isEmpty && run.failures.isEmpty {
+            text = text + Text(" " + RouteCheck.allReachable).foregroundColor(Theme.textPrimary)
+        }
+        return text
     }
 }
 
