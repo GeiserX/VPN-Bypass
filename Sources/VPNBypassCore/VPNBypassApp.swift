@@ -113,7 +113,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // This is a FIRST-RUN-reachable state, and it used to be one log line nobody
                 // saw: the menu showed a green ON while nothing was enforced. Tell the user.
                 NotificationManager.shared.notifyEnforcementFailed(
-                    reason: String(localized: "The privileged helper is not running — no routes are being enforced. Open Settings → General to repair it.")
+                    reason: String(localized: "The privileged helper is not running — no routes are being enforced. Open Settings → Status to repair it.")
                 )
                 // Detect VPN state for display, but skip route mutations that
                 // require the helper. This clears the "Setting Up..." spinner

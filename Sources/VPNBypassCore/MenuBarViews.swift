@@ -309,28 +309,7 @@ struct MenuContent: View {
     /// Everything the status header reads, gathered in one place so the wording lives in the
     /// pure `DropdownStatus.make`.
     private var statusInput: DropdownStatus.Input {
-        let config = routeManager.config
-        let mode: DropdownCopy.Mode = RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
-            ? .custom
-            : (config.routingMode == .vpnOnly ? .vpnOnly : .bypass)
-        return DropdownStatus.Input(
-            isVPNConnected: routeManager.isVPNConnected,
-            vpnName: routeManager.vpnType.flatMap { $0 == .unknown ? nil : $0.rawValue },
-            helperReady: helperManager.helperState.isReady,
-            mode: mode,
-            enabledServices: config.services.filter { $0.enabled }.count,
-            enabledDomains: mode == .vpnOnly
-                ? config.inverseDomains.filter { $0.enabled }.count
-                : config.domains.filter { $0.enabled }.count,
-            enabledRules: config.rules.filter { $0.enabled }.count,
-            installedRoutes: routeManager.uniqueRouteCount,
-            pending: routeManager.pendingReconnectApply,
-            lastRouteChange: routeManager.lastRouteChange,
-            lastDNSRefresh: routeManager.lastDNSRefresh,
-            nextDNSRefresh: routeManager.nextDNSRefresh,
-            autoDNSRefresh: config.autoDNSRefresh,
-            nothingConfigured: isFresh
-        )
+        DropdownStatus.Input.current(routeManager, helperReady: helperManager.helperState.isReady)
     }
 
     private var statusIconName: String {
@@ -355,7 +334,8 @@ struct MenuContent: View {
                 }
                 Spacer()
                 Button(String(localized: "Fix…")) {
-                    openSettings()
+                    // The Status page holds the helper's row and its Install button.
+                    openSettings(page: .status)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)

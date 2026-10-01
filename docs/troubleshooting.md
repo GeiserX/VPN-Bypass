@@ -22,7 +22,7 @@ brew install --cask --no-quarantine vpn-bypass
 ## Routes not being applied
 
 1. Check if VPN is actually connected (look for utun interface)
-2. Verify local gateway is detected in Settings → General
+2. Check that Settings → Status shows a gateway under Normal connection
 3. In Settings → Logs, pick Warnings to see the warnings and errors
 4. Use "Verify Routes" button to test connectivity
 
