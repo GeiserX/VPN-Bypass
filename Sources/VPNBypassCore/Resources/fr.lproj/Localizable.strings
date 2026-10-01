@@ -30,6 +30,7 @@
 "Domains" = "Domaines";
 "Updated %@ ago" = "Mis à jour il y a %@";
 "Settings" = "Réglages";
+"Settings…" = "Réglages…";
 "Quit VPN Bypass" = "Quitter VPN Bypass";
 "ON" = "ON";
 "OFF" = "OFF";
@@ -310,6 +311,27 @@
 "Only apps set to use %@ (%@) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Seules les apps configurées pour utiliser %@ (%@) passent par ici. Les autres apps joignent ces hôtes par la route habituelle du Mac, même si une règle plus bas les couvre aussi.";
 "Only apps set to use %@ go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Seules les apps configurées pour utiliser %@ passent par ici. Les autres apps joignent ces hôtes par la route habituelle du Mac, même si une règle plus bas les couvre aussi.";
 "%@ is off, so this rule does nothing." = "La route %@ est désactivée, cette règle n'a donc aucun effet.";
+
+/* ===== Réglages — Mode de routage (menu de la barre de titre et feuille) ===== */
+"Custom Routes" = "Routes personnalisées";
+"Rules" = "Règles";
+"Routing mode" = "Mode de routage";
+"Routing mode: %@" = "Mode de routage : %@";
+"Switch" = "Changer";
+"Everything uses the VPN except what you list" = "Tout passe par le VPN sauf ce que vous listez";
+"Only what you list uses the VPN" = "Seul ce que vous listez passe par le VPN";
+"Pick a route for each destination" = "Choisissez une route pour chaque destination";
+"Everything uses the VPN except what you list." = "Tout passe par le VPN sauf ce que vous listez.";
+"Only what you list uses the VPN; everything else goes direct." = "Seul ce que vous listez passe par le VPN ; tout le reste passe en direct.";
+"Send each destination through a route you pick: direct, a VPN, a proxy or a Tailscale peer." = "Envoyez chaque destination par la route de votre choix : directe, un VPN, un proxy ou un pair Tailscale.";
+"%@ and %@." = "%1$@ et %2$@.";
+"%@." = "%@.";
+"Nothing listed yet." = "Rien dans la liste pour l'instant.";
+"1 entry." = "1 entrée.";
+"%lld entries." = "%lld entrées.";
+"Your lists become rules." = "Vos listes deviennent des règles.";
+"1 rule." = "1 règle.";
+"%lld rules." = "%lld règles.";
 
 /* ===== Barre des menus : le contrôle de mode et sa question ===== */
 "Switch routing mode?" = "Changer de mode de routage ?";

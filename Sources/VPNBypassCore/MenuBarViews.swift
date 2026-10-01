@@ -1033,9 +1033,8 @@ enum DropdownCopy {
 
 /// The Mode row under the status header: one native segmented control with all three modes,
 /// the same in every mode. Switching mode changes how all traffic routes, and entering Custom
-/// migrates the lists into rules, so a pick asks first with the question the Settings window
-/// asks. The selection reads the saved mode: the segment moves after Switch, and Cancel leaves
-/// it where it was.
+/// migrates the lists into rules, so a pick asks first. The selection reads the saved mode: the
+/// segment moves after Switch, and Cancel leaves it where it was.
 struct DropdownModeRow: View {
     @EnvironmentObject var routeManager: RouteManager
     /// The mode a pick is asking about while the question is open.
@@ -1447,7 +1446,8 @@ enum DropdownModePicker {
         return alert
     }
 
-    /// The question asked before a switch, in the Settings window's English wording.
+    /// The question asked before a switch, in English. (The Settings window now asks in a sheet
+    /// with its own wording, in RoutingModeSwitcher.swift.)
     static func confirmation(to mode: RouteManager.RoutingMode, schemaVersion: Int) -> (message: String, confirm: String) {
         switch mode {
         case .bypass:

@@ -1,6 +1,6 @@
 // DropdownModePickerTests.swift
 // The dropdown's Mode control (proposal 12): one segmented control with Bypass, VPN Only and
-// Custom in every mode, behind the confirmation the Settings window asks.
+// Custom in every mode, behind a confirmation.
 //
 // The problems it locks down: the old control showed only Bypass and VPN Only, and in Custom
 // mode a capsule plus a "Switch to Bypass" link, so Custom could not be picked from the
@@ -29,7 +29,7 @@ final class DropdownModePickerTests: XCTestCase {
         }
     }
 
-    /// The same English wording the Settings window uses for the same switch.
+    /// The question's English wording.
     func testConfirmationWording() {
         XCTAssertEqual(DropdownModePicker.confirmationTitle, "Switch routing mode?")
         let bypass = DropdownModePicker.confirmation(to: .bypass, schemaVersion: 2)
