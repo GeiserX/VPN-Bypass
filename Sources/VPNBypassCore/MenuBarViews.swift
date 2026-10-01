@@ -177,6 +177,7 @@ struct QuickAddField: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(text.isEmpty)
+                .accessibilityLabel(String(localized: "Add"))
 
                 Button {
                     onCancel()
@@ -186,6 +187,7 @@ struct QuickAddField: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "Cancel"))
             }
             if let error {
                 AddDomainFeedbackLine(feedback: error)
@@ -446,6 +448,8 @@ struct MenuContent: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isBusy)
+                .keyboardShortcut(.refreshRoutes)
+                .help(DropdownShortcut.refreshRoutes.help(String(localized: "Refresh Routes")))
 
                 Button {
                     verify()
@@ -469,11 +473,22 @@ struct MenuContent: View {
                 .help(String(localized: "Verify Routes"))
                 .accessibilityLabel(String(localized: "Verify Routes"))
 
+                // The shortcuts here only answer while the menu is open; the buttons that do
+                // the same thing (Refresh Routes, the gear, the power button) carry them too.
                 Menu {
+                    Button(DropdownShortcut.refreshRoutes.title) { routeManager.refreshRoutes() }
+                        .keyboardShortcut(.refreshRoutes)
+                        .disabled(isBusy)
                     Button(String(localized: "Verify Routes")) { verify() }
                         .disabled(routeManager.isCheckingRoutes || routeManager.activeRoutes.isEmpty)
                     Button(String(localized: "Re-resolve DNS Now")) { routeManager.forceDNSRefresh() }
                         .disabled(isBusy)
+                    Button(String(localized: "Open Logs")) { openSettings(page: .logs) }
+                    Divider()
+                    Button(DropdownShortcut.settings.title) { openSettings() }
+                        .keyboardShortcut(.settings)
+                    Button(DropdownShortcut.quit.title) { quit() }
+                        .keyboardShortcut(.quit)
                     Divider()
                     Button(String(localized: "Remove All Routes…")) { confirmingRemoveAll = true }
                         .disabled(routeManager.activeRoutes.isEmpty)
@@ -529,6 +544,10 @@ struct MenuContent: View {
             autoApplyOnVPN: config.autoApplyOnVPN,
             autoDNSRefresh: config.autoDNSRefresh
         )
+    }
+
+    private func quit() {
+        NSApplication.shared.terminate(nil)
     }
 
     private func verify() {
@@ -680,25 +699,11 @@ struct MenuContent: View {
 
             Spacer(minLength: 0)
             
-            Button {
-                openSettings()
-            } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Settings")
-            
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Image(systemName: "power")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Quit VPN Bypass")
+            DropdownIconButton(systemImage: "gearshape.fill", name: String(localized: "Settings"),
+                               shortcut: .settings) { openSettings() }
+
+            DropdownIconButton(systemImage: "power", name: String(localized: "Quit VPN Bypass"),
+                               shortcut: .quit) { quit() }
         }
     }
     
@@ -1843,7 +1848,7 @@ struct FirstRunSetupView: View {
                 .font(.system(size: 10.5))
                 .foregroundColor(Theme.textTertiary)
             // The Services page's switch (ServiceRow), and the same call behind it.
-            Toggle("", isOn: Binding(
+            Toggle(service.name, isOn: Binding(
                 get: { service.enabled },
                 set: { _ in
                     if !routeManager.isApplyingRoutes {
@@ -1854,11 +1859,9 @@ struct FirstRunSetupView: View {
             .toggleStyle(.switch)
             .tint(Theme.success)
             .labelsHidden()
-            .scaleEffect(0.7)
-            .frame(width: 30)
+            .controlSize(.small)
             .disabled(routeManager.isApplyingRoutes)
             .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
-            .accessibilityLabel(service.name)
         }
         .frame(height: 34)
         .padding(.horizontal, 10)

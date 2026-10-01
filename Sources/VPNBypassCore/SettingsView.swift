@@ -328,6 +328,7 @@ struct DomainsTab: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(newDomain.isEmpty)
+                        .accessibilityLabel(String(localized: "Add"))
                     }
                 }
 
@@ -533,7 +534,7 @@ struct DomainRow: View {
             Spacer()
 
             // Toggle - disabled during route operations
-            Toggle("", isOn: Binding(
+            Toggle(domain.domain, isOn: Binding(
                 get: { domain.enabled },
                 set: { _ in
                     if !routeManager.isApplyingRoutes {
@@ -544,7 +545,8 @@ struct DomainRow: View {
             ))
             .toggleStyle(.switch)
             .tint(isInverse ? Theme.warning : Theme.success)
-            .scaleEffect(0.7)
+            .labelsHidden()
+            .controlSize(.small)
             .disabled(routeManager.isApplyingRoutes)
             .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
 
@@ -555,6 +557,7 @@ struct DomainRow: View {
                     .foregroundColor(Theme.error.opacity(isHovered ? 1 : 0.6))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(ControlNames.delete(domain.domain))
             .disabled(routeManager.isApplyingRoutes)
             .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
         }
@@ -647,6 +650,8 @@ struct ServicesTab: View {
     @EnvironmentObject var routeManager: RouteManager
     @EnvironmentObject var settingsUndo: SettingsUndo
     @State private var searchText = ""
+    /// ⌘F puts the cursor in the search field.
+    @FocusState private var isSearchFocused: Bool
     /// Set, Turn All On asks this before it runs.
     @State private var turnOnQuestion: ServiceBulkSwitch.Question?
     @State private var showingCustomServiceEditor = false
@@ -705,6 +710,7 @@ struct ServicesTab: View {
                     }
                     .buttonStyle(.plain)
                     .help("Create Custom Service")
+                    .accessibilityLabel("Create Custom Service")
                 }
             }
 
@@ -742,13 +748,23 @@ struct ServicesTab: View {
                 HStack(spacing: 10) {
                     // Search box
                     HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.textSecondary)
+                        // The magnifier carries ⌘F, so the shortcut has a control to belong to.
+                        Button {
+                            isSearchFocused = true
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 12))
+                                .foregroundColor(Theme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut("f", modifiers: .command)
+                        .help(ControlNames.help(String(localized: "Search services"), shortcut: "⌘F"))
+                        .accessibilityLabel(String(localized: "Search services"))
 
                         TextField("Search services...", text: $searchText)
                             .textFieldStyle(.plain)
                             .font(.system(size: 12))
+                            .focused($isSearchFocused)
                             .disabled(routeManager.isApplyingRoutes)
 
                         if !searchText.isEmpty {
@@ -760,6 +776,7 @@ struct ServicesTab: View {
                                     .foregroundColor(Theme.textSecondary)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(String(localized: "Clear search"))
                         }
                     }
                     .padding(.horizontal, 10)
@@ -912,6 +929,7 @@ struct BulkSwitchMenu: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help(String(localized: "Turn all on or off"))
+        .accessibilityLabel(String(localized: "Turn all on or off"))
     }
 }
 
@@ -968,6 +986,7 @@ struct ServiceRow: View {
                 }
                 .buttonStyle(.plain)
                 .opacity(isHovered ? 1.0 : 0.4)
+                .accessibilityLabel(ControlNames.edit(service.name))
 
                 Button {
                     onDelete?()
@@ -979,10 +998,11 @@ struct ServiceRow: View {
                 }
                 .buttonStyle(.plain)
                 .opacity(isHovered ? 1.0 : 0.4)
+                .accessibilityLabel(ControlNames.delete(service.name))
             }
 
             // Toggle
-            Toggle("", isOn: Binding(
+            Toggle(service.name, isOn: Binding(
                 get: { service.enabled },
                 set: { _ in
                     if !routeManager.isApplyingRoutes {
@@ -992,7 +1012,8 @@ struct ServiceRow: View {
             ))
             .toggleStyle(.switch)
             .tint(Theme.success)
-            .scaleEffect(0.7)
+            .labelsHidden()
+            .controlSize(.small)
             .disabled(routeManager.isApplyingRoutes)
             .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
         }
@@ -1048,6 +1069,7 @@ struct CustomServiceEditor: View {
                         .foregroundColor(Theme.textSecondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "Cancel"))
             }
             .padding(16)
 
@@ -1108,6 +1130,7 @@ struct CustomServiceEditor: View {
                                             .foregroundColor(Theme.error.opacity(0.7))
                                     }
                                     .buttonStyle(.plain)
+                                    .accessibilityLabel(ControlNames.delete(domains[index]))
                                 }
                             }
                         }
@@ -1156,6 +1179,7 @@ struct CustomServiceEditor: View {
                                         .foregroundColor(Theme.error.opacity(0.7))
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel(ControlNames.delete(ipRanges[index]))
                             }
                         }
 
@@ -1937,10 +1961,11 @@ struct SettingsToggleRow: View {
 
             Spacer()
 
-            Toggle("", isOn: $isOn)
+            Toggle(title, isOn: $isOn)
                 .toggleStyle(.switch)
                 .tint(Theme.success)
-                .scaleEffect(0.8)
+                .labelsHidden()
+                .controlSize(.small)
         }
     }
 }

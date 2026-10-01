@@ -81,6 +81,7 @@ struct RoutesTab: View {
                 }
                 .buttonStyle(.plain)
                 .help("Add Route")
+                .accessibilityLabel("Add Route")
             }
 
             // Helper hint
@@ -386,13 +387,14 @@ struct RouteRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             // Enabled toggle
-            Toggle("", isOn: Binding(
+            Toggle(route.name, isOn: Binding(
                 get: { route.enabled },
                 set: { onToggle($0) }
             ))
             .toggleStyle(.switch)
             .tint(Theme.success)
-            .scaleEffect(0.75)
+            .labelsHidden()
+            .controlSize(.small)
             .frame(width: 38)
 
             // Info column
@@ -432,6 +434,7 @@ struct RouteRow: View {
             }
             .buttonStyle(.plain)
             .help("Edit route")
+            .accessibilityLabel(ControlNames.edit(route.name))
 
             // Delete
             Button(action: onDelete) {
@@ -444,6 +447,7 @@ struct RouteRow: View {
             }
             .buttonStyle(.plain)
             .help("Delete route")
+            .accessibilityLabel(ControlNames.delete(route.name))
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
@@ -611,6 +615,7 @@ struct RouteEditorSheet: View {
                         .foregroundColor(Theme.textSecondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "Cancel"))
             }
             .padding(.horizontal, 20)
             .padding(.top, 20)
