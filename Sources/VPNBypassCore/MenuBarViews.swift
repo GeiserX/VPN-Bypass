@@ -208,11 +208,6 @@ struct MenuContent: View {
     @State private var isVerifying = false
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
-    /// The mode a tap wants to switch to, pending confirmation. Settings now
-    /// switches through RoutingModeSheet (RoutingModeSwitcher.swift); this alert
-    /// is replaced by proposal 12. Switching mode changes how ALL traffic routes
-    /// (and entering Custom migrates your lists), so it's a two-step action.
-    @State private var pendingMode: RouteManager.RoutingMode?
 
     private let accentGradient = LinearGradient(
         colors: [Theme.success, Theme.successDark],
@@ -233,8 +228,7 @@ struct MenuContent: View {
                 }
             }
 
-            // Routing mode toggle
-            routingModeToggle
+            DropdownModeRow()
 
             Divider()
                 .padding(.vertical, 8)
@@ -259,33 +253,6 @@ struct MenuContent: View {
         .onAppear {
             // Refresh VPN status when menu opens
             routeManager.refreshStatus()
-        }
-        .alert("Switch routing mode?", isPresented: Binding(
-            get: { pendingMode != nil },
-            set: { if !$0 { pendingMode = nil } }
-        ), presenting: pendingMode) { mode in
-            Button("Cancel", role: .cancel) { pendingMode = nil }
-            Button("Switch to \(mode.displayName)") {
-                routeManager.setRoutingMode(mode)
-                pendingMode = nil
-            }
-        } message: { mode in
-            Text(confirmationMessage(for: mode))
-        }
-    }
-
-    /// The dropdown's own wording for the mode alert. Settings words the same
-    /// switch in RoutingModeSwitcher.swift; this alert is replaced by proposal 12.
-    private func confirmationMessage(for mode: RouteManager.RoutingMode) -> String {
-        switch mode {
-        case .bypass:
-            return "Everything will go through your VPN except the sites you list. Your custom routes stay saved."
-        case .vpnOnly:
-            return "Only the sites you list will use your VPN; everything else goes direct."
-        case .custom:
-            return routeManager.config.schemaVersion < 2
-                ? "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime."
-                : "Switch to your per-rule custom routing. You can switch back to a simple mode anytime."
         }
     }
 
@@ -848,78 +815,6 @@ struct MenuContent: View {
         .cornerRadius(8)
     }
     
-    // MARK: - Routing Mode Toggle
-
-    private var routingModeToggle: some View {
-        HStack(spacing: 8) {
-            Text("Mode")
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundColor(Theme.textSecondary)
-
-            Spacer()
-
-            if routeManager.config.routingMode == .custom {
-                HStack(spacing: 8) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 9))
-                        Text("Custom Routes")
-                            .font(.system(size: 11, weight: .semibold))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Theme.success.opacity(0.15))
-                    .clipShape(Capsule())
-
-                    Button {
-                        pendingMode = .bypass
-                    } label: {
-                        Text("Switch to Bypass")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(Theme.textSecondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            } else {
-                HStack(spacing: 0) {
-                    modeButton(title: "Bypass", mode: .bypass)
-                    modeButton(title: "VPN Only", mode: .vpnOnly)
-                }
-                .background(Color.secondary.opacity(0.12))
-                .cornerRadius(6)
-            }
-        }
-        .padding(.top, 4)
-    }
-
-    private func modeButton(title: LocalizedStringKey, mode: RouteManager.RoutingMode) -> some View {
-        let isSelected = routeManager.config.routingMode == mode
-        return Button {
-            // Tapping the current mode is a no-op; a different mode asks first.
-            if mode != routeManager.config.routingMode {
-                pendingMode = mode
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(isSelected ? Theme.success : Color.clear)
-                    .overlay(
-                        Circle().stroke(isSelected ? Theme.success : Theme.textSecondary, lineWidth: 1.5)
-                    )
-                    .frame(width: 10, height: 10)
-                Text(title)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                    .foregroundColor(isSelected ? .white : Theme.textSecondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(isSelected ? Theme.success.opacity(0.15) : Color.clear)
-            .cornerRadius(6)
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: - Footer
 
     private var footerActions: some View {
@@ -1134,6 +1029,86 @@ enum DropdownCopy {
     }
 }
 
+// MARK: - Mode control
+
+/// The Mode row under the status header: one native segmented control with all three modes,
+/// the same in every mode. Switching mode changes how all traffic routes, and entering Custom
+/// migrates the lists into rules, so a pick asks first. The selection reads the saved mode: the
+/// segment moves after Switch, and Cancel leaves it where it was.
+struct DropdownModeRow: View {
+    @EnvironmentObject var routeManager: RouteManager
+    /// The mode a pick is asking about while the question is open.
+    @State private var asking: RouteManager.RoutingMode?
+    /// Bumped on every pick. The control selects the clicked segment itself, and SwiftUI does
+    /// not push the unchanged saved mode back into it, so it is rebuilt from the saved mode.
+    @State private var generation = 0
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                modeLabel
+                picker
+                    // A segmented control keeps its own width; line its right edge up with the rows below.
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            // The Spanish and French mode names do not fit beside the label: the control takes
+            // its own line, at the small size.
+            VStack(alignment: .leading, spacing: 6) {
+                modeLabel
+                picker
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private var modeLabel: some View {
+        Text("Mode")
+            .font(.system(size: 12))
+            .foregroundColor(Theme.textSecondary)
+    }
+
+    private var picker: some View {
+        Picker("Mode", selection: Binding(
+            get: { routeManager.config.routingMode },
+            set: { picked in
+                guard asking == nil,
+                      let mode = DropdownModePicker.pendingSwitch(picked: picked, current: routeManager.config.routingMode)
+                else { return }
+                asking = mode
+                generation += 1
+                // After this click is handled, so the control is rebuilt from the saved mode.
+                // Through the run loop, not DispatchQueue.main: a modal opened inside a
+                // main-queue block holds that serial queue for as long as it is open, which
+                // stops every main-actor task, the control socket and network-change handling.
+                RunLoop.main.perform(inModes: [.common]) { ask(mode) }
+            }
+        )) {
+            ForEach(DropdownModePicker.modes, id: \.self) { mode in
+                Text(DropdownModePicker.label(mode)).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .id(generation)
+        .help(DropdownStatus.modeDescription(DropdownModePicker.copyMode(routeManager.config.routingMode)))
+    }
+
+    /// While the question is open the run loop is in its modal panel mode, so the app's
+    /// default-mode timers (the 30 s status refresh, the DNS refresh) wait and fire once it
+    /// closes. Main-queue work and main-actor tasks keep running.
+    private func ask(_ mode: RouteManager.RoutingMode) {
+        let alert = DropdownModePicker.confirmationAlert(to: mode, schemaVersion: routeManager.config.schemaVersion)
+        if alert.runModal() == .alertFirstButtonReturn {
+            // The call the Settings switch makes, so entering Custom runs the same migration
+            // of the Bypass and VPN Only lists into rules.
+            routeManager.setRoutingMode(mode)
+        }
+        asking = nil
+    }
+}
+
 // MARK: - Status header
 
 /// The top of the dropdown: who is connected, one sentence on what is routed, and a short
@@ -1264,7 +1239,6 @@ struct DropdownStatus: Equatable {
 
     static func make(_ input: Input, now: Date) -> DropdownStatus {
         let name = input.vpnName ?? String(localized: "VPN")
-        let modeFact = Fact(label: String(localized: "Mode"), value: modeDescription(input.mode))
 
         guard input.isVPNConnected else {
             // Only Bypass keeps its routes across a drop on purpose. VPN Only and Custom tear
@@ -1279,14 +1253,14 @@ struct DropdownStatus: Equatable {
             }
             return DropdownStatus(pill: String(localized: "OFF"), tone: .bad,
                                   headline: String(localized: "No VPN connected"),
-                                  sentence: sentence, note: nil, facts: [modeFact])
+                                  sentence: sentence, note: nil, facts: [])
         }
 
         guard input.helperReady else {
             return DropdownStatus(pill: String(localized: "NOT ENFORCING"), tone: .warn,
                                   headline: String(localized: "\(name) connected"),
                                   sentence: String(localized: "Nothing is routed while the privileged helper is not running."),
-                                  note: nil, facts: [modeFact])
+                                  note: nil, facts: [])
         }
 
         // Once something applied or removed routes after the reconnect (Refresh Routes, a mode
@@ -1323,8 +1297,8 @@ struct DropdownStatus: Equatable {
             }
         }
 
-        let facts = [modeFact,
-                     Fact(label: String(localized: "Routes"), value: routesFact(input, now: now)),
+        // No Mode fact: the Mode control sits right under the header.
+        let facts = [Fact(label: String(localized: "Routes"), value: routesFact(input, now: now)),
                      Fact(label: String(localized: "DNS"), value: dnsFact(input, now: now))]
         if input.installedRoutes == 0 {
             return DropdownStatus(pill: String(localized: "NO ROUTES"), tone: .warn,
@@ -1339,6 +1313,7 @@ struct DropdownStatus: Equatable {
 
     // MARK: Pieces
 
+    /// What a mode does, in one line. The Mode control shows it as its tooltip.
     static func modeDescription(_ mode: DropdownCopy.Mode) -> String {
         switch mode {
         case .bypass: return String(localized: "Bypass: everything else uses the VPN")
@@ -1425,6 +1400,68 @@ struct DropdownStatus: Equatable {
         if seconds < 60 { return String(localized: "less than a minute") }
         let minutes = Int((seconds / 60).rounded(.up))
         return minutes == 1 ? String(localized: "1 more minute") : String(localized: "\(minutes) more minutes")
+    }
+}
+
+/// The dropdown's Mode control: one segmented control with all three modes, in every mode.
+/// What it shows and asks is pure, so the wording and the pick rule are unit-tested.
+enum DropdownModePicker {
+    static let modes: [RouteManager.RoutingMode] = [.bypass, .vpnOnly, .custom]
+
+    static func label(_ mode: RouteManager.RoutingMode) -> String {
+        switch mode {
+        case .bypass: return String(localized: "Bypass")
+        case .vpnOnly: return String(localized: "VPN Only")
+        case .custom: return String(localized: "Custom")
+        }
+    }
+
+    static func copyMode(_ mode: RouteManager.RoutingMode) -> DropdownCopy.Mode {
+        switch mode {
+        case .bypass: return .bypass
+        case .vpnOnly: return .vpnOnly
+        case .custom: return .custom
+        }
+    }
+
+    /// The switch a pick asks to confirm, or nil when the picked mode is already in use.
+    /// Nothing switches here: the mode changes only when the user confirms.
+    static func pendingSwitch(picked: RouteManager.RoutingMode,
+                              current: RouteManager.RoutingMode) -> RouteManager.RoutingMode? {
+        picked == current ? nil : picked
+    }
+
+    static var confirmationTitle: String { String(localized: "Switch routing mode?") }
+
+    /// The question, as a standalone alert rather than a sheet on the dropdown: macOS 26 hides
+    /// the icon of an alert shown as a sheet, and this one should show the app's logo. No icon
+    /// is set here, so NSAlert shows the app icon, AppIcon.icns.
+    @MainActor static func confirmationAlert(to mode: RouteManager.RoutingMode, schemaVersion: Int) -> NSAlert {
+        let copy = confirmation(to: mode, schemaVersion: schemaVersion)
+        let alert = NSAlert()
+        alert.messageText = confirmationTitle
+        alert.informativeText = copy.message
+        alert.addButton(withTitle: copy.confirm)                  // Return
+        alert.addButton(withTitle: String(localized: "Cancel"))   // Escape
+        return alert
+    }
+
+    /// The question asked before a switch, in English. (The Settings window now asks in a sheet
+    /// with its own wording, in RoutingModeSwitcher.swift.)
+    static func confirmation(to mode: RouteManager.RoutingMode, schemaVersion: Int) -> (message: String, confirm: String) {
+        switch mode {
+        case .bypass:
+            return (String(localized: "Everything will go through your VPN except the sites you list. Your custom routes stay saved."),
+                    String(localized: "Switch to Bypass"))
+        case .vpnOnly:
+            return (String(localized: "Only the sites you list will use your VPN; everything else goes direct."),
+                    String(localized: "Switch to VPN Only"))
+        case .custom:
+            let message = schemaVersion < 2
+                ? String(localized: "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime.")
+                : String(localized: "Switch to your per-rule custom routing. You can switch back to a simple mode anytime.")
+            return (message, String(localized: "Switch to Custom Routes"))
+        }
     }
 }
 

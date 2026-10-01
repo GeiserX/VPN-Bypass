@@ -332,3 +332,13 @@
 "Your lists become rules." = "Tus listas pasan a ser reglas.";
 "1 rule." = "1 regla.";
 "%lld rules." = "%lld reglas.";
+
+/* ===== Barra de menú: el control de modo y su pregunta ===== */
+"Switch routing mode?" = "¿Cambiar el modo de enrutamiento?";
+"Switch to Bypass" = "Cambiar al modo Bypass";
+"Switch to VPN Only" = "Cambiar al modo Solo VPN";
+"Switch to Custom Routes" = "Cambiar al modo Personalizado";
+"Everything will go through your VPN except the sites you list. Your custom routes stay saved." = "Todo pasará por tu VPN salvo los sitios que indiques. Tus rutas personalizadas se quedan guardadas.";
+"Only the sites you list will use your VPN; everything else goes direct." = "Solo los sitios que indiques usarán tu VPN; todo lo demás va directo.";
+"Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime." = "Tus dominios y servicios pasan a ser reglas editables que puedes enviar por cualquier ruta (un proxy, un equipo de Tailscale o una VPN concreta). Puedes volver cuando quieras.";
+"Switch to your per-rule custom routing. You can switch back to a simple mode anytime." = "Pasa a tu enrutamiento personalizado por reglas. Puedes volver a un modo simple cuando quieras.";
