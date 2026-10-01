@@ -113,6 +113,7 @@ final class OutsideChangeTests: XCTestCase {
             (.turnedOff("Slack"), "Last change: turned off Slack via the command line, just now", "Slack"),
             (.switchedMode(.vpnOnly), "Last change: switched to VPN Only via the command line, just now", "VPN Only"),
             (.removedAllRoutes(routesLeft: 0), "Last change: removed all routes via the command line, just now", nil),
+            (.removedAllRoutes(routesLeft: 2), "Last change: removed routes via the command line, just now; routes left: 2", nil),
             (.changedRoutes, "Last change: changed the routes via the command line, just now", nil),
             (.changedRules, "Last change: changed the rules via the command line, just now", nil),
         ]
@@ -133,6 +134,14 @@ final class OutsideChangeTests: XCTestCase {
         XCTAssertEqual(LogSource.controlSocket.tag, "via the command line")
         XCTAssertNil(LogSource.app.tag)
         XCTAssertEqual(RouteManager.LogEntry(timestamp: t0, level: .info, message: "x").source, .app)
+    }
+
+    /// The `logs` verb answers with the verb line's old text, so a script sees what it saw.
+    func testTheSocketLogsReplyKeepsTheOldVerbLine() {
+        XCTAssertEqual(entry("Control: 'domain.add' applied", .controlSocket).socketReplyMessage,
+                       "Control: 'domain.add' applied via the command line")
+        XCTAssertEqual(entry("Added domain: en.wikipedia.org", .controlSocket).socketReplyMessage, "Added domain: en.wikipedia.org")
+        XCTAssertEqual(entry("Control: 'domain.add' applied", .app).socketReplyMessage, "Control: 'domain.add' applied")
     }
 
     func testCopyKeepsTheTag() {
@@ -174,7 +183,8 @@ final class OutsideChangeTests: XCTestCase {
 
     private let everyKind: [OutsideChange.Kind] = [
         .addedDomain("en.wikipedia.org"), .removedDomain("x.org"), .turnedOn("Telegram"), .turnedOff("Slack"),
-        .switchedMode(.vpnOnly), .removedAllRoutes(routesLeft: 0), .changedRoutes, .changedRules,
+        .switchedMode(.vpnOnly), .removedAllRoutes(routesLeft: 0), .removedAllRoutes(routesLeft: 2),
+        .changedRoutes, .changedRules,
     ]
 
     func testEveryStringIsTranslated() throws {
@@ -289,6 +299,14 @@ final class OutsideChangeSocketTests: XCTestCase {
         XCTAssertTrue(rm.recentLogs.contains { $0.message == "Control: 'mode' applied" && $0.source == .controlSocket })
     }
 
+    func testTheLogsVerbAnswersAsBefore() async throws {
+        _ = await send("domain.add", ["domain": "example.org"])
+        let resp = await send("logs", ["limit": "200"])
+        let messages = try XCTUnwrap(resp.result?.logs).map(\.message)
+        XCTAssertTrue(messages.contains("Control: 'domain.add' applied via the command line"), "\(messages)")
+        XCTAssertTrue(messages.contains("Added domain: example.org"), "\(messages)")
+    }
+
     func testAChangeMadeInTheAppClearsTheLine() async {
         _ = await send("domain.add", ["domain": "example.org"])
         XCTAssertNotNil(rm.lastOutsideChange)
@@ -310,6 +328,23 @@ final class OutsideChangeSocketTests: XCTestCase {
     func testAFailedRequestIsNoChange() async {
         let resp = await send("domain.rm", ["domain": "nowhere.example"])
         XCTAssertFalse(resp.ok)
+        XCTAssertNil(rm.lastOutsideChange)
+    }
+
+    /// An app save while a request runs may be the later change, so the request does not name
+    /// itself: a missing line, never a false one.
+    func testAnAppSaveWhileARequestRunsKeepsTheRequestOutOfTheFooter() async throws {
+        rm.config.domains = [DomainEntry(domain: "example.com")]
+        ClassicControl.busyWait = 2
+        var holding = true
+        ClassicControl.routeOperationRunning = { holding }
+
+        let request = Task { await self.send("domain.disable", ["domain": "example.com"]) }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        rm.saveConfig()
+        holding = false
+        let resp = await request.value
+        XCTAssertTrue(resp.ok)
         XCTAssertNil(rm.lastOutsideChange)
     }
 

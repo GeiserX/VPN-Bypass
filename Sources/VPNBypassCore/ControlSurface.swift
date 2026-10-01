@@ -33,8 +33,9 @@ public enum ControlSurface {
             let rm = RouteManager.shared
             let before = rm.config
             let routesBefore = Set(rm.activeRoutes.map(\.destination)).union(rm.pendingKernelAdds).count
+            let appSaves = rm.appSaveCount
             let response = await apply(request)
-            if response.ok, CommandRouter.isMutating(request.cmd),
+            if response.ok, CommandRouter.isMutating(request.cmd), rm.appSaveCount == appSaves,
                let change = OutsideChange.make(cmd: request.cmd, result: response.result,
                                                 before: before, after: rm.config,
                                                 routesBefore: routesBefore, routesLeft: rm.uniqueRouteCount, at: Date()) {

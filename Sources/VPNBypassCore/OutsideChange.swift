@@ -154,8 +154,11 @@ struct OutsideChange: Equatable {
         case .switchedMode(let mode):
             let name = DropdownModePicker.label(mode, in: bundle)
             return (String(localized: "Last change: switched to \(name) via the command line, \(when)", bundle: bundle), name)
-        case .removedAllRoutes:
+        case .removedAllRoutes(let left) where left == 0:
             return (String(localized: "Last change: removed all routes via the command line, \(when)", bundle: bundle), nil)
+        case .removedAllRoutes(let left):
+            // Some could not be removed; "all" would be false. The count is a label, so no plural.
+            return (String(localized: "Last change: removed routes via the command line, \(when); routes left: \(left)", bundle: bundle), nil)
         case .changedRoutes:
             return (String(localized: "Last change: changed the routes via the command line, \(when)", bundle: bundle), nil)
         case .changedRules:
@@ -168,5 +171,17 @@ struct OutsideChange: Equatable {
 
     static func help(in bundle: Bundle) -> String {
         String(localized: "Show what came through the command line in Logs", bundle: bundle)
+    }
+}
+
+extension RouteManager.LogEntry {
+    /// The text the socket's `logs` verb returns. The verb's own line read "Control: '<verb>'
+    /// applied via the command line" before the tag existed, and the reply keeps that text, so
+    /// a script reading `logs` sees what it saw before.
+    var socketReplyMessage: String {
+        guard source == .controlSocket, message.hasPrefix("Control: '"), message.hasSuffix("' applied") else {
+            return message
+        }
+        return message + " via the command line"
     }
 }

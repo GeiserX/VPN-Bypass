@@ -336,7 +336,7 @@ enum ClassicControl {
         let lines = RouteManager.shared.recentLogs   // already newest first
             .filter { level == nil || $0.level == level }
             .prefix(limit)
-            .map { ControlLogEntry(time: formatter.string(from: $0.timestamp), level: $0.level.rawValue, message: $0.message) }
+            .map { ControlLogEntry(time: formatter.string(from: $0.timestamp), level: $0.level.rawValue, message: $0.socketReplyMessage) }
         return ok(ControlResult(logs: Array(lines)))
     }
 

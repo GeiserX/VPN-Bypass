@@ -504,3 +504,4 @@
 "Nothing from the command line matches this filter." = "Rien de la ligne de commande ne correspond à ce filtre.";
 "From the command line" = "Depuis la ligne de commande";
 "Show entries from the app too" = "Afficher aussi les entrées de l'app";
+"Last change: removed routes via the command line, %@; routes left: %lld" = "Dernière modification : routes supprimées via la ligne de commande, %1$@ ; routes restantes : %2$lld";

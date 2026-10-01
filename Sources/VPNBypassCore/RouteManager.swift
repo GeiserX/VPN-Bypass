@@ -78,6 +78,10 @@ final class RouteManager: ObservableObject {
     /// save made outside a socket request (the app's own controls) clears it, so the footer
     /// never names a change that a later one in the app has replaced.
     @Published var lastOutsideChange: OutsideChange?
+    /// Saves made outside a socket request. A request that sees this move while it runs does
+    /// not name itself in the footer: an app save in between may be the later change, or may
+    /// sit in the request's before/after comparison.
+    private(set) var appSaveCount = 0
 
     struct RouteChangeOutcome: Equatable {
         enum Kind: Equatable {
@@ -416,7 +420,10 @@ final class RouteManager: ObservableObject {
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
         if !isVPNConnected { configChangedAt = Date() }
-        if !ControlOrigin.isControlSocket { lastOutsideChange = nil }
+        if !ControlOrigin.isControlSocket {
+            lastOutsideChange = nil
+            appSaveCount &+= 1
+        }
 
         log(.info, "Config saved")
     }
