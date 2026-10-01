@@ -132,6 +132,18 @@ final class ClassicControlTests: XCTestCase {
         XCTAssertEqual(rm.config.domains.count, 1)
     }
 
+    /// Routes are tracked by a service's name and by a Bypass entry's domain, so the list may
+    /// not take a domain a service has as its name.
+    func testDomainAddRefusesTheNameOfAService() async {
+        rm.config.services.append(RouteManager.ServiceEntry(id: "custom_s", name: "Shop.Example", enabled: true,
+                                                            domains: ["s.example.com"], ipRanges: [], isCustom: true))
+        let resp = await send("domain.add", ["domain": "shop.example"])
+        XCTAssertFalse(resp.ok)
+        XCTAssertEqual(resp.error?.code, "already_exists")
+        XCTAssertEqual(resp.error?.message, "shop.example is the name of the service Shop.Example; routes are tracked by name, so the bypass list cannot take it")
+        XCTAssertTrue(rm.config.domains.isEmpty)
+    }
+
     func testDomainAddRejectsARangeOnBypassList() async {
         for value in ["10.0.0.0/8", "10.0.0/8", "10.0.0.0 /8", "2001:db8::/32"] {
             let resp = await send("domain.add", ["domain": value])

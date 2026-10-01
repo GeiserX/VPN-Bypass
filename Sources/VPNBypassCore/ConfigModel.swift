@@ -221,6 +221,24 @@ struct Config: Codable {
         return (routes, rules, defaultRouteId)
     }
 
+    /// Whether `preparedForCustomMode()` builds rules from the lists: there are no rules yet,
+    /// and `derive` makes at least one from the current mode's list (only its entries that are
+    /// switched on). The dropdown's question and the Settings sheet word the switch to Custom by
+    /// it (through `RoutingModeCopy.lists(from:)`), so what they say matches what the switch does.
+    var customModeBuildsRulesFromLists: Bool {
+        rules.isEmpty && !Config.derive(domains: domains, services: services, mode: routingMode,
+                                        inverseDomains: inverseDomains, proxy: proxyConfig).rules.isEmpty
+    }
+
+    /// The test `preparedForCustomMode()` runs before it derives anything: no rules yet, and
+    /// some list holds something. Broader than `customModeBuildsRulesFromLists` on purpose, so
+    /// a fresh config still adopts the derived routes even when the current list makes no rule.
+    private var hasRoutableListsAndNoRules: Bool {
+        rules.isEmpty && (!domains.isEmpty
+            || services.contains { $0.enabled }
+            || inverseDomains.contains { $0.enabled })
+    }
+
     /// Prepare THIS config for Custom mode, purely (no actor, no I/O) so the GUI
     /// (`setRoutingMode`) and the CLI (`CommandRouter`) migrate identically.
     ///
@@ -242,13 +260,9 @@ struct Config: Codable {
         if c.schemaVersion < 2 { c.schemaVersion = 2 }
 
         // Already has a rule model → leave it entirely untouched (idempotent re-entry;
-        // never clobber a user's edited rules). Only derive when rules are EMPTY.
-        guard c.rules.isEmpty else { return c }
-        // Nothing to route → start Custom empty (a valid choice; don't fabricate a model).
-        let hasRoutableLists = !c.domains.isEmpty
-            || c.services.contains { $0.enabled }
-            || c.inverseDomains.contains { $0.enabled }
-        guard hasRoutableLists else { return c }
+        // never clobber a user's edited rules). Nothing to route → start Custom empty
+        // (a valid choice; don't fabricate a model). Only derive otherwise.
+        guard c.hasRoutableListsAndNoRules else { return c }
 
         let hasSystemRoutes = c.routes.contains { $0.egress == .vpnDefault }
             && c.routes.contains { $0.egress == .direct }

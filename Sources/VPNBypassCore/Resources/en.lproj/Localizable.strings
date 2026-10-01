@@ -379,10 +379,17 @@
 "%@ is not an IP range the app can route. Write it as 10.0.0.0/24, with a prefix from /2 to /32." = "%@ is not an IP range the app can route. Write it as 10.0.0.0/24, with a prefix from /2 to /32.";
 "%@ would clash with the VPN's own catch-all routes. Use a prefix from /2 to /32." = "%@ would clash with the VPN's own catch-all routes. Use a prefix from /2 to /32.";
 "%@ is already on your %@ list." = "%1$@ is already on your %2$@ list.";
+"“%@” is the name of a service, and the two would share routes. Add a different domain." = "“%@” is the name of a service, and the two would share routes. Add a different domain.";
 "Added the range %@ to your %@ list." = "Added the range %1$@ to your %2$@ list.";
 "Added %@ to your %@ list." = "Added %1$@ to your %2$@ list.";
 "Added %@, from the link you pasted." = "Added %@, from the link you pasted.";
 "Added %@, cleaned up from “%@”." = "Added %1$@, cleaned up from “%2$@”.";
+
+/* ===== Custom service name: the line under the field, and import ===== */
+"A service named “%@” already exists. Choose another name, so their routes stay apart." = "A service named “%@” already exists. Choose another name, so their routes stay apart.";
+"%@ is on your Bypass list. Choose another name, so their routes stay apart." = "%@ is on your Bypass list. Choose another name, so their routes stay apart.";
+"Nothing was imported. The custom service “%@” has the same name as the service “%@”. Rename it in the file and import again." = "Nothing was imported. The custom service “%1$@” has the same name as the service “%2$@”. Rename it in the file and import again.";
+"Nothing was imported. The custom service “%@” has the same name as %@ on the Bypass list. Rename it in the file and import again." = "Nothing was imported. The custom service “%1$@” has the same name as %2$@ on the Bypass list. Rename it in the file and import again.";
 
 /* ===== Settings — Routes and Rules (Custom mode) ===== */
 "Copy Proxy URL" = "Copy Proxy URL";

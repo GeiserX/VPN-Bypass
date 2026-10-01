@@ -563,10 +563,25 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Why the last `importConfig` saved nothing, when the app can say it in the user's words;
+    /// nil after an import that worked or failed for a reason with no such line.
+    private(set) var lastImportRefusal: String?
+
     func importConfig(from url: URL) -> Bool {
+        lastImportRefusal = nil
         do {
             let data = try Data(contentsOf: url)
             let exportData = try JSONDecoder().decode(ExportData.self, from: data)
+
+            // A custom service sharing its name with another service or a Bypass list entry
+            // would share its routes too (see ServiceNameClash). Refuse the file whole, before
+            // anything changes, rather than load it and guess which one to rename.
+            if let found = ServiceNameClash.firstInImport(exportData.config) {
+                let refusal = found.clash.importMessage(service: found.service)
+                lastImportRefusal = refusal
+                log(.error, "Config not imported: \(refusal)")
+                return false
+            }
 
             // Save previous state for transactional rollback
             let previousConfig = config
@@ -1856,6 +1871,7 @@ final class RouteManager: ObservableObject {
     }
     
     func refreshStatus() {
+        if let override = refreshStatusOverrideForTests { override(); return }
         Task {
             await checkVPNStatus()
             // After, not before: checkVPNStatus may itself re-route, and this only has to
@@ -3639,6 +3655,11 @@ final class RouteManager: ObservableObject {
             log(.warning, "Domain \(cleaned) already exists")
             return .failure(.alreadyListed(value: cleaned, list: .bypass))
         }
+        if let service = ServiceNameClash.service(named: cleaned, in: config.services) {
+            let error = AddDomainError.nameTakenByService(value: cleaned, service: service.name)
+            log(.warning, error.message)
+            return .failure(error)
+        }
 
         let entry = DomainEntry(domain: cleaned)
         config.domains.append(entry)
@@ -3651,11 +3672,16 @@ final class RouteManager: ObservableObject {
     /// Puts back a Bypass entry that a delete in Settings took out: the same id, switch and
     /// place in the list. Its routes go in by the same path as `addDomain`'s. Returns false,
     /// and changes nothing, when the list holds that name again (added back by hand or
-    /// through `vpnb`) or the delete has not finished taking it out.
+    /// through `vpnb`), a service has taken it as its name since, or the delete has not
+    /// finished taking it out.
     @discardableResult
     func restoreDomain(_ entry: DomainEntry, at index: Int) -> Bool {
         guard !config.domains.contains(where: { $0.id == entry.id || $0.domain == entry.domain }) else {
             log(.warning, "Domain \(entry.domain) is already on the list, nothing to restore")
+            return false
+        }
+        if let service = ServiceNameClash.service(named: entry.domain, in: config.services) {
+            log(.warning, "Domain \(entry.domain) not restored: \(AddDomainError.nameTakenByService(value: entry.domain, service: service.name).message)")
             return false
         }
         config.domains.insert(entry, at: min(max(index, 0), config.domains.count))
@@ -4326,22 +4352,40 @@ final class RouteManager: ObservableObject {
 
     // MARK: - Custom Service Management
 
-    func addCustomService(name: String, domains: [String], ipRanges: [String]) {
+    /// The service or Bypass list entry a custom service called `name` would share its routes
+    /// with, or nil when the name is free. `excluding` is the service being edited.
+    func customServiceNameClash(_ name: String, excluding id: String? = nil) -> ServiceNameClash? {
+        ServiceNameClash.find(name, excluding: id, services: config.services, domains: config.domains)
+    }
+
+    /// Saves nothing and returns the clash when `name` is taken (see `ServiceNameClash`).
+    @discardableResult
+    func addCustomService(name: String, domains: [String], ipRanges: [String]) -> ServiceNameClash? {
+        if let clash = customServiceNameClash(name) {
+            log(.warning, "Custom service not added: \(clash.message)")
+            return clash
+        }
         let id = "custom_\(UUID().uuidString.prefix(8).lowercased())"
         let service = ServiceEntry(id: id, name: name, enabled: true, domains: domains, ipRanges: ipRanges, isCustom: true)
         config.services.append(service)
         saveConfig()
         log(.success, "Added custom service: \(name)")
         routeNewCustomService(service)
+        return nil
     }
 
     /// Puts back a custom service that a delete in Settings took out, domains and all, at its
     /// old place and switch. Its routes go in by the same path as `addCustomService`'s.
-    /// Returns false, and changes nothing, while a service with that id is still listed.
+    /// Returns false, and changes nothing, while a service with that id is still listed, or
+    /// once another service or a Bypass list entry has taken its name (see `ServiceNameClash`).
     @discardableResult
     func restoreCustomService(_ service: ServiceEntry, at index: Int) -> Bool {
         guard service.isCustom, !config.services.contains(where: { $0.id == service.id }) else {
             log(.warning, "Custom service \(service.name) is still listed, nothing to restore")
+            return false
+        }
+        if let clash = customServiceNameClash(service.name, excluding: service.id) {
+            log(.warning, "Custom service \(service.name) not restored: \(clash.message)")
             return false
         }
         config.services.insert(service, at: min(max(index, 0), config.services.count))
@@ -4363,8 +4407,15 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    func updateCustomService(id: String, name: String, domains: [String], ipRanges: [String]) {
-        guard let index = config.services.firstIndex(where: { $0.id == id && $0.isCustom }) else { return }
+    /// Saves nothing and returns the clash when another service or a Bypass list entry has
+    /// `name` (see `ServiceNameClash`). Keeping the service's own name is not a clash.
+    @discardableResult
+    func updateCustomService(id: String, name: String, domains: [String], ipRanges: [String]) -> ServiceNameClash? {
+        guard let index = config.services.firstIndex(where: { $0.id == id && $0.isCustom }) else { return nil }
+        if let clash = customServiceNameClash(name, excluding: id) {
+            log(.warning, "Custom service not updated: \(clash.message)")
+            return clash
+        }
         let oldName = config.services[index].name
         let wasEnabled = config.services[index].enabled
         config.services[index] = ServiceEntry(id: id, name: name, enabled: wasEnabled, domains: domains, ipRanges: ipRanges, isCustom: true)
@@ -4385,9 +4436,11 @@ final class RouteManager: ObservableObject {
                     }
                 }
                 await applyRoutesForService(config.services[index])
+                await reapplyRoutesSharing(oldName, excludingService: id)
                 if config.manageHostsFile { await updateHostsFile() }
             }
         }
+        return nil
     }
 
     func removeCustomService(_ serviceId: String) {
@@ -4411,8 +4464,45 @@ final class RouteManager: ObservableObject {
             }
             config.services.remove(at: index)
             saveConfig()
+            await reapplyRoutesSharing(name, excludingService: serviceId)
             if config.manageHostsFile { await updateHostsFile() }
             log(.info, "Removed custom service: \(name)")
+        }
+    }
+
+    /// The other services and Bypass entries whose routes are tracked under `source`, switched
+    /// on and live. Names are unique now, but a config.json from before can still hold a custom
+    /// service named exactly like a built-in service or a listed domain.
+    func routeSourceSharers(_ source: String, excludingService id: String) -> (services: [ServiceEntry], domains: [DomainEntry]) {
+        guard bypassListIsLive else { return ([], []) }
+        return (config.services.filter { $0.id != id && $0.enabled && $0.name == source },
+                config.domains.filter { $0.enabled && $0.domain == source })
+    }
+
+    /// `removeRoutesForSource` takes out every route under a source. When a custom service is
+    /// renamed or deleted, that also takes out the routes of anything else with its old name
+    /// (see `routeSourceSharers`); this puts those back. Runs inside the caller's route
+    /// operation.
+    private func reapplyRoutesSharing(_ source: String, excludingService id: String) async {
+        guard isVPNConnected else { return }
+        let sharers = routeSourceSharers(source, excludingService: id)
+        guard !sharers.services.isEmpty || !sharers.domains.isEmpty else { return }
+        guard let gateway = localGateway else {
+            log(.warning, "Routes of \(source) not put back: no local gateway detected. Try Refresh Routes.")
+            return
+        }
+        log(.info, "Putting back the routes of \(source), which shared its name with the custom service just changed")
+        for service in sharers.services {
+            await applyRoutesForService(service, gateway: gateway)
+        }
+        for entry in sharers.domains {
+            let epoch = routeEpoch
+            guard let routes = await applyRoutesForDomain(entry.domain, gateway: gateway, source: entry.domain) else { continue }
+            guard routeEpoch == epoch else {
+                await unstrandRoutes(attempted: Set(routes.map { $0.destination }), addFailed: [])
+                return
+            }
+            activeRoutes.append(contentsOf: routes)
         }
     }
 
@@ -5151,6 +5241,9 @@ final class RouteManager: ObservableObject {
     /// so the leak-critical latch-clear timing is unit-testable without the helper,
     /// kernel routes, or /etc/hosts. See RerouteLatchTimingTests.
     var rerouteApplyOverrideForTests: (() async -> Void)?
+    /// Test-only override for refreshStatus() (nil in production). A test hosting the dropdown
+    /// counts its opens through it, and the real VPN check never runs against this machine.
+    var refreshStatusOverrideForTests: (() -> Void)?
 
     /// #61 test-only seams (nil in production). `removeRoutesBatchOverrideForTests` lets the strand
     /// repro observe kernel removals (incl. unstrandRoutes) without a real helper; `routeEpochForTests`
@@ -5562,6 +5655,9 @@ enum AddDomainError: Error, Equatable {
     case catchAllRange(input: String)
     /// The cleaned value is already on the list.
     case alreadyListed(value: String, list: DomainList)
+    /// A service has the cleaned value as its name, so the entry's routes would share its
+    /// source (see `ServiceNameClash`).
+    case nameTakenByService(value: String, service: String)
 
     /// One line for under the add field, in the user's words and the app's language.
     var message: String { message(in: .main) }
@@ -5582,6 +5678,8 @@ enum AddDomainError: Error, Equatable {
             return String(localized: "\(input) would clash with the VPN's own catch-all routes. Use a prefix from /2 to /32.", bundle: bundle)
         case .alreadyListed(let value, let list):
             return String(localized: "\(value) is already on your \(list.displayName(in: bundle)) list.", bundle: bundle)
+        case .nameTakenByService(_, let service):
+            return String(localized: "\u{201C}\(service)\u{201D} is the name of a service, and the two would share routes. Add a different domain.", bundle: bundle)
         }
     }
 }

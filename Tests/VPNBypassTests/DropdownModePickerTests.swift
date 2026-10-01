@@ -32,18 +32,80 @@ final class DropdownModePickerTests: XCTestCase {
     /// The question's English wording.
     func testConfirmationWording() {
         XCTAssertEqual(DropdownModePicker.confirmationTitle, "Switch routing mode?")
-        let bypass = DropdownModePicker.confirmation(to: .bypass, schemaVersion: 2)
-        XCTAssertEqual(bypass.confirm, "Switch to Bypass")
-        XCTAssertEqual(bypass.message, "Everything will go through your VPN except the sites you list. Your custom routes stay saved.")
-        let vpnOnly = DropdownModePicker.confirmation(to: .vpnOnly, schemaVersion: 2)
-        XCTAssertEqual(vpnOnly.confirm, "Switch to VPN Only")
-        XCTAssertEqual(vpnOnly.message, "Only the sites you list will use your VPN; everything else goes direct.")
-        // First entry into Custom says the lists become rules; a later one does not.
-        let firstCustom = DropdownModePicker.confirmation(to: .custom, schemaVersion: 1)
-        XCTAssertEqual(firstCustom.confirm, "Switch to Custom Routes")
-        XCTAssertTrue(firstCustom.message.hasPrefix("Your listed domains and services become editable rules"))
-        XCTAssertEqual(DropdownModePicker.confirmation(to: .custom, schemaVersion: 2).message,
-                       "Switch to your per-rule custom routing. You can switch back to a simple mode anytime.")
+        for becomeRules in [true, false] {
+            let bypass = DropdownModePicker.confirmation(to: .bypass, listsBecomeRules: becomeRules)
+            XCTAssertEqual(bypass.confirm, "Switch to Bypass")
+            XCTAssertEqual(bypass.message, "Everything will go through your VPN except the sites you list. Your custom routes stay saved.")
+            let vpnOnly = DropdownModePicker.confirmation(to: .vpnOnly, listsBecomeRules: becomeRules)
+            XCTAssertEqual(vpnOnly.confirm, "Switch to VPN Only")
+            XCTAssertEqual(vpnOnly.message, "Only the sites you list will use your VPN; everything else goes direct.")
+        }
+        // Entering Custom says the lists become rules only when the switch builds them.
+        let building = DropdownModePicker.confirmation(to: .custom, listsBecomeRules: true)
+        XCTAssertEqual(building.confirm, "Switch to Custom Routes")
+        XCTAssertEqual(building.message, Self.becomeRules)
+        XCTAssertEqual(DropdownModePicker.confirmation(to: .custom, listsBecomeRules: false).message, Self.perRule)
+    }
+
+    static let becomeRules = "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime."
+    static let perRule = "Switch to your per-rule custom routing. You can switch back to a simple mode anytime."
+
+    /// The dropdown's question and the Settings sheet word the switch to Custom the same way in
+    /// every state, and both say the lists become rules exactly when
+    /// `Config.preparedForCustomMode` builds rules from them. The dropdown used to decide by
+    /// `schemaVersion < 2`, which is wrong both ways: a schemaVersion-2 config with lists and no
+    /// rules gets rules built, and a schemaVersion-1 config with nothing listed, or with the
+    /// rules the decoder already derived, gets none.
+    func testCustomWordingAgreesWithSettingsAndTheMigrationInEveryState() {
+        func config(schema: Int, mode: RouteManager.RoutingMode = .bypass, domains: [String] = [],
+                    domainsOff: [String] = [], services: Bool = false, vpnOnly: [DomainEntry] = [],
+                    rules: Bool = false) -> RouteManager.Config {
+            var c = RouteManager.Config()
+            c.schemaVersion = schema
+            c.routingMode = mode
+            c.domains = domains.map { DomainEntry(domain: $0) } + domainsOff.map { DomainEntry(domain: $0, enabled: false) }
+            c.services = c.services.enumerated().map { i, s in var s = s; s.enabled = services && i == 0; return s }
+            c.inverseDomains = vpnOnly
+            c.routes = []
+            c.rules = []
+            c.defaultRouteId = nil
+            if rules {
+                // The rules an earlier visit to Custom, or the decode migration, built.
+                let built = c.preparedForCustomMode()
+                c.routes = built.routes
+                c.rules = built.rules
+                c.defaultRouteId = built.defaultRouteId
+            }
+            return c
+        }
+        let states: [(name: String, config: RouteManager.Config, becomeRules: Bool)] = [
+            ("v1, a domain, no rules", config(schema: 1, domains: ["a.com"]), true),
+            ("v2, a domain, no rules", config(schema: 2, domains: ["a.com"]), true),
+            ("v2, a service on, no rules", config(schema: 2, services: true), true),
+            ("v2 VPN Only, an entry on, no rules", config(schema: 2, mode: .vpnOnly, vpnOnly: [DomainEntry(domain: "corp.example")]), true),
+            ("v1, nothing listed", config(schema: 1), false),
+            ("v2, nothing listed", config(schema: 2), false),
+            ("v1, only a VPN Only entry that is off", config(schema: 1, vpnOnly: [DomainEntry(domain: "off.example", enabled: false)]), false),
+            ("v1, a domain, rules already derived", config(schema: 1, domains: ["a.com"], rules: true), false),
+            ("v2, a domain, rules already built", config(schema: 2, domains: ["a.com"], rules: true), false),
+            // Derive reads only the current mode's list, and only its entries that are on.
+            ("v2, only a Bypass domain that is off", config(schema: 2, domainsOff: ["off.com"]), false),
+            ("v2 Bypass, empty, a VPN Only entry on", config(schema: 2, vpnOnly: [DomainEntry(domain: "corp.example")]), false),
+            ("v2 VPN Only, empty, a Bypass domain", config(schema: 2, mode: .vpnOnly, domains: ["a.com"]), false),
+        ]
+        for state in states {
+            let c = state.config
+            if state.name.contains("rules already") { XCTAssertFalse(c.rules.isEmpty, "\(state.name): the fixture needs rules") }
+            let rulesWereBuilt = c.rules.isEmpty && !c.preparedForCustomMode().rules.isEmpty
+            XCTAssertEqual(rulesWereBuilt, state.becomeRules, "\(state.name): the migration")
+
+            let settings = RoutingModeCopy.sheetLine(.custom, lists: RoutingModeCopy.lists(from: c))
+            XCTAssertEqual(settings.hasSuffix("Your lists become rules."), state.becomeRules, "\(state.name): Settings says \(settings)")
+
+            let dropdown = DropdownModePicker.confirmation(to: .custom,
+                                                           listsBecomeRules: RoutingModeCopy.lists(from: c).listsBecomeRules)
+            XCTAssertEqual(dropdown.message, state.becomeRules ? Self.becomeRules : Self.perRule, "\(state.name): the dropdown")
+        }
     }
 
     /// The tooltip carries the line the old Mode fact showed.
@@ -231,6 +293,28 @@ final class DropdownModeRowViewTests: XCTestCase {
         let q = try XCTUnwrap(try pick(segment: 1, answer: "Cancel", in: host()))
         XCTAssertTrue(q.mainQueueRanWhileOpen, "a main-queue block runs while the question is open")
         XCTAssertTrue(q.mainActorRanWhileOpen, "a main-actor task runs while the question is open")
+    }
+
+    /// The real question reads the live config through the Settings sheet's test. A
+    /// schemaVersion-2 Bypass config with a domain and no rules gets rules built on Switch, so the
+    /// question says so; the old `schemaVersion < 2` test said it would not.
+    func testTheCustomQuestionSaysTheListsBecomeRulesWhenTheyWill() throws {
+        var cfg = rm.config
+        cfg.schemaVersion = 2
+        rm.config = cfg
+        let view = host()
+        let q = try XCTUnwrap(try pick(segment: 2, answer: "Cancel", in: view), "the question opened")
+        XCTAssertEqual(q.message, DropdownModePickerTests.becomeRules)
+        XCTAssertEqual(rm.config.routingMode, .bypass, "Cancel switches nothing")
+        window?.orderOut(nil)
+
+        // Nothing listed: the switch builds no rules, so the question does not promise any.
+        cfg = rm.config
+        cfg.schemaVersion = 1
+        cfg.domains = []
+        rm.config = cfg
+        let empty = try XCTUnwrap(try pick(segment: 2, answer: "Cancel", in: host()), "the question opened")
+        XCTAssertEqual(empty.message, DropdownModePickerTests.perRule)
     }
 
     func testPickingTheModeInUseAsksNothing() throws {

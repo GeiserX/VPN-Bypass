@@ -478,6 +478,13 @@ struct AddDomainFeedback: Equatable {
     /// The field's text while this line shows. Typing something else clears the line.
     let fieldText: String
 
+    /// A refusal from another form that shows the same line, such as a taken service name.
+    init(refusal message: String, typed: String) {
+        isError = true
+        self.message = message
+        fieldText = typed
+    }
+
     init(_ result: Result<AddedDomain, AddDomainError>, typed: String) {
         switch result {
         case .success(let added):
@@ -1045,14 +1052,26 @@ struct CustomServiceEditor: View {
     @Environment(\.dismiss) private var dismiss
     let service: RouteManager.ServiceEntry?
 
-    @State private var serviceName = ""
+    @State private var serviceName: String
     @State private var domains: [String] = [""]
     @State private var ipRanges: [String] = []
 
+    /// `name` seeds the Service Name field of a new service, for a rendered screenshot.
+    init(service: RouteManager.ServiceEntry?, name: String = "") {
+        self.service = service
+        _serviceName = State(initialValue: name)
+    }
+
     private var isEditing: Bool { service != nil }
+
+    /// The service or Bypass list entry the typed name would share its routes with.
+    private var nameClash: ServiceNameClash? {
+        routeManager.customServiceNameClash(serviceName, excluding: service?.id)
+    }
 
     private var canSave: Bool {
         !serviceName.trimmingCharacters(in: .whitespaces).isEmpty &&
+        nameClash == nil &&
         domains.contains(where: { isValidDomainInput($0) })
     }
 
@@ -1099,6 +1118,14 @@ struct CustomServiceEditor: View {
                             .padding(10)
                             .background(Theme.bgInput)
                             .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(nameClash == nil ? Color.clear : Theme.error.opacity(0.8), lineWidth: 1)
+                            )
+
+                        if let nameClash {
+                            AddDomainFeedbackLine(feedback: AddDomainFeedback(refusal: nameClash.message, typed: serviceName))
+                        }
                     }
 
                     // Domains
@@ -1219,8 +1246,7 @@ struct CustomServiceEditor: View {
                 Spacer()
 
                 Button {
-                    save()
-                    dismiss()
+                    if save() { dismiss() }
                 } label: {
                     Text(isEditing ? "Save Changes" : "Create Service")
                         .font(.system(size: 13, weight: .semibold))
@@ -1252,18 +1278,21 @@ struct CustomServiceEditor: View {
         }
     }
 
-    private func save() {
+    /// False when the service was refused and nothing saved; the field then says why.
+    private func save() -> Bool {
         let cleanDomains = domains
             .map { routeManager.cleanDomain($0) }
             .filter { isValidDomainInput($0) }
         let cleanIPs = ipRanges.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let name = serviceName.trimmingCharacters(in: .whitespaces)
 
+        let clash: ServiceNameClash?
         if let service {
-            routeManager.updateCustomService(id: service.id, name: name, domains: cleanDomains, ipRanges: cleanIPs)
+            clash = routeManager.updateCustomService(id: service.id, name: name, domains: cleanDomains, ipRanges: cleanIPs)
         } else {
-            routeManager.addCustomService(name: name, domains: cleanDomains, ipRanges: cleanIPs)
+            clash = routeManager.addCustomService(name: name, domains: cleanDomains, ipRanges: cleanIPs)
         }
+        return clash == nil
     }
 }
 
@@ -1836,7 +1865,8 @@ struct GeneralTab: View {
                     if routeManager.importConfig(from: url) {
                         // Success handled by routeManager
                     } else {
-                        importErrorMessage = "Failed to import configuration file."
+                        importErrorMessage = routeManager.lastImportRefusal
+                            ?? String(localized: "Failed to import configuration file.")
                         showingImportError = true
                     }
                 }
