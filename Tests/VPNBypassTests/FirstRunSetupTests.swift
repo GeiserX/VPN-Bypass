@@ -292,6 +292,7 @@ final class FirstRunSetupViewTests: XCTestCase {
                 .environmentObject(NotificationManager.shared)
                 .environmentObject(LaunchAtLoginManager.shared)
                 .environmentObject(ModeSwitchRequest())
+                .environmentObject(SettingsUndo(routeManager: rm))
         }
         let plain = host(settings(), size: NSSize(width: 580, height: 680))
         XCTAssertEqual(switches(in: plain).count, 0, "control: with no request the window opens on Domains")
