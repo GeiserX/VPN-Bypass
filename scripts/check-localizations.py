@@ -2,7 +2,8 @@
 """Fail when a localizable string in Sources/ has no Spanish or French entry.
 
 Also fails when a Spanish or French entry's format specifiers differ from its
-key's, ignoring their order ("%1$@ y %2$@" matches "%@ and %@").
+key's. Each argument must keep its position and type, wherever it sits in the
+sentence: "%2$@ y %1$@" matches "%@ and %@", "%1$@ y %1$@" does not.
 
 The keys come from the Swift compiler, not from a regex over the source: an
 interpolation's placeholder depends on its type ("\\(count)" is %lld for an Int,
@@ -91,8 +92,21 @@ def catalog(language: str, table: str) -> dict:
 
 
 def specifiers(text: str) -> list:
-    """Each specifier's length and conversion, ignoring position: "%2$lld" and "%lld" are both "lld"."""
-    return sorted(m.group(2) for m in SPECIFIER.finditer(text) if m.group(2) != "%")
+    """Each argument's position and conversion: "%@ and %lld" is ["%1$@", "%2$lld"], and so is "%2$lld, %1$@".
+
+    A specifier without "n$" takes the next argument, so "%@ and %@" reads arguments 1 and 2.
+    """
+    found, implicit = [], 0
+    for m in SPECIFIER.finditer(text):
+        if m.group(2) == "%":
+            continue
+        if m.group(1):
+            position = int(m.group(1)[:-1])
+        else:
+            implicit += 1
+            position = implicit
+        found.append(f"%{position}${m.group(2)}")
+    return sorted(found)
 
 
 def main() -> int:
