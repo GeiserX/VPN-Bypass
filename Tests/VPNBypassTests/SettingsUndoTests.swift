@@ -439,6 +439,55 @@ final class SettingsUndoManagerTests: RouteManagerTestCase {
         XCTAssertTrue(rm.config.services.allSatisfy(\.enabled))
     }
 
+    /// Starts an undo of Turn All On while a route operation holds the gate, so it waits,
+    /// from ⌘Z or from the line's Undo. The gate stays held until the test releases it.
+    private func startWaitingUndo(_ undo: SettingsUndo, commandZ: Bool) {
+        let ids = rm.config.services.map(\.id)
+        for i in rm.config.services.indices { rm.config.services[i].enabled = true }
+        undo.gateWaitPolls = 20
+        undo.record(.servicesSwitched(ids: ids, on: true))
+        settle()
+        XCTAssertTrue(rm.tryAcquireRouteOperationForTests())
+        if commandZ { undo.undoManager?.undo() } else { undo.undoLast() }
+        XCTAssertNil(undo.last, "the line goes while the undo waits")
+    }
+
+    /// A waiting undo is cancelled when the line is dropped: the gate freeing before the
+    /// wait ends must not put back a change the page or mode switch threw away.
+    func testAWaitingUndoDroppedByAPageSwitchDoesNotRunWhenTheGateFrees() {
+        let manager = UndoManager()
+        let undo = SettingsUndo(routeManager: rm)
+        undo.undoManager = manager
+        startWaitingUndo(undo, commandZ: true)
+        undo.clear()
+        rm.releaseRouteOperationForTests()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        XCTAssertTrue(rm.config.services.allSatisfy(\.enabled), "a dropped undo must not switch anything back")
+        XCTAssertEqual(undo.undoneCount, 0)
+        XCTAssertNil(undo.last)
+        XCTAssertFalse(manager.canUndo)
+    }
+
+    /// A waiting undo is cancelled when a newer change replaces the line: undoing the old
+    /// change under the new line would be undoing something the line no longer shows.
+    func testAWaitingUndoReplacedByANewChangeDoesNotRunWhenTheGateFrees() {
+        let manager = UndoManager()
+        let undo = SettingsUndo(routeManager: rm)
+        undo.undoManager = manager
+        startWaitingUndo(undo, commandZ: false)
+        let b = rm.config.domains[1]
+        undo.record(.domain(b, index: 1, list: .bypass))
+        rm.releaseRouteOperationForTests()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        XCTAssertTrue(rm.config.services.allSatisfy(\.enabled), "the replaced undo must not switch anything back")
+        XCTAssertEqual(undo.undoneCount, 0)
+        if case .domain(let entry, _, _)? = undo.last {
+            XCTAssertEqual(entry.domain, "b.example.com", "the new change keeps its line")
+        } else {
+            XCTFail("the new change must keep its line")
+        }
+    }
+
     func testClearingDropsTheLineAndTheUndoMenuItem() {
         let manager = UndoManager()
         let undo = SettingsUndo(routeManager: rm)

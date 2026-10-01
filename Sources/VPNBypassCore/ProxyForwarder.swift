@@ -179,8 +179,12 @@ final class ProxyForwarder {
     func stop() {
         // Hop onto the queue so we read/mutate listener + tunnels on their owning
         // thread. Safe to call from the main thread and idempotent.
-        queue.async { [weak self] in
-            guard let self = self else { return }
+        //
+        // The block holds `self` strongly on purpose. Callers drop their reference right
+        // after stop() (ProxyListenerManager does `stop(); forwarders[id] = nil`). With a
+        // weak capture the forwarder was already gone when the block ran: the listener was
+        // never cancelled, and the route's port stayed bound after the route was off.
+        queue.async {
             self.listener?.cancel()
             self.listener = nil
             let tunnels = self.activeTunnels

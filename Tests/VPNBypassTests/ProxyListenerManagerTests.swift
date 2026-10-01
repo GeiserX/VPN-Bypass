@@ -182,6 +182,40 @@ final class ProxyListenerManagerTests: XCTestCase {
         manager.stopAll()
     }
 
+    func testRouteTurnedOffAndOnComesBackOnItsPort() {
+        // Turning a route off must release its listener, so turning it back on gets the
+        // same stable port and apps keep reaching it. stop() used to be skipped when the
+        // manager dropped the forwarder straight after it, so the old listener kept the
+        // port and the route came back on a random one.
+        let manager = ProxyListenerManager()
+        let port = ProxyForwarderTests.nextListenPort().rawValue
+        let route = Route(name: "p", egress: .proxyHTTP, proxyHost: "127.0.0.1", proxyPort: 9, localListenPort: Int(port))
+
+        let on = expectation(description: "on")
+        manager.reconcile(routes: [route], boundInterface: nil) { on.fulfill() }
+        wait(for: [on], timeout: 5)
+        XCTAssertEqual(manager.port(for: route.id), port)
+
+        let off = expectation(description: "off")
+        manager.reconcile(routes: [], boundInterface: nil) { off.fulfill() }
+        wait(for: [off], timeout: 5)
+
+        // The listener closes asynchronously; wait, bounded, for the port to be free. With
+        // the old stop() it never is.
+        let deadline = Date().addingTimeInterval(5)
+        while LoopbackPeerAuth.uidOwningLocalTCPPort(port) != nil, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+        XCTAssertNil(LoopbackPeerAuth.uidOwningLocalTCPPort(port), "port \(port) still held after the route was turned off")
+
+        let onAgain = expectation(description: "on again")
+        manager.reconcile(routes: [route], boundInterface: nil) { onAgain.fulfill() }
+        wait(for: [onAgain], timeout: 5)
+        XCTAssertEqual(manager.port(for: route.id), port, "the route came back on a different port")
+
+        manager.stopAll()
+    }
+
     func testReconcileStartsListenerForTailscaleExitRoute() {
         // A Tailscale-peer route is served by a loopback listener like any proxy route
         // (the listener binds locally; the upstream isn't dialed until a client connects).
