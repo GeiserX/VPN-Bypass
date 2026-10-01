@@ -39,6 +39,7 @@ private enum RouteSheetState: Identifiable {
 
 struct RoutesTab: View {
     @EnvironmentObject var routeManager: RouteManager
+    @EnvironmentObject var settingsUndo: SettingsUndo
     @ObservedObject private var listenerManager = ProxyListenerManager.shared
     @State private var sheetState: RouteSheetState?
 
@@ -100,6 +101,10 @@ struct RoutesTab: View {
                 emptyState
             } else {
                 routeList
+            }
+
+            if let change = settingsUndo.last, change.page == .routes {
+                UndoLine(message: change.message) { settingsUndo.undoLast() }
             }
         }
         .sheet(item: $sheetState) { state in
@@ -219,13 +224,9 @@ struct RoutesTab: View {
     }
 
     private func deleteRoute(_ route: Route) {
-        routeManager.config.routes.removeAll { $0.id == route.id }
-        routeManager.saveConfig()
-        // Custom mode: this route may compile to a KERNEL route (a `.vpnDefault`
-        // route with an `.interface` selector) — re-apply so it doesn't go stale
-        // until the next hourly refresh (mirrors ControlSurface.handle).
-        let reapply = RouteManager.usesCustomEngine(schemaVersion: routeManager.config.schemaVersion, routingMode: routeManager.config.routingMode)
-        Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: reapply) }
+        let index = routeManager.config.routes.firstIndex(where: { $0.id == route.id }) ?? routeManager.config.routes.count
+        routeManager.removeRoute(route.id)
+        settingsUndo.record(.route(route, index: index))
     }
 
     private func toggleRoute(_ id: UUID, enabled: Bool) {
@@ -237,6 +238,36 @@ struct RoutesTab: View {
         // until the next hourly refresh (mirrors ControlSurface.handle).
         let reapply = RouteManager.usesCustomEngine(schemaVersion: routeManager.config.schemaVersion, routingMode: routeManager.config.routingMode)
         Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: reapply) }
+    }
+}
+
+extension RouteManager {
+    /// Deletes a route from the Routes page and reconciles its listener. Rules that pointed
+    /// at it keep its id, so putting the route back reconnects them.
+    func removeRoute(_ id: UUID) {
+        config.routes.removeAll { $0.id == id }
+        saveRouteChange()
+    }
+
+    /// Puts back a route a delete took out, at its old place, and starts its listener again
+    /// (the same id gives it the same stable port). Returns false while a route with that id
+    /// is listed.
+    @discardableResult
+    func restoreRoute(_ route: Route, at index: Int) -> Bool {
+        guard !config.routes.contains(where: { $0.id == route.id }) else { return false }
+        config.routes.insert(route, at: min(max(index, 0), config.routes.count))
+        saveRouteChange()
+        log(.success, "Restored route: \(route.name)")
+        return true
+    }
+
+    private func saveRouteChange() {
+        saveConfig()
+        // Custom mode: this route may compile to a KERNEL route (a `.vpnDefault`
+        // route with an `.interface` selector) — re-apply so it doesn't go stale
+        // until the next hourly refresh (mirrors ControlSurface.handle).
+        let reapply = RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
+        Task { await reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: reapply) }
     }
 }
 

@@ -45,6 +45,43 @@ extension RouteManager {
         saveConfig()
         Task { await reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: false) }
     }
+
+    /// Deletes a rule and re-applies, as the Rules page's trash button does.
+    func removeRule(_ id: UUID) {
+        config.rules.removeAll { $0.id == id }
+        saveRulesAndReapply()
+    }
+
+    /// Puts back a rule a delete took out, at its old `order`, and re-applies. A rule that has
+    /// since taken that order moves down one, with everything after it, so first match runs
+    /// as it did before the delete. Returns false while a rule with that id is listed.
+    @discardableResult
+    func restoreRule(_ rule: Rule) -> Bool {
+        guard !config.rules.contains(where: { $0.id == rule.id }) else { return false }
+        config.rules = Self.rules(config.rules, restoring: rule)
+        saveRulesAndReapply()
+        log(.success, "Restored rule: \(rule.pattern)")
+        return true
+    }
+
+    /// `rules` with `rule` back at its `order`, the rules from that order on moved down one
+    /// when another rule holds it now.
+    nonisolated static func rules(_ rules: [Rule], restoring rule: Rule) -> [Rule] {
+        var result = rules
+        if result.contains(where: { $0.order == rule.order }) {
+            for i in result.indices where result[i].order >= rule.order {
+                result[i].order += 1
+            }
+        }
+        result.append(rule)
+        return result
+    }
+
+    /// Saves and re-applies after a rule change (RulesTab's `persistAndReapply`).
+    func saveRulesAndReapply() {
+        saveConfig()
+        Task { await reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
+    }
 }
 
 // MARK: - Proxy rule reach
@@ -107,6 +144,7 @@ private enum RuleSheetState: Identifiable {
 
 struct RulesTab: View {
     @EnvironmentObject var routeManager: RouteManager
+    @EnvironmentObject var settingsUndo: SettingsUndo
     @ObservedObject private var listenerManager = ProxyListenerManager.shared
     @State private var sheetState: RuleSheetState?
     @State private var showingNewRouteSheet = false
@@ -128,6 +166,10 @@ struct RulesTab: View {
                 emptyState
             } else {
                 ruleList
+            }
+
+            if let change = settingsUndo.last, change.page == .rules {
+                UndoLine(message: change.message) { settingsUndo.undoLast() }
             }
 
             defaultRouteFooter
@@ -316,8 +358,8 @@ struct RulesTab: View {
     }
 
     private func deleteRule(_ rule: Rule) {
-        routeManager.config.rules.removeAll { $0.id == rule.id }
-        persistAndReapply()
+        routeManager.removeRule(rule.id)
+        settingsUndo.record(.rule(rule, label: RuleRow.patternDisplay(rule, services: routeManager.config.services)))
     }
 
     private func toggleRule(_ id: UUID, enabled: Bool) {
@@ -356,8 +398,7 @@ struct RulesTab: View {
     }
 
     private func persistAndReapply() {
-        routeManager.saveConfig()
-        Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
+        routeManager.saveRulesAndReapply()
     }
 }
 
@@ -387,8 +428,13 @@ struct RuleRow: View {
     }
 
     private var patternDisplay: String {
+        Self.patternDisplay(rule, services: routeManager.config.services)
+    }
+
+    /// The rule's pattern as its row shows it: a service rule shows the service's name.
+    static func patternDisplay(_ rule: Rule, services: [ServiceEntry]) -> String {
         if rule.matchType == .service {
-            return routeManager.config.services.first(where: { $0.id == rule.pattern })?.name ?? rule.pattern
+            return services.first(where: { $0.id == rule.pattern })?.name ?? rule.pattern
         }
         return rule.pattern
     }
