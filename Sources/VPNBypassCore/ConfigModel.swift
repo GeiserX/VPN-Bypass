@@ -221,6 +221,16 @@ struct Config: Codable {
         return (routes, rules, defaultRouteId)
     }
 
+    /// Whether `preparedForCustomMode()` builds rules from the Bypass and VPN Only lists: there
+    /// are no rules yet, and the lists hold something to route. It is the test that function
+    /// runs, and the dropdown's question and the Settings sheet word the switch to Custom by it
+    /// (through `RoutingModeCopy.lists(from:)`), so what they say matches what the switch does.
+    var customModeBuildsRulesFromLists: Bool {
+        rules.isEmpty && (!domains.isEmpty
+            || services.contains { $0.enabled }
+            || inverseDomains.contains { $0.enabled })
+    }
+
     /// Prepare THIS config for Custom mode, purely (no actor, no I/O) so the GUI
     /// (`setRoutingMode`) and the CLI (`CommandRouter`) migrate identically.
     ///
@@ -242,13 +252,9 @@ struct Config: Codable {
         if c.schemaVersion < 2 { c.schemaVersion = 2 }
 
         // Already has a rule model → leave it entirely untouched (idempotent re-entry;
-        // never clobber a user's edited rules). Only derive when rules are EMPTY.
-        guard c.rules.isEmpty else { return c }
-        // Nothing to route → start Custom empty (a valid choice; don't fabricate a model).
-        let hasRoutableLists = !c.domains.isEmpty
-            || c.services.contains { $0.enabled }
-            || c.inverseDomains.contains { $0.enabled }
-        guard hasRoutableLists else { return c }
+        // never clobber a user's edited rules). Nothing to route → start Custom empty
+        // (a valid choice; don't fabricate a model). Only derive otherwise.
+        guard c.customModeBuildsRulesFromLists else { return c }
 
         let hasSystemRoutes = c.routes.contains { $0.egress == .vpnDefault }
             && c.routes.contains { $0.egress == .direct }

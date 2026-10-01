@@ -1686,8 +1686,8 @@ enum DropdownModePicker {
     /// The question, as a standalone alert rather than a sheet on the dropdown: macOS 26 hides
     /// the icon of an alert shown as a sheet, and this one should show the app's logo. No icon
     /// is set here, so NSAlert shows the app icon, AppIcon.icns.
-    @MainActor static func confirmationAlert(to mode: RouteManager.RoutingMode, schemaVersion: Int) -> NSAlert {
-        let copy = confirmation(to: mode, schemaVersion: schemaVersion)
+    @MainActor static func confirmationAlert(to mode: RouteManager.RoutingMode, config: RouteManager.Config) -> NSAlert {
+        let copy = confirmation(to: mode, listsBecomeRules: RoutingModeCopy.lists(from: config).listsBecomeRules)
         let alert = NSAlert()
         alert.messageText = confirmationTitle
         alert.informativeText = copy.message
@@ -1699,7 +1699,7 @@ enum DropdownModePicker {
     /// Asks the question and, on Switch, changes the mode. Call it through the run loop, not
     /// from inside a click handler or a main-queue block (see `DropdownModeRow`).
     @MainActor static func askAndSwitch(to mode: RouteManager.RoutingMode, routeManager: RouteManager) {
-        let alert = confirmationAlert(to: mode, schemaVersion: routeManager.config.schemaVersion)
+        let alert = confirmationAlert(to: mode, config: routeManager.config)
         if alert.runModal() == .alertFirstButtonReturn {
             // The call the Settings switch makes, so entering Custom runs the same migration
             // of the Bypass and VPN Only lists into rules.
@@ -1708,8 +1708,10 @@ enum DropdownModePicker {
     }
 
     /// The question asked before a switch, in English. (The Settings window now asks in a sheet
-    /// with its own wording, in RoutingModeSwitcher.swift.)
-    static func confirmation(to mode: RouteManager.RoutingMode, schemaVersion: Int) -> (message: String, confirm: String) {
+    /// with its own wording, in RoutingModeSwitcher.swift.) `listsBecomeRules` comes from
+    /// `RoutingModeCopy.lists(from:)`, the answer the Settings sheet shows, so the two never
+    /// disagree about whether the switch to Custom turns the lists into rules.
+    static func confirmation(to mode: RouteManager.RoutingMode, listsBecomeRules: Bool) -> (message: String, confirm: String) {
         switch mode {
         case .bypass:
             return (String(localized: "Everything will go through your VPN except the sites you list. Your custom routes stay saved."),
@@ -1718,7 +1720,7 @@ enum DropdownModePicker {
             return (String(localized: "Only the sites you list will use your VPN; everything else goes direct."),
                     String(localized: "Switch to VPN Only"))
         case .custom:
-            let message = schemaVersion < 2
+            let message = listsBecomeRules
                 ? String(localized: "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime.")
                 : String(localized: "Switch to your per-rule custom routing. You can switch back to a simple mode anytime.")
             return (message, String(localized: "Switch to Custom Routes"))
