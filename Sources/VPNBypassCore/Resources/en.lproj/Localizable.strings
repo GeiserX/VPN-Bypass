@@ -65,6 +65,10 @@
 "Create Custom Service" = "Create Custom Service";
 "Custom" = "Custom";
 "%lld domains" = "%lld domains";
+/* Services page section headers; the On header is not the dropdown's ON pill */
+"services.section.on" = "ON";
+"CUSTOM SERVICES" = "CUSTOM SERVICES";
+"BUILT-IN SERVICES" = "BUILT-IN SERVICES";
 
 /* ===== Settings — Custom Service Editor ===== */
 "Edit Service" = "Edit Service";

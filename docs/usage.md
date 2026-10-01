@@ -27,7 +27,7 @@ The routing mode is the Mode menu at the right end of the title bar, for example
 
 Domains: add custom domains, enable/disable them individually, see resolved IPs.
 
-Services: toggle built-in service packs (Telegram, YouTube, Spotify, …); each bundles known domains and IP ranges.
+Services: toggle built-in service packs (Telegram, YouTube, Spotify, …); each bundles known domains and IP ranges. The page lists the services that are on first, under On. The rest follow in the usual order, custom services before built-in ones. A service you switch on or off keeps its place until you next open the page, so a row never moves from under the pointer. All and None re-sort the list at once.
 
 Rules (Custom mode): the ordered rule list (first match wins) mapping domains/suffixes/IPs/CIDRs/services/processes to routes.
 
