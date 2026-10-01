@@ -375,12 +375,14 @@ enum ClassicControl {
     }
 
     /// The target of domain.rm / domain.enable / domain.disable, checked without looking at
-    /// the lists: `lists` to search and exactly one key.
+    /// the lists: an id, or for each list to search the value an entry there would hold.
     private struct DomainTarget {
         let lists: [DomainList]
         /// nil when the id is malformed: it cannot name an entry, so it ends as not_found.
         let id: UUID?
-        let domain: String?
+        /// The lookup key per list, for a domain target. A list whose add would refuse the
+        /// value has no key and is not searched.
+        let keys: [DomainList: String]
     }
 
     /// With `list`, only that list is searched. Without it, both are (see `findDomain`).
@@ -396,28 +398,40 @@ enum ClassicControl {
         }
         if let id {
             // A malformed id cannot name an entry: not_found, as for the route verbs.
-            return .success(DomainTarget(lists: lists, id: UUID(uuidString: id), domain: nil))
+            return .success(DomainTarget(lists: lists, id: UUID(uuidString: id), keys: [:]))
         }
         guard let raw else {
             return .failure(VerbError(code: "invalid_args", message: "id or domain is required"))
         }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Stored values are cleaned (lowercase, no scheme or port); a CIDR is stored as typed.
-        // A "/" outside a URL is a CIDR attempt: cleanDomain would cut "10.0.0.0/33" down to
-        // "10.0.0.0" and hit a different entry than the one named, so refuse it, as domain.add does.
-        let key: String
-        if rm.isValidCIDR(trimmed) {
-            key = trimmed
-        } else if trimmed.contains("/") && !trimmed.contains("://") {
-            return .failure(VerbError(code: "invalid_args",
-                                      message: "malformed CIDR (expected a.b.c.d/n with n from 2 to 32)"))
-        } else {
-            key = rm.cleanDomain(trimmed)
+        // An entry holds what domain.add saved, so the value is read by the same rule:
+        // checkDomainInput. On the Bypass list a link ("https://example.com/page",
+        // "example.com/page") is its host, and a range is refused; on the VPN Only list a
+        // value with "/" is a CIDR or refused. Cleaning "10.0.0.0/33" down to "10.0.0.0"
+        // would name a different entry, so a refused value never becomes a key.
+        var keys: [DomainList: String] = [:]
+        var refusal: AddDomainError?
+        for list in lists {
+            switch rm.checkDomainInput(raw, list: list) {
+            case .success(let checked): keys[list] = checked.value
+            case .failure(let error): refusal = error
+            }
         }
-        guard !key.isEmpty else {
-            return .failure(VerbError(code: "invalid_args", message: "domain is empty after cleaning"))
+        if keys.isEmpty, let refusal {
+            // Every list refused it. Bypass is checked first, so when both are searched a
+            // range gets the VPN Only reason: malformed, or /0 and /1.
+            return .failure(lookupError(refusal))
         }
-        return .success(DomainTarget(lists: lists, id: nil, domain: key))
+        return .success(DomainTarget(lists: lists.filter { keys[$0] != nil }, id: nil, keys: keys))
+    }
+
+    /// A refused lookup value gets domain.add's code and message, except a range on the
+    /// Bypass list: that message says how to add the range, which a lookup has no use for.
+    private static func lookupError(_ error: AddDomainError) -> VerbError {
+        if case .rangeOnBypassList = error {
+            return VerbError(code: "invalid_args", message: "the bypass list holds domain names, not a CIDR")
+        }
+        let refused = fail(error).error
+        return VerbError(code: refused?.code ?? "invalid_args", message: refused?.message ?? "")
     }
 
     /// An id is searched in every list of the target (ids are unique). A domain is too, but a
@@ -426,7 +440,7 @@ enum ClassicControl {
         var matches: [(DomainEntry, DomainList)] = []
         for list in target.lists {
             let found: DomainEntry?
-            if let key = target.domain {
+            if let key = target.keys[list] {
                 found = entries(list, rm).first(where: { $0.domain == key })
             } else if let uuid = target.id {
                 found = entries(list, rm).first(where: { $0.id == uuid })

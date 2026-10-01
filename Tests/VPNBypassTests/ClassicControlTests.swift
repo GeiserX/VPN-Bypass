@@ -420,6 +420,116 @@ final class ClassicControlTests: XCTestCase {
         XCTAssertTrue(rm.config.domains.isEmpty)
     }
 
+    /// domain.rm, domain.enable and domain.disable read a value by the rule domain.add
+    /// saves it by, so every value add takes on the Bypass list names the entry it saved:
+    /// "example.com/page" used to be refused there as a malformed CIDR.
+    func testBypassLookupTakesEveryValueAddTakes() async {
+        for value in ["example.com", "https://example.com/page", "example.com/page", "Example.com:8080/a?b=c"] {
+            for list: String? in ["bypass", nil] {
+                let label = "\(value) list=\(list ?? "none")"
+                rm.config.domains = []
+                rm.config.inverseDomains = []
+                var args = ["domain": value]
+                if let list { args["list"] = list }
+
+                let add = await send("domain.add", args)
+                XCTAssertTrue(add.ok, "\(label): \(String(describing: add.error))")
+                XCTAssertEqual(rm.config.domains.map(\.domain), ["example.com"], label)
+
+                let off = await send("domain.disable", args)
+                XCTAssertTrue(off.ok, "\(label): \(String(describing: off.error))")
+                XCTAssertEqual(rm.config.domains.first?.enabled, false, label)
+
+                let on = await send("domain.enable", args)
+                XCTAssertTrue(on.ok, "\(label): \(String(describing: on.error))")
+                XCTAssertEqual(rm.config.domains.first?.enabled, true, label)
+
+                let removed = await send("domain.rm", args)
+                XCTAssertTrue(removed.ok, "\(label): \(String(describing: removed.error))")
+                XCTAssertTrue(rm.config.domains.isEmpty, label)
+            }
+        }
+    }
+
+    /// The VPN Only list refuses any "/" that is not a CIDR, on add and on lookup alike, and
+    /// the entry the cleaned value would hit is left alone.
+    func testVPNOnlyLookupRefusesALinkWithASlashLikeAdd() async {
+        let entry = DomainEntry(domain: "example.com")
+        for value in ["https://example.com/page", "example.com/page"] {
+            rm.config.inverseDomains = [entry]
+            let args = ["domain": value, "list": "vpnOnly"]
+            for cmd in ["domain.add", "domain.disable", "domain.enable", "domain.rm"] {
+                let resp = await send(cmd, args)
+                XCTAssertEqual(resp.error?.code, "invalid_args", "\(cmd) \(value)")
+                XCTAssertEqual(resp.error?.message, "malformed CIDR (expected a.b.c.d/n with n from 2 to 32)", "\(cmd) \(value)")
+            }
+            XCTAssertEqual(rm.config.inverseDomains, [entry], value)
+        }
+        // A bare host still names it.
+        let bare = await send("domain.disable", ["domain": "example.com", "list": "vpnOnly"])
+        XCTAssertTrue(bare.ok, "\(String(describing: bare.error))")
+        XCTAssertEqual(rm.config.inverseDomains.first?.enabled, false)
+    }
+
+    /// A CIDR names a VPN Only entry, with or without list=. The Bypass list holds no ranges,
+    /// so list=bypass refuses one instead of cutting it to the host "10.0.0.0".
+    func testCIDRLookupOnEachList() async {
+        let host = DomainEntry(domain: "10.0.0.0")
+        rm.config.domains = [host]
+        for cmd in ["domain.add", "domain.disable", "domain.enable", "domain.rm"] {
+            let resp = await send(cmd, ["domain": "10.0.0.0/24", "list": "bypass"])
+            XCTAssertEqual(resp.error?.code, "invalid_args", cmd)
+        }
+        let lookup = await send("domain.rm", ["domain": "10.0.0.0/24", "list": "bypass"])
+        XCTAssertEqual(lookup.error?.message, "the bypass list holds domain names, not a CIDR")
+        XCTAssertEqual(rm.config.domains, [host], "the host entry nobody named is untouched")
+
+        for list: String? in ["vpnOnly", nil] {
+            let label = "list=\(list ?? "none")"
+            rm.config.inverseDomains = []
+            var args = ["domain": "10.0.0.0/24"]
+            if let list { args["list"] = list }
+            if list == nil {
+                rm.config.inverseDomains = [DomainEntry(domain: "10.0.0.0/24", isCIDR: true)]
+            } else {
+                let add = await send("domain.add", args)
+                XCTAssertTrue(add.ok, "\(label): \(String(describing: add.error))")
+            }
+            let off = await send("domain.disable", args)
+            XCTAssertTrue(off.ok, "\(label): \(String(describing: off.error))")
+            XCTAssertEqual(rm.config.inverseDomains.first?.enabled, false, label)
+            let on = await send("domain.enable", args)
+            XCTAssertTrue(on.ok, "\(label): \(String(describing: on.error))")
+            XCTAssertEqual(rm.config.inverseDomains.first?.enabled, true, label)
+            let removed = await send("domain.rm", args)
+            XCTAssertTrue(removed.ok, "\(label): \(String(describing: removed.error))")
+            XCTAssertTrue(rm.config.inverseDomains.isEmpty, label)
+        }
+        XCTAssertEqual(rm.config.domains, [host])
+    }
+
+    /// A malformed range is refused by every verb on every list, and never cut down to the
+    /// host entry "10.0.0.0".
+    func testMalformedRangeIsRefusedByEveryVerbOnEveryList() async {
+        let host = DomainEntry(domain: "10.0.0.0", enabled: false)
+        let vpnHost = DomainEntry(domain: "10.0.0.0")
+        rm.config.domains = [host]
+        rm.config.inverseDomains = [vpnHost]
+        for list: String? in ["bypass", "vpnOnly", nil] {
+            var args = ["domain": "10.0.0.0/33"]
+            if let list { args["list"] = list }
+            for cmd in ["domain.add", "domain.disable", "domain.enable", "domain.rm"] {
+                let resp = await send(cmd, args)
+                XCTAssertEqual(resp.error?.code, "invalid_args", "\(cmd) list=\(list ?? "none")")
+            }
+        }
+        let both = await send("domain.rm", ["domain": "10.0.0.0/33"])
+        XCTAssertEqual(both.error?.message, "malformed CIDR (expected a.b.c.d/n with n from 2 to 32)",
+                       "with both lists searched, the VPN Only reason names the range problem")
+        XCTAssertEqual(rm.config.domains, [host])
+        XCTAssertEqual(rm.config.inverseDomains, [vpnHost])
+    }
+
     func testBypassListIsLiveOnlyWhereTheGUIShowsIt() {
         rm.config.schemaVersion = 2
         rm.config.routingMode = .bypass
