@@ -58,7 +58,7 @@ enum StatusPage {
             title = status.headline
         } else if input.installedRoutes == 0 && input.nothingConfigured {
             title = String(localized: "Not set up", bundle: bundle)
-        } else if input.installedRoutes == 0 {
+        } else if input.installedRoutes == 0 && !input.everythingElseDirect {
             title = String(localized: "Nothing routed", bundle: bundle)
         } else {
             title = String(localized: "Working", bundle: bundle)
@@ -294,7 +294,7 @@ extension DropdownStatus.Input {
                 ? config.inverseDomains.filter { $0.enabled }.count
                 : config.domains.filter { $0.enabled }.count,
             enabledRules: config.rules.filter { $0.enabled }.count,
-            installedRoutes: routeManager.uniqueRouteCount,
+            installedRoutes: routeManager.routedAddressCount,
             pending: routeManager.pendingReconnectApply,
             lastRouteChange: routeManager.lastRouteChange,
             lastDNSRefresh: routeManager.lastDNSRefresh,
@@ -303,7 +303,8 @@ extension DropdownStatus.Input {
             nothingConfigured: FirstRunSetup.isFresh(mode: config.routingMode,
                                                      domains: config.domains,
                                                      services: config.services,
-                                                     installedRoutes: routeManager.uniqueRouteCount)
+                                                     installedRoutes: routeManager.routedAddressCount),
+            everythingElseDirect: routeManager.everythingElseDirect
         )
     }
 }
@@ -435,14 +436,14 @@ struct StatusTab: View {
     private func routesSection(_ input: DropdownStatus.Input, now: Date) -> some View {
         StatusSection(String(localized: "Addresses")) {
             StatusLineRow(label: String(localized: "Routed"),
-                          line: StatusPage.appliedLine(installed: routeManager.uniqueRouteCount,
+                          line: StatusPage.appliedLine(installed: routeManager.routedAddressCount,
                                                        lastChange: routeManager.lastRouteChange, now: now))
             StatusDivider()
             StatusLineRow(label: String(localized: "From"), line: StatusPage.fromLine(input))
             StatusDivider()
             StatusLineRow(label: String(localized: "Last check"),
                           line: StatusPage.lastCheckLine(Array(routeManager.routeVerificationResults.values),
-                                                         installed: routeManager.uniqueRouteCount, now: now)) {
+                                                         installed: routeManager.routedAddressCount, now: now)) {
                 Button(String(localized: "Verify")) { verify() }
                     .disabled(isVerifying || routeManager.activeRoutes.isEmpty)
             }

@@ -305,6 +305,7 @@
 "DNS" = "DNS";
 "No VPN connected" = "Aucun VPN connecté";
 "Nothing is routed until a VPN connects." = "Rien n'est routé tant qu'aucun VPN n'est connecté.";
+"Everything else still goes direct: removing that failed." = "Tout le reste passe toujours en direct : le retrait a échoué.";
 "%lld addresses stay routed for when it reconnects." = "%lld adresses restent routées pour la reconnexion.";
 "%lld addresses are still routed: removing them failed." = "%lld adresses sont toujours routées : leur retrait a échoué.";
 "NOT ENFORCING" = "INACTIF";

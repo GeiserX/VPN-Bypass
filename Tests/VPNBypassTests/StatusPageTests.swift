@@ -92,6 +92,8 @@ final class StatusPageTests: XCTestCase {
 
     func testNothingInstalledIsNotWorking() {
         XCTAssertEqual(summary { $0.installedRoutes = 0 }.title, "Nothing routed")
+        XCTAssertEqual(summary { $0.mode = .vpnOnly; $0.installedRoutes = 0; $0.everythingElseDirect = true }.title, "Working",
+                       "VPN Only's catch-alls are routed, though not counted")
         let fresh = summary { $0.installedRoutes = 0; $0.nothingConfigured = true; $0.enabledServices = 0; $0.enabledDomains = 0 }
         XCTAssertEqual(fresh.title, "Not set up")
         XCTAssertEqual(fresh.tone, .idle)

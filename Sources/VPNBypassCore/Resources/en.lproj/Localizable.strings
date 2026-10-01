@@ -305,6 +305,7 @@
 "DNS" = "DNS";
 "No VPN connected" = "No VPN connected";
 "Nothing is routed until a VPN connects." = "Nothing is routed until a VPN connects.";
+"Everything else still goes direct: removing that failed." = "Everything else still goes direct: removing that failed.";
 "%lld addresses stay routed for when it reconnects." = "%lld addresses stay routed for when it reconnects.";
 "%lld addresses are still routed: removing them failed." = "%lld addresses are still routed: removing them failed.";
 "NOT ENFORCING" = "NOT ENFORCING";

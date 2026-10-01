@@ -186,6 +186,16 @@ final class DropdownStatusTests: XCTestCase {
         XCTAssertEqual(s.sentence, "Nothing is routed while the privileged helper is not running.")
     }
 
+    /// VPN Only's catch-alls are not counted, but they are routed: with only them in place the
+    /// app is working (everything goes direct), and a failed removal of them is still reported.
+    func testCatchAllsAloneAreRoutedThoughNotCounted() {
+        let on = status { $0.mode = .vpnOnly; $0.enabledDomains = 0; $0.installedRoutes = 0; $0.everythingElseDirect = true }
+        XCTAssertEqual(on.pill, "ON")
+        XCTAssertEqual(on.sentence, "Nothing is sent through the VPN yet.")
+        let off = status { $0.isVPNConnected = false; $0.mode = .vpnOnly; $0.installedRoutes = 0; $0.everythingElseDirect = true }
+        XCTAssertEqual(off.sentence, "Everything else still goes direct: removing that failed.")
+    }
+
     func testNoRoutesIsAWarning() {
         let s = status { $0.installedRoutes = 0 }
         XCTAssertEqual(s.pill, "NOTHING ROUTED")
