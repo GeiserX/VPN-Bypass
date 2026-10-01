@@ -363,3 +363,23 @@
 "Left from earlier" = "Left from earlier";
 "Everything else" = "Everything else";
 "direct" = "direct";
+
+/* ===== Settings: undo after a delete or a Turn All On/Off ===== */
+"Undo" = "Undo";
+"Removed %@." = "Removed %@.";
+"Removed the range %@." = "Removed the range %@.";
+"Removed %@ and its %@." = "Removed %1$@ and its %2$@.";
+"Removed %@, its %@ and its %@." = "Removed %1$@, its %2$@ and its %3$@.";
+"1 IP range" = "1 IP range";
+"%lld IP ranges" = "%lld IP ranges";
+"Removed the rule for %@." = "Removed the rule for %@.";
+"Removed the route %@." = "Removed the route %@.";
+"Turned on %@." = "Turned on %@.";
+"Turned off %@." = "Turned off %@.";
+"Turn All On" = "Turn All On";
+"Turn All On…" = "Turn All On…";
+"Turn All Off" = "Turn All Off";
+"Turn all on or off" = "Turn all on or off";
+"Send %lld services around the VPN?" = "Send %lld services around the VPN?";
+"%@, %@ and %lld more will use your normal connection instead of the VPN. You can turn them off again here." = "%1$@, %2$@ and %3$lld more will use your normal connection instead of the VPN. You can turn them off again here.";
+"Turn On %lld Services" = "Turn On %lld Services";

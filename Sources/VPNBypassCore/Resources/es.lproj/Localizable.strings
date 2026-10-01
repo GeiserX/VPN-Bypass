@@ -363,3 +363,23 @@
 "Left from earlier" = "Restos de antes";
 "Everything else" = "Todo lo demás";
 "direct" = "directo";
+
+/* ===== Ajustes: deshacer tras quitar algo o tras Activar/Desactivar todos ===== */
+"Undo" = "Deshacer";
+"Removed %@." = "Se quitó %@.";
+"Removed the range %@." = "Se quitó el rango %@.";
+"Removed %@ and its %@." = "Se quitó %1$@ junto con %2$@.";
+"Removed %@, its %@ and its %@." = "Se quitó %1$@ junto con %2$@ y %3$@.";
+"1 IP range" = "1 rango de IP";
+"%lld IP ranges" = "%lld rangos de IP";
+"Removed the rule for %@." = "Se quitó la regla de %@.";
+"Removed the route %@." = "Se quitó la ruta %@.";
+"Turned on %@." = "Has activado %@.";
+"Turned off %@." = "Has desactivado %@.";
+"Turn All On" = "Activar todos";
+"Turn All On…" = "Activar todos…";
+"Turn All Off" = "Desactivar todos";
+"Turn all on or off" = "Activar o desactivar todos";
+"Send %lld services around the VPN?" = "¿Sacar %lld servicios de la VPN?";
+"%@, %@ and %lld more will use your normal connection instead of the VPN. You can turn them off again here." = "%1$@, %2$@ y %3$lld más usarán tu conexión normal en lugar de la VPN. Puedes volver a desactivarlos aquí.";
+"Turn On %lld Services" = "Activar %lld servicios";

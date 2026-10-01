@@ -26,9 +26,11 @@ The routing mode is the Mode menu at the right end of the title bar, for example
 
 ![The Domains tab: two domains, each with its switch on, and the field to add another](images/screenshots/domains.png){ width="580" }
 
-Domains: add custom domains, enable/disable them individually, see resolved IPs.
+Domains: add custom domains, enable/disable them individually, see resolved IPs. The ⋯ menu next to the count holds Turn All On and Turn All Off.
 
-Services: toggle built-in service packs (Telegram, YouTube, Spotify, …); each bundles known domains and IP ranges. The page lists the services that are on first, under On. The rest follow in the usual order, custom services before built-in ones. A service you switch on or off keeps its place until you next open the page, so a row never moves from under the pointer. That holds for a newly created service too, and for a service switched through `vpnb` while the page is open. All and None re-sort the list at once.
+Services: toggle built-in service packs (Telegram, YouTube, Spotify, …); each bundles known domains and IP ranges. The page lists the services that are on first, under On. The rest follow in the usual order, custom services before built-in ones. A service you switch on or off keeps its place until you next open the page, so a row never moves from under the pointer. That holds for a newly created service too, and for a service switched through `vpnb` while the page is open. The ⋯ menu next to the search field holds Turn All On… and Turn All Off, and both re-sort the list at once. Turn All On asks first when it would turn on more than five services ("Send 33 services around the VPN?"), with Cancel as the default button. Turn All Off does not ask.
+
+Undo: a trash button removes a domain, a custom service with all its domains, a rule or a route on the first click, and leaves a line in the list such as "Removed news.ycombinator.com." with an Undo button. Turn All On and Turn All Off leave one too ("Turned off 4 services."). Undo, or Edit > Undo (⌘Z), puts the entry back where it was, with its switch as it was, and its routes come back with it. Undoing Turn All On or Turn All Off switches back only the entries it switched. While routes are still being applied, Undo is greyed out like the switches, and ⌘Z waits up to 10 seconds; if they are still running then, the change stays on the line to undo later. The line covers the last change only: the next delete or Turn All On/Off replaces it, and switching page or mode, or closing Settings, drops it.
 
 Rules (Custom mode): the ordered rule list (first match wins) mapping domains/suffixes/IPs/CIDRs/services/processes to routes.
 

@@ -10,6 +10,9 @@ struct SettingsView: View {
     @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
     /// The mode picked in the title bar's Mode menu; set, it opens the sheet.
     @EnvironmentObject var modeSwitch: ModeSwitchRequest
+    /// The last delete or bulk switch, which the page that made it offers to undo.
+    @EnvironmentObject var settingsUndo: SettingsUndo
+    @Environment(\.undoManager) private var undoManager
     @State private var selectedTab: SettingsTab = .domains
 
     // MARK: - Tab model
@@ -80,8 +83,17 @@ struct SettingsView: View {
                 endPoint: .bottom
             )
         )
-        .onAppear { clampSelectedTabIfNeeded() }
-        .onChange(of: routeManager.config.routingMode) { _ in clampSelectedTabIfNeeded() }
+        .onAppear {
+            clampSelectedTabIfNeeded()
+            settingsUndo.undoManager = undoManager
+        }
+        .onChange(of: routeManager.config.routingMode) { _ in
+            clampSelectedTabIfNeeded()
+            // The change was made to another mode's list, which this page no longer shows.
+            settingsUndo.clear()
+        }
+        // The line belongs to the page that made the change.
+        .onChange(of: selectedTab) { _ in settingsUndo.clear() }
         // A page asked for from outside, such as the dropdown's "All 37 services…" row. The
         // publisher sends its current value on subscribe, so a fresh window opens on it too.
         .onReceive(SettingsPageRequest.shared.$page) { page in
@@ -200,6 +212,7 @@ struct SettingsToolbarItem: View {
 
 struct DomainsTab: View {
     @EnvironmentObject var routeManager: RouteManager
+    @EnvironmentObject var settingsUndo: SettingsUndo
     @State private var newDomain: String
     /// What the last add did, shown under the field.
     @State private var feedback: AddDomainFeedback?
@@ -322,7 +335,7 @@ struct DomainsTab: View {
 
                     Spacer()
 
-                    // Loading indicator or All/None buttons
+                    // Loading indicator, or the Turn All On/Off menu after the count
                     if routeManager.isApplyingRoutes {
                         HStack(spacing: 6) {
                             ProgressView()
@@ -331,36 +344,6 @@ struct DomainsTab: View {
                             Text("Applying...")
                                 .font(.system(size: 9))
                                 .foregroundColor(Theme.textSecondary)
-                        }
-                    } else if !activeDomains.isEmpty {
-                        HStack(spacing: 6) {
-                            Button {
-                                if isInverse { routeManager.setAllInverseDomainsEnabled(true) }
-                                else { routeManager.setAllDomainsEnabled(true) }
-                            } label: {
-                                Text("All")
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(Theme.success)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Theme.success.opacity(0.15))
-                                    .cornerRadius(4)
-                            }
-                            .buttonStyle(.plain)
-
-                            Button {
-                                if isInverse { routeManager.setAllInverseDomainsEnabled(false) }
-                                else { routeManager.setAllDomainsEnabled(false) }
-                            } label: {
-                                Text("None")
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(Theme.error)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Theme.error.opacity(0.15))
-                                    .cornerRadius(4)
-                            }
-                            .buttonStyle(.plain)
                         }
                     }
 
@@ -371,6 +354,16 @@ struct DomainsTab: View {
                         .padding(.vertical, 3)
                         .background((isInverse ? Theme.warning : Theme.success).opacity(0.15))
                         .clipShape(Capsule())
+
+                    if !routeManager.isApplyingRoutes && !activeDomains.isEmpty {
+                        BulkSwitchMenu(
+                            turnAllOnTitle: String(localized: "Turn All On"),
+                            canTurnOn: enabledCount < activeDomains.count,
+                            canTurnOff: enabledCount > 0,
+                            onTurnAllOn: { switchAll(true) },
+                            onTurnAllOff: { switchAll(false) }
+                        )
+                    }
                 }
 
                 if activeDomains.isEmpty {
@@ -378,9 +371,13 @@ struct DomainsTab: View {
                 } else {
                     VStack(spacing: 6) {
                         ForEach(activeDomains) { domain in
-                            DomainRow(domain: domain, isInverse: isInverse)
+                            DomainRow(domain: domain, isInverse: isInverse) { removeDomain(domain) }
                         }
                     }
+                }
+
+                if let change = settingsUndo.last, change.page == .domains {
+                    UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
                 }
             }
             .padding(16)
@@ -411,6 +408,24 @@ struct DomainsTab: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 30)
+    }
+
+    /// Turn All On / Turn All Off. Neither asks: the list is the user's own, and the undo
+    /// line switches back exactly the entries this switched.
+    private func switchAll(_ on: Bool) {
+        let list: DomainList = isInverse ? .vpnOnly : .bypass
+        let changed = isInverse ? routeManager.setAllInverseDomainsEnabled(on) : routeManager.setAllDomainsEnabled(on)
+        if !changed.isEmpty { settingsUndo.record(.domainsSwitched(ids: changed, on: on, list: list)) }
+    }
+
+    private func removeDomain(_ domain: RouteManager.DomainEntry) {
+        let list: DomainList = isInverse ? .vpnOnly : .bypass
+        let index = activeDomains.firstIndex(where: { $0.id == domain.id }) ?? activeDomains.count
+        withAnimation(.easeOut(duration: 0.2)) {
+            if isInverse { routeManager.removeInverseDomain(domain) }
+            else { routeManager.removeDomain(domain) }
+        }
+        settingsUndo.record(.domain(domain, index: index, list: list))
     }
 
     private func addDomain() {
@@ -464,6 +479,8 @@ struct DomainRow: View {
     @EnvironmentObject var routeManager: RouteManager
     let domain: RouteManager.DomainEntry
     var isInverse: Bool = false
+    /// The trash button. DomainsTab removes the entry and leaves the undo line.
+    let onDelete: () -> Void
     @State private var isHovered = false
     
     var body: some View {
@@ -510,12 +527,7 @@ struct DomainRow: View {
             .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
 
             // Delete button - disabled during route operations
-            Button {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    if isInverse { routeManager.removeInverseDomain(domain) }
-                    else { routeManager.removeDomain(domain) }
-                }
-            } label: {
+            Button(action: onDelete) {
                 Image(systemName: "trash")
                     .font(.system(size: 11))
                     .foregroundColor(Theme.error.opacity(isHovered ? 1 : 0.6))
@@ -611,11 +623,19 @@ struct ServiceSections {
 
 struct ServicesTab: View {
     @EnvironmentObject var routeManager: RouteManager
+    @EnvironmentObject var settingsUndo: SettingsUndo
     @State private var searchText = ""
+    /// Set, Turn All On asks this before it runs.
+    @State private var turnOnQuestion: ServiceBulkSwitch.Question?
     @State private var showingCustomServiceEditor = false
     @State private var editingService: RouteManager.ServiceEntry?
     /// Each service's switch when the page opened; nil until it appears.
     @State private var pinned: [String: Bool]?
+
+    /// The argument seeds the question Turn All On asks, for a rendered screenshot.
+    init(turnOnQuestion: ServiceBulkSwitch.Question? = nil) {
+        _turnOnQuestion = State(initialValue: turnOnQuestion)
+    }
 
     private var isVPNOnly: Bool {
         routeManager.config.routingMode == .vpnOnly
@@ -737,37 +757,18 @@ struct ServicesTab: View {
                         }
                         .frame(width: 80)
                     } else {
-                        // Select All button
-                        Button {
-                            routeManager.setAllServicesEnabled(true)
-                            // The pointer is on the button, not on a row: show the new split now.
-                            pinned = ServiceSections.pin(routeManager.config.services)
-                        } label: {
-                            Text("All")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Theme.success)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Theme.success.opacity(0.15))
-                                .cornerRadius(6)
-                        }
-                        .buttonStyle(.plain)
-
-                        // Select None button
-                        Button {
-                            routeManager.setAllServicesEnabled(false)
-                            pinned = ServiceSections.pin(routeManager.config.services)
-                        } label: {
-                            Text("None")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Theme.error)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Theme.error.opacity(0.15))
-                                .cornerRadius(6)
-                        }
-                        .buttonStyle(.plain)
+                        BulkSwitchMenu(
+                            turnAllOnTitle: ServiceBulkSwitch.turnAllOnTitle(offCount: offServices.count),
+                            canTurnOn: !offServices.isEmpty,
+                            canTurnOff: enabledCount > 0,
+                            onTurnAllOn: turnAllOn,
+                            onTurnAllOff: { switchAll(false) }
+                        )
                     }
+                }
+
+                if let change = settingsUndo.last, change.page == .services {
+                    UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
                 }
 
                 // Services list: the services that were on when the page opened, then the rest
@@ -799,7 +800,7 @@ struct ServicesTab: View {
                                         ServiceRow(service: service, onEdit: service.isCustom ? {
                                             editingService = service
                                             showingCustomServiceEditor = true
-                                        } : nil)
+                                        } : nil, onDelete: { removeCustomService(service) })
                                     }
                                 }
                             }
@@ -819,12 +820,76 @@ struct ServicesTab: View {
                         pinned = ServiceSections.pinNew(routeManager.config.services, into: current)
                     }
                 }
+                // An undone Turn All On/Off moves many rows at once, like the switch itself.
+                .onChange(of: settingsUndo.undoneCount) { _ in
+                    pinned = ServiceSections.pin(routeManager.config.services)
+                }
             }
         }
         .sheet(isPresented: $showingCustomServiceEditor) {
             CustomServiceEditor(service: editingService)
                 .environmentObject(routeManager)
         }
+        .alert(turnOnQuestion?.title ?? "", isPresented: Binding(
+            get: { turnOnQuestion != nil },
+            set: { if !$0 { turnOnQuestion = nil } }
+        )) {
+            Button(turnOnQuestion?.confirm ?? "") { switchAll(true) }
+            Button(String(localized: "Cancel"), role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+        } message: {
+            Text(turnOnQuestion?.message ?? "")
+        }
+    }
+
+    private var offServices: [RouteManager.ServiceEntry] {
+        routeManager.config.services.filter { !$0.enabled }
+    }
+
+    private func turnAllOn() {
+        if let question = ServiceBulkSwitch.question(turningOn: offServices) {
+            turnOnQuestion = question
+        } else {
+            switchAll(true)
+        }
+    }
+
+    private func switchAll(_ on: Bool) {
+        let changed = routeManager.setAllServicesEnabled(on)
+        // The pointer is on the menu, not on a row: show the new split now.
+        pinned = ServiceSections.pin(routeManager.config.services)
+        if !changed.isEmpty { settingsUndo.record(.servicesSwitched(ids: changed, on: on)) }
+    }
+
+    private func removeCustomService(_ service: RouteManager.ServiceEntry) {
+        let index = routeManager.config.services.firstIndex(where: { $0.id == service.id }) ?? routeManager.config.services.count
+        routeManager.removeCustomService(service.id)
+        settingsUndo.record(.customService(service, index: index))
+    }
+}
+
+/// The ⋯ menu that replaced the All and None chips on the Domains and Services pages.
+struct BulkSwitchMenu: View {
+    let turnAllOnTitle: String
+    let canTurnOn: Bool
+    let canTurnOff: Bool
+    let onTurnAllOn: () -> Void
+    let onTurnAllOff: () -> Void
+
+    var body: some View {
+        Menu {
+            Button(turnAllOnTitle, action: onTurnAllOn)
+                .disabled(!canTurnOn)
+            Button(String(localized: "Turn All Off"), action: onTurnAllOff)
+                .disabled(!canTurnOff)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 14))
+                .foregroundColor(Theme.textSecondary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(String(localized: "Turn all on or off"))
     }
 }
 
@@ -832,6 +897,8 @@ struct ServiceRow: View {
     @EnvironmentObject var routeManager: RouteManager
     let service: RouteManager.ServiceEntry
     var onEdit: (() -> Void)?
+    /// The trash button of a custom service. ServicesTab removes it and leaves the undo line.
+    var onDelete: (() -> Void)?
     @State private var isHovered = false
 
     var body: some View {
@@ -881,7 +948,7 @@ struct ServiceRow: View {
                 .opacity(isHovered ? 1.0 : 0.4)
 
                 Button {
-                    routeManager.removeCustomService(service.id)
+                    onDelete?()
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
@@ -2706,6 +2773,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     static let shared = SettingsWindowController()
 
     private var window: NSWindow?
+    /// The open window's undo line, dropped when the window closes.
+    private var settingsUndo: SettingsUndo?
 
     /// Shows the window, on `page` when one is given.
     func show(page: SettingsView.SettingsTab? = nil) {
@@ -2725,8 +2794,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             return
         }
 
-        let window = Self.makeWindow()
+        let settingsUndo = SettingsUndo()
+        let window = Self.makeWindow(settingsUndo: settingsUndo)
         window.delegate = self
+        self.settingsUndo = settingsUndo
 
         // Show Dock icon so minimize works
         NSApp.setActivationPolicy(.regular)
@@ -2740,13 +2811,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     /// The Settings window, built without showing it. The title bar's Mode menu and the
     /// content's mode sheet share one `ModeSwitchRequest`.
-    static func makeWindow() -> NSWindow {
+    static func makeWindow(settingsUndo: SettingsUndo? = nil) -> NSWindow {
         let modeSwitch = ModeSwitchRequest()
         let settingsView = SettingsView()
             .environmentObject(RouteManager.shared)
             .environmentObject(NotificationManager.shared)
             .environmentObject(LaunchAtLoginManager.shared)
             .environmentObject(modeSwitch)
+            .environmentObject(settingsUndo ?? SettingsUndo())
         let hostingView = NSHostingView(rootView: settingsView)
 
         let window = NSWindow(
@@ -2773,6 +2845,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         window = nil
+        settingsUndo?.clear()
+        settingsUndo = nil
         // Hide Dock icon when settings window closes
         NSApp.setActivationPolicy(.accessory)
     }
