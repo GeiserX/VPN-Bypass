@@ -10,6 +10,23 @@ import SwiftUI
 
 /// What the Status page says, as pure functions of the app's state.
 enum StatusPage {
+    /// What re-reads the tunnels while the page is open: the VPN coming up, going down or
+    /// moving to another interface, and every apply or removal of routes, so the tagged count
+    /// and the default route never contradict the Applied row. Never a timer: the read spawns
+    /// `ifconfig` and `tailscale status`.
+    struct TunnelReadKey: Equatable {
+        let vpnInterface: String?
+        let isVPNConnected: Bool
+        let lastRouteChangeAt: Date?
+
+        @MainActor
+        static func current(_ routeManager: RouteManager) -> TunnelReadKey {
+            TunnelReadKey(vpnInterface: routeManager.vpnInterface,
+                          isVPNConnected: routeManager.isVPNConnected,
+                          lastRouteChangeAt: routeManager.lastRouteChange?.at)
+        }
+    }
+
     /// The block at the top: a one-word verdict, then the dropdown's own sentence.
     struct Summary: Equatable {
         let title: String
@@ -318,8 +335,9 @@ struct StatusTab: View {
             content(now: context.date)
         }
         .task { if readsTunnelsOnChange { await readTunnels() } }
-        .onChange(of: routeManager.vpnInterface) { _ in if readsTunnelsOnChange { Task { await readTunnels() } } }
-        .onChange(of: routeManager.isVPNConnected) { _ in if readsTunnelsOnChange { Task { await readTunnels() } } }
+        .onChange(of: StatusPage.TunnelReadKey.current(routeManager)) { _ in
+            if readsTunnelsOnChange { Task { await readTunnels() } }
+        }
     }
 
     private func content(now: Date) -> some View {
@@ -560,8 +578,8 @@ struct StatusTab: View {
 
     // MARK: Actions
 
-    /// On appear, on a VPN change and on Refresh only: the read spawns `ifconfig` and
-    /// `tailscale status`, which must never sit on a timer.
+    /// On appear, on a `TunnelReadKey` change and on Refresh only: the read spawns `ifconfig`
+    /// and `tailscale status`, which must never sit on a timer.
     private func readTunnels() async {
         isReadingTunnels = true
         snapshot = await routeManager.coexistenceSnapshot()

@@ -271,6 +271,63 @@ final class StatusPageTests: XCTestCase {
         XCTAssertEqual(SettingsView.tabs(for: .custom), [.status, .rules, .routes, .general, .logs, .info])
     }
 
+    // MARK: Tunnel reads
+
+    /// The tunnel snapshot feeds Default route and the tagged count, so it is re-read on every
+    /// apply or removal and on every VPN change; a DNS refresh alone does not read it.
+    @MainActor
+    func testTunnelsAreReReadOnEveryRouteChangeAndVPNChange() {
+        let rm = RouteManager.shared
+        let saved = (rm.lastRouteChange, rm.lastDNSRefresh, rm.vpnInterface, rm.isVPNConnected)
+        defer {
+            rm.lastRouteChange = saved.0; rm.lastDNSRefresh = saved.1
+            rm.vpnInterface = saved.2; rm.isVPNConnected = saved.3
+        }
+        rm.lastRouteChange = nil
+        rm.vpnInterface = nil
+        rm.isVPNConnected = false
+        let start = StatusPage.TunnelReadKey.current(rm)
+
+        rm.lastDNSRefresh = now
+        XCTAssertEqual(StatusPage.TunnelReadKey.current(rm), start, "a DNS refresh is not a reason to read")
+
+        rm.lastRouteChange = .init(kind: .applied, at: now, routeCount: 62, failedCount: 0)
+        let applied = StatusPage.TunnelReadKey.current(rm)
+        XCTAssertNotEqual(applied, start, "an apply re-reads the tagged count")
+
+        rm.lastRouteChange = .init(kind: .removedAll, at: now.addingTimeInterval(5), routeCount: 0, failedCount: 0)
+        let removed = StatusPage.TunnelReadKey.current(rm)
+        XCTAssertNotEqual(removed, applied, "a removal re-reads the tagged count")
+
+        rm.isVPNConnected = true
+        let connected = StatusPage.TunnelReadKey.current(rm)
+        XCTAssertNotEqual(connected, removed, "a VPN coming up re-reads the tunnels")
+
+        rm.vpnInterface = "utun4"
+        XCTAssertNotEqual(StatusPage.TunnelReadKey.current(rm), connected, "a new interface re-reads the tunnels")
+    }
+
+    // MARK: Pointers to this page
+
+    /// The helper's row and its Install button moved from General to Status, so every message
+    /// that sends the user to repair the helper must name Status.
+    func testHelperRepairMessagesPointAtStatus() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let sources = root.appendingPathComponent("Sources/VPNBypassCore")
+        var found = 0
+        for file in try FileManager.default.contentsOfDirectory(at: sources, includingPropertiesForKeys: nil)
+        where file.pathExtension == "swift" {
+            for line in try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n")
+            where line.contains("helper") && line.contains("repair it") {
+                found += 1
+                XCTAssertTrue(line.contains("Settings → Status") || line.contains("Settings > Status"),
+                              "\(file.lastPathComponent): \(line.trimmingCharacters(in: .whitespaces))")
+            }
+        }
+        // The startup notification, the Refresh Routes notification and the socket's refresh error.
+        XCTAssertEqual(found, 3)
+    }
+
     // MARK: Spanish and French
 
     private func lproj(_ language: String) throws -> Bundle {
