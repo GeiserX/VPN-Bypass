@@ -148,7 +148,7 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Private
     
-    private var dnsRefreshTimer: Timer?
+    private(set) var dnsRefreshTimer: Timer?
     private var detectedDNSServer: String?  // User's real DNS (pre-VPN), detected at startup
     private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
@@ -3236,7 +3236,7 @@ final class RouteManager: ObservableObject {
         
         nextDNSRefresh = Date().addingTimeInterval(interval)
         
-        dnsRefreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        dnsRefreshTimer = Timer.scheduledInCommonModes(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 await self?.performDNSRefresh()
             }
@@ -4347,20 +4347,41 @@ final class RouteManager: ObservableObject {
         config.routingMode = mode
         saveConfig()
         log(.info, "Routing mode changed to \(mode.displayName)")
+        applyRoutingModeChange()
+    }
 
-        if isVPNConnected && acquireRouteOperation() {
-            Task {
-                defer { releaseRouteOperation() }
-                // Re-detect VPN gateway when switching to VPN Only
-                // (initial detection may be stale if VPN routing wasn't ready yet)
-                if mode == .vpnOnly {
-                    vpnGateway = await detectVPNGateway()
-                }
-                await removeAllRoutes()
-                await applyAllRoutesInternal(sendNotification: false)
-                if activeRoutes.isEmpty {
-                    log(.warning, "No routes applied after mode switch — DNS refresh will retry")
-                }
+    /// A mode switch the gate could not take yet. The operation holding the gate (a DNS refresh,
+    /// say) may still be installing routes for the old mode, so the switch must run after it,
+    /// never be dropped. Drained by releaseRouteOperation.
+    private var pendingModeApply = false
+
+    /// Rebuilds the routes for the current mode. When another route operation holds the gate,
+    /// waits for it instead of dropping the switch.
+    private func applyRoutingModeChange() {
+        guard isVPNConnected else {
+            pendingModeApply = false
+            return
+        }
+        guard acquireRouteOperation() else {
+            if !pendingModeApply && !isShuttingDown {
+                log(.info, "Mode switch waits for the current route operation to finish")
+            }
+            pendingModeApply = !isShuttingDown
+            return
+        }
+        pendingModeApply = false
+        let mode = config.routingMode
+        Task {
+            defer { releaseRouteOperation() }
+            // Re-detect VPN gateway when switching to VPN Only
+            // (initial detection may be stale if VPN routing wasn't ready yet)
+            if mode == .vpnOnly {
+                vpnGateway = await detectVPNGateway()
+            }
+            await removeAllRoutes()
+            await applyAllRoutesInternal(sendNotification: false)
+            if activeRoutes.isEmpty {
+                log(.warning, "No routes applied after mode switch — DNS refresh will retry")
             }
         }
     }
@@ -4968,6 +4989,7 @@ final class RouteManager: ObservableObject {
     /// Release exclusive route operation lock.
     private func releaseRouteOperation() {
         isApplyingRoutes = false
+        if pendingModeApply { applyRoutingModeChange() }
     }
     
     private func ensureGateway() async -> String? {
