@@ -381,13 +381,14 @@
 "Warnings" = "Avisos";
 "Errors" = "Errores";
 "Search" = "Buscar";
-"Show every entry" = "Mostrar todas las entradas";
-"Show warnings and errors" = "Mostrar avisos y errores";
-"Show errors only" = "Mostrar solo errores";
+"Log level" = "Nivel del registro";
+"All: every entry. Warnings: warnings and errors. Errors: errors only." = "Todos: todas las entradas. Avisos: avisos y errores. Errores: solo errores.";
 "1 entry" = "1 entrada";
 "%lld entries" = "%lld entradas";
 "%lld of %lld entries" = "%1$lld de %2$lld entradas";
 "No entries match “%@”." = "Ninguna entrada contiene «%@».";
+"No warnings or errors match “%@”." = "Ningún aviso ni error contiene «%@».";
+"No errors match “%@”." = "Ningún error contiene «%@».";
 "No warnings or errors." = "No hay avisos ni errores.";
 "No errors." = "No hay errores.";
 "Copy the entries shown" = "Copiar las entradas que se ven";

@@ -381,13 +381,14 @@
 "Warnings" = "Warnings";
 "Errors" = "Errors";
 "Search" = "Search";
-"Show every entry" = "Show every entry";
-"Show warnings and errors" = "Show warnings and errors";
-"Show errors only" = "Show errors only";
+"Log level" = "Log level";
+"All: every entry. Warnings: warnings and errors. Errors: errors only." = "All: every entry. Warnings: warnings and errors. Errors: errors only.";
 "1 entry" = "1 entry";
 "%lld entries" = "%lld entries";
 "%lld of %lld entries" = "%1$lld of %2$lld entries";
 "No entries match “%@”." = "No entries match “%@”.";
+"No warnings or errors match “%@”." = "No warnings or errors match “%@”.";
+"No errors match “%@”." = "No errors match “%@”.";
 "No warnings or errors." = "No warnings or errors.";
 "No errors." = "No errors.";
 "Copy the entries shown" = "Copy the entries shown";

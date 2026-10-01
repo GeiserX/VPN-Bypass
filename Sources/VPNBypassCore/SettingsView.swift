@@ -2309,7 +2309,7 @@ struct LogsTab: View {
     /// The level filter, the search field, and Copy and Clear, as in proposal 14 of #119.
     private func filterBar(shown: [RouteManager.LogEntry]) -> some View {
         HStack(spacing: 10) {
-            Picker("", selection: $filter.level) {
+            Picker(LogLevelFilter.controlName, selection: $filter.level) {
                 ForEach(LogLevelFilter.allCases) { level in
                     Text(level.title).tag(level)
                 }
@@ -2317,7 +2317,7 @@ struct LogsTab: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-            .help(filter.level.help)
+            .help(LogLevelFilter.controlHelp)
 
             LogSearchField(text: $filter.query, placeholder: String(localized: "Search"))
                 .frame(minWidth: 110, maxWidth: 190)

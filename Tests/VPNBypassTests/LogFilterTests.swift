@@ -100,7 +100,28 @@ final class LogFilterTests: XCTestCase {
         XCTAssertNil(LogFilter(level: .errors).emptyLine(shown: 1))
         XCTAssertEqual(LogFilter(level: .warnings).emptyLine(shown: 0), "No warnings or errors.")
         XCTAssertEqual(LogFilter(level: .errors).emptyLine(shown: 0), "No errors.")
-        XCTAssertEqual(LogFilter(level: .errors, query: " zoom ").emptyLine(shown: 0), "No entries match “zoom”.")
+        XCTAssertEqual(LogFilter(query: " zoom ").emptyLine(shown: 0), "No entries match “zoom”.")
+    }
+
+    /// With a level and a term, the line names the level, so it does not claim that no entry
+    /// holds the term when the level is what hides the match.
+    func testEmptyLineWithLevelAndSearchNamesTheLevel() {
+        XCTAssertEqual(LogFilter(level: .errors, query: " zoom ").emptyLine(shown: 0), "No errors match “zoom”.")
+        XCTAssertEqual(LogFilter(level: .warnings, query: "zoom").emptyLine(shown: 0),
+                       "No warnings or errors match “zoom”.")
+    }
+
+    // MARK: The level control
+
+    /// macOS shows one tooltip for the whole segmented control, so it must not depend on the
+    /// selection: it names every choice and says that Warnings includes errors.
+    func testLevelControlHasANameAndOneTooltipForEveryChoice() {
+        XCTAssertEqual(LogLevelFilter.controlName, "Log level")
+        XCTAssertEqual(LogLevelFilter.controlHelp,
+                       "All: every entry. Warnings: warnings and errors. Errors: errors only.")
+        for level in LogLevelFilter.allCases {
+            XCTAssertTrue(LogLevelFilter.controlHelp.contains("\(level.title):"), level.title)
+        }
     }
 
     // MARK: Copy
@@ -122,10 +143,11 @@ final class LogFilterTests: XCTestCase {
     func testEveryStringIsTranslated() throws {
         let en = try lproj("en"), es = try lproj("es"), fr = try lproj("fr")
         for (name, bundle) in [("es", es), ("fr", fr)] {
-            var pairs: [(String, String)] = LogLevelFilter.allCases.flatMap {
-                [($0.title(in: en), $0.title(in: bundle)), ($0.help(in: en), $0.help(in: bundle))]
-            }
-            let filters = [LogFilter(), LogFilter(level: .warnings), LogFilter(level: .errors), LogFilter(query: "zoom")]
+            var pairs: [(String, String)] = LogLevelFilter.allCases.map { ($0.title(in: en), $0.title(in: bundle)) }
+            pairs.append((LogLevelFilter.controlName(in: en), LogLevelFilter.controlName(in: bundle)))
+            pairs.append((LogLevelFilter.controlHelp(in: en), LogLevelFilter.controlHelp(in: bundle)))
+            let filters = [LogFilter(), LogFilter(level: .warnings), LogFilter(level: .errors), LogFilter(query: "zoom"),
+                           LogFilter(level: .warnings, query: "zoom"), LogFilter(level: .errors, query: "zoom")]
             for f in filters {
                 pairs.append((f.countLine(shown: 3, total: 214, in: en), f.countLine(shown: 3, total: 214, in: bundle)))
                 if let english = f.emptyLine(shown: 0, in: en) {
@@ -144,5 +166,10 @@ final class LogFilterTests: XCTestCase {
         }
         XCTAssertEqual(LogFilter(level: .warnings).countLine(shown: 3, total: 214, in: es), "3 de 214 entradas")
         XCTAssertEqual(LogFilter(query: "zoom").emptyLine(shown: 0, in: fr), "Aucune entrée ne contient « zoom ».")
+        XCTAssertEqual(LogFilter(level: .errors, query: "zoom").emptyLine(shown: 0, in: es), "Ningún error contiene «zoom».")
+        for level in LogLevelFilter.allCases {
+            XCTAssertTrue(LogLevelFilter.controlHelp(in: fr).contains(level.title(in: fr)), "fr: \(level)")
+            XCTAssertTrue(LogLevelFilter.controlHelp(in: es).contains(level.title(in: es)), "es: \(level)")
+        }
     }
 }

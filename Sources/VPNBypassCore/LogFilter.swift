@@ -35,15 +35,19 @@ enum LogLevelFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The segment's tooltip, which says that Warnings includes errors.
-    var help: String { help(in: .main) }
+    /// The control's name for VoiceOver; the label itself stays hidden.
+    static var controlName: String { controlName(in: .main) }
 
-    func help(in bundle: Bundle) -> String {
-        switch self {
-        case .all: return String(localized: "Show every entry", bundle: bundle)
-        case .warnings: return String(localized: "Show warnings and errors", bundle: bundle)
-        case .errors: return String(localized: "Show errors only", bundle: bundle)
-        }
+    static func controlName(in bundle: Bundle) -> String {
+        String(localized: "Log level", bundle: bundle)
+    }
+
+    /// The control's one tooltip. macOS shows a single tooltip for the whole segmented
+    /// control, so it describes all three choices and says that Warnings includes errors.
+    static var controlHelp: String { controlHelp(in: .main) }
+
+    static func controlHelp(in bundle: Bundle) -> String {
+        String(localized: "All: every entry. Warnings: warnings and errors. Errors: errors only.", bundle: bundle)
     }
 }
 
@@ -86,7 +90,11 @@ struct LogFilter: Equatable {
     func emptyLine(shown: Int, in bundle: Bundle) -> String? {
         guard shown == 0, isActive else { return nil }
         if !term.isEmpty {
-            return String(localized: "No entries match “\(term)”.", bundle: bundle)
+            switch level {
+            case .all: return String(localized: "No entries match “\(term)”.", bundle: bundle)
+            case .warnings: return String(localized: "No warnings or errors match “\(term)”.", bundle: bundle)
+            case .errors: return String(localized: "No errors match “\(term)”.", bundle: bundle)
+            }
         }
         switch level {
         case .all: return nil
