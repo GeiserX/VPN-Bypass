@@ -487,3 +487,20 @@
 "%lld to %lld ms" = "%lld to %lld ms";
 "Show the result in Logs" = "Show the result in Logs";
 "Show all %lld results in Logs" = "Show all %lld results in Logs";
+
+/* ===== Changes made through the control socket (vpnb, the MCP server) ===== */
+"via the command line" = "via the command line";
+"Came through the control socket, which vpnb and the MCP server use" = "Came through the control socket, which vpnb and the MCP server use";
+"Last change: added %@ via the command line, %@" = "Last change: added %1$@ via the command line, %2$@";
+"Last change: removed %@ via the command line, %@" = "Last change: removed %1$@ via the command line, %2$@";
+"Last change: turned on %@ via the command line, %@" = "Last change: turned on %1$@ via the command line, %2$@";
+"Last change: turned off %@ via the command line, %@" = "Last change: turned off %1$@ via the command line, %2$@";
+"Last change: switched to %@ via the command line, %@" = "Last change: switched to %1$@ via the command line, %2$@";
+"Last change: removed all routes via the command line, %@" = "Last change: removed all routes via the command line, %@";
+"Last change: changed the routes via the command line, %@" = "Last change: changed the routes via the command line, %@";
+"Last change: changed the rules via the command line, %@" = "Last change: changed the rules via the command line, %@";
+"Show what came through the command line in Logs" = "Show what came through the command line in Logs";
+"Nothing came through the command line." = "Nothing came through the command line.";
+"Nothing from the command line matches this filter." = "Nothing from the command line matches this filter.";
+"From the command line" = "From the command line";
+"Show entries from the app too" = "Show entries from the app too";

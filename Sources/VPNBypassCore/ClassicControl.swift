@@ -128,7 +128,8 @@ enum ClassicControl {
         default: return nil
         }
         if response.ok, CommandRouter.isMutating(request.cmd) {
-            RouteManager.shared.log(.info, "Control: '\(request.cmd)' applied via the command line")
+            // The row's "via the command line" tag says where it came from (ControlOrigin).
+            RouteManager.shared.log(.info, "Control: '\(request.cmd)' applied")
         }
         return response
     }

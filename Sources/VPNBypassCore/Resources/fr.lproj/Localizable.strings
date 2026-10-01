@@ -487,3 +487,20 @@
 "%lld to %lld ms" = "de %1$lld à %2$lld ms";
 "Show the result in Logs" = "Voir le résultat dans Journaux";
 "Show all %lld results in Logs" = "Voir les %lld résultats dans Journaux";
+
+/* ===== Modifications faites par le socket de contrôle (vpnb, le serveur MCP) ===== */
+"via the command line" = "via la ligne de commande";
+"Came through the control socket, which vpnb and the MCP server use" = "Arrivé par le socket de contrôle, qu'utilisent vpnb et le serveur MCP";
+"Last change: added %@ via the command line, %@" = "Dernière modification : %1$@ ajouté via la ligne de commande, %2$@";
+"Last change: removed %@ via the command line, %@" = "Dernière modification : %1$@ supprimé via la ligne de commande, %2$@";
+"Last change: turned on %@ via the command line, %@" = "Dernière modification : %1$@ activé via la ligne de commande, %2$@";
+"Last change: turned off %@ via the command line, %@" = "Dernière modification : %1$@ désactivé via la ligne de commande, %2$@";
+"Last change: switched to %@ via the command line, %@" = "Dernière modification : passage au mode %1$@ via la ligne de commande, %2$@";
+"Last change: removed all routes via the command line, %@" = "Dernière modification : toutes les routes supprimées via la ligne de commande, %@";
+"Last change: changed the routes via the command line, %@" = "Dernière modification : routes modifiées via la ligne de commande, %@";
+"Last change: changed the rules via the command line, %@" = "Dernière modification : règles modifiées via la ligne de commande, %@";
+"Show what came through the command line in Logs" = "Voir dans Journaux ce qui est arrivé par la ligne de commande";
+"Nothing came through the command line." = "Rien n'est arrivé par la ligne de commande.";
+"Nothing from the command line matches this filter." = "Rien de la ligne de commande ne correspond à ce filtre.";
+"From the command line" = "Depuis la ligne de commande";
+"Show entries from the app too" = "Afficher aussi les entrées de l'app";

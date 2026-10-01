@@ -74,6 +74,11 @@ final class RouteManager: ObservableObject {
     /// it to decide routing.
     @Published var lastRouteChange: RouteChangeOutcome?
 
+    /// The last settings change a control-socket request made, for the dropdown footer. A
+    /// save made outside a socket request (the app's own controls) clears it, so the footer
+    /// never names a change that a later one in the app has replaced.
+    @Published var lastOutsideChange: OutsideChange?
+
     struct RouteChangeOutcome: Equatable {
         enum Kind: Equatable {
             /// A full apply committed (live, from the DNS cache, or Custom mode).
@@ -210,6 +215,8 @@ final class RouteManager: ObservableObject {
         let timestamp: Date
         let level: LogLevel
         let message: String
+        /// The control socket's lines say so on the Logs page (proposal 15 of #119).
+        var source: LogSource = .app
         
         enum LogLevel: String {
             case info = "INFO"
@@ -409,6 +416,7 @@ final class RouteManager: ObservableObject {
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
         if !isVPNConnected { configChangedAt = Date() }
+        if !ControlOrigin.isControlSocket { lastOutsideChange = nil }
 
         log(.info, "Config saved")
     }
@@ -5474,7 +5482,8 @@ final class RouteManager: ObservableObject {
     private var logFileHandle: FileHandle?
 
     func log(_ level: LogEntry.LogLevel, _ message: String) {
-        let entry = LogEntry(timestamp: Date(), level: level, message: message)
+        let source: LogSource = ControlOrigin.isControlSocket ? .controlSocket : .app
+        let entry = LogEntry(timestamp: Date(), level: level, message: message, source: source)
         recentLogs.insert(entry, at: 0)
         if recentLogs.count > 200 {
             recentLogs.removeLast()
@@ -5482,7 +5491,7 @@ final class RouteManager: ObservableObject {
 
         // Log to file (owner-only, never following a planted symlink).
         guard let url = logFileURL,
-              let data = "[\(Self.logFormatter.string(from: entry.timestamp))] [\(level.rawValue)] \(message)\n".data(using: .utf8)
+              let data = "[\(Self.logFormatter.string(from: entry.timestamp))] [\(level.rawValue)] \(message)\(source.fileSuffix)\n".data(using: .utf8)
         else { return }
 
         if logFileHandle == nil {

@@ -24,8 +24,28 @@ public enum ControlSurface {
     /// Apply one request on the main actor (so it serializes with the GUI's own
     /// RouteManager mutations), persist + reconcile if it changed something, and
     /// return the sanitized response. Never logs args or secrets — only the verb.
+    ///
+    /// Everything the request does runs marked as coming from the socket, so its log lines are
+    /// tagged, and a setting it changed becomes the dropdown footer's "Last change" line.
     @MainActor
     public static func handle(_ request: ControlRequest) async -> ControlResponse {
+        await ControlOrigin.$isControlSocket.withValue(true) {
+            let rm = RouteManager.shared
+            let before = rm.config
+            let routesBefore = Set(rm.activeRoutes.map(\.destination)).union(rm.pendingKernelAdds).count
+            let response = await apply(request)
+            if response.ok, CommandRouter.isMutating(request.cmd),
+               let change = OutsideChange.make(cmd: request.cmd, result: response.result,
+                                                before: before, after: rm.config,
+                                                routesBefore: routesBefore, routesLeft: rm.uniqueRouteCount, at: Date()) {
+                rm.lastOutsideChange = change
+            }
+            return response
+        }
+    }
+
+    @MainActor
+    private static func apply(_ request: ControlRequest) async -> ControlResponse {
         // The Bypass / VPN Only verbs act through RouteManager's own methods and never
         // reach the save + reconcile below. A wrong envelope version falls through to
         // CommandRouter, which answers unsupported_version for every verb.
@@ -68,7 +88,7 @@ public enum ControlSurface {
 
         RouteManager.shared.config = newConfig
         RouteManager.shared.saveConfig()
-        RouteManager.shared.log(.info, "Control: '\(request.cmd)' applied via the command line")
+        RouteManager.shared.log(.info, "Control: '\(request.cmd)' applied")
 
         // Reconcile proxy/Tailscale listeners live, then re-apply KERNEL routes for anything
         // that changes what gets routed where — otherwise a scripted `rule.add`/`route.*`/`default`

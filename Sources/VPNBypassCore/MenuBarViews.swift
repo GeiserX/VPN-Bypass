@@ -663,11 +663,22 @@ struct MenuContent: View {
     // MARK: - Footer
 
     private var footerActions: some View {
-        HStack {
+        HStack(spacing: 8) {
             // No "Updated … ago" here: it did not say what was updated, and Clear stamped it
             // too, so it read fresh right after every route was removed. The result line under
-            // Refresh Routes says what the last apply did.
-            Spacer()
+            // Refresh Routes says what the last apply did. What a script or an agent changed
+            // through the control socket shows here instead (proposal 15 of #119).
+            if let change = routeManager.lastOutsideChange,
+               change.isShown(currentRouteCount: routeManager.uniqueRouteCount) {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    OutsideChangeLine(change: change, now: context.date) {
+                        SettingsPageRequest.shared.logFilter = LogFilter(onlyControlSocket: true)
+                        openSettings(page: .logs)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
             
             Button {
                 openSettings()
@@ -774,6 +785,41 @@ struct MenuContent: View {
     }
 }
 
+// MARK: - Last outside change
+
+/// The footer's "Last change: added en.wikipedia.org via the command line, 2 min ago". A click
+/// opens Logs at the lines that came through the control socket.
+struct OutsideChangeLine: View {
+    let change: OutsideChange
+    let now: Date
+    let onShowLogs: () -> Void
+
+    private var text: AttributedString {
+        let line = change.line(now: now)
+        var text = AttributedString(line.text)
+        if let subject = line.subject, let range = text.range(of: subject) {
+            text[range].foregroundColor = .primary
+            text[range].font = .system(size: 11, weight: .medium)
+        }
+        return text
+    }
+
+    var body: some View {
+        Button(action: onShowLogs) {
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(OutsideChange.help)
+    }
+}
+
 // MARK: - Dropdown copy
 
 /// The dropdown's sentences, kept pure so the wording and its edge cases are unit-tested.
@@ -784,12 +830,14 @@ enum DropdownCopy {
 
     /// A short age: "just now", "23 s ago", "4 min ago", "2 h ago". A date in the future
     /// (clock moved back) reads as "just now" rather than a negative age.
-    static func age(since date: Date, now: Date) -> String {
+    static func age(since date: Date, now: Date) -> String { age(since: date, now: now, in: .main) }
+
+    static func age(since date: Date, now: Date, in bundle: Bundle) -> String {
         let seconds = Int(now.timeIntervalSince(date))
-        if seconds < 5 { return String(localized: "just now") }
-        if seconds < 60 { return String(localized: "\(seconds) s ago") }
-        if seconds < 3600 { return String(localized: "\(seconds / 60) min ago") }
-        return String(localized: "\(seconds / 3600) h ago")
+        if seconds < 5 { return String(localized: "just now", bundle: bundle) }
+        if seconds < 60 { return String(localized: "\(seconds) s ago", bundle: bundle) }
+        if seconds < 3600 { return String(localized: "\(seconds / 60) min ago", bundle: bundle) }
+        return String(localized: "\(seconds / 3600) h ago", bundle: bundle)
     }
 
     private static func routes(_ count: Int) -> String {
@@ -1551,11 +1599,13 @@ struct DropdownStatus: Equatable {
 enum DropdownModePicker {
     static let modes: [RouteManager.RoutingMode] = [.bypass, .vpnOnly, .custom]
 
-    static func label(_ mode: RouteManager.RoutingMode) -> String {
+    static func label(_ mode: RouteManager.RoutingMode) -> String { label(mode, in: .main) }
+
+    static func label(_ mode: RouteManager.RoutingMode, in bundle: Bundle) -> String {
         switch mode {
-        case .bypass: return String(localized: "Bypass")
-        case .vpnOnly: return String(localized: "VPN Only")
-        case .custom: return String(localized: "Custom")
+        case .bypass: return String(localized: "Bypass", bundle: bundle)
+        case .vpnOnly: return String(localized: "VPN Only", bundle: bundle)
+        case .custom: return String(localized: "Custom", bundle: bundle)
         }
     }
 
