@@ -30,6 +30,7 @@
 "Domains" = "Domaines";
 "Updated %@ ago" = "Mis à jour il y a %@";
 "Settings" = "Réglages";
+"Settings…" = "Réglages…";
 "Quit VPN Bypass" = "Quitter VPN Bypass";
 "ON" = "ON";
 "OFF" = "OFF";
