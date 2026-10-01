@@ -115,6 +115,18 @@ final class DropdownCopyTests: XCTestCase {
         XCTAssertFalse(message.contains("DNS"))
     }
 
+    /// With only VPN Only's catch-alls installed the count is 0, and the title names what goes.
+    func testVPNOnlyWithOnlyTheCatchAllsNamesThem() {
+        XCTAssertEqual(
+            DropdownCopy.removeAllConfirmation(mode: .vpnOnly, routeCount: 0, serviceCount: 0, domainCount: 0,
+                                               autoApplyOnVPN: true, autoDNSRefresh: false).title,
+            "Stop sending everything else direct?")
+        XCTAssertEqual(
+            DropdownCopy.removeAllConfirmation(mode: .vpnOnly, routeCount: 2, serviceCount: 0, domainCount: 2,
+                                               autoApplyOnVPN: true, autoDNSRefresh: false).title,
+            "Stop routing all 2 addresses?")
+    }
+
     /// VPN Only and Custom do not send "your services" through the VPN; they say what they lose.
     /// A DNS refresh never reinstalls VPN Only's catch-all routes, so VPN Only never promises it.
     func testVPNOnlyAndCustomSayWhatTheyLose() {

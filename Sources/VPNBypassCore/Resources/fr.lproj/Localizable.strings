@@ -306,6 +306,7 @@
 "DNS" = "DNS";
 "No VPN connected" = "Aucun VPN connecté";
 "Nothing is routed until a VPN connects." = "Rien n'est routé tant qu'aucun VPN n'est connecté.";
+"Everything else still goes direct: removing that failed." = "Tout le reste passe toujours en direct : le retrait a échoué.";
 "%lld addresses stay routed for when it reconnects." = "%lld adresses restent routées pour la reconnexion.";
 "%lld addresses are still routed: removing them failed." = "%lld adresses sont toujours routées : leur retrait a échoué.";
 "NOT ENFORCING" = "INACTIF";
@@ -321,6 +322,7 @@
 "Re-applying routes now." = "Réapplication des routes en cours.";
 "The %lld addresses routed before the drop stay routed." = "Les %lld adresses routées avant la coupure restent routées.";
 "Nothing is routed until then." = "Rien n'est routé d'ici là.";
+"Everything else still goes direct, as before the drop." = "Tout le reste passe toujours en direct, comme avant la coupure.";
 "WAITING" = "EN ATTENTE";
 "%@ reconnected %@" = "%@ reconnecté %@";
 "NOTHING ROUTED" = "RIEN DE ROUTÉ";
@@ -513,6 +515,7 @@
 "From the command line" = "Depuis la ligne de commande";
 "Show entries from the app too" = "Afficher aussi les entrées de l'app";
 "Last change: removed routed addresses via the command line, %@; still routed: %lld" = "Dernière modification : adresses routées retirées via la ligne de commande, %1$@ ; toujours routées : %2$lld";
+"Last change: removed routed addresses via the command line, %@; everything else still goes direct" = "Dernière modification : adresses routées retirées via la ligne de commande, %@ ; tout le reste passe toujours en direct";
 
 /* ===== Noms lus par VoiceOver sur les interrupteurs et boutons d'icône, et raccourcis du menu ===== */
 "Delete %@" = "Supprimer %@";
@@ -540,6 +543,7 @@
 "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details." = "Les échecs sont des adresses que le système a refusées et, lors d'une application qui a résolu le DNS, des domaines qui n'ont pas été résolus. Réglages > Journaux donne les détails.";
 "Stop routing the 1 address?" = "Ne plus router la seule adresse ?";
 "Stop routing all %lld addresses?" = "Ne plus router les %lld adresses ?";
+"Stop sending everything else direct?" = "Ne plus envoyer tout le reste en direct ?";
 
 /* ===== Assistant privilégié : réparation et erreurs ===== */
 "The privileged helper is not running — no routes are being enforced. Open Settings → Status to repair it." = "L'assistant privilégié ne tourne pas : aucune route n'est appliquée. Ouvrez Réglages → État pour le réparer.";
