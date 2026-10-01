@@ -29,7 +29,15 @@ on:
       - 'assets/**'
       - 'VPNBypass.entitlements'
       - '.github/workflows/auto-tag.yml'
-  workflow_dispatch: {}
+  # Run by hand to cut the release for a series of merges made while releases were paused
+  # (repo variable AUTO_RELEASE=false), or to force the bump: a redesign shipped as a major.
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'auto = from the conventional commits since the last tag'
+        type: choice
+        options: [auto, major, minor, patch]
+        default: auto
 
 concurrency:
   group: auto-tag
@@ -51,7 +59,20 @@ jobs:
 
       - name: Compute next version
         id: bump
+        env:
+          EVENT: ${{ github.event_name }}
+          AUTO_RELEASE: ${{ vars.AUTO_RELEASE }}
+          BUMP: ${{ inputs.bump || 'auto' }}
         run: |
+          # A series of PRs (one feature per PR) would otherwise cut one release per merge.
+          # Set the repo variable AUTO_RELEASE=false while the series merges, then run this
+          # workflow by hand once: it releases everything since the last tag as one version.
+          if [ "$EVENT" = "push" ] && [ "$AUTO_RELEASE" = "false" ]; then
+            echo "Releases are paused (repo variable AUTO_RELEASE=false); run this workflow by hand to release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           LATEST=$(git tag -l "v*" --sort=-version:refname | head -1)
           if [ -z "$LATEST" ]; then
             echo "No existing tag; starting at v0.1.0"
@@ -83,6 +104,14 @@ jobs:
           else
             PATCH=$((PATCH + 1))
           fi
+
+          # A manual run can force the bump; it still starts from the last tag.
+          BASE_MAJOR=$(echo "$VERSION" | cut -d. -f1); BASE_MINOR=$(echo "$VERSION" | cut -d. -f2); BASE_PATCH=$(echo "$VERSION" | cut -d. -f3)
+          case "$BUMP" in
+            major) MAJOR=$((BASE_MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MAJOR=$BASE_MAJOR; MINOR=$((BASE_MINOR + 1)); PATCH=0 ;;
+            patch) MAJOR=$BASE_MAJOR; MINOR=$BASE_MINOR; PATCH=$((BASE_PATCH + 1)) ;;
+          esac
 
           NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
           echo "new_tag=${NEW_TAG}" >> "$GITHUB_OUTPUT"

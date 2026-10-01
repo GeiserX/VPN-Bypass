@@ -72,6 +72,21 @@ overwrite manual work. `bump-version.sh` is retained only for the rare manual/lo
 
 The version badge in README.md is the dynamic `github/v/release` shield, so it needs no bump.
 
+**A series of PRs ships as ONE release.** Every merge to `main` that touches the app cuts a
+release, so a feature series merged PR by PR would publish one version per PR (on 2026-10-01 a
+UI redesign cut eleven, 4.13.0 to 4.23.0, which were then deleted and shipped as 5.0.0). Before
+the first merge of a series, pause releases; after the last, release once:
+
+```bash
+gh variable set AUTO_RELEASE --body false --repo GeiserX/VPN-Bypass   # merges now release nothing
+# ... merge the series ...
+gh variable set AUTO_RELEASE --body true --repo GeiserX/VPN-Bypass
+gh workflow run auto-tag.yml --repo GeiserX/VPN-Bypass -f bump=auto    # or major/minor/patch
+```
+
+The manual run bumps from the last tag over every commit since, and `release.yml` writes the
+notes from the same range, so the one release lists the whole series.
+
 After CI completes: `brew update && brew upgrade --cask vpn-bypass` to install locally.
 
 **Version architecture**: The app reads its version from `CFBundleShortVersionString` at runtime (not hardcoded). CI stamps it from the git tag. `bump-version.sh` keeps `Info.plist` and `README.md` badge in sync for local builds.
