@@ -192,6 +192,8 @@ enum ClassicControl {
             return fail("invalid_args", "CIDR /0 and /1 cannot be installed as routes")
         case .alreadyListed(let value, let list):
             return fail("already_exists", "\(value) is already on the \(list.rawValue) list")
+        case .nameTakenByService(let value, let service):
+            return fail("already_exists", "\(value) is the name of the service \(service); routes are tracked by name, so the bypass list cannot take it")
         }
     }
 
