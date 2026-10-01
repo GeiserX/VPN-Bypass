@@ -236,14 +236,37 @@ final class FirstRunSetupViewTests: XCTestCase {
         XCTAssertEqual(opened, 0)
     }
 
+    /// While an apply holds the route gate, the add field is off, as on the Domains page: an
+    /// add then would save the site without routing it.
+    func testTheAddFieldWaitsForAnApply() throws {
+        let view = host(FirstRunSetupView(site: "example.com", onOpenServices: {}, onUseVPNOnly: {})
+                            .environmentObject(rm)
+                            .frame(width: 308),
+                        size: NSSize(width: 308, height: 520))
+        var fields: [NSTextField] = []
+        func walk(_ v: NSView) {
+            if let f = v as? NSTextField, f.isEditable { fields.append(f) }
+            v.subviews.forEach(walk)
+        }
+        walk(view)
+        let field = try XCTUnwrap(fields.first)
+        XCTAssertEqual(fields.count, 1)
+        XCTAssertTrue(field.isEnabled, "control: on while nothing is applying")
+
+        XCTAssertTrue(rm.tryAcquireRouteOperationForTests())
+        defer { rm.releaseRouteOperationForTests() }
+        settle(view)
+        XCTAssertFalse(field.isEnabled, "off while an apply runs")
+    }
+
     /// The real dropdown follows the config while it stays open. A MenuBarExtra(.window) runs
     /// `.onAppear` on its first open only and never `.onDisappear`, so anything latched on open
     /// stays latched for the app's life: here the host runs `.onAppear` once and never closes,
-    /// the same as the menu bar. The change uses a domain that is switched off, which installs
-    /// no route even if the dropdown's own VPN check finds a tunnel on this machine.
+    /// the same as the menu bar. The VPN check on open is off, and the change uses a domain
+    /// that is switched off, so nothing here can install a route on this machine.
     func testTheDropdownLeavesAndReturnsToTheQuestionWithoutReopening() throws {
         rm.isLoading = false
-        let view = host(MenuContent()
+        let view = host(MenuContent(refreshesOnOpen: false)
                             .environmentObject(rm)
                             .environmentObject(NotificationManager.shared)
                             .environmentObject(LaunchAtLoginManager.shared),

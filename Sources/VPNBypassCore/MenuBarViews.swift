@@ -208,6 +208,13 @@ struct MenuContent: View {
     @State private var isVerifying = false
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
+    /// A test hosting the dropdown passes false, so the real VPN check does not run against
+    /// the shared RouteManager after the test ends.
+    private let refreshesOnOpen: Bool
+
+    init(refreshesOnOpen: Bool = true) {
+        self.refreshesOnOpen = refreshesOnOpen
+    }
 
     private let accentGradient = LinearGradient(
         colors: [Theme.success, Theme.successDark],
@@ -265,7 +272,7 @@ struct MenuContent: View {
         .frame(width: 340)
         .onAppear {
             // Refresh VPN status when menu opens
-            routeManager.refreshStatus()
+            if refreshesOnOpen { routeManager.refreshStatus() }
         }
     }
 
@@ -1604,6 +1611,9 @@ struct FirstRunSetupView: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 12.5))
                         .onSubmit(addSite)
+                        // As on the Domains page: an add during an apply would save the site
+                        // without routing it.
+                        .disabled(routeManager.isApplyingRoutes)
                     Button(action: addSite) {
                         Image(systemName: "plus")
                             .font(.system(size: 10, weight: .semibold))
@@ -1613,7 +1623,7 @@ struct FirstRunSetupView: View {
                             .cornerRadius(5)
                     }
                     .buttonStyle(.plain)
-                    .disabled(site.isEmpty)
+                    .disabled(site.isEmpty || routeManager.isApplyingRoutes)
                     .help(FirstRunSetup.addSite)
                     .accessibilityLabel(FirstRunSetup.addSite)
                 }
@@ -1730,7 +1740,7 @@ struct FirstRunSetupView: View {
     /// The Bypass add, as on the Domains page: a refused add keeps the text and says why, a
     /// saved one empties the field and names what went in.
     private func addSite() {
-        guard !site.isEmpty else { return }
+        guard !site.isEmpty, !routeManager.isApplyingRoutes else { return }
         let shown = AddDomainFeedback(routeManager.addDomain(site), typed: site)
         feedback = shown
         site = shown.fieldText
