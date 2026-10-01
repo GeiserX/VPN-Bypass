@@ -127,6 +127,9 @@ final class DropdownModeRowViewTests: XCTestCase {
         var iconName: String?, iconHidden = true
         var isSheet = true
         var segmentWhileOpen: Int?
+        /// Whether a DispatchQueue.main block and a main-actor task queued after the click had
+        /// run by the time the open question was read.
+        var mainQueueRanWhileOpen = false, mainActorRanWhileOpen = false
     }
 
     /// Clicks a segment the way AppKit delivers it (the control selects the segment, then fires
@@ -134,7 +137,7 @@ final class DropdownModeRowViewTests: XCTestCase {
     /// question opened.
     private func pick(segment: Int, answer: String, in view: NSView) throws -> Question? {
         let control = try segmented(in: view)
-        final class Seen: @unchecked Sendable { var question: Question? }
+        final class Seen: @unchecked Sendable { var question: Question?; var queueRan = false; var taskRan = false }
         let seen = Seen()
         let all = { (type: NSView.Type, root: NSView) in Self.all(NSView.self, in: root).filter { $0.isKind(of: type) } }
         let reader = Timer(timeInterval: 0.3, repeats: false) { [view] _ in
@@ -152,6 +155,8 @@ final class DropdownModeRowViewTests: XCTestCase {
                 }
                 q.isSheet = panel.sheetParent != nil
                 q.segmentWhileOpen = (all(NSSegmentedControl.self, view).first as? NSSegmentedControl)?.selectedSegment
+                q.mainQueueRanWhileOpen = seen.queueRan
+                q.mainActorRanWhileOpen = seen.taskRan
                 seen.question = q
                 if let button = buttons.first(where: { $0.title == answer }) { button.performClick(nil) }
                 else { NSApp.abortModal() }
@@ -167,6 +172,10 @@ final class DropdownModeRowViewTests: XCTestCase {
 
         control.selectedSegment = segment
         XCTAssertTrue(control.sendAction(control.action, to: control.target), "the control has an action")
+        // Queued behind whatever the click queued, the way RouteManager's and the control
+        // socket's work reaches the main thread.
+        DispatchQueue.main.async { seen.queueRan = true }
+        Task { @MainActor in seen.taskRan = true }
         settle(view)
         return seen.question
     }
@@ -214,6 +223,14 @@ final class DropdownModeRowViewTests: XCTestCase {
         XCTAssertFalse(q.isSheet, "a standalone alert, not a sheet")
         XCTAssertEqual(q.iconName, NSImage.applicationIconName, "the icon is the app icon")
         XCTAssertFalse(q.iconHidden, "the icon is shown")
+    }
+
+    /// The open question must not hold the main queue: RouteManager, network-change handling
+    /// and the control socket all run there, and `vpnb status` times out if it stops.
+    func testTheAppKeepsRunningWhileTheQuestionIsOpen() throws {
+        let q = try XCTUnwrap(try pick(segment: 1, answer: "Cancel", in: host()))
+        XCTAssertTrue(q.mainQueueRanWhileOpen, "a main-queue block runs while the question is open")
+        XCTAssertTrue(q.mainActorRanWhileOpen, "a main-actor task runs while the question is open")
     }
 
     func testPickingTheModeInUseAsksNothing() throws {

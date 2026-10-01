@@ -1079,8 +1079,11 @@ struct DropdownModeRow: View {
                 else { return }
                 asking = mode
                 generation += 1
-                // After this click is handled, so the control is rebuilt before the question opens.
-                DispatchQueue.main.async { ask(mode) }
+                // After this click is handled, so the control is rebuilt from the saved mode.
+                // Through the run loop, not DispatchQueue.main: a modal opened inside a
+                // main-queue block holds that serial queue for as long as it is open, which
+                // stops every main-actor task, the control socket and network-change handling.
+                RunLoop.main.perform(inModes: [.common]) { ask(mode) }
             }
         )) {
             ForEach(DropdownModePicker.modes, id: \.self) { mode in
@@ -1093,6 +1096,9 @@ struct DropdownModeRow: View {
         .help(DropdownStatus.modeDescription(DropdownModePicker.copyMode(routeManager.config.routingMode)))
     }
 
+    /// While the question is open the run loop is in its modal panel mode, so the app's
+    /// default-mode timers (the 30 s status refresh, the DNS refresh) wait and fire once it
+    /// closes. Main-queue work and main-actor tasks keep running.
     private func ask(_ mode: RouteManager.RoutingMode) {
         let alert = DropdownModePicker.confirmationAlert(to: mode, schemaVersion: routeManager.config.schemaVersion)
         if alert.runModal() == .alertFirstButtonReturn {
