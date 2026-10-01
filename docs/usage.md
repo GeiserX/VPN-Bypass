@@ -22,7 +22,7 @@ Each time you open the dropdown, the app checks the VPN again and puts back any 
 
 While the dropdown is open, ⌘, opens Settings and ⌘Q quits. ⌘R refreshes routes only while the Refresh Routes button shows, which is when a VPN is connected; with no VPN, on first run and during the first check it does nothing. Holding ⌘R refreshes once. The "…" menu lists each shortcut next to its item, and the gear's and power button's tooltips name theirs.
 
-![The dropdown in Bypass mode: VPN Connected over WireGuard, the pill reads ON, four services and two domains are routed around the VPN](images/screenshots/menu-bar.png){ width="340" }
+![The dropdown in Bypass mode: WireGuard connected, the pill reads ON, and four services and two domains skip the VPN, each with how many addresses it routes](images/screenshots/menu-bar.png){ width="340" }
 
 ## Settings
 
@@ -30,9 +30,9 @@ Click the gear icon to access settings. The pages are in a toolbar under the tit
 
 The routing mode is the Mode menu at the right end of the title bar, for example "Mode Bypass". Picking another mode in it opens a sheet that lists the three modes, each with one sentence and what your lists hold for it ("4 services and 2 domains"). For Custom it says "Your lists become rules." when the switch will build them, which happens when Custom has no rules yet and the current mode's list has an entry switched on. Otherwise it says how many rules Custom has. Nothing changes until you click Switch, and the title bar keeps showing the mode in use until then.
 
-![The Services tab: built-in packs such as Telegram, YouTube, Spotify and WhatsApp, each with a switch, four of them on](images/screenshots/services.png){ width="580" }
+![The Services tab: the four services that are on, Telegram, WhatsApp, YouTube and Spotify, listed first under On, then the other built-in services, each with a switch](images/screenshots/services.png){ width="580" }
 
-![The Domains tab: two domains, each with its switch on, and the field to add another](images/screenshots/domains.png){ width="580" }
+![The Domains tab, titled Bypass list: two domains, each with its switch on, and the field to add another](images/screenshots/domains.png){ width="580" }
 
 Domains: the Bypass list in Bypass mode and the VPN Only list in VPN Only mode, each titled after its mode. Add domains, enable/disable them individually, see resolved IPs. The ⋯ menu next to the count holds Turn All On and Turn All Off.
 
