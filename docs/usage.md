@@ -9,7 +9,7 @@ Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow he
 - on a fresh install in Bypass mode, in place of everything down to the gear: the question "What should skip the VPN?", six common services with their switches, a row that opens Settings on the Services page, a field to add a site, and a line that offers VPN Only. Once a service is on or a site is on the list, the normal dropdown below takes its place at once;
 - the Mode control, with Bypass, VPN Only and Custom in every mode. Picking another mode asks first, and the selection moves only after you confirm. Entering Custom turns your lists into rules here too;
 - a field to add a domain to the current mode's list;
-- the active services and routes;
+- what your lists route, one row per service, domain or IP range you added, with its route count, under Skipping the VPN in Bypass or Through the VPN in VPN Only. Hover over a row to see its addresses. A row that has no routes while no apply is running gets an amber mark. In VPN Only the app's own catch-all routes are one line, "Everything else: direct", and the count leaves them out. In Custom mode, Routes In Use comes first, then Routed by your rules lists the rules that installed a route. Routes that no entry on your lists owns, such as those of an entry you just removed, are one "Left from earlier" line;
 - Refresh Routes, a Verify Routes icon, and a "…" menu with Verify Routes, Re-resolve DNS Now and Remove All Routes…, which asks before it removes anything;
 - one line under the buttons with the result of the last apply, for example "62 routes applied 23 s ago, none failed";
 - the gear that opens Settings.

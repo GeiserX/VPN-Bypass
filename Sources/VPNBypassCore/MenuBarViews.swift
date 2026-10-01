@@ -396,16 +396,17 @@ struct MenuContent: View {
                 .buttonStyle(.plain)
             }
             
-            // Active services summary (bypass mode) / Routes in use (custom mode)
-            if routeManager.config.routingMode == .bypass {
-                activeServicesSummary
-            } else if routeManager.config.routingMode == .custom {
+            // Routes in use (custom mode)
+            if routeManager.config.routingMode == .custom {
                 routesInUseSummary
             }
-            
-            // Recent activity
-            if !routeManager.activeRoutes.isEmpty {
-                recentRoutesSection
+
+            // What is routed, one row per entry the user added
+            if let routed = RoutedBySource.make(
+                mode: statusInput.mode, config: routeManager.config,
+                routes: routeManager.activeRoutes.map { .init(destination: $0.destination, source: $0.source) },
+                busy: isBusy) {
+                RoutedBySourceCard(summary: routed)
             }
             
             // Route verification status
@@ -627,59 +628,10 @@ struct MenuContent: View {
         .padding(.vertical, 8)
     }
     
-    // MARK: - Active Services Summary
-    
-    private var activeServicesSummary: some View {
-        let enabledServices = routeManager.config.services.filter { $0.enabled }
-        let maxVisible = 3
-        let visibleServices = Array(enabledServices.prefix(maxVisible))
-        let remainingCount = enabledServices.count - maxVisible
-        
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "app.connected.to.app.below.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                Text("Active Services")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            
-            if enabledServices.isEmpty {
-                Text("No services enabled")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .italic()
-            } else {
-                FlowLayout(spacing: 6) {
-                    ForEach(visibleServices) { service in
-                        ServiceChip(service: service)
-                    }
-                    
-                    if remainingCount > 0 {
-                        Text("+\(remainingCount) more")
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.secondary.opacity(0.12))
-                            .cornerRadius(4)
-                    }
-                }
-            }
-        }
-        .padding(10)
-        .background(Color.secondary.opacity(0.08))
-        .cornerRadius(8)
-    }
-    
     // MARK: - Routes In Use Summary (Custom mode)
 
-    /// Custom mode's analogue of `activeServicesSummary`: enabled routes that at
-    /// least one enabled rule actually points at. Named "Routes In Use" (not
-    /// "Active Routes" — that title is already used for the kernel-route list
-    /// in `recentRoutesSection` and the Logs tab's Route Health card).
+    /// Custom mode: enabled routes that at least one enabled rule actually points at. Named
+    /// "Routes In Use" (not "Active Routes" — that title is the Logs tab's Route Health card).
     private var routesInUseSummary: some View {
         let routesWithRules = routeManager.config.routes.filter { route in
             route.enabled && routeManager.config.rules.contains { $0.enabled && $0.routeId == route.id }
@@ -731,50 +683,6 @@ struct MenuContent: View {
         .cornerRadius(8)
     }
 
-    // MARK: - Recent Routes Section
-    
-    private var recentRoutesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                Text("Active Routes")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("\(routeManager.uniqueRouteCount)")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(Theme.success)
-            }
-            
-            // Show first few routes
-            ForEach(routeManager.activeRoutes.prefix(4)) { route in
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(Theme.success)
-                        .frame(width: 4, height: 4)
-                    Text(route.destination)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text(route.source)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            
-            if routeManager.uniqueRouteCount > 4 {
-                Text("+ \(routeManager.uniqueRouteCount - 4) more")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(10)
-        .background(Color.secondary.opacity(0.08))
-        .cornerRadius(8)
-    }
-    
     // MARK: - Route Verification Section
     
     private var routeVerificationSection: some View {
@@ -1042,6 +950,154 @@ enum DropdownCopy {
     }
 }
 
+// MARK: - What is routed, by what the user added
+
+/// The dropdown's list of what is routed: one row per service, domain, IP range or rule the
+/// user added, with its route count, in the order Settings lists them. A pure function of the
+/// config and the installed routes, so the grouping and the wording are unit-tested. It only
+/// reads: nothing here decides what gets routed.
+enum RoutedBySource {
+    enum Icon: Equatable {
+        case service(id: String), domain, ipRange, rule, leftover
+    }
+
+    struct Row: Equatable, Identifiable {
+        /// The route `source` the row counts.
+        let id: String
+        let name: String
+        let icon: Icon
+        let routeCount: Int
+        /// An entry that should have routes has none, and no apply is running that could add them.
+        let isProblem: Bool
+        /// The first destinations behind the row, for its tooltip.
+        let addresses: [String]
+        let hiddenAddresses: Int
+
+        var countText: String {
+            routeCount == 0 ? String(localized: "no routes") : routes(routeCount)
+        }
+
+        var tooltip: String {
+            let more = hiddenAddresses > 0 ? [String(localized: "+ \(hiddenAddresses) more")] : []
+            return (addresses + more).joined(separator: "\n")
+        }
+    }
+
+    struct Summary: Equatable {
+        let title: String
+        /// Unique destinations, without the VPN Only catch-alls.
+        let routeCount: Int
+        let rows: [Row]
+        /// Rows past `visibleRows`, shown as "+ N more".
+        let hiddenRows: Int
+        /// VPN Only's catch-alls are installed: everything not listed goes direct.
+        let everythingElseDirect: Bool
+
+        var countText: String { routes(routeCount) }
+    }
+
+    struct InstalledRoute: Equatable {
+        let destination: String
+        let source: String
+    }
+
+    static let visibleRows = 8
+    static let tooltipAddresses = 10
+
+    /// One of the app's own VPN Only catch-alls, matched the way stale-route cleanup matches
+    /// them: by destination and by the source they are recorded under.
+    static func isCatchAll(_ route: InstalledRoute) -> Bool {
+        route.source == ClassicRouteCompiler.catchAllSource
+            && RouteCompiler.catchAllDestinations.contains(route.destination)
+    }
+
+    static func title(_ mode: DropdownCopy.Mode) -> String {
+        switch mode {
+        case .bypass: return String(localized: "Skipping the VPN")
+        case .vpnOnly: return String(localized: "Through the VPN")
+        case .custom: return String(localized: "Routed by your rules")
+        }
+    }
+
+    static var leftoverName: String { String(localized: "Left from earlier") }
+    static var everythingElse: String { String(localized: "Everything else") }
+    static var direct: String { String(localized: "direct") }
+
+    /// nil when there is nothing to list: no entry on and no route installed (the status line
+    /// above already says so).
+    static func make(mode: DropdownCopy.Mode, config: RouteManager.Config,
+                     routes: [InstalledRoute], busy: Bool) -> Summary? {
+        // Each entry's route `source` (what its routes are recorded under) and how it reads.
+        // Custom rules that use a proxy or the primary VPN install no kernel route, so a rule
+        // with none is normal and is not listed.
+        var entries: [(source: String, name: String, icon: Icon, expectsRoutes: Bool)] = []
+        switch mode {
+        case .bypass:
+            entries += config.services.filter(\.enabled).map { ($0.name, $0.name, .service(id: $0.id), true) }
+            entries += config.domains.filter(\.enabled).map { ($0.domain, $0.domain, $0.isCIDR ? .ipRange : .domain, true) }
+        case .vpnOnly:
+            entries += config.inverseDomains.filter(\.enabled).map { ($0.domain, $0.domain, $0.isCIDR ? .ipRange : .domain, true) }
+        case .custom:
+            for rule in config.rules.filter(\.enabled).sorted(by: { $0.order < $1.order }) {
+                // A service rule's pattern is the service id; show the service's name.
+                if rule.matchType == .service, let service = config.services.first(where: { $0.id == rule.pattern }) {
+                    entries.append((rule.pattern, service.name, .service(id: service.id), false))
+                } else {
+                    entries.append((rule.pattern, rule.pattern, rule.matchType == .cidr ? .ipRange : .rule, false))
+                }
+            }
+        }
+
+        let counted = routes.filter { !isCatchAll($0) }
+        // A destination can be recorded more than once for a source; count it once.
+        var bySource: [String: [String]] = [:]
+        var seen: Set<String> = []
+        for route in counted where seen.insert("\(route.source)|\(route.destination)").inserted {
+            bySource[route.source, default: []].append(route.destination)
+        }
+
+        func row(id: String, name: String, icon: Icon, destinations: [String], expectsRoutes: Bool) -> Row {
+            Row(id: id, name: name, icon: icon, routeCount: destinations.count,
+                isProblem: expectsRoutes && destinations.isEmpty && !busy,
+                addresses: Array(destinations.prefix(tooltipAddresses)),
+                hiddenAddresses: max(0, destinations.count - tooltipAddresses))
+        }
+
+        var rows: [Row] = []
+        var listed: Set<String> = []
+        for entry in entries where !listed.contains(entry.source) {
+            listed.insert(entry.source)
+            let destinations = bySource[entry.source] ?? []
+            if destinations.isEmpty && !entry.expectsRoutes { continue }
+            rows.append(row(id: entry.source, name: entry.name, icon: entry.icon,
+                            destinations: destinations, expectsRoutes: entry.expectsRoutes))
+        }
+        // Routes no listed entry owns: an entry removed or switched off while its routes wait
+        // for cleanup, or a removal the app retries.
+        var leftover: [String] = []
+        var seenLeftover: Set<String> = []
+        for route in counted where !listed.contains(route.source) && seenLeftover.insert(route.destination).inserted {
+            leftover.append(route.destination)
+        }
+        if !leftover.isEmpty {
+            rows.append(row(id: "\u{0}leftover", name: leftoverName, icon: .leftover,
+                            destinations: leftover, expectsRoutes: false))
+        }
+
+        let everythingElseDirect = mode == .vpnOnly && routes.contains(where: isCatchAll)
+        if rows.isEmpty && !everythingElseDirect { return nil }
+        return Summary(title: title(mode),
+                       routeCount: Set(counted.map(\.destination)).count,
+                       rows: Array(rows.prefix(visibleRows)),
+                       hiddenRows: max(0, rows.count - visibleRows),
+                       everythingElseDirect: everythingElseDirect)
+    }
+
+    private static func routes(_ count: Int) -> String {
+        count == 1 ? String(localized: "1 route") : String(localized: "\(count) routes")
+    }
+}
+
 // MARK: - Mode control
 
 /// The Mode row under the status header: one native segmented control with all three modes,
@@ -1155,7 +1211,7 @@ struct StatusHeader: View {
                         ForEach(status.facts, id: \.label) { fact in
                             GridRow {
                                 Text(fact.label)
-                                    .foregroundColor(Theme.textTertiary)
+                                    .foregroundColor(.secondary)
                                 Text(fact.value)
                                     .foregroundColor(Theme.textSecondary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -1595,7 +1651,7 @@ struct FirstRunSetupView: View {
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(Theme.textTertiary)
+                            .foregroundColor(.secondary)
                     }
                     .frame(height: 34)
                     .padding(.horizontal, 10)
@@ -1749,6 +1805,85 @@ struct FirstRunSetupView: View {
 
 // MARK: - Supporting Views
 
+/// The card `RoutedBySource` describes: what the user added, with how many routes each has.
+/// A row's tooltip lists the addresses behind it.
+struct RoutedBySourceCard: View {
+    let summary: RoutedBySource.Summary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 10))
+                Text(summary.title)
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+                Text(summary.countText)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            .foregroundStyle(.secondary)
+
+            if !summary.rows.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(summary.rows) { row in
+                        HStack(spacing: 8) {
+                            Image(systemName: row.isProblem ? "exclamationmark.triangle.fill" : Self.symbol(row.icon))
+                                .font(.system(size: 11))
+                                .frame(width: 14)
+                                .foregroundColor(row.isProblem ? Theme.warning : .secondary)
+                            Text(row.name)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(row.icon == .leftover ? .secondary : .primary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: 8)
+                            Text(row.countText)
+                                .font(.system(size: 10.5))
+                                .foregroundColor(row.isProblem ? Theme.warning : .secondary)
+                        }
+                        .help(row.tooltip)
+                    }
+                    if summary.hiddenRows > 0 {
+                        Text("+ \(summary.hiddenRows) more")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            if summary.everythingElseDirect {
+                if !summary.rows.isEmpty { Divider() }
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.turn.down.right")
+                        .font(.system(size: 11))
+                        .frame(width: 14)
+                    Text(RoutedBySource.everythingElse)
+                        .font(.system(size: 11.5))
+                    Spacer(minLength: 8)
+                    Text(RoutedBySource.direct)
+                        .font(.system(size: 10.5))
+                        .foregroundColor(.secondary)
+                }
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .cornerRadius(8)
+    }
+
+    static func symbol(_ icon: RoutedBySource.Icon) -> String {
+        switch icon {
+        case .service(let id): return ServiceChip.iconName(for: id)
+        case .domain: return "globe"
+        case .ipRange: return "point.3.connected.trianglepath.dotted"
+        case .rule: return "list.bullet.indent"
+        case .leftover: return "clock.arrow.circlepath"
+        }
+    }
+}
+
 struct StatBadge: View {
     let value: String
     let label: LocalizedStringKey
@@ -1769,10 +1904,8 @@ struct StatBadge: View {
     }
 }
 
-struct ServiceChip: View {
-    let service: RouteManager.ServiceEntry
-
-    /// The symbol a service draws in the dropdown, in its chip and in the first-run list.
+/// The SF Symbol each service draws in the dropdown's list and in the first-run question.
+enum ServiceChip {
     static func iconName(for serviceID: String) -> String {
         switch serviceID {
         case "telegram": return "paperplane.fill"
@@ -1786,65 +1919,6 @@ struct ServiceChip: View {
         case "zoom": return "video.fill"
         case "teams": return "person.2.fill"
         default: return "globe"
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: Self.iconName(for: service.id))
-                .font(.system(size: 9))
-            Text(service.name)
-                .font(.system(size: 10, weight: .medium))
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Theme.success.opacity(0.15))
-        .foregroundColor(Theme.success)
-        .cornerRadius(12)
-    }
-}
-
-// MARK: - Flow Layout
-
-struct FlowLayout: Layout {
-    var spacing: CGFloat = 8
-    
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let result = FlowResult(in: proposal.width ?? 0, subviews: subviews, spacing: spacing)
-        return result.size
-    }
-    
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = FlowResult(in: bounds.width, subviews: subviews, spacing: spacing)
-        for (index, subview) in subviews.enumerated() {
-            subview.place(at: CGPoint(x: bounds.minX + result.positions[index].x, y: bounds.minY + result.positions[index].y), proposal: .unspecified)
-        }
-    }
-    
-    struct FlowResult {
-        var size: CGSize = .zero
-        var positions: [CGPoint] = []
-        
-        init(in maxWidth: CGFloat, subviews: Subviews, spacing: CGFloat) {
-            var x: CGFloat = 0
-            var y: CGFloat = 0
-            var rowHeight: CGFloat = 0
-            
-            for subview in subviews {
-                let size = subview.sizeThatFits(.unspecified)
-                
-                if x + size.width > maxWidth, x > 0 {
-                    x = 0
-                    y += rowHeight + spacing
-                    rowHeight = 0
-                }
-                
-                positions.append(CGPoint(x: x, y: y))
-                x += size.width + spacing
-                rowHeight = max(rowHeight, size.height)
-            }
-            
-            self.size = CGSize(width: maxWidth, height: y + rowHeight)
         }
     }
 }

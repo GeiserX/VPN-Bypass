@@ -52,7 +52,7 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 
 ## The menu bar app
 
-Everything lives in the dropdown: the VPN it found, a pill that says whether routes are enforced, the Mode switch, a field to add a domain, and the services and routes in use. Settings opens from the gear at its foot. See [Usage](usage.md).
+Everything lives in the dropdown: the VPN it found, a pill that says whether routes are enforced, the Mode switch, a field to add a domain, and what is routed, one row per service or domain you added. Settings opens from the gear at its foot. See [Usage](usage.md).
 
 <div class="vb-gallery" markdown>
 <figure markdown>

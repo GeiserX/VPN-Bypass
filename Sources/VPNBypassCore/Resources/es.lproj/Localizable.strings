@@ -12,8 +12,6 @@
 "Clear" = "Limpiar";
 "Verify Routes" = "Verificar rutas";
 "Verifying..." = "Verificando...";
-"Active Services" = "Servicios activos";
-"No services enabled" = "Ningún servicio habilitado";
 "+%lld more" = "+%lld más";
 "+ %lld more" = "+ %lld más";
 "Active Routes" = "Rutas activas";
@@ -356,3 +354,12 @@
 "Only the sites you list will use your VPN; everything else goes direct." = "Solo los sitios que indiques usarán tu VPN; todo lo demás va directo.";
 "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime." = "Tus dominios y servicios pasan a ser reglas editables que puedes enviar por cualquier ruta (un proxy, un equipo de Tailscale o una VPN concreta). Puedes volver cuando quieras.";
 "Switch to your per-rule custom routing. You can switch back to a simple mode anytime." = "Pasa a tu enrutamiento personalizado por reglas. Puedes volver a un modo simple cuando quieras.";
+
+/* ===== Menu bar: what is routed, by what the user added ===== */
+"Skipping the VPN" = "Sin pasar por la VPN";
+"Through the VPN" = "Por la VPN";
+"Routed by your rules" = "Enrutado por tus reglas";
+"no routes" = "sin rutas";
+"Left from earlier" = "Restos de antes";
+"Everything else" = "Todo lo demás";
+"direct" = "directo";
