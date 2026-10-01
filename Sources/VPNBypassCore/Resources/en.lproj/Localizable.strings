@@ -505,3 +505,14 @@
 "From the command line" = "From the command line";
 "Show entries from the app too" = "Show entries from the app too";
 "Last change: removed routes via the command line, %@; routes left: %lld" = "Last change: removed routes via the command line, %1$@; routes left: %2$lld";
+
+/* ===== Names VoiceOver reads for switches and icon buttons, and the dropdown's shortcuts ===== */
+"Delete %@" = "Delete %@";
+"Delete" = "Delete";
+"Edit %@" = "Edit %@";
+"Open Logs" = "Open Logs";
+"More actions" = "More actions";
+"Search services" = "Search services";
+"Clear search" = "Clear search";
+"Add Route" = "Add Route";
+"Add Rule" = "Add Rule";

@@ -221,6 +221,7 @@ struct RulesTab: View {
                 }
                 .buttonStyle(.plain)
                 .help("Add Rule")
+                .accessibilityLabel("Add Rule")
             }
 
             Text("Send specific destinations through specific routes. Rules are checked in order — the first match wins.")
@@ -481,13 +482,14 @@ struct RuleRow: View {
                     .frame(width: 14)
             }
 
-            Toggle("", isOn: Binding(
+            Toggle(patternDisplay, isOn: Binding(
                 get: { rule.enabled },
                 set: onToggle
             ))
             .toggleStyle(.switch)
             .tint(Theme.success)
-            .scaleEffect(0.75)
+            .labelsHidden()
+            .controlSize(.small)
             .frame(width: 34)
 
             Button(action: onEdit) {
@@ -526,6 +528,7 @@ struct RuleRow: View {
             }
             .buttonStyle(.plain)
             .help("Delete rule")
+            .accessibilityLabel(ControlNames.delete(patternDisplay))
         }
     }
 }
@@ -688,6 +691,7 @@ struct RuleEditorSheet: View {
                         .foregroundColor(Theme.textSecondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "Cancel"))
             }
             .padding(.horizontal, 20)
             .padding(.top, 20)

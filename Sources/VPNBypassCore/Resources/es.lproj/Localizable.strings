@@ -505,3 +505,14 @@
 "From the command line" = "Desde la línea de comandos";
 "Show entries from the app too" = "Mostrar también las entradas de la app";
 "Last change: removed routes via the command line, %@; routes left: %lld" = "Último cambio: se quitaron rutas desde la línea de comandos, %1$@; rutas restantes: %2$lld";
+
+/* ===== Nombres que lee VoiceOver en interruptores y botones de icono, y atajos del menú ===== */
+"Delete %@" = "Eliminar %@";
+"Delete" = "Eliminar";
+"Edit %@" = "Editar %@";
+"Open Logs" = "Abrir registros";
+"More actions" = "Más acciones";
+"Search services" = "Buscar servicios";
+"Clear search" = "Borrar búsqueda";
+"Add Route" = "Añadir ruta";
+"Add Rule" = "Añadir regla";
