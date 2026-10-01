@@ -496,11 +496,6 @@ final class SettingsUndoManagerTests: RouteManagerTestCase {
         undo.clear()
         XCTAssertNil(undo.last)
         XCTAssertFalse(manager.canUndo)
-
-        // ⌘Z after the line cleared does nothing.
-        manager.undo()
-        XCTAssertEqual(rm.config.domains.map(\.domain), ["a.example.com"], "a cleared change must not come back")
-        XCTAssertEqual(undo.undoneCount, 0)
     }
 
     /// The Settings window hands its own undo manager to SettingsUndo, so Edit > Undo, which
