@@ -148,7 +148,7 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Private
     
-    private var dnsRefreshTimer: Timer?
+    private(set) var dnsRefreshTimer: Timer?
     private var detectedDNSServer: String?  // User's real DNS (pre-VPN), detected at startup
     private var dnsCache: [String: String] = [:]  // Cache: domain -> first resolved IP (for hosts file)
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
@@ -3236,7 +3236,7 @@ final class RouteManager: ObservableObject {
         
         nextDNSRefresh = Date().addingTimeInterval(interval)
         
-        dnsRefreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        dnsRefreshTimer = Timer.scheduledInCommonModes(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 await self?.performDNSRefresh()
             }
