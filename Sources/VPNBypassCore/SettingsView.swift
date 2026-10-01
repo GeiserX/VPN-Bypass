@@ -82,6 +82,14 @@ struct SettingsView: View {
         )
         .onAppear { clampSelectedTabIfNeeded() }
         .onChange(of: routeManager.config.routingMode) { _ in clampSelectedTabIfNeeded() }
+        // A page asked for from outside, such as the dropdown's "All 37 services…" row. The
+        // publisher sends its current value on subscribe, so a fresh window opens on it too.
+        .onReceive(SettingsPageRequest.shared.$page) { page in
+            guard let page else { return }
+            SettingsPageRequest.shared.page = nil
+            selectedTab = page
+            clampSelectedTabIfNeeded()
+        }
         .sheet(isPresented: Binding(
             get: { modeSwitch.pickedMode != nil },
             set: { if !$0 { modeSwitch.pickedMode = nil } }
@@ -2621,13 +2629,23 @@ struct LogRow: View {
 
 // MARK: - Settings Window Controller
 
+/// The page the Settings window should show next. Set before the window opens or while it is
+/// open; the window takes it and clears it.
+@MainActor
+final class SettingsPageRequest: ObservableObject {
+    static let shared = SettingsPageRequest()
+    @Published var page: SettingsView.SettingsTab?
+}
+
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     static let shared = SettingsWindowController()
 
     private var window: NSWindow?
 
-    func show() {
+    /// Shows the window, on `page` when one is given.
+    func show(page: SettingsView.SettingsTab? = nil) {
+        if let page { SettingsPageRequest.shared.page = page }
         showWindow()
     }
 

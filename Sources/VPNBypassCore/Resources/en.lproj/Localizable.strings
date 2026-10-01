@@ -292,6 +292,16 @@
 "1 more minute" = "1 more minute";
 "%lld more minutes" = "%lld more minutes";
 
+/* ===== Menu bar: the first-run question ===== */
+"NOT SET UP" = "NOT SET UP";
+"What should skip the VPN?" = "What should skip the VPN?";
+"Switched-on services use your normal connection." = "Switched-on services use your normal connection.";
+"All %lld services…" = "All %lld services…";
+"Add a site, like example.com" = "Add a site, like example.com";
+"Add Site" = "Add Site";
+"Mode: Bypass. Want only a few sites on the VPN and everything else direct?" = "Mode: Bypass. Want only a few sites on the VPN and everything else direct?";
+"Use VPN Only instead…" = "Use VPN Only instead…";
+
 /* ===== Adding a domain: the line under the field ===== */
 "Type a domain first." = "Type a domain first.";
 "“%@” is not a domain name." = "“%@” is not a domain name.";

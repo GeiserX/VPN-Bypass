@@ -4,8 +4,9 @@
 
 Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow head on the top line while routes are enforced. The dropdown shows:
 
-- a pill that reads ON, WAITING (the app waits for a reconnected tunnel to hold before it re-applies routes), HELD BACK (the tunnel dropped right after several applies, so the app is not applying until it has held for 30 minutes), NO ROUTES (nothing installed), NOT ENFORCING (the helper is down) or OFF (no VPN);
+- a pill that reads ON, WAITING (the app waits for a reconnected tunnel to hold before it re-applies routes), HELD BACK (the tunnel dropped right after several applies, so the app is not applying until it has held for 30 minutes), NO ROUTES (nothing installed), NOT SET UP (a fresh install with nothing configured), NOT ENFORCING (the helper is down) or OFF (no VPN);
 - the VPN it found, one sentence on what your lists route, and two facts: when routes were last applied and whether any failed, and when DNS was checked and runs next. While the pill reads WAITING or HELD BACK, the header says how long is left instead;
+- on a fresh install in Bypass mode, in place of everything down to the gear: the question "What should skip the VPN?", six common services with their switches, a row that opens Settings on the Services page, a field to add a site, and a line that offers VPN Only. Once something is on, the next open shows the normal dropdown below;
 - the Mode control, with Bypass, VPN Only and Custom in every mode. Picking another mode asks first, and the selection moves only after you confirm. Entering Custom turns your lists into rules here too;
 - a field to add a domain to the current mode's list;
 - the active services and routes;

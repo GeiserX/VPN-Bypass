@@ -60,7 +60,7 @@ Everything lives in the dropdown: the VPN it found, a pill that says whether rou
 <figcaption>Bypass mode</figcaption>
 </figure>
 <figure markdown>
-![The dropdown right after install: VPN Connected, the pill reads NO ROUTES, and a hint says nothing is configured yet](images/screenshots/first-run.png)
+![The dropdown right after install: WireGuard connected, the pill reads NOT SET UP, and the question What should skip the VPN? over six services with switches and a field to add a site](images/screenshots/first-run.png)
 <figcaption>First run</figcaption>
 </figure>
 <figure markdown>
