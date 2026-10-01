@@ -383,3 +383,20 @@
 "Send %lld services around the VPN?" = "¿Sacar %lld servicios de la VPN?";
 "%@, %@ and %lld more will use your normal connection instead of the VPN. You can turn them off again here." = "%1$@, %2$@ y %3$lld más usarán tu conexión normal en lugar de la VPN. Puedes volver a desactivarlos aquí.";
 "Turn On %lld Services" = "Activar %lld servicios";
+
+/* ===== Ajustes: el filtro por nivel y la búsqueda de la página Registros ===== */
+"Warnings" = "Avisos";
+"Errors" = "Errores";
+"Search" = "Buscar";
+"Log level" = "Nivel del registro";
+"All: every entry. Warnings: warnings and errors. Errors: errors only." = "Todos: todas las entradas. Avisos: avisos y errores. Errores: solo errores.";
+"1 entry" = "1 entrada";
+"%lld entries" = "%lld entradas";
+"%lld of %lld entries" = "%1$lld de %2$lld entradas";
+"No entries match “%@”." = "Ninguna entrada contiene «%@».";
+"No warnings or errors match “%@”." = "Ningún aviso ni error contiene «%@».";
+"No errors match “%@”." = "Ningún error contiene «%@».";
+"No warnings or errors." = "No hay avisos ni errores.";
+"No errors." = "No hay errores.";
+"Copy the entries shown" = "Copiar las entradas que se ven";
+"Remove every entry, including any the filter hides" = "Borrar todas las entradas, también las que oculta el filtro";

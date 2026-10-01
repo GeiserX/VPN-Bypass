@@ -383,3 +383,20 @@
 "Send %lld services around the VPN?" = "Send %lld services around the VPN?";
 "%@, %@ and %lld more will use your normal connection instead of the VPN. You can turn them off again here." = "%1$@, %2$@ and %3$lld more will use your normal connection instead of the VPN. You can turn them off again here.";
 "Turn On %lld Services" = "Turn On %lld Services";
+
+/* ===== Settings: the level filter and search on the Logs page ===== */
+"Warnings" = "Warnings";
+"Errors" = "Errors";
+"Search" = "Search";
+"Log level" = "Log level";
+"All: every entry. Warnings: warnings and errors. Errors: errors only." = "All: every entry. Warnings: warnings and errors. Errors: errors only.";
+"1 entry" = "1 entry";
+"%lld entries" = "%lld entries";
+"%lld of %lld entries" = "%1$lld of %2$lld entries";
+"No entries match “%@”." = "No entries match “%@”.";
+"No warnings or errors match “%@”." = "No warnings or errors match “%@”.";
+"No errors match “%@”." = "No errors match “%@”.";
+"No warnings or errors." = "No warnings or errors.";
+"No errors." = "No errors.";
+"Copy the entries shown" = "Copy the entries shown";
+"Remove every entry, including any the filter hides" = "Remove every entry, including any the filter hides";
