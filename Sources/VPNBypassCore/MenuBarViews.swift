@@ -208,6 +208,13 @@ struct MenuContent: View {
     @State private var isVerifying = false
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
+    /// A test hosting the dropdown passes false, so the real VPN check does not run against
+    /// the shared RouteManager after the test ends.
+    private let refreshesOnOpen: Bool
+
+    init(refreshesOnOpen: Bool = true) {
+        self.refreshesOnOpen = refreshesOnOpen
+    }
 
     private let accentGradient = LinearGradient(
         colors: [Theme.success, Theme.successDark],
@@ -223,25 +230,38 @@ struct MenuContent: View {
                 VStack(spacing: 0) {
                     titleHeader(status)
                     helperDownBanner
-                    nothingConfiguredHint
                     StatusHeader(status: status, iconName: statusIconName)
                 }
             }
 
-            DropdownModeRow()
-
-            Divider()
-                .padding(.vertical, 8)
-
-            // Main content
-            if routeManager.isLoading && routeManager.lastUpdate == nil {
-                loadingContent
-            } else if routeManager.isVPNConnected {
-                connectedContent
+            if showsFirstRun {
+                // A fresh install: ask what should skip the VPN, in place of the mode control
+                // and the route actions, which have nothing to act on yet.
+                FirstRunSetupView(
+                    onOpenServices: { openSettings(page: .services) },
+                    onUseVPNOnly: {
+                        // Through the run loop, for the reason given in DropdownModeRow.
+                        RunLoop.main.perform(inModes: [.common]) {
+                            DropdownModePicker.askAndSwitch(to: .vpnOnly, routeManager: routeManager)
+                        }
+                    })
+                    .padding(.top, 16)
             } else {
-                disconnectedContent
+                DropdownModeRow()
+
+                Divider()
+                    .padding(.vertical, 8)
+
+                // Main content
+                if routeManager.isLoading && routeManager.lastUpdate == nil {
+                    loadingContent
+                } else if routeManager.isVPNConnected {
+                    connectedContent
+                } else {
+                    disconnectedContent
+                }
             }
-            
+
             Divider()
                 .padding(.vertical, 8)
             
@@ -252,8 +272,24 @@ struct MenuContent: View {
         .frame(width: 340)
         .onAppear {
             // Refresh VPN status when menu opens
-            routeManager.refreshStatus()
+            if refreshesOnOpen { routeManager.refreshStatus() }
         }
+    }
+
+    /// Nothing configured yet (`FirstRunSetup.isFresh`), read now.
+    private var isFresh: Bool {
+        FirstRunSetup.isFresh(mode: routeManager.config.routingMode,
+                              domains: routeManager.config.domains,
+                              services: routeManager.config.services,
+                              installedRoutes: routeManager.uniqueRouteCount)
+    }
+
+    /// The first-run question shows once the app has finished its first detection, while
+    /// nothing is configured, read live. A MenuBarExtra(.window) runs `.onAppear` on its first
+    /// open only and never runs `.onDisappear`, so a value latched on open would never reset.
+    private var showsFirstRun: Bool {
+        guard !(routeManager.isLoading && routeManager.lastUpdate == nil) else { return false }
+        return isFresh
     }
 
     // MARK: - Title Header
@@ -292,36 +328,13 @@ struct MenuContent: View {
             lastRouteChange: routeManager.lastRouteChange,
             lastDNSRefresh: routeManager.lastDNSRefresh,
             nextDNSRefresh: routeManager.nextDNSRefresh,
-            autoDNSRefresh: config.autoDNSRefresh
+            autoDNSRefresh: config.autoDNSRefresh,
+            nothingConfigured: isFresh
         )
     }
 
     private var statusIconName: String {
         routeManager.isVPNConnected ? (routeManager.vpnType?.icon ?? "checkmark.shield.fill") : "shield.slash.fill"
-    }
-
-    /// First-run honesty: a fresh install prompts for an admin password and then routes
-    /// NOTHING (empty domain list, every service disabled). Say so, instead of leaving a
-    /// silently inert app behind the most intrusive prompt it will ever show.
-    @ViewBuilder
-    private var nothingConfiguredHint: some View {
-        let nothingConfigured = routeManager.config.routingMode != .custom
-            && routeManager.config.domains.isEmpty
-            && !routeManager.config.services.contains(where: { $0.enabled })
-        if nothingConfigured && routeManager.activeRoutes.isEmpty {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles")
-                    .foregroundColor(Theme.blue)
-                Text(String(localized: "Nothing configured yet — add a domain below or enable a service in Settings to start bypassing."))
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer()
-            }
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.blue.opacity(0.08)))
-            .padding(.bottom, 8)
-        }
     }
 
     /// Shown at the top of the dropdown whenever the helper cannot enforce anything while a
@@ -913,7 +926,7 @@ struct MenuContent: View {
         Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
     }
 
-    private func openSettings() {
+    private func openSettings(page: SettingsView.SettingsTab? = nil) {
         // Close the MenuBarExtra dropdown window
         // The dropdown is the current key window when clicking inside it
         if let menuWindow = NSApp.keyWindow {
@@ -924,7 +937,7 @@ struct MenuContent: View {
         // Longer delay on first open helps with initialization
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            SettingsWindowController.shared.show()
+            SettingsWindowController.shared.show(page: page)
         }
     }
 }
@@ -1099,12 +1112,7 @@ struct DropdownModeRow: View {
     /// default-mode timers (the 30 s status refresh, the DNS refresh) wait and fire once it
     /// closes. Main-queue work and main-actor tasks keep running.
     private func ask(_ mode: RouteManager.RoutingMode) {
-        let alert = DropdownModePicker.confirmationAlert(to: mode, schemaVersion: routeManager.config.schemaVersion)
-        if alert.runModal() == .alertFirstButtonReturn {
-            // The call the Settings switch makes, so entering Custom runs the same migration
-            // of the Bypass and VPN Only lists into rules.
-            routeManager.setRoutingMode(mode)
-        }
+        DropdownModePicker.askAndSwitch(to: mode, routeManager: routeManager)
         asking = nil
     }
 }
@@ -1121,17 +1129,17 @@ struct StatusHeader: View {
         HStack(alignment: .top, spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(status.tone.color.opacity(0.15))
+                    .fill(status.headerTone.color.opacity(0.15))
                     .frame(width: 36, height: 36)
                 Image(systemName: iconName)
                     .font(.system(size: 16))
-                    .foregroundColor(status.tone.color)
+                    .foregroundColor(status.headerTone.color)
             }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(status.headline)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundColor(status.tone.color)
+                    .foregroundColor(status.headerTone.color)
                 Text(status.sentence)
                     .font(.system(size: 12))
                     .foregroundColor(Theme.textPrimary)
@@ -1177,10 +1185,16 @@ struct StatusPill: View {
     var body: some View {
         let color = status.tone.color
         HStack(spacing: 4) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
-                .shadow(color: color.opacity(0.6), radius: 3)
+            if status.tone == .idle {
+                Circle()
+                    .strokeBorder(color, lineWidth: 1.3)
+                    .frame(width: 7, height: 7)
+            } else {
+                Circle()
+                    .fill(color)
+                    .frame(width: 6, height: 6)
+                    .shadow(color: color.opacity(0.6), radius: 3)
+            }
             Text(status.pill)
                 .font(.system(size: 9, weight: .bold, design: .rounded))
                 .foregroundColor(color)
@@ -1195,16 +1209,22 @@ struct StatusPill: View {
 /// wording is unit-tested.
 struct DropdownStatus: Equatable {
     enum Tone: Equatable {
-        case ok, warn, bad
+        /// `idle` is NOT SET UP: nothing is wrong, nothing is configured yet.
+        case ok, warn, bad, idle
 
         var color: Color {
             switch self {
             case .ok: return Theme.success
             case .warn: return Theme.warning
             case .bad: return Theme.error
+            case .idle: return Theme.textSecondary
             }
         }
     }
+
+    /// The header's colour. NOT SET UP is about the lists, not the connection: the VPN is up
+    /// and fine, so the header stays green and only the pill goes grey.
+    var headerTone: Tone { tone == .idle ? .ok : tone }
 
     struct Fact: Equatable {
         let label: String
@@ -1228,6 +1248,9 @@ struct DropdownStatus: Equatable {
         var lastDNSRefresh: Date?
         var nextDNSRefresh: Date?
         var autoDNSRefresh: Bool
+        /// A fresh install: Bypass mode, an empty domain list and every service off
+        /// (`FirstRunSetup.isFresh`). The dropdown asks what should skip the VPN.
+        var nothingConfigured: Bool = false
     }
 
     let pill: String
@@ -1300,6 +1323,13 @@ struct DropdownStatus: Equatable {
         // No Mode fact: the Mode control sits right under the header.
         let facts = [Fact(label: String(localized: "Routes"), value: routesFact(input, now: now)),
                      Fact(label: String(localized: "DNS"), value: dnsFact(input, now: now))]
+        if input.installedRoutes == 0 && input.nothingConfigured {
+            // Not a fault: nothing has been asked for yet, and the question sits right below.
+            return DropdownStatus(pill: String(localized: "NOT SET UP"), tone: .idle,
+                                  headline: String(localized: "\(name) connected"),
+                                  sentence: String(localized: "Nothing skips the VPN yet."),
+                                  note: scheduledNote, facts: [])
+        }
         if input.installedRoutes == 0 {
             return DropdownStatus(pill: String(localized: "NO ROUTES"), tone: .warn,
                                   headline: String(localized: "\(name) connected"),
@@ -1446,6 +1476,17 @@ enum DropdownModePicker {
         return alert
     }
 
+    /// Asks the question and, on Switch, changes the mode. Call it through the run loop, not
+    /// from inside a click handler or a main-queue block (see `DropdownModeRow`).
+    @MainActor static func askAndSwitch(to mode: RouteManager.RoutingMode, routeManager: RouteManager) {
+        let alert = confirmationAlert(to: mode, schemaVersion: routeManager.config.schemaVersion)
+        if alert.runModal() == .alertFirstButtonReturn {
+            // The call the Settings switch makes, so entering Custom runs the same migration
+            // of the Bypass and VPN Only lists into rules.
+            routeManager.setRoutingMode(mode)
+        }
+    }
+
     /// The question asked before a switch, in English. (The Settings window now asks in a sheet
     /// with its own wording, in RoutingModeSwitcher.swift.)
     static func confirmation(to mode: RouteManager.RoutingMode, schemaVersion: Int) -> (message: String, confirm: String) {
@@ -1462,6 +1503,247 @@ enum DropdownModePicker {
                 : String(localized: "Switch to your per-rule custom routing. You can switch back to a simple mode anytime.")
             return (message, String(localized: "Switch to Custom Routes"))
         }
+    }
+}
+
+// MARK: - First run
+
+/// What the dropdown asks on a fresh install, kept pure so the rule for when it shows, the
+/// services it offers and its wording are unit-tested.
+enum FirstRunSetup {
+    /// The six services the question offers, in this order. The rest are one row away.
+    static let commonServiceIDs = ["telegram", "whatsapp", "youtube", "zoom", "teams", "spotify"]
+
+    /// Nothing has been asked for yet: Bypass mode, no domain on its list (on or off), every
+    /// service off, and no route installed. VPN Only always installs its catch-all routes and
+    /// Custom has its own pages, so the question is asked in Bypass only.
+    static func isFresh(mode: RouteManager.RoutingMode, domains: [DomainEntry],
+                        services: [ServiceEntry], installedRoutes: Int) -> Bool {
+        mode == .bypass
+            && domains.isEmpty
+            && !services.contains(where: { $0.enabled })
+            && installedRoutes == 0
+    }
+
+    /// The common services found in the catalogue, in the order above.
+    static func commonServices(in services: [ServiceEntry]) -> [ServiceEntry] {
+        commonServiceIDs.compactMap { id in services.first { $0.id == id } }
+    }
+
+    static var title: String { String(localized: "What should skip the VPN?") }
+    static var subtitle: String { String(localized: "Switched-on services use your normal connection.") }
+    static var sitePlaceholder: String { String(localized: "Add a site, like example.com") }
+    static var addSite: String { String(localized: "Add Site") }
+    static var modeLine: String { String(localized: "Mode: Bypass. Want only a few sites on the VPN and everything else direct?") }
+    static var useVPNOnly: String { String(localized: "Use VPN Only instead…") }
+
+    static func domainCount(_ n: Int) -> String {
+        n == 1 ? String(localized: "1 domain") : String(localized: "\(n) domains")
+    }
+
+    static func allServices(_ count: Int) -> String {
+        String(localized: "All \(count) services…")
+    }
+}
+
+/// The question a fresh install asks, as a grouped list: six common services with the Services
+/// page's own switch, a row that opens that page, a row to add a site, and a line that offers
+/// VPN Only. Each switch and each add applies at once, through the same RouteManager calls.
+struct FirstRunSetupView: View {
+    @EnvironmentObject var routeManager: RouteManager
+    let onOpenServices: () -> Void
+    let onUseVPNOnly: () -> Void
+    @State private var site: String
+    /// What the last add did, shown under the field (proposal 5's line).
+    @State private var feedback: AddDomainFeedback?
+
+    /// The arguments seed the field and the line under it, for a rendered screenshot.
+    init(site: String = "", feedback: AddDomainFeedback? = nil,
+         onOpenServices: @escaping () -> Void, onUseVPNOnly: @escaping () -> Void) {
+        _site = State(initialValue: site)
+        _feedback = State(initialValue: feedback)
+        self.onOpenServices = onOpenServices
+        self.onUseVPNOnly = onUseVPNOnly
+    }
+
+    private static let vpnOnlyURL = URL(string: "vpnbypass-dropdown://use-vpn-only")!
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(FirstRunSetup.title)
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.leading, 2)
+            Text(FirstRunSetup.subtitle)
+                .font(.system(size: 11))
+                .foregroundColor(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 2)
+                .padding(.top, 2)
+                .padding(.bottom, 8)
+
+            group {
+                ForEach(FirstRunSetup.commonServices(in: routeManager.config.services)) { service in
+                    serviceRow(service)
+                    rowSeparator
+                }
+                Button(action: onOpenServices) {
+                    HStack(spacing: 9) {
+                        tile("magnifyingglass", Self.gray)
+                        Text(FirstRunSetup.allServices(routeManager.config.services.count))
+                            .font(.system(size: 12.5))
+                            .foregroundColor(Theme.textSecondary)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(Theme.textTertiary)
+                    }
+                    .frame(height: 34)
+                    .padding(.horizontal, 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            group {
+                HStack(spacing: 9) {
+                    tile("globe", Self.gray)
+                    TextField(FirstRunSetup.sitePlaceholder, text: $site)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12.5))
+                        .onSubmit(addSite)
+                        // As on the Domains page: an add during an apply would save the site
+                        // without routing it.
+                        .disabled(routeManager.isApplyingRoutes)
+                    Button(action: addSite) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(Theme.textSecondary)
+                            .frame(width: 20, height: 20)
+                            .background(Color.secondary.opacity(0.18))
+                            .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(site.isEmpty || routeManager.isApplyingRoutes)
+                    .help(FirstRunSetup.addSite)
+                    .accessibilityLabel(FirstRunSetup.addSite)
+                }
+                .frame(height: 34)
+                .padding(.horizontal, 10)
+            }
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .stroke(feedback?.isError == true ? Theme.error.opacity(0.8) : Color.clear, lineWidth: 1))
+            .padding(.top, 8)
+            // Editing the text the line talks about makes it stale.
+            .onChange(of: site) { text in
+                if text != feedback?.fieldText { feedback = nil }
+            }
+
+            if let feedback {
+                AddDomainFeedbackLine(feedback: feedback)
+                    .padding(.top, 6)
+            }
+
+            Divider()
+                .padding(.top, 14)
+                .padding(.bottom, 8)
+
+            Text(modeLineText)
+                .font(.system(size: 11))
+                .foregroundColor(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .environment(\.openURL, OpenURLAction { url in
+                    guard url == Self.vpnOnlyURL else { return .systemAction }
+                    onUseVPNOnly()
+                    return .handled
+                })
+        }
+    }
+
+    /// The mode line with "Use VPN Only instead…" as a link inside it, so it wraps as one sentence.
+    private var modeLineText: AttributedString {
+        var line = AttributedString(FirstRunSetup.modeLine + " ")
+        var link = AttributedString(FirstRunSetup.useVPNOnly)
+        link.link = Self.vpnOnlyURL
+        link.foregroundColor = Theme.Brand.sky
+        line.append(link)
+        return line
+    }
+
+    private func serviceRow(_ service: ServiceEntry) -> some View {
+        HStack(spacing: 9) {
+            tile(ServiceChip.iconName(for: service.id), Self.tileColor(service.id))
+            Text(service.name)
+                .font(.system(size: 12.5))
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(FirstRunSetup.domainCount(service.domains.count))
+                .font(.system(size: 10.5))
+                .foregroundColor(Theme.textTertiary)
+            // The Services page's switch (ServiceRow), and the same call behind it.
+            Toggle("", isOn: Binding(
+                get: { service.enabled },
+                set: { _ in
+                    if !routeManager.isApplyingRoutes {
+                        routeManager.toggleService(service.id)
+                    }
+                }
+            ))
+            .toggleStyle(.switch)
+            .tint(Theme.success)
+            .labelsHidden()
+            .scaleEffect(0.7)
+            .frame(width: 30)
+            .disabled(routeManager.isApplyingRoutes)
+            .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
+            .accessibilityLabel(service.name)
+        }
+        .frame(height: 34)
+        .padding(.horizontal, 10)
+    }
+
+    private var rowSeparator: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.07))
+            .frame(height: 1)
+            .padding(.leading, 39)
+    }
+
+    private func group<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: 0) { content() }
+            .background(Color.secondary.opacity(0.08))
+            .cornerRadius(8)
+    }
+
+    private func tile(_ symbol: String, _ color: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundColor(.white)
+            .frame(width: 20, height: 20)
+            .background(RoundedRectangle(cornerRadius: 5).fill(color))
+    }
+
+    private static let gray = Color(hex: "48484A")
+
+    /// Each service's own colour behind its symbol, as System Settings draws its rows.
+    static func tileColor(_ serviceID: String) -> Color {
+        switch serviceID {
+        case "telegram": return Color(hex: "2AABEE")
+        case "whatsapp": return Color(hex: "25D366")
+        case "youtube": return Color(hex: "FF3B30")
+        case "zoom": return Color(hex: "0B5CFF")
+        case "teams": return Color(hex: "5B5FC7")
+        case "spotify": return Color(hex: "1DB954")
+        default: return gray
+        }
+    }
+
+    /// The Bypass add, as on the Domains page: a refused add keeps the text and says why, a
+    /// saved one empties the field and names what went in.
+    private func addSite() {
+        guard !site.isEmpty, !routeManager.isApplyingRoutes else { return }
+        let shown = AddDomainFeedback(routeManager.addDomain(site), typed: site)
+        feedback = shown
+        site = shown.fieldText
     }
 }
 
@@ -1489,9 +1771,10 @@ struct StatBadge: View {
 
 struct ServiceChip: View {
     let service: RouteManager.ServiceEntry
-    
-    private var iconName: String {
-        switch service.id {
+
+    /// The symbol a service draws in the dropdown, in its chip and in the first-run list.
+    static func iconName(for serviceID: String) -> String {
+        switch serviceID {
         case "telegram": return "paperplane.fill"
         case "youtube": return "play.rectangle.fill"
         case "whatsapp": return "message.fill"
@@ -1500,13 +1783,15 @@ struct ServiceChip: View {
         case "slack": return "number.square.fill"
         case "discord": return "bubble.left.and.bubble.right.fill"
         case "twitch": return "tv.fill"
+        case "zoom": return "video.fill"
+        case "teams": return "person.2.fill"
         default: return "globe"
         }
     }
-    
+
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: iconName)
+            Image(systemName: Self.iconName(for: service.id))
                 .font(.system(size: 9))
             Text(service.name)
                 .font(.system(size: 10, weight: .medium))

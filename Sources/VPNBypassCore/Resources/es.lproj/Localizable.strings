@@ -296,6 +296,16 @@
 "1 more minute" = "1 minuto más";
 "%lld more minutes" = "%lld minutos más";
 
+/* ===== Barra de menú: la pregunta del primer arranque ===== */
+"NOT SET UP" = "SIN CONFIGURAR";
+"What should skip the VPN?" = "¿Qué debe evitar la VPN?";
+"Switched-on services use your normal connection." = "Los servicios activados usan tu conexión normal.";
+"All %lld services…" = "Los %lld servicios…";
+"Add a site, like example.com" = "Añade un sitio, como example.com";
+"Add Site" = "Añadir sitio";
+"Mode: Bypass. Want only a few sites on the VPN and everything else direct?" = "Modo: Bypass. ¿Quieres que solo unos pocos sitios usen la VPN y todo lo demás vaya directo?";
+"Use VPN Only instead…" = "Usar Solo VPN en su lugar…";
+
 /* ===== Añadir un dominio: la línea bajo el campo ===== */
 "Type a domain first." = "Escribe primero un dominio.";
 "“%@” is not a domain name." = "“%@” no es un nombre de dominio.";
