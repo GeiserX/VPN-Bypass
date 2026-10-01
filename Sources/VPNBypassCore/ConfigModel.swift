@@ -221,11 +221,19 @@ struct Config: Codable {
         return (routes, rules, defaultRouteId)
     }
 
-    /// Whether `preparedForCustomMode()` builds rules from the Bypass and VPN Only lists: there
-    /// are no rules yet, and the lists hold something to route. It is the test that function
-    /// runs, and the dropdown's question and the Settings sheet word the switch to Custom by it
-    /// (through `RoutingModeCopy.lists(from:)`), so what they say matches what the switch does.
+    /// Whether `preparedForCustomMode()` builds rules from the lists: there are no rules yet,
+    /// and `derive` makes at least one from the current mode's list (only its entries that are
+    /// switched on). The dropdown's question and the Settings sheet word the switch to Custom by
+    /// it (through `RoutingModeCopy.lists(from:)`), so what they say matches what the switch does.
     var customModeBuildsRulesFromLists: Bool {
+        rules.isEmpty && !Config.derive(domains: domains, services: services, mode: routingMode,
+                                        inverseDomains: inverseDomains, proxy: proxyConfig).rules.isEmpty
+    }
+
+    /// The test `preparedForCustomMode()` runs before it derives anything: no rules yet, and
+    /// some list holds something. Broader than `customModeBuildsRulesFromLists` on purpose, so
+    /// a fresh config still adopts the derived routes even when the current list makes no rule.
+    private var hasRoutableListsAndNoRules: Bool {
         rules.isEmpty && (!domains.isEmpty
             || services.contains { $0.enabled }
             || inverseDomains.contains { $0.enabled })
@@ -254,7 +262,7 @@ struct Config: Codable {
         // Already has a rule model → leave it entirely untouched (idempotent re-entry;
         // never clobber a user's edited rules). Nothing to route → start Custom empty
         // (a valid choice; don't fabricate a model). Only derive otherwise.
-        guard c.customModeBuildsRulesFromLists else { return c }
+        guard c.hasRoutableListsAndNoRules else { return c }
 
         let hasSystemRoutes = c.routes.contains { $0.egress == .vpnDefault }
             && c.routes.contains { $0.egress == .direct }

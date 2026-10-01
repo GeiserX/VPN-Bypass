@@ -58,11 +58,12 @@ final class DropdownModePickerTests: XCTestCase {
     /// rules the decoder already derived, gets none.
     func testCustomWordingAgreesWithSettingsAndTheMigrationInEveryState() {
         func config(schema: Int, mode: RouteManager.RoutingMode = .bypass, domains: [String] = [],
-                    services: Bool = false, vpnOnly: [DomainEntry] = [], rules: Bool = false) -> RouteManager.Config {
+                    domainsOff: [String] = [], services: Bool = false, vpnOnly: [DomainEntry] = [],
+                    rules: Bool = false) -> RouteManager.Config {
             var c = RouteManager.Config()
             c.schemaVersion = schema
             c.routingMode = mode
-            c.domains = domains.map { DomainEntry(domain: $0) }
+            c.domains = domains.map { DomainEntry(domain: $0) } + domainsOff.map { DomainEntry(domain: $0, enabled: false) }
             c.services = c.services.enumerated().map { i, s in var s = s; s.enabled = services && i == 0; return s }
             c.inverseDomains = vpnOnly
             c.routes = []
@@ -87,6 +88,10 @@ final class DropdownModePickerTests: XCTestCase {
             ("v1, only a VPN Only entry that is off", config(schema: 1, vpnOnly: [DomainEntry(domain: "off.example", enabled: false)]), false),
             ("v1, a domain, rules already derived", config(schema: 1, domains: ["a.com"], rules: true), false),
             ("v2, a domain, rules already built", config(schema: 2, domains: ["a.com"], rules: true), false),
+            // Derive reads only the current mode's list, and only its entries that are on.
+            ("v2, only a Bypass domain that is off", config(schema: 2, domainsOff: ["off.com"]), false),
+            ("v2 Bypass, empty, a VPN Only entry on", config(schema: 2, vpnOnly: [DomainEntry(domain: "corp.example")]), false),
+            ("v2 VPN Only, empty, a Bypass domain", config(schema: 2, mode: .vpnOnly, domains: ["a.com"]), false),
         ]
         for state in states {
             let c = state.config
