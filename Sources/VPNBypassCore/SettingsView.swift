@@ -2230,14 +2230,20 @@ struct StatusRow: View {
 
 struct LogsTab: View {
     @EnvironmentObject var routeManager: RouteManager
-    
+    @State private var filter: LogFilter
+
+    init(filter: LogFilter = LogFilter()) {
+        _filter = State(initialValue: filter)
+    }
+
     var body: some View {
+        let shown = filter.apply(routeManager.recentLogs)
         VStack(alignment: .leading, spacing: 20) {
             // Route Health Dashboard
             routeHealthSection
-            
-            // Header
-            HStack {
+
+            VStack(alignment: .leading, spacing: 10) {
+                // Header
                 HStack(spacing: 8) {
                     Image(systemName: "list.bullet.rectangle.fill")
                         .font(.system(size: 20))
@@ -2247,76 +2253,91 @@ struct LogsTab: View {
                         .foregroundColor(.white)
                 }
 
-                Spacer()
-
-                if !routeManager.recentLogs.isEmpty {
-                    Button {
-                        copyLogsToClipboard()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "doc.on.doc")
-                                .font(.system(size: 10))
-                            Text("Copy")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(Theme.blue)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Theme.blue.opacity(0.15))
-                        .clipShape(Capsule())
+                if routeManager.recentLogs.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 36))
+                            .foregroundColor(Theme.textDisabled)
+                        Text("No activity yet")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(Theme.textSecondary)
+                        Text("Logs will appear here when routes are applied")
+                            .font(.system(size: 12))
+                            .foregroundColor(Theme.textDisabled)
                     }
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, 10)
+                } else {
+                    filterBar(shown: shown)
 
-                    Button {
-                        withAnimation { routeManager.recentLogs.removeAll() }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "trash")
-                                .font(.system(size: 10))
-                            Text("Clear")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(Theme.error)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Theme.error.opacity(0.15))
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(filter.countLine(shown: shown.count, total: routeManager.recentLogs.count))
+                            .font(.system(size: 11))
+                            .foregroundColor(Theme.textTertiary)
+                            .padding(.leading, 2)
 
-            // Log content
-            if routeManager.recentLogs.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 36))
-                        .foregroundColor(Theme.textDisabled)
-                    Text("No activity yet")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(Theme.textSecondary)
-                    Text("Logs will appear here when routes are applied")
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.textDisabled)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(routeManager.recentLogs) { log in
-                            LogRow(entry: log)
+                        if let empty = filter.emptyLine(shown: shown.count) {
+                            Text(empty)
+                                .font(.system(size: 12))
+                                .foregroundColor(Theme.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.vertical, 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Theme.bgElevated)
+                                )
+                        } else {
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 1) {
+                                    ForEach(shown) { log in
+                                        LogRow(entry: log, highlight: filter.term)
+                                    }
+                                }
+                                .padding(4)
+                            }
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Theme.bgElevated)
+                            )
                         }
                     }
-                    .padding(4)
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Theme.bgElevated)
-                )
             }
         }
     }
-    
+
+    /// The level filter, the search field, and Copy and Clear, as in proposal 14 of #119.
+    private func filterBar(shown: [RouteManager.LogEntry]) -> some View {
+        HStack(spacing: 10) {
+            Picker("", selection: $filter.level) {
+                ForEach(LogLevelFilter.allCases) { level in
+                    Text(level.title).tag(level)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help(filter.level.help)
+
+            LogSearchField(text: $filter.query, placeholder: String(localized: "Search"))
+                .frame(minWidth: 110, maxWidth: 190)
+
+            Spacer(minLength: 0)
+
+            Button("Copy") {
+                copyLogsToClipboard(shown)
+            }
+            .disabled(shown.isEmpty)
+            .help(String(localized: "Copy the entries shown"))
+
+            Button("Clear") {
+                withAnimation { routeManager.recentLogs.removeAll() }
+            }
+            .help(String(localized: "Remove every entry, including any the filter hides"))
+        }
+        .controlSize(.regular)
+    }
+
     // MARK: - Route Health Dashboard
     
     private var routeHealthSection: some View {
@@ -2421,16 +2442,9 @@ struct LogsTab: View {
         )
     }
 
-    private func copyLogsToClipboard() {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        
-        let logText = routeManager.recentLogs.map { log in
-            "[\(formatter.string(from: log.timestamp))] [\(log.level.rawValue.uppercased())] \(log.message)"
-        }.joined(separator: "\n")
-        
+    private func copyLogsToClipboard(_ entries: [RouteManager.LogEntry]) {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(logText, forType: .string)
+        NSPasteboard.general.setString(LogFilter.clipboardText(entries), forType: .string)
     }
 }
 
@@ -2716,6 +2730,18 @@ struct RouteStatCard: View {
 
 struct LogRow: View {
     let entry: RouteManager.LogEntry
+    /// The search term to mark in the message; empty marks nothing.
+    var highlight: String = ""
+
+    private var message: AttributedString {
+        var text = AttributedString(entry.message)
+        for range in LogFilter.ranges(of: highlight, in: entry.message) {
+            guard let lower = AttributedString.Index(range.lowerBound, within: text),
+                  let upper = AttributedString.Index(range.upperBound, within: text) else { continue }
+            text[lower..<upper].backgroundColor = Color(hex: "FACC15").opacity(0.35)
+        }
+        return text
+    }
     
     private var levelColor: Color {
         switch entry.level {
@@ -2746,7 +2772,7 @@ struct LogRow: View {
                 .foregroundColor(Theme.textTertiary)
                 .frame(width: 70, alignment: .leading)
             
-            Text(entry.message)
+            Text(message)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.white)
                 .lineLimit(1)
@@ -2755,6 +2781,42 @@ struct LogRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+    }
+}
+
+/// The Logs page's search field: a native NSSearchField, with its magnifier and clear button.
+struct LogSearchField: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = placeholder
+        field.sendsSearchStringImmediately = true
+        field.delegate = context.coordinator
+        field.stringValue = text
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+
+        func controlTextDidChange(_ note: Notification) {
+            guard let field = note.object as? NSSearchField else { return }
+            text.wrappedValue = field.stringValue
+        }
+
+        func searchFieldDidEndSearching(_ field: NSSearchField) {
+            text.wrappedValue = ""
+        }
     }
 }
 
