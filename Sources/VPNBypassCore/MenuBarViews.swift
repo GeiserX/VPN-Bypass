@@ -732,7 +732,8 @@ struct MenuContent: View {
             // Refresh Routes says what the last apply did. What a script or an agent changed
             // through the control socket shows here instead (proposal 15 of #119).
             if let change = routeManager.lastOutsideChange,
-               change.isShown(currentRouteCount: routeManager.routedAddressCount) {
+               change.isShown(currentRouteCount: routeManager.routedAddressCount,
+                              everythingElseDirect: routeManager.everythingElseDirect) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     OutsideChangeLine(change: change, now: context.date) {
                         SettingsPageRequest.shared.logFilter = LogFilter(onlyControlSocket: true)
@@ -940,9 +941,16 @@ enum DropdownCopy {
     /// and never in VPN Only, where it does not reinstall the catch-all routes.
     static func removeAllConfirmation(mode: Mode, routeCount: Int, serviceCount: Int, domainCount: Int,
                                       autoApplyOnVPN: Bool, autoDNSRefresh: Bool) -> (title: String, message: String) {
-        let title = routeCount == 1
-            ? String(localized: "Stop routing the 1 address?")
-            : String(localized: "Stop routing all \(routeCount) addresses?")
+        let title: String
+        if routeCount == 0 && mode == .vpnOnly {
+            // Only the catch-alls are installed (the item is off with nothing installed), and
+            // the count leaves them out.
+            title = String(localized: "Stop sending everything else direct?")
+        } else if routeCount == 1 {
+            title = String(localized: "Stop routing the 1 address?")
+        } else {
+            title = String(localized: "Stop routing all \(routeCount) addresses?")
+        }
         let until: String
         switch (autoApplyOnVPN, autoDNSRefresh && mode != .vpnOnly) {
         case (true, true):
@@ -1555,6 +1563,8 @@ struct DropdownStatus: Equatable {
                     : String(localized: "Re-applying routes now.")
                 let note: String
                 switch input.installedRoutes {
+                case 0 where input.everythingElseDirect:
+                    note = String(localized: "Everything else still goes direct, as before the drop.")
                 case 0: note = String(localized: "Nothing is routed until then.")
                 case 1: note = String(localized: "The 1 address routed before the drop stays routed.")
                 default: note = String(localized: "The \(input.installedRoutes) addresses routed before the drop stay routed.")

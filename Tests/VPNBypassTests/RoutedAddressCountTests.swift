@@ -72,6 +72,7 @@ final class RoutedAddressCountLiveTests: XCTestCase {
     private var savedConfig: RouteManager.Config!
     private var savedRoutes: [RouteManager.ActiveRoute] = []
     private var savedChange: RouteManager.RouteChangeOutcome?
+    private var savedCheck: RouteCheck.Run?
     private let rm = RouteManager.shared
 
     override func setUp() {
@@ -79,12 +80,14 @@ final class RoutedAddressCountLiveTests: XCTestCase {
         savedConfig = rm.config
         savedRoutes = rm.activeRoutes
         savedChange = rm.lastRouteChange
+        savedCheck = rm.lastRouteCheck
     }
 
     override func tearDown() {
         rm.config = savedConfig
         rm.activeRoutes = savedRoutes
         rm.lastRouteChange = savedChange
+        rm.lastRouteCheck = savedCheck
         super.tearDown()
     }
 
@@ -152,5 +155,34 @@ final class RoutedAddressCountLiveTests: XCTestCase {
         XCTAssertEqual(outcome.routeCount, 2)
         XCTAssertNotNil(DropdownCopy.shownRouteChange(outcome, currentRouteCount: rm.routedAddressCount),
                         "the line and the header compare the same count, so the removal line stays")
+    }
+
+    /// The Status page's Last check row says "1 of N checked" with the card's count too.
+    func testTheLastCheckRowCountsWhatTheCardCounts() {
+        setMode(.vpnOnly)
+        rm.activeRoutes = [active("140.82.112.4", "github.com"), active("10.20.0.0/16", "10.20.0.0/16")] + catchAlls
+        let plan = RouteCheck.Plan(destinations: ["140.82.112.4"], sources: ["140.82.112.4": "github.com"],
+                                   singleAddresses: 1, routeCount: 2)
+        let result = RouteVerificationResult(destination: "140.82.112.4", isReachable: true, latency: 5,
+                                             timestamp: Date(), error: nil)
+        rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: [result], logsFrom: Date(), at: Date())
+        let text = StatusPage.lastCheck(rm, now: Date()).line.text
+        XCTAssertTrue(text.hasPrefix("1 of 2 checked"), text)
+    }
+}
+
+/// The sentences for VPN Only's catch-alls alone are translated.
+final class RoutedAddressCountStringsTests: XCTestCase {
+    func testTheCatchAllSentencesAreTranslated() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let keys = ["Stop sending everything else direct?", "Everything else still goes direct, as before the drop."]
+        for language in ["es", "fr"] {
+            let url = root.appendingPathComponent("Sources/VPNBypassCore/Resources/\(language).lproj/Localizable.strings")
+            let table = try XCTUnwrap(NSDictionary(contentsOf: url) as? [String: String], language)
+            for key in keys {
+                let value = try XCTUnwrap(table[key], "\(language): \(key)")
+                XCTAssertNotEqual(value, key, "\(language): \(key)")
+            }
+        }
     }
 }

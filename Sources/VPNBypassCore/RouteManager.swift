@@ -22,7 +22,8 @@ final class RouteManager: ObservableObject {
         // moves the line is gone for good; only hiding it let it come back, hours later, when
         // the app's own removal brought the count back to the same number.
         didSet {
-            if case .removedAllRoutes(let left)? = lastOutsideChange?.kind, left != routedAddressCount {
+            if case .removedAllRoutes(let left, let direct)? = lastOutsideChange?.kind,
+               left != routedAddressCount || direct != everythingElseDirect {
                 lastOutsideChange = nil
             }
         }

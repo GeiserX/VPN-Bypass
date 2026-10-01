@@ -322,6 +322,7 @@
 "Re-applying routes now." = "Re-applying routes now.";
 "The %lld addresses routed before the drop stay routed." = "The %lld addresses routed before the drop stay routed.";
 "Nothing is routed until then." = "Nothing is routed until then.";
+"Everything else still goes direct, as before the drop." = "Everything else still goes direct, as before the drop.";
 "WAITING" = "WAITING";
 "%@ reconnected %@" = "%@ reconnected %@";
 "NOTHING ROUTED" = "NOTHING ROUTED";
@@ -514,6 +515,7 @@
 "From the command line" = "From the command line";
 "Show entries from the app too" = "Show entries from the app too";
 "Last change: removed routed addresses via the command line, %@; still routed: %lld" = "Last change: removed routed addresses via the command line, %1$@; still routed: %2$lld";
+"Last change: removed routed addresses via the command line, %@; everything else still goes direct" = "Last change: removed routed addresses via the command line, %@; everything else still goes direct";
 
 /* ===== Names VoiceOver reads for switches and icon buttons, and the dropdown's shortcuts ===== */
 "Delete %@" = "Delete %@";
@@ -541,3 +543,4 @@
 "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details." = "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details.";
 "Stop routing the 1 address?" = "Stop routing the 1 address?";
 "Stop routing all %lld addresses?" = "Stop routing all %lld addresses?";
+"Stop sending everything else direct?" = "Stop sending everything else direct?";

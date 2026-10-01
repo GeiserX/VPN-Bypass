@@ -194,6 +194,12 @@ final class DropdownStatusTests: XCTestCase {
         XCTAssertEqual(on.sentence, "Nothing is sent through the VPN yet.")
         let off = status { $0.isVPNConnected = false; $0.mode = .vpnOnly; $0.installedRoutes = 0; $0.everythingElseDirect = true }
         XCTAssertEqual(off.sentence, "Everything else still goes direct: removing that failed.")
+        let waiting = status {
+            $0.mode = .vpnOnly; $0.installedRoutes = 0; $0.everythingElseDirect = true
+            $0.pending = .init(reason: .settling, connectedAt: self.now, appliesAt: self.now.addingTimeInterval(10))
+        }
+        XCTAssertEqual(waiting.pill, "WAITING")
+        XCTAssertEqual(waiting.note, "Everything else still goes direct, as before the drop.")
     }
 
     func testNoRoutesIsAWarning() {

@@ -23,9 +23,10 @@ final class OutsideChangeTests: XCTestCase {
     }
 
     private func make(_ cmd: String, result: ControlResult? = nil, before: Config, after: Config,
-                      routesBefore: Int = 0, routesLeft: Int = 0) -> OutsideChange? {
+                      routesBefore: Int = 0, routesLeft: Int = 0, everythingElseDirect: Bool = false) -> OutsideChange? {
         OutsideChange.make(cmd: cmd, result: result, before: before, after: after,
-                           routesBefore: routesBefore, routesLeft: routesLeft, at: t0)
+                           routesBefore: routesBefore, routesLeft: routesLeft,
+                           everythingElseDirect: everythingElseDirect, at: t0)
     }
 
     // MARK: Which requests are a change
@@ -101,6 +102,20 @@ final class OutsideChangeTests: XCTestCase {
         XCTAssertEqual(OutsideChange(kind: .addedDomain("x.org"), at: t0).isShown(currentRouteCount: 9), true)
     }
 
+    /// VPN Only's catch-alls are not in the count, so a removal that left only them is told
+    /// apart by its own flag, and stops showing once they come out.
+    func testARemovalThatLeftTheCatchAllsSaysSo() {
+        let change = make("routes.clear", before: config(mode: .vpnOnly), after: config(mode: .vpnOnly),
+                          routesBefore: 4, routesLeft: 0, everythingElseDirect: true)
+        XCTAssertEqual(change?.kind, .removedAllRoutes(routesLeft: 0, everythingElseDirect: true))
+        XCTAssertEqual(change?.isShown(currentRouteCount: 0, everythingElseDirect: true), true)
+        XCTAssertEqual(change?.isShown(currentRouteCount: 0, everythingElseDirect: false), false,
+                       "the catch-alls came out later")
+        XCTAssertEqual(OutsideChange(kind: .removedAllRoutes(routesLeft: 0), at: t0)
+                        .isShown(currentRouteCount: 0, everythingElseDirect: true), false,
+                       "an apply put the catch-alls back")
+    }
+
     // MARK: Wording
 
     func testTheLineSaysWhatWhereAndWhen() {
@@ -114,6 +129,8 @@ final class OutsideChangeTests: XCTestCase {
             (.switchedMode(.vpnOnly), "Last change: switched to VPN Only via the command line, just now", "VPN Only"),
             (.removedAllRoutes(routesLeft: 0), "Last change: removed all routed addresses via the command line, just now", nil),
             (.removedAllRoutes(routesLeft: 2), "Last change: removed routed addresses via the command line, just now; still routed: 2", nil),
+            (.removedAllRoutes(routesLeft: 0, everythingElseDirect: true),
+             "Last change: removed routed addresses via the command line, just now; everything else still goes direct", nil),
             (.changedRoutes, "Last change: changed the routes via the command line, just now", nil),
             (.changedRules, "Last change: changed the rules via the command line, just now", nil),
         ]
@@ -184,6 +201,7 @@ final class OutsideChangeTests: XCTestCase {
     private let everyKind: [OutsideChange.Kind] = [
         .addedDomain("en.wikipedia.org"), .removedDomain("x.org"), .turnedOn("Telegram"), .turnedOff("Slack"),
         .switchedMode(.vpnOnly), .removedAllRoutes(routesLeft: 0), .removedAllRoutes(routesLeft: 2),
+        .removedAllRoutes(routesLeft: 0, everythingElseDirect: true),
         .changedRoutes, .changedRules,
     ]
 
@@ -390,6 +408,35 @@ final class OutsideChangeSocketTests: XCTestCase {
         rm.lastOutsideChange = OutsideChange(kind: .addedDomain("x.org"), at: Date())
         rm.activeRoutes = [route]
         XCTAssertEqual(rm.lastOutsideChange?.kind, .addedDomain("x.org"), "only a removal is about the count")
+    }
+
+    private var catchAlls: [RouteManager.ActiveRoute] {
+        ["0.0.0.0/2", "64.0.0.0/2", "128.0.0.0/2", "192.0.0.0/2"].map {
+            RouteManager.ActiveRoute(destination: $0, gateway: "192.168.1.1",
+                                     source: ClassicRouteCompiler.catchAllSource, timestamp: Date())
+        }
+    }
+
+    /// The reported case: VPN Only, an empty list, the 4 catch-alls installed and no helper to
+    /// remove them. `routes.clear` removes none, so the footer must not say it removed all.
+    func testAClearThatLeftTheCatchAllsDoesNotClaimAll() async throws {
+        try XCTSkipIf(HelperManager.shared.isHelperInstalled,
+                      "this test exercises the helper-unavailable path; a real helper is installed here")
+        rm.config.routingMode = .vpnOnly
+        rm.activeRoutes = catchAlls
+
+        let resp = await send("routes.clear")
+        XCTAssertTrue(resp.ok, "\(String(describing: resp.error))")
+        XCTAssertEqual(rm.uniqueRouteCount, 4, "no helper, so the catch-alls stay")
+        let change = try XCTUnwrap(rm.lastOutsideChange)
+        XCTAssertEqual(change.kind, .removedAllRoutes(routesLeft: 0, everythingElseDirect: true))
+        XCTAssertTrue(change.isShown(currentRouteCount: rm.routedAddressCount,
+                                     everythingElseDirect: rm.everythingElseDirect))
+        XCTAssertFalse(change.line(now: Date()).text.contains("removed all"), change.line(now: Date()).text)
+
+        // Once they do come out, the line about them goes.
+        rm.activeRoutes = []
+        XCTAssertNil(rm.lastOutsideChange, "the catch-alls are gone, so the line is no longer true")
     }
 
     /// The mark follows the request, not the clock: a line the app writes while a request is

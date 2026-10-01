@@ -322,6 +322,7 @@
 "Re-applying routes now." = "Volviendo a aplicar las rutas ahora.";
 "The %lld addresses routed before the drop stay routed." = "Las %lld direcciones enrutadas antes de la caída siguen enrutadas.";
 "Nothing is routed until then." = "Nada se enruta hasta entonces.";
+"Everything else still goes direct, as before the drop." = "Todo lo demás sigue yendo directo, como antes de la caída.";
 "WAITING" = "ESPERANDO";
 "%@ reconnected %@" = "%@ reconectada %@";
 "NOTHING ROUTED" = "NADA ENRUTADO";
@@ -514,6 +515,7 @@
 "From the command line" = "Desde la línea de comandos";
 "Show entries from the app too" = "Mostrar también las entradas de la app";
 "Last change: removed routed addresses via the command line, %@; still routed: %lld" = "Último cambio: se quitaron direcciones enrutadas desde la línea de comandos, %1$@; siguen enrutadas: %2$lld";
+"Last change: removed routed addresses via the command line, %@; everything else still goes direct" = "Último cambio: se quitaron direcciones enrutadas desde la línea de comandos, %@; todo lo demás sigue yendo directo";
 
 /* ===== Nombres que lee VoiceOver en interruptores y botones de icono, y atajos del menú ===== */
 "Delete %@" = "Eliminar %@";
@@ -541,3 +543,4 @@
 "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details." = "Los errores son direcciones que el sistema rechazó y, en una aplicación que resolvió el DNS, dominios que no se resolvieron. Ajustes > Registros tiene los detalles.";
 "Stop routing the 1 address?" = "¿Dejar de enrutar la única dirección?";
 "Stop routing all %lld addresses?" = "¿Dejar de enrutar las %lld direcciones?";
+"Stop sending everything else direct?" = "¿Dejar de enviar todo lo demás directo?";
