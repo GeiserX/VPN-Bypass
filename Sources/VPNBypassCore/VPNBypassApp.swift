@@ -10,6 +10,8 @@ public struct VPNBypassApp: App {
     @StateObject private var routeManager = RouteManager.shared
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var launchAtLoginManager = LaunchAtLoginManager.shared
+    /// SettingsView reads it; the window from SettingsWindowController is the one users see.
+    @StateObject private var modeSwitch = ModeSwitchRequest()
 
     public init() {}
 
@@ -30,6 +32,7 @@ public struct VPNBypassApp: App {
                 .environmentObject(routeManager)
                 .environmentObject(notificationManager)
                 .environmentObject(launchAtLoginManager)
+                .environmentObject(modeSwitch)
         }
     }
 }
