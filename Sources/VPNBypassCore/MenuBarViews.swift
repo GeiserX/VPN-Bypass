@@ -405,7 +405,7 @@ struct MenuContent: View {
             if let routed = RoutedBySource.make(
                 mode: statusInput.mode, config: routeManager.config,
                 routes: routeManager.activeRoutes.map { .init(destination: $0.destination, source: $0.source) },
-                busy: isBusy) {
+                busy: RoutedBySource.mayStillAddRoutes(running: isBusy, pending: routeManager.pendingReconnectApply)) {
                 RoutedBySourceCard(summary: routed)
             }
             
@@ -967,7 +967,8 @@ enum RoutedBySource {
         let name: String
         let icon: Icon
         let routeCount: Int
-        /// An entry that should have routes has none, and no apply is running that could add them.
+        /// An entry that should have routes has none, and no apply is running or waiting that
+        /// could add them.
         let isProblem: Bool
         /// The first destinations behind the row, for its tooltip.
         let addresses: [String]
@@ -1019,6 +1020,12 @@ enum RoutedBySource {
         }
     }
 
+    /// An apply is running, or one is waiting after a reconnect (WAITING / HELD BACK): either
+    /// can still add the routes an entry is missing, so the missing routes are not a warning yet.
+    static func mayStillAddRoutes(running: Bool, pending: RouteManager.PendingReconnectApply?) -> Bool {
+        running || pending != nil
+    }
+
     static var leftoverName: String { String(localized: "Left from earlier") }
     static var everythingElse: String { String(localized: "Everything else") }
     static var direct: String { String(localized: "direct") }
@@ -1048,7 +1055,9 @@ enum RoutedBySource {
             }
         }
 
-        let counted = routes.filter { !isCatchAll($0) }
+        // Only VPN Only shows its catch-alls as the "Everything else" line. Left installed in
+        // another mode (a switch whose clean-up has not run yet), they are routes like any other.
+        let counted = mode == .vpnOnly ? routes.filter { !isCatchAll($0) } : routes
         // A destination can be recorded more than once for a source; count it once.
         var bySource: [String: [String]] = [:]
         var seen: Set<String> = []
@@ -1211,7 +1220,7 @@ struct StatusHeader: View {
                         ForEach(status.facts, id: \.label) { fact in
                             GridRow {
                                 Text(fact.label)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(Theme.textTertiary)
                                 Text(fact.value)
                                     .foregroundColor(Theme.textSecondary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -1651,7 +1660,7 @@ struct FirstRunSetupView: View {
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Theme.textTertiary)
                     }
                     .frame(height: 34)
                     .padding(.horizontal, 10)

@@ -86,6 +86,45 @@ final class RoutedBySourceTests: XCTestCase {
         XCTAssertEqual(busy.rows[1].countText, "no routes")
     }
 
+    /// After a reconnect the app waits before it re-applies (WAITING), or holds the apply back
+    /// for up to 30 minutes (HELD BACK). Neither sets the busy flags, but the apply is coming,
+    /// so a row the drop emptied is not a warning while it waits.
+    func testAPendingReconnectApplyIsNotAWarning() throws {
+        let c = config { $0.inverseDomains = [DomainEntry(domain: "git.corp.example.com")] }
+        let now = Date()
+        for reason: RouteManager.PendingReconnectApply.Reason in [.settling, .heldBack(strikes: 2)] {
+            let pending = RouteManager.PendingReconnectApply(reason: reason, connectedAt: now,
+                                                             appliesAt: now.addingTimeInterval(60))
+            let busy = RoutedBySource.mayStillAddRoutes(running: false, pending: pending)
+            XCTAssertTrue(busy, "\(reason)")
+            let s = try XCTUnwrap(RoutedBySource.make(mode: .vpnOnly, config: c, routes: [], busy: busy))
+            XCTAssertEqual(s.rows.map(\.isProblem), [false], "\(reason)")
+        }
+        XCTAssertTrue(RoutedBySource.mayStillAddRoutes(running: true, pending: nil))
+        XCTAssertFalse(RoutedBySource.mayStillAddRoutes(running: false, pending: nil))
+    }
+
+    /// The catch-alls left installed outside VPN Only (a mode switch whose clean-up has not run,
+    /// or a removal that failed) are not hidden: they are routes no entry owns, counted with the
+    /// rest, so the card agrees with the header and does not vanish when they are all there is.
+    func testCatchAllsLeftOutsideVPNOnlyAreLeftovers() throws {
+        let c = config { $0.services = [service("telegram", "Telegram")] }
+        let leftovers = catchAlls.map { route($0, ClassicRouteCompiler.catchAllSource) }
+        let s = try XCTUnwrap(RoutedBySource.make(mode: .bypass, config: c,
+                                                  routes: leftovers + [route("91.108.4.0/22", "Telegram")], busy: false))
+        XCTAssertEqual(s.rows.map(\.name), ["Telegram", "Left from earlier"])
+        XCTAssertEqual(s.rows.map(\.routeCount), [1, 4])
+        XCTAssertEqual(s.routeCount, 5)
+        XCTAssertFalse(s.everythingElseDirect)
+
+        for mode: DropdownCopy.Mode in [.bypass, .custom] {
+            let only = try XCTUnwrap(RoutedBySource.make(mode: mode, config: config { _ in }, routes: leftovers, busy: false),
+                                     "\(mode)")
+            XCTAssertEqual(only.rows.map(\.name), ["Left from earlier"], "\(mode)")
+            XCTAssertEqual(only.routeCount, 4, "\(mode)")
+        }
+    }
+
     /// Routes no listed entry owns (an entry removed or switched off while its routes wait for
     /// cleanup, or a removal the app retries) are one line at the end, still counted.
     func testRoutesNoEntryOwnsAreOneLeftoverLine() throws {
