@@ -9,8 +9,8 @@ import XCTest
 /// A MenuBarExtra(.window) keeps one window and one view tree for the app's life. Opening it
 /// orders that window in and makes it key; closing orders it out. `.onAppear` runs on the first
 /// open only and `.onDisappear` never, so a refresh hung on `.onAppear` ran once per launch.
-/// The host here opens and closes a window the same way. The VPN is never connected, and the
-/// dropdown's open action is replaced by a counter, so nothing here checks or routes for real.
+/// The host here opens and closes a window the same way. The VPN is never connected, and
+/// RouteManager.refreshStatus() is replaced by a counter, so nothing here checks or routes for real.
 @MainActor
 final class DropdownOpenRefreshTests: XCTestCase {
 
@@ -18,6 +18,8 @@ final class DropdownOpenRefreshTests: XCTestCase {
     private var savedVPNConnected = false
     private var savedIsLoading = true
     private var windows: [NSWindow] = []
+    /// Calls to RouteManager.refreshStatus(), the call the dropdown makes on each open.
+    private var refreshes = 0
 
     private var rm: RouteManager { RouteManager.shared }
 
@@ -33,11 +35,13 @@ final class DropdownOpenRefreshTests: XCTestCase {
         cfg.domains = []
         cfg.inverseDomains = []
         rm.config = cfg
+        rm.refreshStatusOverrideForTests = { [weak self] in self?.refreshes += 1 }
     }
 
     override func tearDown() async throws {
         windows.forEach { $0.orderOut(nil) }
         windows = []
+        rm.refreshStatusOverrideForTests = nil
         rm.config = savedConfig
         rm.isVPNConnected = savedVPNConnected
         rm.isLoading = savedIsLoading
@@ -78,8 +82,8 @@ final class DropdownOpenRefreshTests: XCTestCase {
         settle()
     }
 
-    private func dropdown(onOpen: @escaping () -> Void, onAppear: @escaping () -> Void) -> some View {
-        MenuContent(onOpen: onOpen)
+    private func dropdown(onAppear: @escaping () -> Void) -> some View {
+        MenuContent()
             .environmentObject(rm)
             .environmentObject(NotificationManager.shared)
             .environmentObject(LaunchAtLoginManager.shared)
@@ -87,8 +91,8 @@ final class DropdownOpenRefreshTests: XCTestCase {
     }
 
     func testEveryOpenRefreshes() throws {
-        var refreshes = 0, appears = 0
-        let window = makeWindow(dropdown(onOpen: { refreshes += 1 }, onAppear: { appears += 1 }))
+        var appears = 0
+        let window = makeWindow(dropdown(onAppear: { appears += 1 }))
 
         open(window)
         XCTAssertTrue(window.isKeyWindow, "control: the host makes the window key, as the menu bar does")
@@ -102,8 +106,7 @@ final class DropdownOpenRefreshTests: XCTestCase {
 
     /// Another window taking key focus is not an open of the dropdown.
     func testAnotherWindowBecomingKeyDoesNotRefresh() throws {
-        var refreshes = 0
-        let window = makeWindow(dropdown(onOpen: { refreshes += 1 }, onAppear: {}))
+        let window = makeWindow(dropdown(onAppear: {}))
         open(window)
         XCTAssertEqual(refreshes, 1)
 

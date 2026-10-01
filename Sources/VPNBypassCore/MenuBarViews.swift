@@ -252,14 +252,6 @@ struct MenuContent: View {
     @State private var quickAddError: AddDomainFeedback?
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
-    /// What each open of the dropdown runs. nil, the app's case, refreshes the VPN status. A
-    /// test hosting the dropdown passes its own, so the real VPN check does not run against the
-    /// shared RouteManager after the test ends.
-    private let onOpen: (() -> Void)?
-
-    init(onOpen: (() -> Void)? = nil) {
-        self.onOpen = onOpen
-    }
 
     private let accentGradient = LinearGradient(
         colors: [Theme.success, Theme.successDark],
@@ -317,9 +309,7 @@ struct MenuContent: View {
         .frame(width: 340)
         // Refresh the VPN status on every open. Not `.onAppear`: a MenuBarExtra(.window) keeps
         // one window and one view for the app's life, so `.onAppear` runs on the first open only.
-        .background(WindowBecameKeyObserver {
-            if let onOpen { onOpen() } else { routeManager.refreshStatus() }
-        })
+        .background(WindowBecameKeyObserver { routeManager.refreshStatus() })
     }
 
     /// Nothing configured yet (`FirstRunSetup.isFresh`), read now.

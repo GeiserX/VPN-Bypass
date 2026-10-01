@@ -172,12 +172,15 @@ final class FirstRunSetupViewTests: XCTestCase {
         cfg.domains = []
         cfg.inverseDomains = []
         rm.config = cfg
+        // The hosted dropdown checks the VPN when its window becomes key: never for real here.
+        rm.refreshStatusOverrideForTests = {}
         SettingsPageRequest.shared.page = nil
     }
 
     override func tearDown() async throws {
         window?.orderOut(nil)
         window = nil
+        rm.refreshStatusOverrideForTests = nil
         rm.config = savedConfig
         rm.isVPNConnected = savedVPNConnected
         rm.isLoading = savedIsLoading
@@ -266,7 +269,7 @@ final class FirstRunSetupViewTests: XCTestCase {
     /// that is switched off, so nothing here can install a route on this machine.
     func testTheDropdownLeavesAndReturnsToTheQuestionWithoutReopening() throws {
         rm.isLoading = false
-        let view = host(MenuContent(onOpen: {})
+        let view = host(MenuContent()
                             .environmentObject(rm)
                             .environmentObject(NotificationManager.shared)
                             .environmentObject(LaunchAtLoginManager.shared),
