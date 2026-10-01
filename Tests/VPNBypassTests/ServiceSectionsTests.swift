@@ -81,6 +81,22 @@ final class ServiceSectionsTests: XCTestCase {
         XCTAssertEqual(ids(sections.custom), ["later"])
     }
 
+    /// Once the page has seen a service added during the visit, it is pinned like the others:
+    /// switching it off keeps it in On. The services pinned when the page opened keep their pin.
+    func testAServiceAddedDuringTheVisitKeepsItsRowWhenFlipped() {
+        var now = catalogue
+        now[0].enabled = false   // telegram off on the page
+        now.append(service("new", on: true, custom: true))
+        let pinned = ServiceSections.pinNew(now, into: ServiceSections.pin(catalogue))
+        XCTAssertEqual(pinned["telegram"], true)
+        XCTAssertEqual(pinned["new"], true)
+
+        now[now.count - 1].enabled = false   // the new service off on the page
+        let sections = ServiceSections(services: now, pinned: pinned, search: "")
+        XCTAssertEqual(ids(sections.on), ["telegram", "whatsapp", "youtube", "slack", "new"])
+        XCTAssertEqual(sections.custom.count, 0)
+    }
+
     func testARemovedServiceLeavesItsSection() {
         let pinned = ServiceSections.pin(catalogue)
         let now = catalogue.filter { $0.id != "youtube" }

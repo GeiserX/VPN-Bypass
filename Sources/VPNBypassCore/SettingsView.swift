@@ -536,7 +536,8 @@ struct DomainRow: View {
 /// The split follows the switches as they were when the page opened (`pinned`), not as they
 /// are now, so a switch flipped on the page leaves its row where it is. The row moves on the
 /// next visit, never from under the pointer. A service added since the page opened, such as a
-/// custom service just created, goes by its own switch.
+/// custom service just created, goes by its own switch, and the page pins it as soon as it sees
+/// it, so flipping its switch does not move it either.
 struct ServiceSections {
     enum Kind: CaseIterable {
         case on, custom, builtIn
@@ -549,6 +550,12 @@ struct ServiceSections {
     /// Each service's switch as it is now, by id: what the page pins when it opens.
     static func pin(_ services: [ServiceEntry]) -> [String: Bool] {
         Dictionary(services.map { ($0.id, $0.enabled) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The pin plus every service it has not seen yet, at its switch as it is now. The services
+    /// already pinned keep their pin.
+    static func pinNew(_ services: [ServiceEntry], into pinned: [String: Bool]) -> [String: Bool] {
+        pinned.merging(pin(services)) { kept, _ in kept }
     }
 
     /// Whether a service shows for the search text: its name or one of its domains contains
@@ -798,6 +805,11 @@ struct ServicesTab: View {
                 }
                 .onAppear {
                     pinned = ServiceSections.pin(routeManager.config.services)
+                }
+                .onChange(of: routeManager.config.services.map(\.id)) { _ in
+                    if let current = pinned {
+                        pinned = ServiceSections.pinNew(routeManager.config.services, into: current)
+                    }
                 }
             }
         }
