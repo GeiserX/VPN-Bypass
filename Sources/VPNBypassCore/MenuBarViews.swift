@@ -208,10 +208,10 @@ struct MenuContent: View {
     @State private var isVerifying = false
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
-    /// The mode a tap wants to switch to, pending confirmation. Mirrors
-    /// RoutingModePicker in SettingsView so both surfaces behave identically —
-    /// switching mode changes how ALL traffic routes (and entering Custom
-    /// migrates your lists), so it's deliberately a two-step action.
+    /// The mode a tap wants to switch to, pending confirmation. Settings now
+    /// switches through RoutingModeSheet (RoutingModeSwitcher.swift); this alert
+    /// is replaced by proposal 12. Switching mode changes how ALL traffic routes
+    /// (and entering Custom migrates your lists), so it's a two-step action.
     @State private var pendingMode: RouteManager.RoutingMode?
 
     private let accentGradient = LinearGradient(
@@ -274,9 +274,8 @@ struct MenuContent: View {
         }
     }
 
-    /// Mirrors RoutingModePicker.confirmationMessage(for:) in SettingsView
-    /// verbatim (that one is private to SettingsView.swift) so both surfaces
-    /// show identical wording for the same transition.
+    /// The dropdown's own wording for the mode alert. Settings words the same
+    /// switch in RoutingModeSwitcher.swift; this alert is replaced by proposal 12.
     private func confirmationMessage(for mode: RouteManager.RoutingMode) -> String {
         switch mode {
         case .bypass:
