@@ -39,7 +39,7 @@ Routes (Custom mode): your egresses: auto-detected Direct + VPN links, plus any 
 
 General: launch at login, auto-apply on connect, `/etc/hosts` management, route verification, notification preferences, import/export, and network status (VPN type, interface, gateway, Wi-Fi SSID).
 
-Logs: recent activity for debugging.
+Logs: the last 200 log entries, newest first, under Route Health. The segmented control above the list shows All, Warnings (warnings and errors) or Errors, and the search field keeps the entries whose text contains what you type, ignoring case and accents, with the match marked. A line above the list says how many entries match, for example "3 of 200 entries". Copy copies only the entries shown. Clear removes every entry, including the ones the filter hides.
 
 Info: version and helper status.
 
