@@ -126,7 +126,7 @@ struct RoutesTab: View {
                 VStack(spacing: 0) {
                     SystemRouteRow(
                         icon: "arrow.up.right",
-                        name: "Direct",
+                        name: String(localized: "Direct"),
                         subtitle: "Your physical connection",
                         color: Theme.textSecondary
                     )
@@ -279,7 +279,7 @@ extension RouteManager {
 struct SystemRouteRow: View {
     let icon: String
     let name: String
-    let subtitle: String
+    let subtitle: LocalizedStringKey
     let color: Color
 
     var body: some View {
@@ -592,7 +592,7 @@ struct RouteEditorSheet: View {
     private var isEditing: Bool { editingRoute != nil }
 
     /// A neutral, type-appropriate name hint (never a specific provider).
-    private var namePlaceholder: String {
+    private var namePlaceholder: LocalizedStringKey {
         switch egress {
         case .proxyHTTP, .proxySOCKS5: return "e.g. Residential Proxy"
         case .tailscaleExit:           return "e.g. Home exit"
@@ -852,7 +852,7 @@ struct RouteEditorSheet: View {
 
     @ViewBuilder
     private func formField<F: View>(
-        label: String,
+        label: LocalizedStringKey,
         required: Bool,
         @ViewBuilder field: () -> F
     ) -> some View {
@@ -874,7 +874,7 @@ struct RouteEditorSheet: View {
     private func attemptSave() {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty else {
-            validationError = "Name is required."
+            validationError = String(localized: "Name is required.")
             return
         }
 
@@ -899,13 +899,13 @@ struct RouteEditorSheet: View {
 
         guard !trimmedHost.isEmpty else {
             validationError = isTailscalePeer
-                ? "Select a Tailscale peer (or enter its 100.x IP)."
-                : "Upstream host is required."
+                ? String(localized: "Select a Tailscale peer (or enter its 100.x IP).")
+                : String(localized: "Upstream host is required.")
             return
         }
         guard let port = Int(proxyPortText.trimmingCharacters(in: .whitespaces)),
               (1 ... 65535).contains(port) else {
-            validationError = "Port must be a number between 1 and 65535."
+            validationError = String(localized: "Port must be a number between 1 and 65535.")
             return
         }
 
