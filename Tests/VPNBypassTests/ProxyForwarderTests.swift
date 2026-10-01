@@ -7,7 +7,61 @@ import Network
 // and prove that (a) the upstream received a correctly-authenticated CONNECT and
 // (b) bytes relay end-to-end through the tunnel. Everything is driven off
 // XCTestExpectations (no sleeps) so it is deterministic.
+//
+// Every listener here (forwarders and mock upstreams) binds a port from
+// nextListenPort(), never port 0. See that function for why.
 final class ProxyForwarderTests: XCTestCase {
+
+    // MARK: - Listener ports
+
+    /// A loopback port for one listener in this suite: below the ephemeral range, never
+    /// handed out twice in a run, and free right now.
+    ///
+    /// Port 0 made these tests flaky. A port 0 listener gets its port from the ephemeral
+    /// range (49152-65535), the same range client sockets take their source ports from.
+    /// Every test leaves a TIME_WAIT on its 127.0.0.1 listener/client port pair for 30 s.
+    /// Once in a while a later test drew the same pair again. In every case caught it was
+    /// reversed: its listener on an earlier client's port, its client on that earlier
+    /// listener's port.
+    /// connect() then fails with EADDRINUSE, NWConnection waits in `.waiting` without
+    /// retrying, and the test runs out its 5 s timeout. A fresh connection does not get
+    /// out of it: on macOS it was handed the same source port again.
+    ///
+    /// Production never mixes the two ranges (route listeners use 18000-18999), and
+    /// neither does this suite now: ports come from 20000-48999, each one once per run,
+    /// and each is bound first without SO_REUSEADDR, which also refuses a port that still
+    /// has a TIME_WAIT on it.
+    static func nextListenPort() -> NWEndpoint.Port {
+        listenPortLock.lock(); defer { listenPortLock.unlock() }
+        for _ in 0..<listenPortSpan {
+            let candidate = listenPortCursor
+            listenPortCursor = listenPortCursor >= listenPortFirst + listenPortSpan - 1 ? listenPortFirst : listenPortCursor + 1
+            if canBindLoopback(port: candidate) { return NWEndpoint.Port(rawValue: candidate)! }
+        }
+        fatalError("no free loopback port in \(listenPortFirst)..<\(listenPortFirst + listenPortSpan)")
+    }
+
+    static let listenPortFirst: UInt16 = 20_000
+    static let listenPortSpan: UInt16 = 29_000          // 20000...48999
+    private static let listenPortLock = NSLock()
+    private static var listenPortCursor: UInt16 = listenPortFirst + UInt16.random(in: 0..<listenPortSpan)
+
+    /// Plain BSD bind on 127.0.0.1:port with no SO_REUSEADDR, closed straight away.
+    private static func canBindLoopback(port: UInt16) -> Bool {
+        let fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        return withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+            }
+        }
+    }
 
     private let mockQueue = DispatchQueue(label: "test.proxy.mock-upstream")
     private let clientQueue = DispatchQueue(label: "test.proxy.client")
@@ -70,17 +124,17 @@ final class ProxyForwarderTests: XCTestCase {
             mockReady.fulfill()
         }
         wait(for: [mockReady], timeout: 5.0)
-        XCTAssertNotEqual(mockPort, 0, "mock upstream should have an OS-assigned port")
+        XCTAssertNotEqual(mockPort, 0, "mock upstream should report its bound port")
 
         // 2. Forwarder chaining through the mock, injecting Basic u:p.
         let forwarder = ProxyForwarder(
-            listenPort: 0,
+            listenPort: Self.nextListenPort().rawValue,
             upstream: .init(host: "127.0.0.1", port: mockPort, username: "u", password: "p", boundInterface: nil)
         )
         try forwarder.start()
         self.forwarder = forwarder
         let listenPort = try XCTUnwrap(forwarder.boundPort)
-        XCTAssertNotEqual(listenPort, 0, "forwarder should expose its OS-assigned port")
+        XCTAssertEqual(listenPort, forwarder.listenPort, "forwarder should report the port it was given")
 
         // 3. Client points at the forwarder and issues a CONNECT.
         let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: listenPort)!, using: .tcp)
@@ -103,6 +157,65 @@ final class ProxyForwarderTests: XCTestCase {
         wait(for: [echoed], timeout: 5.0)
     }
 
+    /// The guard on the cause of the old flakiness: every listener this suite starts
+    /// sits outside the range the OS picks client source ports from, and no port repeats.
+    func testSuiteListenersBindOutsideTheEphemeralRange() throws {
+        var ephemeralFirst: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        XCTAssertEqual(sysctlbyname("net.inet.ip.portrange.first", &ephemeralFirst, &size, nil, 0), 0)
+        XCTAssertGreaterThan(ephemeralFirst, 0)
+
+        var seen = Set<UInt16>()
+        for _ in 0..<3 {
+            let forwarder = ProxyForwarder(
+                listenPort: Self.nextListenPort().rawValue,
+                upstream: .init(host: "127.0.0.1", port: 1, username: "", password: "", boundInterface: nil)
+            )
+            try forwarder.start()
+            defer { forwarder.stop() }
+            let port = try XCTUnwrap(forwarder.boundPort)
+            XCTAssertLessThan(Int32(port), ephemeralFirst, "listener on \(port) shares the client source-port range")
+            XCTAssertFalse(seen.contains(port), "listener port \(port) handed out twice")
+            seen.insert(port)
+        }
+    }
+
+    /// Port 0 still works for callers that ask for it (ProxyListenerManager falls back to
+    /// it): the OS-assigned port is reported through boundPort.
+    func testPortZeroReportsTheAssignedPort() throws {
+        let forwarder = ProxyForwarder(
+            listenPort: 0,
+            upstream: .init(host: "127.0.0.1", port: 1, username: "", password: "", boundInterface: nil)
+        )
+        try forwarder.start()
+        self.forwarder = forwarder
+        XCTAssertNotEqual(try XCTUnwrap(forwarder.boundPort), 0)
+    }
+
+    /// stop() must close the listener even when the caller lets go of the forwarder in the
+    /// same breath, which is what ProxyListenerManager does (`stop(); forwarders[id] = nil`).
+    /// The route's stable port has to be bindable again, or turning a route off and on
+    /// moves it to a random port and every app pointed at the old one loses it.
+    func testStopReleasesThePortWhenTheCallerDropsTheForwarderAtOnce() throws {
+        let port = Self.nextListenPort().rawValue
+        let upstream = ProxyForwarder.Upstream(host: "127.0.0.1", port: 1, username: "", password: "", boundInterface: nil)
+        var first: ProxyForwarder? = ProxyForwarder(listenPort: port, upstream: upstream)
+        try first?.start()
+        first?.stop()
+        first = nil
+
+        // stop() finishes asynchronously on the forwarder's queue, so retry the rebind
+        // for a bounded time. Each failed attempt fails at once with EADDRINUSE.
+        let deadline = Date().addingTimeInterval(5)
+        var second: ProxyForwarder?
+        while second == nil, Date() < deadline {
+            let candidate = ProxyForwarder(listenPort: port, upstream: upstream)
+            if (try? candidate.start()) != nil { second = candidate } else { Thread.sleep(forTimeInterval: 0.02) }
+        }
+        self.forwarder = second
+        XCTAssertEqual(second?.boundPort, port, "port \(port) is still held after stop() and release")
+    }
+
     // MARK: - Mock upstream proxy
 
     /// An NWListener that accepts one connection, asserts it received a CONNECT for
@@ -110,7 +223,7 @@ final class ProxyForwarderTests: XCTestCase {
     /// `200 Connection established`, then echoes any subsequent bytes back.
     private func startMockUpstream(gotConnect: XCTestExpectation, ready: @escaping (UInt16) -> Void) throws {
         let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: Self.nextListenPort())
         let listener = try NWListener(using: parameters)
         self.mockListener = listener
 
@@ -221,10 +334,10 @@ final class ProxyForwarderTests: XCTestCase {
             mockReady.fulfill()
         }
         wait(for: [mockReady], timeout: 5.0)
-        XCTAssertNotEqual(mockPort, 0, "mock SOCKS5 should have an OS-assigned port")
+        XCTAssertNotEqual(mockPort, 0, "mock SOCKS5 should report its bound port")
 
         let forwarder = ProxyForwarder(
-            listenPort: 0,
+            listenPort: Self.nextListenPort().rawValue,
             upstream: .init(host: "127.0.0.1", port: mockPort, username: user, password: pass, boundInterface: nil, isSOCKS5: true)
         )
         try forwarder.start()
@@ -257,7 +370,7 @@ final class ProxyForwarderTests: XCTestCase {
 
         // Upstream (port 1) is never dialed — isValidAuthority rejects first, so this is safe.
         let forwarder = ProxyForwarder(
-            listenPort: 0,
+            listenPort: Self.nextListenPort().rawValue,
             upstream: .init(host: "127.0.0.1", port: 1, username: "", password: "", boundInterface: nil)
         )
         try forwarder.start()
@@ -302,7 +415,7 @@ final class ProxyForwarderTests: XCTestCase {
         XCTAssertNotEqual(portA, portB, "the two mock upstreams must be distinct")
 
         let forwarder = ProxyForwarder(
-            listenPort: 0,
+            listenPort: Self.nextListenPort().rawValue,
             upstream: .init(host: "127.0.0.1", port: portA, username: "u", password: "p", boundInterface: nil)
         )
         try forwarder.start()
@@ -348,7 +461,7 @@ final class ProxyForwarderTests: XCTestCase {
     private func startMockSOCKS5(expectAuth: Bool, expectedUser: String, expectedPass: String,
                                  gotConnect: XCTestExpectation, ready: @escaping (UInt16) -> Void) throws {
         let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: Self.nextListenPort())
         let listener = try NWListener(using: parameters)
         self.mockListener = listener
         listener.stateUpdateHandler = { [weak self] state in
@@ -457,7 +570,7 @@ final class ProxyForwarderTests: XCTestCase {
                                       storeConnection: @escaping (NWConnection) -> Void,
                                       gotConnect: XCTestExpectation, ready: @escaping (UInt16) -> Void) throws {
         let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: Self.nextListenPort())
         let listener = try NWListener(using: parameters)
         storeListener(listener)
         listener.stateUpdateHandler = { state in
@@ -559,7 +672,7 @@ final class ProxyForwarderTests: XCTestCase {
     private func assertLocalAuth(clientAuthLine: String?, expect: String) throws {
         let got = expectation(description: "client received the expected refusal")
         let forwarder = ProxyForwarder(
-            listenPort: 0,
+            listenPort: Self.nextListenPort().rawValue,
             upstream: .init(host: "127.0.0.1", port: 1, username: "up", password: "pw", boundInterface: nil),
             localSecret: Self.testSecret
         )
@@ -604,7 +717,7 @@ final class ProxyForwarderTests: XCTestCase {
         wait(for: [mockReady], timeout: 5.0)
 
         let forwarder = ProxyForwarder(
-            listenPort: 0,
+            listenPort: Self.nextListenPort().rawValue,
             upstream: .init(host: "127.0.0.1", port: mockPort, username: "up", password: "pw", boundInterface: nil),
             localSecret: Self.testSecret
         )
@@ -645,7 +758,7 @@ final class ProxyForwarderTests: XCTestCase {
         wait(for: [mockReady], timeout: 5.0)
 
         let forwarder = ProxyForwarder(
-            listenPort: 0,
+            listenPort: Self.nextListenPort().rawValue,
             upstream: .init(host: "127.0.0.1", port: mockPort, username: "up", password: "pw", boundInterface: nil),
             localSecret: Self.testSecret
         )
@@ -744,7 +857,7 @@ final class ProxyForwarderTests: XCTestCase {
         XCTAssertNotEqual(mockPort, 0)
 
         let forwarder = ProxyForwarder(
-            listenPort: 0,
+            listenPort: Self.nextListenPort().rawValue,
             upstream: .init(host: "127.0.0.1", port: mockPort, username: "", password: "", boundInterface: nil)
         )
         try forwarder.start()
@@ -787,7 +900,7 @@ final class ProxyForwarderTests: XCTestCase {
         XCTAssertNotEqual(mockPort, 0)
 
         let forwarder = ProxyForwarder(
-            listenPort: 0,
+            listenPort: Self.nextListenPort().rawValue,
             upstream: .init(host: "127.0.0.1", port: mockPort, username: "", password: "", boundInterface: nil)
         )
         try forwarder.start()
@@ -812,7 +925,7 @@ final class ProxyForwarderTests: XCTestCase {
     private func assertMalformedConnectAuthorityReturns400(authority: String) throws {
         let got400 = expectation(description: "client received 400 Bad Request for authority '\(authority)'")
         let forwarder = ProxyForwarder(
-            listenPort: 0,
+            listenPort: Self.nextListenPort().rawValue,
             upstream: .init(host: "127.0.0.1", port: 1, username: "", password: "", boundInterface: nil)
         )
         try forwarder.start()
@@ -852,7 +965,7 @@ final class ProxyForwarderTests: XCTestCase {
         XCTAssertNotEqual(mockPort, 0)
 
         let forwarder = ProxyForwarder(
-            listenPort: 0,
+            listenPort: Self.nextListenPort().rawValue,
             upstream: .init(host: "127.0.0.1", port: mockPort, username: "", password: "", boundInterface: nil)
         )
         try forwarder.start()
@@ -877,7 +990,7 @@ final class ProxyForwarderTests: XCTestCase {
     /// forwarder dialed upstream with.
     private func startCapturingHTTPMock(onHead: @escaping (String) -> Void, ready: @escaping (UInt16) -> Void) throws {
         let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: Self.nextListenPort())
         let listener = try NWListener(using: parameters)
         self.mockListener = listener
         listener.stateUpdateHandler = { [weak self] state in
