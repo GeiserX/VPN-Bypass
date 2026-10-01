@@ -124,8 +124,8 @@ final class SettingsUndo: ObservableObject {
     /// How many 100 ms polls an undo waits for a running route operation (10 s). Tests
     /// shorten it.
     var gateWaitPolls = 100
-    /// Moves on with every recorded or dropped change, so an undo that outlasted its wait
-    /// puts its line back only if nothing replaced or dropped it meanwhile.
+    /// Moves on with every recorded or dropped change. An undo waiting for the gate goes
+    /// ahead, or puts its line back, only if nothing replaced or dropped it meanwhile.
     private var generation = 0
 
     /// `last` seeds the line, for a rendered screenshot.
@@ -160,9 +160,10 @@ final class SettingsUndo: ObservableObject {
     /// A delete takes its entry out of the config only once its route cleanup ends, and the
     /// route methods skip their work while another operation holds the gate. So while one
     /// runs this waits for it (at most 10 s, as long as a delete's cleanup can take), then
-    /// puts the change back. If it is still running then, the change stays on its line and
-    /// in Edit > Undo (unless a newer change or a page or mode switch dropped it meanwhile):
-    /// putting it back now would change the config with no route work.
+    /// puts the change back. A newer change or a page or mode switch while it waits cancels
+    /// it: the change is no longer the one on the line. If the operation is still running
+    /// when the wait ends, the change stays on its line and in Edit > Undo: putting it back
+    /// now would change the config with no route work.
     private func perform() {
         guard let change = last else { return }
         last = nil
@@ -177,11 +178,10 @@ final class SettingsUndo: ObservableObject {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 polls += 1
             }
+            guard generation == started else { return }
             guard !routeManager.isApplyingRoutes else {
-                if generation == started {
-                    last = change
-                    register()
-                }
+                last = change
+                register()
                 return
             }
             finish(change)
