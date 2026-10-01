@@ -5,8 +5,8 @@
 Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow head on the top line while routes are enforced. The dropdown shows:
 
 - a pill that reads ON, WAITING (the app waits for a reconnected tunnel to hold before it re-applies routes), HELD BACK (the tunnel dropped right after several applies, so the app is not applying until it has held for 30 minutes), NO ROUTES (nothing installed), NOT ENFORCING (the helper is down) or OFF (no VPN);
-- the VPN it found, one sentence on what your lists route, and three facts: the mode, when routes were last applied and whether any failed, and when DNS was checked and runs next. While the pill reads WAITING or HELD BACK, the header says how long is left instead;
-- the Mode switch, Bypass or VPN Only; in Custom mode a button back to Bypass;
+- the VPN it found, one sentence on what your lists route, and two facts: when routes were last applied and whether any failed, and when DNS was checked and runs next. While the pill reads WAITING or HELD BACK, the header says how long is left instead;
+- the Mode control, with Bypass, VPN Only and Custom in every mode. Picking another mode asks the same question [Settings](#settings) asks, and the selection moves only after you confirm. Entering Custom turns your lists into rules here too;
 - a field to add a domain to the current mode's list;
 - the active services and routes;
 - Refresh Routes, a Verify Routes icon, and a "…" menu with Verify Routes, Re-resolve DNS Now and Remove All Routes…, which asks before it removes anything;

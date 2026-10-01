@@ -310,3 +310,13 @@
 "Only apps set to use %@ (%@) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Only apps set to use %@ (%@) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them.";
 "Only apps set to use %@ go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Only apps set to use %@ go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them.";
 "%@ is off, so this rule does nothing." = "%@ is off, so this rule does nothing.";
+
+/* ===== Menu bar: the Mode control and its question ===== */
+"Switch routing mode?" = "Switch routing mode?";
+"Switch to Bypass" = "Switch to Bypass";
+"Switch to VPN Only" = "Switch to VPN Only";
+"Switch to Custom Routes" = "Switch to Custom Routes";
+"Everything will go through your VPN except the sites you list. Your custom routes stay saved." = "Everything will go through your VPN except the sites you list. Your custom routes stay saved.";
+"Only the sites you list will use your VPN; everything else goes direct." = "Only the sites you list will use your VPN; everything else goes direct.";
+"Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime." = "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime.";
+"Switch to your per-rule custom routing. You can switch back to a simple mode anytime." = "Switch to your per-rule custom routing. You can switch back to a simple mode anytime.";

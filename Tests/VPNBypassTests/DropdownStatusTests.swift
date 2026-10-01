@@ -40,7 +40,6 @@ final class DropdownStatusTests: XCTestCase {
         XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN.")
         XCTAssertNil(s.note)
         XCTAssertEqual(s.facts, [
-            .init(label: "Mode", value: "Bypass: everything else uses the VPN"),
             .init(label: "Routes", value: "62 applied 23 s ago, none failed"),
             .init(label: "DNS", value: "checked 12 min ago, next in 18 min"),
         ])
@@ -48,7 +47,24 @@ final class DropdownStatusTests: XCTestCase {
 
     func testFailedRoutesShowInTheFacts() {
         let s = status { $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-5), routeCount: 60, failedCount: 2) }
-        XCTAssertEqual(s.facts[1].value, "60 applied 5 s ago, 2 failed")
+        XCTAssertEqual(s.facts.first { $0.label == "Routes" }?.value, "60 applied 5 s ago, 2 failed")
+    }
+
+    /// The Mode control sits right under the header with all three modes, so no state repeats
+    /// the mode as a fact.
+    func testNoStateListsTheModeAsAFact() {
+        let states: [(String, (inout DropdownStatus.Input) -> Void)] = [
+            ("on", { _ in }),
+            ("no routes", { $0.installedRoutes = 0 }),
+            ("no VPN", { $0.isVPNConnected = false }),
+            ("helper down", { $0.helperReady = false }),
+        ]
+        for mode in [DropdownCopy.Mode.bypass, .vpnOnly, .custom] {
+            for (name, edit) in states {
+                let s = status { $0.mode = mode; edit(&$0) }
+                XCTAssertFalse(s.facts.contains { $0.label == "Mode" }, "\(name), \(mode)")
+            }
+        }
     }
 
     func testUnknownVPNNameReadsVPN() {

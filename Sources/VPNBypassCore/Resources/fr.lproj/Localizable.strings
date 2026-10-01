@@ -310,3 +310,13 @@
 "Only apps set to use %@ (%@) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Seules les apps configurées pour utiliser %@ (%@) passent par ici. Les autres apps joignent ces hôtes par la route habituelle du Mac, même si une règle plus bas les couvre aussi.";
 "Only apps set to use %@ go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Seules les apps configurées pour utiliser %@ passent par ici. Les autres apps joignent ces hôtes par la route habituelle du Mac, même si une règle plus bas les couvre aussi.";
 "%@ is off, so this rule does nothing." = "La route %@ est désactivée, cette règle n'a donc aucun effet.";
+
+/* ===== Barre des menus : le contrôle de mode et sa question ===== */
+"Switch routing mode?" = "Changer de mode de routage ?";
+"Switch to Bypass" = "Passer en mode Contournement";
+"Switch to VPN Only" = "Passer en mode VPN uniquement";
+"Switch to Custom Routes" = "Passer en mode Personnalisé";
+"Everything will go through your VPN except the sites you list. Your custom routes stay saved." = "Tout passera par votre VPN sauf les sites que vous indiquez. Vos routes personnalisées restent enregistrées.";
+"Only the sites you list will use your VPN; everything else goes direct." = "Seuls les sites que vous indiquez passeront par votre VPN ; tout le reste passe en direct.";
+"Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime." = "Vos domaines et services deviennent des règles modifiables que vous pouvez envoyer par n'importe quelle route (un proxy, un pair Tailscale ou un VPN précis). Vous pouvez revenir en arrière à tout moment.";
+"Switch to your per-rule custom routing. You can switch back to a simple mode anytime." = "Passez à votre routage personnalisé par règles. Vous pouvez revenir à un mode simple à tout moment.";
