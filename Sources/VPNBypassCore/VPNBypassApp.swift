@@ -53,8 +53,8 @@ public struct VPNBypassApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var controlServer: ControlSocketServer?
     private var networkMonitor: NWPathMonitor?
-    private var refreshTimer: Timer?
-    private var watchdogTimer: Timer?
+    private(set) var refreshTimer: Timer?
+    private(set) var watchdogTimer: Timer?
     /// Retained so the SIGTERM/SIGINT sources stay alive for the process lifetime.
     private var terminationSignalSources: [DispatchSourceSignal] = []
     private var lastPathStatus: NWPath.Status?
@@ -299,8 +299,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    private func startPeriodicRefresh() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
+    func startPeriodicRefresh() {
+        refreshTimer = Timer.scheduledInCommonModes(withTimeInterval: 30.0, repeats: true) { _ in
             Task { @MainActor in
                 RouteManager.shared.refreshStatus()
             }
@@ -310,10 +310,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Watchdog (Long-term Stability)
     
     /// Watchdog timer runs every 12 hours to ensure app stays healthy during long uptimes
-    private func startWatchdog() {
+    func startWatchdog() {
         let twelveHours: TimeInterval = 12 * 60 * 60  // 43200 seconds
         
-        watchdogTimer = Timer.scheduledTimer(withTimeInterval: twelveHours, repeats: true) { [weak self] _ in
+        watchdogTimer = Timer.scheduledInCommonModes(withTimeInterval: twelveHours, repeats: true) { [weak self] _ in
             self?.runWatchdog()
         }
     }
