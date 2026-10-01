@@ -12,8 +12,6 @@
 "Clear" = "Clear";
 "Verify Routes" = "Verify Routes";
 "Verifying..." = "Verifying...";
-"Active Services" = "Active Services";
-"No services enabled" = "No services enabled";
 "+%lld more" = "+%lld more";
 "+ %lld more" = "+ %lld more";
 "Active Routes" = "Active Routes";
@@ -356,6 +354,15 @@
 "Only the sites you list will use your VPN; everything else goes direct." = "Only the sites you list will use your VPN; everything else goes direct.";
 "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime." = "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime.";
 "Switch to your per-rule custom routing. You can switch back to a simple mode anytime." = "Switch to your per-rule custom routing. You can switch back to a simple mode anytime.";
+
+/* ===== Menu bar: what is routed, by what the user added ===== */
+"Skipping the VPN" = "Skipping the VPN";
+"Through the VPN" = "Through the VPN";
+"Routed by your rules" = "Routed by your rules";
+"no routes" = "no routes";
+"Left from earlier" = "Left from earlier";
+"Everything else" = "Everything else";
+"direct" = "direct";
 
 /* ===== Settings: undo after a delete or a Turn All On/Off ===== */
 "Undo" = "Undo";
