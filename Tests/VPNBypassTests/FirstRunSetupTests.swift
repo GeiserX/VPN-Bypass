@@ -45,15 +45,6 @@ final class FirstRunSetupTests: XCTestCase {
         XCTAssertFalse(FirstRunSetup.isFresh(mode: .custom, domains: [], services: services, installedRoutes: 0))
     }
 
-    /// A switch flipped in the list keeps the list on screen until the dropdown closes.
-    func testTheQuestionStaysUntilTheDropdownCloses() {
-        XCTAssertTrue(FirstRunSetup.shows(freshWhenOpened: true, mode: .bypass))
-        XCTAssertFalse(FirstRunSetup.shows(freshWhenOpened: false, mode: .bypass))
-        XCTAssertFalse(FirstRunSetup.shows(freshWhenOpened: true, mode: .vpnOnly),
-                       "Use VPN Only instead… ends the question at once")
-        XCTAssertFalse(FirstRunSetup.shows(freshWhenOpened: true, mode: .custom))
-    }
-
     // MARK: What it offers
 
     func testSixCommonServicesInTheMockupsOrder() {
@@ -165,6 +156,7 @@ final class FirstRunSetupViewTests: XCTestCase {
 
     private var savedConfig: RouteManager.Config!
     private var savedVPNConnected = false
+    private var savedIsLoading = true
     private var window: NSWindow?
 
     private var rm: RouteManager { RouteManager.shared }
@@ -172,6 +164,7 @@ final class FirstRunSetupViewTests: XCTestCase {
     override func setUp() async throws {
         savedConfig = rm.config
         savedVPNConnected = rm.isVPNConnected
+        savedIsLoading = rm.isLoading
         rm.isVPNConnected = false
         var cfg = RouteManager.Config()
         cfg.routingMode = .bypass
@@ -187,6 +180,7 @@ final class FirstRunSetupViewTests: XCTestCase {
         window = nil
         rm.config = savedConfig
         rm.isVPNConnected = savedVPNConnected
+        rm.isLoading = savedIsLoading
         SettingsPageRequest.shared.page = nil
     }
 
@@ -240,6 +234,29 @@ final class FirstRunSetupViewTests: XCTestCase {
         settle(view)
         XCTAssertFalse(rm.config.services.first { $0.id == "telegram" }!.enabled)
         XCTAssertEqual(opened, 0)
+    }
+
+    /// The real dropdown follows the config while it stays open. A MenuBarExtra(.window) runs
+    /// `.onAppear` on its first open only and never `.onDisappear`, so anything latched on open
+    /// stays latched for the app's life: here the host runs `.onAppear` once and never closes,
+    /// the same as the menu bar. The change uses a domain that is switched off, which installs
+    /// no route even if the dropdown's own VPN check finds a tunnel on this machine.
+    func testTheDropdownLeavesAndReturnsToTheQuestionWithoutReopening() throws {
+        rm.isLoading = false
+        let view = host(MenuContent()
+                            .environmentObject(rm)
+                            .environmentObject(NotificationManager.shared)
+                            .environmentObject(LaunchAtLoginManager.shared),
+                        size: NSSize(width: 340, height: 760))
+        XCTAssertEqual(switches(in: view).count, 6, "control: a fresh install shows the question")
+
+        rm.config.domains = [DomainEntry(domain: "example.com", enabled: false)]
+        settle(view)
+        XCTAssertEqual(switches(in: view).count, 0, "something on the list: the normal dropdown, at once")
+
+        rm.config.domains = []
+        settle(view)
+        XCTAssertEqual(switches(in: view).count, 6, "the list emptied again: the question comes back")
     }
 
     /// The "All N services…" row opens Settings on the Services page, and the request is used

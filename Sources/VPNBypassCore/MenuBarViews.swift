@@ -208,8 +208,6 @@ struct MenuContent: View {
     @State private var isVerifying = false
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
-    /// `FirstRunSetup.isFresh` when the dropdown opened; nil while it is closed.
-    @State private var freshWhenOpened: Bool?
 
     private let accentGradient = LinearGradient(
         colors: [Theme.success, Theme.successDark],
@@ -268,9 +266,7 @@ struct MenuContent: View {
         .onAppear {
             // Refresh VPN status when menu opens
             routeManager.refreshStatus()
-            freshWhenOpened = isFresh
         }
-        .onDisappear { freshWhenOpened = nil }
     }
 
     /// Nothing configured yet (`FirstRunSetup.isFresh`), read now.
@@ -281,12 +277,12 @@ struct MenuContent: View {
                               installedRoutes: routeManager.uniqueRouteCount)
     }
 
-    /// The first-run question shows once the app has finished its first detection, from the
-    /// open on which nothing was configured until the dropdown closes.
+    /// The first-run question shows once the app has finished its first detection, while
+    /// nothing is configured, read live. A MenuBarExtra(.window) runs `.onAppear` on its first
+    /// open only and never runs `.onDisappear`, so a value latched on open would never reset.
     private var showsFirstRun: Bool {
         guard !(routeManager.isLoading && routeManager.lastUpdate == nil) else { return false }
-        return FirstRunSetup.shows(freshWhenOpened: freshWhenOpened ?? isFresh,
-                                   mode: routeManager.config.routingMode)
+        return isFresh
     }
 
     // MARK: - Title Header
@@ -1520,14 +1516,6 @@ enum FirstRunSetup {
             && domains.isEmpty
             && !services.contains(where: { $0.enabled })
             && installedRoutes == 0
-    }
-
-    /// Whether the dropdown shows the question. `freshWhenOpened` is `isFresh` as it was when
-    /// the dropdown opened: a switch flipped here keeps the list on screen until it closes,
-    /// so the row does not vanish from under the pointer. The next open shows the normal view.
-    /// Leaving Bypass ends it at once, since the question no longer applies.
-    static func shows(freshWhenOpened: Bool, mode: RouteManager.RoutingMode) -> Bool {
-        freshWhenOpened && mode == .bypass
     }
 
     /// The common services found in the catalogue, in the order above.

@@ -53,7 +53,7 @@ Switch on a service there, or type a site into the field and press Return. "All 
 
 - the pill reads ON;
 - the menu bar mark shows its arrow head (it is two plain lines and a bar while nothing is routed);
-- the next time you open the dropdown, the service or domain appears under Active Services or Active Routes.
+- the question gives way to the normal dropdown, and the service or domain appears under Active Services or Active Routes.
 
 If the pill reads NOT ENFORCING, the helper is not running; Settings > General shows its state and a Reinstall button. If macOS says the app is damaged, see [Troubleshooting](troubleshooting.md#app-wont-open-damaged-error-macos-gatekeeper).
 
