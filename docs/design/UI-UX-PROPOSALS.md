@@ -2,9 +2,11 @@
 
 These are proposals. Where they stand:
 
-- **1, 3, 4 and 5** are approved and being built, each in its own PR.
-- **2 and 6** each have four alternatives, A to D. Pick one letter for each.
-- **7 to 16** each have one before and after image. Each needs a yes or a no.
+- **1, 3, 4 and 5** are built and merged (#127, #125, #124, #126).
+- **2D and 6A** are the picked alternatives for 2 and 6.
+- **7 to 16** are all approved.
+
+Everything still to build is being built, each in its own PR.
 
 The list is ranked by what each problem costs the person using the app. A wrong click that changes how the whole Mac routes traffic ranks above a label that reads oddly. Every claim points at the code as of `main` at [`ddd1cb0`](https://github.com/GeiserX/VPN-Bypass/commit/ddd1cb0). The "before" halves of the images are crops of the real screenshots in [`docs/images/screenshots/`](../images/screenshots/), or redrawn from the code where no screenshot shows that view. Each image says which. The "after" halves are HTML mockups in [`proposals/ui/`](proposals/ui/) that reuse the colours and type from [`Theme.swift`](../../Sources/VPNBypassCore/Theme.swift). Re-render them with [`proposals/ui/render.sh`](proposals/ui/render.sh), one file at a time, then run `pngquant --quality 80-95` over the PNG. Several come out of `render.sh` over 400 KB.
 
@@ -30,7 +32,7 @@ Logo and icon work is a separate lane, in [`IDENTITY-PROPOSALS.md`](IDENTITY-PRO
 
 ## 2. The routing mode stops looking like a tab
 
-**Pick one: 2A, 2B, 2C or 2D.** The first draft is kept at [`02-mode-is-not-a-tab.png`](proposals/ui/02-mode-is-not-a-tab.png). Its sheet stays. The four alternatives replace its Change… button.
+**Picked: 2D, the mode as a menu in the window toolbar.** The first draft is kept at [`02-mode-is-not-a-tab.png`](proposals/ui/02-mode-is-not-a-tab.png). Its sheet stays. The four alternatives replace its Change… button.
 
 **What the user sees.** Two rows of green pills at the top of Settings. The top row (Bypass, VPN Only, Custom Routes) and the row under it (Domains, Services, General, Logs, Info) share one style: the same gradient, the same glow, the same size.
 
@@ -118,7 +120,7 @@ A "Mode Bypass" menu button at the right end of the title bar, with the same men
 
 ## 6. A first run that asks one question
 
-**Pick one: 6A, 6B, 6C or 6D.** The first draft is kept at [`06-guided-first-run.png`](proposals/ui/06-guided-first-run.png). Its question stays. The four alternatives replace its tinted blue box.
+**Picked: 6A.** The first draft is kept at [`06-guided-first-run.png`](proposals/ui/06-guided-first-run.png). Its question stays. The four alternatives replace its tinted blue box.
 
 **What the user sees.** After the admin password prompt, an amber NO ROUTES pill and the line "Nothing configured yet, add a domain below or enable a service in Settings to start bypassing."
 
@@ -158,7 +160,7 @@ The dropdown keeps its normal layout. Where Active Services will later sit, two 
 
 ## 7. Group what is routed by what the user added
 
-**Yes or no.**
+**Approved.**
 
 ![Before and after: what is routed, grouped by what the user added](proposals/ui/07-routed-by-what-you-added.png)
 
@@ -176,7 +178,7 @@ The dropdown keeps its normal layout. Where Active Services will later sit, two 
 
 ## 8. Deletes and All/None act at once, with no undo
 
-**Yes or no.**
+**Approved.**
 
 ![Before and after: an undo line after a delete, and All/None in a menu](proposals/ui/08-deletes-can-be-undone.png)
 
@@ -194,7 +196,7 @@ The dropdown keeps its normal layout. Where Active Services will later sit, two 
 
 ## 9. Switches without names, and no keyboard shortcuts
 
-**Yes or no.**
+**Approved.**
 
 ![Before and after: named switches and keyboard shortcuts](proposals/ui/09-named-switches-and-shortcuts.png)
 
@@ -210,7 +212,7 @@ The dropdown keeps its normal layout. Where Active Services will later sit, two 
 
 ## 10. Verify Routes checks 10 addresses and the result reads like all of them
 
-**Yes or no.**
+**Approved.**
 
 ![Before and after: Verify Routes says what it checked](proposals/ui/10-verify-states-its-scope.png)
 
@@ -228,7 +230,7 @@ The dropdown keeps its normal layout. Where Active Services will later sit, two 
 
 ## 11. Enabled services sit scattered in a list of 37
 
-**Yes or no.**
+**Approved.**
 
 ![Before and after: enabled services first on the Services page](proposals/ui/11-on-services-first.png)
 
@@ -246,7 +248,7 @@ The dropdown keeps its normal layout. Where Active Services will later sit, two 
 
 ## 12. The dropdown's mode switch is hand-drawn and hides Custom
 
-**Yes or no.**
+**Approved.**
 
 ![Before and after: the dropdown's mode switch as a segmented control](proposals/ui/12-native-mode-picker.png)
 
@@ -264,7 +266,7 @@ The dropdown keeps its normal layout. Where Active Services will later sit, two 
 
 ## 13. Live status is spread over three pages
 
-**Yes or no.**
+**Approved.**
 
 ![Before and after: a Status page](proposals/ui/13-status-page.png)
 
@@ -282,7 +284,7 @@ The dropdown keeps its normal layout. Where Active Services will later sit, two 
 
 ## 14. The log has no filter
 
-**Yes or no.**
+**Approved.**
 
 ![Before and after: a level filter and search on the log](proposals/ui/14-log-filter.png)
 
@@ -300,7 +302,7 @@ The dropdown keeps its normal layout. Where Active Services will later sit, two 
 
 ## 15. Changes made through `vpnb` or an agent are invisible in the app
 
-**Yes or no.**
+**Approved.**
 
 ![Before and after: changes made through vpnb shown in the log and the dropdown](proposals/ui/15-outside-changes-are-visible.png)
 
@@ -316,7 +318,7 @@ The dropdown keeps its normal layout. Where Active Services will later sit, two 
 
 ## 16. "Route" means three different things
 
-**Yes or no.**
+**Approved.**
 
 ![Before and after: one meaning for route](proposals/ui/16-one-meaning-for-route.png)
 
