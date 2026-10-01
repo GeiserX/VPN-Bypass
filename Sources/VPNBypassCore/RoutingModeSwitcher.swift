@@ -24,21 +24,19 @@ enum RoutingModeCopy {
         /// Custom mode's rules, enabled or not.
         var rules: Int
         /// Entering Custom builds rules from the current lists (`Config.preparedForCustomMode`)
-        /// only when there are no rules yet and the lists hold something to route.
+        /// only when there are no rules yet and the lists hold something to route. The dropdown's
+        /// question reads this too, so both surfaces word the switch to Custom the same way.
         var listsBecomeRules: Bool
     }
 
     static func lists(from config: Config) -> Lists {
-        let hasRoutableLists = !config.domains.isEmpty
-            || config.services.contains { $0.enabled }
-            || config.inverseDomains.contains { $0.enabled }
-        return Lists(
+        Lists(
             current: config.routingMode,
             bypassServices: config.services.filter { $0.enabled }.count,
             bypassDomains: config.domains.filter { $0.enabled }.count,
             vpnOnlyEntries: config.inverseDomains.filter { $0.enabled }.count,
             rules: config.rules.count,
-            listsBecomeRules: config.routingMode != .custom && config.rules.isEmpty && hasRoutableLists
+            listsBecomeRules: config.routingMode != .custom && config.customModeBuildsRulesFromLists
         )
     }
 
