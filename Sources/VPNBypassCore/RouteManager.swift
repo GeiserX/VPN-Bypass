@@ -1856,6 +1856,7 @@ final class RouteManager: ObservableObject {
     }
     
     func refreshStatus() {
+        if let override = refreshStatusOverrideForTests { override(); return }
         Task {
             await checkVPNStatus()
             // After, not before: checkVPNStatus may itself re-route, and this only has to
@@ -5151,6 +5152,9 @@ final class RouteManager: ObservableObject {
     /// so the leak-critical latch-clear timing is unit-testable without the helper,
     /// kernel routes, or /etc/hosts. See RerouteLatchTimingTests.
     var rerouteApplyOverrideForTests: (() async -> Void)?
+    /// Test-only override for refreshStatus() (nil in production). A test hosting the dropdown
+    /// counts its opens through it, and the real VPN check never runs against this machine.
+    var refreshStatusOverrideForTests: (() -> Void)?
 
     /// #61 test-only seams (nil in production). `removeRoutesBatchOverrideForTests` lets the strand
     /// repro observe kernel removals (incl. unstrandRoutes) without a real helper; `routeEpochForTests`
