@@ -213,6 +213,7 @@
 "%lld rules" = "%lld reglas";
 "Last check" = "Última comprobación";
 "Not checked yet" = "Sin comprobar todavía";
+"Checking now…" = "Comprobando ahora…";
 "%lld of %lld checked, all reachable, %@" = "%1$lld de %2$lld comprobadas, todas accesibles, %3$@";
 "%lld of %lld checked, %lld not reachable, %@" = "%1$lld de %2$lld comprobadas, %3$lld sin respuesta, %4$@";
 "Verify" = "Comprobar";

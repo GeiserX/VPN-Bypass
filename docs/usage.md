@@ -52,7 +52,7 @@ Status: whether the app is working right now, on one page. A line at the top giv
 
 - Helper: the privileged helper's state and version. When it is not ready, its box turns red and the row has an Install, Update or Retry button. This is the page the dropdown's Fix… button opens.
 - Connection: the VPN and its interface, the normal connection (Wi-Fi network and gateway), and which interface carries the default route.
-- Addresses: what the last apply routed ("62 addresses, 23 s ago, none failed"), what they come from ("4 services, 2 domains"), and the last Verify Routes ("10 of 62 checked, all reachable, 4 min ago"), with a Verify button.
+- Addresses: what the last apply routed ("62 addresses, 23 s ago, none failed"), what they come from ("4 services, 2 domains"), and the last Verify Routes ("10 of 62 checked, all reachable, 4 min ago"), with a Verify button. While a check runs, whether it started from this button, from the dropdown or after an apply, the row reads "Checking now…" with a spinner beside a greyed-out Verify.
 - DNS: the resolver used outside the VPN, when DNS was last refreshed and when it is next due, with Refresh Now.
 - Tunnels: every tunnel that is up, each with one sentence ("The app acts on this one. It carries the default route.", "Never touched." for Tailscale), the Act on menu that pins one tunnel, and Addresses owned, how many kernel entries carry the app's tag. The tunnels are read when the page opens, when the VPN changes, and on Refresh.
 - Recent warnings: the three newest warnings and errors. Show in Log opens Logs with Warnings selected.

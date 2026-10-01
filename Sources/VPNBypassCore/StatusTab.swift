@@ -207,10 +207,32 @@ enum StatusPage {
         }
     }
 
+    /// The Last check row as the page draws it: the line, the spinner and the Verify button.
+    struct LastCheck: Equatable {
+        let line: Line
+        /// A check is pinging now. Drawn as a spinner beside a greyed-out Verify.
+        let isChecking: Bool
+        let canVerify: Bool
+    }
+
+    /// The Last check row from the manager's own state. `isCheckingRoutes` is set by every
+    /// check, so the spinner also shows one started by an apply or from the dropdown.
+    @MainActor
+    static func lastCheck(_ routeManager: RouteManager, now: Date, bundle: Bundle = .main) -> LastCheck {
+        let isChecking = routeManager.isCheckingRoutes
+        return LastCheck(line: lastCheckLine(Array(routeManager.routeVerificationResults.values),
+                                             installed: routeManager.routedAddressCount,
+                                             isChecking: isChecking, now: now, bundle: bundle),
+                         isChecking: isChecking,
+                         canVerify: !isChecking && !routeManager.activeRoutes.isEmpty)
+    }
+
     /// The Last check row, from Verify Routes' results. Verify pings a sample, so the line
-    /// says how many of the installed routes it checked.
-    static func lastCheckLine(_ results: [RouteVerificationResult], installed: Int, now: Date,
-                              bundle: Bundle = .main) -> Line {
+    /// says how many of the installed routes it checked. A check clears the last results when
+    /// it starts, so while one runs the line says so instead of "Not checked yet".
+    static func lastCheckLine(_ results: [RouteVerificationResult], installed: Int, isChecking: Bool = false,
+                              now: Date, bundle: Bundle = .main) -> Line {
+        if isChecking { return Line(text: String(localized: "Checking now…", bundle: bundle)) }
         guard let at = results.map(\.timestamp).max() else {
             return Line(text: String(localized: "Not checked yet", bundle: bundle))
         }
@@ -322,7 +344,6 @@ struct StatusTab: View {
 
     @State private var snapshot: RouteManager.CoexistenceSnapshot?
     @State private var isReadingTunnels = false
-    @State private var isVerifying = false
 
     init(onShowWarnings: @escaping () -> Void = {}, snapshot: RouteManager.CoexistenceSnapshot? = nil) {
         self.onShowWarnings = onShowWarnings
@@ -441,11 +462,17 @@ struct StatusTab: View {
             StatusDivider()
             StatusLineRow(label: String(localized: "From"), line: StatusPage.fromLine(input))
             StatusDivider()
-            StatusLineRow(label: String(localized: "Last check"),
-                          line: StatusPage.lastCheckLine(Array(routeManager.routeVerificationResults.values),
-                                                         installed: routeManager.routedAddressCount, now: now)) {
-                Button(String(localized: "Verify")) { verify() }
-                    .disabled(isVerifying || routeManager.activeRoutes.isEmpty)
+            let check = StatusPage.lastCheck(routeManager, now: now)
+            StatusLineRow(label: String(localized: "Last check"), line: check.line) {
+                HStack(spacing: 6) {
+                    if check.isChecking {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .frame(width: 16, height: 16)
+                    }
+                    Button(String(localized: "Verify")) { verify() }
+                        .disabled(!check.canVerify)
+                }
             }
         }
     }
@@ -587,13 +614,11 @@ struct StatusTab: View {
         isReadingTunnels = false
     }
 
+    /// The spinner and the greyed-out button follow `isCheckingRoutes`, the flag every check
+    /// sets, so this page never starts a second check over one an apply or the dropdown began.
     private func verify() {
-        guard !isVerifying else { return }
-        isVerifying = true
-        Task {
-            await routeManager.verifyRoutes()
-            isVerifying = false
-        }
+        guard !routeManager.isCheckingRoutes else { return }
+        Task { await routeManager.verifyRoutes() }
     }
 
     private func installHelper() {

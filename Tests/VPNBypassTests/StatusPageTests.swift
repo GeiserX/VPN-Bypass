@@ -210,6 +210,9 @@ final class StatusPageTests: XCTestCase {
         // Routes removed since the check: never "3 of 0".
         let three = (0..<3).map { result("1.1.1.\($0)", ok: true, ago: 10) }
         XCTAssertEqual(StatusPage.lastCheckLine(three, installed: 0, now: now).text, "3 of 3 checked, all reachable, 10 s ago")
+        // A check clears the last results when it starts: while it runs, never "Not checked yet".
+        XCTAssertEqual(StatusPage.lastCheckLine([], installed: 62, isChecking: true, now: now), .init(text: "Checking now…"))
+        XCTAssertEqual(StatusPage.lastCheckLine(all, installed: 62, isChecking: true, now: now), .init(text: "Checking now…"))
     }
 
     // MARK: DNS
@@ -378,6 +381,7 @@ final class StatusPageTests: XCTestCase {
             StatusPage.lastCheckLine([], installed: 62, now: now, bundle: bundle).text,
             StatusPage.lastCheckLine([result("1.1.1.1", ok: true, ago: 5)], installed: 62, now: now, bundle: bundle).text,
             StatusPage.lastCheckLine([result("1.1.1.1", ok: false, ago: 5)], installed: 62, now: now, bundle: bundle).text,
+            StatusPage.lastCheckLine([], installed: 62, isChecking: true, now: now, bundle: bundle).text,
             StatusPage.resolverLine(nil, bundle: bundle).text,
             StatusPage.resolverLine("1.1.1.1", bundle: bundle).text,
             StatusPage.refreshedLine(last: nil, next: nil, automatic: true, now: now, bundle: bundle).text,
