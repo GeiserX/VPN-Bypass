@@ -330,6 +330,31 @@ final class SetRoutingModeTests: RouteManagerTestCase {
         rm.setRoutingMode(.bypass)
         XCTAssertEqual(rm.recentLogs.count, logsBefore)
     }
+
+    /// A switch made while another route operation holds the gate (a DNS refresh that came due
+    /// while the mode alert was open, say) waits for it, then rebuilds the routes for the new
+    /// mode. It used to save the mode and apply nothing.
+    func testASwitchWhileTheGateIsHeldRunsWhenItFrees() async {
+        rm.config.routingMode = .vpnOnly
+        rm.isVPNConnected = true
+        defer { rm.isVPNConnected = false }
+        XCTAssertTrue(rm.tryAcquireRouteOperationForTests())
+        let epoch = rm.routeEpoch
+
+        rm.setRoutingMode(.bypass)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(rm.routeEpoch, epoch, "nothing may run while the gate is held")
+
+        rm.releaseRouteOperationForTests()
+        XCTAssertTrue(rm.isApplyingRoutes, "the waiting switch takes the gate as soon as it frees")
+        var polls = 0
+        while rm.isApplyingRoutes && polls < 100 {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            polls += 1
+        }
+        XCTAssertFalse(rm.isApplyingRoutes, "the switch never finished")
+        XCTAssertGreaterThan(rm.routeEpoch, epoch, "the switch must rebuild the routes once the gate frees")
+    }
 }
 
 @MainActor
