@@ -45,15 +45,15 @@ Open `Package.swift` in Xcode and run the project.
 2. macOS asks for an administrator password once. That installs the root helper that edits the routing table. On macOS 13 and later it may also ask you to allow VPN Bypass under System Settings > General > Login Items; the app says so in its dropdown when that is the case.
 3. Connect your VPN. The dropdown reads VPN Connected and names the client it found.
 
-A fresh install routes nothing: the pill in the dropdown reads NO ROUTES and a line says nothing is configured yet.
+A fresh install routes nothing. The pill in the dropdown reads NOT SET UP, and the dropdown asks "What should skip the VPN?" with six common services, each with a switch, a row for all the services, and a field to add a site.
 
-![The dropdown right after install: VPN Connected, the pill reads NO ROUTES, and a hint says nothing is configured yet](images/screenshots/first-run.png){ width="340" }
+![The dropdown right after install: WireGuard connected, the pill reads NOT SET UP, and the question What should skip the VPN? over six services with switches and a field to add a site](images/screenshots/first-run.png){ width="340" }
 
-Turn on a service in Settings > Services, or type a domain into the dropdown's Add Domain field. It worked when:
+Switch on a service there, or type a site into the field and press Return. "All 37 services…" opens Settings on the Services page. If you want the opposite, only a few sites on the VPN, click "Use VPN Only instead…". It worked when:
 
 - the pill reads ON;
 - the menu bar mark shows its arrow head (it is two plain lines and a bar while nothing is routed);
-- the service or domain appears in the dropdown under Active Services or Active Routes.
+- the question gives way to the normal dropdown, and the service or domain appears under Active Services or Active Routes.
 
 If the pill reads NOT ENFORCING, the helper is not running; Settings > General shows its state and a Reinstall button. If macOS says the app is damaged, see [Troubleshooting](troubleshooting.md#app-wont-open-damaged-error-macos-gatekeeper).
 
