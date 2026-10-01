@@ -529,32 +529,95 @@ struct DomainRow: View {
 
 // MARK: - Services Tab
 
+/// How the Services page splits the list: an On section with the services that were on when
+/// the page opened, then the custom and the built-in services that were not, each in the
+/// catalogue's order. Kept pure so the split, its wording and its edge cases are unit-tested.
+///
+/// The split follows the switches as they were when the page opened (`pinned`), not as they
+/// are now, so a switch flipped on the page leaves its row where it is. The row moves on the
+/// next visit, never from under the pointer. A service added since the page opened, such as a
+/// custom service just created, goes by its own switch, and the page pins it as soon as it sees
+/// it, so flipping its switch does not move it either.
+struct ServiceSections {
+    enum Kind: CaseIterable {
+        case on, custom, builtIn
+    }
+
+    var on: [ServiceEntry]
+    var custom: [ServiceEntry]
+    var builtIn: [ServiceEntry]
+
+    /// Each service's switch as it is now, by id: what the page pins when it opens.
+    static func pin(_ services: [ServiceEntry]) -> [String: Bool] {
+        Dictionary(services.map { ($0.id, $0.enabled) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The pin plus every service it has not seen yet, at its switch as it is now. The services
+    /// already pinned keep their pin.
+    static func pinNew(_ services: [ServiceEntry], into pinned: [String: Bool]) -> [String: Bool] {
+        pinned.merging(pin(services)) { kept, _ in kept }
+    }
+
+    /// Whether a service shows for the search text: its name or one of its domains contains
+    /// the text, ignoring case. Empty text shows everything.
+    static func matches(_ service: ServiceEntry, search: String) -> Bool {
+        search.isEmpty
+            || service.name.localizedCaseInsensitiveContains(search)
+            || service.domains.contains { $0.localizedCaseInsensitiveContains(search) }
+    }
+
+    init(services: [ServiceEntry], pinned: [String: Bool], search: String) {
+        let shown = services.filter { Self.matches($0, search: search) }
+        let isOn = { (service: ServiceEntry) in pinned[service.id] ?? service.enabled }
+        on = shown.filter { isOn($0) }
+        custom = shown.filter { !isOn($0) && $0.isCustom }
+        builtIn = shown.filter { !isOn($0) && !$0.isCustom }
+    }
+
+    /// The sections that have rows, top to bottom.
+    var nonEmpty: [(kind: Kind, services: [ServiceEntry])] {
+        Kind.allCases.compactMap { kind in
+            let rows = self[kind]
+            return rows.isEmpty ? nil : (kind, rows)
+        }
+    }
+
+    subscript(kind: Kind) -> [ServiceEntry] {
+        switch kind {
+        case .on: return on
+        case .custom: return custom
+        case .builtIn: return builtIn
+        }
+    }
+
+    /// A section's header. The On header has its own key: the dropdown's "ON" pill says the
+    /// app is enforcing, and Spanish and French word the two differently.
+    static func title(_ kind: Kind, in bundle: Bundle = .main) -> String {
+        switch kind {
+        case .on: return String(localized: "services.section.on", defaultValue: "ON", bundle: bundle)
+        case .custom: return String(localized: "CUSTOM SERVICES", bundle: bundle)
+        case .builtIn: return String(localized: "BUILT-IN SERVICES", bundle: bundle)
+        }
+    }
+}
+
 struct ServicesTab: View {
     @EnvironmentObject var routeManager: RouteManager
     @State private var searchText = ""
     @State private var showingCustomServiceEditor = false
     @State private var editingService: RouteManager.ServiceEntry?
+    /// Each service's switch when the page opened; nil until it appears.
+    @State private var pinned: [String: Bool]?
 
     private var isVPNOnly: Bool {
         routeManager.config.routingMode == .vpnOnly
     }
 
-    private var filteredServices: [RouteManager.ServiceEntry] {
-        if searchText.isEmpty {
-            return routeManager.config.services
-        }
-        return routeManager.config.services.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText) ||
-            $0.domains.contains { $0.localizedCaseInsensitiveContains(searchText) }
-        }
-    }
-
-    private var customServices: [RouteManager.ServiceEntry] {
-        filteredServices.filter { $0.isCustom }
-    }
-
-    private var builtInServices: [RouteManager.ServiceEntry] {
-        filteredServices.filter { !$0.isCustom }
+    private var sections: ServiceSections {
+        let services = routeManager.config.services
+        return ServiceSections(services: services,
+                               pinned: pinned ?? ServiceSections.pin(services),
+                               search: searchText)
     }
 
     private var enabledCount: Int {
@@ -669,6 +732,8 @@ struct ServicesTab: View {
                         // Select All button
                         Button {
                             routeManager.setAllServicesEnabled(true)
+                            // The pointer is on the button, not on a row: show the new split now.
+                            pinned = ServiceSections.pin(routeManager.config.services)
                         } label: {
                             Text("All")
                                 .font(.system(size: 11, weight: .medium))
@@ -683,6 +748,7 @@ struct ServicesTab: View {
                         // Select None button
                         Button {
                             routeManager.setAllServicesEnabled(false)
+                            pinned = ServiceSections.pin(routeManager.config.services)
                         } label: {
                             Text("None")
                                 .font(.system(size: 11, weight: .medium))
@@ -696,55 +762,53 @@ struct ServicesTab: View {
                     }
                 }
 
-                // Services list
+                // Services list: the services that were on when the page opened, then the rest
                 ScrollView {
-                    VStack(spacing: 8) {
-                        // Custom Services section
-                        if !customServices.isEmpty {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("CUSTOM SERVICES")
-                                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                                    .foregroundColor(Theme.textSecondary)
-                                    .padding(.horizontal, 12)
-                                    .padding(.top, 8)
+                    if !sections.nonEmpty.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(sections.nonEmpty.enumerated()), id: \.element.kind) { index, section in
+                                if index > 0 {
+                                    Rectangle()
+                                        .fill(Theme.divider.opacity(0.6))
+                                        .frame(height: 1)
+                                        .padding(.horizontal, 12)
+                                        .padding(.top, 4)
+                                }
+
+                                HStack(spacing: 8) {
+                                    Text(ServiceSections.title(section.kind))
+                                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                                        .foregroundColor(Theme.textSecondary)
+                                    Text(verbatim: String(section.services.count))
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundColor(Theme.textTertiary)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.top, 8)
 
                                 LazyVStack(spacing: 2) {
-                                    ForEach(customServices) { service in
-                                        ServiceRow(service: service, onEdit: {
+                                    ForEach(section.services) { service in
+                                        ServiceRow(service: service, onEdit: service.isCustom ? {
                                             editingService = service
                                             showingCustomServiceEditor = true
-                                        })
+                                        } : nil)
                                     }
                                 }
                             }
-                            .padding(.bottom, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Theme.bgElevated)
-                            )
                         }
-
-                        // Built-in Services section
-                        if !builtInServices.isEmpty {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("BUILT-IN SERVICES")
-                                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                                    .foregroundColor(Theme.textSecondary)
-                                    .padding(.horizontal, 12)
-                                    .padding(.top, 8)
-
-                                LazyVStack(spacing: 2) {
-                                    ForEach(builtInServices) { service in
-                                        ServiceRow(service: service, onEdit: nil)
-                                    }
-                                }
-                            }
-                            .padding(.bottom, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Theme.bgElevated)
-                            )
-                        }
+                        .padding(.bottom, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Theme.bgElevated)
+                        )
+                    }
+                }
+                .onAppear {
+                    pinned = ServiceSections.pin(routeManager.config.services)
+                }
+                .onChange(of: routeManager.config.services.map(\.id)) { _ in
+                    if let current = pinned {
+                        pinned = ServiceSections.pinNew(routeManager.config.services, into: current)
                     }
                 }
             }
