@@ -29,6 +29,8 @@ final class DocScreenshotsTests: XCTestCase {
     private var windows: [NSWindow] = []
     /// A loopback listener started for the proxy route, stopped after the render.
     private var startedListener = false
+    /// The app's appearance before the renders forced dark, put back in `tearDown`.
+    private var savedAppearance: NSAppearance?
     private var saved: (config: RouteManager.Config, connected: Bool, iface: String?, type: VPNType?,
                         gateway: String?, routes: [RouteManager.ActiveRoute], update: Date?,
                         loading: Bool, change: RouteManager.RouteChangeOutcome?, dns: Date?, helper: HelperState)!
@@ -45,9 +47,10 @@ final class DocScreenshotsTests: XCTestCase {
         }
         outputDir = URL(fileURLWithPath: dir, isDirectory: true)
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
-        Self.installBrandMark()
+        Self.serveBrandMark(true)
         XCTAssertNotNil(Bundle.main.image(forResource: "menubar-icon-active"), "the title bar's mark loads")
         Self.drawAsFrontmost(true)
+        savedAppearance = NSApplication.shared.appearance
         NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
 
         saved = (rm.config, rm.isVPNConnected, rm.vpnInterface, rm.vpnType, rm.localGateway,
@@ -60,6 +63,11 @@ final class DocScreenshotsTests: XCTestCase {
     override func tearDown() async throws {
         guard saved != nil else { return }
         Self.drawAsFrontmost(false)
+        Self.serveBrandMark(false)
+        XCTAssertNil(Bundle.main.image(forResource: "menubar-icon-active"),
+                     "the test runner's own bundle answers again once the renders are done")
+        NSApplication.shared.appearance = savedAppearance
+        XCTAssertNil(NSApplication.shared.appearance, "the app follows the system appearance again")
         if startedListener { ProxyListenerManager.shared.stopAll() }
         startedListener = false
         windows.forEach { $0.orderOut(nil) }
@@ -338,12 +346,13 @@ final class DocScreenshotsTests: XCTestCase {
     // MARK: - Brand mark
 
     /// The title bar and wordmark load the mark from `Bundle.main`, which under XCTest is the
-    /// test runner. Serve it from `assets/`, where the app bundle copies it from.
+    /// test runner. Serve it from `assets/`, where the app bundle copies it from, while on;
+    /// off swaps the two methods back.
     private static var brandMarkInstalled = false
 
-    private static func installBrandMark() {
-        guard !brandMarkInstalled else { return }
-        brandMarkInstalled = true
+    private static func serveBrandMark(_ on: Bool) {
+        guard on != brandMarkInstalled else { return }
+        brandMarkInstalled = on
         let original = class_getInstanceMethod(Bundle.self, #selector(Bundle.image(forResource:)))!
         let replacement = class_getInstanceMethod(Bundle.self, #selector(Bundle.docScreenshotImage(forResource:)))!
         method_exchangeImplementations(original, replacement)
