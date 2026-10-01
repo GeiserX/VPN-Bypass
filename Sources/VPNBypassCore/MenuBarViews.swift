@@ -424,7 +424,7 @@ struct MenuContent: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Button {
-                    routeManager.refreshRoutes()
+                    refresh()
                 } label: {
                     HStack(spacing: 6) {
                         if isBusy {
@@ -476,7 +476,7 @@ struct MenuContent: View {
                 // The shortcuts here only answer while the menu is open; the buttons that do
                 // the same thing (Refresh Routes, the gear, the power button) carry them too.
                 Menu {
-                    Button(DropdownShortcut.refreshRoutes.title) { routeManager.refreshRoutes() }
+                    Button(DropdownShortcut.refreshRoutes.title) { refresh() }
                         .keyboardShortcut(.refreshRoutes)
                         .disabled(isBusy)
                     Button(String(localized: "Verify Routes")) { verify() }
@@ -548,6 +548,14 @@ struct MenuContent: View {
 
     private func quit() {
         NSApplication.shared.terminate(nil)
+    }
+
+    /// Refresh Routes, from its button, its menu item or ⌘R. A held ⌘R sends key repeats and
+    /// SwiftUI runs the action for each one; the button turns active again between refreshes,
+    /// so without this a held key would start one refresh after another.
+    private func refresh() {
+        guard !DropdownShortcut.isKeyRepeat(NSApp.currentEvent) else { return }
+        routeManager.refreshRoutes()
     }
 
     private func verify() {

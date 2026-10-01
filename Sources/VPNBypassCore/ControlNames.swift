@@ -2,6 +2,7 @@
 // The names VoiceOver reads for icon-only buttons, and the dropdown's keyboard shortcuts
 // (proposal 9 of #119). Pure, so the wording and the keys are unit-tested.
 
+import AppKit
 import SwiftUI
 
 /// The spoken name of an icon-only button that acts on one row: "Delete en.wikipedia.org".
@@ -59,6 +60,13 @@ enum DropdownShortcut: CaseIterable {
 
     /// The tooltip of the button that carries the shortcut: "Settings (⌘,)".
     func help(_ name: String) -> String { ControlNames.help(name, shortcut: symbol) }
+
+    /// Whether the event is a held key's repeat. Only key events have `isARepeat`; reading it
+    /// on a mouse click raises, so a click is never a repeat.
+    static func isKeyRepeat(_ event: NSEvent?) -> Bool {
+        guard let event, event.type == .keyDown else { return false }
+        return event.isARepeat
+    }
 }
 
 extension View {

@@ -105,6 +105,44 @@ final class NamedControlsTests: XCTestCase {
         }
     }
 
+    /// Presses the key the way the app receives it: through the event queue, so
+    /// `NSApp.currentEvent` is the key press while the button's action runs.
+    private func pressThroughQueue(_ key: String, isARepeat: Bool, in window: NSWindow) throws {
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+                                     windowNumber: window.windowNumber, context: nil, characters: key,
+                                     charactersIgnoringModifiers: key, isARepeat: isARepeat, keyCode: 0)!
+        NSApp.postEvent(event, atStart: true)
+        let dequeued = try XCTUnwrap(NSApp.nextEvent(matching: .keyDown, until: Date(), inMode: .default, dequeue: true))
+        XCTAssertEqual(dequeued.isARepeat, isARepeat)
+        _ = window.performKeyEquivalent(with: dequeued)
+        settle()
+    }
+
+    /// SwiftUI runs a button's action for every repeat of a held key, and Refresh Routes turns
+    /// active again between refreshes, so a held ⌘R started one refresh after another.
+    func testAHeldCommandRStartsOneRefresh() throws {
+        for guarded in [false, true] {
+            var presses = 0
+            let window = host(Button("Refresh Routes") {
+                if guarded && DropdownShortcut.isKeyRepeat(NSApp.currentEvent) { return }
+                presses += 1
+            }.keyboardShortcut(.refreshRoutes))
+            try pressThroughQueue("r", isARepeat: false, in: window)
+            for _ in 0..<5 { try pressThroughQueue("r", isARepeat: true, in: window) }
+            XCTAssertEqual(presses, guarded ? 1 : 6, guarded ? "a held ⌘R refreshed more than once"
+                                                             : "control: SwiftUI hands the action every repeat")
+            window.orderOut(nil)
+        }
+    }
+
+    /// `isARepeat` raises on anything but a key event, and the same action runs on a click.
+    func testAClickIsNotAKeyRepeat() throws {
+        let click = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: .zero, modifierFlags: [], timestamp: 0,
+                                                     windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 0))
+        XCTAssertFalse(DropdownShortcut.isKeyRepeat(click))
+        XCTAssertFalse(DropdownShortcut.isKeyRepeat(nil))
+    }
+
     func testCommandFPutsTheCursorInTheServicesSearch() {
         let rm = RouteManager.shared
         let saved = rm.config
@@ -171,6 +209,15 @@ final class NamedControlsTests: XCTestCase {
         let menu = try XCTUnwrap(try sources().first { $0.name == "MenuBarViews.swift" }?.text)
         XCTAssertEqual(menu.components(separatedBy: ".keyboardShortcut(.refreshRoutes)").count - 1, 2,
                        "Refresh Routes and its menu item")
+        // Both Refresh Routes controls go through refresh(), which drops a held key's repeats.
+        XCTAssertEqual(menu.components(separatedBy: "routeManager.refreshRoutes()").count - 1, 1,
+                       "Refresh Routes runs from one place")
+        XCTAssertTrue(menu.contains("""
+                guard !DropdownShortcut.isKeyRepeat(NSApp.currentEvent) else { return }
+                routeManager.refreshRoutes()
+        """), "refresh() drops a held ⌘R's repeats")
+        XCTAssertEqual(menu.components(separatedBy: "refresh()\n").count - 1 + menu.components(separatedBy: "{ refresh() }").count - 1, 2,
+                       "the button and the menu item both call refresh()")
         for shortcut in ["settings", "quit"] {
             XCTAssertTrue(menu.contains("shortcut: .\(shortcut))"), "the footer button for \(shortcut)")
             XCTAssertTrue(menu.contains(".keyboardShortcut(.\(shortcut))"), "the menu item for \(shortcut)")
