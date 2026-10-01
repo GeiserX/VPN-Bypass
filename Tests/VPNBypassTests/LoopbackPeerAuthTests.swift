@@ -95,7 +95,9 @@ final class LoopbackPeerAuthTests: XCTestCase {
 
     private func acceptOneLoopbackConnection() throws -> (uid: uid_t?, clientPort: UInt16, listenerPort: UInt16) {
         let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+        // Not port 0: a listener in the ephemeral range can collide with an earlier test's
+        // TIME_WAIT and leave the client stuck on EADDRINUSE. See ProxyForwarderTests.nextListenPort.
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: ProxyForwarderTests.nextListenPort())
         let listener = try NWListener(using: parameters)
         let queue = DispatchQueue(label: "test.loopback.peer.accept")
         let listening = expectation(description: "listener ready")
@@ -116,6 +118,11 @@ final class LoopbackPeerAuthTests: XCTestCase {
         listener.start(queue: queue)
         wait(for: [listening], timeout: 5.0)
         let listenerPort = try XCTUnwrap(listener.port?.rawValue)
+        var ephemeralFirst: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        XCTAssertEqual(sysctlbyname("net.inet.ip.portrange.first", &ephemeralFirst, &size, nil, 0), 0)
+        XCTAssertLessThan(Int32(listenerPort), ephemeralFirst,
+                          "listener on \(listenerPort) shares the client source-port range")
 
         let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: listenerPort)!, using: .tcp)
         client.start(queue: queue)
