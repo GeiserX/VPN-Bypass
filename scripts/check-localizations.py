@@ -106,6 +106,8 @@ def main() -> int:
         with tempfile.TemporaryDirectory(prefix="vpnb-loc-") as tmp:
             keys = source_keys(build(Path(tmp)))
 
+    if not keys:
+        sys.exit("error: the compiler wrote no keys under Sources/; the source-path filter matched nothing")
     tables = sorted({table for table, _ in keys})
     catalogs = {(lang, table): catalog(lang, table) for lang in LANGUAGES for table in tables}
     missing = 0

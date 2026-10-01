@@ -406,7 +406,7 @@ final class HelperManager: ObservableObject {
 
         guard let bundlePath = Bundle.main.bundlePath as String?,
               bundlePath.hasSuffix(".app") else {
-            installationError = "Not running from app bundle"
+            installationError = String(localized: "Not running from app bundle")
             return false
         }
 
@@ -416,13 +416,13 @@ final class HelperManager: ObservableObject {
         let plistDest = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
 
         guard FileManager.default.fileExists(atPath: helperSource) else {
-            installationError = "Helper binary not found in app bundle"
+            installationError = String(localized: "Helper binary not found in app bundle")
             RouteManager.shared.log(.error, "❌ Helper not found at: \(helperSource)")
             return false
         }
 
         guard FileManager.default.fileExists(atPath: plistSource) else {
-            installationError = "Helper plist not found in app bundle"
+            installationError = String(localized: "Helper plist not found in app bundle")
             RouteManager.shared.log(.error, "❌ Plist not found at: \(plistSource)")
             return false
         }
@@ -499,7 +499,7 @@ final class HelperManager: ObservableObject {
             return true
         }
 
-        installationError = "Failed to create AppleScript"
+        installationError = String(localized: "Failed to create AppleScript")
         return false
     }
 

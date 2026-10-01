@@ -62,6 +62,24 @@ final class LocalizationCoverageTests: XCTestCase {
         }
     }
 
+    /// Settings > Status shows the helper install error, and the route and rule editors show their
+    /// validation error, through a String; String(localized:) is what makes them keys.
+    func testTheHelperInstallAndEditorErrorsAreTranslated() throws {
+        let keys = ["Not running from app bundle", "Helper binary not found in app bundle",
+                    "Helper plist not found in app bundle", "Failed to create AppleScript",
+                    "Name is required.", "Select a Tailscale peer (or enter its 100.x IP).", "Upstream host is required.",
+                    "Port must be a number between 1 and 65535.", "Select a service.", "Pattern is required.",
+                    "Enter a valid IPv4 address (e.g. 10.0.0.5).", "Enter a valid IPv4 CIDR range (e.g. 10.0.0.0/8).",
+                    "Select a route."]
+        for language in ["es", "fr"] {
+            let bundle = try lproj(language)
+            for key in keys {
+                XCTAssertNotEqual(text(key, bundle), key, "\(language) leaves \"\(key)\" in English")
+            }
+        }
+        XCTAssertEqual(text("Direct", try lproj("es")), "Directo")
+    }
+
     /// The Remove All Routes question is built from parts; the translation must put each part in its place.
     func testTheRemoveAllQuestionKeepsItsPartsInOrder() throws {
         let es = try lproj("es"), fr = try lproj("fr")
