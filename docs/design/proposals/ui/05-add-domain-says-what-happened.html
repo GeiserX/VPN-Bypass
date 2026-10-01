@@ -1,0 +1,48 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  .add { display:flex; gap:8px; align-items:center; }
+  .add .nfield { flex:1; padding:7px 10px; font-size:12px; background: #1F1F1F; border-radius:6px; }
+  .add .go { font-size:12px; font-weight:500; padding:6px 10px; border-radius:6px; background: linear-gradient(90deg, var(--success), var(--successDark)); }
+  .msg { margin-top:7px; font-size:11px; line-height:1.4; }
+  .msg.err { color: #F87171; }
+  .msg.ok { color: var(--success); }
+  .msg .s { color: var(--text2); }
+  .state + .state { margin-top: 14px; }
+</style></head>
+<body>
+<div class="head"><span class="num">5</span><span class="title">Adding a domain says what happened</span></div>
+<p class="caption">The add field in the dropdown and on the Domains tab always empties after Return. A duplicate, an empty result after cleaning, or a DNS failure only writes a log line. Worse, typing 10.0.0.0/24 on the Bypass list silently becomes the single host 10.0.0.0, because the cleaner cuts everything after the slash as if it were a URL path. The proposal keeps the text when the add fails, says why in one line under the field, and names what was actually saved when the input was rewritten.</p>
+<div class="cols">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="shot" style="width:340px;height:40px;background-image:url(../../../images/screenshots/menu-bar.png);background-position:0 -132px;"></div>
+    <div class="shot" style="width:340px;height:58px;background-image:url(../../../images/screenshots/domains.png);background-position:-12px -256px;margin-top:6px"></div>
+    <div class="note">Press Return on a domain that is already listed: the field empties and nothing on screen changes.</div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; proposal</div>
+    <div class="state">
+      <div class="stateTag">Already listed</div>
+      <div class="menu clip">
+        <div class="add"><span class="nfield err">en.wikipedia.org</span><span class="go">Add</span></div>
+        <div class="msg err">en.wikipedia.org is already on your Bypass list.</div>
+      </div>
+    </div>
+    <div class="state">
+      <div class="stateTag">An IP range on the Bypass list</div>
+      <div class="menu clip">
+        <div class="add"><span class="nfield err">10.0.0.0/24</span><span class="go">Add</span></div>
+        <div class="msg err">10.0.0.0/24 is an IP range. <span class="s">The Bypass list takes domains; add ranges on the VPN Only list or as a Custom rule.</span></div>
+      </div>
+    </div>
+    <div class="state">
+      <div class="stateTag">A pasted link</div>
+      <div class="menu clip">
+        <div class="add"><span class="nfield" style="color:var(--text3)">domain.com</span><span class="go" style="opacity:.45">Add</span></div>
+        <div class="msg ok">&#10003; Added news.ycombinator.com <span class="s">(from the link you pasted). 2 routes installed.</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>

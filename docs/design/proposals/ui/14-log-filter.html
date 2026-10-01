@@ -1,0 +1,124 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  /* Lane-local styles for proposal 14. */
+  .titlebar { text-align:center; font: 800 13px "SFRounded", system-ui; margin-top:-13px; }
+  .titlebar .b { font-weight:300; margin-left:2px; color: var(--sky); }
+  .toolbar { display:flex; justify-content:center; gap:2px; padding: 14px 16px 10px; border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(15,15,20,.8); }
+  .tb { width:72px; padding:6px 0 5px; border-radius:7px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11px; color: var(--text2); }
+  .tb svg { width:20px; height:20px; }
+  .tb.sel { background: rgba(255,255,255,.10); color:#fff; }
+  .tb.sel svg { color: var(--sky); }
+  .content { padding: 18px 24px 22px; }
+  .h18 { font: 700 18px "SFRounded", system-ui; display:flex; gap:8px; align-items:center; }
+  .cap { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:500; padding:5px 10px; border-radius:99px; }
+  .loglist { background: rgba(255,255,255,.04); border-radius:12px; padding:4px; margin-top:16px; }
+  .lr { display:flex; align-items:center; gap:10px; padding:6px 10px; }
+  .lr .ts { font: 10px ui-monospace, "SF Mono", Menlo, monospace; color: var(--text3); width:70px; flex:none; }
+  .lr .m { font: 11px ui-monospace, "SF Mono", Menlo, monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lr svg { width:10px; height:10px; flex:none; }
+  .lr mark { background: rgba(250,204,21,.35); color:#fff; border-radius:2px; padding:0 1px; }
+  .filter { display:flex; align-items:center; gap:10px; }
+  .search { display:flex; align-items:center; gap:5px; width:190px; background: rgba(255,255,255,.07); border:0.5px solid rgba(255,255,255,.18); border-radius:6px; font-size:12px; padding:3px 7px; color: var(--text3); }
+  .search.focus { border:0.5px solid var(--accent); box-shadow: 0 0 0 3px rgba(10,132,255,.35); color:#fff; }
+  .search svg { width:11px; height:11px; flex:none; }
+  .search .x { margin-left:auto; width:13px; height:13px; border-radius:50%; background: rgba(255,255,255,.35); color:#1b1b1d; font: 700 9px system-ui; display:flex; align-items:center; justify-content:center; }
+  .count { font-size:11px; color: var(--text3); margin-top:10px; margin-left:2px; }
+  .state + .state { margin-top: 16px; }
+</style></head>
+<body>
+<div class="head"><span class="num">14</span><span class="title">The log gets a level filter and a search field</span></div>
+<p class="caption">Settings &gt; Logs is one list, newest first. A warning such as a dropped tunnel or a failed DNS lookup scrolls past between routine lines, and the only tools are Copy and Clear. The 4.9.0 socket verb <span class="mono">logs</span> already filters by level; the app cannot. The proposal adds a native segmented control (All, Warnings, Errors) and a search field above the list, with a line saying how many entries match.</p>
+<div class="cols">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x, redrawn from SettingsView.swift:2152-2240</div>
+    <div class="win">
+      <div class="content">
+        <div class="row" style="gap:8px">
+          <div class="h18"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="2" y="3" width="16" height="14" rx="3" fill="#3B82F6"/><path d="M5.5 7.5h9M5.5 10h9M5.5 12.5h6" stroke="#fff" stroke-width="1.3"/></svg>Activity Log</div>
+          <span class="spacer"></span>
+          <span class="cap" style="color:var(--blue);background:rgba(59,130,246,.15)"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11"/></svg>Copy</span>
+          <span class="cap" style="color:var(--error);background:rgba(239,68,68,.15)"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.8 10h6.4L12 4"/></svg>Clear</span>
+        </div>
+        <div class="loglist" id="before"></div>
+      </div>
+    </div>
+    <div class="note" style="max-width:580px">Two warnings and an error are in this screen, among twelve lines. On a day with a few reconnects and DNS refreshes the list holds hundreds of lines and they are gone from view.</div>
+  </div>
+
+  <div class="col">
+    <div class="label after">After &middot; proposal</div>
+    <div class="state">
+      <div class="stateTag">Warnings selected</div>
+      <div class="win">
+        <div class="tl"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#3A3A3C"></i></div>
+        <div class="titlebar">VPN <span class="b">Bypass</span></div>
+        <div class="toolbar">
+          <div class="tb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="2.5" width="15" height="15" rx="3.5"/><path d="M5 10.5h2.4l1.6-3.4 2 6.2 1.6-2.8H15"/></svg>Status</div>
+          <div class="tb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><ellipse cx="10" cy="10" rx="3.3" ry="7.5"/><path d="M2.8 7.5h14.4M2.8 12.5h14.4"/></svg>Domains</div>
+          <div class="tb"><svg viewBox="0 0 20 20" fill="currentColor"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.5"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1.5"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1.5"/><rect x="11" y="11" width="6.5" height="6.5" rx="1.5"/></svg>Services</div>
+          <div class="tb"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="2.75 2.75"/><circle cx="10" cy="10" r="5.8" fill="currentColor"/><circle cx="10" cy="10" r="2.3" fill="#141419"/></svg>General</div>
+          <div class="tb sel"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8h8M6 11h8M6 14h5"/></svg>Logs</div>
+          <div class="tb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r=".6" fill="currentColor"/></svg>Info</div>
+        </div>
+        <div class="content">
+          <div class="filter">
+            <div class="nseg"><span>All</span><span class="sel">Warnings</span><span>Errors</span></div>
+            <div class="search"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6.5" cy="6.5" r="4.8"/><path d="M10 10l4.5 4.5"/></svg>Search</div>
+            <span class="spacer"></span>
+            <span class="nbtn">Copy</span><span class="nbtn">Clear</span>
+          </div>
+          <div class="count">3 of 214 entries</div>
+          <div class="loglist" id="warn" style="margin-top:8px"></div>
+        </div>
+      </div>
+    </div>
+    <div class="state">
+      <div class="stateTag">Searching, All selected</div>
+      <div class="win">
+        <div class="content">
+          <div class="filter">
+            <div class="nseg"><span class="sel">All</span><span>Warnings</span><span>Errors</span></div>
+            <div class="search focus"><svg viewBox="0 0 16 16" fill="none" stroke="#9CA3AF" stroke-width="1.8"><circle cx="6.5" cy="6.5" r="4.8"/><path d="M10 10l4.5 4.5"/></svg>wikipedia<span class="x">&times;</span></div>
+            <span class="spacer"></span>
+            <span class="nbtn">Copy</span><span class="nbtn">Clear</span>
+          </div>
+          <div class="count">2 of 214 entries</div>
+          <div class="loglist" id="search" style="margin-top:8px"></div>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="max-width:580px">Warnings includes errors, so one click shows everything that needs a look. Copy copies what the filter shows. Route Health leaves this page for the Status page (proposal 13), so the log starts at the top.</div>
+  </div>
+</div>
+<script>
+  const icon = {
+    info: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7.5" fill="#6B7280"/><path d="M8 7v5" stroke="#15161d" stroke-width="1.8"/><circle cx="8" cy="4.6" r="1" fill="#15161d"/></svg>',
+    success: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7.5" fill="#10B981"/><path d="M4.8 8.3l2.2 2.2 4.2-4.6" stroke="#0b1f18" stroke-width="1.8" fill="none"/></svg>',
+    warning: '<svg viewBox="0 0 16 16"><path d="M8 1 15.5 14.5H.5z" fill="#F59E0B"/><path d="M8 6v4" stroke="#1a1204" stroke-width="1.7"/><circle cx="8" cy="12.2" r="1" fill="#1a1204"/></svg>',
+    error: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7.5" fill="#EF4444"/><path d="M5.3 5.3l5.4 5.4M10.7 5.3l-5.4 5.4" stroke="#200a0a" stroke-width="1.8"/></svg>'
+  };
+  const log = [
+    ['info',    '18:04:12', 'Config saved'],
+    ['success', '18:04:11', 'Added domain: en.wikipedia.org'],
+    ['success', '18:02:51', 'Applied 62 unique routes'],
+    ['success', '18:02:31', 'VPN connected via WireGuard — applying routes in 20s once the tunnel settles'],
+    ['warning', '18:02:15', 'VPN dropped 4s after our last route write — suspected apply-kill (strike 1)'],
+    ['warning', '18:02:15', 'VPN disconnected (was: utun4)'],
+    ['info',    '17:58:40', 'Skipping duplicate route application (applied 3s ago)'],
+    ['success', '17:45:02', 'DNS refresh complete: 2 added, 1 removed'],
+    ['error',   '17:44:58', 'Cannot route example.org: no local gateway detected. Try Refresh Routes.'],
+    ['info',    '17:40:19', 'Network changed: none → Home'],
+    ['success', '17:31:07', 'Route verification: All 10 tested routes are reachable'],
+    ['success', '17:30:55', 'Added domain: news.ycombinator.com'],
+  ];
+  const row = (l, mark) => {
+    let m = l[2];
+    if (mark) m = m.replace(mark, '<mark>' + mark + '</mark>');
+    return `<div class="lr">${icon[l[0]]}<span class="ts">${l[1]}</span><span class="m" >${m}</span></div>`;
+  };
+  document.getElementById('before').innerHTML = log.map(l => row(l)).join('');
+  document.getElementById('warn').innerHTML = log.filter(l => l[0] === 'warning' || l[0] === 'error').map(l => row(l)).join('');
+  document.getElementById('search').innerHTML = [log[1], ['success', '11:12:40', 'Retry succeeded for en.wikipedia.org: 1 routes added']].map(l => row(l, 'wikipedia')).join('');
+</script>
+</body></html>

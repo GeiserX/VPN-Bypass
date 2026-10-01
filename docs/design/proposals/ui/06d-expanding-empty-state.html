@@ -1,0 +1,120 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  .hdr { display:flex; gap:10px; align-items:center; margin-top:12px; }
+  .vicon { width:36px; height:36px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; background: rgba(16,185,129,.15); color: var(--success); }
+  .who { font: 600 13px "SFRounded", system-ui; color: var(--success); }
+  .tile { width:20px; height:20px; border-radius:5px; flex:none; display:inline-flex; align-items:center; justify-content:center; color:#fff; }
+  .tile svg { width:12px; height:12px; }
+  .t-tg { background:#2AABEE; } .t-wa { background:#25D366; } .t-yt { background:#FF3B30; }
+  .t-zm { background:#0B5CFF; } .t-sp { background:#1DB954; } .t-ms { background:#5B5FC7; }
+  .t-sl { background:#4A154B; } .t-dc { background:#5865F2; } .t-gray { background:#48484A; }
+  .modeline { font-size:11px; color: var(--text2); line-height:1.4; }
+  .modeline a { color: var(--sky); text-decoration:none; }
+  .foot { display:flex; align-items:center; gap:12px; color: var(--text2); }
+  .foot svg { width:14px; height:14px; }
+  .caption b { color: var(--text); font-weight:600; }
+
+  .addrow { margin-top:14px; }
+  .addrow svg { width:13px; height:13px; }
+  .empty { margin-top:10px; background: var(--menuCard); border-radius:8px; padding:10px 10px 10px 12px; }
+  .erow { display:flex; align-items:center; gap:10px; }
+  .erow .l1 { font-size:12.5px; }
+  .erow .l2 { font-size:11px; color: var(--text2); margin-top:2px; }
+  .disc { display:inline-flex; align-items:center; gap:4px; font-size:12px; padding:3px 8px 3px 10px; border-radius:5px; background:#4A4A4D; box-shadow: inset 0 0.5px 0 rgba(255,255,255,.25); white-space:nowrap; }
+  .disc svg { width:9px; height:9px; }
+  .disc.open { background: var(--accent); }
+  .srch { margin-top:10px; display:flex; align-items:center; gap:6px; background: rgba(255,255,255,.07); border:0.5px solid rgba(255,255,255,.14); border-radius:6px; padding:4px 8px; font-size:12px; color: var(--text3); }
+  .srch svg { width:11px; height:11px; }
+  .plist { margin-top:6px; position:relative; }
+  .pr { display:flex; align-items:center; gap:8px; height:26px; padding:0 2px; font-size:12.5px; }
+  .pr svg { width:12px; height:12px; color: var(--text2); }
+  .pr .dm { margin-left:auto; font-size:10.5px; color: var(--text3); padding-right:10px; }
+  .sbar { position:absolute; right:0; top:4px; width:4px; height:40px; border-radius:2px; background: rgba(255,255,255,.25); }
+  .fade { height:1px; background: rgba(255,255,255,.07); margin:6px 0 0; }
+  .more { font-size:11px; color: var(--text3); margin-top:6px; }
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="paperplane" viewBox="0 0 16 16"><path fill="currentColor" d="M1.2 7.3 14.8 1.2 10.9 14.8 7.7 9.4 12.4 3.6 6.1 8.3Z"/></symbol>
+  <symbol id="message" viewBox="0 0 16 16"><path fill="currentColor" d="M8 2C4.1 2 1 4.5 1 7.6c0 1.7.9 3.2 2.4 4.2l-.6 2.7 3.1-1.6c.7.2 1.4.3 2.1.3 3.9 0 7-2.5 7-5.6S11.9 2 8 2z"/></symbol>
+  <symbol id="play" viewBox="0 0 16 16"><path fill="currentColor" fill-rule="evenodd" d="M3.5 3h9A2.5 2.5 0 0 1 15 5.5v5a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 1 10.5v-5A2.5 2.5 0 0 1 3.5 3zM6.4 5.5v5l4.2-2.5z"/></symbol>
+  <symbol id="video" viewBox="0 0 16 16"><path fill="currentColor" d="M2.3 4.3h7.4a1.6 1.6 0 0 1 1.6 1.6v4.2a1.6 1.6 0 0 1-1.6 1.6H2.3A1.6 1.6 0 0 1 .7 10.1V5.9a1.6 1.6 0 0 1 1.6-1.6zM12.2 7.1l3.1-2.2v6.2l-3.1-2.2z"/></symbol>
+  <symbol id="note" viewBox="0 0 16 16"><path fill="currentColor" d="M6.4 1.8v8.5a2.7 2.7 0 1 0 1.7 2.5V5.4l4.6 1.3V3.3z"/></symbol>
+  <symbol id="people" viewBox="0 0 16 16"><g fill="currentColor"><circle cx="5.6" cy="5" r="2.6"/><path d="M.8 13.6c0-2.7 2.1-4.3 4.8-4.3s4.8 1.6 4.8 4.3z"/><circle cx="11.6" cy="5.6" r="2.1"/><path d="M11.3 9.6c2.5-.2 4.2 1.2 4.2 4h-4.2c0-1.6-.4-2.9-1.2-3.8.4-.1.8-.2 1.2-.2z"/></g></symbol>
+  <symbol id="hash" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M6 2.5 5 13.5M11 2.5l-1 11M2.8 6h11M2.2 10.2h11"/></symbol>
+  <symbol id="globe" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.3"/><ellipse cx="8" cy="8" rx="2.8" ry="6.3"/><path d="M1.9 6h12.2M1.9 10h12.2"/></g></symbol>
+  <symbol id="search" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6.8" cy="6.8" r="4.6"/><path d="m10.3 10.3 3.9 3.9"/></g></symbol>
+  <symbol id="chev" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m6 3 5 5-5 5"/></symbol>
+  <symbol id="chevdown" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m3 6 5 5 5-5"/></symbol>
+  <symbol id="plus" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M8 3v10M3 8h10"/></symbol>
+  <symbol id="pluscircle" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6.3"/><path stroke-linecap="round" d="M8 5v6M5 8h6"/></g></symbol>
+  <symbol id="key" viewBox="0 0 16 16"><g fill="currentColor"><circle cx="5.5" cy="5.5" r="4"/><rect x="7.5" y="7.2" width="2.2" height="8" rx="1" transform="rotate(-45 8.6 11.2)"/></g><circle cx="5" cy="5" r="1.4" fill="#12261f"/></symbol>
+  <symbol id="gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-dasharray="2.2 2.2"/><circle cx="8" cy="8" r="4.6" fill="currentColor"/><circle cx="8" cy="8" r="1.8" fill="#0F0F0F"/></symbol>
+  <symbol id="power" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1.5v6"/><path d="M4.4 3.8a5.5 5.5 0 1 0 7.2 0"/></g></symbol>
+  <symbol id="arrowcw" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M11.8 1.8v3h-3"/></g></symbol>
+</defs></svg>
+
+<div class="head"><span class="num">6D</span><span class="title">A two-line empty state that opens into the picker</span></div>
+<p class="caption">The fresh-install dropdown keeps the normal layout. Where Active Services will later sit, two plain lines say that nothing skips the VPN yet, next to a <b>Choose</b> button. Choose opens the card in place into a searchable list of all 37 services with checkboxes, and each tick applies at once. <b>Trade-off:</b> the calmest option, and the dropdown looks the same before and after setup, but the question sits one click away instead of being asked, and a 37-row list scrolling inside a menu bar dropdown is cramped next to the Services page.</p>
+<div class="cols">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="shot" style="width:340px;height:372px;background-image:url(../../../images/screenshots/first-run.png);background-position:0 0;"></div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; 6D, closed</div>
+    <div class="menu clip">
+      <div class="row"><span class="brand">VPN<span class="b">Bypass</span></span><span class="spacer"></span><span class="pill idle"><i></i>NOT SET UP</span></div>
+      <div class="hdr">
+        <div class="vicon"><svg width="16" height="16"><use href="#key"/></svg></div>
+        <div><div class="who">WireGuard connected</div><div class="statusline">Everything goes through the VPN.</div></div>
+      </div>
+      <div class="btn addrow"><svg><use href="#pluscircle"/></svg>Add Domain to Bypass</div>
+      <div class="empty">
+        <div class="erow">
+          <div><div class="l1">Nothing skips the VPN yet.</div><div class="l2">Pick what should bypass it.</div></div>
+          <span class="spacer"></span><span class="disc">Choose<svg><use href="#chevdown"/></svg></span>
+        </div>
+      </div>
+      <div class="divider" style="margin-top:12px"></div>
+      <div class="modeline">Mode: Bypass. Want only a few sites on the VPN and everything else direct? <a>Use VPN Only instead&hellip;</a></div>
+      <div class="divider"></div>
+      <div class="foot"><span class="spacer"></span><svg><use href="#gear"/></svg><svg><use href="#power"/></svg></div>
+    </div>
+    <div class="note">What a fresh install shows. No colour, no icon, nothing that reads as a fault.</div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; 6D, open</div>
+    <div class="menu clip">
+      <div class="row"><span class="brand">VPN<span class="b">Bypass</span></span><span class="spacer"></span><span class="pill on"><i></i>ON</span></div>
+      <div class="hdr">
+        <div class="vicon"><svg width="16" height="16"><use href="#key"/></svg></div>
+        <div><div class="who">WireGuard connected</div><div class="statusline">Telegram skips the VPN.</div></div>
+      </div>
+      <div class="btn addrow"><svg><use href="#pluscircle"/></svg>Add Domain to Bypass</div>
+      <div class="empty">
+        <div class="erow">
+          <div><div class="l1">Telegram is on.</div><div class="l2">Tick more, or search for one.</div></div>
+          <span class="spacer"></span><span class="disc open">Done</span>
+        </div>
+        <div class="srch"><svg><use href="#search"/></svg>Search 37 services</div>
+        <div class="plist">
+          <div class="pr"><span class="ncheck"><b class="on">&#10003;</b></span><svg><use href="#paperplane"/></svg>Telegram<span class="dm">6 domains</span></div>
+          <div class="pr"><span class="ncheck"><b></b></span><svg><use href="#message"/></svg>WhatsApp<span class="dm">4 domains</span></div>
+          <div class="pr"><span class="ncheck"><b></b></span><svg><use href="#globe"/></svg>Signal<span class="dm">4 domains</span></div>
+          <div class="pr"><span class="ncheck"><b></b></span><svg><use href="#play"/></svg>YouTube<span class="dm">8 domains</span></div>
+          <div class="pr"><span class="ncheck"><b></b></span><svg><use href="#globe"/></svg>Netflix<span class="dm">4 domains</span></div>
+          <div class="pr"><span class="ncheck"><b></b></span><svg><use href="#globe"/></svg>Amazon Prime Video<span class="dm">5 domains</span></div>
+          <div class="sbar"></div>
+        </div>
+      </div>
+      <div class="divider" style="margin-top:12px"></div>
+      <div class="modeline">Mode: Bypass. Want only a few sites on the VPN and everything else direct? <a>Use VPN Only instead&hellip;</a></div>
+      <div class="divider"></div>
+      <div class="foot"><span class="spacer"></span><svg><use href="#gear"/></svg><svg><use href="#power"/></svg></div>
+    </div>
+    <div class="note">Telegram was just ticked and applied, so the pill already reads ON. Done closes the card, which then becomes the normal Active Services card.</div>
+  </div>
+</div>
+</body></html>

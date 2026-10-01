@@ -1,0 +1,92 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  .hdr { display:flex; gap:10px; align-items:center; margin-top:12px; }
+  .vicon { width:36px; height:36px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; background: rgba(16,185,129,.15); color: var(--success); }
+  .who { font: 600 13px "SFRounded", system-ui; color: var(--success); }
+  .tile { width:20px; height:20px; border-radius:5px; flex:none; display:inline-flex; align-items:center; justify-content:center; color:#fff; }
+  .tile svg { width:12px; height:12px; }
+  .t-tg { background:#2AABEE; } .t-wa { background:#25D366; } .t-yt { background:#FF3B30; }
+  .t-zm { background:#0B5CFF; } .t-sp { background:#1DB954; } .t-ms { background:#5B5FC7; }
+  .t-sl { background:#4A154B; } .t-dc { background:#5865F2; } .t-gray { background:#48484A; }
+  .modeline { font-size:11px; color: var(--text2); line-height:1.4; }
+  .modeline a { color: var(--sky); text-decoration:none; }
+  .foot { display:flex; align-items:center; gap:12px; color: var(--text2); }
+  .foot svg { width:14px; height:14px; }
+  .caption b { color: var(--text); font-weight:600; }
+
+  .win { width:500px; }
+  .tl i.r { background:#FF5F57; } .tl i.g { background:#3A3A3C; }
+  .wbody { padding:10px 32px 0; display:flex; flex-direction:column; align-items:center; }
+  .appicon { width:64px; height:64px; }
+  .wtitle { font-size:22px; font-weight:700; margin-top:10px; letter-spacing:-.2px; }
+  .wsub { font-size:12.5px; color: var(--text2); text-align:center; line-height:1.45; margin-top:6px; max-width:420px; }
+  .srch { align-self:stretch; margin-top:18px; display:flex; align-items:center; gap:6px; background: rgba(255,255,255,.07); border:0.5px solid rgba(255,255,255,.14); border-radius:6px; padding:4px 8px; font-size:12.5px; color: var(--text3); }
+  .srch svg { width:12px; height:12px; }
+  .srch .cnt { margin-left:auto; font-size:11px; }
+  .tbl { align-self:stretch; margin-top:8px; border:0.5px solid rgba(255,255,255,.14); border-radius:8px; background: rgba(0,0,0,.18); padding:4px; position:relative; }
+  .tr { display:flex; align-items:center; gap:9px; height:30px; padding:0 8px; border-radius:5px; }
+  .tr:nth-child(even) { background: rgba(255,255,255,.035); }
+  .tr .nm { font-size:12.5px; }
+  .tr .dm { margin-left:auto; font-size:11px; color: var(--text3); }
+  .sbar { position:absolute; right:3px; top:6px; width:5px; height:54px; border-radius:3px; background: rgba(255,255,255,.28); }
+  .siteRow { align-self:stretch; display:flex; align-items:center; gap:8px; margin-top:12px; font-size:12.5px; color: var(--text2); }
+  .siteRow .nfield { flex:1; color: var(--text3); }
+  .wfoot { display:flex; align-items:center; gap:8px; padding:14px 20px 16px; margin-top:20px; border-top:1px solid rgba(255,255,255,.08); }
+  .wfoot .tiny { font-size:11px; color: var(--text3); }
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="paperplane" viewBox="0 0 16 16"><path fill="currentColor" d="M1.2 7.3 14.8 1.2 10.9 14.8 7.7 9.4 12.4 3.6 6.1 8.3Z"/></symbol>
+  <symbol id="message" viewBox="0 0 16 16"><path fill="currentColor" d="M8 2C4.1 2 1 4.5 1 7.6c0 1.7.9 3.2 2.4 4.2l-.6 2.7 3.1-1.6c.7.2 1.4.3 2.1.3 3.9 0 7-2.5 7-5.6S11.9 2 8 2z"/></symbol>
+  <symbol id="play" viewBox="0 0 16 16"><path fill="currentColor" fill-rule="evenodd" d="M3.5 3h9A2.5 2.5 0 0 1 15 5.5v5a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 1 10.5v-5A2.5 2.5 0 0 1 3.5 3zM6.4 5.5v5l4.2-2.5z"/></symbol>
+  <symbol id="video" viewBox="0 0 16 16"><path fill="currentColor" d="M2.3 4.3h7.4a1.6 1.6 0 0 1 1.6 1.6v4.2a1.6 1.6 0 0 1-1.6 1.6H2.3A1.6 1.6 0 0 1 .7 10.1V5.9a1.6 1.6 0 0 1 1.6-1.6zM12.2 7.1l3.1-2.2v6.2l-3.1-2.2z"/></symbol>
+  <symbol id="note" viewBox="0 0 16 16"><path fill="currentColor" d="M6.4 1.8v8.5a2.7 2.7 0 1 0 1.7 2.5V5.4l4.6 1.3V3.3z"/></symbol>
+  <symbol id="people" viewBox="0 0 16 16"><g fill="currentColor"><circle cx="5.6" cy="5" r="2.6"/><path d="M.8 13.6c0-2.7 2.1-4.3 4.8-4.3s4.8 1.6 4.8 4.3z"/><circle cx="11.6" cy="5.6" r="2.1"/><path d="M11.3 9.6c2.5-.2 4.2 1.2 4.2 4h-4.2c0-1.6-.4-2.9-1.2-3.8.4-.1.8-.2 1.2-.2z"/></g></symbol>
+  <symbol id="hash" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M6 2.5 5 13.5M11 2.5l-1 11M2.8 6h11M2.2 10.2h11"/></symbol>
+  <symbol id="globe" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.3"/><ellipse cx="8" cy="8" rx="2.8" ry="6.3"/><path d="M1.9 6h12.2M1.9 10h12.2"/></g></symbol>
+  <symbol id="search" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6.8" cy="6.8" r="4.6"/><path d="m10.3 10.3 3.9 3.9"/></g></symbol>
+  <symbol id="chev" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m6 3 5 5-5 5"/></symbol>
+  <symbol id="chevdown" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m3 6 5 5 5-5"/></symbol>
+  <symbol id="plus" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M8 3v10M3 8h10"/></symbol>
+  <symbol id="pluscircle" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6.3"/><path stroke-linecap="round" d="M8 5v6M5 8h6"/></g></symbol>
+  <symbol id="key" viewBox="0 0 16 16"><g fill="currentColor"><circle cx="5.5" cy="5.5" r="4"/><rect x="7.5" y="7.2" width="2.2" height="8" rx="1" transform="rotate(-45 8.6 11.2)"/></g><circle cx="5" cy="5" r="1.4" fill="#12261f"/></symbol>
+  <symbol id="gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-dasharray="2.2 2.2"/><circle cx="8" cy="8" r="4.6" fill="currentColor"/><circle cx="8" cy="8" r="1.8" fill="#0F0F0F"/></symbol>
+  <symbol id="power" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1.5v6"/><path d="M4.4 3.8a5.5 5.5 0 1 0 7.2 0"/></g></symbol>
+  <symbol id="arrowcw" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M11.8 1.8v3h-3"/></g></symbol>
+</defs></svg>
+
+<div class="head"><span class="num">6C</span><span class="title">A welcome window, like the macOS setup assistants</span></div>
+<p class="caption">Right after the admin password prompt, the app opens one window that asks the question with room to answer it: the app icon, a large title, a searchable list of all 37 services with checkboxes, and a field for a site. <b>Continue</b> applies what was ticked; <b>Set Up Later</b> closes the window and leaves a one-line hint in the dropdown with a Set Up&hellip; button that reopens it. <b>Trade-off:</b> the clearest guided start, with every service in reach and nothing crammed into the dropdown, but a window on first launch is the most interrupting option, it is a new window to build and keep in step with the Services page, and the dropdown still needs its own empty state for anyone who skips.</p>
+<div class="cols">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="shot" style="width:340px;height:372px;background-image:url(../../../images/screenshots/first-run.png);background-position:0 0;"></div>
+    <div class="note">Today the first thing after the password prompt is this dropdown, and only if the user clicks the menu bar icon.</div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; 6C</div>
+    <div class="win">
+      <div class="tl"><i class="r"></i><i class="g"></i><i class="g"></i></div>
+      <div class="wbody">
+        <img class="appicon" src="../../../images/icon.svg" alt="">
+        <div class="wtitle">What should skip the VPN?</div>
+        <div class="wsub">WireGuard is connected and everything goes through it. The services and sites you pick here use your normal connection instead. You can change this any time in Settings.</div>
+        <div class="srch"><svg><use href="#search"/></svg>Search 37 services</div>
+        <div class="tbl">
+          <div class="tr"><span class="ncheck"><b class="on">&#10003;</b></span><span class="tile t-tg"><svg><use href="#paperplane"/></svg></span><span class="nm">Telegram</span><span class="dm">6 domains · 8 IPs</span></div>
+          <div class="tr"><span class="ncheck"><b class="on">&#10003;</b></span><span class="tile t-wa"><svg><use href="#message"/></svg></span><span class="nm">WhatsApp</span><span class="dm">4 domains · 3 IPs</span></div>
+          <div class="tr"><span class="ncheck"><b></b></span><span class="tile t-gray"><svg><use href="#globe"/></svg></span><span class="nm">Signal</span><span class="dm">4 domains</span></div>
+          <div class="tr"><span class="ncheck"><b></b></span><span class="tile t-yt"><svg><use href="#play"/></svg></span><span class="nm">YouTube</span><span class="dm">8 domains</span></div>
+          <div class="tr"><span class="ncheck"><b></b></span><span class="tile t-gray"><svg><use href="#globe"/></svg></span><span class="nm">Netflix</span><span class="dm">4 domains</span></div>
+          <div class="tr"><span class="ncheck"><b></b></span><span class="tile t-gray"><svg><use href="#globe"/></svg></span><span class="nm">Amazon Prime Video</span><span class="dm">5 domains</span></div>
+          <div class="sbar"></div>
+        </div>
+        <div class="siteRow">Also skip a site<span class="nfield">example.com</span><span class="nbtn">Add</span></div>
+      </div>
+      <div class="wfoot"><span class="nbtn">Set Up Later</span><span class="spacer"></span><span class="nbtn default">Continue</span></div>
+    </div>
+    <div class="note" style="max-width:500px">The list is the Services page's list in its own order. Services without a symbol in the dropdown's chip map show a grey globe, as the chips do today. The window opens once; Set Up&hellip; in the dropdown reopens it.</div>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,78 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  .vc .h { display:flex; align-items:center; gap:6px; font-size:11px; font-weight:500; color: var(--text2); }
+  .vc .h svg { width:10px; height:10px; }
+  .vc .h .n { margin-left:auto; font: 700 10px "SFRounded", system-ui; }
+  .vr { display:flex; align-items:center; gap:6px; margin-top:8px; }
+  .vr svg { width:10px; height:10px; flex:none; }
+  .vr .d { font: 10px ui-monospace, "SF Mono", Menlo, monospace; }
+  .vr .l { margin-left:auto; font: 9px ui-monospace, "SF Mono", Menlo, monospace; color: var(--text3); }
+  .ok { color: var(--success); }
+  .bad { color: var(--error); }
+  .ac .t { font-size:12px; line-height:1.4; margin-top:6px; }
+  .ac .t .s { color: var(--text2); }
+  .ac .fh { font-size:10.5px; font-weight:600; color: #F87171; margin-top:10px; }
+  .ar { display:flex; align-items:center; gap:7px; padding:3px 0; font-size:11px; }
+  .ar svg { width:11px; height:11px; flex:none; }
+  .ar .d { font: 10.5px ui-monospace, "SF Mono", Menlo, monospace; }
+  .ar .src { color: var(--text3); font-size:10.5px; }
+  .ar .e { margin-left:auto; font-size:10.5px; color: #F87171; }
+  .ar .l { margin-left:auto; font-size:10.5px; color: var(--text3); }
+  .ac .sep { height:1px; background: rgba(255,255,255,.08); margin:6px 0; }
+  .ac .link { margin-top:6px; font-size:10.5px; color: var(--sky); }
+  .state + .state { margin-top:14px; }
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="cc" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.2 8.2 7.1 10l3.6-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="okf" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="currentColor"/><path d="M5 8.3 7.1 10.3l4-4.5" fill="none" stroke="#0F0F0F" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="xf" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="currentColor"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="#0F0F0F" stroke-width="1.7" stroke-linecap="round"/></symbol>
+</svg>
+<div class="head"><span class="num">10</span><span class="title">Verify Routes says what it checked, and failures come first</span></div>
+<p class="caption">Verify pings at most 10 destinations: single addresses only, never ranges, always the first 10 in sort order. Its card shows a count such as "9/10" under a badge that says 62 routes, and lists three results picked from a Swift dictionary, whose order is arbitrary. So "10/10" reads as everything checked, and a failure can sit in the seven rows nobody sees. The proposal says what was checked, lists failures first and links to the full result in Logs.</p>
+<div class="cols">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="shot" style="width:340px;height:92px;background-image:url(../../../images/screenshots/menu-bar.png);background-position:0 0;"></div>
+    <div class="tiny" style="margin:2px 0 0 4px">&hellip; further down the same dropdown, after a click on Verify Routes:</div>
+    <div class="menu clip">
+      <div class="card vc">
+        <div class="h"><svg><use href="#cc"/></svg>Route Verification<span class="n" style="color:var(--warning)">9/10</span></div>
+        <div class="vr"><svg class="ok"><use href="#okf"/></svg><span class="d">185.15.58.224</span><span class="l">24ms</span></div>
+        <div class="vr"><svg class="ok"><use href="#okf"/></svg><span class="d">209.216.230.207</span><span class="l">118ms</span></div>
+        <div class="vr"><svg class="ok"><use href="#okf"/></svg><span class="d">142.250.184.14</span><span class="l">31ms</span></div>
+      </div>
+    </div>
+    <div class="note">The header is cropped from the real screenshot. The card is redrawn from <span class="mono">routeVerificationSection</span>, which has no screenshot. One of the ten failed. The three rows shown are all green, and the failure is in the seven that are not shown.</div>
+  </div>
+  <div class="col">
+    <div class="label after">After &middot; proposal</div>
+    <div class="state">
+      <div class="stateTag">One failure</div>
+      <div class="menu clip">
+        <div class="card ac">
+          <div class="vc"><div class="h"><svg><use href="#cc"/></svg>Route check<span style="margin-left:auto;font-size:10px;color:var(--text3);font-weight:400">just now</span></div></div>
+          <div class="t">Checked 10 of 62 routes <span class="s">(single addresses only)</span>.</div>
+          <div class="fh">1 not reachable</div>
+          <div class="ar"><svg class="bad"><use href="#xf"/></svg><span class="d">149.154.167.51</span><span class="src">Telegram</span><span class="e">Ping timed out</span></div>
+          <div class="sep"></div>
+          <div class="ar" style="color:var(--text2)"><svg class="ok"><use href="#okf"/></svg>9 reachable<span class="l">24 to 118 ms</span></div>
+          <div class="link">Show all 10 results in Logs</div>
+        </div>
+      </div>
+    </div>
+    <div class="state">
+      <div class="stateTag">All reachable</div>
+      <div class="menu clip">
+        <div class="card ac">
+          <div class="vc"><div class="h"><svg><use href="#cc"/></svg>Route check<span style="margin-left:auto;font-size:10px;color:var(--text3);font-weight:400">just now</span></div></div>
+          <div class="t">Checked 10 of 62 routes <span class="s">(single addresses only)</span>. All reachable.</div>
+          <div class="link">Show all 10 results in Logs</div>
+        </div>
+      </div>
+    </div>
+    <div class="note">No count badge next to a route total. The sentence carries both numbers, and the ranges that ping cannot test are named as left out.</div>
+  </div>
+</div>
+</body></html>

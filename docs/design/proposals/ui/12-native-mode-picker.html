@@ -1,0 +1,107 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  /* Lane-local styles for proposal 12. */
+  .hdr { display:flex; gap:10px; align-items:center; margin-top:12px; }
+  .vicon { width:36px; height:36px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; background: rgba(16,185,129,.15); color: var(--success); }
+  .who { font: 600 13px "SFRounded", system-ui; color: var(--success); }
+  .badge { margin-left:auto; width:46px; height:42px; border-radius:8px; background: rgba(16,185,129,.12); display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .badge b { font: 800 17px "SFRounded", system-ui; color: var(--success); line-height:1; }
+  .badge s { text-decoration:none; font-size:8.5px; color: var(--text2); margin-top:2px; }
+  .modek { font: 700 10px "SFRounded", system-ui; color: var(--text2); }
+  .capsule { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:600; padding:6px 10px; border-radius:99px; background: rgba(16,185,129,.15); }
+  .plainlink { font-size:10px; font-weight:500; color: var(--text2); }
+  .addbtn { margin-top:12px; }
+  /* Native segmented control, full width inside the dropdown. */
+  .seg3 { display:flex; flex:1; background: rgba(255,255,255,.10); border-radius:6px; padding:2px; gap:0; }
+  .seg3 span { flex:1; text-align:center; font-size:12px; padding:3px 0; border-radius:5px; color:#E5E5E7; position:relative; }
+  .seg3 span + span::before { content:""; position:absolute; left:0; top:4px; bottom:4px; width:1px; background: rgba(255,255,255,.14); }
+  .seg3 span.sel { background:#636366; color:#fff; box-shadow: 0 1px 1px rgba(0,0,0,.3); }
+  .seg3 span.sel::before, .seg3 span.sel + span::before { display:none; }
+  .modeRow { margin-top:12px; gap:10px; }
+  .modeRow .k { font-size:12px; color: var(--text2); }
+  .inuse { margin-top:12px; }
+  .inuse .t { font-size:11px; font-weight:500; color: var(--text2); display:flex; align-items:center; gap:6px; }
+  .inuse .t .n { margin-left:auto; font: 700 10px "SFRounded", system-ui; color: var(--success); }
+  .inuse .r { font-size:10px; display:flex; gap:6px; align-items:center; margin-top:6px; }
+  .inuse .r i { width:4px; height:4px; border-radius:50%; display:inline-block; }
+  /* Native NSAlert, dark appearance. */
+  .alert { width:262px; background:#2A2A2D; border:0.5px solid rgba(255,255,255,.2); border-radius:12px; padding:18px 16px 16px; text-align:center; box-shadow: 0 18px 40px rgba(0,0,0,.6); }
+  .alert img { width:58px; height:58px; }
+  .alert h4 { margin:8px 0 6px; font-size:13px; font-weight:700; }
+  .alert p { margin:0 0 14px; font-size:11px; line-height:1.4; color:#D1D1D6; }
+  .alert .b { display:block; font-size:13px; padding:4px 0; border-radius:6px; background:#4A4A4D; margin-top:7px; box-shadow: inset 0 0.5px 0 rgba(255,255,255,.25); }
+  .alert .b.default { background: var(--accent); }
+  .state + .state { margin-top: 14px; }
+</style></head>
+<body>
+<div class="head"><span class="num">12</span><span class="title">The dropdown's mode switch becomes a native segmented control with all three modes</span></div>
+<p class="caption">Today the dropdown draws its own pair of radio-style buttons, Bypass and VPN Only. In Custom mode they are replaced by a capsule and a plain "Switch to Bypass" link, so from Custom the only way out is Bypass, and Custom cannot be picked from the dropdown at all. The proposal puts all three modes in one native segmented control, the same in every mode. Picking a different mode still asks first, with the alert the app shows today.</p>
+<div class="cols">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x</div>
+    <div class="stateTag">Bypass or VPN Only</div>
+    <div class="shot" style="width:340px;height:134px;background-image:url(../../../images/screenshots/menu-bar.png);background-position:0 -40px;"></div>
+    <div class="stateTag" style="margin-top:10px">Custom Routes <span style="text-transform:none;letter-spacing:0;font-weight:500">(redrawn from MenuBarViews.swift:815-837)</span></div>
+    <div class="menu clip" style="padding-top:12px">
+      <div class="hdr" style="margin-top:0">
+        <div class="vicon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="5.5" r="4"/><rect x="7.5" y="7.2" width="2.2" height="8" rx="1" transform="rotate(-45 8.6 11.2)"/><circle cx="5" cy="5" r="1.4" fill="#12261f"/></svg></div>
+        <div><div class="who">VPN Connected</div><div class="sub" style="color:#E5E5E7">WireGuard</div></div>
+        <div class="badge"><b>62</b><s>routes</s></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <span class="modek">Mode</span><span class="spacer"></span>
+        <span class="capsule"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.8"><path d="M8 15V8M8 8 3 2M8 8l5-6"/></svg>Custom Routes</span>
+        <span class="plainlink">Switch to Bypass</span>
+      </div>
+    </div>
+    <div class="note">Two hand-drawn buttons that look like neither a macOS segmented control nor a radio group. In Custom mode, VPN Only is out of reach and Custom never appears as a choice.</div>
+  </div>
+
+  <div class="col">
+    <div class="label after">After &middot; proposal</div>
+    <div class="state">
+      <div class="stateTag">Bypass</div>
+      <div class="menu clip">
+        <div class="row"><span class="brand">VPN<span class="b">Bypass</span></span><span class="spacer"></span><span class="pill on"><i></i>ON</span></div>
+        <div class="hdr">
+          <div class="vicon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="5.5" r="4"/><rect x="7.5" y="7.2" width="2.2" height="8" rx="1" transform="rotate(-45 8.6 11.2)"/><circle cx="5" cy="5" r="1.4" fill="#12261f"/></svg></div>
+          <div><div class="who">WireGuard connected</div><div class="statusline">4 services and 2 domains skip the VPN.</div></div>
+        </div>
+        <div class="row modeRow"><span class="k">Mode</span><div class="seg3"><span class="sel">Bypass</span><span>VPN Only</span><span>Custom</span></div></div>
+        <div class="btn addbtn"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6.5"/><path d="M8 5v6M5 8h6"/></svg>Add Domain to Bypass</div>
+      </div>
+    </div>
+    <div class="state">
+      <div class="stateTag">Custom Routes</div>
+      <div class="menu clip">
+        <div class="row"><span class="brand">VPN<span class="b">Bypass</span></span><span class="spacer"></span><span class="pill on"><i></i>ON</span></div>
+        <div class="hdr">
+          <div class="vicon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="5.5" r="4"/><rect x="7.5" y="7.2" width="2.2" height="8" rx="1" transform="rotate(-45 8.6 11.2)"/><circle cx="5" cy="5" r="1.4" fill="#12261f"/></svg></div>
+          <div><div class="who">WireGuard connected</div><div class="statusline">3 rules send traffic through 2 routes.</div></div>
+        </div>
+        <div class="row modeRow"><span class="k">Mode</span><div class="seg3"><span>Bypass</span><span>VPN Only</span><span class="sel">Custom</span></div></div>
+        <div class="card inuse">
+          <div class="t"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 15V8M8 8 3 2M8 8l5-6"/></svg>Routes In Use<span class="n">2</span></div>
+          <div class="r"><i style="background:var(--purple)"></i>office-proxy</div>
+          <div class="r"><i style="background:var(--success)"></i>Direct</div>
+        </div>
+      </div>
+    </div>
+    <div class="note">The same control in every mode, so each mode is one click from the other two. With proposal 1, this row replaces the Mode line in the facts list rather than repeating it.</div>
+  </div>
+
+  <div class="col">
+    <div class="label after">&nbsp;</div>
+    <div class="stateTag">After clicking VPN Only</div>
+    <div class="alert">
+      <img src="../../../images/icon.svg" alt="">
+      <h4>Switch routing mode?</h4>
+      <p>Only the sites you list will use your VPN; everything else goes direct.</p>
+      <span class="b default">Switch to VPN Only</span>
+      <span class="b">Cancel</span>
+    </div>
+    <div class="note" style="max-width:262px">The confirmation the app already shows, unchanged. The segment only moves after Switch; Cancel leaves Bypass selected.</div>
+  </div>
+</div>
+</body></html>

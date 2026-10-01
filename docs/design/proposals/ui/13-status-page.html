@@ -1,0 +1,170 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mock.css">
+<style>
+  /* Lane-local styles for proposal 13. */
+  .titlebar { text-align:center; font: 800 13px "SFRounded", system-ui; margin-top:-13px; }
+  .titlebar .b { font-weight:300; margin-left:2px; color: var(--sky); }
+  /* Today's Settings content, redrawn from SettingsView.swift. */
+  .old { padding: 18px 22px 22px; display:flex; flex-direction:column; gap:14px; }
+  .oc { background: var(--card); border:1px solid var(--cardBorder); border-radius:14px; padding:14px 16px; display:flex; flex-direction:column; gap:10px; }
+  .oc.hl { border:2px solid var(--warning); }
+  .oh { display:flex; gap:8px; align-items:center; font: 700 10px "SFRounded", system-ui; letter-spacing:1px; color: var(--text2); text-transform:uppercase; }
+  .oh i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+  .or { display:flex; align-items:center; font-size:12px; color: var(--text2); gap:8px; }
+  .or .v { margin-left:auto; color:#fff; font: 500 12px ui-monospace, "SF Mono", Menlo, monospace; }
+  .or .t { color:#fff; font-size:13px; font-weight:500; }
+  .tag { font: 700 9px "SFRounded", system-ui; padding:2px 6px; border-radius:4px; }
+  .obtn { font-size:12px; font-weight:500; padding:8px 0; border-radius:8px; text-align:center; flex:1; }
+  .h18 { font: 700 18px "SFRounded", system-ui; display:flex; gap:8px; align-items:center; }
+  .stat { flex:1; border-radius:10px; padding:12px 0; display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .stat b { font: 700 20px "SFRounded", system-ui; }
+  .stat s { text-decoration:none; font-size:10px; color: var(--text3); }
+  .elev { background: rgba(255,255,255,.04); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:8px; font-size:11px; }
+  .zoom { zoom: .5; }
+  .anno { font: 700 9.5px "SFRounded", system-ui; color: var(--warning); letter-spacing:.5px; }
+  /* Proposal: native toolbar (as in proposal 2) and a grouped form. */
+  .toolbar { display:flex; justify-content:center; gap:2px; padding: 14px 16px 10px; border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(15,15,20,.8); }
+  .tb { width:72px; padding:6px 0 5px; border-radius:7px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11px; color: var(--text2); }
+  .tb svg { width:20px; height:20px; }
+  .tb.sel { background: rgba(255,255,255,.10); color:#fff; }
+  .tb.sel svg { color: var(--sky); }
+  .content { padding: 16px 24px 22px; }
+  .summary { display:flex; gap:12px; align-items:center; margin-bottom:14px; }
+  .summary .big { font: 700 16px "SFRounded", system-ui; }
+  .summary .s { font-size:12px; color: var(--text2); margin-top:2px; }
+  .gh { font-size:11px; font-weight:600; color: var(--text2); margin: 14px 0 6px 2px; }
+  .group { background: rgba(255,255,255,.05); border:0.5px solid rgba(255,255,255,.10); border-radius:9px; }
+  .gr { display:flex; align-items:center; gap:10px; padding:7px 12px; font-size:12.5px; min-height:32px; }
+  .gr + .gr { border-top: 0.5px solid rgba(255,255,255,.08); }
+  .gr .val { margin-left:auto; color: var(--text2); text-align:right; }
+  .gr .val.ok { color: var(--success); }
+  .gr .val.warn { color: var(--warning); }
+  .dot { width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px; vertical-align:1px; }
+  .popup { display:inline-flex; align-items:center; gap:18px; font-size:12px; padding:2px 6px 2px 9px; border-radius:5px; background:#4A4A4D; box-shadow: inset 0 0.5px 0 rgba(255,255,255,.25); }
+  .popup svg { width:9px; height:12px; }
+  .mono2 { font: 11px ui-monospace, "SF Mono", Menlo, monospace; color: var(--text3); }
+  .lnk { color: var(--sky); font-size:12px; }
+</style></head>
+<body>
+<div class="head"><span class="num">13</span><span class="title">A Status page answers "is it working right now?" in one place</span></div>
+<p class="caption">Today the answer is spread across two pages. Settings &gt; General mixes live state into a long page of settings: the helper, the most common reason nothing works, is card three, the DNS schedule sits inside a settings card, and Network Status and the tunnel diagnostics are at the bottom. Route counts, and the DNS schedule a second time, live in a Route Health block on the Logs page. The proposal adds a Status page as the first item in the toolbar. It gathers the helper, the VPN and gateway, the routes, DNS, the tunnels and recent warnings. General keeps settings only and Logs keeps the log.</p>
+<div class="cols" style="gap:32px">
+  <div class="col">
+    <div class="label">Before &middot; 4.8.x, redrawn from SettingsView.swift</div>
+    <div class="cols" style="gap:20px">
+      <div class="col">
+        <div class="stateTag">General, whole page at half size</div>
+        <div class="win zoom" style="width:580px">
+          <div class="old">
+            <div class="h18">Settings</div>
+            <div class="oc"><div class="oh"><i style="background:var(--blue)"></i>Language</div><div class="or"><span class="t">Language</span><span class="v">System</span></div></div>
+            <div class="oc"><div class="oh"><i style="background:var(--success)"></i>Startup</div><div class="or"><span class="t">Launch at Login</span><span class="spacer"></span><span class="nswitch on"></span></div></div>
+            <div class="oc hl"><div class="oh"><i style="background:var(--error)"></i>Privileged Helper</div><div class="or"><span class="t">Helper installed</span><span class="v" style="color:var(--success)">v4.9.0</span></div><div class="or">The helper runs as root and handles route/hosts changes without prompting.</div></div>
+            <div class="oc"><div class="oh"><i style="background:var(--warning)"></i>Behavior</div><div class="or"><span class="t">Auto-apply on VPN Connect</span><span class="spacer"></span><span class="nswitch on"></span></div><div class="or"><span class="t">Manage /etc/hosts</span><span class="spacer"></span><span class="nswitch on"></span></div><div class="or"><span class="t">Verify Routes After Apply</span><span class="spacer"></span><span class="nswitch"></span></div></div>
+            <div class="oc hl"><div class="oh"><i style="background:var(--cyan,#06B6D4)"></i>DNS Refresh</div><div class="or"><span class="t">Auto DNS Refresh</span><span class="spacer"></span><span class="nswitch on"></span></div><div class="or"><span class="t">Refresh Interval</span><span class="v">30 min</span></div><div class="or">Last refresh: 12 min ago &nbsp; Next refresh: in 18 min</div><div class="row"><span class="obtn" style="background:rgba(6,182,212,.15);color:#06B6D4">Refresh Now</span></div></div>
+            <div class="oc"><div class="oh"><i style="background:var(--purple)"></i>Fallback DNS</div><div class="or"><span class="t">Detected Non-VPN DNS</span><span class="v">192.168.1.1</span></div><div class="or"><span class="v" style="margin:0">1. 1.1.1.1</span></div><div class="or"><span class="v" style="margin:0">2. 8.8.8.8</span></div></div>
+            <div class="oc"><div class="oh"><i style="background:var(--purple)"></i>Notifications</div><div class="or"><span class="t">Enable Notifications</span><span class="spacer"></span><span class="nswitch on"></span></div><div class="or"><span class="t">Silent</span><span class="spacer"></span><span class="nswitch"></span></div></div>
+            <div class="oc"><div class="oh"><i style="background:var(--warning)"></i>SOCKS5 Proxy</div><div class="or"><span class="t">Aggressive Bypass Mode</span></div><div class="or"><span class="t">Enable SOCKS5 Proxy</span><span class="spacer"></span><span class="nswitch"></span></div></div>
+            <div class="oc"><div class="oh"><i style="background:var(--blue)"></i>Configuration</div><div class="row" style="gap:10px"><span class="obtn" style="background:rgba(59,130,246,.15);color:var(--blue)">Export</span><span class="obtn" style="background:rgba(59,130,246,.15);color:var(--blue)">Import</span></div></div>
+            <div class="oc hl"><div class="oh"><i style="background:var(--success)"></i>Network Status</div>
+              <div class="or">VPN Status<span class="v" style="color:var(--success)">&#9679; Connected</span></div>
+              <div class="or">VPN Type<span class="v">WireGuard</span></div>
+              <div class="or">Interface<span class="v">utun4</span></div>
+              <div class="or">Gateway<span class="v">192.168.1.1</span></div>
+              <div class="or">WiFi Network<span class="v">Home</span></div>
+              <div class="or">Active Routes<span class="v">62</span></div></div>
+            <div class="oc hl"><div class="oh"><i style="background:var(--blue)"></i>Coexistence</div>
+              <div class="or"><span class="v" style="margin:0">utun4</span>WireGuard<span class="spacer"></span><span class="tag" style="color:var(--success);background:rgba(16,185,129,.15)">acting on</span><span class="tag" style="color:var(--blue);background:rgba(59,130,246,.15)">default route</span></div>
+              <div class="or"><span class="v" style="margin:0">utun6</span>Tailscale<span class="spacer"></span><span class="tag" style="color:var(--warning);background:rgba(245,158,11,.15)">Tailscale</span></div>
+              <div class="or">Act on<span class="v">Automatic (recommended)</span></div>
+              <div class="or">Routes owned (kernel-tagged)<span class="v">62</span></div></div>
+            <div class="oc"><div class="or"><span class="t">VPN Bypass</span><span class="v">GitHub</span></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="stateTag">Logs, top of the page</div>
+        <div class="win" style="width:380px">
+          <div class="old">
+            <div class="oc" style="border-width:1px">
+              <div class="h18"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16" rx="4" fill="#10B981"/><path d="M5 10h2.5l1.5-3 2 6 1.5-3H15" stroke="#fff" stroke-width="1.5" fill="none"/></svg>Route Health</div>
+              <div class="row" style="gap:10px">
+                <div class="stat" style="background:rgba(16,185,129,.1)"><b>62</b><s>Active Routes</s></div>
+                <div class="stat" style="background:rgba(139,92,246,.1)"><b>4</b><s>Services</s></div>
+                <div class="stat" style="background:rgba(59,130,246,.1)"><b>2</b><s>Domains</s></div>
+              </div>
+              <div class="elev">
+                <span class="mono" style="color:var(--text2)">DNS: 192.168.1.1</span>
+                <span style="color:var(--text3)">Last update: <span style="color:var(--text2)">23 sec</span></span>
+                <span style="color:var(--text3)">Next refresh: <span style="color:var(--success)">18 min</span></span>
+              </div>
+            </div>
+            <div class="h18"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="2" y="3" width="16" height="14" rx="3" fill="#3B82F6"/><path d="M5.5 7.5h9M5.5 10h9M5.5 12.5h6" stroke="#fff" stroke-width="1.3"/></svg>Activity Log</div>
+          </div>
+        </div>
+        <div class="note" style="max-width:380px">The amber outlines mark what is live state rather than a setting: four cards on General, plus Route Health on Logs. To see all of it, the user scrolls General to the bottom, then switches to Logs.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label after">After &middot; proposal</div>
+    <div class="win">
+      <div class="tl"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#3A3A3C"></i></div>
+      <div class="titlebar">VPN <span class="b">Bypass</span></div>
+      <div class="toolbar">
+        <div class="tb sel"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="2.5" width="15" height="15" rx="3.5"/><path d="M5 10.5h2.4l1.6-3.4 2 6.2 1.6-2.8H15"/></svg>Status</div>
+        <div class="tb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><ellipse cx="10" cy="10" rx="3.3" ry="7.5"/><path d="M2.8 7.5h14.4M2.8 12.5h14.4"/></svg>Domains</div>
+        <div class="tb"><svg viewBox="0 0 20 20" fill="currentColor"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.5"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1.5"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1.5"/><rect x="11" y="11" width="6.5" height="6.5" rx="1.5"/></svg>Services</div>
+        <div class="tb"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="2.75 2.75"/><circle cx="10" cy="10" r="5.8" fill="currentColor"/><circle cx="10" cy="10" r="2.3" fill="#141419"/></svg>General</div>
+        <div class="tb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8h8M6 11h8M6 14h5"/></svg>Logs</div>
+        <div class="tb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r=".6" fill="currentColor"/></svg>Info</div>
+      </div>
+      <div class="content">
+        <div class="summary">
+          <svg width="30" height="30" viewBox="0 0 30 30"><circle cx="15" cy="15" r="14" fill="rgba(16,185,129,.15)"/><path d="M9.5 15.5l3.8 3.7 7.4-8" stroke="#10B981" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div><div class="big">Working</div><div class="s">4 services and 2 domains skip the VPN. 62 routes applied 23 s ago, none failed.</div></div>
+        </div>
+
+        <div class="gh">Helper</div>
+        <div class="group">
+          <div class="gr">Privileged helper<span class="val ok"><span class="dot" style="background:var(--success)"></span>Ready, version 4.9.0</span></div>
+        </div>
+
+        <div class="gh">Connection</div>
+        <div class="group">
+          <div class="gr">VPN<span class="val"><span class="dot" style="background:var(--success)"></span>WireGuard, connected on utun4</span></div>
+          <div class="gr">Normal connection<span class="val">Wi&#8209;Fi &ldquo;Home&rdquo;, gateway 192.168.1.1</span></div>
+          <div class="gr">Default route<span class="val">utun4, the VPN</span></div>
+        </div>
+
+        <div class="gh">Routes</div>
+        <div class="group">
+          <div class="gr">Applied<span class="val">62 routes, 23 s ago, none failed</span></div>
+          <div class="gr">From<span class="val">4 services, 2 domains</span></div>
+          <div class="gr">Last check<span class="val">10 of 62 checked, all reachable, 4 min ago</span><span class="nbtn">Verify</span></div>
+        </div>
+
+        <div class="gh">DNS</div>
+        <div class="group">
+          <div class="gr">Resolver<span class="val">192.168.1.1, outside the VPN</span></div>
+          <div class="gr">Refreshed<span class="val">12 min ago, next in 18 min</span><span class="nbtn">Refresh Now</span></div>
+        </div>
+
+        <div class="gh">Tunnels</div>
+        <div class="group">
+          <div class="gr"><span class="mono">utun4</span> WireGuard<span class="val">The app acts on this one. It carries the default route.</span></div>
+          <div class="gr"><span class="mono">utun6</span> Tailscale<span class="val">Never touched</span></div>
+          <div class="gr">Act on<span class="spacer"></span><span class="popup">Automatic (recommended)<svg viewBox="0 0 9 12" fill="none" stroke="#fff" stroke-width="1.4"><path d="M1.5 4.5 4.5 1.5l3 3M1.5 7.5l3 3 3-3"/></svg></span></div>
+        </div>
+
+        <div class="gh row">Recent warnings<span class="spacer"></span><span class="lnk" style="font-weight:400">Show in Log</span></div>
+        <div class="group">
+          <div class="gr"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M8 1.5 15 14H1z" fill="#F59E0B"/><path d="M8 6v4" stroke="#1a1204" stroke-width="1.6"/><circle cx="8" cy="12" r=".9" fill="#1a1204"/></svg><span class="mono2">18:02</span><span style="color:var(--text2)">VPN dropped 4 s after routes were applied; waiting longer next time.</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="max-width:580px">Plain sentences instead of the acting on, default route and Tailscale badges. The three Route Health counters become the Routes rows. When the helper is not ready, its row turns red and gains an Install button, and the summary at the top says why nothing is routed.</div>
+  </div>
+</div>
+</body></html>
