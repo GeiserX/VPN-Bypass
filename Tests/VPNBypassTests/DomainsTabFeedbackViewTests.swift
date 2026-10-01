@@ -37,7 +37,7 @@ final class DomainsTabFeedbackViewTests: XCTestCase {
     }
 
     private func host(_ feedback: AddDomainFeedback) -> NSView {
-        let view = NSHostingView(rootView: DomainsTab(newDomain: feedback.fieldText, feedback: feedback).environmentObject(rm))
+        let view = NSHostingView(rootView: DomainsTab(newDomain: feedback.fieldText, feedback: feedback).environmentObject(rm).environmentObject(SettingsUndo()))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 720),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = view
@@ -59,7 +59,7 @@ final class DomainsTabFeedbackViewTests: XCTestCase {
     /// but no line. The line and its spacing add about 24 points; a relayout can leave a
     /// point of rounding, hence the margin.
     private func showsLine(_ view: NSView, fieldText: String) -> Bool {
-        let bare = NSHostingView(rootView: DomainsTab(newDomain: fieldText).environmentObject(rm))
+        let bare = NSHostingView(rootView: DomainsTab(newDomain: fieldText).environmentObject(rm).environmentObject(SettingsUndo()))
         settle(bare)
         return view.fittingSize.height - bare.fittingSize.height > 12
     }

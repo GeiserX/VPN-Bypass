@@ -3609,7 +3609,31 @@ final class RouteManager: ObservableObject {
         config.domains.append(entry)
         saveConfig()
         log(.success, "Added domain: \(cleaned)")
+        routeNewBypassEntry(entry)
+        return .success(AddedDomain(entry: entry, list: .bypass, typed: trimmed))
+    }
 
+    /// Puts back a Bypass entry that a delete in Settings took out: the same id, switch and
+    /// place in the list. Its routes go in by the same path as `addDomain`'s. Returns false,
+    /// and changes nothing, when the list holds that name again (added back by hand or
+    /// through `vpnb`) or the delete has not finished taking it out.
+    @discardableResult
+    func restoreDomain(_ entry: DomainEntry, at index: Int) -> Bool {
+        guard !config.domains.contains(where: { $0.id == entry.id || $0.domain == entry.domain }) else {
+            log(.warning, "Domain \(entry.domain) is already on the list, nothing to restore")
+            return false
+        }
+        config.domains.insert(entry, at: min(max(index, 0), config.domains.count))
+        saveConfig()
+        log(.success, "Restored domain: \(entry.domain)")
+        if entry.enabled { routeNewBypassEntry(entry) }
+        return true
+    }
+
+    /// Installs the routes of an entry just put on the Bypass list, by `addDomain` or
+    /// `restoreDomain`.
+    private func routeNewBypassEntry(_ entry: DomainEntry) {
+        let cleaned = entry.domain
         if isVPNConnected && bypassListIsLive && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
@@ -3633,7 +3657,6 @@ final class RouteManager: ObservableObject {
                 }
             }
         }
-        return .success(AddedDomain(entry: entry, list: .bypass, typed: trimmed))
     }
 
     func scheduleRetry(for domain: String) {
@@ -3947,20 +3970,32 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    /// Bulk enable/disable all domains with loading state (incremental)
-    func setAllDomainsEnabled(_ enabled: Bool) {
+    /// Bulk enable/disable all domains with loading state (incremental). Returns the ids it
+    /// switched, so Settings can switch exactly those back.
+    @discardableResult
+    func setAllDomainsEnabled(_ enabled: Bool) -> [UUID] {
+        setDomainsEnabled(Set(config.domains.map(\.id)), enabled)
+    }
+
+    /// Switches the Bypass entries in `ids` on or off (incremental), the way
+    /// `setAllDomainsEnabled` does for all of them. Returns the ids it switched.
+    @discardableResult
+    func setDomainsEnabled(_ ids: Set<UUID>, _ enabled: Bool) -> [UUID] {
         // Get domains that need to change
-        let domainsToChange = config.domains.filter { $0.enabled != enabled }
+        let domainsToChange = config.domains.filter { ids.contains($0.id) && $0.enabled != enabled }
+        let changed = domainsToChange.map(\.id)
 
         // Update config
-        for i in config.domains.indices {
+        for i in config.domains.indices where ids.contains(config.domains[i].id) {
             config.domains[i].enabled = enabled
         }
         saveConfig()
 
-        log(.info, enabled ? "Enabled all domains" : "Disabled all domains")
+        log(.info, ids.count == config.domains.count
+            ? (enabled ? "Enabled all domains" : "Disabled all domains")
+            : "\(enabled ? "Enabled" : "Disabled") \(changed.count) domain(s)")
 
-        guard isVPNConnected, acquireRouteOperation() else { return }
+        guard isVPNConnected, acquireRouteOperation() else { return changed }
         Task {
             defer { releaseRouteOperation() }
             let epoch = routeEpoch
@@ -3994,6 +4029,7 @@ final class RouteManager: ObservableObject {
                 await updateHostsFile()
             }
         }
+        return changed
     }
     
     /// Remove all routes matching a source (domain name or service name)
@@ -4064,7 +4100,29 @@ final class RouteManager: ObservableObject {
         config.inverseDomains.append(inverseEntry)
         saveConfig()
         log(.success, "Added VPN Only \(cidr ? "CIDR" : "")domain: \(cleaned)")
+        routeNewInverseEntry(inverseEntry)
+        return .success(AddedDomain(entry: inverseEntry, list: .vpnOnly, typed: trimmed))
+    }
 
+    /// Puts back a VPN Only entry that a delete in Settings took out, like `restoreDomain`.
+    /// Its routes go in by the same path as `addInverseDomain`'s.
+    @discardableResult
+    func restoreInverseDomain(_ entry: DomainEntry, at index: Int) -> Bool {
+        guard !config.inverseDomains.contains(where: { $0.id == entry.id || $0.domain == entry.domain }) else {
+            log(.warning, "VPN Only entry \(entry.domain) is already on the list, nothing to restore")
+            return false
+        }
+        config.inverseDomains.insert(entry, at: min(max(index, 0), config.inverseDomains.count))
+        saveConfig()
+        log(.success, "Restored VPN Only \(entry.isCIDR ? "CIDR" : "")domain: \(entry.domain)")
+        if entry.enabled { routeNewInverseEntry(entry) }
+        return true
+    }
+
+    /// Installs the routes of an entry just put on the VPN Only list, by `addInverseDomain`
+    /// or `restoreInverseDomain`.
+    private func routeNewInverseEntry(_ inverseEntry: DomainEntry) {
+        let cleaned = inverseEntry.domain, cidr = inverseEntry.isCIDR
         if isVPNConnected && config.routingMode == .vpnOnly && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
@@ -4097,7 +4155,6 @@ final class RouteManager: ObservableObject {
                 }
             }
         }
-        return .success(AddedDomain(entry: inverseEntry, list: .vpnOnly, typed: trimmed))
     }
 
     /// Returns the route-cleanup task when one was started (see `removeDomain`).
@@ -4167,12 +4224,24 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    func setAllInverseDomainsEnabled(_ enabled: Bool) {
-        for i in config.inverseDomains.indices {
+    /// Returns the ids it switched, like `setAllDomainsEnabled`.
+    @discardableResult
+    func setAllInverseDomainsEnabled(_ enabled: Bool) -> [UUID] {
+        setInverseDomainsEnabled(Set(config.inverseDomains.map(\.id)), enabled)
+    }
+
+    /// Switches the VPN Only entries in `ids` on or off, then re-applies the list the way
+    /// `setAllInverseDomainsEnabled` does. Returns the ids it switched.
+    @discardableResult
+    func setInverseDomainsEnabled(_ ids: Set<UUID>, _ enabled: Bool) -> [UUID] {
+        let changed = config.inverseDomains.filter { ids.contains($0.id) && $0.enabled != enabled }.map(\.id)
+        for i in config.inverseDomains.indices where ids.contains(config.inverseDomains[i].id) {
             config.inverseDomains[i].enabled = enabled
         }
         saveConfig()
-        log(.info, enabled ? "Enabled all VPN Only domains" : "Disabled all VPN Only domains")
+        log(.info, ids.count == config.inverseDomains.count
+            ? (enabled ? "Enabled all VPN Only domains" : "Disabled all VPN Only domains")
+            : "\(enabled ? "Enabled" : "Disabled") \(changed.count) VPN Only domain(s)")
 
         if isVPNConnected && config.routingMode == .vpnOnly && acquireRouteOperation() {
             Task {
@@ -4182,6 +4251,7 @@ final class RouteManager: ObservableObject {
                 if config.manageHostsFile { await updateHostsFile() }
             }
         }
+        return changed
     }
 
     /// Switch routing mode and re-apply routes
@@ -4227,8 +4297,28 @@ final class RouteManager: ObservableObject {
         config.services.append(service)
         saveConfig()
         log(.success, "Added custom service: \(name)")
+        routeNewCustomService(service)
+    }
 
-        // Apply routes immediately if VPN is connected and in bypass mode
+    /// Puts back a custom service that a delete in Settings took out, domains and all, at its
+    /// old place and switch. Its routes go in by the same path as `addCustomService`'s.
+    /// Returns false, and changes nothing, while a service with that id is still listed.
+    @discardableResult
+    func restoreCustomService(_ service: ServiceEntry, at index: Int) -> Bool {
+        guard service.isCustom, !config.services.contains(where: { $0.id == service.id }) else {
+            log(.warning, "Custom service \(service.name) is still listed, nothing to restore")
+            return false
+        }
+        config.services.insert(service, at: min(max(index, 0), config.services.count))
+        saveConfig()
+        log(.success, "Restored custom service: \(service.name)")
+        if service.enabled { routeNewCustomService(service) }
+        return true
+    }
+
+    /// Applies routes immediately if VPN is connected and in bypass mode, for a custom service
+    /// just added or restored.
+    private func routeNewCustomService(_ service: ServiceEntry) {
         if isVPNConnected && config.routingMode == .bypass && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
@@ -4424,20 +4514,32 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    /// Bulk enable/disable all services with loading state (incremental)
-    func setAllServicesEnabled(_ enabled: Bool) {
+    /// Bulk enable/disable all services with loading state (incremental). Returns the ids it
+    /// switched, so Settings can switch exactly those back.
+    @discardableResult
+    func setAllServicesEnabled(_ enabled: Bool) -> [String] {
+        setServicesEnabled(Set(config.services.map(\.id)), enabled)
+    }
+
+    /// Switches the services in `ids` on or off (incremental), the way `setAllServicesEnabled`
+    /// does for all of them. Returns the ids it switched.
+    @discardableResult
+    func setServicesEnabled(_ ids: Set<String>, _ enabled: Bool) -> [String] {
         // Get services that need to change
-        let servicesToChange = config.services.filter { $0.enabled != enabled }
+        let servicesToChange = config.services.filter { ids.contains($0.id) && $0.enabled != enabled }
+        let changed = servicesToChange.map(\.id)
 
         // Update config
-        for i in config.services.indices {
+        for i in config.services.indices where ids.contains(config.services[i].id) {
             config.services[i].enabled = enabled
         }
         saveConfig()
 
-        log(.info, enabled ? "Enabled all services" : "Disabled all services")
+        log(.info, ids.count == config.services.count
+            ? (enabled ? "Enabled all services" : "Disabled all services")
+            : "\(enabled ? "Enabled" : "Disabled") \(changed.count) service(s)")
 
-        guard isVPNConnected, acquireRouteOperation() else { return }
+        guard isVPNConnected, acquireRouteOperation() else { return changed }
         Task {
             defer { releaseRouteOperation() }
             let epoch = routeEpoch
@@ -4456,6 +4558,7 @@ final class RouteManager: ObservableObject {
             }
             if config.manageHostsFile { await updateHostsFile() }
         }
+        return changed
     }
     
     // MARK: - Route Verification

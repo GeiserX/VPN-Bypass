@@ -356,3 +356,23 @@
 "Only the sites you list will use your VPN; everything else goes direct." = "Solo los sitios que indiques usarán tu VPN; todo lo demás va directo.";
 "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime." = "Tus dominios y servicios pasan a ser reglas editables que puedes enviar por cualquier ruta (un proxy, un equipo de Tailscale o una VPN concreta). Puedes volver cuando quieras.";
 "Switch to your per-rule custom routing. You can switch back to a simple mode anytime." = "Pasa a tu enrutamiento personalizado por reglas. Puedes volver a un modo simple cuando quieras.";
+
+/* ===== Ajustes: deshacer tras quitar algo o tras Activar/Desactivar todos ===== */
+"Undo" = "Deshacer";
+"Removed %@." = "Se quitó %@.";
+"Removed the range %@." = "Se quitó el rango %@.";
+"Removed %@ and its %@." = "Se quitó %1$@ junto con %2$@.";
+"Removed %@, its %@ and its %@." = "Se quitó %1$@ junto con %2$@ y %3$@.";
+"1 IP range" = "1 rango de IP";
+"%lld IP ranges" = "%lld rangos de IP";
+"Removed the rule for %@." = "Se quitó la regla de %@.";
+"Removed the route %@." = "Se quitó la ruta %@.";
+"Turned on %@." = "Has activado %@.";
+"Turned off %@." = "Has desactivado %@.";
+"Turn All On" = "Activar todos";
+"Turn All On…" = "Activar todos…";
+"Turn All Off" = "Desactivar todos";
+"Turn all on or off" = "Activar o desactivar todos";
+"Send %lld services around the VPN?" = "¿Sacar %lld servicios de la VPN?";
+"%@, %@ and %lld more will use your normal connection instead of the VPN. You can turn them off again here." = "%1$@, %2$@ y %3$lld más usarán tu conexión normal en lugar de la VPN. Puedes volver a desactivarlos aquí.";
+"Turn On %lld Services" = "Activar %lld servicios";

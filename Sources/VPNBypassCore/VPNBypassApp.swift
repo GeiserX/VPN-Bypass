@@ -12,6 +12,7 @@ public struct VPNBypassApp: App {
     @StateObject private var launchAtLoginManager = LaunchAtLoginManager.shared
     /// SettingsView reads it; the window from SettingsWindowController is the one users see.
     @StateObject private var modeSwitch = ModeSwitchRequest()
+    @StateObject private var settingsUndo = SettingsUndo()
 
     public init() {}
 
@@ -33,6 +34,7 @@ public struct VPNBypassApp: App {
                 .environmentObject(notificationManager)
                 .environmentObject(launchAtLoginManager)
                 .environmentObject(modeSwitch)
+                .environmentObject(settingsUndo)
         }
         // The app menu's Settings… (shown while the Settings window makes the app a regular
         // app) opens the same window as the gear, which carries the Mode menu in its title bar.
