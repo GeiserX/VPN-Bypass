@@ -17,7 +17,16 @@ final class RouteManager: ObservableObject {
     @Published var vpnType: VPNType?
     @Published var localGateway: String?
     @Published var vpnGateway: String?
-    @Published var activeRoutes: [ActiveRoute] = []
+    @Published var activeRoutes: [ActiveRoute] = [] {
+        // A "removed all routes" footer line is a claim about what is installed. Once the count
+        // moves the line is gone for good; only hiding it let it come back, hours later, when
+        // the app's own removal brought the count back to the same number.
+        didSet {
+            if case .removedAllRoutes(let left)? = lastOutsideChange?.kind, left != uniqueRouteCount {
+                lastOutsideChange = nil
+            }
+        }
+    }
     /// Unique kernel route count (activeRoutes may have multiple entries per destination for multi-source tracking)
     var uniqueRouteCount: Int { Set(activeRoutes.map { $0.destination }).count }
     @Published var lastUpdate: Date?

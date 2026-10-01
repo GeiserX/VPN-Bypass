@@ -348,6 +348,50 @@ final class OutsideChangeSocketTests: XCTestCase {
         XCTAssertNil(rm.lastOutsideChange)
     }
 
+    /// Two requests that overlap interleave at every await, so one that changed nothing would
+    /// find the other's change in its before/after comparison and claim it. Neither names itself.
+    func testOverlappingRequestsKeepEachOtherOutOfTheFooter() async throws {
+        rm.lastOutsideChange = OutsideChange(kind: .addedDomain("old.example"), at: Date())
+        ClassicControl.busyWait = 2
+        var holding = true
+        ClassicControl.routeOperationRunning = { holding }
+
+        let noOp = Task { await self.send("service.enable", ["id": "svc_a"]) }   // already on
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let mode = await send("mode", ["mode": "vpnOnly"])
+        // The mode switch joined a request that is still running, so it does not name itself
+        // either, even though it finishes first.
+        XCTAssertNil(rm.lastOutsideChange, "the request that joined named itself")
+        holding = false
+        let resp = await noOp.value
+        XCTAssertTrue(mode.ok, "\(String(describing: mode.error))")
+        XCTAssertTrue(resp.ok)
+        XCTAssertEqual(rm.config.routingMode, .vpnOnly)
+        XCTAssertNil(rm.lastOutsideChange, "a missing line, never a false or stale one")
+
+        // Once neither runs, the next request names itself again.
+        _ = await send("domain.add", ["domain": "example.org"])
+        XCTAssertEqual(rm.lastOutsideChange?.kind, .addedDomain("example.org"))
+    }
+
+    /// The removal line goes for good once the route count moves. It does not come back when
+    /// the app's own removal brings the count back to the number the line holds.
+    func testARemovalLineStaysGoneWhenTheCountComesBack() {
+        let route = RouteManager.ActiveRoute(destination: "93.184.216.34", gateway: "192.168.1.1",
+                                             source: "s", timestamp: Date())
+        rm.lastOutsideChange = OutsideChange(kind: .removedAllRoutes(routesLeft: 0), at: Date())
+        rm.activeRoutes = []
+        XCTAssertNotNil(rm.lastOutsideChange, "the count did not move")
+        rm.activeRoutes = [route]
+        XCTAssertNil(rm.lastOutsideChange, "a refresh brought routes back")
+        rm.activeRoutes = []
+        XCTAssertNil(rm.lastOutsideChange, "Remove All Routes in the app is not the command line")
+
+        rm.lastOutsideChange = OutsideChange(kind: .addedDomain("x.org"), at: Date())
+        rm.activeRoutes = [route]
+        XCTAssertEqual(rm.lastOutsideChange?.kind, .addedDomain("x.org"), "only a removal is about the count")
+    }
+
     /// The mark follows the request, not the clock: a line the app writes while a request is
     /// suspended (here, waiting for a route operation) is the app's, untagged.
     func testALineTheAppWritesWhileARequestWaitsIsNotTagged() async throws {

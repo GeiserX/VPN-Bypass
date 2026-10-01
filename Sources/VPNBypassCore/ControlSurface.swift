@@ -9,8 +9,16 @@
 
 import Foundation
 
-/// The bridge between the control socket and RouteManager. Namespaced enum; no state.
+/// The bridge between the control socket and RouteManager. Namespaced enum; its only state
+/// is the two counters that tell `handle` whether mutating requests overlapped.
 public enum ControlSurface {
+
+    /// Mutating requests running now, and how many have started. Each connection has its own
+    /// queue, so two requests interleave on the main actor at every await, and one's
+    /// before/after comparison can hold the other's change. A request that overlapped another
+    /// does not name itself in the footer: a missing line, never a false one.
+    @MainActor private static var mutatingInFlight = 0
+    @MainActor private static var mutatingStarted = 0
 
     /// A ready-to-start socket server bound to the default user-only socket path,
     /// dispatching every request through `handle`. The caller (the app delegate)
@@ -34,11 +42,21 @@ public enum ControlSurface {
             let before = rm.config
             let routesBefore = Set(rm.activeRoutes.map(\.destination)).union(rm.pendingKernelAdds).count
             let appSaves = rm.appSaveCount
+            let mutating = CommandRouter.isMutating(request.cmd)
+            let joinedAnother = mutating && mutatingInFlight > 0
+            if mutating { mutatingInFlight += 1; mutatingStarted &+= 1 }
+            let started = mutatingStarted
             let response = await apply(request)
-            if response.ok, CommandRouter.isMutating(request.cmd), rm.appSaveCount == appSaves,
-               let change = OutsideChange.make(cmd: request.cmd, result: response.result,
-                                                before: before, after: rm.config,
-                                                routesBefore: routesBefore, routesLeft: rm.uniqueRouteCount, at: Date()) {
+            if mutating { mutatingInFlight -= 1 }
+            let ranAlone = !joinedAnother && mutatingStarted == started
+            guard response.ok, mutating, rm.appSaveCount == appSaves else { return response }
+            if !ranAlone {
+                // The comparison may hold the other request's change, so name neither, and drop
+                // an older line: it is no longer the last change.
+                if !OutsideChange.sameSettings(before, rm.config) { rm.lastOutsideChange = nil }
+            } else if let change = OutsideChange.make(cmd: request.cmd, result: response.result,
+                                                      before: before, after: rm.config,
+                                                      routesBefore: routesBefore, routesLeft: rm.uniqueRouteCount, at: Date()) {
                 rm.lastOutsideChange = change
             }
             return response
