@@ -30,6 +30,7 @@
 "Domains" = "Dominios";
 "Updated %@ ago" = "Actualizado hace %@";
 "Settings" = "Ajustes";
+"Settings…" = "Ajustes…";
 "Quit VPN Bypass" = "Salir de VPN Bypass";
 "ON" = "ON";
 "OFF" = "OFF";
@@ -310,3 +311,24 @@
 "Only apps set to use %@ (%@) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Solo las apps configuradas para usar %@ (%@) salen por aquí. Las demás apps llegan a estos hosts por la ruta habitual del Mac, aunque una regla de más abajo también los incluya.";
 "Only apps set to use %@ go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Solo las apps configuradas para usar %@ salen por aquí. Las demás apps llegan a estos hosts por la ruta habitual del Mac, aunque una regla de más abajo también los incluya.";
 "%@ is off, so this rule does nothing." = "La ruta %@ está desactivada, así que esta regla no hace nada.";
+
+/* ===== Ajustes — Modo de enrutamiento (menú de la barra de título y hoja) ===== */
+"Custom Routes" = "Rutas personalizadas";
+"Rules" = "Reglas";
+"Routing mode" = "Modo de enrutamiento";
+"Routing mode: %@" = "Modo de enrutamiento: %@";
+"Switch" = "Cambiar";
+"Everything uses the VPN except what you list" = "Todo usa la VPN salvo lo que pongas en la lista";
+"Only what you list uses the VPN" = "Solo lo que pongas en la lista usa la VPN";
+"Pick a route for each destination" = "Elige una ruta para cada destino";
+"Everything uses the VPN except what you list." = "Todo usa la VPN salvo lo que pongas en la lista.";
+"Only what you list uses the VPN; everything else goes direct." = "Solo lo que pongas en la lista usa la VPN; todo lo demás va directo.";
+"Send each destination through a route you pick: direct, a VPN, a proxy or a Tailscale peer." = "Envía cada destino por la ruta que elijas: directa, una VPN, un proxy o un nodo de Tailscale.";
+"%@ and %@." = "%1$@ y %2$@.";
+"%@." = "%@.";
+"Nothing listed yet." = "Aún no hay nada en la lista.";
+"1 entry." = "1 entrada.";
+"%lld entries." = "%lld entradas.";
+"Your lists become rules." = "Tus listas pasan a ser reglas.";
+"1 rule." = "1 regla.";
+"%lld rules." = "%lld reglas.";

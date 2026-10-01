@@ -1,6 +1,6 @@
 # Routing modes
 
-VPN Bypass has three modes. Switch from the dropdown's Mode switch or from Settings; changing mode from either asks you to confirm, because it changes how all traffic is routed.
+VPN Bypass has three modes. Switch from the dropdown's Mode switch or from the Mode menu at the right end of the Settings title bar. Both ask before they switch, because the mode changes how all traffic is routed. The dropdown asks with an alert. Settings opens a sheet that explains each mode and says what your lists hold for it.
 
 ## The three modes
 

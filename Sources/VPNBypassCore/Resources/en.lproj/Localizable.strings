@@ -30,6 +30,7 @@
 "Domains" = "Domains";
 "Updated %@ ago" = "Updated %@ ago";
 "Settings" = "Settings";
+"Settings…" = "Settings…";
 "Quit VPN Bypass" = "Quit VPN Bypass";
 "ON" = "ON";
 "OFF" = "OFF";
@@ -310,3 +311,24 @@
 "Only apps set to use %@ (%@) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Only apps set to use %@ (%@) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them.";
 "Only apps set to use %@ go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Only apps set to use %@ go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them.";
 "%@ is off, so this rule does nothing." = "%@ is off, so this rule does nothing.";
+
+/* ===== Settings — Routing mode (title bar menu and sheet) ===== */
+"Custom Routes" = "Custom Routes";
+"Rules" = "Rules";
+"Routing mode" = "Routing mode";
+"Routing mode: %@" = "Routing mode: %@";
+"Switch" = "Switch";
+"Everything uses the VPN except what you list" = "Everything uses the VPN except what you list";
+"Only what you list uses the VPN" = "Only what you list uses the VPN";
+"Pick a route for each destination" = "Pick a route for each destination";
+"Everything uses the VPN except what you list." = "Everything uses the VPN except what you list.";
+"Only what you list uses the VPN; everything else goes direct." = "Only what you list uses the VPN; everything else goes direct.";
+"Send each destination through a route you pick: direct, a VPN, a proxy or a Tailscale peer." = "Send each destination through a route you pick: direct, a VPN, a proxy or a Tailscale peer.";
+"%@ and %@." = "%@ and %@.";
+"%@." = "%@.";
+"Nothing listed yet." = "Nothing listed yet.";
+"1 entry." = "1 entry.";
+"%lld entries." = "%lld entries.";
+"Your lists become rules." = "Your lists become rules.";
+"1 rule." = "1 rule.";
+"%lld rules." = "%lld rules.";

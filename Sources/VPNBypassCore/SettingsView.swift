@@ -8,6 +8,8 @@ struct SettingsView: View {
     @EnvironmentObject var routeManager: RouteManager
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
+    /// The mode picked in the title bar's Mode menu; set, it opens the sheet.
+    @EnvironmentObject var modeSwitch: ModeSwitchRequest
     @State private var selectedTab: SettingsTab = .domains
 
     // MARK: - Tab model
@@ -40,8 +42,8 @@ struct SettingsView: View {
         }
     }
 
-    /// Ordered tabs to display, driven entirely by the routing mode (chosen via
-    /// RoutingModePicker in the header): Bypass/VPN Only keep the classic tabs;
+    /// Ordered tabs to display, driven entirely by the routing mode (chosen from the
+    /// Mode menu in the title bar): Bypass/VPN Only keep the classic tabs;
     /// Custom Routes swaps Domains/Services for Rules + Routes.
     private var visibleTabs: [SettingsTab] {
         switch routeManager.config.routingMode {
@@ -80,21 +82,29 @@ struct SettingsView: View {
         )
         .onAppear { clampSelectedTabIfNeeded() }
         .onChange(of: routeManager.config.routingMode) { _ in clampSelectedTabIfNeeded() }
+        .sheet(isPresented: Binding(
+            get: { modeSwitch.pickedMode != nil },
+            set: { if !$0 { modeSwitch.pickedMode = nil } }
+        )) {
+            RoutingModeSheet(
+                selected: modeSwitch.pickedMode ?? routeManager.config.routingMode,
+                lists: RoutingModeCopy.lists(from: routeManager.config),
+                onCancel: { modeSwitch.pickedMode = nil },
+                onSwitch: { mode in
+                    routeManager.setRoutingMode(mode)
+                    modeSwitch.pickedMode = nil
+                }
+            )
+        }
     }
 
+    /// The page toolbar: icon above label, a plain highlight on the page shown. The routing
+    /// mode is not here; it is the Mode menu in the title bar, so no page button changes it.
     private var headerView: some View {
         VStack(spacing: 0) {
-            // 3-way mode selector — chooses the routing mode, which in turn drives visibleTabs
-            RoutingModePicker()
-                .padding(.horizontal, 16)
-                .padding(.top, 36) // Space for titlebar traffic lights
-                .padding(.bottom, 10)
-
-            // Tab bar with pill selector — driven by visibleTabs so indices stay consistent
-            HStack(spacing: 6) {
-                ForEach(Array(visibleTabs.enumerated()), id: \.element) { offset, tab in
-                    TabItem(
-                        index: offset,
+            HStack(spacing: 4) {
+                ForEach(visibleTabs, id: \.self) { tab in
+                    SettingsToolbarItem(
                         title: tab.title,
                         icon: tab.icon,
                         isSelected: selectedTab == tab
@@ -103,18 +113,14 @@ struct SettingsView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity)
+            // The hosting view's safe area already starts below the title bar row (traffic
+            // lights, app name, Mode menu), so only a small gap is added here.
+            .padding(.top, 6)
+            .padding(.bottom, 8)
 
-            // Subtle separator
             Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.clear, Theme.success.opacity(0.3), Color.clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
+                .fill(Theme.divider)
                 .frame(height: 1)
         }
         .background(Theme.bgPrimary.opacity(0.8))
@@ -138,50 +144,42 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - Tab Item
+// MARK: - Toolbar Item
 
-struct TabItem: View {
-    let index: Int
+/// One page button in the Settings toolbar, laid out like macOS System Settings: icon above
+/// label, and a plain highlight on the page shown rather than the green pill the mode used to wear.
+struct SettingsToolbarItem: View {
     let title: LocalizedStringKey
     let icon: String
     let isSelected: Bool
     let action: () -> Void
-    
-    @State private var isHovered = false
 
-    // Non-English languages tend to have longer tab labels
-    private var isCompact: Bool {
-        (Bundle.main.preferredLocalizations.first ?? "en") != "en"
-    }
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: isCompact ? 5 : 6) {
+            VStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: isCompact ? 12 : 13, weight: .medium))
+                    .font(.system(size: 17, weight: .regular))
+                    .frame(height: 20)
+                    .foregroundColor(isSelected ? Theme.Brand.sky : Theme.textSecondary)
                 Text(title)
-                    .font(.system(size: isCompact ? 12 : 13, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(isSelected ? Theme.textPrimary : Theme.textSecondary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .foregroundColor(isSelected ? .white : Theme.textSecondary)
-            .padding(.horizontal, isCompact ? 10 : 14)
-            .padding(.vertical, 8)
+            .frame(minWidth: 64)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
             .background(
-                Group {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Theme.accentGradient)
-                            .shadow(color: Theme.success.opacity(0.4), radius: 8, y: 2)
-                    } else if isHovered {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Theme.bgHover)
-                    }
-                }
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isSelected ? Color.white.opacity(0.10) : (isHovered ? Theme.bgCard : Color.clear))
             )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.15)) {
                 isHovered = hovering
@@ -526,130 +524,6 @@ struct DomainRow: View {
         )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
-    }
-}
-
-// MARK: - Routing Mode Picker
-
-/// 3-way mode selector shown above the tab bar (see `SettingsView.headerView`).
-/// Replaces the old per-tab Bypass/VPN Only radio card — mode is chosen once,
-/// here, and drives which tabs are visible (`SettingsView.visibleTabs`).
-struct RoutingModePicker: View {
-    @EnvironmentObject var routeManager: RouteManager
-    /// The mode a tap wants to switch to, pending confirmation. Switching mode
-    /// changes how ALL traffic routes (and entering Custom migrates your lists),
-    /// so it's deliberately a two-step action rather than a single click.
-    @State private var pendingMode: RouteManager.RoutingMode?
-
-    private static let modes: [(mode: RouteManager.RoutingMode, title: LocalizedStringKey, icon: String)] = [
-        (.bypass, "Bypass", "globe"),
-        (.vpnOnly, "VPN Only", "lock.shield"),
-        (.custom, "Custom Routes", "arrow.triangle.branch")
-    ]
-
-    private var footnote: LocalizedStringKey {
-        switch routeManager.config.routingMode {
-        case .bypass:  return "Everything goes through your VPN except what you list below."
-        case .vpnOnly: return "Only what you list below goes through your VPN — everything else is direct."
-        case .custom:  return "Send different destinations through different routes — proxies, Tailscale, or your VPN."
-        }
-    }
-
-    private func confirmationMessage(for mode: RouteManager.RoutingMode) -> String {
-        switch mode {
-        case .bypass:
-            return "Everything will go through your VPN except the sites you list. Your custom routes stay saved."
-        case .vpnOnly:
-            return "Only the sites you list will use your VPN; everything else goes direct."
-        case .custom:
-            return routeManager.config.schemaVersion < 2
-                ? "Your listed domains and services become editable rules you can send through any route (a proxy, a Tailscale peer, or a specific VPN). You can switch back anytime."
-                : "Switch to your per-rule custom routing. You can switch back to a simple mode anytime."
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 6) {
-                ForEach(Array(Self.modes.enumerated()), id: \.offset) { _, entry in
-                    RoutingModeSegment(
-                        title: entry.title,
-                        icon: entry.icon,
-                        isSelected: routeManager.config.routingMode == entry.mode
-                    ) {
-                        // Tapping the current mode is a no-op; a different mode asks first.
-                        if entry.mode != routeManager.config.routingMode {
-                            pendingMode = entry.mode
-                        }
-                    }
-                }
-            }
-
-            Text(footnote)
-                .font(.system(size: 10))
-                .foregroundColor(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity)
-        }
-        .alert("Switch routing mode?", isPresented: Binding(
-            get: { pendingMode != nil },
-            set: { if !$0 { pendingMode = nil } }
-        ), presenting: pendingMode) { mode in
-            Button("Cancel", role: .cancel) { pendingMode = nil }
-            Button("Switch to \(mode.displayName)") {
-                routeManager.setRoutingMode(mode)
-                pendingMode = nil
-            }
-        } message: { mode in
-            Text(confirmationMessage(for: mode))
-        }
-    }
-}
-
-private struct RoutingModeSegment: View {
-    let title: LocalizedStringKey
-    let icon: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-            }
-            .foregroundColor(isSelected ? .white : Theme.textSecondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .background(
-                Group {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Theme.accentGradient)
-                            .shadow(color: Theme.success.opacity(0.4), radius: 8, y: 2)
-                    } else if isHovered {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Theme.bgHover)
-                    } else {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Theme.bgCard)
-                    }
-                }
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.15)) {
-                isHovered = hovering
-            }
-        }
     }
 }
 
@@ -2769,10 +2643,28 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             return
         }
 
+        let window = Self.makeWindow()
+        window.delegate = self
+
+        // Show Dock icon so minimize works
+        NSApp.setActivationPolicy(.regular)
+
+        // Bring to front (normal level — not floating/screenSaver)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        self.window = window
+    }
+
+    /// The Settings window, built without showing it. The title bar's Mode menu and the
+    /// content's mode sheet share one `ModeSwitchRequest`.
+    static func makeWindow() -> NSWindow {
+        let modeSwitch = ModeSwitchRequest()
         let settingsView = SettingsView()
             .environmentObject(RouteManager.shared)
             .environmentObject(NotificationManager.shared)
             .environmentObject(LaunchAtLoginManager.shared)
+            .environmentObject(modeSwitch)
         let hostingView = NSHostingView(rootView: settingsView)
 
         let window = NSWindow(
@@ -2790,20 +2682,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.contentMinSize = NSSize(width: 580, height: 680)
         window.contentMaxSize = NSSize(width: 580, height: 680)
-        window.delegate = self
         window.center()
 
-        // Add branded titlebar accessory
-        addBrandedTitlebar(to: window)
-
-        // Show Dock icon so minimize works
-        NSApp.setActivationPolicy(.regular)
-
-        // Bring to front (normal level — not floating/screenSaver)
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-
-        self.window = window
+        // Branded title bar, with the Mode menu at its right end
+        addBrandedTitlebar(to: window, modeSwitch: modeSwitch)
+        return window
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -2812,10 +2695,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         NSApp.setActivationPolicy(.accessory)
     }
 
-    private func addBrandedTitlebar(to window: NSWindow) {
+    private static func addBrandedTitlebar(to window: NSWindow, modeSwitch: ModeSwitchRequest) {
         let containerView = NSView(frame: NSRect(x: 0, y: 0, width: window.frame.width, height: 28))
 
-        let titleView = NSHostingView(rootView: BrandedTitlebarView())
+        let titleView = NSHostingView(rootView: BrandedTitlebarView()
+            .environmentObject(RouteManager.shared)
+            .environmentObject(modeSwitch))
         titleView.frame = containerView.bounds
         titleView.autoresizingMask = [.width, .height]
         containerView.addSubview(titleView)
@@ -2832,6 +2717,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
 struct BrandedTitlebarView: View {
     var body: some View {
+        ZStack {
+            brand
+            HStack {
+                Spacer()
+                RoutingModeTitlebarButton()
+                    .padding(.trailing, 10)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var brand: some View {
         HStack {
             Spacer()
 
