@@ -1,5 +1,5 @@
 // SettingsView.swift
-// Settings window with tabs for Domains, Services, Rules, Routes, General, Logs, and Info.
+// Settings window with tabs for Status, Domains, Services, Rules, Routes, General, Logs, and Info.
 
 import SwiftUI
 import UniformTypeIdentifiers
@@ -13,15 +13,18 @@ struct SettingsView: View {
     /// The last delete or bulk switch, which the page that made it offers to undo.
     @EnvironmentObject var settingsUndo: SettingsUndo
     @Environment(\.undoManager) private var undoManager
-    @State private var selectedTab: SettingsTab = .domains
+    @State private var selectedTab: SettingsTab = .status
+    /// What the Logs page shows when it opens: All, or Warnings after the Status page's Show in Log.
+    @State private var logsFilter = LogFilter()
 
     // MARK: - Tab model
 
     enum SettingsTab: Hashable {
-        case domains, services, rules, routes, general, logs, info
+        case status, domains, services, rules, routes, general, logs, info
 
         var title: LocalizedStringKey {
             switch self {
+            case .status:   return "Status"
             case .domains:  return "Domains"
             case .services: return "Services"
             case .rules:    return "Rules"
@@ -34,6 +37,7 @@ struct SettingsView: View {
 
         var icon: String {
             switch self {
+            case .status:   return "waveform.path.ecg.rectangle"
             case .domains:  return "globe"
             case .services: return "square.grid.2x2.fill"
             case .rules:    return "list.bullet.indent"
@@ -45,14 +49,16 @@ struct SettingsView: View {
         }
     }
 
-    /// Ordered tabs to display, driven entirely by the routing mode (chosen from the
-    /// Mode menu in the title bar): Bypass/VPN Only keep the classic tabs;
+    /// Ordered tabs to display, driven by the routing mode (chosen from the Mode menu in the
+    /// title bar): Status comes first in every mode; Bypass/VPN Only keep the classic tabs;
     /// Custom Routes swaps Domains/Services for Rules + Routes.
-    private var visibleTabs: [SettingsTab] {
-        switch routeManager.config.routingMode {
-        case .bypass:  return [.domains, .services, .general, .logs, .info]
-        case .vpnOnly: return [.domains, .general, .logs, .info]
-        case .custom:  return [.rules, .routes, .general, .logs, .info]
+    private var visibleTabs: [SettingsTab] { Self.tabs(for: routeManager.config.routingMode) }
+
+    static func tabs(for mode: RouteManager.RoutingMode) -> [SettingsTab] {
+        switch mode {
+        case .bypass:  return [.status, .domains, .services, .general, .logs, .info]
+        case .vpnOnly: return [.status, .domains, .general, .logs, .info]
+        case .custom:  return [.status, .rules, .routes, .general, .logs, .info]
         }
     }
 
@@ -93,7 +99,11 @@ struct SettingsView: View {
             settingsUndo.clear()
         }
         // The line belongs to the page that made the change.
-        .onChange(of: selectedTab) { _ in settingsUndo.clear() }
+        .onChange(of: selectedTab) { tab in
+            settingsUndo.clear()
+            // The Logs filter resets when the page is left, as it always has.
+            if tab != .logs { logsFilter = LogFilter() }
+        }
         // A page asked for from outside, such as the dropdown's "All 37 services…" row. The
         // publisher sends its current value on subscribe, so a fresh window opens on it too.
         .onReceive(SettingsPageRequest.shared.$page) { page in
@@ -150,12 +160,17 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 0) {
                 switch selectedTab {
+                case .status:
+                    StatusTab(onShowWarnings: {
+                        logsFilter = LogFilter(level: .warnings)
+                        selectedTab = .logs
+                    })
                 case .domains:  DomainsTab()
                 case .services: ServicesTab()
                 case .rules:    RulesTab()
                 case .routes:   RoutesTab()
                 case .general:  GeneralTab()
-                case .logs:     LogsTab()
+                case .logs:     LogsTab(filter: logsFilter)
                 case .info:     InfoTab()
                 }
             }
@@ -1217,65 +1232,12 @@ struct GeneralTab: View {
     @EnvironmentObject var routeManager: RouteManager
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
-    @StateObject private var helperManager = HelperManager.shared
     @State private var showingExportSuccess = false
     @State private var showingImportPicker = false
     @State private var showingImportError = false
     @State private var importErrorMessage = ""
     @State private var selectedLanguage: String = UserDefaults.standard.string(forKey: "UserLanguageOverride") ?? "system"
     @State private var showingRestartAlert = false
-
-    private var helperStateIcon: String {
-        switch helperManager.helperState {
-        case .ready: return "checkmark.shield.fill"
-        case .checking, .installing: return "shield.fill"
-        case .outdated: return "exclamationmark.shield.fill"
-        case .missing, .failed: return "xmark.shield.fill"
-        }
-    }
-
-    private var helperStateColor: Color {
-        switch helperManager.helperState {
-        case .ready: return Theme.success
-        case .checking, .installing: return Theme.warning
-        case .outdated: return Theme.warning
-        case .missing, .failed: return Theme.error
-        }
-    }
-
-    private var helperStateSubtitle: String {
-        switch helperManager.helperState {
-        case .ready: return String(localized: "No more password prompts for route changes")
-        case .checking: return String(localized: "Verifying helper version...")
-        case .installing: return String(localized: "Admin authorization required...")
-        case .outdated: return String(localized: "Helper needs updating for this version")
-        case .missing: return String(localized: "Install to enable route management")
-        case .failed: return String(localized: "Helper could not be started")
-        }
-    }
-
-    private var helperNeedsAction: Bool {
-        switch helperManager.helperState {
-        case .missing, .outdated, .failed: return true
-        default: return false
-        }
-    }
-
-    private var helperActionIcon: String {
-        switch helperManager.helperState {
-        case .outdated: return "arrow.up.circle.fill"
-        default: return "arrow.down.circle.fill"
-        }
-    }
-
-    private var helperActionLabel: String {
-        if helperManager.isInstalling { return String(localized: "Installing...") }
-        switch helperManager.helperState {
-        case .outdated: return String(localized: "Update")
-        case .failed: return String(localized: "Retry")
-        default: return String(localized: "Install")
-        }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -1343,73 +1305,6 @@ struct GeneralTab: View {
                         set: { _ in launchAtLoginManager.toggle() }
                     )
                 )
-            }
-            
-            // Privileged Helper section
-            SettingsCard(title: "Privileged Helper", icon: "lock.shield.fill", iconColor: Theme.error) {
-                HStack(spacing: 12) {
-                    Image(systemName: helperStateIcon)
-                        .font(.system(size: 14))
-                        .foregroundColor(helperStateColor)
-                        .frame(width: 20)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(helperManager.helperState.statusText)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white)
-                        Text(helperStateSubtitle)
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.textSecondary)
-                    }
-
-                    Spacer()
-
-                    if helperNeedsAction {
-                        Button {
-                            installHelper()
-                        } label: {
-                            HStack(spacing: 4) {
-                                if helperManager.isInstalling {
-                                    ProgressView()
-                                        .scaleEffect(0.6)
-                                        .frame(width: 12, height: 12)
-                                } else {
-                                    Image(systemName: helperActionIcon)
-                                        .font(.system(size: 10))
-                                }
-                                Text(helperActionLabel)
-                                    .font(.system(size: 11, weight: .medium))
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Theme.accentGradient)
-                            .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(helperManager.isInstalling)
-                    } else if let version = helperManager.helperVersion {
-                        Text("v\(version)")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(Theme.textSecondary)
-                    }
-                }
-
-                if let error = helperManager.installationError {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(Theme.warning)
-                        Text(error)
-                            .font(.system(size: 10))
-                            .foregroundColor(Theme.warning)
-                            .lineLimit(2)
-                    }
-                }
-
-                Text("The helper runs as root and handles route/hosts changes without prompting.")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textSecondary)
             }
             
             // Behavior section
@@ -1504,59 +1399,6 @@ struct GeneralTab: View {
                         .frame(width: 100)
                     }
                     
-                    Divider().background(Theme.divider)
-                    
-                    // Status and manual refresh
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let lastRefresh = routeManager.lastDNSRefresh {
-                                HStack(spacing: 4) {
-                                    Text("Last refresh:")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(Theme.textSecondary)
-                                    Text(lastRefresh, style: .relative)
-                                        .font(.system(size: 10))
-                                        .foregroundColor(Theme.textSecondary)
-                                }
-                            }
-                            if let nextRefresh = routeManager.nextDNSRefresh {
-                                HStack(spacing: 4) {
-                                    Text("Next refresh:")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(Theme.textSecondary)
-                                    Text(nextRefresh, style: .relative)
-                                        .font(.system(size: 10))
-                                        .foregroundColor(Theme.success)
-                                }
-                            }
-                        }
-                        
-                        Spacer()
-                        
-                        Button {
-                            routeManager.forceDNSRefresh()
-                        } label: {
-                            HStack(spacing: 4) {
-                                if routeManager.isApplyingRoutes {
-                                    ProgressView()
-                                        .scaleEffect(0.5)
-                                        .frame(width: 10, height: 10)
-                                } else {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 10))
-                                }
-                                Text("Refresh Now")
-                                    .font(.system(size: 10, weight: .medium))
-                            }
-                            .foregroundColor(Theme.cyan)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(Theme.cyan.opacity(0.15))
-                            .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(routeManager.isApplyingRoutes)
-                    }
                 }
 
                 Text("Re-resolves all domains to catch IP changes and ensure routes stay up to date.")
@@ -1932,95 +1774,6 @@ struct GeneralTab: View {
                     .foregroundColor(Theme.textSecondary)
             }
             
-            // Network status section
-            SettingsCard(title: "Network Status", icon: "network", iconColor: Theme.success) {
-                StatusRow(
-                    label: "VPN Status",
-                    value: routeManager.isVPNConnected ? String(localized: "Connected") : String(localized: "Disconnected"),
-                    valueColor: routeManager.isVPNConnected ? Theme.success : Theme.error,
-                    showDot: true
-                )
-                
-                if let vpnType = routeManager.vpnType {
-                    StatusRow(label: "VPN Type", value: vpnType.rawValue)
-                }
-                
-                if let vpnIface = routeManager.vpnInterface {
-                    StatusRow(label: "Interface", value: vpnIface)
-                }
-                
-                if let gateway = routeManager.localGateway {
-                    StatusRow(label: "Gateway", value: gateway)
-                }
-                
-                if let ssid = routeManager.currentNetworkSSID {
-                    StatusRow(label: "WiFi Network", value: ssid)
-                }
-                
-                StatusRow(label: "Active Routes", value: "\(routeManager.uniqueRouteCount)")
-                
-                // Route verification results
-                if !routeManager.routeVerificationResults.isEmpty {
-                    Divider().background(Theme.divider)
-                    
-                    let passedCount = routeManager.routeVerificationResults.values.filter { $0.isReachable }.count
-                    let totalCount = routeManager.routeVerificationResults.count
-                    
-                    HStack {
-                        Text("Route Verification")
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.textSecondary)
-
-                        Spacer()
-
-                        HStack(spacing: 4) {
-                            Image(systemName: passedCount == totalCount ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(passedCount == totalCount ? Theme.success : Theme.warning)
-                            Text("\(passedCount)/\(totalCount) reachable")
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                .foregroundColor(passedCount == totalCount ? Theme.success : Theme.warning)
-                        }
-                    }
-                }
-            }
-            
-            // Coexistence diagnostics: which tunnels are up, which one this app acts on,
-            // which carries the default route — the three facts every multi-VPN confusion
-            // turns on, previously answerable only by hand-run shell commands.
-            CoexistenceCard()
-
-            // About section
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    BrandedAppName(fontSize: 13)
-                    Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textSecondary)
-                }
-
-                Spacer()
-
-                Link(destination: URL(string: "https://github.com/GeiserX/VPN-Bypass")!) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 10))
-                        Text("GitHub")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundColor(Theme.success)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Theme.success.opacity(0.15))
-                    .clipShape(Capsule())
-                }
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Theme.bgCard)
-            )
-            
             Spacer()
         }
         .fileImporter(
@@ -2091,19 +1844,6 @@ struct GeneralTab: View {
         
         // Clean up temp file
         try? FileManager.default.removeItem(at: exportURL)
-    }
-    
-    private func installHelper() {
-        Task {
-            let ready = await helperManager.ensureHelperReady()
-            if ready && routeManager.isVPNConnected && routeManager.activeRoutes.isEmpty {
-                // Helper just became ready and VPN is connected but no routes —
-                // the initial startup was skipped because helper wasn't ready.
-                // Automatically apply routes and start the DNS refresh lifecycle.
-                await routeManager.detectAndApplyRoutesAsync()
-                routeManager.startDNSRefreshTimer()
-            }
-        }
     }
 }
 
@@ -2198,34 +1938,6 @@ struct SettingsToggleRow: View {
     }
 }
 
-struct StatusRow: View {
-    let label: LocalizedStringKey
-    let value: String
-    var valueColor: Color = .white
-    var showDot: Bool = false
-    
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 12))
-                .foregroundColor(Theme.textSecondary)
-            
-            Spacer()
-            
-            HStack(spacing: 6) {
-                if showDot {
-                    Circle()
-                        .fill(valueColor)
-                        .frame(width: 6, height: 6)
-                }
-                Text(value)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(valueColor)
-            }
-        }
-    }
-}
-
 // MARK: - Logs Tab
 
 struct LogsTab: View {
@@ -2239,20 +1951,7 @@ struct LogsTab: View {
     var body: some View {
         let shown = filter.apply(routeManager.recentLogs)
         VStack(alignment: .leading, spacing: 20) {
-            // Route Health Dashboard
-            routeHealthSection
-
             VStack(alignment: .leading, spacing: 10) {
-                // Header
-                HStack(spacing: 8) {
-                    Image(systemName: "list.bullet.rectangle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Theme.blueGradient)
-                    Text("Activity Log")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
-
                 if routeManager.recentLogs.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "doc.text")
@@ -2336,110 +2035,6 @@ struct LogsTab: View {
             .help(String(localized: "Remove every entry, including any the filter hides"))
         }
         .controlSize(.regular)
-    }
-
-    // MARK: - Route Health Dashboard
-    
-    private var routeHealthSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack(spacing: 8) {
-                Image(systemName: "heart.text.square.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(
-                        Theme.successGradient
-                    )
-                Text("Route Health")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-            }
-            
-            // Stats grid
-            HStack(spacing: 12) {
-                // Active routes
-                RouteStatCard(
-                    icon: "arrow.triangle.branch",
-                    title: "Active Routes",
-                    value: "\(routeManager.uniqueRouteCount)",
-                    color: Theme.success
-                )
-
-                // Enabled services (only in bypass mode)
-                RouteStatCard(
-                    icon: "square.grid.2x2",
-                    title: "Services",
-                    value: routeManager.config.routingMode == .vpnOnly ? "—" : "\(routeManager.config.services.filter { $0.enabled }.count)",
-                    color: Theme.purple
-                )
-
-                // Enabled domains (mode-aware)
-                RouteStatCard(
-                    icon: "globe",
-                    title: "Domains",
-                    value: routeManager.config.routingMode == .vpnOnly
-                        ? "\(routeManager.config.inverseDomains.filter { $0.enabled }.count)"
-                        : "\(routeManager.config.domains.filter { $0.enabled }.count)",
-                    color: Theme.blue
-                )
-            }
-            
-            // DNS and timing info
-            VStack(alignment: .leading, spacing: 8) {
-                if let dnsServer = routeManager.detectedDNSServerDisplay {
-                    HStack(spacing: 6) {
-                        Image(systemName: "server.rack")
-                            .font(.system(size: 10))
-                            .foregroundColor(Theme.cyan)
-                        Text("DNS: \(dnsServer)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(Theme.textSecondary)
-                    }
-                }
-                
-                if let lastUpdate = routeManager.lastUpdate {
-                    HStack(spacing: 6) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 10))
-                            .foregroundColor(Theme.textTertiary)
-                        Text("Last update: ")
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.textTertiary)
-                        Text(lastUpdate, style: .relative)
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.textSecondary)
-                    }
-                }
-                
-                if routeManager.config.autoDNSRefresh, let nextRefresh = routeManager.nextDNSRefresh {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 10))
-                            .foregroundColor(Theme.success)
-                        Text("Next refresh: ")
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.textTertiary)
-                        Text(nextRefresh, style: .relative)
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.success)
-                    }
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Theme.bgElevated)
-            )
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Theme.bgCard)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(Theme.bgCardBorder, lineWidth: 1)
-                )
-        )
     }
 
     private func copyLogsToClipboard(_ entries: [RouteManager.LogEntry]) {
@@ -2697,37 +2292,6 @@ struct LinkRow: View {
     }
 }
 
-// MARK: - Route Stat Card
-
-struct RouteStatCard: View {
-    let icon: String
-    let title: LocalizedStringKey
-    let value: String
-    let color: Color
-    
-    var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundColor(color)
-            
-            Text(value)
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-            
-            Text(title)
-                .font(.system(size: 10))
-                .foregroundColor(Theme.textTertiary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(color.opacity(0.1))
-        )
-    }
-}
-
 struct LogRow: View {
     let entry: RouteManager.LogEntry
     /// The search term to mark in the message; empty marks nothing.
@@ -2975,123 +2539,3 @@ struct BrandedTitlebarView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
-
-// MARK: - Coexistence Diagnostics
-
-/// Read-only view of every live tunnel and what this app is doing about them. Refreshes on
-/// appear and on demand ONLY — the underlying enumeration spawns `ifconfig` and
-/// `tailscale status`, which must never sit on a timer.
-struct CoexistenceCard: View {
-    @EnvironmentObject var routeManager: RouteManager
-    @State private var snapshot: RouteManager.CoexistenceSnapshot?
-    @State private var isRefreshing = false
-
-    var body: some View {
-        SettingsCard(title: "Coexistence", icon: "point.3.connected.trianglepath.dotted", iconColor: Theme.blue) {
-            if let snapshot {
-                if snapshot.links.isEmpty {
-                    Text(String(localized: "No VPN tunnels are up."))
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.textSecondary)
-                } else {
-                    ForEach(snapshot.links) { link in
-                        HStack(spacing: 6) {
-                            Text(link.interface)
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            Text(link.label)
-                                .font(.system(size: 11))
-                                .foregroundColor(Theme.textSecondary)
-                                .lineLimit(1)
-                            Spacer()
-                            if link.interface == snapshot.selectedInterface {
-                                TagBadge(text: String(localized: "acting on"), color: Theme.success)
-                            }
-                            if link.interface == snapshot.defaultRouteInterface {
-                                TagBadge(text: String(localized: "default route"), color: Theme.blue)
-                            }
-                            if link.isTailscale {
-                                TagBadge(text: "Tailscale", color: Theme.warning)
-                            }
-                        }
-                    }
-                }
-                Divider().background(Theme.divider)
-
-                // The pin: act only on one tunnel. Constrains automatic selection — a stale
-                // pin degrades to automatic with a logged warning, never to a silent no-op.
-                HStack {
-                    Text(String(localized: "Act on"))
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.textSecondary)
-                    Spacer()
-                    Picker("", selection: Binding(
-                        get: { routeManager.config.pinnedVPNInterface ?? "" },
-                        set: { iface in
-                            routeManager.config.pinnedVPNInterface = iface.isEmpty ? nil : iface
-                            routeManager.config.pinnedVPNProductHint = iface.isEmpty ? nil
-                                : snapshot.links.first(where: { $0.interface == iface })?.label
-                            routeManager.saveConfig()
-                            Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
-                        }
-                    )) {
-                        Text(String(localized: "Automatic (recommended)")).tag("")
-                        ForEach(snapshot.links.filter { !$0.isTailscale }) { link in
-                            Text("\(link.label) · \(link.interface)").tag(link.interface)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .frame(maxWidth: 240)
-                }
-                if let pinned = routeManager.config.pinnedVPNInterface,
-                   let selected = snapshot.selectedInterface, pinned != selected {
-                    Text(String(localized: "Pinned tunnel \(pinned) is not eligible right now — acting on \(selected) automatically."))
-                        .font(.system(size: 10))
-                        .foregroundColor(Theme.warning)
-                }
-
-                StatusRow(label: "Routes owned (kernel-tagged)", value: "\(snapshot.taggedRouteCount)")
-                Text(String(localized: "This app acts on ONE tunnel and tags every route it installs in the kernel itself. Tailscale and loopback are never touched."))
-                    .font(.system(size: 10))
-                    .foregroundColor(Theme.textSecondary)
-            } else {
-                Text(String(localized: "Reading network state…"))
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.textSecondary)
-            }
-
-            HStack {
-                Spacer()
-                Button {
-                    Task { await refresh() }
-                } label: {
-                    Label(String(localized: "Refresh"), systemImage: "arrow.clockwise")
-                        .font(.system(size: 11))
-                }
-                .disabled(isRefreshing)
-            }
-        }
-        .task { await refresh() }
-    }
-
-    private func refresh() async {
-        isRefreshing = true
-        snapshot = await routeManager.coexistenceSnapshot()
-        isRefreshing = false
-    }
-}
-
-/// Small capsule badge used by the coexistence rows.
-struct TagBadge: View {
-    let text: String
-    let color: Color
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundColor(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(color.opacity(0.15)))
-    }
-}
-
