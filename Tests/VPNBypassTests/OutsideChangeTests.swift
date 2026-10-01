@@ -112,8 +112,8 @@ final class OutsideChangeTests: XCTestCase {
             (.turnedOn("Telegram"), "Last change: turned on Telegram via the command line, just now", "Telegram"),
             (.turnedOff("Slack"), "Last change: turned off Slack via the command line, just now", "Slack"),
             (.switchedMode(.vpnOnly), "Last change: switched to VPN Only via the command line, just now", "VPN Only"),
-            (.removedAllRoutes(routesLeft: 0), "Last change: removed all routes via the command line, just now", nil),
-            (.removedAllRoutes(routesLeft: 2), "Last change: removed routes via the command line, just now; routes left: 2", nil),
+            (.removedAllRoutes(routesLeft: 0), "Last change: removed all routed addresses via the command line, just now", nil),
+            (.removedAllRoutes(routesLeft: 2), "Last change: removed routed addresses via the command line, just now; still routed: 2", nil),
             (.changedRoutes, "Last change: changed the routes via the command line, just now", nil),
             (.changedRules, "Last change: changed the rules via the command line, just now", nil),
         ]

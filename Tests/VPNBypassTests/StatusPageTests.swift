@@ -34,7 +34,7 @@ final class StatusPageTests: XCTestCase {
     func testWorkingMatchesTheMockup() {
         let s = summary()
         XCTAssertEqual(s.title, "Working")
-        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 62 routes applied 23 s ago, none failed.")
+        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 62 addresses routed 23 s ago, none failed.")
         XCTAssertEqual(s.tone, .ok)
         XCTAssertNil(s.note)
     }
@@ -47,7 +47,7 @@ final class StatusPageTests: XCTestCase {
 
     func testFailedRoutesShowInTheSentence() {
         let s = summary { $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-5), routeCount: 60, failedCount: 2) }
-        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 60 routes applied 5 s ago, 2 failed.")
+        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 60 addresses routed 5 s ago, 2 failed.")
     }
 
     /// The caption of image 13: with the helper down, the summary says why nothing is routed.
@@ -91,7 +91,7 @@ final class StatusPageTests: XCTestCase {
     }
 
     func testNothingInstalledIsNotWorking() {
-        XCTAssertEqual(summary { $0.installedRoutes = 0 }.title, "No routes installed")
+        XCTAssertEqual(summary { $0.installedRoutes = 0 }.title, "Nothing routed")
         let fresh = summary { $0.installedRoutes = 0; $0.nothingConfigured = true; $0.enabledServices = 0; $0.enabledDomains = 0 }
         XCTAssertEqual(fresh.title, "Not set up")
         XCTAssertEqual(fresh.tone, .idle)
@@ -162,11 +162,11 @@ final class StatusPageTests: XCTestCase {
 
     func testAppliedLine() {
         let applied = RouteManager.RouteChangeOutcome(kind: .applied, at: now.addingTimeInterval(-23), routeCount: 62, failedCount: 0)
-        XCTAssertEqual(StatusPage.appliedLine(installed: 62, lastChange: applied, now: now), .init(text: "62 routes, 23 s ago, none failed"))
+        XCTAssertEqual(StatusPage.appliedLine(installed: 62, lastChange: applied, now: now), .init(text: "62 addresses, 23 s ago, none failed"))
         let failed = RouteManager.RouteChangeOutcome(kind: .applied, at: now.addingTimeInterval(-23), routeCount: 1, failedCount: 2)
         XCTAssertEqual(StatusPage.appliedLine(installed: 1, lastChange: failed, now: now),
-                       .init(text: "1 route, 23 s ago, 2 failed", tone: .warn))
-        XCTAssertEqual(StatusPage.appliedLine(installed: 5, lastChange: nil, now: now).text, "5 routes")
+                       .init(text: "1 address, 23 s ago, 2 failed", tone: .warn))
+        XCTAssertEqual(StatusPage.appliedLine(installed: 5, lastChange: nil, now: now).text, "5 addresses")
         XCTAssertEqual(StatusPage.appliedLine(installed: 0, lastChange: nil, now: now).text, "None yet")
     }
 
@@ -175,7 +175,7 @@ final class StatusPageTests: XCTestCase {
         let removed = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now.addingTimeInterval(-120), routeCount: 0, failedCount: 0)
         XCTAssertEqual(StatusPage.appliedLine(installed: 0, lastChange: removed, now: now),
                        .init(text: "All removed 2 min ago", tone: .warn))
-        XCTAssertEqual(StatusPage.appliedLine(installed: 3, lastChange: removed, now: now).text, "3 routes")
+        XCTAssertEqual(StatusPage.appliedLine(installed: 3, lastChange: removed, now: now).text, "3 addresses")
         let stuck = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now.addingTimeInterval(-120), routeCount: 2, failedCount: 2)
         XCTAssertEqual(StatusPage.appliedLine(installed: 2, lastChange: stuck, now: now),
                        .init(text: "Removed 2 min ago, 2 could not be removed", tone: .bad))
@@ -388,8 +388,8 @@ final class StatusPageTests: XCTestCase {
             StatusPage.tunnelLine(other, snapshot: s, bundle: bundle),
         ]
         for key in ["Status", "Helper", "Privileged helper", "Connection", "Normal connection", "Default route",
-                    "Applied", "From", "Last check", "Verify", "Resolver", "Refreshed", "Refresh", "Act on",
-                    "Automatic (recommended)", "No VPN tunnels are up.", "Routes owned (kernel-tagged)",
+                    "Addresses", "Routed", "From", "Last check", "Verify", "Resolver", "Refreshed", "Refresh", "Act on",
+                    "Automatic (recommended)", "No VPN tunnels are up.", "Addresses owned (kernel-tagged)",
                     "Reading network state…", "Recent warnings", "Show in Log"] {
             out.append(String(localized: String.LocalizationValue(key), bundle: bundle))
         }

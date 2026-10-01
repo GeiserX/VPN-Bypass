@@ -65,40 +65,40 @@ final class RouteCheckTests: XCTestCase {
 
     func testASampleWithRangesLeftOutSaysSingleAddressesOnly() {
         let s = RouteCheck.scope(checked: 10, singleAddresses: 40, routeCount: 62)
-        XCTAssertEqual(s.main, "Checked 10 of 62 routes")
+        XCTAssertEqual(s.main, "Checked 10 of 62 addresses")
         XCTAssertEqual(s.qualifier, "(single addresses only)")
-        XCTAssertEqual(s.text, "Checked 10 of 62 routes (single addresses only).")
+        XCTAssertEqual(s.text, "Checked 10 of 62 addresses (single addresses only).")
     }
 
     /// Only the sample size cut the list: no range was left out, so no qualifier.
     func testASampleOfSingleAddressesHasNoQualifier() {
         XCTAssertEqual(RouteCheck.scope(checked: 10, singleAddresses: 62, routeCount: 62).text,
-                       "Checked 10 of 62 routes.")
+                       "Checked 10 of 62 addresses.")
     }
 
     /// Ranges left out with fewer than ten single addresses.
     func testFewSingleAddressesAndSomeRanges() {
         XCTAssertEqual(RouteCheck.scope(checked: 3, singleAddresses: 3, routeCount: 5).text,
-                       "Checked 3 of 5 routes (single addresses only).")
+                       "Checked 3 of 5 addresses (single addresses only).")
     }
 
     func testEveryRouteChecked() {
-        XCTAssertEqual(RouteCheck.scope(checked: 4, singleAddresses: 4, routeCount: 4).text, "Checked all 4 routes.")
-        XCTAssertEqual(RouteCheck.scope(checked: 1, singleAddresses: 1, routeCount: 1).text, "Checked the only route.")
+        XCTAssertEqual(RouteCheck.scope(checked: 4, singleAddresses: 4, routeCount: 4).text, "Checked all 4 addresses.")
+        XCTAssertEqual(RouteCheck.scope(checked: 1, singleAddresses: 1, routeCount: 1).text, "Checked the only address.")
     }
 
     /// One address out of several routes takes the singular form, which es and fr spell
     /// differently ("1 route vérifiée sur 2", never "1 routes vérifiées").
     func testCheckingOneOfSeveralRoutes() {
         XCTAssertEqual(RouteCheck.scope(checked: 1, singleAddresses: 1, routeCount: 2).text,
-                       "Checked 1 of 2 routes (single addresses only).")
+                       "Checked 1 of 2 addresses (single addresses only).")
     }
 
     func testOnlyRangesMeansNothingToCheck() {
         XCTAssertEqual(RouteCheck.scope(checked: 0, singleAddresses: 0, routeCount: 3).text,
-                       "Nothing to check: all 3 routes are address ranges, which ping cannot test.")
+                       "Nothing to check: all 3 addresses are ranges, which ping cannot test.")
         XCTAssertEqual(RouteCheck.scope(checked: 0, singleAddresses: 0, routeCount: 1).text,
-                       "Nothing to check: the only route is an address range, which ping cannot test.")
+                       "Nothing to check: the only address is a range, which ping cannot test.")
     }
 
     // MARK: Results
@@ -172,10 +172,10 @@ final class RouteCheckTests: XCTestCase {
                                                                withTemplate: "%lld"))
         }
         XCTAssertEqual(Set(keys), [
-            "Nothing to check: the only route is an address range, which ping cannot test",
-            "Nothing to check: all %lld routes are address ranges, which ping cannot test",
-            "Checked the only route", "Checked all %lld routes", "Checked %lld of %lld routes",
-            "Checked 1 of %lld routes",
+            "Nothing to check: the only address is a range, which ping cannot test",
+            "Nothing to check: all %lld addresses are ranges, which ping cannot test",
+            "Checked the only address", "Checked all %lld addresses", "Checked %lld of %lld addresses",
+            "Checked 1 of %lld addresses",
             "(single addresses only)", "Route check", "All reachable.",
             "1 not reachable", "%lld not reachable", "1 reachable", "%lld reachable",
             "%lld ms", "%lld to %lld ms", "Show the result in Logs", "Show all %lld results in Logs",
@@ -189,15 +189,15 @@ final class RouteCheckTests: XCTestCase {
             }
             guard lang != "en" else { continue }
             let bundle = try XCTUnwrap(Bundle(url: url.deletingLastPathComponent()), lang)
-            let checked = String(localized: "Checked \(10) of \(62) routes", bundle: bundle)
-            XCTAssertNotEqual(checked, "Checked 10 of 62 routes", lang)
+            let checked = String(localized: "Checked \(10) of \(62) addresses", bundle: bundle)
+            XCTAssertNotEqual(checked, "Checked 10 of 62 addresses", lang)
             XCTAssertTrue(checked.contains("10") && checked.contains("62"), "\(lang): \(checked)")
             XCTAssertLessThan(try XCTUnwrap(checked.range(of: "10")).lowerBound,
                               try XCTUnwrap(checked.range(of: "62")).lowerBound, "\(lang): \(checked)")
         }
-        for (lang, expected) in [("es", "Comprobada 1 de 2 rutas"), ("fr", "1 route vérifiée sur 2")] {
+        for (lang, expected) in [("es", "Comprobada 1 de 2 direcciones"), ("fr", "1 adresse vérifiée sur 2")] {
             let bundle = try XCTUnwrap(Bundle(url: core.appendingPathComponent("Resources/\(lang).lproj")), lang)
-            XCTAssertEqual(String(localized: "Checked 1 of \(2) routes", bundle: bundle), expected)
+            XCTAssertEqual(String(localized: "Checked 1 of \(2) addresses", bundle: bundle), expected)
         }
     }
 }

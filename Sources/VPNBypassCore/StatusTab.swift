@@ -59,7 +59,7 @@ enum StatusPage {
         } else if input.installedRoutes == 0 && input.nothingConfigured {
             title = String(localized: "Not set up", bundle: bundle)
         } else if input.installedRoutes == 0 {
-            title = String(localized: "No routes installed", bundle: bundle)
+            title = String(localized: "Nothing routed", bundle: bundle)
         } else {
             title = String(localized: "Working", bundle: bundle)
             if let change = DropdownCopy.shownRouteChange(input.lastRouteChange,
@@ -159,7 +159,7 @@ enum StatusPage {
     // MARK: Routes
 
     static func routes(_ n: Int, bundle: Bundle = .main) -> String {
-        n == 1 ? String(localized: "1 route", bundle: bundle) : String(localized: "\(n) routes", bundle: bundle)
+        n == 1 ? String(localized: "1 address", bundle: bundle) : String(localized: "\(n) addresses", bundle: bundle)
     }
 
     /// The Applied row: what the last apply or removal did, or what is installed.
@@ -433,8 +433,8 @@ struct StatusTab: View {
     }
 
     private func routesSection(_ input: DropdownStatus.Input, now: Date) -> some View {
-        StatusSection(String(localized: "Routes")) {
-            StatusLineRow(label: String(localized: "Applied"),
+        StatusSection(String(localized: "Addresses")) {
+            StatusLineRow(label: String(localized: "Routed"),
                           line: StatusPage.appliedLine(installed: routeManager.uniqueRouteCount,
                                                        lastChange: routeManager.lastRouteChange, now: now))
             StatusDivider()
@@ -502,7 +502,7 @@ struct StatusTab: View {
                                color: Theme.warning)
                 }
                 StatusDivider()
-                StatusLineRow(label: String(localized: "Routes owned (kernel-tagged)"),
+                StatusLineRow(label: String(localized: "Addresses owned (kernel-tagged)"),
                               line: StatusPage.Line(text: "\(snapshot.taggedRouteCount)"))
             } else {
                 StatusPlainRow(text: String(localized: "Reading network state…"))

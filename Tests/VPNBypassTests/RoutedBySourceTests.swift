@@ -46,9 +46,9 @@ final class RoutedBySourceTests: XCTestCase {
                       route("142.250.1.1", "YouTube")]
         let s = try XCTUnwrap(RoutedBySource.make(mode: .bypass, config: c, routes: routes, busy: false))
         XCTAssertEqual(s.title, "Skipping the VPN")
-        XCTAssertEqual(s.countText, "4 routes")
+        XCTAssertEqual(s.countText, "4 addresses")
         XCTAssertEqual(s.rows.map(\.name), ["Telegram", "YouTube", "en.wikipedia.org"])
-        XCTAssertEqual(s.rows.map(\.countText), ["2 routes", "1 route", "1 route"])
+        XCTAssertEqual(s.rows.map(\.countText), ["2 addresses", "1 address", "1 address"])
         XCTAssertEqual(s.rows.map(\.icon), [.service(id: "telegram"), .service(id: "youtube"), .domain])
         XCTAssertFalse(s.rows.contains(where: \.isProblem))
         XCTAssertFalse(s.everythingElseDirect, "Bypass has no catch-alls")
@@ -79,11 +79,11 @@ final class RoutedBySourceTests: XCTestCase {
         let routes = [route("91.108.4.0/22", "Telegram")]
         let idle = try XCTUnwrap(RoutedBySource.make(mode: .bypass, config: c, routes: routes, busy: false))
         XCTAssertEqual(idle.rows.map(\.isProblem), [false, true])
-        XCTAssertEqual(idle.rows[1].countText, "no routes")
+        XCTAssertEqual(idle.rows[1].countText, "no addresses")
 
         let busy = try XCTUnwrap(RoutedBySource.make(mode: .bypass, config: c, routes: routes, busy: true))
         XCTAssertEqual(busy.rows.map(\.isProblem), [false, false])
-        XCTAssertEqual(busy.rows[1].countText, "no routes")
+        XCTAssertEqual(busy.rows[1].countText, "no addresses")
     }
 
     /// After a reconnect the app waits before it re-applies (WAITING), or holds the apply back
@@ -185,7 +185,7 @@ final class RoutedBySourceTests: XCTestCase {
             + [route("10.20.0.0/16", "10.20.0.0/16"), route("10.1.2.3", "git.corp.example.com")]
         let s = try XCTUnwrap(RoutedBySource.make(mode: .vpnOnly, config: c, routes: routes, busy: false))
         XCTAssertEqual(s.title, "Through the VPN")
-        XCTAssertEqual(s.countText, "2 routes")
+        XCTAssertEqual(s.countText, "2 addresses")
         XCTAssertEqual(s.rows.map(\.name), ["git.corp.example.com", "10.20.0.0/16", "jira.corp.example.com"])
         XCTAssertEqual(s.rows.map(\.icon), [.domain, .ipRange, .domain])
         XCTAssertEqual(s.rows.map(\.isProblem), [false, false, true])
@@ -212,7 +212,7 @@ final class RoutedBySourceTests: XCTestCase {
                                                   routes: catchAlls.map { route($0, ClassicRouteCompiler.catchAllSource) },
                                                   busy: false))
         XCTAssertEqual(s.rows, [])
-        XCTAssertEqual(s.countText, "0 routes")
+        XCTAssertEqual(s.countText, "0 addresses")
         XCTAssertTrue(s.everythingElseDirect)
 
         let listed = config { $0.inverseDomains = [DomainEntry(domain: "git.corp.example.com")] }
@@ -280,9 +280,9 @@ final class RoutedBySourceTests: XCTestCase {
             keys.append(interpolation.stringByReplacingMatches(in: raw, range: NSRange(raw.startIndex..., in: raw),
                                                                withTemplate: "%lld"))
         }
-        XCTAssertEqual(Set(keys), ["no routes", "+ %lld more", "Skipping the VPN", "Through the VPN",
+        XCTAssertEqual(Set(keys), ["no addresses", "+ %lld more", "Skipping the VPN", "Through the VPN",
                                    "Routed by your rules", "Left from earlier", "Everything else", "direct",
-                                   "1 route", "%lld routes"], "the scan found a different set; update the list")
+                                   "1 address", "%lld addresses"], "the scan found a different set; update the list")
 
         for lang in ["en", "es", "fr"] {
             let url = core.appendingPathComponent("Resources/\(lang).lproj/Localizable.strings")

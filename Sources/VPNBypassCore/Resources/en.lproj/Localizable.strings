@@ -39,8 +39,8 @@
 "Info" = "Info";
 
 /* ===== Settings — Domains Tab ===== */
-"VPN Only Domains" = "VPN Only Domains";
-"Custom Domains" = "Custom Domains";
+"VPN Only list" = "VPN Only list";
+"Bypass list" = "Bypass list";
 "Only these domains will use the VPN. Everything else bypasses it." = "Only these domains will use the VPN. Everything else bypasses it.";
 "Add domains that should bypass VPN and use your regular connection." = "Add domains that should bypass VPN and use your regular connection.";
 "Routing Mode" = "Routing Mode";
@@ -141,7 +141,7 @@
 "Disconnect" = "Disconnect";
 "Routes" = "Routes";
 "Failures" = "Failures";
-"Routes: services, domains, DNS refresh" = "Routes: services, domains, DNS refresh";
+"Addresses: services, domains, DNS refresh" = "Addresses: services, domains, DNS refresh";
 "SOCKS5 Proxy" = "SOCKS5 Proxy";
 "Aggressive Bypass Mode" = "Aggressive Bypass Mode";
 "For corporate VPNs (Cisco, Zscaler) that block UDP. Requires external SOCKS5 proxy server with UDP support." = "For corporate VPNs (Cisco, Zscaler) that block UDP. Requires external SOCKS5 proxy server with UDP support.";
@@ -176,7 +176,7 @@
 "Working" = "Working";
 "Not working" = "Not working";
 "Not set up" = "Not set up";
-"No routes installed" = "No routes installed";
+"Nothing routed" = "Nothing routed";
 "Helper" = "Helper";
 "Privileged helper" = "Privileged helper";
 "Ready" = "Ready";
@@ -198,7 +198,7 @@
 "%@, Tailscale" = "%@, Tailscale";
 "%@, another tunnel" = "%@, another tunnel";
 "%@, outside the VPN" = "%@, outside the VPN";
-"Applied" = "Applied";
+"Routed" = "Routed";
 "None yet" = "None yet";
 "%@, %@, none failed" = "%1$@, %2$@, none failed";
 "%@, %@, %lld failed" = "%1$@, %2$@, %3$lld failed";
@@ -234,7 +234,7 @@
 "Automatic (recommended)" = "Automatic (recommended)";
 "No VPN tunnels are up." = "No VPN tunnels are up.";
 "Pinned tunnel %@ is not eligible right now — acting on %@ automatically." = "Pinned tunnel %1$@ is not eligible right now — acting on %2$@ automatically.";
-"Routes owned (kernel-tagged)" = "Routes owned (kernel-tagged)";
+"Addresses owned (kernel-tagged)" = "Addresses owned (kernel-tagged)";
 "Reading network state…" = "Reading network state…";
 "Recent warnings" = "Recent warnings";
 "Show in Log" = "Show in Log";
@@ -269,10 +269,10 @@
 "Connected via %@. Routes will be applied automatically." = "Connected via %@. Routes will be applied automatically.";
 "Disconnected from %@. %@" = "Disconnected from %@. %@";
 "VPN connection lost. %@" = "VPN connection lost. %@";
-"%lld route(s) could not be removed." = "%lld route(s) could not be removed.";
-"Routes cleared." = "Routes cleared.";
-"Routes Applied" = "Routes Applied";
-"%lld route(s) applied successfully." = "%lld route(s) applied successfully.";
+"%lld address(es) are still routed: removing them failed." = "%lld address(es) are still routed: removing them failed.";
+"Nothing is routed now." = "Nothing is routed now.";
+"Addresses Routed" = "Addresses Routed";
+"%lld address(es) routed." = "%lld address(es) routed.";
 "%lld failed." = "%lld failed.";
 "Route Verification Failed" = "Route Verification Failed";
 "Network Changed" = "Network Changed";
@@ -285,7 +285,7 @@
 "Domain Added" = "Domain Added";
 "Domain Removed" = "Domain Removed";
 "DNS Refresh Complete" = "DNS Refresh Complete";
-"%lld route(s) updated" = "%lld route(s) updated";
+"%lld address(es) updated" = "%lld address(es) updated";
 
 /* ===== Language Settings ===== */
 "Language" = "Language";
@@ -305,8 +305,8 @@
 "DNS" = "DNS";
 "No VPN connected" = "No VPN connected";
 "Nothing is routed until a VPN connects." = "Nothing is routed until a VPN connects.";
-"%@ stay in place for when it reconnects." = "%@ stay in place for when it reconnects.";
-"%@ could not be removed." = "%@ could not be removed.";
+"%lld addresses stay routed for when it reconnects." = "%lld addresses stay routed for when it reconnects.";
+"%lld addresses are still routed: removing them failed." = "%lld addresses are still routed: removing them failed.";
 "NOT ENFORCING" = "NOT ENFORCING";
 "%@ connected" = "%@ connected";
 "Nothing is routed while the privileged helper is not running." = "Nothing is routed while the privileged helper is not running.";
@@ -318,11 +318,11 @@
 "Refresh Routes applies now anyway." = "Refresh Routes applies now anyway.";
 "Waiting for the tunnel to hold before re-applying routes, in %@." = "Waiting for the tunnel to hold before re-applying routes, in %@.";
 "Re-applying routes now." = "Re-applying routes now.";
-"The %@ from before the drop are still in place." = "The %@ from before the drop are still in place.";
-"No routes are installed until then." = "No routes are installed until then.";
+"The %lld addresses routed before the drop stay routed." = "The %lld addresses routed before the drop stay routed.";
+"Nothing is routed until then." = "Nothing is routed until then.";
 "WAITING" = "WAITING";
 "%@ reconnected %@" = "%@ reconnected %@";
-"NO ROUTES" = "NO ROUTES";
+"NOTHING ROUTED" = "NOTHING ROUTED";
 "Nothing is routed right now." = "Nothing is routed right now.";
 "Bypass: everything else uses the VPN" = "Bypass: everything else uses the VPN";
 "VPN Only: everything else goes direct" = "VPN Only: everything else goes direct";
@@ -341,10 +341,10 @@
 "No rules yet." = "No rules yet.";
 "1 rule decides where traffic goes." = "1 rule decides where traffic goes.";
 "%lld rules decide where traffic goes." = "%lld rules decide where traffic goes.";
-"%lld installed" = "%lld installed";
-"none applied yet" = "none applied yet";
-"%lld applied %@, none failed" = "%lld applied %@, none failed";
-"%lld applied %@, %lld failed" = "%lld applied %@, %lld failed";
+"%lld routed" = "%lld routed";
+"none routed yet" = "none routed yet";
+"%lld routed %@, none failed" = "%lld routed %@, none failed";
+"%lld routed %@, %lld failed" = "%lld routed %@, %lld failed";
 "all removed %@" = "all removed %@";
 "removed %@, %lld could not be" = "removed %@, %lld could not be";
 "checked %@" = "checked %@";
@@ -352,8 +352,8 @@
 "%@, automatic check off" = "%@, automatic check off";
 "%@, next in %@" = "%@, next in %@";
 "%@, next one due now" = "%@, next one due now";
-"1 route" = "1 route";
-"%lld routes" = "%lld routes";
+"1 address" = "1 address";
+"%lld addresses" = "%lld addresses";
 "%lld s" = "%lld s";
 "%lld min" = "%lld min";
 "%lld h" = "%lld h";
@@ -427,7 +427,7 @@
 "Skipping the VPN" = "Skipping the VPN";
 "Through the VPN" = "Through the VPN";
 "Routed by your rules" = "Routed by your rules";
-"no routes" = "no routes";
+"no addresses" = "no addresses";
 "Left from earlier" = "Left from earlier";
 "Everything else" = "Everything else";
 "direct" = "direct";
@@ -471,12 +471,12 @@
 
 /* ===== Menu bar: what Verify Routes checked ===== */
 "Route check" = "Route check";
-"Nothing to check: the only route is an address range, which ping cannot test" = "Nothing to check: the only route is an address range, which ping cannot test";
-"Nothing to check: all %lld routes are address ranges, which ping cannot test" = "Nothing to check: all %lld routes are address ranges, which ping cannot test";
-"Checked the only route" = "Checked the only route";
-"Checked all %lld routes" = "Checked all %lld routes";
-"Checked %lld of %lld routes" = "Checked %lld of %lld routes";
-"Checked 1 of %lld routes" = "Checked 1 of %lld routes";
+"Nothing to check: the only address is a range, which ping cannot test" = "Nothing to check: the only address is a range, which ping cannot test";
+"Nothing to check: all %lld addresses are ranges, which ping cannot test" = "Nothing to check: all %lld addresses are ranges, which ping cannot test";
+"Checked the only address" = "Checked the only address";
+"Checked all %lld addresses" = "Checked all %lld addresses";
+"Checked %lld of %lld addresses" = "Checked %1$lld of %2$lld addresses";
+"Checked 1 of %lld addresses" = "Checked 1 of %lld addresses";
 "(single addresses only)" = "(single addresses only)";
 "All reachable." = "All reachable.";
 "1 not reachable" = "1 not reachable";
@@ -496,7 +496,7 @@
 "Last change: turned on %@ via the command line, %@" = "Last change: turned on %1$@ via the command line, %2$@";
 "Last change: turned off %@ via the command line, %@" = "Last change: turned off %1$@ via the command line, %2$@";
 "Last change: switched to %@ via the command line, %@" = "Last change: switched to %1$@ via the command line, %2$@";
-"Last change: removed all routes via the command line, %@" = "Last change: removed all routes via the command line, %@";
+"Last change: removed all routed addresses via the command line, %@" = "Last change: removed all routed addresses via the command line, %@";
 "Last change: changed the routes via the command line, %@" = "Last change: changed the routes via the command line, %@";
 "Last change: changed the rules via the command line, %@" = "Last change: changed the rules via the command line, %@";
 "Show what came through the command line in Logs" = "Show what came through the command line in Logs";
@@ -504,7 +504,7 @@
 "Nothing from the command line matches this filter." = "Nothing from the command line matches this filter.";
 "From the command line" = "From the command line";
 "Show entries from the app too" = "Show entries from the app too";
-"Last change: removed routes via the command line, %@; routes left: %lld" = "Last change: removed routes via the command line, %1$@; routes left: %2$lld";
+"Last change: removed routed addresses via the command line, %@; still routed: %lld" = "Last change: removed routed addresses via the command line, %1$@; still routed: %2$lld";
 
 /* ===== Names VoiceOver reads for switches and icon buttons, and the dropdown's shortcuts ===== */
 "Delete %@" = "Delete %@";
@@ -516,3 +516,19 @@
 "Clear search" = "Clear search";
 "Add Route" = "Add Route";
 "Add Rule" = "Add Rule";
+
+/* ===== One meaning for route: kernel entries read as addresses (proposal 16) ===== */
+"1 address stays routed for when it reconnects." = "1 address stays routed for when it reconnects.";
+"1 address is still routed: removing it failed." = "1 address is still routed: removing it failed.";
+"The 1 address routed before the drop stays routed." = "The 1 address routed before the drop stays routed.";
+"Keeping %lld address(es) routed around the VPN — they use your normal connection and will be reused on reconnect." = "Keeping %lld address(es) routed around the VPN — they use your normal connection and will be reused on reconnect.";
+"Addresses" = "Addresses";
+"VPN Bypass: VPN connected but nothing is being routed" = "VPN Bypass: VPN connected but nothing is being routed";
+"No addresses to route, checked %@." = "No addresses to route, checked %@.";
+"%@ routed %@, none failed." = "%1$@ routed %2$@, none failed.";
+"%@ routed %@, %lld failed." = "%1$@ routed %2$@, %3$lld failed.";
+"Removed all routed addresses %@." = "Removed all routed addresses %@.";
+"Removed routed addresses %@, %lld could not be removed." = "Removed routed addresses %1$@, %2$lld could not be removed.";
+"Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details." = "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details.";
+"Stop routing the 1 address?" = "Stop routing the 1 address?";
+"Stop routing all %lld addresses?" = "Stop routing all %lld addresses?";

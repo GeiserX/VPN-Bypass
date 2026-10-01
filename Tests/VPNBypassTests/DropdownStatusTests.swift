@@ -40,14 +40,14 @@ final class DropdownStatusTests: XCTestCase {
         XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN.")
         XCTAssertNil(s.note)
         XCTAssertEqual(s.facts, [
-            .init(label: "Routes", value: "62 applied 23 s ago, none failed"),
+            .init(label: "Addresses", value: "62 routed 23 s ago, none failed"),
             .init(label: "DNS", value: "checked 12 min ago, next in 18 min"),
         ])
     }
 
     func testFailedRoutesShowInTheFacts() {
         let s = status { $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-5), routeCount: 60, failedCount: 2) }
-        XCTAssertEqual(s.facts.first { $0.label == "Routes" }?.value, "60 applied 5 s ago, 2 failed")
+        XCTAssertEqual(s.facts.first { $0.label == "Addresses" }?.value, "60 routed 5 s ago, 2 failed")
     }
 
     /// The Mode control sits right under the header with all three modes, so no state repeats
@@ -83,7 +83,7 @@ final class DropdownStatusTests: XCTestCase {
         XCTAssertEqual(s.tone, .warn)
         XCTAssertEqual(s.headline, "WireGuard reconnected 12 s ago")
         XCTAssertEqual(s.sentence, "Waiting for the tunnel to hold before re-applying routes, in 38 s.")
-        XCTAssertEqual(s.note, "The 62 routes from before the drop are still in place.")
+        XCTAssertEqual(s.note, "The 62 addresses routed before the drop stay routed.")
 
         let later = DropdownStatus.make(input {
             $0.pending = .init(reason: .settling, connectedAt: self.now.addingTimeInterval(-12),
@@ -98,7 +98,7 @@ final class DropdownStatusTests: XCTestCase {
             $0.installedRoutes = 0
             $0.pending = .init(reason: .settling, connectedAt: self.now, appliesAt: self.now.addingTimeInterval(10))
         }
-        XCTAssertEqual(s.note, "No routes are installed until then.")
+        XCTAssertEqual(s.note, "Nothing is routed until then.")
     }
 
     /// Past the deadline, before the task has cleared the state, it must not print "in 0 s".
@@ -142,7 +142,7 @@ final class DropdownStatusTests: XCTestCase {
         XCTAssertEqual(s.pill, "OFF")
         XCTAssertEqual(s.tone, .bad)
         XCTAssertEqual(s.headline, "No VPN connected")
-        XCTAssertEqual(s.sentence, "62 routes stay in place for when it reconnects.")
+        XCTAssertEqual(s.sentence, "62 addresses stay routed for when it reconnects.")
         XCTAssertEqual(status { $0.isVPNConnected = false; $0.installedRoutes = 0 }.sentence,
                        "Nothing is routed until a VPN connects.")
     }
@@ -153,7 +153,7 @@ final class DropdownStatusTests: XCTestCase {
         for mode in [DropdownCopy.Mode.vpnOnly, .custom] {
             let s = status { $0.isVPNConnected = false; $0.mode = mode; $0.installedRoutes = 3 }
             XCTAssertEqual(s.pill, "OFF")
-            XCTAssertEqual(s.sentence, "3 routes could not be removed.", "\(mode)")
+            XCTAssertEqual(s.sentence, "3 addresses are still routed: removing them failed.", "\(mode)")
             XCTAssertEqual(status { $0.isVPNConnected = false; $0.mode = mode; $0.installedRoutes = 0 }.sentence,
                            "Nothing is routed until a VPN connects.", "\(mode)")
         }
@@ -169,7 +169,7 @@ final class DropdownStatusTests: XCTestCase {
                 $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-4), routeCount: 62, failedCount: 0)
             }
             XCTAssertEqual(s.pill, "ON", "\(reason)")
-            XCTAssertEqual(s.facts.first { $0.label == "Routes" }?.value, "62 applied just now, none failed", "\(reason)")
+            XCTAssertEqual(s.facts.first { $0.label == "Addresses" }?.value, "62 routed just now, none failed", "\(reason)")
             XCTAssertEqual(s.note, "The scheduled re-apply still runs in 2 min.", "\(reason)")
         }
         // A change from BEFORE the reconnect does not end the wait.
@@ -188,7 +188,7 @@ final class DropdownStatusTests: XCTestCase {
 
     func testNoRoutesIsAWarning() {
         let s = status { $0.installedRoutes = 0 }
-        XCTAssertEqual(s.pill, "NO ROUTES")
+        XCTAssertEqual(s.pill, "NOTHING ROUTED")
         XCTAssertEqual(s.tone, .warn)
         XCTAssertEqual(s.sentence, "Nothing is routed right now.")
     }
@@ -223,10 +223,10 @@ final class DropdownStatusTests: XCTestCase {
         XCTAssertEqual(DropdownStatus.routesFact(input {
             $0.lastRouteChange = .init(kind: .removedAll, at: self.now.addingTimeInterval(-4), routeCount: 0, failedCount: 0)
             $0.installedRoutes = 62
-        }, now: now), "62 installed")
-        XCTAssertEqual(DropdownStatus.routesFact(input { $0.lastRouteChange = nil }, now: now), "62 installed")
+        }, now: now), "62 routed")
+        XCTAssertEqual(DropdownStatus.routesFact(input { $0.lastRouteChange = nil }, now: now), "62 routed")
         XCTAssertEqual(DropdownStatus.routesFact(input { $0.lastRouteChange = nil; $0.installedRoutes = 0 }, now: now),
-                       "none applied yet")
+                       "none routed yet")
     }
 
     /// With the automatic refresh off there is no "next", and the fact must say so.
