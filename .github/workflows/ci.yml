@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - '**/*.swift'
+      - '**/*.strings'
+      - 'scripts/check-localizations.py'
       - 'Package.swift'
       - 'Package.resolved'
       - '.github/workflows/ci.yml'
@@ -52,6 +54,11 @@ jobs:
           key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
           restore-keys: spm-${{ runner.os }}-
       - run: swift test --enable-code-coverage
+      - name: Check translations
+        # Every localizable string in Sources/ needs a Spanish and a French entry. The keys come
+        # from the compiler (a separate build of VPNBypassCore in a temp dir, so a cached .build
+        # cannot feed it stale keys).
+        run: python3 scripts/check-localizations.py
       - name: Build privileged helper
         # The helper isn't part of the SPM package (it's compiled by the Makefile with
         # a bridging header for the XPC audit token), so `swift test` doesn't cover it.

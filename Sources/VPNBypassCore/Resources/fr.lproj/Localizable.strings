@@ -540,3 +540,132 @@
 "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details." = "Les échecs sont des adresses que le système a refusées et, lors d'une application qui a résolu le DNS, des domaines qui n'ont pas été résolus. Réglages > Journaux donne les détails.";
 "Stop routing the 1 address?" = "Ne plus router la seule adresse ?";
 "Stop routing all %lld addresses?" = "Ne plus router les %lld adresses ?";
+
+/* ===== Assistant privilégié : réparation et erreurs ===== */
+"The privileged helper is not running — no routes are being enforced. Open Settings → Status to repair it." = "L'assistant privilégié ne tourne pas : aucune route n'est appliquée. Ouvrez Réglages → État pour le réparer.";
+"Can't refresh: the privileged helper is not running. Open Settings → Status to repair it." = "Actualisation impossible : l'assistant privilégié ne tourne pas. Ouvrez Réglages → État pour le réparer.";
+"The privileged helper isn't ready, so no routes could be applied." = "L'assistant privilégié n'est pas prêt, aucune route n'a donc pu être appliquée.";
+"Helper not running — nothing is being routed" = "L'assistant ne tourne pas : rien n'est routé";
+"Fix…" = "Réparer…";
+"Helper security pin could not be restored" = "Impossible de rétablir l'épinglage de sécurité de l'assistant";
+"Could not secure the helper. Please try installing again." = "Impossible de sécuriser l'assistant. Réessayez de l'installer.";
+"Cannot secure the helper: this app has no computable code signature (cdhash). Reinstall the app from the official DMG." = "Impossible de sécuriser l'assistant : la signature de code de cette app (cdhash) ne peut pas être calculée. Réinstallez l'app depuis le DMG officiel.";
+"Helper installed but its security pin did not persist. Please try installing again." = "L'assistant est installé, mais son épinglage de sécurité n'a pas été conservé. Réessayez de l'installer.";
+
+/* ===== Routes non appliquées ===== */
+"VPN Bypass isn't routing anything" = "VPN Bypass ne route rien";
+"Your configuration file could not be read, so no routes are being enforced. It has been left untouched at ~/Library/Application Support/VPNBypass/config.json — repair it, or import a saved configuration from Settings." = "Votre fichier de configuration n'a pas pu être lu, aucune route n'est donc appliquée. Il a été laissé intact dans ~/Library/Application Support/VPNBypass/config.json : réparez-le ou importez une configuration enregistrée depuis Réglages.";
+"VPN Only isn't available while GlobalProtect is connected. Its catch-all routes were removed so your traffic stays in the tunnel. Switch to Bypass mode." = "Le mode VPN uniquement n'est pas disponible tant que GlobalProtect est connecté. Ses routes générales ont été supprimées pour que votre trafic reste dans le tunnel. Passez en mode Contournement.";
+"No network gateway was detected, so no routes could be applied." = "Aucune passerelle réseau n'a été détectée, aucune route n'a donc pu être appliquée.";
+"VPN Only needs a connected VPN. Nothing is being routed through the VPN right now." = "Le mode VPN uniquement nécessite un VPN connecté. Rien n'est routé par le VPN pour l'instant.";
+
+/* ===== Barre des menus : icône, menu et Supprimer toutes les routes ===== */
+"VPN Bypass: helper error, nothing is being routed" = "VPN Bypass : erreur de l'assistant, rien n'est routé";
+"VPN Bypass: no VPN detected, nothing is being routed" = "VPN Bypass : aucun VPN détecté, rien n'est routé";
+"VPN Bypass — VPN Only: %lld destinations use the VPN, everything else is direct" = "VPN Bypass — VPN uniquement : %lld destinations passent par le VPN, tout le reste passe en direct";
+"VPN Bypass — Custom: %lld destinations routed by your rules" = "VPN Bypass — Personnalisé : %lld destinations routées par vos règles";
+"VPN Bypass — Bypass: %lld destinations skip the VPN, everything else is tunnelled" = "VPN Bypass — Contournement : %lld destinations contournent le VPN, tout le reste passe par le tunnel";
+"domain.com" = "domain.com";
+"Refreshing routes…" = "Actualisation des routes…";
+"Re-resolve DNS Now" = "Résoudre à nouveau le DNS maintenant";
+"Remove All Routes…" = "Supprimer toutes les routes…";
+"Remove Routes" = "Supprimer les routes";
+"VPN Entries" = "Entrées VPN";
+"Routes In Use" = "Routes utilisées";
+"No rules configured" = "Aucune règle configurée";
+"until you refresh routes, the VPN reconnects, or DNS is next refreshed" = "jusqu'à ce que vous actualisiez les routes, que le VPN se reconnecte ou que le DNS soit de nouveau actualisé";
+"until you refresh routes or the VPN reconnects" = "jusqu'à ce que vous actualisiez les routes ou que le VPN se reconnecte";
+"until you refresh routes or DNS is next refreshed" = "jusqu'à ce que vous actualisiez les routes ou que le DNS soit de nouveau actualisé";
+"until you refresh routes" = "jusqu'à ce que vous actualisiez les routes";
+"Your %@ and %@" = "Ce que vous avez listé (%1$@ et %2$@)";
+"Your %@" = "Ce que vous avez listé (%@)";
+"Everything this app sends around the VPN" = "Tout ce que cette app envoie hors du VPN";
+"%@ will go through the VPN %@." = "%1$@ passera par le VPN %2$@.";
+"VPN Only stops: all traffic follows your VPN's own routing %@." = "Le mode VPN uniquement s'arrête : tout le trafic suit le routage de votre VPN %@.";
+"Traffic your rules send direct or to a specific VPN will follow your VPN's own routing %@. Rules that use a proxy keep working." = "Le trafic que vos règles envoient en direct ou vers un VPN précis suivra le routage de votre VPN %@. Les règles qui passent par un proxy continuent de fonctionner.";
+
+/* ===== Réglages : page Routes (mode Personnalisé) ===== */
+"%lld/%lld active" = "%1$lld/%2$lld actives";
+"Point an app at a route: paste the copied shell exports into a shell, or the copied proxy URL into an app's proxy setting. A browser set to 127.0.0.1 and the port asks you to sign in: the user is vpnb, the password is the part between vpnb: and @ in the proxy URL." = "Pour faire passer une app par une route : collez les exports shell copiés dans un shell, ou l'URL du proxy copiée dans le réglage proxy de l'app. Un navigateur réglé sur 127.0.0.1 et le port demande de se connecter : l'utilisateur est vpnb, le mot de passe est la partie entre vpnb: et @ dans l'URL du proxy.";
+"System Routes" = "Routes système";
+"Your physical connection" = "Votre connexion physique";
+"Whatever tunnel is currently up" = "Le tunnel actuellement actif";
+"Detected automatically." = "Détecté automatiquement.";
+"No proxy routes yet" = "Aucune route proxy pour l'instant";
+"Add one to route specific traffic through a proxy, a Tailscale peer, or a specific VPN." = "Ajoutez-en une pour faire passer un trafic précis par un proxy, un pair Tailscale ou un VPN précis.";
+"Edit route" = "Modifier la route";
+"Delete route" = "Supprimer la route";
+"Upstream" = "Proxy amont";
+"Listening on" = "À l'écoute sur";
+"Listener starting…" = "Démarrage de l'écoute…";
+"Listener off" = "Écoute désactivée";
+"Edit Route" = "Modifier la route";
+"Name" = "Nom";
+"Type" = "Type";
+"HTTP CONNECT" = "HTTP CONNECT";
+"SOCKS5" = "SOCKS5";
+"Tailscale Peer" = "Pair Tailscale";
+"100.x.x.x" = "100.x.x.x";
+"No Tailscale peers detected — enter the peer's 100.x IP manually." = "Aucun pair Tailscale détecté : saisissez manuellement l'IP 100.x du pair.";
+"Upstream Host" = "Hôte du proxy amont";
+"proxy.example.com" = "proxy.example.com";
+"Proxy port on peer" = "Port du proxy sur le pair";
+"Upstream Port" = "Port du proxy amont";
+"Optional" = "Facultatif";
+"Runs a small forward proxy (e.g. tinyproxy) on a Tailscale peer; traffic on this route exits through that peer's internet connection. Set up the proxy on the peer first, listening on its Tailscale IP." = "Utilise un petit proxy de transfert (par ex. tinyproxy) sur un pair Tailscale ; le trafic de cette route sort par la connexion internet de ce pair. Configurez d'abord le proxy sur le pair, à l'écoute sur son IP Tailscale.";
+"Uses whichever VPN is active. Connect a second VPN to pin this route to a specific one." = "Utilise le VPN actif, quel qu'il soit. Connectez un second VPN pour attacher cette route à un VPN précis.";
+"Primary VPN (automatic)" = "VPN principal (automatique)";
+"e.g. Residential Proxy" = "ex. : Proxy résidentiel";
+"e.g. Home exit" = "ex. : Sortie maison";
+"e.g. Work VPN" = "ex. : VPN du travail";
+"e.g. Direct" = "ex. : Direct";
+"%@ · %@ — not connected" = "%1$@ · %2$@ — non connecté";
+
+/* ===== Réglages : page Règles (mode Personnalisé) ===== */
+"Routing Rules" = "Règles de routage";
+"Send specific destinations through specific routes. Rules are checked in order — the first match wins." = "Envoyez des destinations précises par des routes précises. Les règles sont vérifiées dans l'ordre : la première correspondance l'emporte.";
+"Drag to reorder — earlier rules win." = "Faites glisser pour réordonner : les règles placées plus haut l'emportent.";
+"No rules yet" = "Aucune règle pour l'instant";
+"Add a rule to send a domain, service, or IP range through a specific route." = "Ajoutez une règle pour envoyer un domaine, un service ou une plage d'IP par une route précise.";
+"Destinations that don't match any rule above use this route." = "Les destinations qui ne correspondent à aucune règle ci-dessus utilisent cette route.";
+"Edit rule" = "Modifier la règle";
+"Delete rule" = "Supprimer la règle";
+"Your Routes" = "Vos routes";
+"New Route…" = "Nouvelle route…";
+"Edit Rule" = "Modifier la règle";
+"Match" = "Correspondance";
+"Domain" = "Domaine";
+"Service" = "Service";
+"IP" = "IP";
+"CIDR" = "CIDR";
+"No services configured. Add one in the Services tab first." = "Aucun service configuré. Ajoutez-en d'abord un dans l'onglet Services.";
+"Pattern" = "Motif";
+"Route" = "Route";
+
+/* ===== Réglages : Domaines, Services, Général et À propos ===== */
+"e.g., example.com or 10.0.0.0/24" = "ex. : example.com ou 10.0.0.0/24";
+"e.g., example.com" = "ex. : example.com";
+"No entries configured" = "Aucune entrée configurée";
+"Add domains or IP ranges that should use VPN" = "Ajoutez les domaines ou plages d'IP qui doivent passer par le VPN";
+"Switch to Bypass mode above to manage services." = "Passez en mode Contournement ci-dessus pour gérer les services.";
+"e.g. My Service" = "ex. : Mon service";
+"example.com" = "example.com";
+"DNS server" = "Serveur DNS";
+"Server address" = "Adresse du serveur";
+"Port" = "Port";
+"Username" = "Nom d'utilisateur";
+"Password" = "Mot de passe";
+"GitHub Issues" = "Tickets GitHub";
+
+/* ===== Noms et exemples identiques dans toutes les langues ===== */
+"English" = "English";
+"Español" = "Español";
+"Français" = "Français";
+"v%@" = "v%@";
+"SF" = "SF";
+"Sergio Fernández" = "Sergio Fernández";
+"Patreon" = "Patreon";
+"Thanks.dev" = "Thanks.dev";
+"geiser.cloud" = "geiser.cloud";
+"github.com/GeiserX" = "github.com/GeiserX";
+"© 2026 Sergio Fernández (GeiserX)" = "© 2026 Sergio Fernández (GeiserX)";

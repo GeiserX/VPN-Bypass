@@ -807,7 +807,7 @@ struct RuleEditorSheet: View {
 
     @ViewBuilder
     private func formField<F: View>(
-        label: String,
+        label: LocalizedStringKey,
         required: Bool,
         @ViewBuilder field: () -> F
     ) -> some View {

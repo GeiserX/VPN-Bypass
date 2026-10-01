@@ -279,7 +279,7 @@ extension RouteManager {
 struct SystemRouteRow: View {
     let icon: String
     let name: String
-    let subtitle: String
+    let subtitle: LocalizedStringKey
     let color: Color
 
     var body: some View {
@@ -592,7 +592,7 @@ struct RouteEditorSheet: View {
     private var isEditing: Bool { editingRoute != nil }
 
     /// A neutral, type-appropriate name hint (never a specific provider).
-    private var namePlaceholder: String {
+    private var namePlaceholder: LocalizedStringKey {
         switch egress {
         case .proxyHTTP, .proxySOCKS5: return "e.g. Residential Proxy"
         case .tailscaleExit:           return "e.g. Home exit"
@@ -852,7 +852,7 @@ struct RouteEditorSheet: View {
 
     @ViewBuilder
     private func formField<F: View>(
-        label: String,
+        label: LocalizedStringKey,
         required: Bool,
         @ViewBuilder field: () -> F
     ) -> some View {
