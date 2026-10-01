@@ -205,7 +205,6 @@ struct MenuContent: View {
     @State private var isAddingDomain = false
     /// Why the last quick-add saved nothing, shown under the field, which stays open.
     @State private var quickAddError: AddDomainFeedback?
-    @State private var isVerifying = false
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
     /// A test hosting the dropdown passes false, so the real VPN check does not run against
@@ -411,7 +410,9 @@ struct MenuContent: View {
             
             // The last Verify Routes: what it checked, failures first
             if let run = routeManager.lastRouteCheck {
-                RouteCheckCard(run: run, onShowLogs: { openSettings(page: .logs) })
+                RouteCheckCard(run: run,
+                               logsHoldResults: run.logsHoldResults(oldestLogAt: routeManager.recentLogs.last?.timestamp),
+                               onShowLogs: { openSettings(page: .logs) })
             }
             
             actionButtons
@@ -470,7 +471,7 @@ struct MenuContent: View {
                     verify()
                 } label: {
                     Group {
-                        if isVerifying {
+                        if routeManager.isCheckingRoutes {
                             ProgressView()
                                 .controlSize(.small)
                                 .scaleEffect(0.7)
@@ -484,13 +485,13 @@ struct MenuContent: View {
                     .cornerRadius(6)
                 }
                 .buttonStyle(.plain)
-                .disabled(isVerifying || routeManager.activeRoutes.isEmpty)
+                .disabled(routeManager.isCheckingRoutes || routeManager.activeRoutes.isEmpty)
                 .help(String(localized: "Verify Routes"))
                 .accessibilityLabel(String(localized: "Verify Routes"))
 
                 Menu {
                     Button(String(localized: "Verify Routes")) { verify() }
-                        .disabled(isVerifying || routeManager.activeRoutes.isEmpty)
+                        .disabled(routeManager.isCheckingRoutes || routeManager.activeRoutes.isEmpty)
                     Button(String(localized: "Re-resolve DNS Now")) { routeManager.forceDNSRefresh() }
                         .disabled(isBusy)
                     Divider()
@@ -551,12 +552,8 @@ struct MenuContent: View {
     }
 
     private func verify() {
-        guard !isVerifying else { return }
-        isVerifying = true
-        Task {
-            await routeManager.verifyRoutes()
-            isVerifying = false
-        }
+        guard !routeManager.isCheckingRoutes else { return }
+        Task { await routeManager.verifyRoutes() }
     }
 
     // MARK: - Loading Content
@@ -927,14 +924,25 @@ enum RouteCheck {
         let sources: [String: String]
         let singleAddresses: Int
         let routeCount: Int
+        /// When the check started logging: its result lines are all at or after this.
+        let logsFrom: Date
         let at: Date
 
-        init(plan: Plan, results: [RouteVerificationResult], at: Date) {
+        init(plan: Plan, results: [RouteVerificationResult], logsFrom: Date, at: Date) {
             self.results = results
             self.sources = plan.sources
             self.singleAddresses = plan.singleAddresses
             self.routeCount = plan.routeCount
+            self.logsFrom = logsFrom
             self.at = at
+        }
+
+        /// Whether the log still has every result line. It keeps the newest 200 lines and the
+        /// Logs page can empty it, and both drop the oldest lines first, so the lines are all
+        /// there while the oldest line left is no newer than the check.
+        func logsHoldResults(oldestLogAt: Date?) -> Bool {
+            guard let oldest = oldestLogAt else { return false }
+            return oldest <= logsFrom
         }
 
         var failures: [RouteVerificationResult] { results.filter { !$0.isReachable } }
@@ -981,7 +989,9 @@ enum RouteCheck {
         }
         // Ranges were left out only when there are fewer single addresses than routes; when the
         // sample size alone cut the list, the two numbers already say so.
-        return Scope(main: String(localized: "Checked \(checked) of \(routeCount) routes"),
+        return Scope(main: checked == 1
+                        ? String(localized: "Checked 1 of \(routeCount) routes")
+                        : String(localized: "Checked \(checked) of \(routeCount) routes"),
                      qualifier: singleAddresses < routeCount ? String(localized: "(single addresses only)") : nil)
     }
 
@@ -1954,6 +1964,8 @@ struct RoutedBySourceCard: View {
 /// The last Verify Routes: what it checked, the failures first, then one line for the rest.
 struct RouteCheckCard: View {
     let run: RouteCheck.Run
+    /// False once the log has lost the check's lines, so the link would open a page without them.
+    let logsHoldResults: Bool
     let onShowLogs: () -> Void
 
     var body: some View {
@@ -2032,8 +2044,8 @@ struct RouteCheckCard: View {
                 }
             }
 
-            // Every result is one line in Settings > Logs.
-            if !run.results.isEmpty {
+            // Every result is one line in Settings > Logs, until the log drops them.
+            if !run.results.isEmpty && logsHoldResults {
                 Button(action: onShowLogs) {
                     Text(RouteCheck.logsLink(run.results.count))
                         .font(.system(size: 11))

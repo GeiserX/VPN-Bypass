@@ -408,6 +408,7 @@
 "Checked the only route" = "Checked the only route";
 "Checked all %lld routes" = "Checked all %lld routes";
 "Checked %lld of %lld routes" = "Checked %lld of %lld routes";
+"Checked 1 of %lld routes" = "Checked 1 of %lld routes";
 "(single addresses only)" = "(single addresses only)";
 "All reachable." = "All reachable.";
 "1 not reachable" = "1 not reachable";

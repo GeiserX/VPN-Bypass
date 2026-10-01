@@ -29,6 +29,9 @@ final class RouteManager: ObservableObject {
     /// Bumped when a check starts and when routes are removed, so a check still pinging then
     /// does not publish a card for routes that are gone.
     private var routeCheckGeneration = 0
+    /// True while the current check is pinging, whether the menu or an apply started it. The
+    /// menu's Verify icon shows a spinner and stays off meanwhile.
+    @Published private(set) var isCheckingRoutes = false
     /// The last check's results by address, for the Info page.
     var routeVerificationResults: [String: RouteVerificationResult] {
         Dictionary((lastRouteCheck?.results ?? []).map { ($0.destination, $0) }, uniquingKeysWith: { first, _ in first })
@@ -4575,6 +4578,8 @@ final class RouteManager: ObservableObject {
     /// result, so the card's "Show all results in Logs" has them all.
     func verifyRoutes() async {
         log(.info, "Verifying routes...")
+        // Every result line is logged after this, so the card can tell when the log lost them.
+        let logsFrom = Date()
         clearRouteCheck()
         let generation = routeCheckGeneration
 
@@ -4585,6 +4590,9 @@ final class RouteManager: ObservableObject {
             vpnOnly: config.routingMode == .vpnOnly,
             isSingleAddress: { self.isValidIP($0) })
         guard plan.routeCount > 0 else { return }
+        isCheckingRoutes = true
+        // A check dropped by a newer one must not turn the newer one's spinner off.
+        defer { if generation == routeCheckGeneration { isCheckingRoutes = false } }
 
         var results: [RouteVerificationResult] = []
         for destination in plan.destinations {
@@ -4606,7 +4614,7 @@ final class RouteManager: ObservableObject {
             log(.info, "Route check: result dropped, routes were removed or another check started while it ran")
             return
         }
-        lastRouteCheck = RouteCheck.Run(plan: plan, results: results, at: Date())
+        lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: logsFrom, at: Date())
 
         let checked = results.count
         let failedCount = results.filter { !$0.isReachable }.count
@@ -4624,6 +4632,7 @@ final class RouteManager: ObservableObject {
     func clearRouteCheck() {
         routeCheckGeneration += 1
         lastRouteCheck = nil
+        isCheckingRoutes = false
     }
 
     func verifyRoute(_ destination: String) async -> RouteVerificationResult {

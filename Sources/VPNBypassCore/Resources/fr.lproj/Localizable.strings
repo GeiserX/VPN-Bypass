@@ -408,6 +408,7 @@
 "Checked the only route" = "La seule route a été vérifiée";
 "Checked all %lld routes" = "Les %lld routes ont été vérifiées";
 "Checked %lld of %lld routes" = "%1$lld routes vérifiées sur %2$lld";
+"Checked 1 of %lld routes" = "1 route vérifiée sur %lld";
 "(single addresses only)" = "(adresses individuelles uniquement)";
 "All reachable." = "Toutes sont accessibles.";
 "1 not reachable" = "1 inaccessible";

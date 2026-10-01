@@ -87,6 +87,13 @@ final class RouteCheckTests: XCTestCase {
         XCTAssertEqual(RouteCheck.scope(checked: 1, singleAddresses: 1, routeCount: 1).text, "Checked the only route.")
     }
 
+    /// One address out of several routes takes the singular form, which es and fr spell
+    /// differently ("1 route vérifiée sur 2", never "1 routes vérifiées").
+    func testCheckingOneOfSeveralRoutes() {
+        XCTAssertEqual(RouteCheck.scope(checked: 1, singleAddresses: 1, routeCount: 2).text,
+                       "Checked 1 of 2 routes (single addresses only).")
+    }
+
     func testOnlyRangesMeansNothingToCheck() {
         XCTAssertEqual(RouteCheck.scope(checked: 0, singleAddresses: 0, routeCount: 3).text,
                        "Nothing to check: all 3 routes are address ranges, which ping cannot test.")
@@ -103,7 +110,7 @@ final class RouteCheckTests: XCTestCase {
         var results = (0..<10).map { result("10.0.0.\($0)", ok: true, ms: Double($0 + 20)) }
         results[7] = result("10.0.0.7", ok: false)
         results[2] = result("10.0.0.2", ok: false)
-        let run = RouteCheck.Run(plan: plan, results: results, at: Date())
+        let run = RouteCheck.Run(plan: plan, results: results, logsFrom: Date(), at: Date())
         XCTAssertEqual(run.failures.map(\.destination), ["10.0.0.2", "10.0.0.7"])
         XCTAssertEqual(run.reachable.map(\.destination),
                        ["10.0.0.0", "10.0.0.1", "10.0.0.3", "10.0.0.4", "10.0.0.5", "10.0.0.6", "10.0.0.8", "10.0.0.9"])
@@ -125,6 +132,19 @@ final class RouteCheckTests: XCTestCase {
         XCTAssertEqual(RouteCheck.reachable(9), "9 reachable")
         XCTAssertEqual(RouteCheck.logsLink(1), "Show the result in Logs")
         XCTAssertEqual(RouteCheck.logsLink(10), "Show all 10 results in Logs")
+    }
+
+    /// The Logs link shows only while the log still holds every result line: it keeps the newest
+    /// 200 lines and can be emptied, and both drop the oldest first.
+    func testTheLogsLinkNeedsTheResultLinesInTheLog() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        let plan = RouteCheck.Plan(destinations: [], sources: [:], singleAddresses: 1, routeCount: 1)
+        let run = RouteCheck.Run(plan: plan, results: [result("1.1.1.1", ok: true)], logsFrom: start,
+                                 at: start.addingTimeInterval(5))
+        XCTAssertTrue(run.logsHoldResults(oldestLogAt: start.addingTimeInterval(-60)))
+        XCTAssertTrue(run.logsHoldResults(oldestLogAt: start))
+        XCTAssertFalse(run.logsHoldResults(oldestLogAt: start.addingTimeInterval(1)), "older lines were trimmed")
+        XCTAssertFalse(run.logsHoldResults(oldestLogAt: nil), "the log was emptied")
     }
 
     // MARK: Translations
@@ -155,6 +175,7 @@ final class RouteCheckTests: XCTestCase {
             "Nothing to check: the only route is an address range, which ping cannot test",
             "Nothing to check: all %lld routes are address ranges, which ping cannot test",
             "Checked the only route", "Checked all %lld routes", "Checked %lld of %lld routes",
+            "Checked 1 of %lld routes",
             "(single addresses only)", "Route check", "All reachable.",
             "1 not reachable", "%lld not reachable", "1 reachable", "%lld reachable",
             "%lld ms", "%lld to %lld ms", "Show the result in Logs", "Show all %lld results in Logs",
@@ -173,6 +194,10 @@ final class RouteCheckTests: XCTestCase {
             XCTAssertTrue(checked.contains("10") && checked.contains("62"), "\(lang): \(checked)")
             XCTAssertLessThan(try XCTUnwrap(checked.range(of: "10")).lowerBound,
                               try XCTUnwrap(checked.range(of: "62")).lowerBound, "\(lang): \(checked)")
+        }
+        for (lang, expected) in [("es", "Comprobada 1 de 2 rutas"), ("fr", "1 route vérifiée sur 2")] {
+            let bundle = try XCTUnwrap(Bundle(url: core.appendingPathComponent("Resources/\(lang).lproj")), lang)
+            XCTAssertEqual(String(localized: "Checked 1 of \(2) routes", bundle: bundle), expected)
         }
     }
 }
@@ -197,7 +222,7 @@ final class VerifyRoutesLoggingTests: XCTestCase {
         rm.activeRoutes = savedRoutes
         rm.config = savedConfig
         rm.recentLogs = savedLogs
-        rm.lastRouteCheck = nil
+        rm.clearRouteCheck()
     }
 
     private func route(_ dest: String, _ source: String) -> RouteManager.ActiveRoute {
@@ -220,6 +245,60 @@ final class VerifyRoutesLoggingTests: XCTestCase {
         let lines = rm.recentLogs.map(\.message)
         XCTAssertTrue(lines.contains { $0.hasPrefix("Route check: 127.0.0.1 (Loopback) reachable") }, "\(lines)")
         XCTAssertEqual(lines.first, "Route check: all 1 reachable (checked 1 of 2 routes, single addresses only)")
+
+        // The Logs link holds while the lines are there, and goes once the Logs page empties it.
+        XCTAssertEqual(run?.logsHoldResults(oldestLogAt: rm.recentLogs.last?.timestamp), true)
+        rm.recentLogs.removeAll()
+        XCTAssertEqual(run?.logsHoldResults(oldestLogAt: rm.recentLogs.last?.timestamp), false)
+        rm.log(.info, "later")
+        XCTAssertEqual(run?.logsHoldResults(oldestLogAt: rm.recentLogs.last?.timestamp), false)
+    }
+
+    /// Waits until verifyRoutes has logged its start `count` times; it logs before its first
+    /// await, so after that it is waiting on ping.
+    private func waitForStart(_ rm: RouteManager, count: Int = 1) async {
+        var spins = 0
+        while rm.recentLogs.filter({ $0.message == "Verifying routes..." }).count < count {
+            spins += 1
+            if spins > 10_000 { XCTFail("the check never started"); return }
+            await Task.yield()
+        }
+    }
+
+    /// The spinner follows a check, whoever started it: on while it pings, off once it is done.
+    func testIsCheckingRoutesWhileTheCheckRuns() async {
+        let rm = RouteManager.shared
+        rm.config.routingMode = .bypass
+        rm.activeRoutes = [route("127.0.0.1", "Loopback")]
+        rm.recentLogs = []
+
+        let check = Task { await rm.verifyRoutes() }
+        await waitForStart(rm)
+        XCTAssertTrue(rm.isCheckingRoutes)
+        await check.value
+        XCTAssertFalse(rm.isCheckingRoutes)
+    }
+
+    /// A check dropped by a newer one must not turn the newer one's spinner off when it ends.
+    /// The newer one pings a TEST-NET address that never answers, so it is still running then.
+    func testADroppedCheckLeavesTheNewerSpinnerOn() async {
+        let rm = RouteManager.shared
+        rm.config.routingMode = .bypass
+        rm.activeRoutes = [route("127.0.0.1", "Loopback")]
+        rm.recentLogs = []
+
+        let older = Task { await rm.verifyRoutes() }
+        await waitForStart(rm)
+        rm.activeRoutes = [route("192.0.2.1", "Nowhere")]
+        let newer = Task { await rm.verifyRoutes() }
+        await waitForStart(rm, count: 2)
+
+        await older.value
+        XCTAssertTrue(rm.isCheckingRoutes, "the dropped check turned the spinner off")
+        XCTAssertNil(rm.lastRouteCheck)
+        await newer.value
+        XCTAssertFalse(rm.isCheckingRoutes)
+        XCTAssertEqual(rm.lastRouteCheck?.results.map(\.destination), ["192.0.2.1"])
     }
 
     /// Only ranges: nothing is pinged, and the card and the log say why.
@@ -252,10 +331,14 @@ final class VerifyRoutesLoggingTests: XCTestCase {
             XCTAssertLessThan(spins, 10_000, "the check never started")
             await Task.yield()
         }
+        XCTAssertTrue(rm.isCheckingRoutes)
         rm.clearRouteCheck()
+        // Its result will be dropped, so nothing is checking any more.
+        XCTAssertFalse(rm.isCheckingRoutes)
         await check.value
 
         XCTAssertNil(rm.lastRouteCheck)
+        XCTAssertFalse(rm.isCheckingRoutes)
         XCTAssertEqual(rm.recentLogs.first?.message,
                        "Route check: result dropped, routes were removed or another check started while it ran")
     }
