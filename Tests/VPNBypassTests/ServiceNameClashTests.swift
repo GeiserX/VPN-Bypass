@@ -3,7 +3,9 @@
 // because routes are tracked by that name: the two would share one source, the dropdown would
 // group both under one row, and removing one could remove the other's routes. Covers the pure
 // check, RouteManager's add, update and undo, config import, and that a config.json already holding
-// such a name still loads. The VPN is never connected here, so nothing touches the kernel.
+// such a name still loads, the Bypass list refusing a service's name, and the put-back of a shared
+// source's routes when a custom service leaves it. Where the VPN is marked connected no gateway
+// is known, so nothing touches the kernel.
 
 import XCTest
 @testable import VPNBypassCore
@@ -14,6 +16,7 @@ final class ServiceNameClashTests: RouteManagerTestCase {
     private var savedConfig: RouteManager.Config!
     private var savedLogs: [RouteManager.LogEntry] = []
     private var savedVPNConnected = false
+    private var savedGateway: String?
     private var tempFiles: [URL] = []
 
     override func setUp() {
@@ -21,6 +24,7 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         savedConfig = rm.config
         savedLogs = rm.recentLogs
         savedVPNConnected = rm.isVPNConnected
+        savedGateway = rm.localGateway
         rm.isVPNConnected = false
         var cfg = RouteManager.Config()
         cfg.routingMode = .bypass
@@ -35,6 +39,7 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         rm.config = savedConfig
         rm.recentLogs = savedLogs
         rm.isVPNConnected = savedVPNConnected
+        rm.localGateway = savedGateway
         rm.cancelAllRetries()
         super.tearDown()
     }
@@ -181,6 +186,104 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         XCTAssertTrue(rm.config.domains.contains { $0.domain == "example.com" })
     }
 
+    // MARK: - The Bypass list, the other way round
+
+    func testTheBypassListRefusesADomainAServiceHasAsItsName() {
+        rm.config.services.append(custom("custom_s", "Shop.Example"))
+        XCTAssertEqual(rm.addDomain("  SHOP.example "),
+                       .failure(.nameTakenByService(value: "shop.example", service: "Shop.Example")))
+        XCTAssertEqual(rm.config.domains.map(\.domain), ["example.com"], "nothing was added")
+        XCTAssertNoThrow(try rm.addDomain("other.example").get(), "a name no service has still goes in")
+    }
+
+    func testUndoDoesNotBringBackADomainAServiceTookAsItsNameSince() {
+        let deleted = DomainEntry(domain: "shop.example")
+        rm.config.services.append(custom("custom_s", "shop.example"))
+        XCTAssertFalse(rm.undo(.domain(deleted, index: 0, list: .bypass)))
+        XCTAssertEqual(rm.config.domains.map(\.domain), ["example.com"])
+        rm.config.services.removeAll { $0.id == "custom_s" }
+        XCTAssertTrue(rm.undo(.domain(deleted, index: 0, list: .bypass)), "once the name is free it comes back")
+    }
+
+    // MARK: - Getting out of a clash an old config holds
+
+    func testTheRoutesSharingASourceAreTheEnabledOwnersWithExactlyThatName() {
+        let netflix = try! XCTUnwrap(rm.config.services.firstIndex { $0.id == "netflix" })
+        rm.config.services[netflix].enabled = true
+        rm.config.services.append(custom("custom_n", "Netflix"))
+        rm.config.services.append(custom("custom_e", "example.com"))
+
+        var sharers = rm.routeSourceSharers("Netflix", excludingService: "custom_n")
+        XCTAssertEqual(sharers.services.map(\.id), ["netflix"])
+        XCTAssertTrue(sharers.domains.isEmpty)
+        sharers = rm.routeSourceSharers("example.com", excludingService: "custom_e")
+        XCTAssertTrue(sharers.services.isEmpty)
+        XCTAssertEqual(sharers.domains.map(\.domain), ["example.com"])
+        XCTAssertTrue(rm.routeSourceSharers("netflix", excludingService: "custom_x").services.isEmpty,
+                      "routes are tracked by the exact name, so another case shares nothing")
+
+        rm.config.services[netflix].enabled = false
+        rm.config.domains[0].enabled = false
+        XCTAssertTrue(rm.routeSourceSharers("Netflix", excludingService: "custom_n").services.isEmpty, "an owner that is off has no routes")
+        XCTAssertTrue(rm.routeSourceSharers("example.com", excludingService: "custom_e").domains.isEmpty)
+
+        rm.config.services[netflix].enabled = true
+        rm.config.routingMode = .vpnOnly
+        XCTAssertTrue(rm.routeSourceSharers("Netflix", excludingService: "custom_n").services.isEmpty, "no Bypass routes in VPN Only")
+    }
+
+    private func waitForTheGate() async {
+        var polls = 0
+        while rm.isApplyingRoutes && polls < 100 {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            polls += 1
+        }
+        XCTAssertFalse(rm.isApplyingRoutes, "a route operation never finished")
+    }
+
+    private let notPutBack = "Routes of Netflix not put back: no local gateway detected. Try Refresh Routes."
+
+    /// Deleting the custom "Netflix" takes out every route under the source "Netflix", the
+    /// built-in one's too, so the delete puts those back. No gateway is known here, so the
+    /// put-back stops at its first step and logs it; nothing reaches the routing table.
+    func testDeletingACustomServiceThatSharedANamePutsTheOtherOwnersRoutesBack() async {
+        let netflix = try! XCTUnwrap(rm.config.services.firstIndex { $0.id == "netflix" })
+        rm.config.services[netflix].enabled = true
+        rm.config.services.append(custom("custom_n", "Netflix"))
+        rm.isVPNConnected = true
+        rm.localGateway = nil
+        rm.recentLogs = []
+
+        rm.removeCustomService("custom_n")
+        await waitForTheGate()
+        XCTAssertFalse(rm.config.services.contains { $0.id == "custom_n" })
+        XCTAssertTrue(rm.recentLogs.contains { $0.message == notPutBack }, rm.recentLogs.map(\.message).joined(separator: "\n"))
+    }
+
+    func testRenamingACustomServiceThatSharedANamePutsTheOtherOwnersRoutesBack() async {
+        let netflix = try! XCTUnwrap(rm.config.services.firstIndex { $0.id == "netflix" })
+        rm.config.services[netflix].enabled = true
+        rm.config.services.append(custom("custom_n", "Netflix"))
+        rm.isVPNConnected = true
+        rm.localGateway = nil
+        rm.recentLogs = []
+
+        XCTAssertNil(rm.updateCustomService(id: "custom_n", name: "My Netflix", domains: ["custom_n.test"], ipRanges: []))
+        await waitForTheGate()
+        XCTAssertTrue(rm.recentLogs.contains { $0.message == notPutBack }, rm.recentLogs.map(\.message).joined(separator: "\n"))
+    }
+
+    func testDeletingACustomServiceWithAFreeNamePutsNothingBack() async {
+        rm.config.services.append(custom("custom_w", "Work Tools"))
+        rm.isVPNConnected = true
+        rm.localGateway = nil
+        rm.recentLogs = []
+
+        rm.removeCustomService("custom_w")
+        await waitForTheGate()
+        XCTAssertFalse(rm.recentLogs.contains { $0.message.contains("not put back") || $0.message.hasPrefix("Putting back") })
+    }
+
     // MARK: - The lines in Spanish and French
 
     private func lproj(_ language: String) throws -> Bundle {
@@ -200,6 +303,13 @@ final class ServiceNameClashTests: RouteManagerTestCase {
             "Nothing was imported. The custom service \u{201C}Mine\u{201D} has the same name as the service \u{201C}Netflix\u{201D}. Rename it in the file and import again.",
             "Nothing was imported. The custom service \u{201C}Mine\u{201D} has the same name as example.com on the Bypass list. Rename it in the file and import again.",
         ])
+        let taken = AddDomainError.nameTakenByService(value: "shop.example", service: "Shop")
+        XCTAssertEqual(taken.message(in: en), "\u{201C}Shop\u{201D} is the name of a service, and the two would share routes. Add a different domain.")
+        for bundle in [es, fr] {
+            XCTAssertNotEqual(taken.message(in: bundle), taken.message(in: en))
+            XCTAssertTrue(taken.message(in: bundle).contains("Shop"))
+            XCTAssertFalse(taken.message(in: bundle).contains("%"))
+        }
         XCTAssertEqual(ServiceNameClash.service(name: "Netflix").message(in: es),
                        "Ya existe un servicio llamado \u{201C}Netflix\u{201D}. Elige otro nombre para que sus rutas no se mezclen.")
         for (name, bundle) in [("es", es), ("fr", fr)] {

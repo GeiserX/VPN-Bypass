@@ -3,8 +3,8 @@
 // service's name, or the domain itself for a Bypass list entry. A custom service named like
 // another service or a listed domain shares that source with it, so the dropdown groups both
 // sets of routes under one row and removing one can remove the other's routes. The Settings
-// editor, config import and Undo refuse such a name; a config.json that already holds one still
-// loads as before.
+// editor, config import and Undo refuse such a name, and the Bypass list refuses a domain a
+// service has as its name; a config.json that already holds one still loads as before.
 
 import Foundation
 
@@ -43,6 +43,15 @@ enum ServiceNameClash: Error, Equatable {
             }
         }
         return nil
+    }
+
+    /// The service whose name is `name`, ignoring case and the spaces around it, or nil. The
+    /// Bypass list asks before it takes a domain, because the entry's routes would be tracked
+    /// under the same source as that service's.
+    static func service(named name: String, in services: [ServiceEntry]) -> ServiceEntry? {
+        let key = normalized(name)
+        guard !key.isEmpty else { return nil }
+        return services.first { normalized($0.name) == key }
     }
 
     private static func normalized(_ value: String) -> String {

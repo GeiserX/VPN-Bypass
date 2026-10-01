@@ -379,6 +379,7 @@
 "%@ is not an IP range the app can route. Write it as 10.0.0.0/24, with a prefix from /2 to /32." = "%@ n'est pas une plage IP que l'app peut router. Écrivez-la sous la forme 10.0.0.0/24, avec un préfixe de /2 à /32.";
 "%@ would clash with the VPN's own catch-all routes. Use a prefix from /2 to /32." = "%@ entrerait en conflit avec les routes générales du VPN. Utilisez un préfixe de /2 à /32.";
 "%@ is already on your %@ list." = "%1$@ figure déjà dans votre liste %2$@.";
+"“%@” is the name of a service, and the two would share routes. Add a different domain." = "« %@ » est le nom d'un service et les deux partageraient leurs routes. Ajoutez un autre domaine.";
 "Added the range %@ to your %@ list." = "Plage %1$@ ajoutée à votre liste %2$@.";
 "Added %@ to your %@ list." = "%1$@ ajouté à votre liste %2$@.";
 "Added %@, from the link you pasted." = "%@ ajouté, à partir du lien collé.";

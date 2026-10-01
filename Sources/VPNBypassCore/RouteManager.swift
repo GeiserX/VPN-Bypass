@@ -3654,6 +3654,11 @@ final class RouteManager: ObservableObject {
             log(.warning, "Domain \(cleaned) already exists")
             return .failure(.alreadyListed(value: cleaned, list: .bypass))
         }
+        if let service = ServiceNameClash.service(named: cleaned, in: config.services) {
+            let error = AddDomainError.nameTakenByService(value: cleaned, service: service.name)
+            log(.warning, error.message)
+            return .failure(error)
+        }
 
         let entry = DomainEntry(domain: cleaned)
         config.domains.append(entry)
@@ -3666,11 +3671,16 @@ final class RouteManager: ObservableObject {
     /// Puts back a Bypass entry that a delete in Settings took out: the same id, switch and
     /// place in the list. Its routes go in by the same path as `addDomain`'s. Returns false,
     /// and changes nothing, when the list holds that name again (added back by hand or
-    /// through `vpnb`) or the delete has not finished taking it out.
+    /// through `vpnb`), a service has taken it as its name since, or the delete has not
+    /// finished taking it out.
     @discardableResult
     func restoreDomain(_ entry: DomainEntry, at index: Int) -> Bool {
         guard !config.domains.contains(where: { $0.id == entry.id || $0.domain == entry.domain }) else {
             log(.warning, "Domain \(entry.domain) is already on the list, nothing to restore")
+            return false
+        }
+        if let service = ServiceNameClash.service(named: entry.domain, in: config.services) {
+            log(.warning, "Domain \(entry.domain) not restored: \(AddDomainError.nameTakenByService(value: entry.domain, service: service.name).message)")
             return false
         }
         config.domains.insert(entry, at: min(max(index, 0), config.domains.count))
@@ -4425,6 +4435,7 @@ final class RouteManager: ObservableObject {
                     }
                 }
                 await applyRoutesForService(config.services[index])
+                await reapplyRoutesSharing(oldName, excludingService: id)
                 if config.manageHostsFile { await updateHostsFile() }
             }
         }
@@ -4452,8 +4463,45 @@ final class RouteManager: ObservableObject {
             }
             config.services.remove(at: index)
             saveConfig()
+            await reapplyRoutesSharing(name, excludingService: serviceId)
             if config.manageHostsFile { await updateHostsFile() }
             log(.info, "Removed custom service: \(name)")
+        }
+    }
+
+    /// The other services and Bypass entries whose routes are tracked under `source`, switched
+    /// on and live. Names are unique now, but a config.json from before can still hold a custom
+    /// service named exactly like a built-in service or a listed domain.
+    func routeSourceSharers(_ source: String, excludingService id: String) -> (services: [ServiceEntry], domains: [DomainEntry]) {
+        guard bypassListIsLive else { return ([], []) }
+        return (config.services.filter { $0.id != id && $0.enabled && $0.name == source },
+                config.domains.filter { $0.enabled && $0.domain == source })
+    }
+
+    /// `removeRoutesForSource` takes out every route under a source. When a custom service is
+    /// renamed or deleted, that also takes out the routes of anything else with its old name
+    /// (see `routeSourceSharers`); this puts those back. Runs inside the caller's route
+    /// operation.
+    private func reapplyRoutesSharing(_ source: String, excludingService id: String) async {
+        guard isVPNConnected else { return }
+        let sharers = routeSourceSharers(source, excludingService: id)
+        guard !sharers.services.isEmpty || !sharers.domains.isEmpty else { return }
+        guard let gateway = localGateway else {
+            log(.warning, "Routes of \(source) not put back: no local gateway detected. Try Refresh Routes.")
+            return
+        }
+        log(.info, "Putting back the routes of \(source), which shared its name with the custom service just changed")
+        for service in sharers.services {
+            await applyRoutesForService(service, gateway: gateway)
+        }
+        for entry in sharers.domains {
+            let epoch = routeEpoch
+            guard let routes = await applyRoutesForDomain(entry.domain, gateway: gateway, source: entry.domain) else { continue }
+            guard routeEpoch == epoch else {
+                await unstrandRoutes(attempted: Set(routes.map { $0.destination }), addFailed: [])
+                return
+            }
+            activeRoutes.append(contentsOf: routes)
         }
     }
 
@@ -5603,6 +5651,9 @@ enum AddDomainError: Error, Equatable {
     case catchAllRange(input: String)
     /// The cleaned value is already on the list.
     case alreadyListed(value: String, list: DomainList)
+    /// A service has the cleaned value as its name, so the entry's routes would share its
+    /// source (see `ServiceNameClash`).
+    case nameTakenByService(value: String, service: String)
 
     /// One line for under the add field, in the user's words and the app's language.
     var message: String { message(in: .main) }
@@ -5623,6 +5674,8 @@ enum AddDomainError: Error, Equatable {
             return String(localized: "\(input) would clash with the VPN's own catch-all routes. Use a prefix from /2 to /32.", bundle: bundle)
         case .alreadyListed(let value, let list):
             return String(localized: "\(value) is already on your \(list.displayName(in: bundle)) list.", bundle: bundle)
+        case .nameTakenByService(_, let service):
+            return String(localized: "\u{201C}\(service)\u{201D} is the name of a service, and the two would share routes. Add a different domain.", bundle: bundle)
         }
     }
 }
