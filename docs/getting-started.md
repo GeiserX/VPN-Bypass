@@ -53,7 +53,7 @@ Switch on a service there, or type a site into the field and press Return. "All 
 
 - the pill reads ON;
 - the menu bar mark shows its arrow head (it is two plain lines and a bar while nothing is routed);
-- the question gives way to the normal dropdown, and the service or domain appears under Skipping the VPN with its route count.
+- the question gives way to the normal dropdown, and the service or domain appears under Skipping the VPN with how many addresses it routes.
 
 If the pill reads NOT ENFORCING, the helper is not running; Settings > Status shows its state, with an Install, Update or Retry button; the dropdown's Fix… button opens it. If macOS says the app is damaged, see [Troubleshooting](troubleshooting.md#app-wont-open-damaged-error-macos-gatekeeper).
 

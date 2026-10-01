@@ -46,7 +46,7 @@ struct MenuBarLabel: View {
         }
         let count = routeManager.uniqueRouteCount
         guard !routeManager.activeRoutes.isEmpty else {
-            return String(localized: "VPN Bypass: VPN connected but no routes are being enforced")
+            return String(localized: "VPN Bypass: VPN connected but nothing is being routed")
         }
         switch routeManager.config.routingMode {
         case .vpnOnly:
@@ -634,8 +634,9 @@ struct MenuContent: View {
     
     // MARK: - Routes In Use Summary (Custom mode)
 
-    /// Custom mode: enabled routes that at least one enabled rule actually points at. Named
-    /// "Routes In Use" (not "Active Routes" — that title is the Logs tab's Route Health card).
+    /// Custom mode: enabled routes that at least one enabled rule actually points at. On screen
+    /// "route" means only these ways out (proposal 16 of #119); the kernel entries the app
+    /// installs are "addresses".
     private var routesInUseSummary: some View {
         let routesWithRules = routeManager.config.routes.filter { route in
             route.enabled && routeManager.config.rules.contains { $0.enabled && $0.routeId == route.id }
@@ -854,7 +855,7 @@ enum DropdownCopy {
     }
 
     private static func routes(_ count: Int) -> String {
-        count == 1 ? String(localized: "1 route") : String(localized: "\(count) routes")
+        count == 1 ? String(localized: "1 address") : String(localized: "\(count) addresses")
     }
 
     /// The outcome the result line shows, or nil to show none. A removal is a claim about what
@@ -874,20 +875,20 @@ enum DropdownCopy {
         switch outcome.kind {
         case .applied:
             if outcome.routeCount == 0 && outcome.failedCount == 0 {
-                return (String(localized: "No routes to install, checked \(when)."), false)
+                return (String(localized: "No addresses to route, checked \(when)."), false)
             }
             if outcome.failedCount == 0 {
-                return (String(localized: "\(routes(outcome.routeCount)) applied \(when), none failed."), false)
+                return (String(localized: "\(routes(outcome.routeCount)) routed \(when), none failed."), false)
             }
-            return (String(localized: "\(routes(outcome.routeCount)) applied \(when), \(outcome.failedCount) failed."), true)
+            return (String(localized: "\(routes(outcome.routeCount)) routed \(when), \(outcome.failedCount) failed."), true)
         case .removedAll:
             if outcome.failedCount == 0 {
                 // No promise that Refresh brings them back: when the removal came from a mode
                 // switch or re-route whose apply was then refused (VPN Only under GlobalProtect),
                 // Refresh is refused the same way.
-                return (String(localized: "All routes removed \(when)."), true)
+                return (String(localized: "Removed all routed addresses \(when)."), true)
             }
-            return (String(localized: "Routes removed \(when), \(outcome.failedCount) could not be removed."), true)
+            return (String(localized: "Removed routed addresses \(when), \(outcome.failedCount) could not be removed."), true)
         }
     }
 
@@ -900,8 +901,8 @@ enum DropdownCopy {
     static func removeAllConfirmation(mode: Mode, routeCount: Int, serviceCount: Int, domainCount: Int,
                                       autoApplyOnVPN: Bool, autoDNSRefresh: Bool) -> (title: String, message: String) {
         let title = routeCount == 1
-            ? String(localized: "Remove the 1 route?")
-            : String(localized: "Remove all \(routeCount) routes?")
+            ? String(localized: "Stop routing the 1 address?")
+            : String(localized: "Stop routing all \(routeCount) addresses?")
         let until: String
         switch (autoApplyOnVPN, autoDNSRefresh && mode != .vpnOnly) {
         case (true, true):
@@ -1018,21 +1019,21 @@ enum RouteCheck {
     static func scope(checked: Int, singleAddresses: Int, routeCount: Int) -> Scope {
         if checked == 0 {
             return Scope(main: routeCount == 1
-                ? String(localized: "Nothing to check: the only route is an address range, which ping cannot test")
-                : String(localized: "Nothing to check: all \(routeCount) routes are address ranges, which ping cannot test"),
+                ? String(localized: "Nothing to check: the only address is a range, which ping cannot test")
+                : String(localized: "Nothing to check: all \(routeCount) addresses are ranges, which ping cannot test"),
                          qualifier: nil)
         }
         if checked >= routeCount {
             return Scope(main: checked == 1
-                ? String(localized: "Checked the only route")
-                : String(localized: "Checked all \(routeCount) routes"),
+                ? String(localized: "Checked the only address")
+                : String(localized: "Checked all \(routeCount) addresses"),
                          qualifier: nil)
         }
         // Ranges were left out only when there are fewer single addresses than routes; when the
         // sample size alone cut the list, the two numbers already say so.
         return Scope(main: checked == 1
-                        ? String(localized: "Checked 1 of \(routeCount) routes")
-                        : String(localized: "Checked \(checked) of \(routeCount) routes"),
+                        ? String(localized: "Checked 1 of \(routeCount) addresses")
+                        : String(localized: "Checked \(checked) of \(routeCount) addresses"),
                      qualifier: singleAddresses < routeCount ? String(localized: "(single addresses only)") : nil)
     }
 
@@ -1084,7 +1085,7 @@ enum RoutedBySource {
         let hiddenAddresses: Int
 
         var countText: String {
-            routeCount == 0 ? String(localized: "no routes") : routes(routeCount)
+            routeCount == 0 ? String(localized: "no addresses") : routes(routeCount)
         }
 
         var tooltip: String {
@@ -1212,7 +1213,7 @@ enum RoutedBySource {
     }
 
     private static func routes(_ count: Int) -> String {
-        count == 1 ? String(localized: "1 route") : String(localized: "\(count) routes")
+        count == 1 ? String(localized: "1 address") : String(localized: "\(count) addresses")
     }
 }
 
@@ -1444,9 +1445,13 @@ struct DropdownStatus: Equatable {
             if input.installedRoutes == 0 {
                 sentence = String(localized: "Nothing is routed until a VPN connects.")
             } else if input.mode == .bypass {
-                sentence = String(localized: "\(routeCount(input.installedRoutes)) stay in place for when it reconnects.")
+                sentence = input.installedRoutes == 1
+                    ? String(localized: "1 address stays routed for when it reconnects.")
+                    : String(localized: "\(input.installedRoutes) addresses stay routed for when it reconnects.")
             } else {
-                sentence = String(localized: "\(routeCount(input.installedRoutes)) could not be removed.")
+                sentence = input.installedRoutes == 1
+                    ? String(localized: "1 address is still routed: removing it failed.")
+                    : String(localized: "\(input.installedRoutes) addresses are still routed: removing them failed.")
             }
             return DropdownStatus(pill: String(localized: "OFF"), tone: .bad,
                                   headline: String(localized: "No VPN connected"),
@@ -1484,9 +1489,12 @@ struct DropdownStatus: Equatable {
                 let sentence = left > 0
                     ? String(localized: "Waiting for the tunnel to hold before re-applying routes, in \(countdown(left)).")
                     : String(localized: "Re-applying routes now.")
-                let note = input.installedRoutes > 0
-                    ? String(localized: "The \(routeCount(input.installedRoutes)) from before the drop are still in place.")
-                    : String(localized: "No routes are installed until then.")
+                let note: String
+                switch input.installedRoutes {
+                case 0: note = String(localized: "Nothing is routed until then.")
+                case 1: note = String(localized: "The 1 address routed before the drop stays routed.")
+                default: note = String(localized: "The \(input.installedRoutes) addresses routed before the drop stay routed.")
+                }
                 return DropdownStatus(
                     pill: String(localized: "WAITING"), tone: .warn,
                     headline: String(localized: "\(name) reconnected \(DropdownCopy.age(since: pending.connectedAt, now: now))"),
@@ -1495,7 +1503,7 @@ struct DropdownStatus: Equatable {
         }
 
         // No Mode fact: the Mode control sits right under the header.
-        let facts = [Fact(label: String(localized: "Routes"), value: routesFact(input, now: now)),
+        let facts = [Fact(label: String(localized: "Addresses"), value: routesFact(input, now: now)),
                      Fact(label: String(localized: "DNS"), value: dnsFact(input, now: now))]
         if input.installedRoutes == 0 && input.nothingConfigured {
             // Not a fault: nothing has been asked for yet, and the question sits right below.
@@ -1505,7 +1513,7 @@ struct DropdownStatus: Equatable {
                                   note: scheduledNote, facts: [])
         }
         if input.installedRoutes == 0 {
-            return DropdownStatus(pill: String(localized: "NO ROUTES"), tone: .warn,
+            return DropdownStatus(pill: String(localized: "NOTHING ROUTED"), tone: .warn,
                                   headline: String(localized: "\(name) connected"),
                                   sentence: String(localized: "Nothing is routed right now."),
                                   note: scheduledNote, facts: facts)
@@ -1556,15 +1564,15 @@ struct DropdownStatus: Equatable {
         guard let change = DropdownCopy.shownRouteChange(input.lastRouteChange,
                                                          currentRouteCount: input.installedRoutes) else {
             return input.installedRoutes > 0
-                ? String(localized: "\(input.installedRoutes) installed")
-                : String(localized: "none applied yet")
+                ? String(localized: "\(input.installedRoutes) routed")
+                : String(localized: "none routed yet")
         }
         let when = DropdownCopy.age(since: change.at, now: now)
         switch change.kind {
         case .applied:
             return change.failedCount == 0
-                ? String(localized: "\(change.routeCount) applied \(when), none failed")
-                : String(localized: "\(change.routeCount) applied \(when), \(change.failedCount) failed")
+                ? String(localized: "\(change.routeCount) routed \(when), none failed")
+                : String(localized: "\(change.routeCount) routed \(when), \(change.failedCount) failed")
         case .removedAll:
             return change.failedCount == 0
                 ? String(localized: "all removed \(when)")
@@ -1583,10 +1591,6 @@ struct DropdownStatus: Equatable {
         return left > 0
             ? String(localized: "\(checked), next in \(countdown(left))")
             : String(localized: "\(checked), next one due now")
-    }
-
-    private static func routeCount(_ n: Int) -> String {
-        n == 1 ? String(localized: "1 route") : String(localized: "\(n) routes")
     }
 
     /// "38 s", "18 min", "1 h", "1 h 20 min". Minutes round up, so "1 min" never means 1 s.

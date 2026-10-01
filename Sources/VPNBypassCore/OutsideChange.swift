@@ -155,10 +155,10 @@ struct OutsideChange: Equatable {
             let name = DropdownModePicker.label(mode, in: bundle)
             return (String(localized: "Last change: switched to \(name) via the command line, \(when)", bundle: bundle), name)
         case .removedAllRoutes(let left) where left == 0:
-            return (String(localized: "Last change: removed all routes via the command line, \(when)", bundle: bundle), nil)
+            return (String(localized: "Last change: removed all routed addresses via the command line, \(when)", bundle: bundle), nil)
         case .removedAllRoutes(let left):
             // Some could not be removed; "all" would be false. The count is a label, so no plural.
-            return (String(localized: "Last change: removed routes via the command line, \(when); routes left: \(left)", bundle: bundle), nil)
+            return (String(localized: "Last change: removed routed addresses via the command line, \(when); still routed: \(left)", bundle: bundle), nil)
         case .changedRoutes:
             return (String(localized: "Last change: changed the routes via the command line, \(when)", bundle: bundle), nil)
         case .changedRules:

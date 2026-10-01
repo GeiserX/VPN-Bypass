@@ -123,11 +123,11 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     nonisolated static func disconnectedBody(wasInterface: String?, routesKept: Int, routesFailed: Int) -> String {
         let suffix: String
         if routesFailed > 0 {
-            suffix = String(localized: "\(routesFailed) route(s) could not be removed.")
+            suffix = String(localized: "\(routesFailed) address(es) are still routed: removing them failed.")
         } else if routesKept > 0 {
-            suffix = String(localized: "Keeping \(routesKept) bypass route(s) — they use your normal connection and will be reused on reconnect.")
+            suffix = String(localized: "Keeping \(routesKept) address(es) routed around the VPN — they use your normal connection and will be reused on reconnect.")
         } else {
-            suffix = String(localized: "Routes cleared.")
+            suffix = String(localized: "Nothing is routed now.")
         }
         return wasInterface != nil
             ? String(localized: "Disconnected from \(wasInterface!). \(suffix)")
@@ -153,13 +153,13 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         // Don't notify if no routes were successfully applied (likely still initializing)
         guard count > 0 else { return }
         
-        var body = String(localized: "\(count) route(s) applied successfully.")
+        var body = String(localized: "\(count) address(es) routed.")
         if failedCount > 0 {
             body += " " + String(localized: "\(failedCount) failed.")
         }
 
         sendNotification(
-            title: String(localized: "Routes Applied"),
+            title: String(localized: "Addresses Routed"),
             body: body,
             identifier: "routes-applied"
         )
@@ -306,7 +306,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         
         sendNotification(
             title: String(localized: "DNS Refresh Complete"),
-            body: String(localized: "\(updatedCount) route(s) updated"),
+            body: String(localized: "\(updatedCount) address(es) updated"),
             identifier: "dns-refresh"
         )
     }

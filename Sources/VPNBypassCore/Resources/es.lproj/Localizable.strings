@@ -39,8 +39,8 @@
 "Info" = "Información";
 
 /* ===== Ajustes — Pestaña Dominios ===== */
-"VPN Only Domains" = "Dominios solo VPN";
-"Custom Domains" = "Dominios personalizados";
+"VPN Only list" = "Lista Solo VPN";
+"Bypass list" = "Lista Bypass";
 "Only these domains will use the VPN. Everything else bypasses it." = "Solo estos dominios usarán la VPN. Todo lo demás la evita.";
 "Add domains that should bypass VPN and use your regular connection." = "Añade dominios que deben evitar la VPN y usar tu conexión habitual.";
 "Routing Mode" = "Modo de enrutamiento";
@@ -141,7 +141,7 @@
 "Disconnect" = "Desconexión";
 "Routes" = "Rutas";
 "Failures" = "Errores";
-"Routes: services, domains, DNS refresh" = "Rutas: servicios, dominios, actualización DNS";
+"Addresses: services, domains, DNS refresh" = "Direcciones: servicios, dominios, actualización DNS";
 "SOCKS5 Proxy" = "Proxy SOCKS5";
 "Aggressive Bypass Mode" = "Modo bypass agresivo";
 "For corporate VPNs (Cisco, Zscaler) that block UDP. Requires external SOCKS5 proxy server with UDP support." = "Para VPNs corporativas (Cisco, Zscaler) que bloquean UDP. Requiere servidor proxy SOCKS5 externo con soporte UDP.";
@@ -176,7 +176,7 @@
 "Working" = "Funciona";
 "Not working" = "No funciona";
 "Not set up" = "Sin configurar";
-"No routes installed" = "No hay rutas instaladas";
+"Nothing routed" = "Nada enrutado";
 "Helper" = "Asistente";
 "Privileged helper" = "Asistente privilegiado";
 "Ready" = "Listo";
@@ -198,7 +198,7 @@
 "%@, Tailscale" = "%@, Tailscale";
 "%@, another tunnel" = "%@, otro túnel";
 "%@, outside the VPN" = "%@, fuera de la VPN";
-"Applied" = "Aplicadas";
+"Routed" = "Enrutadas";
 "None yet" = "Ninguna todavía";
 "%@, %@, none failed" = "%1$@, %2$@, ninguna falló";
 "%@, %@, %lld failed" = "%1$@, %2$@, %3$lld con fallo";
@@ -234,7 +234,7 @@
 "Automatic (recommended)" = "Automático (recomendado)";
 "No VPN tunnels are up." = "No hay ningún túnel VPN activo.";
 "Pinned tunnel %@ is not eligible right now — acting on %@ automatically." = "El túnel fijado %1$@ no se puede usar ahora; se actúa sobre %2$@ automáticamente.";
-"Routes owned (kernel-tagged)" = "Rutas propias (marcadas en el kernel)";
+"Addresses owned (kernel-tagged)" = "Direcciones propias (marcadas en el kernel)";
 "Reading network state…" = "Leyendo el estado de la red…";
 "Recent warnings" = "Avisos recientes";
 "Show in Log" = "Ver en el registro";
@@ -269,10 +269,10 @@
 "Connected via %@. Routes will be applied automatically." = "Conectado vía %@. Las rutas se aplicarán automáticamente.";
 "Disconnected from %@. %@" = "Desconectado de %@. %@";
 "VPN connection lost. %@" = "Conexión VPN perdida. %@";
-"%lld route(s) could not be removed." = "%lld ruta(s) no se pudieron eliminar.";
-"Routes cleared." = "Rutas eliminadas.";
-"Routes Applied" = "Rutas aplicadas";
-"%lld route(s) applied successfully." = "%lld ruta(s) aplicada(s) correctamente.";
+"%lld address(es) are still routed: removing them failed." = "%lld dirección(es) siguen enrutadas: no se pudieron quitar.";
+"Nothing is routed now." = "Ya no se enruta nada.";
+"Addresses Routed" = "Direcciones enrutadas";
+"%lld address(es) routed." = "%lld dirección(es) enrutada(s).";
 "%lld failed." = "%lld fallida(s).";
 "Route Verification Failed" = "Verificación de ruta fallida";
 "Network Changed" = "Red cambiada";
@@ -285,7 +285,7 @@
 "Domain Added" = "Dominio añadido";
 "Domain Removed" = "Dominio eliminado";
 "DNS Refresh Complete" = "Actualización DNS completada";
-"%lld route(s) updated" = "%lld ruta(s) actualizada(s)";
+"%lld address(es) updated" = "%lld dirección(es) actualizada(s)";
 
 /* ===== Ajustes de idioma ===== */
 "Language" = "Idioma";
@@ -305,8 +305,8 @@
 "DNS" = "DNS";
 "No VPN connected" = "Ninguna VPN conectada";
 "Nothing is routed until a VPN connects." = "No se enruta nada hasta que se conecte una VPN.";
-"%@ stay in place for when it reconnects." = "%@ se mantienen para cuando se reconecte.";
-"%@ could not be removed." = "No se pudo eliminar: %@.";
+"%lld addresses stay routed for when it reconnects." = "%lld direcciones siguen enrutadas para cuando se reconecte.";
+"%lld addresses are still routed: removing them failed." = "%lld direcciones siguen enrutadas: no se pudieron quitar.";
 "NOT ENFORCING" = "SIN APLICAR";
 "%@ connected" = "%@ conectada";
 "Nothing is routed while the privileged helper is not running." = "No se enruta nada mientras el asistente privilegiado no esté en marcha.";
@@ -318,11 +318,11 @@
 "Refresh Routes applies now anyway." = "Actualizar rutas las aplica ahora de todos modos.";
 "Waiting for the tunnel to hold before re-applying routes, in %@." = "Esperando a que el túnel se estabilice antes de volver a aplicar las rutas, en %@.";
 "Re-applying routes now." = "Volviendo a aplicar las rutas ahora.";
-"The %@ from before the drop are still in place." = "Siguen puestas las %@ de antes de la caída.";
-"No routes are installed until then." = "No hay rutas instaladas hasta entonces.";
+"The %lld addresses routed before the drop stay routed." = "Las %lld direcciones enrutadas antes de la caída siguen enrutadas.";
+"Nothing is routed until then." = "Nada se enruta hasta entonces.";
 "WAITING" = "ESPERANDO";
 "%@ reconnected %@" = "%@ reconectada %@";
-"NO ROUTES" = "SIN RUTAS";
+"NOTHING ROUTED" = "NADA ENRUTADO";
 "Nothing is routed right now." = "Ahora mismo no se enruta nada.";
 "Bypass: everything else uses the VPN" = "Bypass: todo lo demás usa la VPN";
 "VPN Only: everything else goes direct" = "Solo VPN: todo lo demás va directo";
@@ -341,10 +341,10 @@
 "No rules yet." = "Aún no hay reglas.";
 "1 rule decides where traffic goes." = "1 regla decide adónde va el tráfico.";
 "%lld rules decide where traffic goes." = "%lld reglas deciden adónde va el tráfico.";
-"%lld installed" = "%lld instaladas";
-"none applied yet" = "ninguna aplicada aún";
-"%lld applied %@, none failed" = "%lld aplicadas %@, ninguna falló";
-"%lld applied %@, %lld failed" = "%lld aplicadas %@, %lld fallaron";
+"%lld routed" = "%lld enrutadas";
+"none routed yet" = "ninguna enrutada aún";
+"%lld routed %@, none failed" = "%lld enrutadas %@, ninguna falló";
+"%lld routed %@, %lld failed" = "%lld enrutadas %@, %lld fallaron";
 "all removed %@" = "todas eliminadas %@";
 "removed %@, %lld could not be" = "eliminadas %@, %lld no se pudieron eliminar";
 "checked %@" = "comprobado %@";
@@ -352,8 +352,8 @@
 "%@, automatic check off" = "%@, comprobación automática desactivada";
 "%@, next in %@" = "%@, la próxima en %@";
 "%@, next one due now" = "%@, la próxima toca ahora";
-"1 route" = "1 ruta";
-"%lld routes" = "%lld rutas";
+"1 address" = "1 dirección";
+"%lld addresses" = "%lld direcciones";
 "%lld s" = "%lld s";
 "%lld min" = "%lld min";
 "%lld h" = "%lld h";
@@ -427,7 +427,7 @@
 "Skipping the VPN" = "Sin pasar por la VPN";
 "Through the VPN" = "Por la VPN";
 "Routed by your rules" = "Enrutado por tus reglas";
-"no routes" = "sin rutas";
+"no addresses" = "sin direcciones";
 "Left from earlier" = "Restos de antes";
 "Everything else" = "Todo lo demás";
 "direct" = "directo";
@@ -471,12 +471,12 @@
 
 /* ===== Barra de menús: qué comprobó Verificar rutas ===== */
 "Route check" = "Comprobación de rutas";
-"Nothing to check: the only route is an address range, which ping cannot test" = "Nada que comprobar: la única ruta es un rango de direcciones, y ping no puede comprobar rangos";
-"Nothing to check: all %lld routes are address ranges, which ping cannot test" = "Nada que comprobar: las %lld rutas son rangos de direcciones, y ping no puede comprobar rangos";
-"Checked the only route" = "Comprobada la única ruta";
-"Checked all %lld routes" = "Comprobadas las %lld rutas";
-"Checked %lld of %lld routes" = "Comprobadas %1$lld de %2$lld rutas";
-"Checked 1 of %lld routes" = "Comprobada 1 de %lld rutas";
+"Nothing to check: the only address is a range, which ping cannot test" = "Nada que comprobar: la única dirección es un rango, y ping no puede comprobar rangos";
+"Nothing to check: all %lld addresses are ranges, which ping cannot test" = "Nada que comprobar: las %lld direcciones son rangos, y ping no puede comprobar rangos";
+"Checked the only address" = "Comprobada la única dirección";
+"Checked all %lld addresses" = "Comprobadas las %lld direcciones";
+"Checked %lld of %lld addresses" = "Comprobadas %1$lld de %2$lld direcciones";
+"Checked 1 of %lld addresses" = "Comprobada 1 de %lld direcciones";
 "(single addresses only)" = "(solo direcciones sueltas)";
 "All reachable." = "Todas son accesibles.";
 "1 not reachable" = "1 no accesible";
@@ -496,7 +496,7 @@
 "Last change: turned on %@ via the command line, %@" = "Último cambio: se activó %1$@ desde la línea de comandos, %2$@";
 "Last change: turned off %@ via the command line, %@" = "Último cambio: se desactivó %1$@ desde la línea de comandos, %2$@";
 "Last change: switched to %@ via the command line, %@" = "Último cambio: se cambió a %1$@ desde la línea de comandos, %2$@";
-"Last change: removed all routes via the command line, %@" = "Último cambio: se quitaron todas las rutas desde la línea de comandos, %@";
+"Last change: removed all routed addresses via the command line, %@" = "Último cambio: se quitaron todas las direcciones enrutadas desde la línea de comandos, %@";
 "Last change: changed the routes via the command line, %@" = "Último cambio: se cambiaron las rutas desde la línea de comandos, %@";
 "Last change: changed the rules via the command line, %@" = "Último cambio: se cambiaron las reglas desde la línea de comandos, %@";
 "Show what came through the command line in Logs" = "Ver en Registros lo que llegó desde la línea de comandos";
@@ -504,7 +504,7 @@
 "Nothing from the command line matches this filter." = "Nada de la línea de comandos coincide con este filtro.";
 "From the command line" = "Desde la línea de comandos";
 "Show entries from the app too" = "Mostrar también las entradas de la app";
-"Last change: removed routes via the command line, %@; routes left: %lld" = "Último cambio: se quitaron rutas desde la línea de comandos, %1$@; rutas restantes: %2$lld";
+"Last change: removed routed addresses via the command line, %@; still routed: %lld" = "Último cambio: se quitaron direcciones enrutadas desde la línea de comandos, %1$@; siguen enrutadas: %2$lld";
 
 /* ===== Nombres que lee VoiceOver en interruptores y botones de icono, y atajos del menú ===== */
 "Delete %@" = "Eliminar %@";
@@ -516,3 +516,18 @@
 "Clear search" = "Borrar búsqueda";
 "Add Route" = "Añadir ruta";
 "Add Rule" = "Añadir regla";
+
+/* ===== One meaning for route: kernel entries read as addresses (proposal 16) ===== */
+"1 address stays routed for when it reconnects." = "1 dirección sigue enrutada para cuando se reconecte.";
+"1 address is still routed: removing it failed." = "1 dirección sigue enrutada: no se pudo quitar.";
+"The 1 address routed before the drop stays routed." = "La dirección enrutada antes de la caída sigue enrutada.";
+"Keeping %lld address(es) routed around the VPN — they use your normal connection and will be reused on reconnect." = "Se mantienen %lld dirección(es) enrutadas fuera de la VPN — usan tu conexión normal y se reutilizarán al reconectar.";
+"Addresses" = "Direcciones";
+"VPN Bypass: VPN connected but nothing is being routed" = "VPN Bypass: VPN conectada, pero no se enruta nada";
+"No addresses to route, checked %@." = "Ninguna dirección que enrutar, comprobado %@.";
+"%@ routed %@, none failed." = "Enrutado %2$@: %1$@, ninguna falló.";
+"%@ routed %@, %lld failed." = "Enrutado %2$@: %1$@, %3$lld fallaron.";
+"Removed all routed addresses %@." = "Se quitaron todas las direcciones enrutadas %@.";
+"Removed routed addresses %@, %lld could not be removed." = "Se quitaron las direcciones enrutadas %1$@; %2$lld no se pudieron quitar.";
+"Stop routing the 1 address?" = "¿Dejar de enrutar la única dirección?";
+"Stop routing all %lld addresses?" = "¿Dejar de enrutar las %lld direcciones?";

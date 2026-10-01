@@ -102,7 +102,7 @@ final class FirstRunSetupTests: XCTestCase {
 
     func testOnceSomethingIsOnTheNormalStatesReturn() {
         XCTAssertEqual(DropdownStatus.make(input { $0.nothingConfigured = false; $0.enabledServices = 1 }, now: now).pill,
-                       "NO ROUTES", "a service is on but its routes are not in yet")
+                       "NOTHING ROUTED", "a service is on but its routes are not in yet")
         XCTAssertEqual(DropdownStatus.make(input { $0.nothingConfigured = false; $0.enabledServices = 1; $0.installedRoutes = 6 }, now: now).pill,
                        "ON")
     }

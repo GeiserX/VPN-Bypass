@@ -232,6 +232,16 @@ struct SettingsToolbarItem: View {
 
 // MARK: - Domains Tab
 
+/// The Domains page's title names the list after its mode. It said "Custom Domains", which
+/// read as Custom mode's list (proposal 16 of #119).
+enum DomainListCopy {
+    static func title(isInverse: Bool, bundle: Bundle = .main) -> String {
+        isInverse
+            ? String(localized: "VPN Only list", bundle: bundle)
+            : String(localized: "Bypass list", bundle: bundle)
+    }
+}
+
 struct DomainsTab: View {
     @EnvironmentObject var routeManager: RouteManager
     @EnvironmentObject var settingsUndo: SettingsUndo
@@ -265,7 +275,7 @@ struct DomainsTab: View {
                     Image(systemName: isInverse ? "lock.shield.fill" : "globe.americas.fill")
                         .font(.system(size: 20))
                         .foregroundStyle(isInverse ? Theme.warningGradient : Theme.successGradient)
-                    Text(isInverse ? "VPN Only Domains" : "Custom Domains")
+                    Text(DomainListCopy.title(isInverse: isInverse))
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                 }
@@ -1567,7 +1577,7 @@ struct GeneralTab: View {
                             )
                         )
                         NotificationChip(
-                            label: "Routes",
+                            label: "Addresses",
                             isOn: Binding(
                                 get: { notificationManager.notifyOnRoutesApplied },
                                 set: { notificationManager.notifyOnRoutesApplied = $0; notificationManager.savePreferences() }
@@ -1582,7 +1592,7 @@ struct GeneralTab: View {
                         )
                     }
                     
-                    Text("Routes: services, domains, DNS refresh")
+                    Text("Addresses: services, domains, DNS refresh")
                         .font(.system(size: 10))
                         .foregroundColor(Theme.textSecondary)
                 }
