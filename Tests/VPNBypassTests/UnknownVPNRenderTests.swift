@@ -18,6 +18,8 @@ final class UnknownVPNRenderTests: XCTestCase {
 
     private var rm: RouteManager { RouteManager.shared }
     private var window: NSWindow?
+    /// Whether the app was already set up as an assistive client, put back in `tearDown`.
+    private var wasAccessibilityClient = false
     private var saved: (config: RouteManager.Config, connected: Bool, iface: String?, type: VPNType?,
                         gateway: String?, ssid: String?, routes: [RouteManager.ActiveRoute], update: Date?,
                         loading: Bool, change: RouteManager.RouteChangeOutcome?, dns: Date?,
@@ -54,12 +56,14 @@ final class UnknownVPNRenderTests: XCTestCase {
         helper.installationError = nil
         // SwiftUI builds its accessibility tree only for an assistive client, which this sets
         // the app up as; without it the page reads as one empty group.
+        wasAccessibilityClient = Self.isAccessibilityClient
         Self.setAccessibilityClient(true)
+        XCTAssertTrue(Self.isAccessibilityClient, "control: the setting reads back")
     }
 
     override func tearDown() async throws {
         Self.speak(nil)
-        Self.setAccessibilityClient(false)
+        Self.setAccessibilityClient(wasAccessibilityClient)
         window?.orderOut(nil)
         window = nil
         guard saved != nil else { return }
@@ -207,8 +211,14 @@ final class UnknownVPNRenderTests: XCTestCase {
         try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: url)
     }
 
+    private static let enhancedUserInterface = NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface")
+
+    private static var isAccessibilityClient: Bool {
+        (NSApplication.shared.accessibilityAttributeValue(enhancedUserInterface) as? Bool) ?? false
+    }
+
     private static func setAccessibilityClient(_ on: Bool) {
-        NSApplication.shared.accessibilitySetValue(on, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+        NSApplication.shared.accessibilitySetValue(on, forAttribute: enhancedUserInterface)
     }
 
     // MARK: - The language
