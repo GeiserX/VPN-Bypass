@@ -508,7 +508,7 @@ struct StatusTab: View {
                             Text(link.interface)
                                 .font(.system(size: 13, design: .monospaced))
                                 .foregroundColor(Theme.textPrimary)
-                            Text(link.label)
+                            Text(VPNType.displayLabel(link.label))
                                 .font(.system(size: 13))
                                 .foregroundColor(Theme.textPrimary)
                                 .lineLimit(1)
@@ -561,7 +561,7 @@ struct StatusTab: View {
             )) {
                 Text(String(localized: "Automatic (recommended)")).tag("")
                 ForEach(snapshot.links.filter { !$0.isTailscale }) { link in
-                    Text("\(link.label) · \(link.interface)").tag(link.interface)
+                    Text("\(VPNType.displayLabel(link.label)) · \(link.interface)").tag(link.interface)
                 }
             }
             .pickerStyle(.menu)

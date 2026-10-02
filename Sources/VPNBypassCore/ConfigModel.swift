@@ -37,6 +37,13 @@ enum VPNType: String, Codable {
     /// The product name to show, or nil for `.unknown`: its raw value is an English
     /// placeholder, so a caller shows its own localized "VPN" instead.
     var knownName: String? { self == .unknown ? nil : rawValue }
+
+    /// A tunnel label to show. A label is `.unknown`'s raw value when the app could not name
+    /// the VPN; that English placeholder shows as the localized "VPN". The stored label (and a
+    /// route's productHint) keeps the raw value, which other code compares against.
+    static func displayLabel(_ label: String, in bundle: Bundle = .main) -> String {
+        label == VPNType.unknown.rawValue ? String(localized: "VPN", bundle: bundle) : label
+    }
     
     var icon: String {
         switch self {

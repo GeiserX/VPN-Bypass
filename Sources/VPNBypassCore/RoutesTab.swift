@@ -120,20 +120,26 @@ struct RoutesTab: View {
 
     // MARK: - System routes (the auto-created Direct / VPN-default routes)
 
+    /// The two system rows' names. SystemRouteRow takes a String, which Text shows as it is,
+    /// so both are looked up here.
+    static func systemRouteNames(vpnType: VPNType?, in bundle: Bundle) -> (direct: String, vpn: String) {
+        (String(localized: "Direct", bundle: bundle), vpnType?.knownName ?? String(localized: "VPN", bundle: bundle))
+    }
+
     private var systemRoutesCard: some View {
         SettingsCard(title: "System Routes", icon: "shield.lefthalf.filled", iconColor: Theme.textSecondary) {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(spacing: 0) {
                     SystemRouteRow(
                         icon: "arrow.up.right",
-                        name: String(localized: "Direct"),
+                        name: Self.systemRouteNames(vpnType: routeManager.vpnType, in: .main).direct,
                         subtitle: "Your physical connection",
                         color: Theme.textSecondary
                     )
                     Divider().background(Theme.divider).padding(.vertical, 4)
                     SystemRouteRow(
                         icon: routeManager.vpnType?.icon ?? "lock.shield",
-                        name: routeManager.vpnType?.knownName ?? String(localized: "VPN"),
+                        name: Self.systemRouteNames(vpnType: routeManager.vpnType, in: .main).vpn,
                         subtitle: "Whatever tunnel is currently up",
                         color: Theme.warning
                     )
@@ -855,8 +861,8 @@ struct RouteEditorSheet: View {
                     Text("Primary VPN (automatic)").tag("")
                     ForEach(selectable, id: \.link.interface) { entry in
                         Text(entry.isLive
-                             ? "\(entry.link.label) · \(entry.link.interface)"
-                             : "\(entry.link.label) · \(entry.link.interface) — not connected")
+                             ? "\(VPNType.displayLabel(entry.link.label)) · \(entry.link.interface)"
+                             : "\(VPNType.displayLabel(entry.link.label)) · \(entry.link.interface) — not connected")
                             .tag(entry.link.interface)
                     }
                 }
