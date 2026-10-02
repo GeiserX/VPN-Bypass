@@ -82,8 +82,10 @@ extension RouteManager {
     /// a `.cidr` rule, checked by the VPN Only list's range check, which is the Rules
     /// editor's `isValidCIDR`; a name or a pasted link becomes a `.domain` rule for its host,
     /// cleaned as the Bypass list cleans it. Saves but does not re-apply; the caller does.
-    /// Returns the rule saved, why the input was refused, or nil when nothing was saved for
-    /// a reason already in the log (no Direct route, the same rule is there).
+    /// A rule with the same pattern refuses the add, naming its route: on Direct it is a
+    /// repeat, and on another route it matches first, so a second rule would do nothing. A
+    /// rule whose route is gone matches nothing, so it does not count. Returns the rule
+    /// saved, why the input was refused, or nil when there is no Direct route (logged).
     func addDirectRule(_ input: String) -> Result<Rule, AddDomainError>? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let checked: CheckedDomainInput
@@ -99,9 +101,14 @@ extension RouteManager {
             log(.error, "Cannot add rule for \(checked.value): no Direct route found")
             return nil
         }
-        guard !config.rules.contains(where: { $0.matchType == matchType && $0.pattern == checked.value }) else {
-            log(.warning, "Rule for \(checked.value) already exists")
-            return nil
+        let existing = config.rules
+            .filter { $0.matchType == matchType && $0.pattern == checked.value }
+            .compactMap { rule in config.routes.first(where: { $0.id == rule.routeId }) }
+            .first
+        if let route = existing {
+            let error = AddDomainError.ruleExists(value: checked.value, route: route, vpnName: vpnType?.knownName)
+            log(.warning, error.message)
+            return .failure(error)
         }
         let maxOrder = config.rules.map(\.order).max() ?? -1
         let rule = Rule(matchType: matchType, pattern: checked.value, routeId: directRouteId, order: maxOrder + 1)

@@ -188,6 +188,8 @@ final class AddDomainOutcomeTests: XCTestCase {
             .empty(input: ""), .empty(input: "!!!"), .rangeOnBypassList(input: "10.0.0.0/24"),
             .malformedRange(input: "10.0.0.0/33"), .catchAllRange(input: "0.0.0.0/0"),
             .alreadyListed(value: "example.com", list: .bypass),
+            .ruleExists(value: "example.com", route: Route(name: "Direct", egress: .direct), vpnName: nil),
+            .ruleExists(value: "example.com", route: Route(name: "Work Proxy", egress: .proxyHTTP), vpnName: nil),
         ]
         let added: [AddedDomain] = [
             AddedDomain(entry: DomainEntry(domain: "10.0.0.0/24", isCIDR: true), list: .vpnOnly, typed: "10.0.0.0/24"),
@@ -300,11 +302,48 @@ final class AddDomainOutcomeTests: XCTestCase {
         XCTAssertEqual(state.error?.message, AddDomainError.malformedRange(input: "10.0.0.0/33").message)
     }
 
-    func testCustomQuickAddSavesARepeatOnce() {
-        customWithDirect()
+    /// A repeat used to close the field as if it had saved.
+    func testCustomQuickAddRefusesARepeatAndSaysSo() {
+        let direct = customWithDirect()
         _ = rm.addDirectRule("10.0.0.0/24")
-        XCTAssertNil(rm.addDirectRule("10.0.0.0/24"))
+        let error = AddDomainError.ruleExists(value: "10.0.0.0/24", route: direct, vpnName: rm.vpnType?.knownName)
+        XCTAssertEqual(rm.addDirectRule("10.0.0.0/24"), .failure(error))
         XCTAssertEqual(rm.config.rules.map(\.pattern), ["10.0.0.0/24"])
+        XCTAssertEqual(error.message, "10.0.0.0/24 already has a rule on the Direct route.")
+        let state = MenuContent.quickAdd(after: .failure(error), typed: "10.0.0.0/24")
+        XCTAssertTrue(state.isOpen, "closing would look like it saved")
+        XCTAssertEqual(state.text, "10.0.0.0/24")
+    }
+
+    /// A rule on another route matches first, so a Direct rule after it would do nothing.
+    func testCustomQuickAddRefusesAPatternAnotherRouteHas() {
+        let direct = customWithDirect()
+        let proxy = Route(name: "Work Proxy", egress: .proxyHTTP)
+        let vpn = Route(name: "", egress: .vpnDefault)
+        rm.config.routes = [direct, proxy, vpn]
+        let theirs = [Rule(matchType: .cidr, pattern: "10.0.0.0/24", routeId: vpn.id, order: 0),
+                      Rule(matchType: .domain, pattern: "example.com", routeId: proxy.id, order: 1)]
+        rm.config.rules = theirs
+        let vpnName = rm.vpnType?.knownName
+
+        XCTAssertEqual(rm.addDirectRule("10.0.0.0/24"),
+                       .failure(.ruleExists(value: "10.0.0.0/24", route: vpn, vpnName: vpnName)))
+        let link = rm.addDirectRule("https://example.com/page")
+        XCTAssertEqual(link, .failure(.ruleExists(value: "example.com", route: proxy, vpnName: vpnName)))
+        XCTAssertEqual(rm.config.rules, theirs, "no second rule")
+
+        guard case .failure(let error)? = link else { return XCTFail("not refused") }
+        XCTAssertEqual(error.message, "example.com already has a rule on the Work Proxy route, and the first matching rule wins. To send it direct, change that rule's route on the Rules page.")
+        XCTAssertTrue(MenuContent.quickAdd(after: .failure(error), typed: "https://example.com/page").isOpen)
+    }
+
+    /// A rule whose route was deleted matches nothing, so it does not block the add.
+    func testCustomQuickAddIgnoresARuleWhoseRouteIsGone() throws {
+        customWithDirect()
+        let orphan = Rule(matchType: .cidr, pattern: "10.0.0.0/24", routeId: UUID(), order: 0)
+        rm.config.rules = [orphan]
+        let rule = try XCTUnwrap(rm.addDirectRule("10.0.0.0/24")).get()
+        XCTAssertEqual(rm.config.rules, [orphan, rule])
     }
 
     // MARK: - GUI and socket agree

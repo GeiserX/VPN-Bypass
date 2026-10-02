@@ -194,6 +194,9 @@ enum ClassicControl {
             return fail("already_exists", "\(value) is already on the \(list.rawValue) list")
         case .nameTakenByService(let value, let service):
             return fail("already_exists", "\(value) is the name of the service \(service); routes are tracked by name, so the bypass list cannot take it")
+        case .ruleExists(let value, let route, _):
+            // Only Custom mode's quick-add returns this; domain.add never does.
+            return fail("already_exists", "\(value) already has a rule on the route \(route.name)")
         }
     }
 

@@ -773,7 +773,8 @@ struct MenuContent: View {
 
     /// The quick-add after an add. A refused one stays open with the text and says why,
     /// as the Domains tab does, because closing would look like it worked. A saved one
-    /// closes. nil is Custom mode's rule add when it saved, which says nothing back.
+    /// closes. nil is Custom mode's rule add when it saved, which says nothing back, or found
+    /// no Direct route, which it logs.
     static func quickAdd(after result: Result<AddedDomain, AddDomainError>?, typed: String) -> QuickAddState {
         guard let result else { return .closed }
         let shown = AddDomainFeedback(result, typed: typed)
