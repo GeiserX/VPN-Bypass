@@ -899,7 +899,7 @@ struct ServicesTab: View {
     }
 
     private var offServices: [RouteManager.ServiceEntry] {
-        routeManager.config.services.filter { !$0.enabled }
+        routeManager.servicesTurnAllOnSwitchesOn
     }
 
     private func turnAllOn() {

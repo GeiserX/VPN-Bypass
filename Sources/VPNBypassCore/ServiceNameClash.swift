@@ -4,7 +4,8 @@
 // another service or a listed domain shares that source with it, so the dropdown groups both
 // sets of routes under one row and removing one can remove the other's routes. The Settings
 // editor, config import and Undo refuse such a name, and the Bypass list refuses a domain a
-// service has as its name; a config.json that already holds one still loads as before.
+// service has as its name; a config.json that already holds one still loads, except that a
+// built-in service a custom one has the name of is turned off (below).
 //
 // An app update can still bring a built-in service whose name a user's custom service already
 // has. The custom one keeps its name and its routes; the built-in one stays off until the

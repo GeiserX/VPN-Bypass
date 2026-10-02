@@ -4503,10 +4503,10 @@ final class RouteManager: ObservableObject {
         }
         Task {
             defer { releaseRouteOperation() }
-            // In VPN Only no service routes anything, so the routes under this name belong to
-            // the VPN Only entry with exactly that name. Leave them in: taking them out and
-            // putting them back would send that entry's traffic outside the VPN meanwhile.
-            if !vpnOnlyEntryRoutes(name) {
+            // Services route only in Bypass (a mode switch takes every route out). In VPN Only
+            // or Custom the routes under this name belong to a VPN Only entry, the catch-all or
+            // a rule of that name, so leave them in.
+            if bypassListIsLive {
                 await removeRoutesForSource(name)
             }
             // If routes were retained (kernel removal failed), save the domain list
@@ -4529,12 +4529,6 @@ final class RouteManager: ObservableObject {
         guard bypassListIsLive else { return ([], []) }
         return (config.services.filter { $0.id != id && $0.enabled && $0.name == source },
                 config.domains.filter { $0.enabled && $0.domain == source })
-    }
-
-    /// True when VPN Only is on and an enabled VPN Only entry is exactly `source`, so the
-    /// routes under that source are that entry's.
-    private func vpnOnlyEntryRoutes(_ source: String) -> Bool {
-        config.routingMode == .vpnOnly && config.inverseDomains.contains { $0.enabled && $0.domain == source }
     }
 
     /// `removeRoutesForSource` takes out every route under a source. When a custom service is
@@ -4568,6 +4562,12 @@ final class RouteManager: ObservableObject {
     /// (see `ServiceNameClash.customServiceHolding`), or nil when it can be turned on.
     func customServiceHolding(nameOf service: ServiceEntry) -> ServiceEntry? {
         ServiceNameClash.customServiceHolding(nameOf: service, in: config.services)
+    }
+
+    /// The services Turn All On switches on: the ones off, less those a custom service holds
+    /// off. The Services page counts and names these in its menu and question.
+    var servicesTurnAllOnSwitchesOn: [ServiceEntry] {
+        config.services.filter { !$0.enabled && customServiceHolding(nameOf: $0) == nil }
     }
 
     func toggleService(_ serviceId: String) {

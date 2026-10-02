@@ -340,6 +340,20 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         XCTAssertTrue(rm.recentLogs.contains { $0.message.hasPrefix("Putting back the routes of Netflix") })
     }
 
+    /// The load turns a built-in service off while a custom one has its name, so the shared
+    /// name a config can still hold is two custom services from before the check.
+    func testDeletingACustomServicePutsBackTheRoutesOfAnotherCustomServiceOfItsName() async {
+        let kernel = bypassWithASharedName()
+        rm.config.services[0] = ServiceEntry(id: "custom_m", name: "Netflix", enabled: true, domains: [], ipRanges: [builtInRange], isCustom: true)
+
+        rm.removeCustomService("custom_n")
+        await waitForTheGate()
+
+        XCTAssertEqual(rm.config.services.map(\.id), ["custom_m"])
+        XCTAssertEqual(kernel.installed, [builtInRange], "the deleted one's range goes, the other's is back")
+        XCTAssertEqual(routes("Netflix"), [builtInRange])
+    }
+
     func testRenamingTheCustomServicePutsTheBuiltInOnesRoutesBackInBypass() async {
         let kernel = bypassWithASharedName()
 
@@ -410,6 +424,45 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         XCTAssertTrue(routes("Corp").isEmpty, "a service routes nothing in VPN Only")
     }
 
+    func testDeletingTheCustomServiceKeepsTheVPNOnlyCatchAllsRouted() async {
+        let catchAll = ClassicRouteCompiler.catchAllSource
+        let kernel = FakeKernel(installed: [])
+        kernel.attach(to: rm)
+        _ = kernel.add([("0.0.0.0/1", gateway, true), ("128.0.0.0/1", gateway, true)])
+        rm.config.routingMode = .vpnOnly
+        rm.config.services = [ServiceEntry(id: "custom_c", name: catchAll, enabled: true, domains: [], ipRanges: [customRange], isCustom: true)]
+        XCTAssertNil(rm.customServiceNameClash(catchAll, excluding: "custom_c"), "nothing refuses this name")
+        rm.activeRoutes = [route("0.0.0.0/1", catchAll), route("128.0.0.0/1", catchAll)]
+        rm.isVPNConnected = true
+        rm.localGateway = gateway
+
+        rm.removeCustomService("custom_c")
+        await waitForTheGate()
+
+        XCTAssertFalse(rm.config.services.contains { $0.id == "custom_c" })
+        XCTAssertEqual(kernel.installed, ["0.0.0.0/1", "128.0.0.0/1"])
+        XCTAssertEqual(routes(catchAll), ["0.0.0.0/1", "128.0.0.0/1"])
+    }
+
+    func testDeletingTheCustomServiceKeepsACustomModeRuleOfItsNameRouted() async {
+        let kernel = FakeKernel(installed: [])
+        kernel.attach(to: rm)
+        _ = kernel.add("10.20.0.5", gateway: gateway)
+        rm.config.schemaVersion = 2
+        rm.config.routingMode = .custom
+        rm.config.services = [ServiceEntry(id: "custom_c", name: "corp.example", enabled: true, domains: [], ipRanges: [customRange], isCustom: true)]
+        rm.activeRoutes = [route("10.20.0.5", "corp.example")]
+        rm.isVPNConnected = true
+        rm.localGateway = gateway
+
+        rm.removeCustomService("custom_c")
+        await waitForTheGate()
+
+        XCTAssertFalse(rm.config.services.contains { $0.id == "custom_c" })
+        XCTAssertEqual(kernel.installed, ["10.20.0.5"], "the rule corp.example owns this route")
+        XCTAssertEqual(routes("corp.example"), ["10.20.0.5"])
+    }
+
     // MARK: - An app update brings a built-in service named like a custom one
 
     /// Writes config.json as an older version would have saved it, then loads it the way a
@@ -443,7 +496,10 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         XCTAssertTrue(rm.recentLogs.contains { $0.message == "Netflix not turned on: Your custom service \u{201C}netflix\u{201D} has this name. Rename it to turn this service on." },
                       rm.recentLogs.map(\.message).joined(separator: "\n"))
 
+        let promised = rm.servicesTurnAllOnSwitchesOn.map(\.id)
+        XCTAssertFalse(promised.contains("netflix"), "the Services page does not count or name it")
         let switched = rm.setAllServicesEnabled(true)
+        XCTAssertEqual(Set(switched), Set(promised), "Turn All On switches what the page promised")
         XCTAssertFalse(switched.contains("netflix"))
         XCTAssertFalse(try service("netflix").enabled, "Turn All On leaves it off")
         XCTAssertTrue(try service("spotify").enabled)
