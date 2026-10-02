@@ -219,6 +219,94 @@ final class AddDomainOutcomeTests: XCTestCase {
         XCTAssertEqual(MenuContent.quickAdd(after: nil, typed: "example.com"), .closed, "Custom mode's rule add")
     }
 
+    // MARK: - Custom mode's quick-add
+
+    /// A Custom-mode config with the Direct route and no rules.
+    @discardableResult
+    private func customWithDirect() -> Route {
+        let direct = Route(name: "Direct", egress: .direct)
+        var cfg = RouteManager.Config()
+        cfg.routingMode = .custom
+        cfg.manageHostsFile = false
+        cfg.routes = [direct]
+        cfg.rules = []
+        rm.config = cfg
+        return direct
+    }
+
+    /// The bug: "10.0.0.0/24" was saved as a `.domain` rule for the host 10.0.0.0.
+    func testCustomQuickAddSavesARangeAsARangeRule() throws {
+        let direct = customWithDirect()
+        let rule = try XCTUnwrap(rm.addDirectRule(" 10.0.0.0/24 ")).get()
+        XCTAssertEqual(rule.matchType, .cidr)
+        XCTAssertEqual(rule.pattern, "10.0.0.0/24")
+        XCTAssertEqual(rule.routeId, direct.id)
+        XCTAssertEqual(rm.config.rules, [rule])
+        XCTAssertTrue(rm.isValidCIDR(rule.pattern), "the Rules editor saves the same pattern unchanged")
+        let socket = CommandRouter.apply(ControlRequest(cmd: "rule.add", args: ["match": "cidr", "pattern": rule.pattern,
+                                                                                "routeId": direct.id.uuidString]),
+                                         to: rm.config)
+        XCTAssertTrue(socket.response.ok, "vpnb rule.add takes the same pattern")
+        XCTAssertEqual(socket.config.rules.last?.matchType, .cidr)
+    }
+
+    func testCustomQuickAddSavesANameOrALinkAsADomainRule() throws {
+        let cases: [(String, String)] = [
+            ("Example.COM", "example.com"),
+            ("https://news.ycombinator.com/item?id=1", "news.ycombinator.com"),
+            ("example.com/page", "example.com"),
+            ("https://10.0.0.1/admin", "10.0.0.1"),
+        ]
+        for (typed, saved) in cases {
+            let direct = customWithDirect()
+            let rule = try XCTUnwrap(rm.addDirectRule(typed), typed).get()
+            XCTAssertEqual(rule.matchType, .domain, typed)
+            XCTAssertEqual(rule.pattern, saved, typed)
+            XCTAssertEqual(rule.routeId, direct.id, typed)
+            XCTAssertEqual(rm.config.rules, [rule], typed)
+        }
+    }
+
+    func testCustomQuickAddRefusesABadRangeAndSavesNothing() {
+        let cases: [(String, AddDomainError)] = [
+            ("10.0.0.0/33", .malformedRange(input: "10.0.0.0/33")),
+            ("10.0.0/8", .malformedRange(input: "10.0.0/8")),
+            ("010.0.0.0/8", .malformedRange(input: "010.0.0.0/8")),
+            ("10.0.0.0 /24", .malformedRange(input: "10.0.0.0 /24")),
+            ("2001:db8::/32", .malformedRange(input: "2001:db8::/32")),
+            ("0.0.0.0/0", .catchAllRange(input: "0.0.0.0/0")),
+            ("128.0.0.0/1", .catchAllRange(input: "128.0.0.0/1")),
+            ("!!!", .empty(input: "!!!")),
+        ]
+        for (typed, error) in cases {
+            customWithDirect()
+            XCTAssertEqual(rm.addDirectRule(typed), .failure(error), typed)
+            XCTAssertEqual(rm.config.rules, [], "\(typed) saved \(rm.config.rules.map(\.pattern))")
+            XCTAssertEqual(rm.config.domains, [], typed)
+            XCTAssertEqual(rm.config.inverseDomains, [], typed)
+            if typed.contains("/") {
+                XCTAssertFalse(rm.isValidCIDR(typed), "the Rules editor refuses \(typed) too")
+            }
+        }
+    }
+
+    func testCustomQuickAddRefusalStaysOpenWithTheLine() {
+        customWithDirect()
+        let refusal = rm.addDirectRule("10.0.0.0/33")
+        guard case .failure(let error)? = refusal else { return XCTFail("not refused: \(String(describing: refusal))") }
+        let state = MenuContent.quickAdd(after: .failure(error), typed: "10.0.0.0/33")
+        XCTAssertTrue(state.isOpen)
+        XCTAssertEqual(state.text, "10.0.0.0/33")
+        XCTAssertEqual(state.error?.message, AddDomainError.malformedRange(input: "10.0.0.0/33").message)
+    }
+
+    func testCustomQuickAddSavesARepeatOnce() {
+        customWithDirect()
+        _ = rm.addDirectRule("10.0.0.0/24")
+        XCTAssertNil(rm.addDirectRule("10.0.0.0/24"))
+        XCTAssertEqual(rm.config.rules.map(\.pattern), ["10.0.0.0/24"])
+    }
+
     // MARK: - GUI and socket agree
 
     /// The same input gets the same outcome from the Domains tab (addDomain /

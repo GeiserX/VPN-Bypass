@@ -77,6 +77,40 @@ extension RouteManager {
         return result
     }
 
+    /// Custom mode's dropdown quick-add: a rule on the Direct route, appended after the
+    /// others as `RulesTab.saveRule` appends a new one. An IP range ("10.0.0.0/24") becomes
+    /// a `.cidr` rule, checked by the VPN Only list's range check, which is the Rules
+    /// editor's `isValidCIDR`; a name or a pasted link becomes a `.domain` rule for its host,
+    /// cleaned as the Bypass list cleans it. Saves but does not re-apply; the caller does.
+    /// Returns the rule saved, why the input was refused, or nil when nothing was saved for
+    /// a reason already in the log (no Direct route, the same rule is there).
+    func addDirectRule(_ input: String) -> Result<Rule, AddDomainError>? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let checked: CheckedDomainInput
+        switch checkDomainInput(trimmed, list: Self.looksLikeIPRange(trimmed) ? .vpnOnly : .bypass) {
+        case .failure(let error):
+            log(.warning, error.message)
+            return .failure(error)
+        case .success(let value):
+            checked = value
+        }
+        let matchType: MatchType = checked.isCIDR ? .cidr : .domain
+        guard let directRouteId = config.routes.first(where: { $0.egress == .direct })?.id else {
+            log(.error, "Cannot add rule for \(checked.value): no Direct route found")
+            return nil
+        }
+        guard !config.rules.contains(where: { $0.matchType == matchType && $0.pattern == checked.value }) else {
+            log(.warning, "Rule for \(checked.value) already exists")
+            return nil
+        }
+        let maxOrder = config.rules.map(\.order).max() ?? -1
+        let rule = Rule(matchType: matchType, pattern: checked.value, routeId: directRouteId, order: maxOrder + 1)
+        config.rules.append(rule)
+        saveConfig()
+        log(.success, "Added rule: \(checked.value) → Direct")
+        return .success(rule)
+    }
+
     /// Saves and re-applies after a rule change (RulesTab's `persistAndReapply`).
     func saveRulesAndReapply() {
         saveConfig()
