@@ -3,7 +3,8 @@
 // The Status page's tunnel list, its Act on picker and the route editor's VPN picker show
 // the localized "VPN" in its place (#159). These draw the real views offscreen in English,
 // Spanish and French, with one such tunnel in fixed fake state, and read what they show.
-// The route editor's VPN picker also carries a name for VoiceOver; it had none.
+// Every menu and segmented control in the route editor, the rule editor and the General
+// page also carries a name for VoiceOver; five of them had none.
 // Nothing is routed: the VPN check is off and the tunnels are handed in, never read.
 //
 // Set VPNB_RENDERS to a directory to also write each render there as a PNG.
@@ -104,7 +105,7 @@ final class UnknownVPNRenderTests: XCTestCase {
             let shown = try renderStatusPage(language)
             assertNoPlaceholder(shown, "\(language) Status page")
             XCTAssertEqual(shown.menus, [[automatic[language]!, "VPN · utun7"]], "\(language): the Act on picker")
-            XCTAssertEqual(shown.menuNames, [["en": "Act on", "es": "Actuar sobre", "fr": "Agir sur"][language]!],
+            XCTAssertEqual(shown.controlNames, [["en": "Act on", "es": "Actuar sobre", "fr": "Agir sur"][language]!],
                            "\(language): control, the Act on picker's name reads from the tree")
         }
     }
@@ -117,10 +118,55 @@ final class UnknownVPNRenderTests: XCTestCase {
             let shown = try renderRouteEditor(language)
             assertNoPlaceholder(shown, "\(language) route editor")
             XCTAssertEqual(shown.menus, [items[language]!], "\(language): the VPN picker")
-            // An unnamed menu reads as just "pop-up button" in VoiceOver.
-            XCTAssertEqual(shown.menuNames, [Self.lproj(language)!.localizedString(forKey: "VPN", value: nil, table: nil)],
-                           "\(language): the VPN picker's name")
+            // An unnamed control reads as just "pop-up button" or "radio group" in VoiceOver.
+            XCTAssertEqual(shown.controlNames, [Self.word("Type", language), Self.word("VPN", language)],
+                           "\(language): the Type control's and the VPN picker's names")
         }
+    }
+
+    func testTheRouteEditorNamesItsTailscalePeerMenu() throws {
+        let route = Route(name: "home-exit", egress: .tailscaleExit, proxyHost: "100.64.0.1", proxyPort: 8888)
+        let peer = RouteManager.TailscalePeer(name: "home-exit", ip: "100.64.0.1", online: true, exitNodeCapable: true)
+        for language in Self.languages {
+            let shown = try render(RouteEditorSheet(editingRoute: route, selectableLinks: [], peers: [peer],
+                                                    onSave: { _ in }, onCancel: {}),
+                                   language: language, name: "route-editor-peer-\(language).png")
+            XCTAssertEqual(shown.controlNames, [Self.word("Type", language), Self.word("Tailscale Peer", language)],
+                           "\(language): the route editor's controls")
+            // The peer's name stays as typed. The suffix was a plain String, so it showed in English.
+            XCTAssertEqual(shown.menus, [[["en": "home-exit · exit node", "es": "home-exit · nodo de salida",
+                                           "fr": "home-exit · nœud de sortie"][language]!]], "\(language): the peer menu")
+        }
+    }
+
+    func testTheRuleEditorNamesItsControls() throws {
+        let services = Array(RouteManager.Config().services.prefix(2))
+        let rule = Rule(matchType: .service, pattern: services[0].id, routeId: UUID(), order: 0)
+        for language in Self.languages {
+            let shown = try render(RuleEditorSheet(editingRule: rule, services: services, onSave: { _ in }, onCancel: {})
+                                       .environmentObject(rm),
+                                   language: language, name: "rule-editor-\(language).png")
+            XCTAssertEqual(Array(shown.controlNames.prefix(2)), [Self.word("Match", language), Self.word("Service", language)],
+                           "\(language): the rule editor's controls")
+            XCTAssertFalse(shown.controlNames.contains(""), "\(language): an unnamed control in \(shown.controlNames)")
+        }
+    }
+
+    func testTheGeneralPageNamesTheRefreshIntervalMenu() throws {
+        for language in Self.languages {
+            let shown = try render(GeneralTab().environmentObject(rm).environmentObject(NotificationManager.shared)
+                                       .environmentObject(LaunchAtLoginManager.shared).frame(width: 532).padding(24)
+                                       .background(Theme.bgPrimary),
+                                   language: language, name: "general-\(language).png")
+            XCTAssertTrue(shown.controlNames.contains(Self.word("Refresh Interval", language)),
+                          "\(language): the DNS refresh menu's name, in \(shown.controlNames)")
+            XCTAssertFalse(shown.controlNames.contains(""), "\(language): an unnamed control in \(shown.controlNames)")
+        }
+    }
+
+    /// A key's text in one language, from the source tree.
+    private static func word(_ key: String, _ language: String) -> String {
+        lproj(language)!.localizedString(forKey: key, value: nil, table: nil)
     }
 
     private func assertNoPlaceholder(_ shown: Shown, _ what: String, file: StaticString = #filePath, line: UInt = #line) {
@@ -133,11 +179,11 @@ final class UnknownVPNRenderTests: XCTestCase {
     // MARK: - Rendering
 
     /// What a render shows: every label, value and title in its accessibility tree, the name
-    /// VoiceOver reads for each menu picker, and the picker's items, which exist while the
-    /// menu is closed.
+    /// VoiceOver reads for each menu and segmented control, and each menu's items, which exist
+    /// while the menu is closed.
     private struct Shown {
         var text: [String] = []
-        var menuNames: [String] = []
+        var controlNames: [String] = []
         var menus: [[String]] = []
     }
 
@@ -202,8 +248,9 @@ final class UnknownVPNRenderTests: XCTestCase {
         for name in ["accessibilityLabel", "accessibilityTitle", "accessibilityValue"] {
             if let text = text(name), !text.isEmpty { shown.text.append(text) }
         }
-        if (get("accessibilityRole") as? String) == NSAccessibility.Role.popUpButton.rawValue {
-            shown.menuNames.append(text("accessibilityLabel") ?? "")
+        if [NSAccessibility.Role.popUpButton.rawValue, NSAccessibility.Role.radioGroup.rawValue]
+            .contains(get("accessibilityRole") as? String) {
+            shown.controlNames.append(text("accessibilityLabel") ?? "")
         }
         for child in get("accessibilityChildren") as? [Any] ?? [] {
             collectText(child, into: &shown, depth: depth + 1)

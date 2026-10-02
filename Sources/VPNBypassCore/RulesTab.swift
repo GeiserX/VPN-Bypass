@@ -750,13 +750,14 @@ struct RuleEditorSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     formField(label: "Match", required: true) {
-                        Picker("", selection: $matchType) {
+                        Picker(String(localized: "Match"), selection: $matchType) {
                             Text("Domain").tag(MatchType.domain)
                             Text("Service").tag(MatchType.service)
                             Text("IP").tag(MatchType.ip)
                             Text("CIDR").tag(MatchType.cidr)
                         }
                         .pickerStyle(.segmented)
+                        .labelsHidden()
                     }
 
                     if matchType == .service {
@@ -766,12 +767,13 @@ struct RuleEditorSheet: View {
                                     .font(.system(size: 11))
                                     .foregroundColor(Theme.textTertiary)
                             } else {
-                                Picker("", selection: $selectedServiceId) {
+                                Picker(String(localized: "Service"), selection: $selectedServiceId) {
                                     ForEach(services) { service in
                                         Text(service.name).tag(service.id)
                                     }
                                 }
                                 .pickerStyle(.menu)
+                                .labelsHidden()
                             }
                         }
                     } else {

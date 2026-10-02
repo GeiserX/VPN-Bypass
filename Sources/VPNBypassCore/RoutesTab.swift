@@ -580,7 +580,7 @@ struct RouteEditorSheet: View {
     // Tailscale-peer egress: picking a peer from the list sets both of these.
     @State private var selectedPeerIP: String
     @State private var tailscaleNodeName: String
-    @State private var peers: [RouteManager.TailscalePeer] = []
+    @State private var peers: [RouteManager.TailscalePeer]
 
     // VPN egress: which tunnel to target ("" = primary/automatic).
     @State private var selectedVPNInterface: String
@@ -589,18 +589,20 @@ struct RouteEditorSheet: View {
     /// Live tunnels PLUS ones seen before, so a VPN that is currently disconnected can still
     /// be chosen — live enumeration alone only ever reports tunnels that are UP.
     @State private var selectableLinks: [(link: RouteManager.RememberedLink, isLive: Bool)] = []
-    /// False when the tunnels were handed in: the sheet shows them as given, so a test or a
-    /// render can show any tunnel state without reading the real ones.
+    /// False when the tunnels were handed in: the sheet shows them and `peers` as given, so a
+    /// test or a render can show any tunnel state without reading the real ones.
     private let readsTunnels: Bool
 
     init(
         editingRoute: Route?,
         selectableLinks: [(link: RouteManager.RememberedLink, isLive: Bool)]? = nil,
+        peers: [RouteManager.TailscalePeer] = [],
         onSave: @escaping (Route) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.editingRoute = editingRoute
         _selectableLinks = State(initialValue: selectableLinks ?? [])
+        _peers = State(initialValue: peers)
         readsTunnels = selectableLinks == nil
         self.onSave = onSave
         self.onCancel = onCancel
@@ -665,13 +667,14 @@ struct RouteEditorSheet: View {
                     }
 
                     formField(label: "Type", required: true) {
-                        Picker("", selection: $egress) {
+                        Picker(String(localized: "Type"), selection: $egress) {
                             Text("HTTP CONNECT").tag(Egress.proxyHTTP)
                             Text("SOCKS5").tag(Egress.proxySOCKS5)
                             Text("Tailscale Peer").tag(Egress.tailscaleExit)
                             Text("VPN").tag(Egress.vpnDefault)
                         }
                         .pickerStyle(.segmented)
+                        .labelsHidden()
                     }
 
                     if egress == .vpnDefault {
@@ -700,7 +703,7 @@ struct RouteEditorSheet: View {
                                     }
                                 }
                             } else {
-                                Picker("", selection: Binding(
+                                Picker(String(localized: "Tailscale Peer"), selection: Binding(
                                     get: { selectedPeerIP },
                                     set: { newIP in
                                         selectedPeerIP = newIP
@@ -718,12 +721,13 @@ struct RouteEditorSheet: View {
                                             // of a tailnet, and it is the only kind that can
                                             // carry general internet traffic without extra
                                             // setup — so say which ones they are.
-                                            Text(peer.exitNodeCapable ? "\(peer.name) · exit node" : peer.name)
+                                            Text(peer.exitNodeCapable ? String(localized: "\(peer.name) · exit node") : peer.name)
                                         }
                                         .tag(peer.ip)
                                     }
                                 }
                                 .pickerStyle(.menu)
+                                .labelsHidden()
                             }
                         }
                     } else {
@@ -858,7 +862,6 @@ struct RouteEditorSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
-                // Named after the field's caption, so VoiceOver reads which menu this is.
                 Picker(String(localized: "VPN"), selection: Binding(
                     get: { selectedVPNInterface },
                     set: { iface in
