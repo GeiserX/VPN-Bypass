@@ -1470,7 +1470,7 @@ struct GeneralTab: View {
                         
                         Spacer()
                         
-                        Picker("", selection: Binding(
+                        Picker(String(localized: "Refresh Interval"), selection: Binding(
                             get: { routeManager.config.dnsRefreshInterval },
                             set: { 
                                 routeManager.config.dnsRefreshInterval = $0
@@ -1485,6 +1485,7 @@ struct GeneralTab: View {
                             Text("6 hours").tag(TimeInterval(21600))
                         }
                         .pickerStyle(.menu)
+                        .labelsHidden()
                         .frame(width: 100)
                     }
                     

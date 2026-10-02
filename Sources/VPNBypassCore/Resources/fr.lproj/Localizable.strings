@@ -597,6 +597,7 @@
 "e.g. Work VPN" = "ex. : VPN du travail";
 "e.g. Direct" = "ex. : Direct";
 "%@ · %@ — not connected" = "%1$@ · %2$@ — non connecté";
+"%@ · exit node" = "%@ · nœud de sortie";
 "Direct" = "Direct";
 "Name is required." = "Le nom est obligatoire.";
 "Select a Tailscale peer (or enter its 100.x IP)." = "Choisissez un pair Tailscale (ou saisissez son IP 100.x).";
