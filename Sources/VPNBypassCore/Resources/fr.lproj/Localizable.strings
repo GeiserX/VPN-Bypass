@@ -3,19 +3,13 @@
 /* ===== Barre de menus ===== */
 "VPN Connected" = "VPN connecté";
 "VPN Disconnected" = "VPN déconnecté";
-"via %@" = "via %@";
-"Gateway: %@" = "Passerelle : %@";
-"routes" = "routes";
 "Add Domain to VPN" = "Ajouter un domaine au VPN";
 "Add Domain to Bypass" = "Ajouter un domaine au contournement";
 "Refresh Routes" = "Actualiser les routes";
 "Clear" = "Effacer";
 "Verify Routes" = "Vérifier les routes";
-"Verifying..." = "Vérification...";
 "+%lld more" = "+%lld de plus";
 "+ %lld more" = "+ %lld de plus";
-"Active Routes" = "Routes actives";
-"Route Verification" = "Vérification des routes";
 "Mode" = "Mode";
 "Bypass" = "Contournement";
 "VPN Only" = "VPN uniquement";
@@ -23,10 +17,8 @@
 "Detecting VPN and applying routes" = "Détection du VPN et application des routes";
 "No VPN Connection" = "Pas de connexion VPN";
 "Connect to a VPN to start bypassing\ntraffic for configured services." = "Connectez-vous à un VPN pour commencer\nà contourner le trafic des services configurés.";
-"VPN Domains" = "Domaines VPN";
 "Services" = "Services";
 "Domains" = "Domaines";
-"Updated %@ ago" = "Mis à jour il y a %@";
 "Settings" = "Réglages";
 "Settings…" = "Réglages…";
 "Quit VPN Bypass" = "Quitter VPN Bypass";
@@ -43,22 +35,14 @@
 "Bypass list" = "Liste Contournement";
 "Only these domains will use the VPN. Everything else bypasses it." = "Seuls ces domaines utiliseront le VPN. Tout le reste le contourne.";
 "Add domains that should bypass VPN and use your regular connection." = "Ajoutez les domaines qui doivent contourner le VPN et utiliser votre connexion habituelle.";
-"Routing Mode" = "Mode de routage";
-"Domains skip VPN" = "Les domaines contournent le VPN";
-"Only domains use VPN" = "Seuls les domaines utilisent le VPN";
-"Enter domain (e.g., example.com)" = "Entrez un domaine (ex. : example.com)";
 "CONFIGURED DOMAINS" = "DOMAINES CONFIGURÉS";
 "Applying..." = "Application...";
 "All" = "Tous";
-"None" = "Aucun";
-"No domains configured" = "Aucun domaine configuré";
-"Add domains that should use VPN" = "Ajoutez des domaines qui doivent utiliser le VPN";
 "Add a domain above to bypass VPN" = "Ajoutez un domaine ci-dessus pour contourner le VPN";
 
 /* ===== Réglages — Onglet Services ===== */
 "%lld/%lld enabled" = "%lld/%lld activés";
 "Services disabled in VPN Only mode" = "Services désactivés en mode VPN uniquement";
-"Switch to Bypass mode in the Domains tab to manage services." = "Passez en mode Contournement dans l'onglet Domaines pour gérer les services.";
 "Search services..." = "Rechercher des services...";
 "Create Custom Service" = "Créer un service personnalisé";
 "Custom" = "Personnalisé";
@@ -71,7 +55,6 @@
 /* ===== Réglages — Éditeur de service ===== */
 "Edit Service" = "Modifier le service";
 "Service Name" = "Nom du service";
-"e.g. My Company VPN" = "ex. : VPN de mon entreprise";
 "Add" = "Ajouter";
 "IP Ranges (optional)" = "Plages IP (optionnel)";
 "CIDR notation, e.g. 192.168.1.0/24" = "Notation CIDR, ex. : 192.168.1.0/24";
@@ -84,7 +67,6 @@
 "Startup" = "Démarrage";
 "Launch at Login" = "Lancer au démarrage";
 "Automatically start VPN Bypass when you log in" = "Démarrer VPN Bypass automatiquement à la connexion";
-"Privileged Helper" = "Assistant privilégié";
 "Not Installed" = "Non installé";
 "Checking..." = "Vérification...";
 "Update Required (v%@ → v%@)" = "Mise à jour requise (v%@ → v%@)";
@@ -96,7 +78,6 @@
 "Helper update failed: %@" = "La mise à jour de l'assistant a échoué : %@";
 "Helper update did not take effect (got %@, expected %@)" = "La mise à jour de l'assistant n'a pas pris effet (obtenu %@, attendu %@)";
 "unknown" = "inconnu";
-"No more password prompts for route changes" = "Plus de demandes de mot de passe pour les changements de routes";
 "Verifying helper version..." = "Vérification de la version de l'assistant...";
 "Admin authorization required..." = "Autorisation administrateur requise...";
 "Helper needs updating for this version" = "L'assistant doit être mis à jour pour cette version";
@@ -124,8 +105,6 @@
 "1 hour" = "1 heure";
 "2 hours" = "2 heures";
 "6 hours" = "6 heures";
-"Last refresh:" = "Dernière actualisation :";
-"Next refresh:" = "Prochaine actualisation :";
 "Refresh Now" = "Actualiser maintenant";
 "Re-resolves all domains to catch IP changes and ensure routes stay up to date." = "Résout à nouveau tous les domaines pour détecter les changements d'IP et maintenir les routes à jour.";
 "Fallback DNS" = "DNS de secours";
@@ -150,6 +129,11 @@
 "Proxy Server" = "Serveur proxy";
 "Authentication (optional)" = "Authentification (optionnel)";
 "Test Connection" = "Tester la connexion";
+"Proxy not configured" = "Proxy non configuré";
+"Invalid server or port" = "Serveur ou port non valide";
+"Connection timeout" = "Délai de connexion dépassé";
+"Connected to %@" = "Connecté à %@";
+"Cannot connect to %@" = "Impossible de se connecter à %@";
 "Testing..." = "Test en cours...";
 "Proxy will be used for services that need UDP (Discord voice, gaming, etc.) when corporate VPN blocks direct UDP traffic." = "Le proxy sera utilisé pour les services nécessitant l'UDP (voix Discord, jeux, etc.) lorsque le VPN d'entreprise bloque le trafic UDP direct.";
 "Configuration" = "Configuration";
@@ -159,16 +143,7 @@
 "Import Error" = "Erreur d'importation";
 "OK" = "OK";
 "Failed to import configuration file." = "Impossible d'importer le fichier de configuration.";
-"Network Status" = "État du réseau";
-"VPN Status" = "État du VPN";
 "Connected" = "Connecté";
-"Disconnected" = "Déconnecté";
-"VPN Type" = "Type de VPN";
-"Interface" = "Interface";
-"Gateway" = "Passerelle";
-"WiFi Network" = "Réseau WiFi";
-"%lld/%lld reachable" = "%lld/%lld accessibles";
-"Version %@" = "Version %@";
 "GitHub" = "GitHub";
 
 /* ===== Réglages : la page État ===== */
@@ -241,14 +216,9 @@
 "Show in Log" = "Voir dans le journal";
 
 /* ===== Réglages — Onglet Journaux ===== */
-"Activity Log" = "Journal d'activité";
 "Copy" = "Copier";
 "No activity yet" = "Aucune activité";
 "Logs will appear here when routes are applied" = "Les journaux apparaîtront ici lorsque des routes seront appliquées";
-"Route Health" = "Santé des routes";
-"DNS: %@" = "DNS : %@";
-"Last update: " = "Dernière mise à jour : ";
-"Next refresh: " = "Prochaine actualisation : ";
 
 /* ===== Réglages — Onglet Infos ===== */
 "Route specific traffic around your corporate VPN" = "Routez du trafic spécifique en contournant votre VPN d'entreprise";
@@ -276,15 +246,7 @@
 "%lld address(es) routed." = "%lld adresse(s) routée(s).";
 "%lld failed." = "%lld échouée(s).";
 "Route Verification Failed" = "Échec de la vérification de route";
-"Network Changed" = "Réseau modifié";
-"Switched to %@. Checking VPN status..." = "Basculé vers %@. Vérification de l'état du VPN...";
-"Network changed. Checking VPN status..." = "Réseau modifié. Vérification de l'état du VPN...";
 "VPN Bypass" = "VPN Bypass";
-"Test notification successful!" = "Notification de test réussie !";
-"Service Enabled" = "Service activé";
-"Service Disabled" = "Service désactivé";
-"Domain Added" = "Domaine ajouté";
-"Domain Removed" = "Domaine supprimé";
 "DNS Refresh Complete" = "Actualisation DNS terminée";
 "%lld address(es) updated" = "%lld adresse(s) mise(s) à jour";
 
@@ -492,6 +454,8 @@
 "All reachable." = "Toutes sont accessibles.";
 "1 not reachable" = "1 inaccessible";
 "%lld not reachable" = "%lld inaccessibles";
+"Ping timed out" = "Délai du ping dépassé";
+"Host unreachable" = "Hôte injoignable";
 "1 reachable" = "1 accessible";
 "%lld reachable" = "%lld accessibles";
 "%lld ms" = "%lld ms";
@@ -634,6 +598,8 @@
 "Select a Tailscale peer (or enter its 100.x IP)." = "Choisissez un pair Tailscale (ou saisissez son IP 100.x).";
 "Upstream host is required." = "L'hôte du proxy amont est obligatoire.";
 "Port must be a number between 1 and 65535." = "Le port doit être un nombre entre 1 et 65535.";
+"Tailscale" = "Tailscale";
+"primary VPN" = "VPN principal";
 
 /* ===== Réglages : page Règles (mode Personnalisé) ===== */
 "Routing Rules" = "Règles de routage";
@@ -660,6 +626,11 @@
 "Enter a valid IPv4 address (e.g. 10.0.0.5)." = "Saisissez une adresse IPv4 valide (ex. : 10.0.0.5).";
 "Enter a valid IPv4 CIDR range (e.g. 10.0.0.0/8)." = "Saisissez une plage CIDR IPv4 valide (ex. : 10.0.0.0/8).";
 "Select a route." = "Choisissez une route.";
+"DOMAIN" = "DOMAINE";
+"SUFFIX" = "SUFFIXE";
+"SERVICE" = "SERVICE";
+"PROCESS" = "PROCESSUS";
+"Choose Route" = "Choisir une route";
 
 /* ===== Réglages : Domaines, Services, Général et À propos ===== */
 "e.g., example.com or 10.0.0.0/24" = "ex. : example.com ou 10.0.0.0/24";

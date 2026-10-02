@@ -704,7 +704,7 @@ struct MenuContent: View {
                         Circle()
                             .fill(route.accentColor)
                             .frame(width: 4, height: 4)
-                        Text(route.friendlyName(vpnName: routeManager.vpnType?.rawValue))
+                        Text(route.friendlyName(vpnName: routeManager.vpnType?.knownName))
                             .font(.system(size: 10))
                             .foregroundStyle(.primary)
                         Spacer()

@@ -3,19 +3,13 @@
 /* ===== Menu Bar ===== */
 "VPN Connected" = "VPN Connected";
 "VPN Disconnected" = "VPN Disconnected";
-"via %@" = "via %@";
-"Gateway: %@" = "Gateway: %@";
-"routes" = "routes";
 "Add Domain to VPN" = "Add Domain to VPN";
 "Add Domain to Bypass" = "Add Domain to Bypass";
 "Refresh Routes" = "Refresh Routes";
 "Clear" = "Clear";
 "Verify Routes" = "Verify Routes";
-"Verifying..." = "Verifying...";
 "+%lld more" = "+%lld more";
 "+ %lld more" = "+ %lld more";
-"Active Routes" = "Active Routes";
-"Route Verification" = "Route Verification";
 "Mode" = "Mode";
 "Bypass" = "Bypass";
 "VPN Only" = "VPN Only";
@@ -23,10 +17,8 @@
 "Detecting VPN and applying routes" = "Detecting VPN and applying routes";
 "No VPN Connection" = "No VPN Connection";
 "Connect to a VPN to start bypassing\ntraffic for configured services." = "Connect to a VPN to start bypassing\ntraffic for configured services.";
-"VPN Domains" = "VPN Domains";
 "Services" = "Services";
 "Domains" = "Domains";
-"Updated %@ ago" = "Updated %@ ago";
 "Settings" = "Settings";
 "Settings…" = "Settings…";
 "Quit VPN Bypass" = "Quit VPN Bypass";
@@ -43,22 +35,14 @@
 "Bypass list" = "Bypass list";
 "Only these domains will use the VPN. Everything else bypasses it." = "Only these domains will use the VPN. Everything else bypasses it.";
 "Add domains that should bypass VPN and use your regular connection." = "Add domains that should bypass VPN and use your regular connection.";
-"Routing Mode" = "Routing Mode";
-"Domains skip VPN" = "Domains skip VPN";
-"Only domains use VPN" = "Only domains use VPN";
-"Enter domain (e.g., example.com)" = "Enter domain (e.g., example.com)";
 "CONFIGURED DOMAINS" = "CONFIGURED DOMAINS";
 "Applying..." = "Applying...";
 "All" = "All";
-"None" = "None";
-"No domains configured" = "No domains configured";
-"Add domains that should use VPN" = "Add domains that should use VPN";
 "Add a domain above to bypass VPN" = "Add a domain above to bypass VPN";
 
 /* ===== Settings — Services Tab ===== */
 "%lld/%lld enabled" = "%lld/%lld enabled";
 "Services disabled in VPN Only mode" = "Services disabled in VPN Only mode";
-"Switch to Bypass mode in the Domains tab to manage services." = "Switch to Bypass mode in the Domains tab to manage services.";
 "Search services..." = "Search services...";
 "Create Custom Service" = "Create Custom Service";
 "Custom" = "Custom";
@@ -71,7 +55,6 @@
 /* ===== Settings — Custom Service Editor ===== */
 "Edit Service" = "Edit Service";
 "Service Name" = "Service Name";
-"e.g. My Company VPN" = "e.g. My Company VPN";
 "Add" = "Add";
 "IP Ranges (optional)" = "IP Ranges (optional)";
 "CIDR notation, e.g. 192.168.1.0/24" = "CIDR notation, e.g. 192.168.1.0/24";
@@ -84,7 +67,6 @@
 "Startup" = "Startup";
 "Launch at Login" = "Launch at Login";
 "Automatically start VPN Bypass when you log in" = "Automatically start VPN Bypass when you log in";
-"Privileged Helper" = "Privileged Helper";
 "Not Installed" = "Not Installed";
 "Checking..." = "Checking...";
 "Update Required (v%@ → v%@)" = "Update Required (v%@ → v%@)";
@@ -96,7 +78,6 @@
 "Helper update failed: %@" = "Helper update failed: %@";
 "Helper update did not take effect (got %@, expected %@)" = "Helper update did not take effect (got %@, expected %@)";
 "unknown" = "unknown";
-"No more password prompts for route changes" = "No more password prompts for route changes";
 "Verifying helper version..." = "Verifying helper version...";
 "Admin authorization required..." = "Admin authorization required...";
 "Helper needs updating for this version" = "Helper needs updating for this version";
@@ -124,8 +105,6 @@
 "1 hour" = "1 hour";
 "2 hours" = "2 hours";
 "6 hours" = "6 hours";
-"Last refresh:" = "Last refresh:";
-"Next refresh:" = "Next refresh:";
 "Refresh Now" = "Refresh Now";
 "Re-resolves all domains to catch IP changes and ensure routes stay up to date." = "Re-resolves all domains to catch IP changes and ensure routes stay up to date.";
 "Fallback DNS" = "Fallback DNS";
@@ -150,6 +129,11 @@
 "Proxy Server" = "Proxy Server";
 "Authentication (optional)" = "Authentication (optional)";
 "Test Connection" = "Test Connection";
+"Proxy not configured" = "Proxy not configured";
+"Invalid server or port" = "Invalid server or port";
+"Connection timeout" = "Connection timeout";
+"Connected to %@" = "Connected to %@";
+"Cannot connect to %@" = "Cannot connect to %@";
 "Testing..." = "Testing...";
 "Proxy will be used for services that need UDP (Discord voice, gaming, etc.) when corporate VPN blocks direct UDP traffic." = "Proxy will be used for services that need UDP (Discord voice, gaming, etc.) when corporate VPN blocks direct UDP traffic.";
 "Configuration" = "Configuration";
@@ -159,16 +143,7 @@
 "Import Error" = "Import Error";
 "OK" = "OK";
 "Failed to import configuration file." = "Failed to import configuration file.";
-"Network Status" = "Network Status";
-"VPN Status" = "VPN Status";
 "Connected" = "Connected";
-"Disconnected" = "Disconnected";
-"VPN Type" = "VPN Type";
-"Interface" = "Interface";
-"Gateway" = "Gateway";
-"WiFi Network" = "WiFi Network";
-"%lld/%lld reachable" = "%lld/%lld reachable";
-"Version %@" = "Version %@";
 "GitHub" = "GitHub";
 
 /* ===== Settings — Status page ===== */
@@ -241,14 +216,9 @@
 "Show in Log" = "Show in Log";
 
 /* ===== Settings — Logs Tab ===== */
-"Activity Log" = "Activity Log";
 "Copy" = "Copy";
 "No activity yet" = "No activity yet";
 "Logs will appear here when routes are applied" = "Logs will appear here when routes are applied";
-"Route Health" = "Route Health";
-"DNS: %@" = "DNS: %@";
-"Last update: " = "Last update: ";
-"Next refresh: " = "Next refresh: ";
 
 /* ===== Settings — Info Tab ===== */
 "Route specific traffic around your corporate VPN" = "Route specific traffic around your corporate VPN";
@@ -276,15 +246,7 @@
 "%lld address(es) routed." = "%lld address(es) routed.";
 "%lld failed." = "%lld failed.";
 "Route Verification Failed" = "Route Verification Failed";
-"Network Changed" = "Network Changed";
-"Switched to %@. Checking VPN status..." = "Switched to %@. Checking VPN status...";
-"Network changed. Checking VPN status..." = "Network changed. Checking VPN status...";
 "VPN Bypass" = "VPN Bypass";
-"Test notification successful!" = "Test notification successful!";
-"Service Enabled" = "Service Enabled";
-"Service Disabled" = "Service Disabled";
-"Domain Added" = "Domain Added";
-"Domain Removed" = "Domain Removed";
 "DNS Refresh Complete" = "DNS Refresh Complete";
 "%lld address(es) updated" = "%lld address(es) updated";
 
@@ -492,6 +454,8 @@
 "All reachable." = "All reachable.";
 "1 not reachable" = "1 not reachable";
 "%lld not reachable" = "%lld not reachable";
+"Ping timed out" = "Ping timed out";
+"Host unreachable" = "Host unreachable";
 "1 reachable" = "1 reachable";
 "%lld reachable" = "%lld reachable";
 "%lld ms" = "%lld ms";
@@ -634,6 +598,8 @@
 "Select a Tailscale peer (or enter its 100.x IP)." = "Select a Tailscale peer (or enter its 100.x IP).";
 "Upstream host is required." = "Upstream host is required.";
 "Port must be a number between 1 and 65535." = "Port must be a number between 1 and 65535.";
+"Tailscale" = "Tailscale";
+"primary VPN" = "primary VPN";
 
 /* ===== Settings: Rules page (Custom mode) ===== */
 "Routing Rules" = "Routing Rules";
@@ -660,6 +626,11 @@
 "Enter a valid IPv4 address (e.g. 10.0.0.5)." = "Enter a valid IPv4 address (e.g. 10.0.0.5).";
 "Enter a valid IPv4 CIDR range (e.g. 10.0.0.0/8)." = "Enter a valid IPv4 CIDR range (e.g. 10.0.0.0/8).";
 "Select a route." = "Select a route.";
+"DOMAIN" = "DOMAIN";
+"SUFFIX" = "SUFFIX";
+"SERVICE" = "SERVICE";
+"PROCESS" = "PROCESS";
+"Choose Route" = "Choose Route";
 
 /* ===== Settings: Domains, Services, General and About ===== */
 "e.g., example.com or 10.0.0.0/24" = "e.g., example.com or 10.0.0.0/24";

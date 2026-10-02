@@ -58,7 +58,7 @@ enum UndoableChange {
         case .rule(_, let label):
             return String(localized: "Removed the rule for \(label).", bundle: bundle)
         case .route(let route, _):
-            return String(localized: "Removed the route \(route.friendlyName(vpnName: nil)).", bundle: bundle)
+            return String(localized: "Removed the route \(route.friendlyName(vpnName: nil, in: bundle)).", bundle: bundle)
         case .domainsSwitched(let ids, let on, _):
             let what = ids.count == 1 ? String(localized: "1 domain", bundle: bundle)
                 : String(localized: "\(ids.count) domains", bundle: bundle)
