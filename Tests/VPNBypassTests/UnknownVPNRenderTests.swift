@@ -3,6 +3,7 @@
 // The Status page's tunnel list, its Act on picker and the route editor's VPN picker show
 // the localized "VPN" in its place (#159). These draw the real views offscreen in English,
 // Spanish and French, with one such tunnel in fixed fake state, and read what they show.
+// The route editor's VPN picker also carries a name for VoiceOver; it had none.
 // Nothing is routed: the VPN check is off and the tunnels are handed in, never read.
 //
 // Set VPNB_RENDERS to a directory to also write each render there as a PNG.
@@ -103,6 +104,8 @@ final class UnknownVPNRenderTests: XCTestCase {
             let shown = try renderStatusPage(language)
             assertNoPlaceholder(shown, "\(language) Status page")
             XCTAssertEqual(shown.menus, [[automatic[language]!, "VPN · utun7"]], "\(language): the Act on picker")
+            XCTAssertEqual(shown.menuNames, [["en": "Act on", "es": "Actuar sobre", "fr": "Agir sur"][language]!],
+                           "\(language): control, the Act on picker's name reads from the tree")
         }
     }
 
@@ -114,6 +117,9 @@ final class UnknownVPNRenderTests: XCTestCase {
             let shown = try renderRouteEditor(language)
             assertNoPlaceholder(shown, "\(language) route editor")
             XCTAssertEqual(shown.menus, [items[language]!], "\(language): the VPN picker")
+            // An unnamed menu reads as just "pop-up button" in VoiceOver.
+            XCTAssertEqual(shown.menuNames, [Self.lproj(language)!.localizedString(forKey: "VPN", value: nil, table: nil)],
+                           "\(language): the VPN picker's name")
         }
     }
 
@@ -126,10 +132,12 @@ final class UnknownVPNRenderTests: XCTestCase {
 
     // MARK: - Rendering
 
-    /// What a render shows: every label, value and title in its accessibility tree, and the
-    /// items of each menu picker, which exist while the menu is closed.
+    /// What a render shows: every label, value and title in its accessibility tree, the name
+    /// VoiceOver reads for each menu picker, and the picker's items, which exist while the
+    /// menu is closed.
     private struct Shown {
         var text: [String] = []
+        var menuNames: [String] = []
         var menus: [[String]] = []
     }
 
@@ -170,7 +178,7 @@ final class UnknownVPNRenderTests: XCTestCase {
             try write(hosting, to: URL(fileURLWithPath: dir, isDirectory: true).appendingPathComponent(name))
         }
         var shown = Shown()
-        collectText(window, into: &shown.text, depth: 0)
+        collectText(window, into: &shown, depth: 0)
         collectMenus(hosting, into: &shown.menus)
         return shown
     }
@@ -184,18 +192,21 @@ final class UnknownVPNRenderTests: XCTestCase {
 
     /// SwiftUI's own nodes answer the accessibility getters without declaring the protocol
     /// to Swift, so each getter is sent by name.
-    private func collectText(_ element: Any, into out: inout [String], depth: Int) {
+    private func collectText(_ element: Any, into shown: inout Shown, depth: Int) {
         guard depth < 80, let element = element as? NSObject else { return }
         func get(_ name: String) -> Any? {
             let selector = NSSelectorFromString(name)
             return element.responds(to: selector) ? element.perform(selector)?.takeUnretainedValue() : nil
         }
+        func text(_ name: String) -> String? { (get(name) as? String) ?? (get(name) as? NSAttributedString)?.string }
         for name in ["accessibilityLabel", "accessibilityTitle", "accessibilityValue"] {
-            let text = (get(name) as? String) ?? (get(name) as? NSAttributedString)?.string
-            if let text, !text.isEmpty { out.append(text) }
+            if let text = text(name), !text.isEmpty { shown.text.append(text) }
+        }
+        if (get("accessibilityRole") as? String) == NSAccessibility.Role.popUpButton.rawValue {
+            shown.menuNames.append(text("accessibilityLabel") ?? "")
         }
         for child in get("accessibilityChildren") as? [Any] ?? [] {
-            collectText(child, into: &out, depth: depth + 1)
+            collectText(child, into: &shown, depth: depth + 1)
         }
     }
 

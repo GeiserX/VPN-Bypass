@@ -858,7 +858,8 @@ struct RouteEditorSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
-                Picker("", selection: Binding(
+                // Named after the field's caption, so VoiceOver reads which menu this is.
+                Picker(String(localized: "VPN"), selection: Binding(
                     get: { selectedVPNInterface },
                     set: { iface in
                         selectedVPNInterface = iface
@@ -874,6 +875,7 @@ struct RouteEditorSheet: View {
                     }
                 }
                 .pickerStyle(.menu)
+                .labelsHidden()
             }
         }
     }
