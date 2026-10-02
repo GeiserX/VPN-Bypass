@@ -220,8 +220,10 @@ final class StatusPageTests: XCTestCase {
     func testTheRowCountsWhatTheKernelHolds() {
         let installed = [owned("140.82.112.4", "github.com"), owned("140.82.112.5", "github.com"),
                          owned("0.0.0.0/2", "0.0.0.0/2")] + catchAlls.dropFirst()
-        let tagged = ["140.82.112.4", "203.0.113.9", "0.0.0.0/2", "64.0.0.0/2", "128.0.0.0/2", "192.0.0.0/2"]
-        XCTAssertEqual(StatusPage.ownedLine(tagged: tagged, installed: installed, vpnOnly: true).text, "3, plus 3 catch-alls")
+        // Two unrecorded addresses against one missing, and a recorded catch-all the kernel lost,
+        // so a row that read the app's records instead of the kernel would say "3, plus 3".
+        let tagged = ["140.82.112.4", "203.0.113.9", "203.0.113.10", "0.0.0.0/2", "128.0.0.0/2", "192.0.0.0/2"]
+        XCTAssertEqual(StatusPage.ownedLine(tagged: tagged, installed: installed, vpnOnly: true).text, "4, plus 2 catch-alls")
     }
 
     func testTheCatchAllsAreNamedInSpanishAndFrench() throws {
