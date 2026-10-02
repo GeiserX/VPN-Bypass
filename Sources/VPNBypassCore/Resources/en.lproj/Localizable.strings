@@ -346,6 +346,8 @@
 "%@ is not an IP range the app can route. Write it as 10.0.0.0/24, with a prefix from /2 to /32." = "%@ is not an IP range the app can route. Write it as 10.0.0.0/24, with a prefix from /2 to /32.";
 "%@ would clash with the VPN's own catch-all routes. Use a prefix from /2 to /32." = "%@ would clash with the VPN's own catch-all routes. Use a prefix from /2 to /32.";
 "%@ is already on your %@ list." = "%1$@ is already on your %2$@ list.";
+"%@ already has a rule on the %@ route." = "%1$@ already has a rule on the %2$@ route.";
+"%@ already has a rule on the %@ route, and the first matching rule wins. To send it direct, change that rule's route on the Rules page." = "%1$@ already has a rule on the %2$@ route, and the first matching rule wins. To send it direct, change that rule's route on the Rules page.";
 "“%@” is the name of a service, and the two would share routes. Add a different domain." = "“%@” is the name of a service, and the two would share routes. Add a different domain.";
 "Added the range %@ to your %@ list." = "Added the range %1$@ to your %2$@ list.";
 "Added %@ to your %@ list." = "Added %1$@ to your %2$@ list.";

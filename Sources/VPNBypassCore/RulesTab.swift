@@ -77,6 +77,47 @@ extension RouteManager {
         return result
     }
 
+    /// Custom mode's dropdown quick-add: a rule on the Direct route, appended after the
+    /// others as `RulesTab.saveRule` appends a new one. An IP range ("10.0.0.0/24") becomes
+    /// a `.cidr` rule, checked by the VPN Only list's range check, which is the Rules
+    /// editor's `isValidCIDR`; a name or a pasted link becomes a `.domain` rule for its host,
+    /// cleaned as the Bypass list cleans it. Saves but does not re-apply; the caller does.
+    /// A rule with the same pattern refuses the add, naming its route: on Direct it is a
+    /// repeat, and on another route it matches first, so a second rule would do nothing. A
+    /// rule whose route is gone matches nothing, so it does not count. Returns the rule
+    /// saved, why the input was refused, or nil when there is no Direct route (logged).
+    func addDirectRule(_ input: String) -> Result<Rule, AddDomainError>? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let checked: CheckedDomainInput
+        switch checkDomainInput(trimmed, list: Self.looksLikeIPRange(trimmed) ? .vpnOnly : .bypass) {
+        case .failure(let error):
+            log(.warning, error.message)
+            return .failure(error)
+        case .success(let value):
+            checked = value
+        }
+        let matchType: MatchType = checked.isCIDR ? .cidr : .domain
+        guard let directRouteId = config.routes.first(where: { $0.egress == .direct })?.id else {
+            log(.error, "Cannot add rule for \(checked.value): no Direct route found")
+            return nil
+        }
+        let existing = config.rules
+            .filter { $0.matchType == matchType && $0.pattern == checked.value }
+            .compactMap { rule in config.routes.first(where: { $0.id == rule.routeId }) }
+            .first
+        if let route = existing {
+            let error = AddDomainError.ruleExists(value: checked.value, route: route, vpnName: vpnType?.knownName)
+            log(.warning, error.message)
+            return .failure(error)
+        }
+        let maxOrder = config.rules.map(\.order).max() ?? -1
+        let rule = Rule(matchType: matchType, pattern: checked.value, routeId: directRouteId, order: maxOrder + 1)
+        config.rules.append(rule)
+        saveConfig()
+        log(.success, "Added rule: \(checked.value) → Direct")
+        return .success(rule)
+    }
+
     /// Saves and re-applies after a rule change (RulesTab's `persistAndReapply`).
     func saveRulesAndReapply() {
         saveConfig()
