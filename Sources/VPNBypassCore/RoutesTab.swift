@@ -589,13 +589,19 @@ struct RouteEditorSheet: View {
     /// Live tunnels PLUS ones seen before, so a VPN that is currently disconnected can still
     /// be chosen — live enumeration alone only ever reports tunnels that are UP.
     @State private var selectableLinks: [(link: RouteManager.RememberedLink, isLive: Bool)] = []
+    /// False when the tunnels were handed in: the sheet shows them as given, so a test or a
+    /// render can show any tunnel state without reading the real ones.
+    private let readsTunnels: Bool
 
     init(
         editingRoute: Route?,
+        selectableLinks: [(link: RouteManager.RememberedLink, isLive: Bool)]? = nil,
         onSave: @escaping (Route) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.editingRoute = editingRoute
+        _selectableLinks = State(initialValue: selectableLinks ?? [])
+        readsTunnels = selectableLinks == nil
         self.onSave = onSave
         self.onCancel = onCancel
         _name = State(initialValue: editingRoute?.name ?? "")
@@ -828,6 +834,7 @@ struct RouteEditorSheet: View {
         .frame(width: 400)
         .background(Theme.bgSecondary)
         .task {
+            guard readsTunnels else { return }
             peers = await RouteManager.shared.listTailscalePeers()
             vpnLinks = await RouteManager.shared.listVPNLinks()
             selectableLinks = await RouteManager.shared.selectableVPNLinks()
