@@ -90,27 +90,7 @@ final class DestinationsToUnstrandTests: XCTestCase {
 
 // MARK: - Deterministic strand repro (REAL removeAllRoutes + commitAppliedRoutes)
 
-/// Minimal in-memory stand-in for the kernel routing table. `removeRoutesBatchOverrideForTests`
-/// routes RouteManager's removals here instead of the privileged helper, so a test can seed the
-/// "installed" set, then observe exactly what an aborting apply removes.
-private final class FakeKernel {
-    var installed: Set<String>
-    let failRemovals: Bool
-    init(installed: Set<String>, failRemovals: Bool = false) {
-        self.installed = installed
-        self.failRemovals = failRemovals
-    }
-
-    func remove(_ destinations: [String]) -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
-        if failRemovals {
-            // Simulate a kernel-delete failure: nothing is removed; every dest is reported failed.
-            return (successCount: 0, failureCount: destinations.count, failedDestinations: destinations, error: nil)
-        }
-        var success = 0
-        for d in destinations where installed.remove(d) != nil { success += 1 }
-        return (successCount: success, failureCount: 0, failedDestinations: [], error: nil)
-    }
-}
+// FakeKernel (FakeKernel.swift) stands in for the routing table.
 
 @MainActor
 final class StrandOnPreemptionTests: XCTestCase {

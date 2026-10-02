@@ -899,7 +899,7 @@ struct ServicesTab: View {
     }
 
     private var offServices: [RouteManager.ServiceEntry] {
-        routeManager.config.services.filter { !$0.enabled }
+        routeManager.servicesTurnAllOnSwitchesOn
     }
 
     private func turnAllOn() {
@@ -958,6 +958,20 @@ struct ServiceRow: View {
     var onDelete: (() -> Void)?
     @State private var isHovered = false
 
+    /// The custom service that keeps this built-in one off by having its name (an app update
+    /// can bring a built-in service named like one of the user's), or nil.
+    private var heldBy: RouteManager.ServiceEntry? { routeManager.customServiceHolding(nameOf: service) }
+
+    /// The red line a name clash puts under the row: on a custom service, the editor's line
+    /// asking for another name; on a built-in service kept off, which custom service to rename.
+    private var nameLine: String? {
+        if service.isCustom { return routeManager.customServiceNameClash(service.name, excluding: service.id)?.message }
+        return heldBy.map { ServiceNameClash.builtInOffMessage(custom: $0.name) }
+    }
+
+    /// A built-in service kept off by a custom one cannot be turned on from its switch.
+    private var switchLocked: Bool { heldBy != nil && !service.enabled }
+
     var body: some View {
         HStack(spacing: 12) {
             // Status dot
@@ -987,6 +1001,11 @@ struct ServiceRow: View {
                 Text("\(service.domains.count) domains" + (service.ipRanges.isEmpty ? "" : " · \(service.ipRanges.count) IPs"))
                     .font(.system(size: 10))
                     .foregroundColor(Theme.textSecondary)
+
+                if let nameLine {
+                    AddDomainFeedbackLine(feedback: AddDomainFeedback(refusal: nameLine, typed: service.name))
+                        .padding(.top, 2)
+                }
             }
 
             Spacer()
@@ -1031,8 +1050,8 @@ struct ServiceRow: View {
             .tint(Theme.success)
             .labelsHidden()
             .controlSize(.small)
-            .disabled(routeManager.isApplyingRoutes)
-            .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
+            .disabled(routeManager.isApplyingRoutes || switchLocked)
+            .opacity(routeManager.isApplyingRoutes || switchLocked ? 0.5 : 1)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

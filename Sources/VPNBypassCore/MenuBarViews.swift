@@ -1931,6 +1931,11 @@ struct FirstRunSetupView: View {
         return line
     }
 
+    /// A built-in service a custom one keeps off by having its name (see ServiceRow).
+    private func switchLocked(_ service: ServiceEntry) -> Bool {
+        !service.enabled && routeManager.customServiceHolding(nameOf: service) != nil
+    }
+
     private func serviceRow(_ service: ServiceEntry) -> some View {
         HStack(spacing: 9) {
             tile(ServiceChip.iconName(for: service.id), Self.tileColor(service.id))
@@ -1954,8 +1959,9 @@ struct FirstRunSetupView: View {
             .tint(Theme.success)
             .labelsHidden()
             .controlSize(.small)
-            .disabled(routeManager.isApplyingRoutes)
-            .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
+            .disabled(routeManager.isApplyingRoutes || switchLocked(service))
+            .opacity(routeManager.isApplyingRoutes || switchLocked(service) ? 0.5 : 1)
+            .help(routeManager.customServiceHolding(nameOf: service).map { ServiceNameClash.builtInOffMessage(custom: $0.name) } ?? "")
         }
         .frame(height: 34)
         .padding(.horizontal, 10)
