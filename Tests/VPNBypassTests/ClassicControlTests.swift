@@ -471,6 +471,33 @@ final class ClassicControlTests: XCTestCase {
         XCTAssertEqual(rm.config.inverseDomains.first?.enabled, false)
     }
 
+    /// Without list=, a link is looked up on both lists by its host: a domain on both asks
+    /// for list= instead of the Bypass entry being picked, and one only on VPN Only is found.
+    func testLinkWithoutListSearchesBothListsByHost() async {
+        for value in ["https://example.com", "example.com/page"] {
+            let bypass = DomainEntry(domain: "example.com")
+            let vpnOnly = DomainEntry(domain: "example.com")
+            rm.config.domains = [bypass]
+            rm.config.inverseDomains = [vpnOnly]
+            for cmd in ["domain.disable", "domain.enable", "domain.rm"] {
+                let resp = await send(cmd, ["domain": value])
+                XCTAssertEqual(resp.error?.code, "invalid_args", "\(cmd) \(value)")
+                XCTAssertEqual(resp.error?.message, "that domain is on both lists; add list=bypass or list=vpnOnly",
+                               "\(cmd) \(value)")
+            }
+            XCTAssertEqual(rm.config.domains, [bypass], value)
+            XCTAssertEqual(rm.config.inverseDomains, [vpnOnly], value)
+
+            rm.config.domains = []
+            let off = await send("domain.disable", ["domain": value])
+            XCTAssertTrue(off.ok, "\(value): \(String(describing: off.error))")
+            XCTAssertEqual(rm.config.inverseDomains.first?.enabled, false, value)
+            let removed = await send("domain.rm", ["domain": value])
+            XCTAssertTrue(removed.ok, "\(value): \(String(describing: removed.error))")
+            XCTAssertTrue(rm.config.inverseDomains.isEmpty, value)
+        }
+    }
+
     /// A CIDR names a VPN Only entry, with or without list=. The Bypass list holds no ranges,
     /// so list=bypass refuses one instead of cutting it to the host "10.0.0.0".
     func testCIDRLookupOnEachList() async {

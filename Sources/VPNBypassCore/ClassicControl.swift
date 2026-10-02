@@ -416,6 +416,12 @@ enum ClassicControl {
             case .failure(let error): refusal = error
             }
         }
+        // Without list=, a link the VPN Only list refuses ("https://example.com",
+        // "example.com/page") is still looked up there by its host, so an entry on both
+        // lists asks for list= instead of the Bypass one being picked without a word.
+        if lists.count == 2, keys[.vpnOnly] == nil, let host = keys[.bypass] {
+            keys[.vpnOnly] = host
+        }
         if keys.isEmpty, let refusal {
             // Every list refused it. Bypass is checked first, so when both are searched a
             // range gets the VPN Only reason: malformed, or /0 and /1.
