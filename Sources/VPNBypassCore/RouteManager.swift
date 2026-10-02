@@ -3599,7 +3599,7 @@ final class RouteManager: ObservableObject {
     func testProxyConnection() async {
         guard config.proxyConfig.isConfigured else {
             await MainActor.run {
-                proxyTestResult = ProxyTestResult(success: false, message: "Proxy not configured")
+                proxyTestResult = ProxyTestResult(success: false, message: String(localized: "Proxy not configured"))
             }
             return
         }
@@ -3625,28 +3625,29 @@ final class RouteManager: ObservableObject {
               server.range(of: #"^[a-zA-Z0-9]([a-zA-Z0-9.\-]*[a-zA-Z0-9])?$"#, options: .regularExpression) != nil,
               port > 0, port < 65536 else {
             await MainActor.run {
-                proxyTestResult = ProxyTestResult(success: false, message: "Invalid server or port")
+                proxyTestResult = ProxyTestResult(success: false, message: String(localized: "Invalid server or port"))
             }
             return
         }
 
         // Use nc (netcat) to test connection
         let args = ["-z", "-w", "5", server, String(port)]
+        let endpoint = "\(server):\(port)"
         guard let result = await runProcessAsync("/usr/bin/nc", arguments: args, timeout: 6.0) else {
             await MainActor.run {
-                proxyTestResult = ProxyTestResult(success: false, message: "Connection timeout")
+                proxyTestResult = ProxyTestResult(success: false, message: String(localized: "Connection timeout"))
             }
             return
         }
         
         if result.exitCode == 0 {
             await MainActor.run {
-                proxyTestResult = ProxyTestResult(success: true, message: "Connected to \(server):\(port)")
+                proxyTestResult = ProxyTestResult(success: true, message: String(localized: "Connected to \(endpoint)"))
                 log(.success, "SOCKS5 proxy test successful: \(server):\(port)")
             }
         } else {
             await MainActor.run {
-                proxyTestResult = ProxyTestResult(success: false, message: "Cannot connect to \(server):\(port)")
+                proxyTestResult = ProxyTestResult(success: false, message: String(localized: "Cannot connect to \(endpoint)"))
                 log(.warning, "SOCKS5 proxy test failed: \(server):\(port)")
             }
         }
@@ -4795,7 +4796,7 @@ final class RouteManager: ObservableObject {
                 isReachable: false,
                 latency: nil,
                 timestamp: Date(),
-                error: "Ping timed out"
+                error: String(localized: "Ping timed out")
             )
         }
         
@@ -4819,7 +4820,7 @@ final class RouteManager: ObservableObject {
             isReachable: isReachable,
             latency: latency ?? (isReachable ? elapsed : nil),
             timestamp: Date(),
-            error: isReachable ? nil : "Host unreachable"
+            error: isReachable ? nil : String(localized: "Host unreachable")
         )
     }
     

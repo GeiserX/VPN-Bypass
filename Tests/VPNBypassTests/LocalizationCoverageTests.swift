@@ -80,6 +80,59 @@ final class LocalizationCoverageTests: XCTestCase {
         XCTAssertEqual(text("Direct", try lproj("es")), "Directo")
     }
 
+    /// The route row's type badge and status, the rule row's match badge and the rule's route
+    /// chip went through a String, which Text shows as it is, so 5.0.1 drew the rule badges and
+    /// "Choose Route" in English.
+    @MainActor
+    func testTheRouteAndRuleBadgesAreTranslated() throws {
+        let es = try lproj("es"), fr = try lproj("fr")
+        let direct = Route(name: "Direct", egress: .direct)
+        let primaryVPN = Route(name: "VPN", egress: .vpnDefault, vpnSelector: VPNSelector(kind: .primary))
+
+        XCTAssertEqual(RouteRow.typeLabel(.direct, in: es), "Directo")
+        XCTAssertEqual(RouteRow.nonListenerStatusLabel(direct, in: es), "directo")
+        XCTAssertEqual(RouteRow.nonListenerStatusLabel(primaryVPN, in: es), "VPN principal")
+        XCTAssertEqual(RouteRow.nonListenerStatusLabel(primaryVPN, in: fr), "VPN principal")
+        XCTAssertEqual(RouteRow.nonListenerStatusLabel(direct, in: fr), "en direct")
+
+        XCTAssertEqual(RuleRow.matchLabel(.domain, in: es), "DOMINIO")
+        XCTAssertEqual(RuleRow.matchLabel(.service, in: es), "SERVICIO")
+        XCTAssertEqual(RuleRow.matchLabel(.domain, in: fr), "DOMAINE")
+        XCTAssertEqual(RuleRow.matchLabel(.suffix, in: fr), "SUFFIXE")
+        XCTAssertEqual(RuleRow.matchLabel(.process, in: fr), "PROCESSUS")
+        XCTAssertEqual(RuleRow.matchLabel(.suffix, in: es), "SUFIJO")
+
+        XCTAssertEqual(RouteChip.displayName(nil, vpnName: nil, in: es), "Elegir ruta")
+        XCTAssertEqual(RouteChip.displayName(nil, vpnName: nil, in: fr), "Choisir une route")
+        XCTAssertEqual(RouteChip.displayName(direct, vpnName: nil, in: es), "Directo")
+    }
+
+    /// `.unknown`'s raw value is the English placeholder "Unknown VPN"; the Routes page, the
+    /// rule chips and the dropdown show their own localized "VPN" in its place.
+    func testAnUnknownVPNHasNoNameToShow() {
+        XCTAssertNil(VPNType.unknown.knownName)
+        XCTAssertEqual(VPNType.wireGuard.knownName, "WireGuard")
+        XCTAssertEqual(Route(name: "", egress: .vpnDefault).friendlyName(vpnName: VPNType.unknown.knownName), "VPN")
+    }
+
+    /// The Routes page's System Routes rows take their names as a String, so 5.0.1 drew
+    /// "Direct" in English there.
+    @MainActor
+    func testTheSystemRouteNamesAreTranslated() throws {
+        let es = try lproj("es")
+        XCTAssertEqual(RoutesTab.systemRouteNames(vpnType: nil, in: es).direct, "Directo")
+        XCTAssertEqual(RoutesTab.systemRouteNames(vpnType: .unknown, in: es).vpn, "VPN")
+        XCTAssertEqual(RoutesTab.systemRouteNames(vpnType: .wireGuard, in: es).vpn, "WireGuard")
+    }
+
+    /// A tunnel the app could not name is labelled with `.unknown`'s raw value, "Unknown VPN";
+    /// the Status page's tunnel list and both VPN pickers show "VPN" in its place.
+    func testAnUnknownTunnelLabelShowsAsVPN() {
+        XCTAssertEqual(VPNType.displayLabel(VPNType.unknown.rawValue), "VPN")
+        XCTAssertEqual(VPNType.displayLabel("WireGuard"), "WireGuard")
+        XCTAssertEqual(VPNType.displayLabel("VPN (utun4)"), "VPN (utun4)")
+    }
+
     /// The Remove All Routes question is built from parts; the translation must put each part in its place.
     func testTheRemoveAllQuestionKeepsItsPartsInOrder() throws {
         let es = try lproj("es"), fr = try lproj("fr")
