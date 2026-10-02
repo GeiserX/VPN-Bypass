@@ -26,6 +26,8 @@ final class RoutedAddressCountTests: XCTestCase {
         XCTAssertEqual(RoutedBySource.addressCount(routes, vpnOnly: true), 2)
         XCTAssertTrue(RoutedBySource.everythingElseDirect(routes, vpnOnly: true))
         XCTAssertEqual(RoutedBySource.addressCount(catchAllRoutes, vpnOnly: true), 0)
+        XCTAssertEqual(RoutedBySource.catchAllCount(routes, vpnOnly: true), 4)
+        XCTAssertEqual(RoutedBySource.catchAllCount([route("140.82.112.4", "github.com")], vpnOnly: true), 0)
     }
 
     /// Bypass has no catch-alls; left installed after a switch they are routes like any other,
@@ -36,6 +38,7 @@ final class RoutedAddressCountTests: XCTestCase {
         XCTAssertEqual(RoutedBySource.addressCount(routes, vpnOnly: false), 2)
         XCTAssertEqual(RoutedBySource.addressCount(routes + catchAllRoutes, vpnOnly: false), 6)
         XCTAssertFalse(RoutedBySource.everythingElseDirect(routes + catchAllRoutes, vpnOnly: false))
+        XCTAssertEqual(RoutedBySource.catchAllCount(routes + catchAllRoutes, vpnOnly: false), 0)
     }
 
     func testCustomCountsWhatItsRulesInstalled() {
@@ -47,6 +50,7 @@ final class RoutedAddressCountTests: XCTestCase {
     /// same range on the user's own list is one of the user's destinations, and counts.
     func testTheSameRangeOnTheUsersListCounts() {
         XCTAssertEqual(RoutedBySource.addressCount([route("0.0.0.0/2", "0.0.0.0/2")], vpnOnly: true), 1)
+        XCTAssertEqual(RoutedBySource.catchAllCount([route("0.0.0.0/2", "0.0.0.0/2")], vpnOnly: true), 0)
     }
 
     /// The card's own count is this function, in every mode.

@@ -210,6 +210,8 @@
 "Automatic (recommended)" = "Automático (recomendado)";
 "No VPN tunnels are up." = "No hay ningún túnel VPN activo.";
 "Pinned tunnel %@ is not eligible right now — acting on %@ automatically." = "El túnel fijado %1$@ no se puede usar ahora; se actúa sobre %2$@ automáticamente.";
+"%lld, plus 1 catch-all" = "%lld, más 1 ruta general";
+"%lld, plus %lld catch-alls" = "%1$lld, más %2$lld rutas generales";
 "Addresses owned (kernel-tagged)" = "Direcciones propias (marcadas en el kernel)";
 "Reading network state…" = "Leyendo el estado de la red…";
 "Recent warnings" = "Avisos recientes";

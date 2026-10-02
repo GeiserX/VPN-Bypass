@@ -148,7 +148,8 @@ final class StatusPageTests: XCTestCase {
     private let other = RouteManager.VPNLink(interface: "utun7", addresses: ["10.8.0.2"], label: "OpenVPN", isTailscale: false)
 
     private func snapshot(default iface: String?, selected: String? = "utun4") -> RouteManager.CoexistenceSnapshot {
-        .init(links: [wireguard, tailscale, other], selectedInterface: selected, defaultRouteInterface: iface, taggedRouteCount: 62)
+        .init(links: [wireguard, tailscale, other], selectedInterface: selected, defaultRouteInterface: iface,
+              taggedDestinations: (1...62).map { "198.51.100.\($0)" })
     }
 
     func testDefaultRouteLine() {
@@ -158,6 +159,80 @@ final class StatusPageTests: XCTestCase {
         XCTAssertEqual(StatusPage.defaultRouteLine(snapshot(default: "utun6")).text, "utun6, Tailscale")
         XCTAssertEqual(StatusPage.defaultRouteLine(snapshot(default: "utun7")).text, "utun7, another tunnel")
         XCTAssertEqual(StatusPage.defaultRouteLine(snapshot(default: "en0")).text, "en0, outside the VPN")
+    }
+
+    // MARK: Addresses owned
+
+    private func owned(_ destination: String, _ source: String) -> RoutedBySource.InstalledRoute {
+        .init(destination: destination, source: source)
+    }
+
+    private var catchAlls: [RoutedBySource.InstalledRoute] {
+        ["0.0.0.0/2", "64.0.0.0/2", "128.0.0.0/2", "192.0.0.0/2"].map { owned($0, ClassicRouteCompiler.catchAllSource) }
+    }
+
+    /// The row as the page builds it when the kernel holds exactly what the app recorded.
+    private func ownedText(_ installed: [RoutedBySource.InstalledRoute], vpnOnly: Bool, bundle: Bundle = .main) -> String {
+        StatusPage.ownedLine(tagged: installed.map(\.destination), installed: installed, vpnOnly: vpnOnly, bundle: bundle).text
+    }
+
+    /// The problem this row had: in VPN Only it read 6 while Routed above read 2, because it
+    /// counted the 4 catch-alls as addresses.
+    func testVPNOnlyNamesTheCatchAllsApartFromTheAddresses() {
+        let installed = [owned("10.20.0.0/16", "10.20.0.0/16"), owned("140.82.112.4", "github.com")] + catchAlls
+        XCTAssertEqual(ownedText(installed, vpnOnly: true), "2, plus 4 catch-alls")
+        XCTAssertEqual(ownedText([owned("140.82.112.4", "github.com"), catchAlls[0]], vpnOnly: true), "1, plus 1 catch-all")
+    }
+
+    /// With nothing on the VPN Only list the catch-alls are all the app owns.
+    func testVPNOnlyWithNoEntriesOwnsOnlyTheCatchAlls() {
+        XCTAssertEqual(ownedText(catchAlls, vpnOnly: true), "0, plus 4 catch-alls")
+        XCTAssertEqual(ownedText([], vpnOnly: true), "0")
+    }
+
+    /// Bypass has no catch-alls: the row is the bare number. The catch-all ranges left from a
+    /// switch out of VPN Only are routes like any other, as the card and Routed count them.
+    func testBypassIsTheBareNumber() {
+        let installed = [owned("91.108.4.0/22", "Telegram"), owned("91.108.4.0/22", "telegram.org"),
+                         owned("142.250.1.1", "YouTube")]
+        XCTAssertEqual(ownedText(installed, vpnOnly: false), "2")
+        XCTAssertEqual(ownedText(installed + catchAlls, vpnOnly: false), "6")
+    }
+
+    func testCustomIsTheBareNumber() {
+        let installed = [owned("10.9.0.0/16", "10.9.0.0/16"), owned("1.2.3.4", "b.example")]
+        XCTAssertEqual(ownedText(installed, vpnOnly: false), "2")
+    }
+
+    /// The first number is the Routed row's, read through the same function, in every mode.
+    func testTheFirstNumberIsTheRoutedCount() {
+        let installed = [owned("10.20.0.0/16", "10.20.0.0/16"), owned("140.82.112.4", "github.com"),
+                         owned("140.82.112.4", "api.github.com")] + catchAlls
+        for vpnOnly in [true, false] {
+            let routed = RoutedBySource.addressCount(installed, vpnOnly: vpnOnly)
+            XCTAssertTrue(ownedText(installed, vpnOnly: vpnOnly).hasPrefix("\(routed)"), "vpnOnly: \(vpnOnly)")
+        }
+    }
+
+    /// The row still reads the kernel: a tagged route the app has no record of is an address,
+    /// and a recorded route the kernel no longer holds is not counted. A user's own entry for
+    /// a catch-all range is an address, as the card counts it.
+    func testTheRowCountsWhatTheKernelHolds() {
+        let installed = [owned("140.82.112.4", "github.com"), owned("140.82.112.5", "github.com"),
+                         owned("0.0.0.0/2", "0.0.0.0/2")] + catchAlls.dropFirst()
+        // Two unrecorded addresses against one missing, and a recorded catch-all the kernel lost,
+        // so a row that read the app's records instead of the kernel would say "3, plus 3".
+        let tagged = ["140.82.112.4", "203.0.113.9", "203.0.113.10", "0.0.0.0/2", "128.0.0.0/2", "192.0.0.0/2"]
+        XCTAssertEqual(StatusPage.ownedLine(tagged: tagged, installed: installed, vpnOnly: true).text, "4, plus 2 catch-alls")
+    }
+
+    func testTheCatchAllsAreNamedInSpanishAndFrench() throws {
+        let es = try lproj("es"), fr = try lproj("fr")
+        let installed = [owned("140.82.112.4", "github.com"), owned("140.82.112.5", "github.com")] + catchAlls
+        XCTAssertEqual(ownedText(installed, vpnOnly: true, bundle: es), "2, más 4 rutas generales")
+        XCTAssertEqual(ownedText(installed, vpnOnly: true, bundle: fr), "2, plus 4 routes générales")
+        XCTAssertEqual(ownedText([catchAlls[0]], vpnOnly: true, bundle: es), "0, más 1 ruta general")
+        XCTAssertEqual(ownedText([catchAlls[0]], vpnOnly: true, bundle: fr), "0, plus 1 route générale")
     }
 
     // MARK: Routes
@@ -392,6 +467,8 @@ final class StatusPageTests: XCTestCase {
             StatusPage.tunnelLine(wireguard, snapshot: s, bundle: bundle),
             StatusPage.tunnelLine(tailscale, snapshot: s, bundle: bundle),
             StatusPage.tunnelLine(other, snapshot: s, bundle: bundle),
+            ownedText([catchAlls[0]], vpnOnly: true, bundle: bundle),
+            ownedText(catchAlls, vpnOnly: true, bundle: bundle),
         ]
         for key in ["Status", "Helper", "Privileged helper", "Connection", "Normal connection", "Default route",
                     "Addresses", "Routed", "From", "Last check", "Verify", "Resolver", "Refreshed", "Refresh", "Act on",
