@@ -65,4 +65,6 @@
 # - linear.api_key  → use LINEAR_API_KEY env var instead
 # - github.token    → use GITHUB_TOKEN env var instead
 
-sync.remote: "git+https://github.com/GeiserX/VPN-Bypass.git"
+sync.remote: "git+ssh://git@gitea.geiser.cloud:2222/giteaer/VPN-Bypass-beads.git"
+# Every bd write is a Dolt commit, so a push always carries it.
+dolt.auto-commit: "on"
