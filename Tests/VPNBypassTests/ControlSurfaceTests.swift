@@ -35,15 +35,18 @@ final class ControlSurfaceTests: XCTestCase {
 
     func testRouteSetRepointsLiveListenerKeepingStablePort() async {
         let id = UUID()
+        // A port from TestPorts, not a fixed one: a fixed port fails this test whenever
+        // something else holds it, because the listener then falls back to a random port.
+        let stablePort = TestPorts.nextListenPort().rawValue
         var cfg = RouteManager.shared.config
         cfg.multiRouteEnabled = true
         cfg.routes = [Route(id: id, name: "oxy", egress: .proxyHTTP,
-                            proxyHost: "127.0.0.1", proxyPort: 8001, localListenPort: 18099)]
+                            proxyHost: "127.0.0.1", proxyPort: 8001, localListenPort: Int(stablePort))]
         RouteManager.shared.config = cfg
 
         await RouteManager.shared.reconcileProxyListeners()
         let started = await waitForPort(id)
-        XCTAssertEqual(started, 18099, "listener up on its stable port")
+        XCTAssertEqual(started, stablePort, "listener up on its stable port")
 
         // Re-point the upstream port (the canonical "switch the exit IP" command).
         let resp = await ControlSurface.handle(ControlRequest(cmd: "route.set",
@@ -52,7 +55,7 @@ final class ControlSurfaceTests: XCTestCase {
         XCTAssertEqual(resp.result?.routes?.first?.proxyPort, 8002)
         XCTAssertEqual(RouteManager.shared.config.routes.first?.proxyPort, 8002, "change persisted to config")
         let afterRepoint = await waitForPort(id)
-        XCTAssertEqual(afterRepoint, 18099,
+        XCTAssertEqual(afterRepoint, stablePort,
                        "listener re-pointed in place — stable local port survives (HTTPS_PROXY keeps working)")
     }
 

@@ -166,18 +166,19 @@ final class ProxyListenerManagerTests: XCTestCase {
         // and an identical reconcile must be a no-op — both on a stable per-route port.
         let manager = ProxyListenerManager()
         let id = UUID()
-        let r1 = Route(id: id, name: "p", egress: .proxyHTTP, proxyHost: "127.0.0.1", proxyPort: 9, localListenPort: 18077)
+        let port = TestPorts.nextListenPort().rawValue
+        let r1 = Route(id: id, name: "p", egress: .proxyHTTP, proxyHost: "127.0.0.1", proxyPort: 9, localListenPort: Int(port))
 
         let e1 = expectation(description: "start")
         manager.reconcile(routes: [r1], boundInterface: nil) { e1.fulfill() }
         wait(for: [e1], timeout: 5)
-        XCTAssertEqual(manager.port(for: id), 18077)
+        XCTAssertEqual(manager.port(for: id), port)
 
-        let r2 = Route(id: id, name: "p", egress: .proxyHTTP, proxyHost: "127.0.0.1", proxyPort: 10, localListenPort: 18077)
+        let r2 = Route(id: id, name: "p", egress: .proxyHTTP, proxyHost: "127.0.0.1", proxyPort: 10, localListenPort: Int(port))
         let e2 = expectation(description: "restart")
         manager.reconcile(routes: [r2], boundInterface: nil) { e2.fulfill() }
         wait(for: [e2], timeout: 5)
-        XCTAssertEqual(manager.port(for: id), 18077, "still served on its stable port after an in-place edit")
+        XCTAssertEqual(manager.port(for: id), port, "still served on its stable port after an in-place edit")
 
         manager.stopAll()
     }
@@ -188,7 +189,7 @@ final class ProxyListenerManagerTests: XCTestCase {
         // manager dropped the forwarder straight after it, so the old listener kept the
         // port and the route came back on a random one.
         let manager = ProxyListenerManager()
-        let port = ProxyForwarderTests.nextListenPort().rawValue
+        let port = TestPorts.nextListenPort().rawValue
         let route = Route(name: "p", egress: .proxyHTTP, proxyHost: "127.0.0.1", proxyPort: 9, localListenPort: Int(port))
 
         let on = expectation(description: "on")
