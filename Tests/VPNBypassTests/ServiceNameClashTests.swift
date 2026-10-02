@@ -4,8 +4,9 @@
 // group both under one row, and removing one could remove the other's routes. Covers the pure
 // check, RouteManager's add, update and undo, config import, and that a config.json already holding
 // such a name still loads, the Bypass list refusing a service's name, and the put-back of a shared
-// source's routes when a custom service leaves it. Where the VPN is marked connected no gateway
-// is known, so nothing touches the kernel.
+// source's routes when a custom service leaves it. The put-back tests run against FakeKernel
+// with a fake gateway, so nothing touches the real routing table or the network. An app update
+// that brings a built-in service named like a custom one keeps the built-in one off.
 
 import XCTest
 @testable import VPNBypassCore
@@ -17,6 +18,9 @@ final class ServiceNameClashTests: RouteManagerTestCase {
     private var savedLogs: [RouteManager.LogEntry] = []
     private var savedVPNConnected = false
     private var savedGateway: String?
+    private var savedVPNGateway: String?
+    private var savedActiveRoutes: [RouteManager.ActiveRoute] = []
+    private var savedPendingKernelAdds: Set<String> = []
     private var tempFiles: [URL] = []
 
     override func setUp() {
@@ -25,6 +29,9 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         savedLogs = rm.recentLogs
         savedVPNConnected = rm.isVPNConnected
         savedGateway = rm.localGateway
+        savedVPNGateway = rm.vpnGateway
+        savedActiveRoutes = rm.activeRoutes
+        savedPendingKernelAdds = rm.pendingKernelAdds
         rm.isVPNConnected = false
         var cfg = RouteManager.Config()
         cfg.routingMode = .bypass
@@ -40,6 +47,12 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         rm.recentLogs = savedLogs
         rm.isVPNConnected = savedVPNConnected
         rm.localGateway = savedGateway
+        rm.vpnGateway = savedVPNGateway
+        rm.activeRoutes = savedActiveRoutes
+        // A batch add records its destinations here until a teardown; keep the fake ones out
+        // of the next test's teardown.
+        rm.pendingKernelAdds = savedPendingKernelAdds
+        FakeKernel.detach(from: rm)
         rm.cancelAllRetries()
         super.tearDown()
     }
@@ -284,6 +297,194 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         XCTAssertFalse(rm.recentLogs.contains { $0.message.contains("not put back") || $0.message.hasPrefix("Putting back") })
     }
 
+    // MARK: - The put-back, against a fake routing table
+
+    private let gateway = "192.0.2.1"
+    private let builtInRange = "198.51.100.0/24"
+    private let customRange = "203.0.113.0/24"
+
+    private func route(_ destination: String, _ source: String, via gw: String? = nil) -> RouteManager.ActiveRoute {
+        RouteManager.ActiveRoute(destination: destination, gateway: gw ?? gateway, source: source, timestamp: Date())
+    }
+
+    /// Bypass with the VPN up: the built-in "Netflix" and a custom service of the same name are
+    /// both on and both routed, each with one range, all under the one source "Netflix".
+    private func bypassWithASharedName() -> FakeKernel {
+        let kernel = FakeKernel(installed: [])
+        kernel.attach(to: rm)
+        _ = kernel.add([(builtInRange, gateway, true), (customRange, gateway, true)])
+        rm.config.services = [
+            ServiceEntry(id: "netflix", name: "Netflix", enabled: true, domains: [], ipRanges: [builtInRange]),
+            ServiceEntry(id: "custom_n", name: "Netflix", enabled: true, domains: [], ipRanges: [customRange], isCustom: true),
+        ]
+        rm.activeRoutes = [route(builtInRange, "Netflix"), route(customRange, "Netflix")]
+        rm.isVPNConnected = true
+        rm.localGateway = gateway
+        rm.recentLogs = []
+        return kernel
+    }
+
+    private func routes(_ source: String) -> Set<String> {
+        Set(rm.activeRoutes.filter { $0.source == source }.map(\.destination))
+    }
+
+    func testDeletingTheCustomServicePutsTheBuiltInOnesRoutesBackInBypass() async {
+        let kernel = bypassWithASharedName()
+
+        rm.removeCustomService("custom_n")
+        await waitForTheGate()
+
+        XCTAssertEqual(kernel.installed, [builtInRange], "the custom range goes, the built-in one is back")
+        XCTAssertEqual(kernel.gateways[builtInRange], gateway)
+        XCTAssertEqual(routes("Netflix"), [builtInRange])
+        XCTAssertTrue(rm.recentLogs.contains { $0.message.hasPrefix("Putting back the routes of Netflix") })
+    }
+
+    func testRenamingTheCustomServicePutsTheBuiltInOnesRoutesBackInBypass() async {
+        let kernel = bypassWithASharedName()
+
+        XCTAssertNil(rm.updateCustomService(id: "custom_n", name: "My Netflix", domains: [], ipRanges: [customRange]))
+        await waitForTheGate()
+
+        XCTAssertEqual(kernel.installed, [builtInRange, customRange])
+        XCTAssertEqual(routes("Netflix"), [builtInRange], "the built-in service routes under its name again")
+        XCTAssertEqual(routes("My Netflix"), [customRange], "the custom one routes under its new name")
+    }
+
+    func testDeletingTheCustomServicePutsABypassEntryOfItsNameBack() async {
+        let kernel = FakeKernel(installed: ["198.51.100.7"])
+        kernel.dns["shop.example"] = ["198.51.100.7"]
+        kernel.attach(to: rm)
+        rm.config.domains = [DomainEntry(domain: "shop.example")]
+        rm.config.services = [ServiceEntry(id: "custom_s", name: "shop.example", enabled: true, domains: [], ipRanges: [customRange], isCustom: true)]
+        _ = kernel.add(customRange, gateway: gateway)
+        rm.activeRoutes = [route("198.51.100.7", "shop.example"), route(customRange, "shop.example")]
+        rm.isVPNConnected = true
+        rm.localGateway = gateway
+
+        rm.removeCustomService("custom_s")
+        await waitForTheGate()
+
+        XCTAssertEqual(kernel.installed, ["198.51.100.7"])
+        XCTAssertEqual(routes("shop.example"), ["198.51.100.7"])
+    }
+
+    /// VPN Only routes no service, so a custom service named like a VPN Only entry owns none of
+    /// the routes under that name: renaming or deleting it leaves the entry's routes in, through
+    /// the VPN, the whole time.
+    private func vpnOnlyWithASharedName() -> FakeKernel {
+        let vpn = "10.8.0.1"
+        let kernel = FakeKernel(installed: [])
+        kernel.attach(to: rm)
+        _ = kernel.add("10.20.0.5", gateway: vpn)
+        rm.config.routingMode = .vpnOnly
+        rm.config.inverseDomains = [DomainEntry(domain: "corp.example")]
+        rm.config.services = [ServiceEntry(id: "custom_c", name: "corp.example", enabled: true, domains: [], ipRanges: [customRange], isCustom: true)]
+        rm.activeRoutes = [route("10.20.0.5", "corp.example", via: vpn)]
+        rm.isVPNConnected = true
+        rm.localGateway = gateway
+        rm.vpnGateway = vpn
+        return kernel
+    }
+
+    func testDeletingTheCustomServiceKeepsAVPNOnlyEntryOfItsNameRouted() async {
+        let kernel = vpnOnlyWithASharedName()
+
+        rm.removeCustomService("custom_c")
+        await waitForTheGate()
+
+        XCTAssertFalse(rm.config.services.contains { $0.id == "custom_c" })
+        XCTAssertEqual(kernel.installed, ["10.20.0.5"])
+        XCTAssertEqual(kernel.gateways["10.20.0.5"], "10.8.0.1")
+        XCTAssertEqual(routes("corp.example"), ["10.20.0.5"])
+    }
+
+    func testRenamingTheCustomServiceKeepsAVPNOnlyEntryOfItsNameRouted() async {
+        let kernel = vpnOnlyWithASharedName()
+
+        XCTAssertNil(rm.updateCustomService(id: "custom_c", name: "Corp", domains: [], ipRanges: [customRange]))
+        await waitForTheGate()
+
+        XCTAssertEqual(kernel.installed, ["10.20.0.5"])
+        XCTAssertEqual(routes("corp.example"), ["10.20.0.5"])
+        XCTAssertTrue(routes("Corp").isEmpty, "a service routes nothing in VPN Only")
+    }
+
+    // MARK: - An app update brings a built-in service named like a custom one
+
+    /// Writes config.json as an older version would have saved it, then loads it the way a
+    /// launch does, so the built-in merge runs.
+    private func load(_ services: [ServiceEntry]) {
+        rm.config.services = services
+        rm.saveConfig()
+        rm.config = RouteManager.Config()
+        rm.loadConfig()
+        XCTAssertFalse(rm.isConfigLoadFailed)
+    }
+
+    private func service(_ id: String) throws -> ServiceEntry {
+        try XCTUnwrap(rm.config.services.first { $0.id == id }, id)
+    }
+
+    func testANewBuiltInNamedLikeACustomServiceComesInOffAndStaysOff() async throws {
+        load(Config.defaultServices.filter { $0.id != "netflix" } + [custom("custom_n", "netflix")])
+
+        XCTAssertFalse(try service("netflix").enabled)
+        XCTAssertEqual(try service("netflix").name, "Netflix")
+        XCTAssertEqual(try service("custom_n").name, "netflix", "the custom service keeps its name")
+        XCTAssertTrue(try service("custom_n").enabled, "and stays on")
+        XCTAssertEqual(rm.customServiceHolding(nameOf: try service("netflix"))?.id, "custom_n")
+        XCTAssertEqual(rm.customServiceNameClash("netflix", excluding: "custom_n"), .service(name: "Netflix"),
+                       "the custom service's row and editor show the line asking for another name")
+
+        rm.recentLogs = []
+        rm.toggleService("netflix")
+        XCTAssertFalse(try service("netflix").enabled, "its switch does not turn it on")
+        XCTAssertTrue(rm.recentLogs.contains { $0.message == "Netflix not turned on: Your custom service \u{201C}netflix\u{201D} has this name. Rename it to turn this service on." },
+                      rm.recentLogs.map(\.message).joined(separator: "\n"))
+
+        let switched = rm.setAllServicesEnabled(true)
+        XCTAssertFalse(switched.contains("netflix"))
+        XCTAssertFalse(try service("netflix").enabled, "Turn All On leaves it off")
+        XCTAssertTrue(try service("spotify").enabled)
+
+        let response = await ControlSurface.handle(ControlRequest(cmd: "service.enable", args: ["id": "netflix"]))
+        XCTAssertEqual(response.error?.code, "already_exists", "vpnb gets an error, not a success with the service still off")
+        XCTAssertFalse(try service("netflix").enabled)
+
+        XCTAssertNil(rm.updateCustomService(id: "custom_n", name: "My Netflix", domains: ["custom_n.test"], ipRanges: []))
+        XCTAssertNil(rm.customServiceHolding(nameOf: try service("netflix")))
+        rm.toggleService("netflix")
+        XCTAssertTrue(try service("netflix").enabled, "once the custom service is renamed the built-in one turns on")
+    }
+
+    func testABuiltInRenamedOntoACustomServicesNameIsTurnedOffOnLoad() throws {
+        // A built-in service the user had on, saved under a name this version changed to the
+        // custom service's.
+        var renamed = try XCTUnwrap(Config.defaultServices.first { $0.id == "netflix" })
+        renamed.name = "Netflix (old)"
+        renamed.enabled = true
+        load(Config.defaultServices.filter { $0.id != "netflix" } + [renamed, custom("custom_n", "Netflix ")])
+
+        XCTAssertEqual(try service("netflix").name, "Netflix")
+        XCTAssertFalse(try service("netflix").enabled, "the two would route under one name")
+        XCTAssertTrue(try service("custom_n").enabled)
+        XCTAssertTrue(rm.config.services.filter { $0.enabled && $0.name.lowercased().hasPrefix("netflix") }.count == 1)
+
+        // The merge saved it: the next launch reads the built-in one as off.
+        rm.config = RouteManager.Config()
+        rm.loadConfig()
+        XCTAssertFalse(try service("netflix").enabled)
+    }
+
+    func testABuiltInWithAFreeNameKeepsItsSwitch() throws {
+        var netflix = try XCTUnwrap(Config.defaultServices.first { $0.id == "netflix" })
+        netflix.enabled = true
+        load(Config.defaultServices.filter { $0.id != "netflix" } + [netflix, custom("custom_w", "Work Tools")])
+        XCTAssertTrue(try service("netflix").enabled)
+        XCTAssertNil(rm.customServiceHolding(nameOf: try service("netflix")))
+    }
+
     // MARK: - The lines in Spanish and French
 
     private func lproj(_ language: String) throws -> Bundle {
@@ -309,6 +510,14 @@ final class ServiceNameClashTests: RouteManagerTestCase {
             XCTAssertNotEqual(taken.message(in: bundle), taken.message(in: en))
             XCTAssertTrue(taken.message(in: bundle).contains("Shop"))
             XCTAssertFalse(taken.message(in: bundle).contains("%"))
+        }
+        XCTAssertEqual(ServiceNameClash.builtInOffMessage(custom: "Mine", in: en),
+                       "Your custom service \u{201C}Mine\u{201D} has this name. Rename it to turn this service on.")
+        for (name, bundle) in [("es", es), ("fr", fr)] {
+            let line = ServiceNameClash.builtInOffMessage(custom: "Mine", in: bundle)
+            XCTAssertNotEqual(line, ServiceNameClash.builtInOffMessage(custom: "Mine", in: en), "\(name) has no translation")
+            XCTAssertTrue(line.contains("Mine"), line)
+            XCTAssertFalse(line.contains("%"), line)
         }
         XCTAssertEqual(ServiceNameClash.service(name: "Netflix").message(in: es),
                        "Ya existe un servicio llamado \u{201C}Netflix\u{201D}. Elige otro nombre para que sus rutas no se mezclen.")

@@ -266,6 +266,9 @@ enum ClassicControl {
         guard let service = rm.config.services.first(where: { $0.id == id }) else {
             return fail("not_found", "no service with that id")
         }
+        if enabled, !service.enabled, let custom = rm.customServiceHolding(nameOf: service) {
+            return fail("already_exists", "the custom service \(custom.name) has this service's name; routes are tracked by name, so rename it before turning this service on")
+        }
         if service.enabled != enabled {
             rm.toggleService(id)
         }

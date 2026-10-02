@@ -393,6 +393,7 @@
 "%@ is on your Bypass list. Choose another name, so their routes stay apart." = "%@ está en tu lista Bypass. Elige otro nombre para que sus rutas no se mezclen.";
 "Nothing was imported. The custom service “%@” has the same name as the service “%@”. Rename it in the file and import again." = "No se importó nada. El servicio personalizado “%1$@” tiene el mismo nombre que el servicio “%2$@”. Cámbiale el nombre en el archivo y vuelve a importarlo.";
 "Nothing was imported. The custom service “%@” has the same name as %@ on the Bypass list. Rename it in the file and import again." = "No se importó nada. El servicio personalizado “%1$@” tiene el mismo nombre que %2$@, de la lista Bypass. Cámbiale el nombre en el archivo y vuelve a importarlo.";
+"Your custom service “%@” has this name. Rename it to turn this service on." = "Tu servicio personalizado “%@” tiene este nombre. Cámbiale el nombre para activar este servicio.";
 
 /* ===== Settings — Routes and Rules (Custom mode) ===== */
 "Copy Proxy URL" = "Copiar URL del proxy";

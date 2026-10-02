@@ -359,8 +359,19 @@ final class RouteManager: ObservableObject {
         for saved in config.services where defaultById[saved.id] == nil {
             merged.append(saved)
         }
-        
-        if updated > 0 || added > 0 {
+
+        // A built-in service this version added or renamed can have the name of one of the
+        // user's custom services. Both would route under that one name, so the built-in one
+        // stays off until the custom one is renamed; the custom one keeps its name and routes.
+        var switchedOff = 0
+        for i in merged.indices where merged[i].enabled {
+            guard let custom = ServiceNameClash.customServiceHolding(nameOf: merged[i], in: merged) else { continue }
+            merged[i].enabled = false
+            switchedOff += 1
+            log(.warning, "\(merged[i].name) turned off: your custom service \(custom.name) has the same name. Rename it to turn \(merged[i].name) on.")
+        }
+
+        if updated > 0 || added > 0 || switchedOff > 0 {
             config.services = merged
             if autoSave {
                 saveConfig()
@@ -4492,7 +4503,12 @@ final class RouteManager: ObservableObject {
         }
         Task {
             defer { releaseRouteOperation() }
-            await removeRoutesForSource(name)
+            // In VPN Only no service routes anything, so the routes under this name belong to
+            // the VPN Only entry with exactly that name. Leave them in: taking them out and
+            // putting them back would send that entry's traffic outside the VPN meanwhile.
+            if !vpnOnlyEntryRoutes(name) {
+                await removeRoutesForSource(name)
+            }
             // If routes were retained (kernel removal failed), save the domain list
             // so updateHostsFile can reconstruct hosts entries for this orphaned source
             if activeRoutes.contains(where: { $0.source == name }) {
@@ -4513,6 +4529,12 @@ final class RouteManager: ObservableObject {
         guard bypassListIsLive else { return ([], []) }
         return (config.services.filter { $0.id != id && $0.enabled && $0.name == source },
                 config.domains.filter { $0.enabled && $0.domain == source })
+    }
+
+    /// True when VPN Only is on and an enabled VPN Only entry is exactly `source`, so the
+    /// routes under that source are that entry's.
+    private func vpnOnlyEntryRoutes(_ source: String) -> Bool {
+        config.routingMode == .vpnOnly && config.inverseDomains.contains { $0.enabled && $0.domain == source }
     }
 
     /// `removeRoutesForSource` takes out every route under a source. When a custom service is
@@ -4542,8 +4564,18 @@ final class RouteManager: ObservableObject {
         }
     }
 
+    /// The custom service that keeps the built-in service `service` off by having its name
+    /// (see `ServiceNameClash.customServiceHolding`), or nil when it can be turned on.
+    func customServiceHolding(nameOf service: ServiceEntry) -> ServiceEntry? {
+        ServiceNameClash.customServiceHolding(nameOf: service, in: config.services)
+    }
+
     func toggleService(_ serviceId: String) {
         guard let index = config.services.firstIndex(where: { $0.id == serviceId }) else { return }
+        if !config.services[index].enabled, let custom = customServiceHolding(nameOf: config.services[index]) {
+            log(.warning, "\(config.services[index].name) not turned on: \(ServiceNameClash.builtInOffMessage(custom: custom.name))")
+            return
+        }
         config.services[index].enabled.toggle()
         saveConfig()
         
@@ -4642,7 +4674,7 @@ final class RouteManager: ObservableObject {
 
         // Apply new kernel routes in single batch, exclude failed destinations from ownership
         var failedDests: Set<String> = []
-        if !routesToAdd.isEmpty && HelperManager.shared.isHelperInstalled {
+        if !routesToAdd.isEmpty && (HelperManager.shared.isHelperInstalled || addRoutesBatchOverrideForTests != nil) {
             let result = await addRoutesBatchTracked(routes: routesToAdd)
             failedDests = Set(result.failedDestinations)
             if result.failureCount > 0 {
@@ -4686,6 +4718,10 @@ final class RouteManager: ObservableObject {
     /// does for all of them. Returns the ids it switched.
     @discardableResult
     func setServicesEnabled(_ ids: Set<String>, _ enabled: Bool) -> [String] {
+        // A built-in service whose name a custom service has stays off (see toggleService).
+        let held = enabled ? Set(config.services.filter { customServiceHolding(nameOf: $0) != nil }.map(\.id)) : []
+        let ids = ids.subtracting(held)
+
         // Get services that need to change
         let servicesToChange = config.services.filter { ids.contains($0.id) && $0.enabled != enabled }
         let changed = servicesToChange.map(\.id)
@@ -4972,7 +5008,12 @@ final class RouteManager: ObservableObject {
         // interleave at the await below, and a drop caused by the in-flight batch must not
         // be judged against a pre-batch timestamp.
         if !routes.isEmpty { lastKernelBurstAt = Date() }
-        let result = await HelperManager.shared.addRoutesBatch(routes: routes)
+        let result: (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?)
+        if let override = addRoutesBatchOverrideForTests {
+            result = await override(routes)
+        } else {
+            result = await HelperManager.shared.addRoutesBatch(routes: routes)
+        }
         // Failed destinations never reached the kernel — nothing to sweep for them.
         pendingKernelAdds.subtract(result.failedDestinations)
         return result
@@ -5286,6 +5327,14 @@ final class RouteManager: ObservableObject {
     /// repro observe kernel removals (incl. unstrandRoutes) without a real helper; `routeEpochForTests`
     /// exposes the private preemption epoch so the test can capture it before forcing a teardown.
     var removeRoutesBatchOverrideForTests: (([String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?))?
+    /// Test-only seams (nil in production) for the other kernel calls and the DNS lookup a
+    /// single entry's edit makes: the batch add `applyRoutesForService` uses, the one-route add
+    /// and remove, and `resolveIPs`. With all four set a test runs an edit end to end against
+    /// an in-memory routing table (FakeKernel in the tests), with no helper and no network.
+    var addRoutesBatchOverrideForTests: (([(destination: String, gateway: String, isNetwork: Bool)]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?))?
+    var addRouteOverrideForTests: ((_ destination: String, _ gateway: String, _ isNetwork: Bool) async -> Bool)?
+    var removeRouteOverrideForTests: ((_ destination: String) async -> Bool)?
+    var resolveIPsOverrideForTests: ((_ domain: String) async -> [String]?)?
     var routeEpochForTests: UInt64 { routeEpoch }
 
     private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil, persistCache: Bool = true) async -> [ActiveRoute]? {
@@ -5319,6 +5368,7 @@ final class RouteManager: ObservableObject {
     }
     
     private func resolveIPs(for domain: String) async -> [String]? {
+        if let override = resolveIPsOverrideForTests { return await override(domain) }
         // Use nonisolated static method for true parallelism
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
@@ -5326,6 +5376,7 @@ final class RouteManager: ObservableObject {
     }
     
     private func addRoute(_ destination: String, gateway: String, isNetwork: Bool = false) async -> Bool {
+        if let override = addRouteOverrideForTests { return await override(destination, gateway, isNetwork) }
         guard HelperManager.shared.isHelperInstalled else {
             log(.error, "Cannot add route: helper not ready")
             return false
@@ -5338,6 +5389,7 @@ final class RouteManager: ObservableObject {
     }
 
     private func removeRoute(_ destination: String) async -> Bool {
+        if let override = removeRouteOverrideForTests { return await override(destination) }
         guard HelperManager.shared.isHelperInstalled else {
             log(.error, "Cannot remove route: helper not ready")
             return false
