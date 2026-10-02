@@ -70,6 +70,10 @@ backup/
 *.db-shm
 db.sqlite
 bd.db
+# Bead text lives in the Dolt tracker only, never in git
+# (the shared copy is the private Dolt remote named by sync.remote)
+issues.jsonl
+interactions.jsonl
 # NOTE: Do NOT add negation patterns here.
 # They would override fork protection in .git/info/exclude.
 # Config files (metadata.json, config.yaml) are tracked by git by default
