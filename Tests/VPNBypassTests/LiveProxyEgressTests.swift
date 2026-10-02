@@ -18,7 +18,7 @@ final class LiveProxyEgressTests: XCTestCase {
             throw XCTSkip("no upstream proxy URL in env")
         }
 
-        let forwarder = ProxyForwarder(listenPort: 0, upstream: upstream)
+        let forwarder = ProxyForwarder(listenPort: TestPorts.nextListenPort().rawValue, upstream: upstream)
         try forwarder.start()
         defer { forwarder.stop() }
         guard let port = forwarder.boundPort else { return XCTFail("forwarder did not bind a port") }
@@ -88,9 +88,10 @@ final class LiveProxyEgressTests: XCTestCase {
               let up = Self.parseUpstream(proxyURL, iface: nil) else { throw XCTSkip("no upstream") }
 
         let routeId = UUID()
+        let stablePort = TestPorts.nextListenPort().rawValue
         let route = Route(id: routeId, name: "oxy-live", egress: .proxyHTTP,
                           proxyHost: up.host, proxyPort: Int(up.port),
-                          proxyUser: up.username, proxyPass: up.password, localListenPort: 18443)
+                          proxyUser: up.username, proxyPass: up.password, localListenPort: Int(stablePort))
         var cfg = RouteManager.shared.config
         cfg.multiRouteEnabled = true
         cfg.routes = [route]
@@ -103,7 +104,7 @@ final class LiveProxyEgressTests: XCTestCase {
 
         let port = ProxyListenerManager.shared.port(for: routeId)
         print("APP-RECONCILE listener port: \(port.map(String.init) ?? "nil")")
-        XCTAssertEqual(port, 18443, "stable per-route port honored")
+        XCTAssertEqual(port, stablePort, "stable per-route port honored")
         guard let port else { return }
 
         let exitIP = try await Self.fetchExitIP(throughLoopbackPort: port)
@@ -128,9 +129,10 @@ final class LiveProxyEgressTests: XCTestCase {
         XCTAssertTrue(ProxyListenerManager.isTailnetHost(peerHost), "peer must be a 100.64/10 tailnet IP")
 
         let routeId = UUID()
+        let stablePort = TestPorts.nextListenPort().rawValue
         let route = Route(id: routeId, name: "ts-live", egress: .tailscaleExit,
                           proxyHost: peerHost, proxyPort: peerPort,
-                          tailscaleExitNode: "peer", localListenPort: 18944)
+                          tailscaleExitNode: "peer", localListenPort: Int(stablePort))
         var cfg = RouteManager.shared.config
         cfg.multiRouteEnabled = true
         cfg.routes = [route]
@@ -147,7 +149,7 @@ final class LiveProxyEgressTests: XCTestCase {
 
         let port = ProxyListenerManager.shared.port(for: routeId)
         print("TS-RECONCILE listener port: \(port.map(String.init) ?? "nil")")
-        XCTAssertEqual(port, 18944, "stable per-route port honored")
+        XCTAssertEqual(port, stablePort, "stable per-route port honored")
         guard let port else { return }
 
         let exitIP = try await Self.fetchExitIP(throughLoopbackPort: port)
