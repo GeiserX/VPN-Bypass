@@ -455,15 +455,22 @@ struct RouteRow: View {
 
     /// Proxy and Tailscale-peer routes: where the route goes, the local address an
     /// app points at, and one button per thing a user copies.
+    /// The upstream and the listener sit on two lines: side by side, an upstream
+    /// longer than about 17 characters wrapped mid-address. An upstream too long
+    /// even for its own line is cut in the middle, and its tooltip shows all of it.
     @ViewBuilder
     private var listenerDetails: some View {
-        HStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Text("Upstream")
                     .foregroundColor(Theme.textTertiary)
+                    .fixedSize()
                 Text(verbatim: upstreamDisplay)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(Text(verbatim: upstreamDisplay))
             }
             HStack(spacing: 4) {
                 if let port = listenerPort {
