@@ -133,7 +133,7 @@ struct RoutesTab: View {
                     Divider().background(Theme.divider).padding(.vertical, 4)
                     SystemRouteRow(
                         icon: routeManager.vpnType?.icon ?? "lock.shield",
-                        name: routeManager.vpnType?.rawValue ?? "VPN",
+                        name: routeManager.vpnType?.knownName ?? String(localized: "VPN"),
                         subtitle: "Whatever tunnel is currently up",
                         color: Theme.warning
                     )
@@ -335,13 +335,17 @@ struct RouteRow: View {
     /// Which Copy button last copied, so only that one flips to "Copied".
     @State private var copied: CopyKind?
 
-    private var typeLabel: String {
-        switch route.egress {
-        case .proxyHTTP: return "HTTP CONNECT"
-        case .proxySOCKS5: return "SOCKS5"
-        case .tailscaleExit: return "Tailscale"
-        case .vpnDefault: return "VPN"
-        case .direct: return "Direct"
+    private var typeLabel: String { Self.typeLabel(route.egress, in: .main) }
+
+    /// The badge beside the route's name. Text(String) shows a String as it is, so each
+    /// label is looked up here; the protocol and product names read the same in every language.
+    static func typeLabel(_ egress: Egress, in bundle: Bundle) -> String {
+        switch egress {
+        case .proxyHTTP: return String(localized: "HTTP CONNECT", bundle: bundle)
+        case .proxySOCKS5: return String(localized: "SOCKS5", bundle: bundle)
+        case .tailscaleExit: return String(localized: "Tailscale", bundle: bundle)
+        case .vpnDefault: return String(localized: "VPN", bundle: bundle)
+        case .direct: return String(localized: "Direct", bundle: bundle)
         }
     }
 
@@ -364,9 +368,7 @@ struct RouteRow: View {
             }
             return peerName
         case .vpnDefault:
-            // A specific-VPN route shows its pinned tunnel; the primary VPN has none.
-            let iface = route.vpnSelector?.interfaceName ?? route.vpnSelector?.productHint
-            return iface.map { "→ \($0)" } ?? "primary VPN"
+            return Self.vpnTarget(route, in: .main)
         case .proxyHTTP, .proxySOCKS5, .direct:
             let host = route.proxyHost ?? "—"
             if let port = route.proxyPort {
@@ -376,12 +378,18 @@ struct RouteRow: View {
         }
     }
 
-    /// Status text for `.vpnDefault` / `.direct` routes, which have no loopback
-    /// listener (mirrors the vpnSelector logic in `upstreamDisplay`).
-    private var nonListenerStatusLabel: String {
-        guard route.egress == .vpnDefault else { return "direct" }
+    /// Status text for `.vpnDefault` / `.direct` routes, which have no loopback listener.
+    private var nonListenerStatusLabel: String { Self.nonListenerStatusLabel(route, in: .main) }
+
+    static func nonListenerStatusLabel(_ route: Route, in bundle: Bundle) -> String {
+        guard route.egress == .vpnDefault else { return String(localized: "direct", bundle: bundle) }
+        return vpnTarget(route, in: bundle)
+    }
+
+    /// Where a VPN route goes: a specific-VPN route shows its pinned tunnel; the primary VPN has none.
+    static func vpnTarget(_ route: Route, in bundle: Bundle) -> String {
         let iface = route.vpnSelector?.interfaceName ?? route.vpnSelector?.productHint
-        return iface.map { "→ \($0)" } ?? "primary VPN"
+        return iface.map { "→ \($0)" } ?? String(localized: "primary VPN", bundle: bundle)
     }
 
     var body: some View {

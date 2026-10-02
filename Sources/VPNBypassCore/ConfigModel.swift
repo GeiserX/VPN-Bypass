@@ -33,6 +33,10 @@ enum VPNType: String, Codable {
     case pulseSecure = "Pulse Secure"
     case checkPoint = "Check Point"
     case unknown = "Unknown VPN"
+
+    /// The product name to show, or nil for `.unknown`: its raw value is an English
+    /// placeholder, so a caller shows its own localized "VPN" instead.
+    var knownName: String? { self == .unknown ? nil : rawValue }
     
     var icon: String {
         switch self {

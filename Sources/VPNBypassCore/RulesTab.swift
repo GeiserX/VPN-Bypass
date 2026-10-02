@@ -10,14 +10,14 @@ extension Route {
     /// Friendly display name for route pickers/chips. `.direct`/`.vpnDefault`
     /// are the two auto-created system routes, so their name is derived rather
     /// than stored; proxy/Tailscale routes just use their own user-given name.
-    func friendlyName(vpnName: String?) -> String {
+    func friendlyName(vpnName: String?, in bundle: Bundle = .main) -> String {
         switch egress {
-        case .direct:      return "Direct"
+        case .direct:      return String(localized: "Direct", bundle: bundle)
         case .vpnDefault:
             // A route pinned to a SPECIFIC tunnel is user-created — use its own name so
             // several VPNs are distinguishable. The primary-VPN route derives its label.
-            if vpnSelector?.kind == .interface { return name.isEmpty ? "VPN" : name }
-            return vpnName ?? "VPN"
+            if vpnSelector?.kind == .interface { return name.isEmpty ? String(localized: "VPN", bundle: bundle) : name }
+            return vpnName ?? String(localized: "VPN", bundle: bundle)
         case .proxyHTTP, .proxySOCKS5, .tailscaleExit: return name
         }
     }
@@ -417,14 +417,18 @@ struct RuleRow: View {
     let onReassign: (UUID) -> Void
     let onNewRoute: () -> Void
 
-    private var matchLabel: String {
-        switch rule.matchType {
-        case .domain:  return "DOMAIN"
-        case .suffix:  return "SUFFIX"
-        case .ip:      return "IP"
-        case .cidr:    return "CIDR"
-        case .service: return "SERVICE"
-        case .process: return "PROCESS"
+    private var matchLabel: String { Self.matchLabel(rule.matchType, in: .main) }
+
+    /// The badge beside the rule's pattern. Text(String) shows a String as it is, so each
+    /// label is looked up here.
+    static func matchLabel(_ type: MatchType, in bundle: Bundle) -> String {
+        switch type {
+        case .domain:  return String(localized: "DOMAIN", bundle: bundle)
+        case .suffix:  return String(localized: "SUFFIX", bundle: bundle)
+        case .ip:      return String(localized: "IP", bundle: bundle)
+        case .cidr:    return String(localized: "CIDR", bundle: bundle)
+        case .service: return String(localized: "SERVICE", bundle: bundle)
+        case .process: return String(localized: "PROCESS", bundle: bundle)
         }
     }
 
@@ -582,7 +586,7 @@ struct RouteChipMenu: View {
                 Label("New Route…", systemImage: "plus")
             }
         } label: {
-            RouteChip(route: selectedRoute, vpnName: routeManager.vpnType?.rawValue)
+            RouteChip(route: selectedRoute, vpnName: routeManager.vpnType?.knownName)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -594,9 +598,9 @@ struct RouteChipMenu: View {
             onSelect(route.id)
         } label: {
             if selectedRouteId == route.id {
-                Label(route.friendlyName(vpnName: routeManager.vpnType?.rawValue), systemImage: "checkmark")
+                Label(route.friendlyName(vpnName: routeManager.vpnType?.knownName), systemImage: "checkmark")
             } else {
-                Text(route.friendlyName(vpnName: routeManager.vpnType?.rawValue))
+                Text(route.friendlyName(vpnName: routeManager.vpnType?.knownName))
             }
         }
     }
@@ -606,8 +610,11 @@ struct RouteChip: View {
     let route: Route?
     let vpnName: String?
 
-    private var displayName: String {
-        route?.friendlyName(vpnName: vpnName) ?? "Choose Route"
+    private var displayName: String { Self.displayName(route, vpnName: vpnName, in: .main) }
+
+    /// The chip's text: the route's name, or "Choose Route" when the rule has none.
+    static func displayName(_ route: Route?, vpnName: String?, in bundle: Bundle) -> String {
+        route?.friendlyName(vpnName: vpnName, in: bundle) ?? String(localized: "Choose Route", bundle: bundle)
     }
 
     private var color: Color {

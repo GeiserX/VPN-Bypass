@@ -2,8 +2,9 @@
 """Fail when a localizable string in Sources/ has no Spanish or French entry.
 
 Also fails when a Spanish or French entry's format specifiers differ from its
-key's. Each argument must keep its position and type, wherever it sits in the
-sentence: "%2$@ y %1$@" matches "%@ and %@", "%1$@ y %1$@" does not.
+key's, and when a catalog has a key that no source file uses any more. Each
+argument must keep its position and type, wherever it sits in the sentence:
+"%2$@ y %1$@" matches "%@ and %@", "%1$@ y %1$@" does not.
 
 The keys come from the Swift compiler, not from a regex over the source: an
 interpolation's placeholder depends on its type ("\\(count)" is %lld for an Int,
@@ -15,12 +16,18 @@ Usage:
     scripts/check-localizations.py                     # builds VPNBypassCore in a temp dir
     scripts/check-localizations.py --stringsdata DIR   # reads .stringsdata files already under DIR
 
+A key no source file uses means a translated string went back to a plain
+literal (Text(someString) shows a String as it is, in English), or a string was
+removed and its catalog line was not. Either way the line is dead: restore the
+lookup or delete the line from en, es and fr.
+
 Keys with no letter outside their format specifiers ("%lld/%lld", "8080") are
 skipped. Names and examples that read the same in every language ("SOCKS5",
 "example.com") still need an entry, with the English text as the value, so the
 catalog says they were looked at.
 
-Needs macOS (swift, plutil). Exits 1 and lists the keys when any are missing.
+Needs macOS (swift, plutil). Exits 1 and lists the keys when any are missing,
+mismatched or unused.
 """
 
 import argparse
@@ -34,6 +41,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RESOURCES = ROOT / "Sources" / "VPNBypassCore" / "Resources"
 LANGUAGES = ["es", "fr"]
+# The reference catalog: checked for unused keys along with the translations.
+REFERENCE = "en"
 # A format specifier: %@, %lld, %1$@, %.1f ...
 SPECIFIER = re.compile(r"%(\d+\$)?[-+ #0-9.]*((?:hh|h|ll|l|q|L)?[@dDiuUxXoOfeEgGcCsSp%])")
 
@@ -62,7 +71,7 @@ def build(scratch: Path) -> Path:
 
 
 def source_keys(root: Path) -> dict:
-    """{(table, key): ["File.swift:line", ...]} for every key the compiler saw in Sources/."""
+    """{(table, key): ["File.swift:line", ...]} for every key the compiler saw in Sources/, letters or not."""
     keys: dict = {}
     files = list(root.rglob("*.stringsdata"))
     if not files:
@@ -75,8 +84,7 @@ def source_keys(root: Path) -> dict:
         for table, entries in data.get("tables", {}).items():
             for entry in entries:
                 where = f"{source.relative_to(ROOT)}:{entry.get('location', {}).get('startingLine', '?')}"
-                if needs_translation(entry["key"]):
-                    keys.setdefault((table, entry["key"]), []).append(where)
+                keys.setdefault((table, entry["key"]), []).append(where)
     return keys
 
 
@@ -89,6 +97,23 @@ def catalog(language: str, table: str) -> dict:
         check=True, capture_output=True, text=True,
     )
     return json.loads(result.stdout)
+
+
+def catalog_tables() -> list:
+    """Every table any language folder has a .strings file for: "Localizable" for Localizable.strings."""
+    return sorted({path.stem for path in RESOURCES.glob("*.lproj/*.strings")})
+
+
+def unused_keys(keys: dict) -> list:
+    """[(language, table, key)] for each catalog line whose key no source file uses."""
+    used = set(keys)
+    found = []
+    for lang in [REFERENCE] + LANGUAGES:
+        for table in catalog_tables():
+            for key in catalog(lang, table):
+                if (table, key) not in used:
+                    found.append((lang, table, key))
+    return found
 
 
 def specifiers(text: str) -> list:
@@ -122,6 +147,8 @@ def main() -> int:
 
     if not keys:
         sys.exit("error: the compiler wrote no keys under Sources/; the source-path filter matched nothing")
+    unused = unused_keys(keys)
+    keys = {entry: places for entry, places in keys.items() if needs_translation(entry[1])}
     tables = sorted({table for table, _ in keys})
     catalogs = {(lang, table): catalog(lang, table) for lang in LANGUAGES for table in tables}
     missing = 0
@@ -139,12 +166,16 @@ def main() -> int:
                 mismatched += 1
                 print(f"{lang}.lproj/{table}.strings: {json.dumps(key, ensure_ascii=False)} has the specifiers "
                       f"{specifiers(key)}, its translation {specifiers(value)}")
-    if missing or mismatched:
+    # A key no source uses: a lookup reverted to a plain String literal, or a string removed
+    # without its catalog line.
+    for lang, table, key in unused:
+        print(f"{lang}.lproj/{table}.strings has {json.dumps(key, ensure_ascii=False)}, which no source file uses")
+    if missing or mismatched or unused:
         print(f"\n{missing} missing translation(s), {mismatched} with the wrong specifiers, "
-              f"across {', '.join(LANGUAGES)}.", file=sys.stderr)
+              f"{len(unused)} unused, across {', '.join([REFERENCE] + LANGUAGES)}.", file=sys.stderr)
         return 1
     print(f"All {len(keys)} localizable keys in Sources/ have {' and '.join(LANGUAGES)} entries, "
-          f"with the same specifiers.")
+          f"with the same specifiers, and every catalog key is used.")
     return 0
 
 
