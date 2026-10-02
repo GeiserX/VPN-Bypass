@@ -203,7 +203,8 @@ final class DocScreenshotsTests: XCTestCase {
         startedListener = true
         let deadline = Date().addingTimeInterval(5)
         while !up && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
-        XCTAssertNotNil(ProxyListenerManager.shared.port(for: proxy.id), "office-proxy's listener is up")
+        XCTAssertEqual(ProxyListenerManager.shared.port(for: proxy.id), 18168,
+                       "office-proxy's listener is up on the port the docs show")
     }
 
     private func route(_ destination: String, via gateway: String, for source: String) -> RouteManager.ActiveRoute {

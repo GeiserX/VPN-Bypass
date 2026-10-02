@@ -20,6 +20,11 @@ final class LoopbackPeerAuthTests: XCTestCase {
                        "a different uid must be rejected")
     }
 
+    // The two listen-socket tests below keep port .any on purpose: no client ever dials
+    // these listeners, so there is no connect() to collide with a TIME_WAIT, and the kernel
+    // hands out a port no socket holds. The wildcard one could not use TestPorts anyway:
+    // TestPorts checks 127.0.0.1 only, and a 0.0.0.0 bind also fails when a socket on any
+    // other address holds the port.
     func testUidLookupFindsOwnListeningPort() throws {
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
@@ -96,8 +101,8 @@ final class LoopbackPeerAuthTests: XCTestCase {
     private func acceptOneLoopbackConnection() throws -> (uid: uid_t?, clientPort: UInt16, listenerPort: UInt16) {
         let parameters = NWParameters.tcp
         // Not port 0: a listener in the ephemeral range can collide with an earlier test's
-        // TIME_WAIT and leave the client stuck on EADDRINUSE. See ProxyForwarderTests.nextListenPort.
-        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: ProxyForwarderTests.nextListenPort())
+        // TIME_WAIT and leave the client stuck on EADDRINUSE. See TestPorts.nextListenPort.
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: TestPorts.nextListenPort())
         let listener = try NWListener(using: parameters)
         let queue = DispatchQueue(label: "test.loopback.peer.accept")
         let listening = expectation(description: "listener ready")

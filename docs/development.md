@@ -29,6 +29,10 @@ pngquant --quality 95-100 --speed 1 --force --ext .png /tmp/shots/*.png
 
 Run it on a Mac with a 2x display, since the images are 2x. Each window draws as the key window of the active app, in the dark appearance, so the traffic lights and switches are in colour even when the test runs over ssh. A test fails if the close button comes out grey. Copy the files over the old ones and read each one before you commit it. Re-render after a change to any view the images show.
 
+## Tests that open a port
+
+A test that starts a TCP listener and connects a client to it takes the port from `TestPorts.nextListenPort()` in [`Tests/VPNBypassTests/TestPorts.swift`](https://github.com/GeiserX/VPN-Bypass/blob/main/Tests/VPNBypassTests/TestPorts.swift), never port 0 and never a fixed number. Port 0 picks from the range client sockets take their source ports from, so a listener can land on an old client's port and the next connect fails with EADDRINUSE. A fixed port fails whenever another process holds it. The helper hands out each port in 20000-48999 once per run, below that range and outside the 18000-18999 range the app's route listeners use, and binds it first to check it is free. A listener nothing connects to can stay on port 0, as `LoopbackPeerAuthTests` and `testPortZeroReportsTheAssignedPort` do.
+
 ## Contributing
 
 Contributions are welcome! Here's how you can help:
