@@ -1421,9 +1421,9 @@ final class RouteManager: ObservableObject {
         let links: [VPNLink]
         let selectedInterface: String?
         let defaultRouteInterface: String?
-        /// Kernel routes carrying OUR ownership tag (RTF_PROTO1) — ground truth of what this
-        /// app currently owns, read silently from the table itself.
-        let taggedRouteCount: Int
+        /// Destinations of the kernel routes carrying OUR ownership tag (RTF_PROTO1) — ground
+        /// truth of what this app currently owns, read silently from the table itself.
+        let taggedDestinations: [String]
     }
 
     /// On-demand only — never call from a timer. `listVPNLinks` spawns `ifconfig` and
@@ -1431,11 +1431,11 @@ final class RouteManager: ObservableObject {
     func coexistenceSnapshot() async -> CoexistenceSnapshot {
         let links = await listVPNLinks()
         let defaultIface = await currentDefaultRouteInterface()
-        let tagged = RouteKernel.currentTable()?.filter { $0.isOurs }.count ?? 0
+        let tagged = RouteKernel.currentTable()?.filter { $0.isOurs }.map(\.destinationString) ?? []
         return CoexistenceSnapshot(links: links,
                                    selectedInterface: vpnInterface,
                                    defaultRouteInterface: defaultIface,
-                                   taggedRouteCount: tagged)
+                                   taggedDestinations: tagged)
     }
 
     func listVPNLinks() async -> [VPNLink] {

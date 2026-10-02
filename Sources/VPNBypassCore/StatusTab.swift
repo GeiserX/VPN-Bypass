@@ -289,6 +289,25 @@ enum StatusPage {
         return role + " " + String(localized: "It carries the default route.", bundle: bundle)
     }
 
+    /// The Addresses owned row: the kernel's tagged routes, counted by the rule every other
+    /// count uses (`RoutedBySource`). In VPN Only the catch-alls are named apart, so while the
+    /// kernel holds what the app recorded, the first number is the Routed row's. A tagged
+    /// destination the app has no record of counts as an address.
+    static func ownedLine(tagged: [String], installed: [RoutedBySource.InstalledRoute], vpnOnly: Bool,
+                          bundle: Bundle = .main) -> Line {
+        let inKernel = Set(tagged)
+        let recorded = installed.filter { inKernel.contains($0.destination) }
+        let unrecorded = inKernel.subtracting(recorded.map(\.destination))
+            .map { RoutedBySource.InstalledRoute(destination: $0, source: "") }
+        let routes = recorded + unrecorded
+        let addresses = RoutedBySource.addressCount(routes, vpnOnly: vpnOnly)
+        switch RoutedBySource.catchAllCount(routes, vpnOnly: vpnOnly) {
+        case 0: return Line(text: "\(addresses)")
+        case 1: return Line(text: String(localized: "\(addresses), plus 1 catch-all", bundle: bundle))
+        case let n: return Line(text: String(localized: "\(addresses), plus \(n) catch-alls", bundle: bundle))
+        }
+    }
+
     // MARK: Recent warnings
 
     /// The newest warnings and errors, newest first, as the log keeps them.
@@ -531,7 +550,9 @@ struct StatusTab: View {
                 }
                 StatusDivider()
                 StatusLineRow(label: String(localized: "Addresses owned (kernel-tagged)"),
-                              line: StatusPage.Line(text: "\(snapshot.taggedRouteCount)"))
+                              line: StatusPage.ownedLine(tagged: snapshot.taggedDestinations,
+                                                         installed: routeManager.installedRoutes,
+                                                         vpnOnly: routeManager.config.routingMode == .vpnOnly))
             } else {
                 StatusPlainRow(text: String(localized: "Reading network state…"))
             }

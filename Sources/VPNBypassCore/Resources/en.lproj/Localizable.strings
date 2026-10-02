@@ -210,6 +210,8 @@
 "Automatic (recommended)" = "Automatic (recommended)";
 "No VPN tunnels are up." = "No VPN tunnels are up.";
 "Pinned tunnel %@ is not eligible right now — acting on %@ automatically." = "Pinned tunnel %1$@ is not eligible right now — acting on %2$@ automatically.";
+"%lld, plus 1 catch-all" = "%lld, plus 1 catch-all";
+"%lld, plus %lld catch-alls" = "%1$lld, plus %2$lld catch-alls";
 "Addresses owned (kernel-tagged)" = "Addresses owned (kernel-tagged)";
 "Reading network state…" = "Reading network state…";
 "Recent warnings" = "Recent warnings";

@@ -1184,9 +1184,15 @@ enum RoutedBySource {
         Set(counted(routes, vpnOnly: vpnOnly).map(\.destination)).count
     }
 
+    /// How many of VPN Only's catch-alls are installed: the routes `addressCount` leaves out.
+    /// In another mode `addressCount` counts them as addresses, so this is 0.
+    static func catchAllCount(_ routes: [InstalledRoute], vpnOnly: Bool) -> Int {
+        vpnOnly ? Set(routes.filter(isCatchAll).map(\.destination)).count : 0
+    }
+
     /// VPN Only's catch-alls are installed: everything not listed goes direct.
     static func everythingElseDirect(_ routes: [InstalledRoute], vpnOnly: Bool) -> Bool {
-        vpnOnly && routes.contains(where: isCatchAll)
+        catchAllCount(routes, vpnOnly: vpnOnly) > 0
     }
 
     static func title(_ mode: DropdownCopy.Mode) -> String {
