@@ -761,8 +761,7 @@ struct MenuContent: View {
         if routeManager.config.routingMode == .vpnOnly {
             result = routeManager.addInverseDomain(newDomain)
         } else if RouteManager.usesCustomEngine(schemaVersion: routeManager.config.schemaVersion, routingMode: routeManager.config.routingMode) {
-            addDomainRuleToDirect(newDomain)
-            result = nil
+            result = addDomainRuleToDirect(newDomain).map { .failure($0) }
         } else {
             result = routeManager.addDomain(newDomain)
         }
@@ -774,7 +773,8 @@ struct MenuContent: View {
 
     /// The quick-add after an add. A refused one stays open with the text and says why,
     /// as the Domains tab does, because closing would look like it worked. A saved one
-    /// closes. nil is Custom mode's rule add, which says nothing back.
+    /// closes. nil is Custom mode's rule add when it saved, which says nothing back, or found
+    /// no Direct route, which it logs.
     static func quickAdd(after result: Result<AddedDomain, AddDomainError>?, typed: String) -> QuickAddState {
         guard let result else { return .closed }
         let shown = AddDomainFeedback(result, typed: typed)
@@ -797,26 +797,21 @@ struct MenuContent: View {
 
     /// Custom mode routes from `config.rules`, not `config.domains` (see
     /// `RouteManager.usesCustomEngine`), so the quick-add above would silently do
-    /// nothing there. Add a `.domain` rule to the Direct route instead - the same
-    /// mapping `RouteManager.Config.derive()` uses for a bypass-mode domain - so
-    /// quick-add behaves like "bypass this domain" in Custom mode too. Mirrors
-    /// RulesTab.saveRule's append-at-end-of-order for brand-new rules.
-    private func addDomainRuleToDirect(_ domain: String) {
-        let cleaned = routeManager.cleanDomain(domain)
-        guard !cleaned.isEmpty else { return }
-        guard let directRouteId = routeManager.config.routes.first(where: { $0.egress == .direct })?.id else {
-            routeManager.log(.error, "Cannot add rule for \(cleaned): no Direct route found")
-            return
+    /// nothing there. Add a rule to the Direct route instead - the same mapping
+    /// `RouteManager.Config.derive()` uses for a bypass-mode domain - so quick-add
+    /// behaves like "bypass this" in Custom mode too: a range becomes a `.cidr` rule,
+    /// anything else a `.domain` rule (see `RouteManager.addDirectRule`). Returns why
+    /// the input was refused, nil otherwise.
+    private func addDomainRuleToDirect(_ input: String) -> AddDomainError? {
+        switch routeManager.addDirectRule(input) {
+        case .success?:
+            Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
+            return nil
+        case .failure(let error)?:
+            return error
+        case nil:
+            return nil
         }
-        guard !routeManager.config.rules.contains(where: { $0.matchType == .domain && $0.pattern == cleaned }) else {
-            routeManager.log(.warning, "Rule for \(cleaned) already exists")
-            return
-        }
-        let maxOrder = routeManager.config.rules.map(\.order).max() ?? -1
-        routeManager.config.rules.append(Rule(matchType: .domain, pattern: cleaned, routeId: directRouteId, order: maxOrder + 1))
-        routeManager.saveConfig()
-        routeManager.log(.success, "Added rule: \(cleaned) → Direct")
-        Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
     }
 
     private func openSettings(page: SettingsView.SettingsTab? = nil) {

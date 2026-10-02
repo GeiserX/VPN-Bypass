@@ -5748,6 +5748,10 @@ enum AddDomainError: Error, Equatable {
     /// A service has the cleaned value as its name, so the entry's routes would share its
     /// source (see `ServiceNameClash`).
     case nameTakenByService(value: String, service: String)
+    /// Custom mode's quick-add: a rule with the same pattern is already on the list, on
+    /// `route`. On another route it matches first, so a Direct rule after it would do nothing.
+    /// `vpnName` names the primary-VPN route as the Rules page does.
+    case ruleExists(value: String, route: Route, vpnName: String?)
 
     /// One line for under the add field, in the user's words and the app's language.
     var message: String { message(in: .main) }
@@ -5770,6 +5774,11 @@ enum AddDomainError: Error, Equatable {
             return String(localized: "\(value) is already on your \(list.displayName(in: bundle)) list.", bundle: bundle)
         case .nameTakenByService(_, let service):
             return String(localized: "\u{201C}\(service)\u{201D} is the name of a service, and the two would share routes. Add a different domain.", bundle: bundle)
+        case .ruleExists(let value, let route, let vpnName):
+            let routeName = route.friendlyName(vpnName: vpnName, in: bundle)
+            return route.egress == .direct
+                ? String(localized: "\(value) already has a rule on the \(routeName) route.", bundle: bundle)
+                : String(localized: "\(value) already has a rule on the \(routeName) route, and the first matching rule wins. To send it direct, change that rule's route on the Rules page.", bundle: bundle)
         }
     }
 }
