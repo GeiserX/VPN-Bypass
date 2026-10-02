@@ -4,7 +4,7 @@
 // the localized "VPN" in its place (#159). These draw the real views offscreen in English,
 // Spanish and French, with one such tunnel in fixed fake state, and read what they show.
 // Every menu and segmented control in the route editor, the rule editor and the General
-// page also carries a name for VoiceOver; five of them had none.
+// page also carries a name for VoiceOver; six of them had none.
 // Nothing is routed: the VPN check is off and the tunnels are handed in, never read.
 //
 // Set VPNB_RENDERS to a directory to also write each render there as a PNG.
