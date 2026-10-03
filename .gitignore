@@ -47,3 +47,6 @@ dist/
 
 # goal-loop durable state (loop-owned, not part of the product)
 .goal-loop/
+
+# Beads: bead text lives in the Dolt tracker only, never in git
+.beads/*.jsonl
