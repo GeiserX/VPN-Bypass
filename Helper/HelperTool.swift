@@ -42,7 +42,7 @@ class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
     /// exact process on the other end and cannot be reused mid-connection. Validating by PID
     /// instead is subject to a PID-reuse race — a local process can grab the app's recycled PID in
     /// the window between exit and this check, so the helper's "who is PID X?" question is answered
-    /// by the wrong process, satisfying even the pinned cdhash. The audit token closes that race.
+    /// by the wrong process, which then passes the signature check. The audit token closes that race.
     ///
     /// Anti-brick: if no usable audit token is present (it always is on a live XPC connection) we
     /// fall back to the previous PID check, so a missing/removed private API can never lock out the
@@ -58,17 +58,9 @@ class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
     }
 
     /// Build the caller's `SecCode` from a guest attribute (audit token or PID) and check it against
-    /// our authorization requirement. Under ad-hoc signing the signing identifier alone is forgeable
-    /// by any local binary (`codesign -s - -i com.geiserx.vpn-bypass /tmp/evil`), so identifier-only
-    /// is NOT sufficient — HelperAuthPolicy binds the requirement to the root-only pinned cdhash,
-    /// which a forged binary cannot reproduce.
-    ///
-    /// FAIL-CLOSED (1.8.0): when the pin is absent/malformed, `HelperAuthPolicy.requirementString`
-    /// returns nil and we REJECT the caller rather than falling back to the forgeable identifier-only
-    /// requirement. Anti-brick invariant: this cannot lock out the real app because the installer
-    /// GUARANTEES a matching pin at install time and the readiness gate self-heals a missing/stale
-    /// pin by reinstalling (see HelperManager). A correctly installed helper always has a matching
-    /// pin, so only forged/unauthorized callers are rejected.
+    /// `HelperAuthPolicy.callerRequirement`: the app's identifier, signed by our Developer ID team.
+    /// Apple issues that certificate to the team alone, so a local binary that copies the identifier
+    /// (`codesign -s - -i com.geiserx.vpn-bypass /tmp/evil`) cannot satisfy it.
     private func verifyCallerCode(attribute: CFString, value: CFTypeRef) -> Bool {
         var code: SecCode?
         let attrs = [attribute: value] as CFDictionary
@@ -77,35 +69,13 @@ class HelperToolDelegate: NSObject, NSXPCListenerDelegate {
             return false
         }
 
-        // No valid pin ⇒ reject (fail-closed). Never fall back to identifier-only.
-        guard let requirementString = HelperAuthPolicy.requirementString(
-            pinnedCDHash: Self.readPinnedCDHash(),
-            appSigningIdentifier: HelperConstants.appSigningIdentifier
-        ) else {
-            return false
-        }
-
         var requirement: SecRequirement?
-        guard SecRequirementCreateWithString(requirementString as CFString, [], &requirement) == errSecSuccess,
+        guard SecRequirementCreateWithString(HelperAuthPolicy.callerRequirement as CFString, [], &requirement) == errSecSuccess,
               let req = requirement else {
             return false
         }
 
         return SecCodeCheckValidity(callerCode, [], req) == errSecSuccess
-    }
-
-    /// The pinned app cdhash (lowercase hex) if the root-only pin file holds a well-formed
-    /// value, else nil. Validation is delegated to the shared, testable
-    /// `HelperAuthPolicy.validatedCDHash` so the helper and the tests agree on exactly what
-    /// counts as a valid pin (a whole 40- or 64-hex cdhash). Read fresh each call so a
-    /// rewritten pin (app update) takes effect without restarting the helper. A nil result
-    /// makes `verifyCallerCode` fail-closed (reject); because the installer and readiness
-    /// gate guarantee a valid pin for the real app, nil means "no authorized caller present",
-    /// not "brick the real app".
-    private static func readPinnedCDHash() -> String? {
-        guard let data = FileManager.default.contents(atPath: HelperConstants.cdhashPinPath),
-              let raw = String(data: data, encoding: .utf8) else { return nil }
-        return HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: raw)
     }
 }
 

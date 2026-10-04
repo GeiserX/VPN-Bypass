@@ -1,131 +1,62 @@
+import Security
 import XCTest
 @testable import VPNBypassCore
 
-/// Tests for `HelperAuthPolicy`, the pure/testable seam that decides the privileged
-/// helper's XPC-caller authorization requirement. The security property under test is
-/// FAIL-CLOSED: with no valid cdhash pin the helper must reject the caller (nil
-/// requirement) rather than fall back to the forgeable identifier-only requirement.
+/// Tests for `HelperAuthPolicy.callerRequirement`, the code-signing requirement the privileged
+/// helper enforces on every XPC caller. The security property under test: only the app's
+/// identifier signed by our Developer ID team passes, so an ad-hoc binary that copies the
+/// identifier does not.
 final class HelperAuthPolicyTests: XCTestCase {
 
-    private let identifier = "com.geiserx.vpn-bypass"
-    // A well-formed 20-byte code-directory hash (40 lowercase hex chars).
-    private let pin40 = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
-    // A well-formed 32-byte (SHA-256) cdhash form (64 lowercase hex chars).
-    private let pin64 = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678a1b2c3d4e5f60718293a4b5c"
+    private let requirement = HelperAuthPolicy.callerRequirement
 
-    // MARK: - requirementString: fail-closed on absent pin
-
-    func testRequirementStringNilPinRejects() {
-        // The core of the fix: a nil pin yields NO requirement → caller must reject.
-        XCTAssertNil(HelperAuthPolicy.requirementString(pinnedCDHash: nil, appSigningIdentifier: identifier))
+    func testRequirementIsExactlyIdentifierAndTeam() {
+        XCTAssertEqual(
+            requirement,
+            "anchor apple generic and identifier \"com.geiserx.vpn-bypass\" and certificate leaf[subject.OU] = \"624WUVM8B4\""
+        )
     }
 
-    func testRequirementStringNeverIdentifierOnly() {
-        // Regression guard: the requirement must never be the identifier-only string that a
-        // locally forged ad-hoc binary could satisfy. Either it is nil (reject) or it binds
-        // the cdhash.
-        let identifierOnly = "identifier \"\(identifier)\""
-        XCTAssertNotEqual(HelperAuthPolicy.requirementString(pinnedCDHash: nil, appSigningIdentifier: identifier), identifierOnly)
-        XCTAssertNotEqual(HelperAuthPolicy.requirementString(pinnedCDHash: pin40, appSigningIdentifier: identifier), identifierOnly)
+    func testRequirementIsNeverIdentifierOnly() {
+        // The identifier alone is what `codesign -s - -i com.geiserx.vpn-bypass` forges.
+        XCTAssertNotEqual(requirement, "identifier \"\(HelperConstants.appSigningIdentifier)\"")
+        XCTAssertTrue(requirement.hasPrefix("anchor apple generic and "))
+        XCTAssertTrue(requirement.contains("certificate leaf[subject.OU] = \"\(HelperConstants.teamIdentifier)\""))
     }
 
-    // MARK: - requirementString: pinned requirement when present
-
-    func testRequirementStringWith40HexPin() {
-        let expected = "identifier \"\(identifier)\" and cdhash H\"\(pin40)\""
-        XCTAssertEqual(HelperAuthPolicy.requirementString(pinnedCDHash: pin40, appSigningIdentifier: identifier), expected)
-    }
-
-    func testRequirementStringWith64HexPin() {
-        let expected = "identifier \"\(identifier)\" and cdhash H\"\(pin64)\""
-        XCTAssertEqual(HelperAuthPolicy.requirementString(pinnedCDHash: pin64, appSigningIdentifier: identifier), expected)
-    }
-
-    func testRequirementStringInterpolatesGivenIdentifier() {
-        let other = "com.example.other"
-        let expected = "identifier \"\(other)\" and cdhash H\"\(pin40)\""
-        XCTAssertEqual(HelperAuthPolicy.requirementString(pinnedCDHash: pin40, appSigningIdentifier: other), expected)
-    }
-
-    func testRequirementStringContainsBothPredicates() {
-        let req = HelperAuthPolicy.requirementString(pinnedCDHash: pin40, appSigningIdentifier: identifier)
+    func testRequirementCompiles() {
+        // The helper rejects every caller when the string does not compile, so a typo here
+        // would lock the app out of its own helper.
+        var req: SecRequirement?
+        XCTAssertEqual(SecRequirementCreateWithString(requirement as CFString, [], &req), errSecSuccess)
         XCTAssertNotNil(req)
-        XCTAssertTrue(req?.contains("identifier \"\(identifier)\"") == true)
-        XCTAssertTrue(req?.contains("cdhash H\"\(pin40)\"") == true)
-        XCTAssertTrue(req?.contains(" and ") == true)
     }
 
-    // MARK: - validatedCDHash: accepts whole cdhashes
+    func testForgedIdentifierFailsRequirement() throws {
+        // A binary ad-hoc signed with the app's identifier: the forgery the team check exists for.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let forged = dir.appendingPathComponent("forged")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: forged)
+        let sign = Process()
+        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        sign.arguments = ["--force", "--sign", "-", "--identifier", HelperConstants.appSigningIdentifier, forged.path]
+        try sign.run()
+        sign.waitUntilExit()
+        XCTAssertEqual(sign.terminationStatus, 0)
 
-    func testValidatedCDHashAccepts40Hex() {
-        XCTAssertEqual(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: pin40), pin40)
-    }
+        var staticCode: SecStaticCode?
+        XCTAssertEqual(SecStaticCodeCreateWithPath(forged as CFURL, [], &staticCode), errSecSuccess)
+        let code = try XCTUnwrap(staticCode)
 
-    func testValidatedCDHashAccepts64Hex() {
-        XCTAssertEqual(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: pin64), pin64)
-    }
+        // Control: the forgery does carry the identifier, so an identifier-only check passes it.
+        var identifierOnly: SecRequirement?
+        SecRequirementCreateWithString("identifier \"\(HelperConstants.appSigningIdentifier)\"" as CFString, [], &identifierOnly)
+        XCTAssertEqual(SecStaticCodeCheckValidity(code, [], try XCTUnwrap(identifierOnly)), errSecSuccess)
 
-    func testValidatedCDHashLowercasesUppercaseHex() {
-        XCTAssertEqual(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: pin40.uppercased()), pin40)
-    }
-
-    func testValidatedCDHashTrimsWhitespaceAndNewlines() {
-        XCTAssertEqual(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: "  \(pin40)\n"), pin40)
-    }
-
-    // MARK: - validatedCDHash: rejects everything that is not a whole cdhash
-
-    func testValidatedCDHashRejectsNil() {
-        XCTAssertNil(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: nil))
-    }
-
-    func testValidatedCDHashRejectsEmpty() {
-        XCTAssertNil(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: ""))
-        XCTAssertNil(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: "   \n"))
-    }
-
-    func testValidatedCDHashRejectsShortHex() {
-        // A partial/truncated write ("ab") is even-length valid hex but is NOT a cdhash.
-        XCTAssertNil(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: "ab"))
-    }
-
-    func testValidatedCDHashRejectsWrongLength() {
-        XCTAssertNil(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: String(repeating: "a", count: 39)))
-        XCTAssertNil(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: String(repeating: "a", count: 41)))
-        XCTAssertNil(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: String(repeating: "a", count: 63)))
-        XCTAssertNil(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: String(repeating: "a", count: 65)))
-    }
-
-    func testValidatedCDHashRejectsNonHex() {
-        // 40 chars but 'g' is not a hex digit.
-        XCTAssertNil(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: String(repeating: "g", count: 40)))
-        // Correct length with a single non-hex character.
-        var almost = pin40
-        almost.removeLast()
-        almost.append("z")
-        XCTAssertNil(HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: almost))
-    }
-
-    // MARK: - End-to-end: validation feeds the fail-closed decision
-
-    func testValidPinFileYieldsPinnedRequirement() {
-        // Raw file contents → validated pin → pinned requirement (the real app is accepted).
-        let validated = HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: "\(pin40)\n")
-        let req = HelperAuthPolicy.requirementString(pinnedCDHash: validated, appSigningIdentifier: identifier)
-        XCTAssertEqual(req, "identifier \"\(identifier)\" and cdhash H\"\(pin40)\"")
-    }
-
-    func testMalformedPinFileYieldsRejection() {
-        // Raw garbage → nil validated pin → nil requirement (reject; NOT identifier-only).
-        let validated = HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: "not-a-real-cdhash")
-        XCTAssertNil(validated)
-        XCTAssertNil(HelperAuthPolicy.requirementString(pinnedCDHash: validated, appSigningIdentifier: identifier))
-    }
-
-    func testAbsentPinFileYieldsRejection() {
-        // No file (nil contents) → nil validated pin → nil requirement (reject).
-        let validated = HelperAuthPolicy.validatedCDHash(fromRawPinFileContents: nil)
-        XCTAssertNil(validated)
-        XCTAssertNil(HelperAuthPolicy.requirementString(pinnedCDHash: validated, appSigningIdentifier: identifier))
+        var req: SecRequirement?
+        SecRequirementCreateWithString(requirement as CFString, [], &req)
+        XCTAssertNotEqual(SecStaticCodeCheckValidity(code, [], try XCTUnwrap(req)), errSecSuccess)
     }
 }

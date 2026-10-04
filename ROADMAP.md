@@ -8,10 +8,10 @@ forced through the VPN), and **Custom** (the multi-route epic, shipped in 3.0 �
 each domain/service/CIDR to a named route). Custom-mode egresses include the local gateway, a specific VPN
 interface (multi-VPN), an HTTP/SOCKS5 proxy via a local `127.0.0.1` listener, and a Tailscale-peer exit
 (proxy-over-tailnet). A bundled **`vpnb` CLI** scripts it all over a user-only socket (on `PATH` via the tap
-cask since 3.1.2), and the privileged helper (1.11.0) is cdhash-pinned (fail-closed, since 1.8.0) and audit-token-verified
-(since 1.7.0). The whole
+cask since 3.1.2), and the privileged helper accepts only the app signed by our Developer ID team (since 2.3.0; it was cdhash-pinned
+before) and is audit-token-verified (since 1.7.0). Releases are signed and notarized since 5.1.0. The whole
 engine stays **entitlement-free** — kernel routes + `/etc/hosts` + local proxy listeners + a PF/local-CA
-path, **no Network Extension** — so the app remains ad-hoc-signable.
+path, **no Network Extension** — so signing needs no restricted entitlements.
 
 ### ✅ Phase 1 Complete - Core & Polish (v1.0 - v1.2)
 

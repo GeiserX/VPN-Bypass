@@ -14,7 +14,7 @@
 	<string>14</string>
 	<key>SMAuthorizedClients</key>
 	<array>
-		<string>identifier "com.geiserx.vpn-bypass"</string>
+		<string>anchor apple generic and identifier "com.geiserx.vpn-bypass" and certificate leaf[subject.OU] = "624WUVM8B4"</string>
 	</array>
 </dict>
 </plist>

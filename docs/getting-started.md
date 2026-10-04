@@ -28,12 +28,11 @@ Download the latest `.dmg` from [Releases](https://github.com/GeiserX/VPN-Bypass
 git clone https://github.com/GeiserX/VPN-Bypass.git
 cd VPN-Bypass
 
-# Build and create release DMG
-make release
-
-# Or just build and run
+# Build and run
 make run
 ```
+
+The privileged helper only accepts an app signed with the project's Developer ID, so a build from source can't use it as is. To run your own build, put your team ID in `HelperConstants.teamIdentifier` and in the two code requirements in `Info.plist` and `Helper/Info.plist`, then sign with your certificate. `make release` signs, notarizes and builds the DMG; it needs `SIGN_IDENTITY` and notary credentials, listed at the top of [`scripts/sign-and-notarize.sh`](https://github.com/GeiserX/VPN-Bypass/blob/main/scripts/sign-and-notarize.sh).
 
 ## Xcode
 

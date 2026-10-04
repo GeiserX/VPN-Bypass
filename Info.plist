@@ -41,7 +41,7 @@
 	<key>SMPrivilegedExecutables</key>
 	<dict>
 		<key>com.geiserx.vpnbypass.helper</key>
-		<string>identifier "com.geiserx.vpnbypass.helper"</string>
+		<string>anchor apple generic and identifier "com.geiserx.vpnbypass.helper" and certificate leaf[subject.OU] = "624WUVM8B4"</string>
 	</dict>
 </dict>
 </plist>

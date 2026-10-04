@@ -61,8 +61,39 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" Info.plist
 
-      - name: Build release
+      # The helper only accepts an app signed by our Developer ID team, so a release must
+      # never fall back to ad-hoc: a missing secret fails here, and the signing script
+      # (scripts/sign-and-notarize.sh) fails on any it needs.
+      - name: Import signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD; do
+            [ -n "${!name}" ] || { echo "::error::secret $name is not set"; exit 1; }
+          done
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_pass="$(openssl rand -hex 16)"
+          security create-keychain -p "$keychain_pass" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_pass" "$keychain"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_pass" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain"
+
+      - name: Build, sign and notarize release
+        env:
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: make release
+
+      - name: Remove signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
 
       - name: Calculate SHA256
         id: sha
@@ -178,6 +209,15 @@ jobs:
           # Fail the release loudly if the app anchor moved and the insert silently no-op'd
           # (otherwise vpnb would just never appear on PATH, with no error).
           grep -q 'Contents/MacOS/vpnb' Casks/vpn-bypass.rb || { echo "::error::vpnb binary stanza not inserted into the tap cask (app anchor not found)"; exit 1; }
+
+          # The app is signed and notarized, so the postflight keeps only `open`. The old one
+          # cleared quarantine and re-signed the app ad hoc, which would now break it: the
+          # helper accepts only our team's signature. Idempotent, and the release fails if a
+          # re-sign or xattr call survives.
+          perl -0777pi -e 's|  postflight_steps do\n.*?\n  end\n|  postflight_steps do\n    run "/usr/bin/open",\n        args:         ["{{appdir}}/VPN Bypass.app"],\n        must_succeed: false\n  end\n|s' Casks/vpn-bypass.rb
+          if grep -qE '/usr/bin/(codesign|xattr)' Casks/vpn-bypass.rb || ! grep -q '/usr/bin/open' Casks/vpn-bypass.rb; then
+            echo "::error::tap cask postflight not rewritten"; cat Casks/vpn-bypass.rb; exit 1
+          fi
 
           # Commit and push
           git config user.name "github-actions[bot]"

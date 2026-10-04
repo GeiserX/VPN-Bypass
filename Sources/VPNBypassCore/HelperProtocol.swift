@@ -139,24 +139,25 @@ struct HelperConstants {
     // /0 or /1). Those collide with wg-quick / OpenVPN `redirect-gateway def1`. DELETE
     // of the same destinations stays allowed so leftover pre-4.8.0 catch-alls can be
     // cleaned up. Bumped so installed 2.2.0 helpers reinstall and pick this up.
-    static let helperVersion = "2.2.1"
+    // 2.3.0: releases are signed with our Developer ID, so the helper accepts a caller by the
+    // app's identifier signed by our team (HelperAuthPolicy.callerRequirement) and the cdhash pin
+    // is gone. A 2.2.1 helper rejects the signed app (its pin holds the old ad-hoc cdhash), and
+    // that rejection is what sends the app to reinstall it.
+    static let helperVersion = "2.3.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"
 
-    /// The main app's code-signing identifier (ad-hoc). Under ad-hoc signing this string
-    /// alone is forgeable (`codesign -s - -i com.geiserx.vpn-bypass`), so as of 1.8.0 the
-    /// helper requires this identifier AND the pinned cdhash below — never the identifier
-    /// alone. See HelperAuthPolicy.
+    /// The main app's code-signing identifier.
     static let appSigningIdentifier = "com.geiserx.vpn-bypass"
 
-    /// Root-only file (root:wheel 644) holding the installing app's cdhash as lowercase
-    /// hex. Written in the SAME admin operation that installs/updates the helper, read
-    /// per-connection by the helper's caller check. As of 1.8.0 this pin is MANDATORY:
-    /// absent/!valid-hex ⇒ the helper rejects the caller (fail-closed), and the installer
-    /// guarantees the pin so a correctly-installed helper always has it. A missing/stale
-    /// pin is recovered by reinstall (readiness gate), never accepted as identifier-only.
-    static let cdhashPinPath = "/Library/PrivilegedHelperTools/com.geiserx.vpnbypass.helper.cdhash"
+    /// The Developer ID team that signs releases. It is the OU of the signing certificate and
+    /// appears in every signed binary (`codesign -dv` prints it as TeamIdentifier).
+    static let teamIdentifier = "624WUVM8B4"
+
+    /// Where helpers 1.6.0 to 2.2.1 kept the installing app's cdhash. Nothing reads it now; the
+    /// installer deletes it.
+    static let legacyCDHashPinPath = "/Library/PrivilegedHelperTools/com.geiserx.vpnbypass.helper.cdhash"
 }
 
 // MARK: - Helper Authorization Policy (pure, testable seam)
@@ -168,34 +169,14 @@ struct HelperConstants {
 /// without duplicating logic or touching the helper build's file list.
 enum HelperAuthPolicy {
 
-    /// The code-signing requirement the helper must enforce on an XPC caller, or `nil` when
-    /// the caller MUST be rejected outright.
-    ///
-    /// FAIL-CLOSED: under ad-hoc signing the `identifier` predicate alone is forgeable by any
-    /// local binary, so identifier-only is NOT a safe authorization. When the root-only cdhash
-    /// pin is absent/malformed (`pinnedCDHash == nil`) this returns `nil` → the helper rejects
-    /// the caller rather than accepting a forgeable identity. When the pin is present it binds
-    /// to it — `identifier "<id>" and cdhash H"<pin>"` — which a forged binary cannot
-    /// reproduce. The installer guarantees the pin (see HelperManager), so a correctly
-    /// installed helper always has one and the real app is never rejected.
-    static func requirementString(pinnedCDHash: String?, appSigningIdentifier: String) -> String? {
-        guard let pin = pinnedCDHash else { return nil }
-        return "identifier \"\(appSigningIdentifier)\" and cdhash H\"\(pin)\""
-    }
-
-    /// Validate raw pin-file contents into a canonical lowercase-hex cdhash, or `nil` if the
-    /// content isn't a whole cdhash. `kSecCodeInfoUnique` is a 20-byte code-directory hash
-    /// (40 hex chars); the SHA-256 form is 32 bytes (64 hex). A partial/truncated write
-    /// (e.g. "ab") is even-length valid hex but is not a real cdhash, so treat it as "no
-    /// valid pin" — under the fail-closed model the helper then rejects (and the readiness
-    /// gate reinstalls to restore a good pin) rather than pinning an unsatisfiable value.
-    static func validatedCDHash(fromRawPinFileContents raw: String?) -> String? {
-        guard let raw = raw else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let isValidCDHash = (trimmed.count == 40 || trimmed.count == 64)
-            && trimmed.allSatisfy { $0.isHexDigit }
-        return isValidCDHash ? trimmed : nil
-    }
+    /// The code-signing requirement the helper enforces on every XPC caller: the app's
+    /// identifier, on a certificate Apple issued to our team. The identifier alone is forgeable
+    /// by any local binary (`codesign -s - -i com.geiserx.vpn-bypass`); the team is not, since
+    /// only Apple can issue a certificate with our team in its OU. An ad-hoc build of the app,
+    /// such as a local `swift build`, does not satisfy it.
+    static let callerRequirement =
+        "anchor apple generic and identifier \"\(HelperConstants.appSigningIdentifier)\" "
+        + "and certificate leaf[subject.OU] = \"\(HelperConstants.teamIdentifier)\""
 }
 
 /// CIDR helpers shared by the app and the privileged helper.
