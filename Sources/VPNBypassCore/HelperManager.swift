@@ -352,6 +352,44 @@ final class HelperManager: ObservableObject {
          .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
+    /// The root shell script the legacy installer runs: replace the helper and its launchd
+    /// plist with the copies from this app bundle, then start the daemon.
+    ///
+    /// The sources derive from Bundle.main.bundlePath, so a bundle path containing a single
+    /// quote (e.g. /Users/o'brien/…/VPN Bypass.app) would otherwise break out of the 'cp …'
+    /// single-quoting and inject commands into this ROOT admin script. Every path is escaped
+    /// for the shell layer here; the caller escapes the whole command for AppleScript.
+    static func legacyInstallShellCommand(helperSource: String, plistSource: String) -> String {
+        let hs = shSingleQuoteEscaped(helperSource)
+        let ps = shSingleQuoteEscaped(plistSource)
+        let hd = shSingleQuoteEscaped("/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)")
+        let pd = shSingleQuoteEscaped("/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist")
+        // Helpers before 2.3.0 authorized the app by a cdhash pinned in this file. The team
+        // requirement replaced it, so remove the leftover in the same admin op.
+        let oldPin = shSingleQuoteEscaped(HelperConstants.legacyCDHashPinPath)
+
+        // An app that came from Homebrew or a browser download carries com.apple.quarantine,
+        // and `cp` copies it onto the helper and the plist. Since macOS 27 launchd refuses a
+        // quarantined plist or program (error 155; `launchctl bootstrap` prints "Bootstrap
+        // failed: 5"), so the mark comes off both copies before the bootstrap. `cp` onto an existing file
+        // keeps that file's own attributes, which is why this is a removal and not `cp -X`:
+        // a copy left quarantined by 5.1.0 has to be cleaned too.
+        return """
+        mkdir -p /Library/PrivilegedHelperTools
+        launchctl bootout system/\(kHelperToolMachServiceName) 2>/dev/null || true
+        cp '\(hs)' '\(hd)'
+        chmod 544 '\(hd)'
+        chown root:wheel '\(hd)'
+        xattr -d com.apple.quarantine '\(hd)' 2>/dev/null || true
+        cp '\(ps)' '\(pd)'
+        chmod 644 '\(pd)'
+        chown root:wheel '\(pd)'
+        xattr -d com.apple.quarantine '\(pd)' 2>/dev/null || true
+        rm -f '\(oldPin)'
+        launchctl bootstrap system '\(pd)'
+        """
+    }
+
     private func installHelperLegacy() -> Bool {
         RouteManager.shared.log(.info, "🔐 Attempting manual helper installation via AppleScript...")
 
@@ -363,8 +401,6 @@ final class HelperManager: ObservableObject {
 
         let helperSource = "\(bundlePath)/Contents/MacOS/\(kHelperToolMachServiceName)"
         let plistSource = "\(bundlePath)/Contents/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
-        let helperDest = "/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)"
-        let plistDest = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
 
         guard FileManager.default.fileExists(atPath: helperSource) else {
             installationError = String(localized: "Helper binary not found in app bundle")
@@ -378,32 +414,7 @@ final class HelperManager: ObservableObject {
             return false
         }
 
-        // helperSource/plistSource derive from Bundle.main.bundlePath, so a bundle path
-        // containing a single quote (e.g. /Users/o'brien/…/VPN Bypass.app) would otherwise
-        // break out of the 'cp …' single-quoting and inject commands into this ROOT admin
-        // script. Escape ' as '\'' for the shell layer, then escape the whole command for
-        // the AppleScript double-quoted string layer (\ and "). The dest paths are constants,
-        // but they go through the same escaping uniformly.
-        let hs = Self.shSingleQuoteEscaped(helperSource)
-        let ps = Self.shSingleQuoteEscaped(plistSource)
-        let hd = Self.shSingleQuoteEscaped(helperDest)
-        let pd = Self.shSingleQuoteEscaped(plistDest)
-        // Helpers before 2.3.0 authorized the app by a cdhash pinned in this file. The team
-        // requirement replaced it, so remove the leftover in the same admin op.
-        let oldPin = Self.shSingleQuoteEscaped(HelperConstants.legacyCDHashPinPath)
-
-        let shellCommand = """
-        mkdir -p /Library/PrivilegedHelperTools
-        launchctl bootout system/\(kHelperToolMachServiceName) 2>/dev/null || true
-        cp '\(hs)' '\(hd)'
-        chmod 544 '\(hd)'
-        chown root:wheel '\(hd)'
-        cp '\(ps)' '\(pd)'
-        chmod 644 '\(pd)'
-        chown root:wheel '\(pd)'
-        rm -f '\(oldPin)'
-        launchctl bootstrap system '\(pd)'
-        """
+        let shellCommand = Self.legacyInstallShellCommand(helperSource: helperSource, plistSource: plistSource)
         let script = "do shell script \"\(Self.appleScriptStringEscaped(shellCommand))\" with administrator privileges"
 
         var error: NSDictionary?
