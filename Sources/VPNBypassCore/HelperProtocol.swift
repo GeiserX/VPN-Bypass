@@ -143,7 +143,10 @@ struct HelperConstants {
     // app's identifier signed by our team (HelperAuthPolicy.callerRequirement) and the cdhash pin
     // is gone. A 2.2.1 helper rejects the signed app (its pin holds the old ad-hoc cdhash), and
     // that rejection is what sends the app to reinstall it.
-    static let helperVersion = "2.3.0"
+    // 2.3.1: every hosts write ends with chmod 644. The atomic write kept the mode it found, and
+    // a 0440 /etc/hosts left by another tool is unreadable to mDNSResponder (not in wheel), so
+    // every entry was silently ignored. Bumped so installed 2.3.0 helpers reinstall and pick this up.
+    static let helperVersion = "2.3.1"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

@@ -5550,6 +5550,13 @@ final class RouteManager: ObservableObject {
             log(.error, "Cannot modify hosts file: helper not ready (\(HelperManager.shared.helperState.statusText))")
             return false
         }
+        // Another tool can leave /etc/hosts unreadable to the resolver (0440 on 2026-10-05), and
+        // then every entry in it is ignored until the next write. The helper sets 0644 on every
+        // write, so say what was found before it does, or the hour of silence is invisible.
+        if !HostsFileMode.isWorldReadable(path: "/etc/hosts") {
+            let mode = HostsFileMode.octalMode(path: "/etc/hosts") ?? "unreadable"
+            log(.warning, "/etc/hosts was \(mode), which the system resolver cannot read, so its entries were being ignored. Setting 0644 with this update.")
+        }
         let result = await HelperManager.shared.updateHostsFile(entries: entries)
         if !result.success {
             log(.error, "Helper hosts update failed: \(result.error ?? "unknown")")
