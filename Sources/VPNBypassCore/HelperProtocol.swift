@@ -155,8 +155,8 @@ struct HelperConstants {
     /// appears in every signed binary (`codesign -dv` prints it as TeamIdentifier).
     static let teamIdentifier = "624WUVM8B4"
 
-    /// Where helpers 1.6.0 to 2.2.1 kept the installing app's cdhash. Nothing reads it now; the
-    /// installer deletes it.
+    /// Where helpers 1.6.0 to 2.2.1 kept the installing app's cdhash. The app checks for it to
+    /// spot such a helper, which refuses a signed app, and the installer deletes it.
     static let legacyCDHashPinPath = "/Library/PrivilegedHelperTools/com.geiserx.vpnbypass.helper.cdhash"
 }
 

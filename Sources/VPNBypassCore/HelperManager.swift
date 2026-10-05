@@ -111,8 +111,12 @@ final class HelperManager: ObservableObject {
         let version: String? = { if case .version(let v) = probe { return v } else { return nil } }()
 
         guard let version = version else {
+            // A helper from before 2.3.0 still has its cdhash pin file. It refuses this app
+            // because of that pin, not because of Login Items, and since it was installed with
+            // launchctl, SMAppService reports it as .notRegistered. Reinstall it.
+            let preTeamHelper = FileManager.default.fileExists(atPath: HelperConstants.legacyCDHashPinPath)
             // Check if the user disabled the background item in System Settings
-            if #available(macOS 13.0, *), isDaemonDisabledByUser() {
+            if #available(macOS 13.0, *), !preTeamHelper, isDaemonDisabledByUser() {
                 RouteManager.shared.log(.warning, "Helper daemon disabled by user in System Settings")
                 helperState = .failed(String(localized: "Please enable VPN Bypass in System Settings → General → Login Items"))
                 return false

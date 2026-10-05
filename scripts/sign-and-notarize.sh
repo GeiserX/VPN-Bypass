@@ -29,6 +29,10 @@ fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+# The requirement the helper enforces on the app (HelperAuthPolicy.callerRequirement; a
+# test keeps the two equal). A certificate from another team signs fine but fails this.
+helper_requirement='anchor apple generic and identifier "com.geiserx.vpn-bypass" and certificate leaf[subject.OU] = "624WUVM8B4"'
+
 sign() { codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$@"; }
 
 # notarytool can exit 0 for a rejected submission, so read the status it reports.
@@ -50,6 +54,7 @@ case "$mode" in
     sign --identifier com.geiserx.vpn-bypass.vpnb "$target/Contents/MacOS/vpnb"
     sign "$target"
     codesign --verify --deep --strict --verbose=2 "$target"
+    codesign --verify -R="$helper_requirement" "$target"
     ditto -c -k --keepParent "$target" "$work/app.zip"
     notarize "$work/app.zip"
     xcrun stapler staple "$target"

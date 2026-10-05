@@ -59,4 +59,21 @@ final class HelperAuthPolicyTests: XCTestCase {
         SecRequirementCreateWithString(requirement as CFString, [], &req)
         XCTAssertNotEqual(SecStaticCodeCheckValidity(code, [], try XCTUnwrap(req)), errSecSuccess)
     }
+
+    func testReleaseScriptChecksTheSameRequirement() throws {
+        // scripts/sign-and-notarize.sh refuses a release whose app fails this requirement, so
+        // the two strings must stay equal.
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        for _ in 0..<8 {
+            let script = dir.appendingPathComponent("scripts/sign-and-notarize.sh")
+            if FileManager.default.fileExists(atPath: script.path) {
+                let text = try String(contentsOf: script, encoding: .utf8)
+                XCTAssertTrue(text.contains("helper_requirement='\(requirement)'"),
+                              "scripts/sign-and-notarize.sh does not check HelperAuthPolicy.callerRequirement")
+                return
+            }
+            dir = dir.deletingLastPathComponent()
+        }
+        throw XCTSkip("scripts/sign-and-notarize.sh not found walking up from \(#filePath)")
+    }
 }

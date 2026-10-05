@@ -68,8 +68,9 @@ jobs:
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD; do
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY; do
             [ -n "${!name}" ] || { echo "::error::secret $name is not set"; exit 1; }
           done
           keychain="$RUNNER_TEMP/signing.keychain-db"
@@ -81,7 +82,9 @@ jobs:
           security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           rm -f "$RUNNER_TEMP/cert.p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_pass" "$keychain" > /dev/null
-          security list-keychains -d user -s "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain" | grep -q "$APPLE_SIGNING_IDENTITY" \
+            || { echo "::error::the certificate holds no codesigning identity $APPLE_SIGNING_IDENTITY"; exit 1; }
 
       - name: Build, sign and notarize release
         env:
@@ -215,7 +218,7 @@ jobs:
           # helper accepts only our team's signature. Idempotent, and the release fails if a
           # re-sign or xattr call survives.
           perl -0777pi -e 's|  postflight_steps do\n.*?\n  end\n|  postflight_steps do\n    run "/usr/bin/open",\n        args:         ["{{appdir}}/VPN Bypass.app"],\n        must_succeed: false\n  end\n|s' Casks/vpn-bypass.rb
-          if grep -qE '/usr/bin/(codesign|xattr)' Casks/vpn-bypass.rb || ! grep -q '/usr/bin/open' Casks/vpn-bypass.rb; then
+          if grep -qE 'codesign|xattr' Casks/vpn-bypass.rb || ! grep -q '/usr/bin/open' Casks/vpn-bypass.rb; then
             echo "::error::tap cask postflight not rewritten"; cat Casks/vpn-bypass.rb; exit 1
           fi
 
