@@ -339,7 +339,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         isRelaunchingForUpdate = true
         RouteManager.shared.log(.info, "VPN Bypass was updated on disk. Restarting to run the new version...")
-        NSApp.terminate(nil)
+        // Not `NSApp.terminate(nil)` right here. terminate answers .terminateLater and then spins
+        // a nested run loop until the teardown replies, and that teardown runs on the main queue.
+        // This method is called from a main-actor Task, which is a block of that same queue, and
+        // the queue cannot drain while one of its own blocks is still on the stack: the quit
+        // would wait for itself forever. The run loop calls its own blocks outside the queue.
+        RunLoop.main.perform(inModes: [.common]) {
+            MainActor.assumeIsolated { NSApp.terminate(nil) }
+        }
     }
     
     // MARK: - Watchdog (Long-term Stability)
