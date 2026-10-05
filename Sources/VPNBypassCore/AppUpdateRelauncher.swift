@@ -6,7 +6,11 @@
 // us: it runs a cask's install steps in a sandbox that forbids launching apps (`deny lsopen`),
 // so a cask that quits the app before an upgrade leaves it closed, with every route removed.
 // The running app notices the replacement itself and restarts into the new copy.
+//
+// The same restart serves Settings' "Restart Now" (a language change): starting the new copy
+// before the old one has exited does not work, see relaunchCommand.
 
+import AppKit
 import Foundation
 import Security
 
@@ -58,5 +62,24 @@ enum AppUpdateRelauncher {
     static func relaunchCommand(pid: Int32, bundlePath: String, opener: String = "/usr/bin/open") -> (executable: String, arguments: [String]) {
         let script = #"i=0; while kill -0 "$1" 2>/dev/null && [ "$i" -lt 240 ]; do /bin/sleep 0.5; i=$((i+1)); done; exec "$2" "$3""#
         return ("/bin/sh", ["-c", script, "sh", String(pid), opener, bundlePath])
+    }
+
+    /// Quit this process and reopen `bundlePath` once it is gone. Throws when the waiter cannot
+    /// be started, and then nothing quits.
+    ///
+    /// The quit is handed to the run loop instead of being called here. `terminate` answers
+    /// .terminateLater and then spins a nested run loop until the teardown replies, and that
+    /// teardown runs on the main queue. A caller that is itself a block of the main queue, such
+    /// as a main-actor Task, would keep the queue from draining while it is on the stack, and the
+    /// quit would wait for itself forever. The run loop calls its own blocks outside the queue.
+    @MainActor static func restart(bundlePath: String) throws {
+        let command = relaunchCommand(pid: ProcessInfo.processInfo.processIdentifier, bundlePath: bundlePath)
+        let waiter = Process()
+        waiter.executableURL = URL(fileURLWithPath: command.executable)
+        waiter.arguments = command.arguments
+        try waiter.run()
+        RunLoop.main.perform(inModes: [.common]) {
+            MainActor.assumeIsolated { NSApp.terminate(nil) }
+        }
     }
 }

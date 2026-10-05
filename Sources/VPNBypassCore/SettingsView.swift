@@ -1902,15 +1902,12 @@ struct GeneralTab: View {
         }
         .alert(String(localized: "Restart Required"), isPresented: $showingRestartAlert) {
             Button(String(localized: "Restart Now")) {
-                let path = Bundle.main.bundlePath
-                let task = Process()
-                task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-                task.arguments = ["-n", path]
+                // Not `open -n` followed by a quit: the new copy would start while this one
+                // still holds the single-instance lock, exit at once, and leave the app closed.
                 do {
-                    try task.run()
-                    NSApp.terminate(nil)
+                    try AppUpdateRelauncher.restart(bundlePath: Bundle.main.bundlePath)
                 } catch {
-                    // Fall through — app stays open
+                    RouteManager.shared.log(.warning, "Restart could not be scheduled: \(error.localizedDescription)")
                 }
             }
             Button(String(localized: "Later"), role: .cancel) { }
