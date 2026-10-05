@@ -9,9 +9,9 @@
 	<key>CFBundleName</key>
 	<string>VPNBypassHelper</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.3.0</string>
+	<string>2.3.1</string>
 	<key>CFBundleVersion</key>
-	<string>15</string>
+	<string>16</string>
 	<key>SMAuthorizedClients</key>
 	<array>
 		<string>anchor apple generic and identifier "com.geiserx.vpn-bypass" and certificate leaf[subject.OU] = "624WUVM8B4"</string>

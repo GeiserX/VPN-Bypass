@@ -447,10 +447,21 @@ class HelperTool: NSObject, HelperProtocol {
         
         do {
             try newContent.write(toFile: hostsPath, atomically: true, encoding: .utf8)
-            return (true, nil)
         } catch {
             return (false, "Failed to write hosts file: \(error.localizedDescription)")
         }
+
+        // The atomic write keeps whatever mode the file had. Another tool can leave /etc/hosts
+        // at 0440 (seen on 2026-10-05: `cp /dev/stdin tmp && mv tmp /etc/hosts` from a pipe
+        // creates 0440). mDNSResponder runs as `_mdnsresponder`, which is not in wheel, so it
+        // cannot open such a file and every entry in it is ignored, ours included. The
+        // resolver needs 0644, so set it every time rather than trust what we found.
+        if chmod(hostsPath, 0o644) != 0 {
+            let err = String(cString: strerror(errno))
+            helperLog.error("hosts file written but chmod 644 failed: \(err, privacy: .public)")
+            return (false, "Hosts file written but could not be made readable by the resolver (chmod 644: \(err))")
+        }
+        return (true, nil)
     }
     
     func flushDNSCache(withReply reply: @escaping (Bool) -> Void) {
