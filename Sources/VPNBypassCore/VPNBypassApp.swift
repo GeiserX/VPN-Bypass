@@ -68,6 +68,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastPrimaryInterface: String?
     private var networkDebounceWorkItem: DispatchWorkItem?
     private var appStartTime = Date()
+    /// The executable this process was launched from, to notice when an update replaces it.
+    private var launchedExecutable: AppUpdateRelauncher.FileIdentity?
+    private var isRelaunchingForUpdate = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Single-instance guard FIRST. Two processes mutating the route table at
@@ -79,6 +82,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("VPN Bypass: another instance is already running — exiting duplicate without touching routes.")
             exit(0)
         }
+
+        launchedExecutable = Bundle.main.executablePath.flatMap(AppUpdateRelauncher.identity(ofFileAt:))
 
         // Hide dock icon (menu bar only)
         NSApp.setActivationPolicy(.accessory)
@@ -300,10 +305,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func startPeriodicRefresh() {
-        refreshTimer = Timer.scheduledInCommonModes(withTimeInterval: 30.0, repeats: true) { _ in
+        refreshTimer = Timer.scheduledInCommonModes(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 RouteManager.shared.refreshStatus()
+                self?.relaunchIfUpdatedOnDisk()
             }
+        }
+    }
+
+    /// Restart into the new copy once an update has replaced this app's bundle (see
+    /// AppUpdateRelauncher). Quitting goes through the normal path, so the routes this process
+    /// installed are removed before the new copy starts and applies its own.
+    @MainActor private func relaunchIfUpdatedOnDisk() {
+        guard !isRelaunchingForUpdate, let launched = launchedExecutable,
+              let executablePath = Bundle.main.executablePath else { return }
+        let bundlePath = Bundle.main.bundlePath
+        guard bundlePath.hasSuffix(".app") else { return }
+
+        let state = AppUpdateRelauncher.state(launched: launched, executablePath: executablePath) {
+            AppUpdateRelauncher.bundleSignatureIsValid(atPath: bundlePath)
+        }
+        guard state == .replaced else { return }
+
+        let command = AppUpdateRelauncher.relaunchCommand(pid: ProcessInfo.processInfo.processIdentifier, bundlePath: bundlePath)
+        let waiter = Process()
+        waiter.executableURL = URL(fileURLWithPath: command.executable)
+        waiter.arguments = command.arguments
+        do {
+            try waiter.run()
+        } catch {
+            RouteManager.shared.log(.warning, "VPN Bypass was updated on disk, but the restart could not be scheduled: \(error.localizedDescription)")
+            return
+        }
+        isRelaunchingForUpdate = true
+        RouteManager.shared.log(.info, "VPN Bypass was updated on disk. Restarting to run the new version...")
+        // Not `NSApp.terminate(nil)` right here. terminate answers .terminateLater and then spins
+        // a nested run loop until the teardown replies, and that teardown runs on the main queue.
+        // This method is called from a main-actor Task, which is a block of that same queue, and
+        // the queue cannot drain while one of its own blocks is still on the stack: the quit
+        // would wait for itself forever. The run loop calls its own blocks outside the queue.
+        RunLoop.main.perform(inModes: [.common]) {
+            MainActor.assumeIsolated { NSApp.terminate(nil) }
         }
     }
     

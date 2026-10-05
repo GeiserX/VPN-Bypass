@@ -13,7 +13,7 @@ brew trust --cask geiserx/vpn-bypass/vpn-bypass
 brew install --cask vpn-bypass
 ```
 
-The tap is the canonical install path: it tracks the latest release and updates with `brew upgrade`. On Homebrew 6+, trust the tap first (as shown above) or the install will be blocked.
+The tap is the canonical install path: it tracks the latest release and updates with `brew upgrade`. After an upgrade the running app notices the new copy within 30 seconds and restarts into it. On Homebrew 6+, trust the tap first (as shown above) or the install will be blocked.
 
 Do not install the raw `Casks/vpn-bypass.rb` from this repository; it is a frozen snapshot and installs an old build.
 

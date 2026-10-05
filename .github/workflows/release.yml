@@ -213,13 +213,16 @@ jobs:
           # (otherwise vpnb would just never appear on PATH, with no error).
           grep -q 'Contents/MacOS/vpnb' Casks/vpn-bypass.rb || { echo "::error::vpnb binary stanza not inserted into the tap cask (app anchor not found)"; exit 1; }
 
-          # The app is signed and notarized, so the postflight keeps only `open`. The old one
-          # cleared quarantine and re-signed the app ad hoc, which would now break it: the
-          # helper accepts only our team's signature. Idempotent, and the release fails if a
-          # re-sign or xattr call survives.
-          perl -0777pi -e 's|  postflight_steps do\n.*?\n  end\n|  postflight_steps do\n    run "/usr/bin/open",\n        args:         ["{{appdir}}/VPN Bypass.app"],\n        must_succeed: false\n  end\n|s' Casks/vpn-bypass.rb
-          if grep -qE 'codesign|xattr' Casks/vpn-bypass.rb || ! grep -q '/usr/bin/open' Casks/vpn-bypass.rb; then
-            echo "::error::tap cask postflight not rewritten"; cat Casks/vpn-bypass.rb; exit 1
+          # The cask has no preflight or postflight. The old ones quit the app before an
+          # upgrade and tried to reopen it after, but Homebrew runs install steps in a sandbox
+          # that forbids launching an app (`deny lsopen`), so the app stayed closed with every
+          # route removed. The app now restarts itself when its bundle is replaced
+          # (AppUpdateRelauncher), which needs it left running. A step that re-signs the app
+          # or clears quarantine would also break it: the helper accepts only our team's
+          # signature. Idempotent, and the release fails if any such step survives.
+          perl -0777pi -e 's{  (?:pre|post)flight(?:_steps)? do\n.*?\n  end\n\n?}{}gs' Casks/vpn-bypass.rb
+          if grep -qE 'flight|terminate_process|/usr/bin/open|codesign|xattr' Casks/vpn-bypass.rb; then
+            echo "::error::tap cask still has a preflight or postflight step"; cat Casks/vpn-bypass.rb; exit 1
           fi
 
           # Commit and push
