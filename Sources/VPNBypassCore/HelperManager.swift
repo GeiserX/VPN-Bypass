@@ -115,8 +115,15 @@ final class HelperManager: ObservableObject {
             // because of that pin, not because of Login Items, and since it was installed with
             // launchctl, SMAppService reports it as .notRegistered. Reinstall it.
             let preTeamHelper = FileManager.default.fileExists(atPath: HelperConstants.legacyCDHashPinPath)
+            // 5.1.0 left its copies quarantined, and on macOS 27 launchd would not start them.
+            // That helper is unreachable for the same kind of reason: not Login Items, and
+            // SMAppService reports .notRegistered for it too. Reinstalling removes the mark.
+            let quarantinedCopy = Self.isQuarantined(path: helperPath) || Self.isQuarantined(path: plistPath)
             // Check if the user disabled the background item in System Settings
-            if #available(macOS 13.0, *), !preTeamHelper, isDaemonDisabledByUser() {
+            if #available(macOS 13.0, *),
+               Self.unreachableHelperIsUsersChoice(daemonDisabled: isDaemonDisabledByUser(),
+                                                   preTeamHelper: preTeamHelper,
+                                                   quarantinedCopy: quarantinedCopy) {
                 RouteManager.shared.log(.warning, "Helper daemon disabled by user in System Settings")
                 helperState = .failed(String(localized: "Please enable VPN Bypass in System Settings → General → Login Items"))
                 return false
@@ -350,6 +357,19 @@ final class HelperManager: ObservableObject {
     private static func appleScriptStringEscaped(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
          .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    /// Whether an unreachable helper is the user's doing (the background item is off in Login
+    /// Items), in which case a reinstall would only prompt again on every launch (#25). Two
+    /// known states look the same to SMAppService and are ours to repair: a helper from before
+    /// 2.3.0, and copies that still carry the quarantine mark.
+    nonisolated static func unreachableHelperIsUsersChoice(daemonDisabled: Bool, preTeamHelper: Bool, quarantinedCopy: Bool) -> Bool {
+        daemonDisabled && !preTeamHelper && !quarantinedCopy
+    }
+
+    /// Whether the file at `path` carries com.apple.quarantine. False for a missing file.
+    nonisolated static func isQuarantined(path: String) -> Bool {
+        getxattr(path, "com.apple.quarantine", nil, 0, 0, XATTR_NOFOLLOW) >= 0
     }
 
     /// The root shell script the legacy installer runs: replace the helper and its launchd
