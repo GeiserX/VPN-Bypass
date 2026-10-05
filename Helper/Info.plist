@@ -9,12 +9,12 @@
 	<key>CFBundleName</key>
 	<string>VPNBypassHelper</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.2.1</string>
+	<string>2.3.0</string>
 	<key>CFBundleVersion</key>
-	<string>14</string>
+	<string>15</string>
 	<key>SMAuthorizedClients</key>
 	<array>
-		<string>identifier "com.geiserx.vpn-bypass"</string>
+		<string>anchor apple generic and identifier "com.geiserx.vpn-bypass" and certificate leaf[subject.OU] = "624WUVM8B4"</string>
 	</array>
 </dict>
 </plist>

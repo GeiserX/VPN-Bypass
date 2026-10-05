@@ -15,13 +15,6 @@ cask "vpn-bypass" do
 
   app "VPN Bypass.app"
 
-  postflight do
-    # Sign the app after installation (ad-hoc) for notifications to work
-    system_command "/usr/bin/codesign",
-                   args: ["--force", "--deep", "--sign", "-", "#{appdir}/VPN Bypass.app"],
-                   sudo: false
-  end
-
   zap trash: [
     "~/Library/Application Support/VPNBypass",
     "~/Library/Caches/com.geiserx.vpn-bypass",

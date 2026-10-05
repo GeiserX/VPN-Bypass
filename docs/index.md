@@ -117,7 +117,6 @@ flowchart LR
 
 - It does not route per application. Rules are about where traffic goes, never about which process sent it; that would need a Network Extension, which the app deliberately does not use.
 - It never touches Tailscale's own range, loopback, or kernel-reserved addresses, whatever a rule asks for, and it never picks Tailscale as the VPN to act on. See [Addresses that are never touched](coexistence.md#addresses-that-are-never-touched).
-- It is not notarized. The app is signed ad hoc, so Gatekeeper may call it damaged on first launch. The one-line fix is in [Troubleshooting](troubleshooting.md#app-wont-open-damaged-error-macos-gatekeeper).
 - It does not change what your VPN client does with DNS. The `/etc/hosts` option works around a client that forces DNS through the tunnel; it does not switch that off.
 
 ## Privacy

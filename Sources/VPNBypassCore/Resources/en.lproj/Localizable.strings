@@ -520,10 +520,6 @@
 "The privileged helper isn't ready, so no routes could be applied." = "The privileged helper isn't ready, so no routes could be applied.";
 "Helper not running — nothing is being routed" = "Helper not running — nothing is being routed";
 "Fix…" = "Fix…";
-"Helper security pin could not be restored" = "Helper security pin could not be restored";
-"Could not secure the helper. Please try installing again." = "Could not secure the helper. Please try installing again.";
-"Cannot secure the helper: this app has no computable code signature (cdhash). Reinstall the app from the official DMG." = "Cannot secure the helper: this app has no computable code signature (cdhash). Reinstall the app from the official DMG.";
-"Helper installed but its security pin did not persist. Please try installing again." = "Helper installed but its security pin did not persist. Please try installing again.";
 "Not running from app bundle" = "Not running from app bundle";
 "Helper binary not found in app bundle" = "Helper binary not found in app bundle";
 "Helper plist not found in app bundle" = "Helper plist not found in app bundle";

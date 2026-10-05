@@ -113,12 +113,15 @@ uninstall-helper:
 	@sudo rm -f /Library/LaunchDaemons/$(HELPER_ID).plist
 	@echo "Helper uninstalled"
 
-# Create signed release DMG for distribution
+# Create the signed, notarized release DMG for distribution. Needs SIGN_IDENTITY and
+# notary credentials (see scripts/sign-and-notarize.sh); there is no ad-hoc fallback,
+# since the helper only accepts an app signed by our Developer ID team.
 release: bundle
 	@echo "Creating release v$(VERSION)..."
-	@codesign --force --deep --sign - "$(APP_BUNDLE)"
+	@scripts/sign-and-notarize.sh app "$(APP_BUNDLE)"
 	@mkdir -p dist
 	@$(MAKE) dmg
+	@scripts/sign-and-notarize.sh dmg "dist/VPN-Bypass-$(VERSION).dmg"
 	@echo ""
 	@echo "✅ Release created!"
 	@echo "   DMG: dist/VPN-Bypass-$(VERSION).dmg"

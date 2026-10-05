@@ -520,10 +520,6 @@
 "The privileged helper isn't ready, so no routes could be applied." = "El asistente privilegiado no está listo, así que no se pudo aplicar ninguna ruta.";
 "Helper not running — nothing is being routed" = "El asistente no está en marcha: no se enruta nada";
 "Fix…" = "Reparar…";
-"Helper security pin could not be restored" = "No se pudo restaurar la fijación de seguridad del asistente";
-"Could not secure the helper. Please try installing again." = "No se pudo proteger el asistente. Vuelve a intentar instalarlo.";
-"Cannot secure the helper: this app has no computable code signature (cdhash). Reinstall the app from the official DMG." = "No se puede proteger el asistente: no se puede calcular la firma de código de esta app (cdhash). Reinstala la app desde el DMG oficial.";
-"Helper installed but its security pin did not persist. Please try installing again." = "El asistente se instaló, pero su fijación de seguridad no se guardó. Vuelve a intentar instalarlo.";
 "Not running from app bundle" = "La app no se está ejecutando desde su paquete";
 "Helper binary not found in app bundle" = "No se encuentra el asistente en el paquete de la app";
 "Helper plist not found in app bundle" = "No se encuentra el plist del asistente en el paquete de la app";

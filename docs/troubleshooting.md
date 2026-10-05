@@ -5,18 +5,12 @@ and ownership rules, plus the commands to see what is actually happening.
 
 ## App won't open / "damaged" error (macOS Gatekeeper)
 
-The app is ad-hoc signed and not notarized with Apple, so macOS Gatekeeper may block it on first launch. You'll see errors like *"VPN Bypass is damaged and can't be opened"* or *"Apple cannot check it for malicious software"*.
+From 5.1.0 the app is signed with a Developer ID and notarized by Apple, so Gatekeeper opens it. Update to the latest release if you see this.
 
-**Fix:** Remove the quarantine attribute:
+Earlier versions were signed ad hoc and not notarized, so Gatekeeper could block them on first launch with *"VPN Bypass is damaged and can't be opened"* or *"Apple cannot check it for malicious software"*. On those, remove the quarantine attribute:
 
 ```bash
 xattr -cr /Applications/VPN\ Bypass.app
-```
-
-**Prevention:** Install with the `--no-quarantine` flag:
-
-```bash
-brew install --cask --no-quarantine vpn-bypass
 ```
 
 ## Routes not being applied
