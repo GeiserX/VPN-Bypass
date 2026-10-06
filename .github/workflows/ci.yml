@@ -2,24 +2,23 @@ name: CI
 
 on:
   workflow_dispatch:
+  # No paths filter on push to main: release.yml publishes a commit only when this
+  # workflow's jobs are green on that exact commit, and auto-tag.yml tags commits that
+  # touch files outside any Swift-only filter (Info.plist, Makefile, assets/**), so every
+  # commit on main needs its own run.
   push:
     branches: [main]
-    paths:
-      - '**/*.swift'
-      - '**/*.strings'
-      - 'scripts/check-localizations.py'
-      - 'Package.swift'
-      - 'Package.resolved'
-      - '.github/workflows/ci.yml'
   # No paths filter on PRs: `test` is a required status check in the "Protect
   # main" ruleset, so it MUST report on every PR — a path-filtered run that is
-  # skipped never reports and blocks the PR forever. Push to main stays
-  # path-filtered (above) to avoid redundant post-merge runs.
+  # skipped never reports and blocks the PR forever.
   pull_request:
     branches: [main]
 
+# Pull requests: one run per PR, a new push cancels the old run. Main: one group per
+# commit, so a quick second merge can never cancel (or replace while pending) the run
+# the first commit's release is waiting on.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -73,3 +72,38 @@ jobs:
         with:
           files: coverage.lcov
           fail_ci_if_error: false
+
+  app:
+    # The job name is the check name: release.yml waits for it on the release commit, and
+    # the "Protect main" ruleset requires it. Rename all three together.
+    name: build and launch app
+    # Public repo: GitHub-hosted macOS is free here and a throwaway VM, so PR code never
+    # touches a self-hosted runner.
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          # The Makefile stamps the version from the last tag (git describe).
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select Xcode (latest stable)
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Build the app bundle
+        # The same `make bundle` that `make release` signs and packs into the DMG: the
+        # universal release build of the app and vpnb, plus the privileged helper.
+        run: make bundle
+      - name: Check the binaries are universal
+        run: |
+          for f in "VPN Bypass.app/Contents/MacOS/VPNBypass" \
+                   "VPN Bypass.app/Contents/MacOS/vpnb" \
+                   "VPN Bypass.app/Contents/MacOS/com.geiserx.vpnbypass.helper"; do
+            archs=$(lipo -archs "$f")
+            echo "$f: $archs"
+            case " $archs " in *" arm64 "*) ;; *) echo "::error::$f has no arm64 slice"; exit 1 ;; esac
+            case " $archs " in *" x86_64 "*) ;; *) echo "::error::$f has no x86_64 slice"; exit 1 ;; esac
+          done
+      - name: Launch the built app
+        run: scripts/smoke-launch.sh "VPN Bypass.app"
