@@ -29,6 +29,9 @@ version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/C
 sock="$HOME/Library/Application Support/VPNBypass/control.sock"
 applog="$HOME/Library/Logs/VPNBypass/vpnbypass.log"
 rm -f "$sock"
+# Measure the log instead of deleting it, so a run on a developer's Mac keeps their history
+# and an old log can't stand in for this launch's output.
+log_before=$(stat -f %z "$applog" 2>/dev/null || echo 0)
 out=$(mktemp)
 "$bin" >"$out" 2>&1 &
 pid=$!
@@ -37,7 +40,7 @@ trap 'kill -KILL "$pid" 2>/dev/null || true' EXIT
 fail() {
   echo "::error::$1"
   echo "--- app stdout/stderr ---"; cat "$out"
-  echo "--- app log ---"; cat "$applog" 2>/dev/null || echo "(no log file)"
+  echo "--- app log (this launch) ---"; tail -c +"$((log_before + 1))" "$applog" 2>/dev/null || echo "(no log file)"
   exit 1
 }
 
@@ -62,6 +65,7 @@ echo "Control socket is up."
 
 sleep 15
 kill -0 "$pid" 2>/dev/null || fail "the app exited within 15 s of launching"
-[ -s "$applog" ] || fail "the app wrote nothing to $applog"
-echo "--- app log ---"; cat "$applog"
+log_after=$(stat -f %z "$applog" 2>/dev/null || echo 0)
+[ "$log_after" -gt "$log_before" ] || fail "the app wrote nothing to $applog"
+echo "--- app log (this launch) ---"; tail -c +"$((log_before + 1))" "$applog"
 echo "Smoke launch passed: VPN Bypass $version launched, opened its control socket and kept running."
