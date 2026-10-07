@@ -26,8 +26,69 @@ permissions:
   contents: write
 
 jobs:
+  ci-gate:
+    # A release ships a signed DMG and moves the Homebrew cask, so it must only ever publish a
+    # commit whose CI is green. auto-tag.yml dispatches this workflow the moment a merge lands,
+    # while CI for that same commit is still running, so this waits for it instead of trusting
+    # it. v5.1.4 shipped from a commit whose CI run never got a runner; this gate stops that.
+    #
+    # It needs green runs of these CI jobs on the exact commit being released. A failed or
+    # cancelled run fails the release. To retry: re-run CI for the commit (or start it with
+    # `gh workflow run ci.yml --ref vX.Y.Z`), then re-run this workflow.
+    name: CI green on the release commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      checks: read
+    steps:
+      - name: Wait for CI on ${{ github.sha }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          # Job names in ci.yml, one per line. Keep in step with the ruleset's required checks.
+          REQUIRED_CHECKS: |
+            test
+            build and launch app
+          # macOS runners can queue for a long time; CI itself takes about 10 minutes.
+          WAIT_MINUTES: '90'
+        run: |
+          set -euo pipefail
+          deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+          while :; do
+            waiting=""
+            while IFS= read -r name; do
+              [ -n "$name" ] || continue
+              # The newest run of this check made by GitHub Actions on this commit.
+              state=$(gh api -X GET "repos/$REPO/commits/$SHA/check-runs" \
+                -f check_name="$name" -f filter=all --paginate \
+                --jq '.check_runs[] | select(.app.slug == "github-actions") | "\(.id) \(.status) \(.conclusion)"' \
+                </dev/null | sort -n | tail -1)
+              read -r _ status conclusion <<<"${state:-0 missing none}"
+              if [ "$status" = completed ] && [ "$conclusion" = success ]; then
+                echo "ok: $name"
+              elif [ "$status" = completed ]; then
+                echo "::error::CI check '$name' on $SHA concluded '$conclusion'. Not releasing. Re-run CI for this commit, then re-run this workflow."
+                exit 1
+              else
+                waiting="$waiting '$name' ($status)"
+              fi
+            done <<<"$REQUIRED_CHECKS"
+            if [ -z "$waiting" ]; then
+              echo "CI is green on $SHA."
+              exit 0
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Gave up after $WAIT_MINUTES minutes waiting for:$waiting on $SHA. If CI never ran on this commit, start it with: gh workflow run ci.yml --ref <this tag>"
+              exit 1
+            fi
+            echo "waiting for:$waiting"
+            sleep 30
+          done
+
   release:
     name: Build and Release
+    needs: ci-gate
     runs-on: macos-latest  # free + unlimited on public repos; ships full Xcode for the universal build
 
     steps:
