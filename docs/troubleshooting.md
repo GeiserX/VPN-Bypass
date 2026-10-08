@@ -7,6 +7,13 @@ and ownership rules, plus the commands to see what is actually happening.
 
 From 5.1.0 the app is signed with a Developer ID and notarized by Apple, so Gatekeeper opens it. Update to the latest release if you see this.
 
+On the first launch of a release macOS asks once whether to open an app downloaded from the internet; click Open. If instead it says *"VPN Bypass" Not Opened, Apple could not verify "VPN Bypass" is free of malware*, click Done, not Move to Bin. The release itself is fine: the same dialog did not appear for a fresh copy of the same build in our tests, and this is what cleared it:
+
+1. Move the app out of `/Applications` and back (drag it in Finder, or `mv` it in a terminal), then open it again.
+2. If the dialog returns, delete the app and reinstall it from the release DMG, or run `brew reinstall --cask vpn-bypass`.
+
+To confirm the copy you have is the notarized release, run `spctl -a -vv -t exec "/Applications/VPN Bypass.app"`; it answers `accepted`, `source=Notarized Developer ID`.
+
 Earlier versions were signed ad hoc and not notarized, so Gatekeeper could block them on first launch with *"VPN Bypass is damaged and can't be opened"* or *"Apple cannot check it for malicious software"*. On those, remove the quarantine attribute:
 
 ```bash
