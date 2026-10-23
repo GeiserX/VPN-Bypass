@@ -100,17 +100,19 @@ final class HelperManager: ObservableObject {
 
         // Files exist — verify version via XPC with timeout
         helperState = .checking
-        var probe = await probeVersion()
-        if case .timedOut = probe {
-            // The helper may just be slow under launch load — retry once before
-            // concluding it needs reinstalling. Reinstalling a healthy-but-busy
-            // helper would fire an intrusive admin-password prompt for nothing.
-            RouteManager.shared.log(.warning, "Helper version probe timed out; retrying before reinstall")
-            probe = await probeVersion()
-        }
-        let version: String? = { if case .version(let v) = probe { return v } else { return nil } }()
-
-        guard let version = version else {
+        // Early in boot the helper can take well over one deadline to answer (#174).
+        // Reinstalling a healthy-but-slow helper fires an admin-password prompt for
+        // nothing, so a timeout is retried with backoff before anything is concluded.
+        let probe = await Self.probeVersionRetryingTimeouts(
+            probe: { [weak self] in
+                guard let self else { return .unreachable }
+                return await self.probeVersion()
+            },
+            beforeRetry: { [weak self] in self?.dropXPCConnection() },
+            log: { RouteManager.shared.log(.warning, $0) }
+        )
+        let expected = HelperConstants.helperVersion
+        let verdict = Self.versionCheckVerdict(probe, expected: expected) {
             // A helper from before 2.3.0 still has its cdhash pin file. It refuses this app
             // because of that pin, not because of Login Items, and since it was installed with
             // launchctl, SMAppService reports it as .notRegistered. Reinstall it.
@@ -120,15 +122,25 @@ final class HelperManager: ObservableObject {
             // SMAppService reports .notRegistered for it too. Reinstalling removes the mark.
             let quarantinedCopy = Self.isQuarantined(path: helperPath) || Self.isQuarantined(path: plistPath)
             // Check if the user disabled the background item in System Settings
-            if #available(macOS 13.0, *),
-               Self.unreachableHelperIsUsersChoice(daemonDisabled: isDaemonDisabledByUser(),
-                                                   preTeamHelper: preTeamHelper,
-                                                   quarantinedCopy: quarantinedCopy) {
-                RouteManager.shared.log(.warning, "Helper daemon disabled by user in System Settings")
-                helperState = .failed(String(localized: "Please enable VPN Bypass in System Settings → General → Login Items"))
-                return false
-            }
+            guard #available(macOS 13.0, *) else { return false }
+            return Self.unreachableHelperIsUsersChoice(daemonDisabled: self.isDaemonDisabledByUser(),
+                                                       preTeamHelper: preTeamHelper,
+                                                       quarantinedCopy: quarantinedCopy)
+        }
 
+        let version: String
+        switch verdict {
+        case .ready:
+            helperVersion = expected
+            helperState = .ready
+            return true
+
+        case .loginItemsDisabled:
+            RouteManager.shared.log(.warning, "Helper daemon disabled by user in System Settings")
+            helperState = .failed(String(localized: "Please enable VPN Bypass in System Settings → General → Login Items"))
+            return false
+
+        case .reinstall:
             // XPC unreachable or persistently unresponsive — helper may be corrupted or wrong arch
             RouteManager.shared.log(.warning, "Helper XPC connection failed, attempting reinstall...")
             helperState = .installing
@@ -145,15 +157,12 @@ final class HelperManager: ObservableObject {
             }
             helperState = .failed(String(localized: "Cannot connect to helper after reinstall"))
             return false
+
+        case .update(let installed):
+            version = installed
         }
 
         helperVersion = version
-        let expected = HelperConstants.helperVersion
-
-        if version == expected {
-            helperState = .ready
-            return true
-        }
 
         // Version mismatch — update
         RouteManager.shared.log(.info, "🔐 Helper version mismatch: installed=\(version), expected=\(expected)")
@@ -228,10 +237,63 @@ final class HelperManager: ObservableObject {
     /// slow under launch load) from `unreachable` (XPC error / no proxy — the helper
     /// is likely broken) lets the caller retry a slow helper instead of firing an
     /// intrusive admin-password reinstall for a perfectly healthy one.
-    private enum VersionProbe: Sendable {
+    enum VersionProbe: Sendable, Equatable {
         case version(String)
         case unreachable
         case timedOut
+    }
+
+    /// What the launch version check decided.
+    enum VersionCheckVerdict: Equatable {
+        case ready
+        case update(installed: String)
+        case reinstall
+        case loginItemsDisabled
+    }
+
+    /// Decides from a (retried) version probe whether the helper is ready, needs updating,
+    /// needs reinstalling, or was turned off by the user. `unreachableIsUsersChoice` is
+    /// consulted only when the helper gave no version.
+    static func versionCheckVerdict(_ probe: VersionProbe, expected: String,
+                                    unreachableIsUsersChoice: () -> Bool) -> VersionCheckVerdict {
+        guard case .version(let version) = probe else {
+            return unreachableIsUsersChoice() ? .loginItemsDisabled : .reinstall
+        }
+        return version == expected ? .ready : .update(installed: version)
+    }
+
+    /// Waits between version probes after a timeout: with the 10 s deadline per probe,
+    /// five probes and these pauses give a slow helper about 60 s to answer (#174).
+    nonisolated static let versionRetryDelays: [TimeInterval] = [2, 4, 4, 4]
+
+    /// Probes the helper's version, retrying only timeouts. An answer or an XPC error
+    /// returns at once: an error means the helper is really unreachable, and retrying it
+    /// would only delay the reinstall. Returns `.timedOut` if every probe timed out.
+    static func probeVersionRetryingTimeouts(
+        delays: [TimeInterval] = versionRetryDelays,
+        probe: () async -> VersionProbe,
+        beforeRetry: () -> Void = {},
+        sleep: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
+        log: (String) -> Void
+    ) async -> VersionProbe {
+        var result = await probe()
+        var attempt = 1
+        for delay in delays {
+            guard case .timedOut = result else { break }
+            log("Helper version check timed out (attempt \(attempt) of \(delays.count + 1)); retrying in \(Int(delay)) s before deciding anything")
+            await sleep(delay)
+            beforeRetry()
+            result = await probe()
+            attempt += 1
+        }
+        if attempt > 1 {
+            switch result {
+            case .version(let v): log("Helper answered the version check on attempt \(attempt) (v\(v)); no reinstall needed")
+            case .unreachable: log("Helper became unreachable on attempt \(attempt)")
+            case .timedOut: log("Helper did not answer the version check in \(attempt) attempts; treating it as broken")
+            }
+        }
+        return result
     }
 
     private func probeVersion() async -> VersionProbe {
