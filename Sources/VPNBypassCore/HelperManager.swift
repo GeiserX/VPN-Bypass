@@ -300,8 +300,11 @@ final class HelperManager: ObservableObject {
         let connection = getOrCreateConnection()
         let result = await withXPCDeadline(seconds: xpcTimeout, fallback: VersionProbe.timedOut) { once in
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                RouteManager.shared.log(.error, "XPC error during getVersion: \(error.localizedDescription)")
-                once.complete(.unreachable)
+                // After a timeout the retry drops the connection, which fires this
+                // handler for the abandoned call; log only an error that decided the check.
+                if once.complete(.unreachable) {
+                    RouteManager.shared.log(.error, "XPC error during getVersion: \(error.localizedDescription)")
+                }
             } as? HelperProtocol
 
             guard let helper = proxy else {
@@ -714,12 +717,17 @@ final class OnceGate<T: Sendable>: @unchecked Sendable {
         self.continuation = continuation
     }
 
-    func complete(_ value: sending T) {
+    /// Returns true when this call delivered the value, false when an earlier
+    /// call (the reply or the deadline) already won.
+    @discardableResult
+    func complete(_ value: sending T) -> Bool {
         lock.lock()
         let cont = continuation
         continuation = nil
         lock.unlock()
-        cont?.resume(returning: value)
+        guard let cont else { return false }
+        cont.resume(returning: value)
+        return true
     }
 }
 

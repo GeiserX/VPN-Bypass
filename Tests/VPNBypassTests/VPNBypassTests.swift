@@ -712,6 +712,17 @@ final class OnceGateTests: XCTestCase {
         XCTAssertEqual(result, 42)
     }
 
+    func testOnceGateReportsWhichCallWon() async {
+        var wins: [Bool] = []
+        let result: Int = await withCheckedContinuation { continuation in
+            let gate = OnceGate(continuation: continuation)
+            wins.append(gate.complete(1))
+            wins.append(gate.complete(2))
+        }
+        XCTAssertEqual(result, 1)
+        XCTAssertEqual(wins, [true, false])
+    }
+
     func testOnceGateConcurrentCompletion() async {
         let result: String = await withCheckedContinuation { continuation in
             let gate = OnceGate(continuation: continuation)
