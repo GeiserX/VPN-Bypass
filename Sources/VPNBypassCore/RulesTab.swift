@@ -140,15 +140,63 @@ extension RouteManager {
         }
     }
 
-    /// Whether `name` is already routed by an entry the current mode reads: the Bypass list or
-    /// an enabled service, the VPN Only list, or a Custom mode domain rule.
-    func isListedInCurrentMode(_ name: String) -> Bool {
-        if config.routingMode == .vpnOnly { return config.inverseDomains.contains { $0.domain == name } }
-        if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
-            return config.rules.contains { $0.matchType == .domain && $0.pattern == name }
+    /// Where `name` already is, among the entries the current mode reads: the Bypass list or
+    /// an enabled service, the VPN Only list, or a Custom mode domain rule. nil when nowhere.
+    /// A list entry that is switched off is `.listedOff`: adding it again would be refused.
+    func lookupListing(_ name: String) -> LookupListing? {
+        if config.routingMode == .vpnOnly {
+            guard let entry = config.inverseDomains.first(where: { $0.domain == name }) else { return nil }
+            return entry.enabled ? .vpnOnlyList : .listedOff
         }
-        return config.domains.contains { $0.domain == name }
-            || config.services.contains { $0.enabled && $0.domains.contains(name) }
+        if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
+            // The rule the compiler would use: enabled, lowest order, with a route that is on.
+            let routes = Dictionary(config.routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let match = config.rules
+                .filter { $0.enabled && $0.matchType == .domain && $0.pattern == name }
+                .sorted { $0.order < $1.order }
+                .lazy.compactMap { routes[$0.routeId] }
+                .first { $0.enabled }
+            guard let route = match else { return nil }
+            return .rule(routeName: route.friendlyName(vpnName: vpnType?.knownName))
+        }
+        if let entry = config.domains.first(where: { $0.domain == name }) {
+            return entry.enabled ? .bypassList : .listedOff
+        }
+        if let service = config.services.first(where: { $0.enabled && $0.domains.contains(name) }) {
+            return .group(service.name)
+        }
+        return nil
+    }
+
+    /// Custom services, the Bypass mode groups a looked-up name can join. Built-in services
+    /// are left out: their domains are reset to the shipped list at every launch.
+    var lookupGroups: [ServiceEntry] {
+        config.services.filter(\.isCustom).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Adds `name` to the custom service `groupId`, keeping its name, switch and addresses.
+    /// The line to show, or nil when the group is gone.
+    func addLookup(_ name: String, toGroup groupId: String) -> AddDomainFeedback? {
+        guard let group = config.services.first(where: { $0.id == groupId && $0.isCustom }) else { return nil }
+        if group.domains.contains(name) {
+            return AddDomainFeedback(refusal: String(localized: "\(name) is already in \(group.name)."), typed: name)
+        }
+        if let clash = updateCustomService(id: group.id, name: group.name, domains: group.domains + [name], ipRanges: group.ipRanges) {
+            return AddDomainFeedback(refusal: clash.message, typed: name)
+        }
+        let message = group.enabled
+            ? String(localized: "Added \(name) to \(group.name).")
+            : String(localized: "Added \(name) to \(group.name). The group is off; turn it on in Services to bypass it.")
+        return AddDomainFeedback(success: message)
+    }
+
+    /// Makes a custom service named `groupName` whose first domain is `name`.
+    func addLookup(_ name: String, toNewGroup groupName: String) -> AddDomainFeedback {
+        let groupName = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let clash = addCustomService(name: groupName, domains: [name], ipRanges: []) {
+            return AddDomainFeedback(refusal: clash.message, typed: name)
+        }
+        return AddDomainFeedback(success: String(localized: "Made the group \(groupName) with \(name)."))
     }
 
     /// Saves and re-applies after a rule change (RulesTab's `persistAndReapply`).
@@ -156,6 +204,17 @@ extension RouteManager {
         saveConfig()
         Task { await reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
     }
+}
+
+/// Where a looked-up name already is, for the Lookups page's last column.
+enum LookupListing: Equatable {
+    case bypassList
+    case group(String)
+    case vpnOnlyList
+    /// On the current mode's list, switched off.
+    case listedOff
+    /// A Custom mode domain rule, and the name of the route it sends the name to.
+    case rule(routeName: String)
 }
 
 // MARK: - Proxy rule reach

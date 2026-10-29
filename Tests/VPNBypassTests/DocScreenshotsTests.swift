@@ -190,6 +190,8 @@ final class DocScreenshotsTests: XCTestCase {
     /// as listed, the rest offer Add.
     private func seedLookups() {
         rm.config.dnsLookupsEnabled = true
+        rm.config.services.append(ServiceEntry(id: "custom_meetings", name: "Meetings", enabled: true,
+                                               domains: ["zoom.us"], ipRanges: [], isCustom: true))
         let counts = ["github.com": 41, "slack.com": 33, "en.wikipedia.org": 27, "zoom.us": 19,
                       "api.openai.com": 14, "docs.google.com": 12, "news.ycombinator.com": 9,
                       "registry.npmjs.org": 7, "status.example.com": 3]

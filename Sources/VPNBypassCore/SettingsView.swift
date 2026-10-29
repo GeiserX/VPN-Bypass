@@ -490,6 +490,13 @@ struct AddDomainFeedback: Equatable {
         fieldText = typed
     }
 
+    /// A save from another form, such as a name added to a group.
+    init(success message: String) {
+        isError = false
+        self.message = message
+        fieldText = ""
+    }
+
     init(_ result: Result<AddedDomain, AddDomainError>, typed: String) {
         switch result {
         case .success(let added):

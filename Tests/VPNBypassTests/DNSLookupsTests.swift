@@ -125,3 +125,97 @@ final class DNSLookupsConfigTests: XCTestCase {
         }
     }
 }
+
+/// What the Lookups page shows for a name already routed, and adding a name to a group.
+@MainActor
+final class LookupListingTests: RouteManagerTestCase {
+
+    override func setUp() {
+        super.setUp()
+        rm.config.routingMode = .bypass
+        rm.config.domains = []
+        rm.config.inverseDomains = []
+        rm.config.services.removeAll(where: { $0.isCustom })
+    }
+
+    func testNamesTheListOrGroupThatHasTheName() {
+        XCTAssertNil(rm.lookupListing("api.example.com"))
+        rm.config.domains = [DomainEntry(domain: "api.example.com")]
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .bypassList)
+
+        rm.config.domains = []
+        rm.addCustomService(name: "Example", domains: ["api.example.com"], ipRanges: [])
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .group("Example"))
+
+        // A group that is off does not route the name, so the page still offers Add.
+        let id = rm.config.services.first { $0.name == "Example" }!.id
+        rm.config.services[rm.config.services.firstIndex { $0.id == id }!].enabled = false
+        XCTAssertNil(rm.lookupListing("api.example.com"))
+
+        rm.config.routingMode = .vpnOnly
+        XCTAssertNil(rm.lookupListing("api.example.com"))
+        rm.config.inverseDomains = [DomainEntry(domain: "api.example.com")]
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .vpnOnlyList)
+        rm.config.inverseDomains = [DomainEntry(domain: "api.example.com", enabled: false)]
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .listedOff)
+
+        rm.config.routingMode = .bypass
+        rm.config.domains = [DomainEntry(domain: "api.example.com", enabled: false)]
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .listedOff)
+    }
+
+    /// Custom mode names the route of the rule the compiler would use: enabled, lowest
+    /// order, with a route that is on.
+    func testCustomModeNamesTheRouteOfTheRuleInForce() {
+        rm.config.schemaVersion = 2
+        rm.config.routingMode = .custom
+        let direct = rm.config.routes.first { $0.egress == .direct }!
+        var proxy = Route(name: "Office proxy", egress: .proxyHTTP, enabled: true)
+        rm.config.routes.append(proxy)
+        rm.config.rules = [
+            Rule(matchType: .domain, pattern: "api.example.com", routeId: proxy.id, order: 2),
+            Rule(matchType: .domain, pattern: "api.example.com", routeId: direct.id, enabled: false, order: 0),
+        ]
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .rule(routeName: "Office proxy"))
+
+        rm.config.rules.append(Rule(matchType: .domain, pattern: "api.example.com", routeId: direct.id, order: 1))
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .rule(routeName: "Direct"))
+
+        proxy.enabled = false
+        rm.config.routes[rm.config.routes.firstIndex { $0.id == proxy.id }!] = proxy
+        rm.config.rules.removeLast()
+        XCTAssertNil(rm.lookupListing("api.example.com"))
+    }
+
+    func testOffersOnlyCustomServicesAsGroups() {
+        rm.addCustomService(name: "Zeta", domains: ["z.example"], ipRanges: [])
+        rm.addCustomService(name: "alpha", domains: ["a.example"], ipRanges: [])
+        XCTAssertEqual(rm.lookupGroups.map(\.name), ["alpha", "Zeta"])
+    }
+
+    func testAddsToAGroupKeepingItsNameSwitchAndAddresses() {
+        rm.addCustomService(name: "Example", domains: ["a.example.com"], ipRanges: ["10.0.0.0/8"])
+        let id = rm.config.services.first { $0.name == "Example" }!.id
+
+        let added = rm.addLookup("b.example.com", toGroup: id)
+        XCTAssertEqual(added?.isError, false)
+        let group = rm.config.services.first { $0.id == id }!
+        XCTAssertEqual(group.domains, ["a.example.com", "b.example.com"])
+        XCTAssertEqual(group.ipRanges, ["10.0.0.0/8"])
+        XCTAssertTrue(group.enabled)
+        XCTAssertEqual(rm.lookupListing("b.example.com"), .group("Example"))
+
+        XCTAssertEqual(rm.addLookup("b.example.com", toGroup: id)?.isError, true)
+        XCTAssertEqual(rm.config.services.first { $0.id == id }!.domains.count, 2)
+    }
+
+    func testMakesANewGroupAndRefusesATakenName() {
+        let made = rm.addLookup("c.example.com", toNewGroup: "  Example  ")
+        XCTAssertFalse(made.isError)
+        XCTAssertEqual(rm.lookupListing("c.example.com"), .group("Example"))
+
+        let clash = rm.addLookup("d.example.com", toNewGroup: "example")
+        XCTAssertTrue(clash.isError)
+        XCTAssertNil(rm.lookupListing("d.example.com"))
+    }
+}
