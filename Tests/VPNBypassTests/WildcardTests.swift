@@ -1063,8 +1063,15 @@ final class WildcardLookupTests: XCTestCase {
         XCTAssertEqual(calls.forwarded, 1)
         XCTAssertTrue(calls.checked.isEmpty && calls.admitted.isEmpty && calls.installed.isEmpty)
 
-        let (aaaa, aaaaCalls) = reply(query("example.com", type: DNSWire.typeAAAA), specs: [excluding], upstream: up)
-        XCTAssertNotNil(aaaa)
+        let v6 = DNSWire.Record(labels: labels("example.com"), type: DNSWire.typeAAAA, rclass: 1, ttl: 600,
+                                data: [0x26, 0x00, 0x19, 0x01] + [UInt8](repeating: 0, count: 11) + [1])
+        let upV6 = DNSWire.encode(DNSWire.Message(id: 7, flags: 0x8180,
+                                                  questions: [.init(labels: labels("example.com"), type: DNSWire.typeAAAA, qclass: 1)],
+                                                  answers: [v6], authority: [], additional: []))!
+        let (aaaa, aaaaCalls) = reply(query("example.com", type: DNSWire.typeAAAA), specs: [excluding], upstream: upV6)
+        XCTAssertEqual(aaaa?.rcode, DNSWire.rcodeNoError)
+        XCTAssertEqual(aaaa?.questions.map(\.type), [DNSWire.typeAAAA])
+        XCTAssertEqual(aaaa?.answers.map(\.type), [DNSWire.typeAAAA], "the upstream's IPv6 answer, not the empty one wildcards give")
         XCTAssertEqual(aaaaCalls.forwarded, 1, "asked upstream, not answered empty")
 
         let (other, otherCalls) = reply(query("api.example.com"), specs: [excluding], upstream: upstreamAnswer("api.example.com", [[34, 2, 2, 2]]))
