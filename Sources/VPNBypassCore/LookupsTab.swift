@@ -146,7 +146,7 @@ struct LookupsTab: View {
                                 listing: routeManager.lookupListing(entry.name),
                                 removal: routeManager.lookupRemoval(entry.name),
                                 onAdd: add,
-                                onRemove: { removal in feedback = routeManager.removeLookup(removal) },
+                                onRemove: { removal in feedback = routeManager.removeLookup(removal, for: entry.name) },
                                 onTurnOn: { name, serviceId in feedback = routeManager.turnOnLookupService(serviceId, for: name) },
                                 onAddChoice: { value, target in
                                     if target == .newService {
@@ -238,6 +238,8 @@ private struct LookupRow: View {
     @State private var panelMode: LookupMode?
 
     static let countWidth: CGFloat = 76
+    /// The most a listed row's service name takes beside its status.
+    static let statusDetailWidth: CGFloat = 120
     /// How long, in tenths of a second, a panel add waits for a running apply.
     static let applyWaitPolls = 300
     private var mode: LookupMode { LookupMode(routeManager) }
@@ -339,9 +341,11 @@ private struct LookupRow: View {
                 .font(.system(size: 10))
             Text(title)
             if let detail {
+                // Capped, so a long service name truncates instead of squeezing the domain.
                 Text(detail)
                     .foregroundColor(Theme.textTertiary)
                     .truncationMode(.tail)
+                    .frame(maxWidth: Self.statusDetailWidth, alignment: .leading)
             }
         }
         .font(.system(size: 11))

@@ -130,6 +130,48 @@ final class LookupRemovalDecisionTests: XCTestCase {
         XCTAssertNil(removal(config))
     }
 
+    /// A rule in force that sends the name to the VPN or a proxy is not a bypass: no button,
+    /// the Rules page changes it. A Direct rule below it is not in force, so it does not count.
+    func testCustomModeOffersNothingForARuleThatIsNotDirect() {
+        var config = bypassConfig()
+        config.schemaVersion = 2
+        config.routingMode = .custom
+        let direct = Route(name: "Direct", egress: .direct)
+        let vpn = Route(name: "Primary VPN", egress: .vpnDefault, vpnSelector: VPNSelector(kind: .primary))
+        config.routes = [direct, vpn]
+        let toVPN = Rule(matchType: .suffix, pattern: "example.com", routeId: vpn.id, order: 0)
+        let toDirect = Rule(matchType: .domain, pattern: host, routeId: direct.id, order: 1)
+        config.rules = [toVPN, toDirect]
+        XCTAssertNil(removal(config))
+    }
+
+    // MARK: - What still holds the name
+
+    /// The config once a removal is done, for the "still listed" line: each case takes out
+    /// exactly what it names.
+    func testTheConfigWithoutARemoval() {
+        var config = bypassConfig()
+        let exact = DomainEntry(domain: host)
+        let wildcard = DomainEntry(domain: "*.example.com")
+        config.domains = [exact, wildcard]
+        let first = try! XCTUnwrap(removal(config))
+        let after = RouteManager.config(config, without: first)
+        XCTAssertEqual(after.domains.map(\.domain), ["*.example.com"])
+        XCTAssertEqual(RouteManager.lookupRemoval(host, config: after),
+                       .listEntry(id: wildcard.id, list: .bypass, entry: "*.example.com"),
+                       "the wildcard still holds the name")
+        config.domains = []
+        config.services.append(ServiceEntry(id: "custom_ex", name: "Example", enabled: true,
+                                            domains: ["a.example.com", host], ipRanges: [], isCustom: true))
+        let fromService = RouteManager.config(config, without: try! XCTUnwrap(removal(config)))
+        XCTAssertEqual(fromService.services.last?.domains, ["a.example.com"])
+        XCTAssertNil(RouteManager.lookupRemoval(host, config: fromService))
+        let slack = config.services.firstIndex { $0.id == "slack" }!
+        config.services[slack].enabled = true
+        let off = RouteManager.config(config, without: .turnOffService(serviceId: "slack", service: "Slack"))
+        XCTAssertFalse(off.services[slack].enabled)
+    }
+
     // MARK: - What the button says
 
     func testTheButtonSaysWhatGoes() {
@@ -188,7 +230,7 @@ final class LookupRemoveTests: RouteManagerTestCase {
     func testRemovesTheNameFromTheBypassList() async {
         rm.config.domains = [DomainEntry(domain: host), DomainEntry(domain: "other.example.com")]
         let removal = try! XCTUnwrap(rm.lookupRemoval(host))
-        XCTAssertEqual(rm.removeLookup(removal)?.isError, false)
+        XCTAssertEqual(rm.removeLookup(removal, for: host)?.isError, false)
         for _ in 0..<100 where rm.config.domains.count > 1 {
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
@@ -202,7 +244,7 @@ final class LookupRemoveTests: RouteManagerTestCase {
         rm.config.inverseDomains = [DomainEntry(domain: "*.example.com")]
         let removal = try! XCTUnwrap(rm.lookupRemoval(host))
         XCTAssertEqual(removal.title(for: host), "Remove *.example.com")
-        XCTAssertEqual(rm.removeLookup(removal)?.isError, false)
+        XCTAssertEqual(rm.removeLookup(removal, for: host)?.isError, false)
         for _ in 0..<100 where !rm.config.inverseDomains.isEmpty {
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
@@ -210,10 +252,27 @@ final class LookupRemoveTests: RouteManagerTestCase {
         assertUnlisted()
     }
 
+    /// The name's own entry under a wildcard: Remove takes the entry, and the line says the
+    /// wildcard still lists the name, since the row keeps reading Bypassed.
+    func testSaysWhenAnotherEntryStillListsTheName() async {
+        rm.config.domains = [DomainEntry(domain: host), DomainEntry(domain: "*.example.com")]
+        let removal = try! XCTUnwrap(rm.lookupRemoval(host))
+        let line = try! XCTUnwrap(rm.removeLookup(removal, for: host))
+        XCTAssertFalse(line.isError)
+        XCTAssertTrue(line.message.contains("still listed by another entry"), line.message)
+        for _ in 0..<100 where rm.config.domains.count > 1 {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(rm.lookupRemoval(host), .listEntry(id: rm.config.domains[0].id, list: .bypass, entry: "*.example.com"))
+        // The last entry goes with no such note.
+        let last = try! XCTUnwrap(rm.removeLookup(rm.lookupRemoval(host)!, for: host))
+        XCTAssertFalse(last.message.contains("still listed"), last.message)
+    }
+
     func testRemovesTheDomainFromACustomServiceKeepingTheRest() {
         rm.addCustomService(name: "Example", domains: ["a.example.com", host], ipRanges: ["10.0.0.0/8"])
         let removal = try! XCTUnwrap(rm.lookupRemoval(host))
-        XCTAssertEqual(rm.removeLookup(removal)?.isError, false)
+        XCTAssertEqual(rm.removeLookup(removal, for: host)?.isError, false)
         let service = rm.config.services.first { $0.name == "Example" }!
         XCTAssertEqual(service.domains, ["a.example.com"])
         XCTAssertEqual(service.ipRanges, ["10.0.0.0/8"])
@@ -226,7 +285,7 @@ final class LookupRemoveTests: RouteManagerTestCase {
         rm.config.services[slack].enabled = true
         XCTAssertTrue(rm.addDomainToBuiltInService(host, serviceId: "slack"))
         let removal = try! XCTUnwrap(rm.lookupRemoval(host))
-        XCTAssertEqual(rm.removeLookup(removal)?.isError, false)
+        XCTAssertEqual(rm.removeLookup(removal, for: host)?.isError, false)
         XCTAssertFalse(rm.config.services[slack].domains.contains(host))
         XCTAssertNil(rm.config.builtInServiceExtras["slack"])
         XCTAssertTrue(rm.config.services[slack].enabled, "the service stays on")
@@ -237,11 +296,11 @@ final class LookupRemoveTests: RouteManagerTestCase {
         let slack = rm.config.services.firstIndex { $0.id == "slack" }!
         rm.config.services[slack].enabled = true
         let removal = try! XCTUnwrap(rm.lookupRemoval("slack.com"))
-        XCTAssertEqual(rm.removeLookup(removal)?.isError, false)
+        XCTAssertEqual(rm.removeLookup(removal, for: "slack.com")?.isError, false)
         XCTAssertFalse(rm.config.services[slack].enabled)
         XCTAssertNil(rm.lookupListing("slack.com"))
         XCTAssertEqual(rm.lookupServiceToTurnOn("slack.com")?.id, "slack", "the row offers to turn it back on")
-        XCTAssertNil(rm.removeLookup(removal), "already off: nothing to do")
+        XCTAssertNil(rm.removeLookup(removal, for: "slack.com"), "already off: nothing to do")
     }
 
     func testDeletesTheCustomModeRule() {
@@ -253,7 +312,7 @@ final class LookupRemoveTests: RouteManagerTestCase {
         rm.config.rules = []
         guard case .success? = rm.addDirectRule(host) else { return XCTFail("rule not added") }
         let removal = try! XCTUnwrap(rm.lookupRemoval(host))
-        XCTAssertEqual(rm.removeLookup(removal)?.isError, false)
+        XCTAssertEqual(rm.removeLookup(removal, for: host)?.isError, false)
         XCTAssertTrue(rm.config.rules.isEmpty)
         assertUnlisted()
     }

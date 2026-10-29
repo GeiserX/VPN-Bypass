@@ -419,6 +419,7 @@
 "1 IP range" = "1 plage d'IP";
 "%lld IP ranges" = "%lld plages d'IP";
 "Removed the rule for %@." = "Règle pour %@ supprimée.";
+"%@ is still listed by another entry; point at it again to remove that one." = "%@ reste listé par une autre entrée ; pointez-le à nouveau pour retirer celle-ci.";
 "Removed the route %@." = "Route %@ supprimée.";
 "Turned on %@." = "Vous avez activé %@.";
 "Turned off %@." = "Vous avez désactivé %@.";

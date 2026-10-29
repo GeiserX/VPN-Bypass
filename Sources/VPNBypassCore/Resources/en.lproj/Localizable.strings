@@ -419,6 +419,7 @@
 "1 IP range" = "1 IP range";
 "%lld IP ranges" = "%lld IP ranges";
 "Removed the rule for %@." = "Removed the rule for %@.";
+"%@ is still listed by another entry; point at it again to remove that one." = "%@ is still listed by another entry; point at it again to remove that one.";
 "Removed the route %@." = "Removed the route %@.";
 "Turned on %@." = "Turned on %@.";
 "Turned off %@." = "Turned off %@.";

@@ -193,8 +193,9 @@ extension RouteManager {
     /// first switched-on service that holds it. A domain the user put in a service (a custom
     /// service, or `builtInServiceExtras` of a built-in one) comes out of that service; a
     /// domain a built-in service ships with cannot, so the service is turned off. In Custom
-    /// mode the rule in force is deleted. nil when the name is not listed or its own entry is
-    /// switched off (`.listedOff`: turning it on or off is the Domains page's switch).
+    /// mode the rule in force is deleted when it sends the name to Direct. nil when the name is
+    /// not listed, its own entry is switched off (`.listedOff`: turning it on or off is the
+    /// Domains page's switch), or a Custom mode rule sends it elsewhere (the Rules page's).
     nonisolated static func lookupRemoval(_ name: String, config: Config, vpnName: String? = nil,
                                           shipped: [ServiceEntry] = Config.defaultServices) -> LookupRemoval? {
         func onList(_ entries: [DomainEntry], _ list: DomainList) -> LookupRemoval? {
@@ -212,7 +213,9 @@ extension RouteManager {
                 }
                 .sorted { $0.order < $1.order }
                 .first { routes[$0.routeId]?.enabled == true }
-            guard let rule = inForce, let route = routes[rule.routeId] else { return nil }
+            // Only a rule to Direct is a bypass to undo; a rule to the VPN or a proxy is the
+            // Rules page's to change, so the row offers nothing for it.
+            guard let rule = inForce, let route = routes[rule.routeId], route.egress == .direct else { return nil }
             let shown = rule.matchType == .domain || WildcardDomain.isWildcard(rule.pattern)
                 ? rule.pattern : WildcardDomain.entry(for: rule.pattern)
             return .rule(id: rule.id, entry: shown, routeName: route.friendlyName(vpnName: vpnName))
@@ -234,7 +237,34 @@ extension RouteManager {
     /// Does what `removal` says, through the same paths as the Domains, Services and Rules
     /// pages, so the routes go as they do there. The line to show, or nil when what it named
     /// is gone (or the service is already off).
-    func removeLookup(_ removal: LookupRemoval) -> AddDomainFeedback? {
+    func removeLookup(_ removal: LookupRemoval, for name: String) -> AddDomainFeedback? {
+        let after = Self.config(config, without: removal)
+        guard let done = removeLookupEntry(removal) else { return nil }
+        // Another entry still holds the name (an exact entry under a wildcard, the list and a
+        // service, a second rule): say so, or the row would keep its status with no reason.
+        guard !done.isError, Self.lookupRemoval(name, config: after, vpnName: vpnType?.knownName) != nil else { return done }
+        return AddDomainFeedback(success: done.message + " "
+            + String(localized: "\(name) is still listed by another entry; point at it again to remove that one."))
+    }
+
+    /// `config` once `removal` is done, so what still holds the name is known before the
+    /// removal's own task (the Domains page's remove runs in one) has finished.
+    nonisolated static func config(_ config: Config, without removal: LookupRemoval) -> Config {
+        var after = config
+        switch removal {
+        case .listEntry(let id, let list, _):
+            if list == .vpnOnly { after.inverseDomains.removeAll { $0.id == id } } else { after.domains.removeAll { $0.id == id } }
+        case .rule(let id, _, _):
+            after.rules.removeAll { $0.id == id }
+        case .serviceDomain(let serviceId, _, let entry):
+            if let i = after.services.firstIndex(where: { $0.id == serviceId }) { after.services[i].domains.removeAll { $0 == entry } }
+        case .turnOffService(let serviceId, _):
+            if let i = after.services.firstIndex(where: { $0.id == serviceId }) { after.services[i].enabled = false }
+        }
+        return after
+    }
+
+    private func removeLookupEntry(_ removal: LookupRemoval) -> AddDomainFeedback? {
         switch removal {
         case .listEntry(let id, let list, let entry):
             if list == .vpnOnly {
