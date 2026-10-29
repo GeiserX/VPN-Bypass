@@ -844,7 +844,11 @@ public enum WildcardLookup {
         let withheld = withheldAddresses(candidates: candidates, alreadyRouted: already, admitted: admitted,
                                          outcome: outcome, spec: spec)
 
-        let rewritten = DNSWire.rewriteForWildcard(response, ttlCap: ttlCap, keepAddress: { !withheld.contains($0) })
+        // An address handed out past a busy queue has no route yet: a short TTL makes the
+        // client ask again soon, when the route can be in, instead of keeping it for minutes.
+        let handedOutUnrouted = outcome.timedOut && admitted.contains { !outcome.installed.contains($0) && !withheld.contains($0) }
+        let rewritten = DNSWire.rewriteForWildcard(response, ttlCap: handedOutUnrouted ? min(ttlCap, unroutedTTL) : ttlCap,
+                                                   keepAddress: { !withheld.contains($0) })
         // Every address gone: fail the lookup so the client asks again, rather than say the
         // name has none.
         let hadA = response.answers.contains { DNSWire.ipv4(of: $0) != nil }
@@ -855,6 +859,9 @@ public enum WildcardLookup {
         if !overTCP && out.count > query.maxUDPSize { return DNSWire.truncated(rewritten) }
         return out
     }
+
+    /// The TTL of an answer that holds an address handed out without its route.
+    public static let unroutedTTL: UInt32 = 10
 
     /// The addresses taken out of the answer: those that passed the guard and have no route.
     /// A connection opened before its route lands goes the wrong way, and breaks or leaks

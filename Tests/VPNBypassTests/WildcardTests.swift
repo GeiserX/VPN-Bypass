@@ -912,6 +912,10 @@ final class WildcardLookupTests: XCTestCase {
                                            install: busy)
         XCTAssertEqual(around?.rcode, DNSWire.rcodeNoError)
         XCTAssertEqual(addresses(around), ["34.1.1.1"], "around the VPN: the connection takes the VPN, as without the wildcard")
+        XCTAssertEqual(around?.answers.map(\.ttl), [WildcardLookup.unroutedTTL], "asked again soon, when the route can be in")
+        let (routed, _) = replyWithOutcome(query("api.example.com"), upstream: upstreamAnswer("api.example.com", [[34, 1, 1, 1]]),
+                                           install: { WildcardLookup.Install(installed: $0) })
+        XCTAssertEqual(routed?.answers.map(\.ttl), [300], "a routed answer keeps the usual cap")
 
         let (into, _) = replyWithOutcome(query("git.corp.example.net"), upstream: upstreamAnswer("git.corp.example.net", [[10, 20, 30, 40]]),
                                          install: busy)
