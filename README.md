@@ -30,6 +30,7 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 
 - Three modes: Bypass sends the destinations you list around the VPN, VPN Only sends only them through it, and Custom routes each rule where you say, first match wins.
 - 37 built-in service packs (Telegram, WhatsApp, YouTube, Netflix, Spotify, Zoom, GitHub and more) plus any domain, wildcard or subnet you add.
+- Not sure what to add? Turn on Lookups (off by default) to see the names your Mac looks up, most frequent first, and add any of them with one click.
 - In Custom mode a rule can exit direct, through a specific VPN when several are up, through an HTTP or SOCKS5 proxy, or through a Tailscale peer.
 - Routes come back on their own when the VPN reconnects or the network changes, and domains are re-resolved as their addresses rotate.
 - Detects GlobalProtect, Cisco AnyConnect, OpenVPN, WireGuard, FortiClient, Zscaler, Cloudflare WARP, Pulse Secure, Check Point and Tailscale exit nodes.

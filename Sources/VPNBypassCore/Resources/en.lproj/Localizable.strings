@@ -660,3 +660,25 @@
 "geiser.cloud" = "geiser.cloud";
 "github.com/GeiserX" = "github.com/GeiserX";
 "© 2026 Sergio Fernández (GeiserX)" = "© 2026 Sergio Fernández (GeiserX)";
+
+/* ===== DNS Lookups (#176) ===== */
+"Lookups" = "Lookups";
+"DNS Lookups" = "DNS Lookups";
+"Watch DNS Lookups" = "Watch DNS Lookups";
+"List the names this Mac looks up, to pick what to add" = "List the names this Mac looks up, to pick what to add";
+"When this is on, the helper runs tcpdump to read the DNS questions this Mac sends, never their answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit." = "When this is on, the helper runs tcpdump to read the DNS questions this Mac sends, never their answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit.";
+"Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) never show here. To see them, turn Secure DNS off in the browser's settings." = "Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) never show here. To see them, turn Secure DNS off in the browser's settings.";
+"Start counting again from now" = "Start counting again from now";
+"%lld names, counting since %@" = "%lld names, counting since %@";
+"Waiting for lookups…" = "Waiting for lookups…";
+"No name matches \"%@\"" = "No name matches \"%@\"";
+"Showing the top %lld. Search to find the rest." = "Showing the top %lld. Search to find the rest.";
+"Times looked up" = "Times looked up";
+"Listed" = "Listed";
+"Add to the VPN Only list" = "Add to the VPN Only list";
+"Add a rule that sends it Direct" = "Add a rule that sends it Direct";
+"Add to the Bypass list" = "Add to the Bypass list";
+"The privileged helper is not running." = "The privileged helper is not running.";
+"The privileged helper did not answer." = "The privileged helper did not answer.";
+"The capture could not start." = "The capture could not start.";
+"Add %@" = "Add %@";

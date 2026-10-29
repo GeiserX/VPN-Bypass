@@ -26,7 +26,7 @@ While the dropdown is open, ⌘, opens Settings and ⌘Q quits. ⌘R refreshes r
 
 ## Settings
 
-Click the gear icon to access settings. The pages are in a toolbar under the title bar, and which ones appear depends on the mode. Status comes first in every mode and is the page Settings opens on. Bypass: Status, Domains, Services, General, Logs, Info. VPN Only: Status, Domains, General, Logs, Info. Custom: Status, Rules, Routes, General, Logs, Info.
+Click the gear icon to access settings. The pages are in a toolbar under the title bar, and which ones appear depends on the mode. Status comes first in every mode and is the page Settings opens on. Bypass: Status, Domains, Services, Lookups, General, Logs, Info. VPN Only: Status, Domains, Lookups, General, Logs, Info. Custom: Status, Rules, Routes, Lookups, General, Logs, Info.
 
 The routing mode is the Mode menu at the right end of the title bar, for example "Mode Bypass". Picking another mode in it opens a sheet that lists the three modes, each with one sentence and what your lists hold for it ("4 services and 2 domains"). For Custom it says "Your lists become rules." when the switch will build them, which happens when Custom has no rules yet and the current mode's list has an entry switched on. Otherwise it says how many rules Custom has. Nothing changes until you click Switch, and the title bar keeps showing the mode in use until then.
 
@@ -56,6 +56,12 @@ Status: whether the app is working right now, on one page. A line at the top giv
 - DNS: the resolver used outside the VPN, when DNS was last refreshed and when it is next due, with Refresh Now.
 - Tunnels: every tunnel that is up, each with one sentence ("The app acts on this one. It carries the default route.", "Never touched." for Tailscale), the Act on menu that pins one tunnel, and Addresses owned, how many kernel entries carry the app's tag. In VPN Only the catch-alls are counted apart ("2, plus 4 catch-alls"), so the first number matches Routed while the kernel holds what the app installed; in Bypass and Custom it is one number. The tunnels are read when the page opens, when the VPN changes, and on Refresh.
 - Recent warnings: the three newest warnings and errors. Show in Log opens Logs with Warnings selected.
+
+Lookups: the names this Mac looks up, most frequent first, for when you do not know what to add. It is off until you turn on Watch DNS Lookups. Then the helper runs `tcpdump` to read the DNS questions the Mac sends on every interface, the VPN included. It never reads the answers, questions other devices send to this Mac, or any other traffic, and it never puts an interface in promiscuous mode. A name counts once per 3 seconds, so the A, AAAA and HTTPS questions a browser sends for one visit are one lookup. Search filters the list and Clear starts the count again. Add puts a name on the current mode's list: the Bypass list, the VPN Only list, or a rule to Direct in Custom mode. A name the mode already routes reads Listed. The list lives in memory only and is cleared when you turn the switch off or quit; a name you only see here is never written to the log or to disk. A name you Add is saved and logged like any name you type in by hand. The switch itself is saved, so the capture resumes when the app restarts. If the app stops asking for a minute, the helper stops `tcpdump` by itself.
+
+Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) go out as HTTPS and never show here. To see them, turn Secure DNS off in the browser's settings while you look. Plain DNS sent over TCP does not show either, because the capture reads UDP port 53 only; macOS uses TCP for a lookup only when a UDP answer comes back too large to fit.
+
+![The Lookups page: the Watch DNS Lookups switch on, a search field, and nine names counted since 9:09, most frequent first; two already on the Bypass list read Listed, the others have an Add button](images/screenshots/lookups.png){ width="580" }
 
 General: settings only. Launch at login, auto-apply on connect, `/etc/hosts` management, route verification, the DNS refresh schedule, fallback DNS, notification preferences, the SOCKS5 proxy, and import/export.
 

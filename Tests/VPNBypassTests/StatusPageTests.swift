@@ -346,9 +346,9 @@ final class StatusPageTests: XCTestCase {
     // MARK: Pages
 
     func testStatusIsTheFirstPageInEveryMode() {
-        XCTAssertEqual(SettingsView.tabs(for: .bypass), [.status, .domains, .services, .general, .logs, .info])
-        XCTAssertEqual(SettingsView.tabs(for: .vpnOnly), [.status, .domains, .general, .logs, .info])
-        XCTAssertEqual(SettingsView.tabs(for: .custom), [.status, .rules, .routes, .general, .logs, .info])
+        XCTAssertEqual(SettingsView.tabs(for: .bypass), [.status, .domains, .services, .lookups, .general, .logs, .info])
+        XCTAssertEqual(SettingsView.tabs(for: .vpnOnly), [.status, .domains, .lookups, .general, .logs, .info])
+        XCTAssertEqual(SettingsView.tabs(for: .custom), [.status, .rules, .routes, .lookups, .general, .logs, .info])
     }
 
     // MARK: Tunnel reads

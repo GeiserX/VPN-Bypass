@@ -1,5 +1,5 @@
 // SettingsView.swift
-// Settings window with tabs for Status, Domains, Services, Rules, Routes, General, Logs, and Info.
+// Settings window with tabs for Status, Domains, Services, Rules, Routes, Lookups, General, Logs, and Info.
 
 import SwiftUI
 import UniformTypeIdentifiers
@@ -22,7 +22,7 @@ struct SettingsView: View {
     // MARK: - Tab model
 
     enum SettingsTab: Hashable {
-        case status, domains, services, rules, routes, general, logs, info
+        case status, domains, services, rules, routes, lookups, general, logs, info
 
         var title: LocalizedStringKey {
             switch self {
@@ -31,6 +31,7 @@ struct SettingsView: View {
             case .services: return "Services"
             case .rules:    return "Rules"
             case .routes:   return "Routes"
+            case .lookups:  return "Lookups"
             case .general:  return "General"
             case .logs:     return "Logs"
             case .info:     return "Info"
@@ -44,6 +45,7 @@ struct SettingsView: View {
             case .services: return "square.grid.2x2.fill"
             case .rules:    return "list.bullet.indent"
             case .routes:   return "arrow.triangle.branch"
+            case .lookups:  return "magnifyingglass"
             case .general:  return "gearshape.fill"
             case .logs:     return "list.bullet.rectangle"
             case .info:     return "info.circle.fill"
@@ -58,9 +60,9 @@ struct SettingsView: View {
 
     static func tabs(for mode: RouteManager.RoutingMode) -> [SettingsTab] {
         switch mode {
-        case .bypass:  return [.status, .domains, .services, .general, .logs, .info]
-        case .vpnOnly: return [.status, .domains, .general, .logs, .info]
-        case .custom:  return [.status, .rules, .routes, .general, .logs, .info]
+        case .bypass:  return [.status, .domains, .services, .lookups, .general, .logs, .info]
+        case .vpnOnly: return [.status, .domains, .lookups, .general, .logs, .info]
+        case .custom:  return [.status, .rules, .routes, .lookups, .general, .logs, .info]
         }
     }
 
@@ -139,7 +141,9 @@ struct SettingsView: View {
     /// mode is not here; it is the Mode menu in the title bar, so no page button changes it.
     private var headerView: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
+            // Each item is at least 80 pt wide, so seven with 4 pt gaps need 584 pt of a 580 pt
+            // window; seven sit edge to edge instead.
+            HStack(spacing: visibleTabs.count > 6 ? 0 : 4) {
                 ForEach(visibleTabs, id: \.self) { tab in
                     SettingsToolbarItem(
                         title: tab.title,
@@ -176,6 +180,7 @@ struct SettingsView: View {
                 case .services: ServicesTab()
                 case .rules:    RulesTab()
                 case .routes:   RoutesTab()
+                case .lookups:  LookupsTab()
                 case .general:  GeneralTab()
                 case .logs:     LogsTab(filter: logsFilter).id(logsFilterRequest)
                 case .info:     InfoTab()

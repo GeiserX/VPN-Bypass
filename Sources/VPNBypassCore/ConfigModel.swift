@@ -122,6 +122,8 @@ struct Config: Codable {
     /// Durable half of the pin — utun indices renumber across reconnects, so the product label
     /// ("GlobalProtect") re-resolves the pin when the named interface vanishes.
     var pinnedVPNProductHint: String? = nil
+    /// The DNS Lookups page's switch (#176). Off until the user turns it on.
+    var dnsLookupsEnabled: Bool = false
 
     // Custom decoder for backward compatibility with configs missing new fields
     init(from decoder: Decoder) throws {
@@ -151,6 +153,7 @@ struct Config: Codable {
         rememberedVPNLinks = try container.decodeIfPresent([RouteManager.RememberedLink].self, forKey: .rememberedVPNLinks) ?? []
         pinnedVPNInterface = try container.decodeIfPresent(String.self, forKey: .pinnedVPNInterface)
         pinnedVPNProductHint = try container.decodeIfPresent(String.self, forKey: .pinnedVPNProductHint)
+        dnsLookupsEnabled = try container.decodeIfPresent(Bool.self, forKey: .dnsLookupsEnabled) ?? false
 
         // One-time migration: derive the routes/rules representation from the
         // legacy bypass list + single proxy so the new model is populated for

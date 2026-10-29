@@ -660,3 +660,25 @@
 "geiser.cloud" = "geiser.cloud";
 "github.com/GeiserX" = "github.com/GeiserX";
 "© 2026 Sergio Fernández (GeiserX)" = "© 2026 Sergio Fernández (GeiserX)";
+
+/* ===== DNS Lookups (#176) ===== */
+"Lookups" = "Consultas";
+"DNS Lookups" = "Consultas DNS";
+"Watch DNS Lookups" = "Ver las consultas DNS";
+"List the names this Mac looks up, to pick what to add" = "Lista los nombres que consulta este Mac, para elegir qué añadir";
+"When this is on, the helper runs tcpdump to read the DNS questions this Mac sends, never their answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit." = "Con esto activado, el asistente ejecuta tcpdump para leer las preguntas DNS que envía este Mac, nunca sus respuestas ni ningún otro tráfico. La lista se queda en memoria y se borra al desactivarlo o al salir.";
+"Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) never show here. To see them, turn Secure DNS off in the browser's settings." = "Las consultas que un navegador envía por DNS cifrado (DNS seguro, DNS sobre HTTPS) nunca aparecen aquí. Para verlas, desactiva el DNS seguro en los ajustes del navegador.";
+"Start counting again from now" = "Volver a contar desde ahora";
+"%lld names, counting since %@" = "%lld nombres, contando desde las %@";
+"Waiting for lookups…" = "Esperando consultas…";
+"No name matches \"%@\"" = "Ningún nombre coincide con «%@»";
+"Showing the top %lld. Search to find the rest." = "Se muestran los %lld primeros. Busca para encontrar el resto.";
+"Times looked up" = "Veces consultado";
+"Listed" = "En la lista";
+"Add to the VPN Only list" = "Añadir a la lista Solo VPN";
+"Add a rule that sends it Direct" = "Añadir una regla que lo envíe por Directo";
+"Add to the Bypass list" = "Añadir a la lista Bypass";
+"The privileged helper is not running." = "El asistente con privilegios no está en marcha.";
+"The privileged helper did not answer." = "El asistente con privilegios no respondió.";
+"The capture could not start." = "La captura no pudo empezar.";
+"Add %@" = "Añadir %@";

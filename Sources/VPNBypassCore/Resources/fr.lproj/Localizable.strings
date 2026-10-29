@@ -660,3 +660,25 @@
 "geiser.cloud" = "geiser.cloud";
 "github.com/GeiserX" = "github.com/GeiserX";
 "© 2026 Sergio Fernández (GeiserX)" = "© 2026 Sergio Fernández (GeiserX)";
+
+/* ===== DNS Lookups (#176) ===== */
+"Lookups" = "Requêtes";
+"DNS Lookups" = "Requêtes DNS";
+"Watch DNS Lookups" = "Suivre les requêtes DNS";
+"List the names this Mac looks up, to pick what to add" = "Liste les noms que ce Mac demande, pour choisir quoi ajouter";
+"When this is on, the helper runs tcpdump to read the DNS questions this Mac sends, never their answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit." = "Quand ceci est activé, l'assistant lance tcpdump pour lire les questions DNS que ce Mac envoie, jamais leurs réponses ni aucun autre trafic. La liste reste en mémoire et s'efface quand vous le désactivez ou quittez.";
+"Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) never show here. To see them, turn Secure DNS off in the browser's settings." = "Les requêtes qu'un navigateur envoie en DNS chiffré (DNS sécurisé, DNS over HTTPS) n'apparaissent jamais ici. Pour les voir, désactivez le DNS sécurisé dans les réglages du navigateur.";
+"Start counting again from now" = "Recommencer à compter à partir de maintenant";
+"%lld names, counting since %@" = "%lld noms, comptés depuis %@";
+"Waiting for lookups…" = "En attente de requêtes…";
+"No name matches \"%@\"" = "Aucun nom ne correspond à « %@ »";
+"Showing the top %lld. Search to find the rest." = "Les %lld premiers sont affichés. Cherchez pour trouver les autres.";
+"Times looked up" = "Nombre de requêtes";
+"Listed" = "Dans la liste";
+"Add to the VPN Only list" = "Ajouter à la liste VPN uniquement";
+"Add a rule that sends it Direct" = "Ajouter une règle qui l'envoie par Direct";
+"Add to the Bypass list" = "Ajouter à la liste Contournement";
+"The privileged helper is not running." = "L'assistant privilégié ne tourne pas.";
+"The privileged helper did not answer." = "L'assistant privilégié n'a pas répondu.";
+"The capture could not start." = "La capture n'a pas pu démarrer.";
+"Add %@" = "Ajouter %@";

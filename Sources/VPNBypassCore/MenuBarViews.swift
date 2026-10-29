@@ -757,14 +757,7 @@ struct MenuContent: View {
     
     private func addDomainAndClose() {
         guard !newDomain.isEmpty else { return }
-        let result: Result<AddedDomain, AddDomainError>?
-        if routeManager.config.routingMode == .vpnOnly {
-            result = routeManager.addInverseDomain(newDomain)
-        } else if RouteManager.usesCustomEngine(schemaVersion: routeManager.config.schemaVersion, routingMode: routeManager.config.routingMode) {
-            result = addDomainRuleToDirect(newDomain).map { .failure($0) }
-        } else {
-            result = routeManager.addDomain(newDomain)
-        }
+        let result = routeManager.addForCurrentMode(newDomain)
         let next = Self.quickAdd(after: result, typed: newDomain)
         newDomain = next.text
         quickAddError = next.error
@@ -793,25 +786,6 @@ struct MenuContent: View {
         newDomain = ""
         quickAddError = nil
         isAddingDomain = false
-    }
-
-    /// Custom mode routes from `config.rules`, not `config.domains` (see
-    /// `RouteManager.usesCustomEngine`), so the quick-add above would silently do
-    /// nothing there. Add a rule to the Direct route instead - the same mapping
-    /// `RouteManager.Config.derive()` uses for a bypass-mode domain - so quick-add
-    /// behaves like "bypass this" in Custom mode too: a range becomes a `.cidr` rule,
-    /// anything else a `.domain` rule (see `RouteManager.addDirectRule`). Returns why
-    /// the input was refused, nil otherwise.
-    private func addDomainRuleToDirect(_ input: String) -> AddDomainError? {
-        switch routeManager.addDirectRule(input) {
-        case .success?:
-            Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
-            return nil
-        case .failure(let error)?:
-            return error
-        case nil:
-            return nil
-        }
     }
 
     private func openSettings(page: SettingsView.SettingsTab? = nil) {
