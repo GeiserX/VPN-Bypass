@@ -520,6 +520,40 @@ extension RouteKernel {
 // MARK: - Write pacing
 
 extension RouteKernel {
+    /// Work that must not wait behind a whole batch on the helper's route queue: a wildcard
+    /// lookup holds its DNS answer until its route is in, and one `addRoutesBatch` of a thousand
+    /// routes holds the queue for several seconds at the pacer's rate. `submit` queues the work
+    /// on the route queue as usual, and a long job on that queue calls `drain()` between two
+    /// writes, so the work runs there instead of after the whole batch. Either way it runs on
+    /// the route queue, through the same socket rules and the same pacer, and exactly once.
+    public final class PriorityLane: @unchecked Sendable {
+        private let lock = NSLock()
+        private var pending: [() -> Void] = []
+
+        public init() {}
+
+        public func submit(on queue: DispatchQueue, _ work: @escaping () -> Void) {
+            lock.lock()
+            pending.append(work)
+            lock.unlock()
+            queue.async { self.drain() }
+        }
+
+        /// Runs everything submitted so far, in order. Call it only on the route queue.
+        public func drain() {
+            while true {
+                lock.lock()
+                guard !pending.isEmpty else {
+                    lock.unlock()
+                    return
+                }
+                let work = pending.removeFirst()
+                lock.unlock()
+                work()
+            }
+        }
+    }
+
     /// Paces bursts of routing-socket writes so concurrent readers never lose messages.
     ///
     /// Every RTM write is broadcast to every open routing socket on the system, and a routing

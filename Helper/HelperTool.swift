@@ -91,6 +91,10 @@ class HelperTool: NSObject, HelperProtocol {
     /// behind a long batch would time it out and trigger a spurious helper reinstall.
     static let routeQueue = DispatchQueue(label: "com.geiserx.vpnbypass.helper.routes")
 
+    /// Wildcard route installs, run between two writes of a batch instead of after it. The
+    /// batch loops below call `drain()` on every step.
+    static let priorityLane = RouteKernel.PriorityLane()
+
     // MARK: - Route Management
 
     func addRoute(destination: String, gateway: String, isNetwork: Bool, withReply reply: @escaping (Bool, String?) -> Void) {
@@ -137,6 +141,7 @@ class HelperTool: NSObject, HelperProtocol {
             let snapshot = self.kernelSnapshot()
 
             for route in routes {
+                Self.priorityLane.drain()
                 guard let destination = route["destination"] as? String,
                       let gateway = route["gateway"] as? String else {
                     failureCount += 1
@@ -175,6 +180,7 @@ class HelperTool: NSObject, HelperProtocol {
             var lastError: String?
 
             for destination in destinations {
+                Self.priorityLane.drain()
                 guard self.isValidDestination(destination) else {
                     failureCount += 1
                     failedDestinations.append(destination)
@@ -365,6 +371,16 @@ class HelperTool: NSObject, HelperProtocol {
         let message = errnoString(err!)
         helperLog.error("delete \(destination, privacy: .public) failed: \(message, privacy: .public)")
         return (false, message)
+    }
+
+    /// The addresses among `ips` that already carry our host route to `gateway`, from one
+    /// silent table read. Safe off `routeQueue`: it writes nothing.
+    static func learnedRoutesInPlace(_ ips: [String], gateway: String) -> Set<String> {
+        guard !ips.isEmpty, let table = RouteKernel.currentTable() else { return [] }
+        return WildcardLookup.alreadyRouted(ips, gateway: gateway, table: table) { name in
+            let index = if_nametoindex(name)
+            return index == 0 || index > UInt32(UInt16.max) ? nil : UInt16(index)
+        }
     }
 
     /// Installs the routes a wildcard learned, for `WildcardForwarder`. Call it on `routeQueue`.

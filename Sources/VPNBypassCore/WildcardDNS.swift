@@ -422,6 +422,75 @@ public enum DNSWire {
         return out
     }
 
+    // MARK: Following a chain
+
+    /// The labels of the uncompressed name at the start of `data` (record data after `parse`).
+    static func leadingName(_ data: [UInt8]) -> [[UInt8]]? {
+        var labels: [[UInt8]] = []
+        var offset = 0
+        while offset < data.count {
+            let length = Int(data[offset])
+            guard length & 0xC0 == 0 else { return nil }
+            offset += 1
+            if length == 0 { return labels }
+            guard offset + length <= data.count else { return nil }
+            labels.append(Array(data[offset..<(offset + length)]))
+            offset += length
+        }
+        return nil
+    }
+
+    /// `m` with its CNAME chain folded onto the asked name: the records of the asked type at the
+    /// end of the chain, under the asked name, with the shortest TTL along the way; the CNAME and
+    /// DNAME records themselves are gone. A chain that leaves the wildcard (`x.example.com` to
+    /// `y.cdn.net`) otherwise sends macOS to ask for `y.cdn.net` itself, through the normal
+    /// resolver: mDNSResponder does not take the chained records from our answer (seen on macOS
+    /// 26.6 on 2026-10-29), so the address the app connects to is one we never routed. A chain
+    /// that ends without a record of the type is "no data" for the name, as it was for the target.
+    public static func flattened(_ m: Message) -> Message {
+        guard let question = m.questions.first,
+              question.type != typeCNAME, question.type != typeDNAME, question.type != 255,
+              m.answers.contains(where: { $0.type == typeCNAME || $0.type == typeDNAME }) else { return m }
+        var name = question.name
+        var seen: Set<String> = [name]
+        var ttl = UInt32.max
+        while let link = m.answers.first(where: { $0.type == typeCNAME && $0.rclass == question.qclass && $0.name == name }) {
+            guard let target = leadingName(link.data) else { break }
+            ttl = min(ttl, link.ttl)
+            name = text(target)
+            // A loop, or a chain longer than any resolver follows: nothing at the end of it.
+            guard seen.insert(name).inserted, seen.count <= 16 else {
+                name = ""
+                break
+            }
+        }
+        var out = m
+        out.answers = m.answers.compactMap { record in
+            guard !name.isEmpty, record.name == name, record.type == question.type, record.rclass == question.qclass else { return nil }
+            var r = record
+            r.labels = question.labels
+            r.ttl = min(r.ttl, ttl)
+            return r
+        }
+        return out
+    }
+
+    /// `m` without the HTTPS and SVCB answers that would send the client to a name we do not
+    /// answer: AliasMode records (priority 0) and ServiceMode records whose TargetName is
+    /// neither "." (the owner, which after `flattened` is the asked name) nor a name
+    /// `keepTarget` accepts. With none left the client falls back to A for the asked name,
+    /// which comes through us.
+    public static func withoutForeignServiceTargets(_ m: Message, keepTarget: (String) -> Bool) -> Message {
+        var out = m
+        out.answers = m.answers.filter { record in
+            guard record.type == typeHTTPS || record.type == typeSVCB else { return true }
+            guard record.data.count >= 3, record.data[0] != 0 || record.data[1] != 0,
+                  let target = leadingName(Array(record.data.dropFirst(2))) else { return false }
+            return target.isEmpty || keepTarget(text(target))
+        }
+        return out
+    }
+
     /// SVCB / HTTPS data: SvcPriority, TargetName (never compressed), then key, length, value.
     static func svcParams(_ data: [UInt8]) -> (head: [UInt8], params: [(key: UInt16, value: [UInt8])])? {
         guard data.count >= 3 else { return nil }
@@ -715,16 +784,33 @@ public enum WildcardResolverFile {
 /// tested: the helper passes in how to ask the upstream, how the limiter admits and how the
 /// routes go in.
 public enum WildcardLookup {
+    /// What became of the addresses handed to `install`.
+    public struct Install: Equatable {
+        /// The addresses that now have their route.
+        public var installed: [String]
+        /// The route queue did not get to them within the wait. They may still get their route
+        /// later, or never.
+        public var timedOut: Bool
+
+        public init(installed: [String], timedOut: Bool = false) {
+            self.installed = installed
+            self.timedOut = timedOut
+        }
+    }
+
     /// The reply to `bytes`, or nil to send nothing (a message that is not a query).
     /// - `forward`: the upstream's raw answer for the spec, nil when none came.
+    /// - `routed`: the addresses that already have our route to the spec's gateway. They are
+    ///   answered at once, without the limiter or the route queue.
     /// - `admit`: the addresses the limiter lets the suffix learn.
-    /// - `install`: the addresses that now have their route.
+    /// - `install`: what the kernel did with them.
     public static func reply(
         to bytes: [UInt8], overTCP: Bool, specs: [WildcardSpec], guard safetyGuard: WildcardSafetyGuard,
         ttlCap: UInt32,
         forward: (DNSWire.Message, WildcardSpec) -> [UInt8]?,
+        routed: ([String], WildcardSpec) -> Set<String> = { _, _ in [] },
         admit: ([String], WildcardSpec) -> [String],
-        install: ([String], WildcardSpec) -> [String]
+        install: ([String], WildcardSpec) -> Install
     ) -> [UInt8]? {
         guard let query = DNSWire.parse(bytes), !query.isResponse, query.opcode == 0,
               query.questions.count == 1, let question = query.questions.first else { return nil }
@@ -740,20 +826,25 @@ public enum WildcardLookup {
         // The routes are IPv4 only; an IPv6 answer would take the connection past them.
         if question.type == DNSWire.typeAAAA { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNoError) }
 
-        guard let raw = forward(query, spec), let response = DNSWire.parse(raw) else {
+        guard let raw = forward(query, spec), let upstream = DNSWire.parse(raw) else {
             return DNSWire.reply(to: query, rcode: DNSWire.rcodeServFail)
         }
+        // Every address under the asked name, and no name the client would look up elsewhere.
+        let response = DNSWire.withoutForeignServiceTargets(DNSWire.flattened(upstream)) {
+            WildcardDomain.matches($0, suffix: spec.suffix)
+        }
 
-        // Guard, then limiter, then the kernel. An address the guard refuses is left to the
-        // routing table, as it would be without the wildcard. One it passed that got no route
-        // (the limiter, a failed install, a busy route queue) is taken out of the answer: a
-        // connection opened before its route lands goes the wrong way, and breaks or leaks
-        // when the route arrives.
+        // Guard, then what is already routed, then the limiter, then the kernel. An address
+        // the guard refuses is left to the routing table, as it would be without the wildcard.
         let candidates = DNSWire.addresses(in: response).filter { safetyGuard.refusal(for: $0, spec: spec) == nil }
-        let routed = Set(install(admit(candidates, spec), spec))
-        let unrouted = Set(candidates).subtracting(routed)
+        let already = candidates.isEmpty ? [] : routed(candidates, spec)
+        let rest = candidates.filter { !already.contains($0) }
+        let admitted = rest.isEmpty ? [] : admit(rest, spec)
+        let outcome = admitted.isEmpty ? Install(installed: []) : install(admitted, spec)
+        let withheld = withheldAddresses(candidates: candidates, alreadyRouted: already, admitted: admitted,
+                                         outcome: outcome, spec: spec)
 
-        let rewritten = DNSWire.rewriteForWildcard(response, ttlCap: ttlCap, keepAddress: { !unrouted.contains($0) })
+        let rewritten = DNSWire.rewriteForWildcard(response, ttlCap: ttlCap, keepAddress: { !withheld.contains($0) })
         // Every address gone: fail the lookup so the client asks again, rather than say the
         // name has none.
         let hadA = response.answers.contains { DNSWire.ipv4(of: $0) != nil }
@@ -762,6 +853,47 @@ public enum WildcardLookup {
         }
         guard let out = DNSWire.encode(rewritten) else { return DNSWire.reply(to: query, rcode: DNSWire.rcodeServFail) }
         if !overTCP && out.count > query.maxUDPSize { return DNSWire.truncated(rewritten) }
+        return out
+    }
+
+    /// The addresses taken out of the answer: those that passed the guard and have no route.
+    /// A connection opened before its route lands goes the wrong way, and breaks or leaks
+    /// when the route arrives, so the limiter's refusals and failed installs always go.
+    /// A busy route queue is decided by direction: around the VPN (Bypass, Direct) the address
+    /// is handed out anyway and the connection takes the VPN, as it did before wildcards,
+    /// rather than fail the lookup; into a tunnel (VPN Only, a pinned VPN) it is withheld,
+    /// because the same connection would leave by the physical interface.
+    public static func withheldAddresses(candidates: [String], alreadyRouted: Set<String>, admitted: [String],
+                                         outcome: Install, spec: WildcardSpec) -> Set<String> {
+        var withheld = Set(candidates).subtracting(alreadyRouted).subtracting(outcome.installed)
+        if outcome.timedOut && !spec.intoTunnel {
+            withheld.subtract(admitted)
+        }
+        return withheld
+    }
+
+    /// The addresses among `ips` that already carry our host route (`RTF_PROTO1`) to `gateway`
+    /// in `table` (a `RouteKernel.currentTable()` read, which is silent). `interfaceIndex`
+    /// resolves an `iface:` gateway; nil when the interface is gone.
+    public static func alreadyRouted(_ ips: [String], gateway: String, table: [RouteKernel.KernelRoute],
+                                     interfaceIndex: (String) -> UInt16?) -> Set<String> {
+        let wanted = Set(ips)
+        var wantIndex: UInt16?
+        var wantAddress: UInt32?
+        if gateway.hasPrefix("iface:") {
+            guard let index = interfaceIndex(String(gateway.dropFirst(6))) else { return [] }
+            wantIndex = index
+        } else {
+            guard let address = WildcardIPv4.parse(gateway) else { return [] }
+            wantAddress = address
+        }
+        var out: Set<String> = []
+        for route in table where route.isHost && route.isOurs && RouteKernel.isComparableEntry(route.flags) {
+            let ip = route.destinationString
+            guard wanted.contains(ip) else { continue }
+            if let wantIndex, route.gatewayInterfaceIndex == wantIndex, route.gatewayAddress == nil { out.insert(ip) }
+            if let wantAddress, route.gatewayAddress == wantAddress { out.insert(ip) }
+        }
         return out
     }
 }

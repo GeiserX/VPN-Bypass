@@ -254,6 +254,61 @@ final class DNSWireTests: XCTestCase {
         XCTAssertTrue(cut.answers.isEmpty)
         XCTAssertEqual(cut.questions, full.questions)
     }
+
+    private func name(_ n: String) -> [UInt8] { labels(n).flatMap { [UInt8($0.count)] + $0 } + [0] }
+
+    private func record(_ owner: String, _ type: UInt16, ttl: UInt32, _ data: [UInt8]) -> DNSWire.Record {
+        DNSWire.Record(labels: labels(owner), type: type, rclass: 1, ttl: ttl, data: data)
+    }
+
+    private func response(_ q: String, type: UInt16 = DNSWire.typeA, _ answers: [DNSWire.Record]) -> DNSWire.Message {
+        DNSWire.Message(id: 1, flags: 0x8180, questions: [.init(labels: labels(q), type: type, qclass: 1)],
+                        answers: answers, authority: [], additional: [])
+    }
+
+    func testAChainIsFoldedOntoTheAskedName() {
+        let m = response("Docs.Example.com", [
+            record("docs.example.com", DNSWire.typeCNAME, ttl: 300, name("edge.example.org")),
+            record("edge.example.org", DNSWire.typeCNAME, ttl: 90, name("d1.cdn.example.net")),
+            record("d1.cdn.example.net", DNSWire.typeA, ttl: 600, [52, 1, 1, 1]),
+            record("d1.cdn.example.net", DNSWire.typeA, ttl: 30, [52, 2, 2, 2]),
+            record("other.example.net", DNSWire.typeA, ttl: 600, [52, 9, 9, 9]),   // not on the chain
+        ])
+        let out = DNSWire.flattened(m)
+        XCTAssertEqual(out.answers.map(\.type), [DNSWire.typeA, DNSWire.typeA])
+        XCTAssertEqual(out.answers.map { $0.labels }, [labels("Docs.Example.com"), labels("Docs.Example.com")],
+                       "under the name exactly as asked")
+        XCTAssertEqual(out.answers.map(\.ttl), [90, 30])
+        XCTAssertEqual(DNSWire.addresses(in: out), ["52.1.1.1", "52.2.2.2"])
+        XCTAssertEqual(DNSWire.flattened(response("a.example.com", [record("a.example.com", DNSWire.typeA, ttl: 5, [52, 3, 3, 3])])),
+                       response("a.example.com", [record("a.example.com", DNSWire.typeA, ttl: 5, [52, 3, 3, 3])]),
+                       "an answer without a chain is left as it is")
+    }
+
+    func testABrokenOrLoopingChainHasNoData() {
+        let loop = response("a.example.com", [
+            record("a.example.com", DNSWire.typeCNAME, ttl: 60, name("b.example.net")),
+            record("b.example.net", DNSWire.typeCNAME, ttl: 60, name("a.example.com")),
+            record("a.example.com", DNSWire.typeA, ttl: 60, [52, 1, 1, 1]),
+        ])
+        XCTAssertTrue(DNSWire.flattened(loop).answers.isEmpty)
+        let dangling = response("a.example.com", [record("a.example.com", DNSWire.typeCNAME, ttl: 60, name("b.example.net"))])
+        XCTAssertTrue(DNSWire.flattened(dangling).answers.isEmpty, "the target has no A: neither has the name")
+    }
+
+    func testAnHTTPSChainKeepsOnlyRecordsThatPointBackAtTheAskedName() {
+        func https(_ priority: UInt8, _ target: String) -> [UInt8] { [0, priority] + (target.isEmpty ? [0] : name(target)) }
+        let m = response("app.example.com", type: DNSWire.typeHTTPS, [
+            record("app.example.com", DNSWire.typeCNAME, ttl: 60, name("x.cdn.example.net")),
+            record("x.cdn.example.net", DNSWire.typeHTTPS, ttl: 60, https(1, "")),                   // "." = the owner
+            record("x.cdn.example.net", DNSWire.typeHTTPS, ttl: 60, https(0, "y.cdn.example.net")),  // alias mode
+            record("x.cdn.example.net", DNSWire.typeHTTPS, ttl: 60, https(2, "z.cdn.example.net")),  // another name
+            record("x.cdn.example.net", DNSWire.typeHTTPS, ttl: 60, https(3, "pool.example.com")),   // under the wildcard
+        ])
+        let out = DNSWire.withoutForeignServiceTargets(DNSWire.flattened(m)) { WildcardDomain.matches($0, suffix: "example.com") }
+        XCTAssertEqual(out.answers.map(\.name), ["app.example.com", "app.example.com"])
+        XCTAssertEqual(out.answers.map { $0.data[1] }, [1, 3])
+    }
 }
 
 // MARK: - Safety guard and limiter
@@ -747,17 +802,28 @@ final class WildcardLookupTests: XCTestCase {
 
     private struct Calls {
         var forwarded = 0
+        var checked: [String] = []
         var admitted: [String] = []
         var installed: [String] = []
     }
 
     private func reply(_ bytes: [UInt8], specs: [WildcardSpec]? = nil, guard g: WildcardSafetyGuard = WildcardSafetyGuard(),
-                       upstream: [UInt8]?, admit: @escaping ([String]) -> [String] = { $0 },
+                       upstream: [UInt8]?, routed: @escaping ([String]) -> Set<String> = { _ in [] },
+                       admit: @escaping ([String]) -> [String] = { $0 },
                        install: @escaping ([String]) -> [String] = { $0 }) -> (DNSWire.Message?, Calls) {
+        replyWithOutcome(bytes, specs: specs, guard: g, upstream: upstream, routed: routed, admit: admit,
+                         install: { WildcardLookup.Install(installed: install($0)) })
+    }
+
+    private func replyWithOutcome(_ bytes: [UInt8], specs: [WildcardSpec]? = nil, guard g: WildcardSafetyGuard = WildcardSafetyGuard(),
+                                  upstream: [UInt8]?, routed: @escaping ([String]) -> Set<String> = { _ in [] },
+                                  admit: @escaping ([String]) -> [String] = { $0 },
+                                  install: @escaping ([String]) -> WildcardLookup.Install) -> (DNSWire.Message?, Calls) {
         var calls = Calls()
         let out = WildcardLookup.reply(
             to: bytes, overTCP: false, specs: specs ?? [spec, tunnelSpec], guard: g, ttlCap: 300,
             forward: { _, _ in calls.forwarded += 1; return upstream },
+            routed: { ips, _ in calls.checked += ips; return routed(ips) },
             admit: { ips, _ in calls.admitted += ips; return admit(ips) },
             install: { ips, _ in calls.installed += ips; return install(ips) })
         return (out.flatMap(DNSWire.parse), calls)
@@ -822,5 +888,164 @@ final class WildcardLookupTests: XCTestCase {
         let (m, calls) = reply(upstreamAnswer("api.example.com", [[34, 1, 1, 1]]), upstream: nil)
         XCTAssertNil(m)
         XCTAssertEqual(calls.forwarded, 0)
+    }
+
+    // MARK: Already routed, and a busy route queue
+
+    func testAnAddressThatAlreadyHasOurRouteIsAnsweredWithoutTheQueue() {
+        let up = upstreamAnswer("api.example.com", [[34, 1, 1, 1], [34, 2, 2, 2]])
+        let (m, calls) = reply(query("api.example.com"), upstream: up, routed: { _ in ["34.1.1.1"] })
+        XCTAssertEqual(calls.checked, ["34.1.1.1", "34.2.2.2"])
+        XCTAssertEqual(calls.admitted, ["34.2.2.2"], "the routed one skips the limiter")
+        XCTAssertEqual(calls.installed, ["34.2.2.2"], "and the route queue")
+        XCTAssertEqual(addresses(m), ["34.1.1.1", "34.2.2.2"])
+
+        let (all, allCalls) = reply(query("api.example.com"), upstream: up, routed: { Set($0) },
+                                    install: { _ in XCTFail("nothing to install"); return [] })
+        XCTAssertEqual(addresses(all), ["34.1.1.1", "34.2.2.2"])
+        XCTAssertTrue(allCalls.admitted.isEmpty)
+    }
+
+    func testABusyQueueHandsOutTheAddressAroundTheVPNButNotIntoATunnel() {
+        let busy: ([String]) -> WildcardLookup.Install = { _ in WildcardLookup.Install(installed: [], timedOut: true) }
+        let (around, _) = replyWithOutcome(query("api.example.com"), upstream: upstreamAnswer("api.example.com", [[34, 1, 1, 1]]),
+                                           install: busy)
+        XCTAssertEqual(around?.rcode, DNSWire.rcodeNoError)
+        XCTAssertEqual(addresses(around), ["34.1.1.1"], "around the VPN: the connection takes the VPN, as without the wildcard")
+
+        let (into, _) = replyWithOutcome(query("git.corp.example.net"), upstream: upstreamAnswer("git.corp.example.net", [[10, 20, 30, 40]]),
+                                         install: busy)
+        XCTAssertEqual(into?.rcode, DNSWire.rcodeServFail, "into a tunnel: never out the physical interface")
+
+        // The limiter's refusal still withholds, busy queue or not.
+        let (limited, _) = replyWithOutcome(query("api.example.com"), upstream: upstreamAnswer("api.example.com", [[34, 1, 1, 1], [34, 2, 2, 2]]),
+                                            admit: { $0.filter { $0 != "34.2.2.2" } }, install: busy)
+        XCTAssertEqual(addresses(limited), ["34.1.1.1"])
+    }
+
+    func testOnlyOurHostRouteToTheSameGatewayCountsAsRouted() {
+        func kr(_ ip: String, gateway: String? = nil, ifIndex: UInt16? = nil, flags: Int32 = RTF_UP | RTF_STATIC | RTF_HOST | RTF_PROTO1,
+                prefix: Int? = nil) -> RouteKernel.KernelRoute {
+            RouteKernel.KernelRoute(destination: WildcardIPv4.parse(ip)!, prefix: prefix,
+                                    gatewayAddress: gateway.flatMap(WildcardIPv4.parse), gatewayInterfaceIndex: ifIndex, flags: flags)
+        }
+        let table = [
+            kr("34.1.1.1", gateway: "192.168.10.1"),                                        // ours, right gateway
+            kr("34.2.2.2", gateway: "192.168.10.254"),                                      // ours, other gateway
+            kr("34.3.3.3", gateway: "192.168.10.1", flags: RTF_UP | RTF_STATIC | RTF_HOST), // someone else's
+            kr("34.4.4.4", gateway: "192.168.10.1", prefix: 24),                            // not a host route
+            kr("34.5.5.5", gateway: "192.168.10.1", flags: RTF_UP | RTF_HOST | RTF_PROTO1 | RTF_WASCLONED),
+            kr("10.9.9.9", ifIndex: 24),
+        ]
+        let ips = ["34.1.1.1", "34.2.2.2", "34.3.3.3", "34.4.4.4", "34.5.5.5", "34.6.6.6", "10.9.9.9"]
+        XCTAssertEqual(WildcardLookup.alreadyRouted(ips, gateway: "192.168.10.1", table: table, interfaceIndex: { _ in nil }),
+                       ["34.1.1.1"])
+        XCTAssertEqual(WildcardLookup.alreadyRouted(ips, gateway: "iface:utun4", table: table, interfaceIndex: { $0 == "utun4" ? 24 : nil }),
+                       ["10.9.9.9"])
+        XCTAssertEqual(WildcardLookup.alreadyRouted(ips, gateway: "iface:utun9", table: table, interfaceIndex: { _ in nil }), [],
+                       "a tunnel that is gone has nothing routed into it")
+    }
+
+    // MARK: CNAME chains
+
+    private func chainAnswer(_ name: String, to target: String, _ ips: [[UInt8]], type: UInt16 = DNSWire.typeA) -> [UInt8] {
+        var records = [DNSWire.Record(labels: labels(name), type: DNSWire.typeCNAME, rclass: 1, ttl: 120,
+                                      data: labels(target).flatMap { [UInt8($0.count)] + $0 } + [0])]
+        records += ips.map { DNSWire.Record(labels: labels(target), type: DNSWire.typeA, rclass: 1, ttl: 600, data: $0) }
+        return DNSWire.encode(DNSWire.Message(id: 7, flags: 0x8180, questions: [.init(labels: labels(name), type: type, qclass: 1)],
+                                              answers: records, authority: [], additional: []))!
+    }
+
+    func testAChainOutOfTheWildcardIsAnsweredUnderTheAskedName() {
+        let (m, calls) = reply(query("docs.example.com"), upstream: chainAnswer("docs.example.com", to: "d1.cdn.example.net", [[52, 1, 1, 1], [52, 2, 2, 2]]))
+        XCTAssertEqual(calls.installed, ["52.1.1.1", "52.2.2.2"])
+        XCTAssertEqual(m?.answers.map(\.type), [DNSWire.typeA, DNSWire.typeA], "no CNAME left for the client to follow elsewhere")
+        XCTAssertEqual(m?.answers.map(\.name), ["docs.example.com", "docs.example.com"])
+        XCTAssertEqual(m?.answers.map(\.ttl), [120, 120], "the shortest TTL along the chain")
+        XCTAssertEqual(addresses(m), ["52.1.1.1", "52.2.2.2"])
+    }
+}
+
+/// The wildcard lookup against a route queue held by a batch, as `addRoutesBatch` holds it:
+/// the install waits on the queue exactly as `WildcardForwarder.installRoutes` does.
+final class WildcardHeldQueueTests: XCTestCase {
+
+    private let spec = WildcardSpec(suffix: "example.com", gateway: "192.168.10.1", upstream: ["1.1.1.1"], interface: "en0")
+    private let tunnelSpec = WildcardSpec(suffix: "corp.example.net", gateway: "iface:utun4", upstream: ["10.0.0.53"],
+                                          interface: "utun4", intoTunnel: true)
+
+    private func labels(_ name: String) -> [[UInt8]] { name.split(separator: ".").map { Array($0.utf8) } }
+
+    private func lookup(_ name: String, ip: [UInt8], queue: DispatchQueue, lane: RouteKernel.PriorityLane,
+                        wait: TimeInterval) -> DNSWire.Message? {
+        let q = DNSWire.encode(DNSWire.Message(id: 7, flags: 0x0100, questions: [.init(labels: labels(name), type: DNSWire.typeA, qclass: 1)],
+                                               answers: [], authority: [], additional: []))!
+        let up = DNSWire.encode(DNSWire.Message(id: 7, flags: 0x8180, questions: [.init(labels: labels(name), type: DNSWire.typeA, qclass: 1)],
+                                                answers: [.init(labels: labels(name), type: DNSWire.typeA, rclass: 1, ttl: 60, data: ip)],
+                                                authority: [], additional: []))!
+        let out = WildcardLookup.reply(
+            to: q, overTCP: false, specs: [spec, tunnelSpec], guard: WildcardSafetyGuard(), ttlCap: 300,
+            forward: { _, _ in up }, admit: { ips, _ in ips },
+            install: { ips, _ in
+                let done = DispatchSemaphore(value: 0)
+                lane.submit(on: queue) { done.signal() }
+                return done.wait(timeout: .now() + wait) == .success
+                    ? WildcardLookup.Install(installed: ips) : WildcardLookup.Install(installed: [], timedOut: true)
+            })
+        return out.flatMap(DNSWire.parse)
+    }
+
+    /// A batch on `queue`: `steps` writes of `stepMS` each, draining the lane between them
+    /// when `yields`. Returns a semaphore signalled when the batch ends.
+    private func holdQueue(_ queue: DispatchQueue, lane: RouteKernel.PriorityLane, steps: Int, stepMS: UInt32, yields: Bool) -> DispatchSemaphore {
+        let started = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        queue.async {
+            started.signal()
+            for _ in 0..<steps {
+                if yields { lane.drain() }
+                usleep(stepMS * 1000)
+            }
+            finished.signal()
+        }
+        started.wait()
+        return finished
+    }
+
+    func testALookupDuringABatchGetsItsRouteBetweenTwoWrites() {
+        let queue = DispatchQueue(label: "test.routes")
+        let lane = RouteKernel.PriorityLane()
+        // 3 s of batch; the lookup waits 0.5 s.
+        let finished = holdQueue(queue, lane: lane, steps: 150, stepMS: 20, yields: true)
+        let start = DispatchTime.now()
+        let m = lookup("api.example.com", ip: [34, 1, 1, 1], queue: queue, lane: lane, wait: 0.5)
+        let tookMS = (DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+        XCTAssertEqual(m?.rcode, DNSWire.rcodeNoError)
+        XCTAssertEqual(m.map(DNSWire.addresses(in:)), ["34.1.1.1"])
+        XCTAssertLessThan(tookMS, 400, "answered between two writes, not after the batch")
+        XCTAssertEqual(finished.wait(timeout: .now()), .timedOut, "the batch was still running")
+        _ = finished.wait(timeout: .now() + 5)
+    }
+
+    func testAQueueHeldWithoutAPauseTimesOutByDirection() {
+        let queue = DispatchQueue(label: "test.routes.held")
+        let lane = RouteKernel.PriorityLane()
+        let finished = holdQueue(queue, lane: lane, steps: 1, stepMS: 1500, yields: false)
+        let around = lookup("api.example.com", ip: [34, 1, 1, 1], queue: queue, lane: lane, wait: 0.2)
+        XCTAssertEqual(around.map(DNSWire.addresses(in:)), ["34.1.1.1"], "around the VPN: handed out, takes the VPN")
+        let into = lookup("git.corp.example.net", ip: [10, 20, 30, 40], queue: queue, lane: lane, wait: 0.2)
+        XCTAssertEqual(into?.rcode, DNSWire.rcodeServFail, "into a tunnel: withheld")
+        _ = finished.wait(timeout: .now() + 5)
+    }
+
+    func testTheLaneRunsEachJobOnceInOrder() {
+        let queue = DispatchQueue(label: "test.routes.order")
+        let lane = RouteKernel.PriorityLane()
+        var ran: [Int] = []
+        let finished = holdQueue(queue, lane: lane, steps: 20, stepMS: 10, yields: true)
+        for i in 0..<5 { lane.submit(on: queue) { ran.append(i) } }
+        _ = finished.wait(timeout: .now() + 5)
+        queue.sync {}
+        XCTAssertEqual(ran, [0, 1, 2, 3, 4])
     }
 }

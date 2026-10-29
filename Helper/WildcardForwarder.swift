@@ -7,7 +7,10 @@
 // would have used anyway (`WildcardSpec.upstream`, over a socket bound to `interface`); the
 // IPv4 addresses in the answer pass the safety guard and the limiter, get their host route on
 // `HelperTool.routeQueue` through the same install path and pacer as every other route, and
-// only then does the answer go back, without any address that missed its route. AAAA gets an
+// only then does the answer go back, without any address that missed its route (a busy route
+// queue around the VPN aside, see `WildcardLookup.withheldAddresses`). An address that already
+// has our route is answered at once. A CNAME chain is folded onto the asked name, so the client
+// never asks for a name outside the wildcard through the normal resolver. AAAA gets an
 // empty answer and HTTPS loses its `ipv6hint`, because the routes are IPv4 only. The decision
 // itself is `WildcardLookup.reply`, tested from the app target; this file is its sockets.
 //
@@ -30,8 +33,9 @@ final class WildcardForwarder {
     /// its route's "last seen" keeps moving.
     static let ttlCap: UInt32 = 300
     static let upstreamTimeout: TimeInterval = 2
-    /// The longest a reply waits for its routes. Past it the answer goes out without the
-    /// addresses that wait, and their install is called off if it has not started.
+    /// The longest a reply waits for its routes. Past it their install is called off if it has
+    /// not started, and the addresses go out without a route around the VPN, or not at all
+    /// into a tunnel (`WildcardLookup.withheldAddresses`).
     static let routeWait: TimeInterval = 1.5
     static let maxInFlight = 64
     static let maxTCPConnections = 16
@@ -321,6 +325,15 @@ final class WildcardForwarder {
         return WildcardLookup.reply(
             to: bytes, overTCP: overTCP, specs: specs, guard: safetyGuard, ttlCap: Self.ttlCap,
             forward: { query, spec in Self.forward(bytes, query: query, spec: spec, overTCP: overTCP) },
+            routed: { candidates, spec in
+                // Already ours, to this gateway: answered now, and reported so the app's
+                // "last seen" moves, without waiting on the route queue.
+                let inPlace = HelperTool.learnedRoutesInPlace(candidates, gateway: spec.gateway)
+                if !inPlace.isEmpty, self.queue.sync(execute: { self.generation == generation }) {
+                    self.record(candidates.filter(inPlace.contains), suffix: spec.suffix, gateway: spec.gateway)
+                }
+                return inPlace
+            },
             admit: { candidates, spec in
                 let now = DispatchTime.now().uptimeNanoseconds
                 return self.queue.sync {
@@ -346,12 +359,13 @@ final class WildcardForwarder {
         var installed: [String] = []
     }
 
-    /// Adds the routes on `routeQueue` and waits for them, at most `routeWait`.
-    private func installRoutes(_ ips: [String], spec: WildcardSpec, generation: UInt64) -> [String] {
-        guard !ips.isEmpty else { return [] }
+    /// Adds the routes on `routeQueue`, ahead of the rest of any batch running there, and waits
+    /// for them, at most `routeWait`.
+    private func installRoutes(_ ips: [String], spec: WildcardSpec, generation: UInt64) -> WildcardLookup.Install {
+        guard !ips.isEmpty else { return WildcardLookup.Install(installed: []) }
         let done = DispatchSemaphore(value: 0)
         let pending = PendingInstall()
-        HelperTool.routeQueue.async { [routeWriter, weak self] in
+        HelperTool.priorityLane.submit(on: HelperTool.routeQueue) { [routeWriter, weak self] in
             defer { done.signal() }
             guard let self else { return }
             pending.lock.lock()
@@ -371,12 +385,13 @@ final class WildcardForwarder {
             let started = pending.started
             pending.abandoned = true
             pending.lock.unlock()
-            helperLog.info("wildcard: replied without \(ips.count, privacy: .public) address(es); the route queue was busy\(started ? "" : ", install called off", privacy: .public)")
-            return []
+            // `WildcardLookup.withheldAddresses` decides by direction whether these still go out.
+            helperLog.info("wildcard: \(ips.count, privacy: .public) address(es) still without a route after \(Self.routeWait, privacy: .public) s; the route queue was busy\(started ? "" : ", install called off", privacy: .public)")
+            return WildcardLookup.Install(installed: [], timedOut: true)
         }
         pending.lock.lock()
         defer { pending.lock.unlock() }
-        return pending.installed
+        return WildcardLookup.Install(installed: pending.installed)
     }
 
     private func record(_ ips: [String], suffix: String, gateway: String) {
