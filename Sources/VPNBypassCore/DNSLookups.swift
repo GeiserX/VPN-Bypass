@@ -83,10 +83,13 @@ final class DNSLookupsMonitor: ObservableObject {
         if !enabled, timer != nil { stop() }
     }
 
+    /// Also empties the helper's buffer, so a name looked up just before Clear does not come
+    /// back with the next drain.
     func clear() {
         generation += 1
         tally = DNSLookupTally()
         since = Date()
+        if isCapturing { Task { _ = await HelperManager.shared.drainDNSQueries() } }
     }
 
     private func start() {

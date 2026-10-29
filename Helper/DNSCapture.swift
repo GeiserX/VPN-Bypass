@@ -38,7 +38,9 @@ final class DNSCapture {
             process.arguments = Self.arguments
             let output = Pipe()
             process.standardOutput = output
-            process.standardError = FileHandle.nullDevice
+            // Read only when tcpdump exits at once; while it runs, drained and discarded.
+            let errors = Pipe()
+            process.standardError = errors
             process.standardInput = FileHandle.nullDevice
             output.fileHandleForReading.readabilityHandler = { [weak self, weak process] handle in
                 let data = handle.availableData
@@ -73,8 +75,13 @@ final class DNSCapture {
             while process.isRunning && DispatchTime.now() < deadline { Thread.sleep(forTimeInterval: 0.02) }
             guard process.isRunning else {
                 output.fileHandleForReading.readabilityHandler = nil
-                helperLog.error("DNS capture: tcpdump exited at once (status \(process.terminationStatus, privacy: .public))")
-                return (false, "tcpdump exited at once (status \(process.terminationStatus))")
+                let said = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                    .split(separator: "\n").last.map { String($0.prefix(200)) } ?? "status \(process.terminationStatus)"
+                helperLog.error("DNS capture: tcpdump exited at once: \(said, privacy: .public)")
+                return (false, "tcpdump exited at once: \(said)")
+            }
+            errors.fileHandleForReading.readabilityHandler = { handle in
+                if handle.availableData.isEmpty { handle.readabilityHandler = nil }
             }
             self.process = process
             buffer = DNSQueryBuffer()
