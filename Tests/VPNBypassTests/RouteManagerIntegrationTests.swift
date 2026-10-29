@@ -2,30 +2,28 @@ import XCTest
 @testable import VPNBypassCore
 import Foundation
 
-// Base class that snapshots and restores the real config FILE around each test,
-// preventing tests from corrupting the user's production config.json.
+// Base class that snapshots and restores the test config FILE around each test. Under
+// XCTest `RouteManager.configURL` is a temp dir (ConfigIsolationTests), so this never
+// reads, moves or deletes the user's real ~/Library/Application Support/VPNBypass/config.json.
 @MainActor
 class RouteManagerTestCase: XCTestCase {
 
     var rm: RouteManager { RouteManager.shared }
 
-    private static let configDir: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("VPNBypass", isDirectory: true)
-    }()
-    private static let configURL = configDir.appendingPathComponent("config.json")
-    private static let testBackupURL = configDir.appendingPathComponent("config.json.test-snapshot")
+    var configURL: URL { rm.configURL }
+    var testBackupURL: URL { configURL.appendingPathExtension("test-snapshot") }
 
     override func setUp() {
         super.setUp()
-        try? FileManager.default.copyItem(at: Self.configURL, to: Self.testBackupURL)
+        try? FileManager.default.removeItem(at: testBackupURL)
+        try? FileManager.default.copyItem(at: configURL, to: testBackupURL)
     }
 
     override func tearDown() {
         let fm = FileManager.default
-        if fm.fileExists(atPath: Self.testBackupURL.path) {
-            try? fm.removeItem(at: Self.configURL)
-            try? fm.moveItem(at: Self.testBackupURL, to: Self.configURL)
+        if fm.fileExists(atPath: testBackupURL.path) {
+            try? fm.removeItem(at: configURL)
+            try? fm.moveItem(at: testBackupURL, to: configURL)
             rm.loadConfig()
         }
         super.tearDown()
