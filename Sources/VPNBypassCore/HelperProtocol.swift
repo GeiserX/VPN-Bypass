@@ -92,6 +92,27 @@ protocol HelperProtocol {
     /// for a minute the helper stops the capture by itself.
     /// - Parameter reply: whether the capture is still running, and the names.
     func drainDNSQueries(withReply reply: @escaping (Bool, [String]) -> Void)
+
+    /// Sets the wildcard domains the helper serves (`WildcardSpec.dictionary` each). For every
+    /// one it writes `/etc/resolver/<suffix>` pointing at its forwarder on 127.0.0.1:53530 and
+    /// runs the forwarder; an empty list stops it and removes every resolver file it wrote. A
+    /// call renews the lease like a drain does.
+    /// - Parameters:
+    ///   - context: `WildcardSafetyGuard.dictionary`, the addresses no wildcard may learn.
+    ///   - reply: `(true, unserved, nil)` when the list is in place; `unserved` holds the
+    ///     suffixes whose resolver file belongs to someone else and was left alone.
+    ///     `(false, [], reason)` when nothing could be served.
+    func setWildcards(
+        specs: [[String: String]],
+        context: [String: String],
+        withReply reply: @escaping (Bool, [String], String?) -> Void
+    )
+
+    /// The routes wildcards learned since the last drain (`LearnedWildcardRoute.dictionary`
+    /// each, no names). Renews the lease; without a drain or a set for two minutes the helper
+    /// stops the forwarder and removes its resolver files by itself.
+    /// - Parameter reply: whether the forwarder is running, and the routes.
+    func drainWildcardRoutes(withReply reply: @escaping (Bool, [[String: String]]) -> Void)
 }
 
 // MARK: - Helper Constants
@@ -161,7 +182,9 @@ struct HelperConstants {
     // every entry was silently ignored. Bumped so installed 2.3.0 helpers reinstall and pick this up.
     // 2.4.0: the opt-in DNS Lookups capture (#176): start/stop/drain of one fixed-argument
     // tcpdump. Bumped so installed 2.3.1 helpers, which have no such methods, reinstall.
-    static let helperVersion = "2.4.0"
+    // 2.5.0: always-on wildcard domains: a DNS forwarder on 127.0.0.1:53530, the resolver files
+    // that point at it, and set/drain calls for them. Bumped so installed 2.4.0 helpers reinstall.
+    static let helperVersion = "2.5.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

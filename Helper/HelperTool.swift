@@ -89,7 +89,11 @@ class HelperTool: NSObject, HelperProtocol {
     /// time — the condition behind the concurrent `/sbin/route` processes seen in #65.
     /// Deliberately NOT used by `getVersion`: that is the app's liveness probe, and queueing it
     /// behind a long batch would time it out and trigger a spurious helper reinstall.
-    private static let routeQueue = DispatchQueue(label: "com.geiserx.vpnbypass.helper.routes")
+    static let routeQueue = DispatchQueue(label: "com.geiserx.vpnbypass.helper.routes")
+
+    /// Wildcard route installs, run between two writes of a batch instead of after it. The
+    /// batch loops below call `drain()` on every step.
+    static let priorityLane = RouteKernel.PriorityLane()
 
     // MARK: - Route Management
 
@@ -133,10 +137,12 @@ class HelperTool: NSObject, HelperProtocol {
             var lastError: String?
 
             // ONE silent table read for the whole batch — replaces a forked, event-emitting
-            // `route -n get` per destination.
-            let snapshot = self.kernelSnapshot()
+            // `route -n get` per destination. Read again only after a wildcard install ran in
+            // between, so "already correct" is never decided on a route it has just changed.
+            var snapshot = self.kernelSnapshot()
 
             for route in routes {
+                if Self.priorityLane.drain() { snapshot = self.kernelSnapshot() }
                 guard let destination = route["destination"] as? String,
                       let gateway = route["gateway"] as? String else {
                     failureCount += 1
@@ -175,6 +181,7 @@ class HelperTool: NSObject, HelperProtocol {
             var lastError: String?
 
             for destination in destinations {
+                Self.priorityLane.drain()
                 guard self.isValidDestination(destination) else {
                     failureCount += 1
                     failedDestinations.append(destination)
@@ -367,6 +374,40 @@ class HelperTool: NSObject, HelperProtocol {
         return (false, message)
     }
 
+    /// The addresses among `ips` that already carry our host route to `gateway`, from one
+    /// silent table read. Safe off `routeQueue`: it writes nothing.
+    static func learnedRoutesInPlace(_ ips: [String], gateway: String) -> Set<String> {
+        guard !ips.isEmpty, let table = RouteKernel.currentTable() else { return [] }
+        return WildcardLookup.alreadyRouted(ips, gateway: gateway, table: table) { name in
+            let index = if_nametoindex(name)
+            return index == 0 || index > UInt32(UInt16.max) ? nil : UInt16(index)
+        }
+    }
+
+    /// Installs the routes a wildcard learned, for `WildcardForwarder`. Call it on `routeQueue`.
+    ///
+    /// The same validation and install path as `addRoutesBatch`, with one more refusal: an
+    /// address that already has a static host route someone else wrote (no `RTF_PROTO1`). That
+    /// is how a VPN client pins its own server to the physical interface, and a zone that
+    /// answers with the VPN server's address must not get to move it.
+    /// - Returns: the addresses that now have the route.
+    func installLearnedRoutes(_ ips: [String], gateway: String) -> [String] {
+        guard isValidGateway(gateway) else { return [] }
+        let snapshot = kernelSnapshot()
+        var installed: [String] = []
+        for ip in ips {
+            if let current = snapshot[ip], current.isHost, !current.isOurs {
+                helperLog.info("wildcard: refusing \(ip, privacy: .public), another program owns its host route")
+                continue
+            }
+            guard allowsInstall(ip) else { continue }
+            if installRoute(destination: ip, gateway: gateway, isNetwork: false, snapshot: snapshot).success {
+                installed.append(ip)
+            }
+        }
+        return installed
+    }
+
     // MARK: - Hosts File Management
     
     func updateHostsFile(entries: [[String: String]], withReply reply: @escaping (Bool, String?) -> Void) {
@@ -465,6 +506,16 @@ class HelperTool: NSObject, HelperProtocol {
     }
     
     func flushDNSCache(withReply reply: @escaping (Bool) -> Void) {
+        Self.flushResolverCaches()
+        // Hosts write already succeeded; the app ignores this Bool. A
+        // nonzero killall (no matching process) must not fail the update.
+        reply(true)
+    }
+
+    /// `dscacheutil -flushcache` and `killall -HUP mDNSResponder`, each bounded. Shared with the
+    /// wildcard forwarder, which flushes when its resolver files change so cached answers are
+    /// asked again through the new path.
+    static func flushResolverCaches() {
         // Best-effort: the app ignores this Bool and already recorded the hosts
         // write as success. A wedged child must not park this XPC thread.
         let dscache = Process()
@@ -480,10 +531,6 @@ class HelperTool: NSObject, HelperProtocol {
         mdns.standardOutput = FileHandle.nullDevice
         mdns.standardError = FileHandle.nullDevice
         logFlushOutcome("killall -HUP mDNSResponder", ProcessDeadline.run(mdns))
-
-        // Hosts write already succeeded; the app ignores this Bool. A
-        // nonzero killall (no matching process) must not fail the update.
-        reply(true)
     }
     
     // MARK: - Version
@@ -518,7 +565,27 @@ class HelperTool: NSObject, HelperProtocol {
         reply(running, names)
     }
 
-    private func logFlushOutcome(_ name: String, _ outcome: ProcessDeadline.Outcome) {
+    // MARK: - Wildcard domains
+
+    // Each spec is re-validated here (WildcardSpec.init?(dictionary:)); one the helper may not
+    // act on is dropped, never half-applied. See WildcardForwarder.
+
+    func setWildcards(specs: [[String: String]], context: [String: String],
+                      withReply reply: @escaping (Bool, [String], String?) -> Void) {
+        let parsed = specs.compactMap(WildcardSpec.init(dictionary:))
+        if parsed.count != specs.count {
+            helperLog.error("wildcard: refused \(specs.count - parsed.count, privacy: .public) invalid spec(s)")
+        }
+        let result = WildcardForwarder.shared.configure(parsed, guard: WildcardSafetyGuard(dictionary: context))
+        reply(result.ok, result.unserved, result.error)
+    }
+
+    func drainWildcardRoutes(withReply reply: @escaping (Bool, [[String: String]]) -> Void) {
+        let (running, routes) = WildcardForwarder.shared.drain()
+        reply(running, routes.map(\.dictionary))
+    }
+
+    private static func logFlushOutcome(_ name: String, _ outcome: ProcessDeadline.Outcome) {
         switch outcome {
         case .failedToStart:
             helperLog.error("\(name, privacy: .public) failed to start")

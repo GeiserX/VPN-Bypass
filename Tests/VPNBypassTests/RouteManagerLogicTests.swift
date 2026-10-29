@@ -12,9 +12,10 @@ final class RouteManagerLogicTests: XCTestCase {
     // MARK: - log() Tests
 
     func testLogAddsEntryToRecentLogs() {
+        // The list keeps the newest 200, and the tests before this one may have filled it.
         let countBefore = rm.recentLogs.count
         rm.log(.info, "test log entry")
-        XCTAssertGreaterThan(rm.recentLogs.count, countBefore)
+        XCTAssertEqual(rm.recentLogs.count, min(countBefore + 1, 200))
         XCTAssertEqual(rm.recentLogs[0].message, "test log entry")
     }
 

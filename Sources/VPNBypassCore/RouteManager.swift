@@ -213,6 +213,11 @@ final class RouteManager: ObservableObject {
     /// the developer's live DNS cache. `configURL` was already fixed for exactly this reason; this
     /// was the same hole in a sibling property that never got the same treatment.
     private let dnsCacheURL: URL
+
+    /// The wildcard route ledger's file, beside the config (and redirected under tests with it).
+    let wildcardLedgerURL: URL
+    /// Always-on wildcard domains (see WildcardEngine).
+    private(set) lazy var wildcards = WildcardEngine(manager: self, ledgerURL: wildcardLedgerURL)
     
     /// Public accessor for UI to display detected DNS server
     var detectedDNSServerDisplay: String? {
@@ -234,9 +239,19 @@ final class RouteManager: ObservableObject {
         let id = UUID()
         let destination: String
         let gateway: String
-        let source: String // domain name or service name
+        let source: String // domain name or service name, or "*.suffix" for a learned route
         let timestamp: Date
     }
+
+    /// A route the helper's forwarder learned for a wildcard. The apply paths compare the routes
+    /// they want against `activeRoutes`, and none of them knows these addresses; each leaves them
+    /// to WildcardEngine instead of taking them for stale ones.
+    nonisolated static func isLearnedWildcardRoute(_ route: ActiveRoute) -> Bool {
+        WildcardDomain.isWildcard(route.source)
+    }
+
+    /// `activeRoutes` without the learned wildcard routes: what an apply compares against.
+    var listedRoutes: [ActiveRoute] { activeRoutes.filter { !Self.isLearnedWildcardRoute($0) } }
     
     struct LogEntry: Identifiable {
         let id = UUID()
@@ -279,6 +294,7 @@ final class RouteManager: ObservableObject {
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
         configURL = appDir.appendingPathComponent("config.json")
         dnsCacheURL = appDir.appendingPathComponent("dns-cache.json")
+        wildcardLedgerURL = appDir.appendingPathComponent("wildcard-routes.json")
     }
     
     // MARK: - Public API
@@ -325,6 +341,9 @@ final class RouteManager: ObservableObject {
     /// Preserves the user's enabled/disabled state while updating domains,
     /// ipRanges, and names from the latest source code definitions.
     /// Also adds any new built-in services that didn't exist when the user last saved.
+    /// The domains the user added to a built-in service (`builtInServiceExtras`) follow the
+    /// shipped ones, so they survive this reset; the shipped list stays authoritative for its
+    /// own entries.
     private func mergeBuiltInServices(autoSave: Bool = true) {
         let defaults = Config.defaultServices
         let savedById = Dictionary(uniqueKeysWithValues: config.services.map { ($0.id, $0) })
@@ -336,8 +355,9 @@ final class RouteManager: ObservableObject {
         
         // Walk the default list to preserve ordering from source code
         for builtIn in defaults {
+            let domains = Self.domains(of: builtIn, extras: config.builtInServiceExtras[builtIn.id])
             if let saved = savedById[builtIn.id] {
-                let domainsChanged = Set(saved.domains) != Set(builtIn.domains)
+                let domainsChanged = Set(saved.domains) != Set(domains)
                 let ipRangesChanged = Set(saved.ipRanges) != Set(builtIn.ipRanges)
                 if domainsChanged || ipRangesChanged || saved.name != builtIn.name {
                     updated += 1
@@ -346,12 +366,14 @@ final class RouteManager: ObservableObject {
                     id: builtIn.id,
                     name: builtIn.name,
                     enabled: saved.enabled,
-                    domains: builtIn.domains,
+                    domains: domains,
                     ipRanges: builtIn.ipRanges
                 ))
             } else {
                 added += 1
-                merged.append(builtIn)
+                var fresh = builtIn
+                fresh.domains = domains
+                merged.append(fresh)
             }
         }
         
@@ -407,6 +429,8 @@ final class RouteManager: ObservableObject {
         } catch {
             log(.error, "Failed to save configuration: \(error.localizedDescription)")
         }
+        // A wildcard added, removed or switched, or the mode changed: the helper's list follows.
+        wildcards.requestSync()
     }
 
     /// - Parameter recoveringFromLoadFailure: set only by `importConfig`, which is replacing an
@@ -731,7 +755,7 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    private func runProcessAsync(
+    func runProcessAsync(
         _ executablePath: String,
         arguments: [String] = [],
         timeout: TimeInterval = 5.0
@@ -1904,6 +1928,8 @@ final class RouteManager: ObservableObject {
             // After, not before: checkVPNStatus may itself re-route, and this only has to
             // catch what the kernel dropped without any signal the app can otherwise see.
             await reconcileMissingRoutes()
+            // The network, the VPN or its DNS servers may have moved under the wildcards.
+            wildcards.requestSync()
         }
     }
     
@@ -2084,7 +2110,7 @@ final class RouteManager: ObservableObject {
         if isInverse {
             // VPN Only mode: resolve inverse domains (these go through VPN)
             // CIDR entries are routed directly as network routes, not DNS-resolved
-            for domain in config.inverseDomains where domain.enabled {
+            for domain in config.inverseDomains where domain.enabled && !domain.isWildcard {
                 if domain.isCIDR {
                     inverseCIDRs.append(domain.domain)
                 } else {
@@ -2093,11 +2119,11 @@ final class RouteManager: ObservableObject {
             }
         } else {
             // Bypass mode: resolve bypass domains + service domains
-            for domain in config.domains where domain.enabled {
+            for domain in config.domains where domain.enabled && !domain.isWildcard {
                 allDomains.append((domain.domain, domain.domain))
             }
             for service in config.services where service.enabled {
-                for domain in service.domains {
+                for domain in service.resolvableDomains {
                     allDomains.append((domain, service.name))
                 }
             }
@@ -2210,7 +2236,7 @@ final class RouteManager: ObservableObject {
         // interface-change and import paths clear activeRoutes first, so this never
         // blocks a genuine change.
         let desiredPairs = Set(routesToAdd.map { "\($0.destination)|\($0.gateway)" })
-        let activePairs = Set(activeRoutes.map { "\($0.destination)|\($0.gateway)" })
+        let activePairs = Set(listedRoutes.map { "\($0.destination)|\($0.gateway)" })
         if Self.shouldSkipReapply(desiredPairs: desiredPairs, activePairs: activePairs, forceReassert: forceReassert) {
             // active == desired means no graced orphan is outstanding, so any grace history
             // left in the map belongs to destinations that are desired again (or gone) and
@@ -2351,7 +2377,7 @@ final class RouteManager: ObservableObject {
         // Diff-before-mutate: skip a no-op re-apply to avoid route-table churn that
         // pressures a VPN's route monitor (same guard the legacy full apply uses).
         let desiredPairs = Set(routesToAdd.map { "\($0.destination)|\($0.gateway)" })
-        let activePairs = Set(activeRoutes.map { "\($0.destination)|\($0.gateway)" })
+        let activePairs = Set(listedRoutes.map { "\($0.destination)|\($0.gateway)" })
         if Self.shouldSkipReapply(desiredPairs: desiredPairs, activePairs: activePairs, forceReassert: forceReassert) {
             // Same grace-history forgiveness as the classic skip path (see there for why).
             orphanFirstSeen.removeAll()
@@ -2583,6 +2609,9 @@ final class RouteManager: ObservableObject {
             }
         }
 
+        // The forwarder stops with the routes, and its resolver files go with it.
+        await wildcards.routesCleared()
+
         log(.info, activeRoutes.isEmpty ? "All routes removed" : "Routes removed (\(activeRoutes.count) entries retained from failed kernel removals)")
     }
     
@@ -2634,7 +2663,7 @@ final class RouteManager: ObservableObject {
         var serviceRanges: [(source: String, range: String)] = []
 
         if isInverse {
-            for domain in config.inverseDomains where domain.enabled {
+            for domain in config.inverseDomains where domain.enabled && !domain.isWildcard {
                 if domain.isCIDR {
                     inverseCIDRs.append(domain.domain)
                 } else if let cachedIPs = dnsDiskCache[domain.domain] {
@@ -2644,7 +2673,7 @@ final class RouteManager: ObservableObject {
             }
         } else {
             for service in config.services where service.enabled {
-                for domain in service.domains {
+                for domain in service.resolvableDomains {
                     if let cachedIPs = dnsDiskCache[domain] {
                         resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: service.name, ips: cachedIPs))
                         if let firstIP = cachedIPs.first { dnsCache[domain] = firstIP }
@@ -2654,7 +2683,7 @@ final class RouteManager: ObservableObject {
                     serviceRanges.append((service.name, range))
                 }
             }
-            for domain in config.domains where domain.enabled {
+            for domain in config.domains where domain.enabled && !domain.isWildcard {
                 if let cachedIPs = dnsDiskCache[domain.domain] {
                     resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: domain.domain, ips: cachedIPs))
                     if let firstIP = cachedIPs.first { dnsCache[domain.domain] = firstIP }
@@ -2677,7 +2706,8 @@ final class RouteManager: ObservableObject {
 
         // Crash recovery first: clear tagged leftovers a previous run stranded, keeping what
         // this apply wants (those become zero-event no-ops in the reconciling batch below).
-        await startupSweepIfNeeded(desired: routesToAdd.map { $0.destination })
+        // Routes a wildcard learned in the previous run are not leftovers while it is listed.
+        await startupSweepIfNeeded(desired: routesToAdd.map { $0.destination } + wildcards.ledgerDestinations(config: config))
 
         log(.info, "Applying \(routesToAdd.count) routes from cache (\(isInverse ? "VPN Only" : "Bypass") mode)...")
 
@@ -2736,7 +2766,7 @@ final class RouteManager: ObservableObject {
     /// removeRoutesBatch routed through the test override when set (so tests observe kernel
     /// removals without a real helper), else the privileged helper. Return shape matches
     /// HelperManager.removeRoutesBatch.
-    private func removeRoutesBatchVia(_ destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
+    func removeRoutesBatchVia(_ destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
         if let override = removeRoutesBatchOverrideForTests { return await override(destinations) }
         // Apply-kill attribution anchor (see addRoutesBatchTracked): deletes are broadcast to
         // every open routing socket just like adds. Stamped at SUBMISSION, not completion — a
@@ -2866,8 +2896,11 @@ final class RouteManager: ObservableObject {
         // 2. Add-failed: were in batch add input but failed — delete-before-add already
         //    removed the old route, so a failed delete means "already gone."
         let newDestinations = Set(newRoutes.map { $0.destination })
+        // A learned wildcard route is not this apply's to judge; an address it shares with a
+        // listed entry that went stays in the kernel for the wildcard.
+        let learnedDestinations = Set(activeRoutes.filter(Self.isLearnedWildcardRoute).map(\.destination))
         let stalePartition = RouteManager.partitionStaleRoutes(
-            active: Set(activeRoutes.map { $0.destination }),
+            active: Set(listedRoutes.map { $0.destination }).subtracting(learnedDestinations),
             applied: newDestinations,
             attempted: Set(routesToAdd.map { $0.destination })
         )
@@ -2933,10 +2966,11 @@ final class RouteManager: ObservableObject {
             return false
         }
 
-        activeRoutes = newRoutes
+        activeRoutes = newRoutes + activeRoutes.filter(Self.isLearnedWildcardRoute)
         // Committed destinations are tracked in activeRoutes now — no longer pending.
         pendingKernelAdds.subtract(newRoutes.map { $0.destination })
         lastUpdate = Date()
+        wildcards.routesApplied()
 
         // Manage hosts file if enabled
         if config.manageHostsFile {
@@ -2986,7 +3020,7 @@ final class RouteManager: ObservableObject {
         // Collect domains to resolve based on routing mode
         var domainsToResolve: [(domain: String, source: String)] = []
         if isInverse {
-            for domain in config.inverseDomains where domain.enabled {
+            for domain in config.inverseDomains where domain.enabled && !domain.isWildcard {
                 if !domain.isCIDR {
                     let resolvable = domain.domain
                     domainsToResolve.append((resolvable, domain.domain))
@@ -2994,11 +3028,11 @@ final class RouteManager: ObservableObject {
             }
         } else {
             for service in config.services where service.enabled {
-                for domain in service.domains {
+                for domain in service.resolvableDomains {
                     domainsToResolve.append((domain, service.name))
                 }
             }
-            for domain in config.domains where domain.enabled {
+            for domain in config.domains where domain.enabled && !domain.isWildcard {
                 let resolvable = domain.domain
                 domainsToResolve.append((resolvable, domain.domain))
             }
@@ -3358,7 +3392,7 @@ final class RouteManager: ObservableObject {
         var inverseCIDRs: [String] = []
 
         if isInverse {
-            for domain in config.inverseDomains where domain.enabled {
+            for domain in config.inverseDomains where domain.enabled && !domain.isWildcard {
                 if domain.isCIDR {
                     inverseCIDRs.append(domain.domain)
                 } else {
@@ -3367,12 +3401,12 @@ final class RouteManager: ObservableObject {
                 }
             }
         } else {
-            for domain in config.domains where domain.enabled {
+            for domain in config.domains where domain.enabled && !domain.isWildcard {
                 let resolvable = domain.domain
                 domainsToResolve.append((resolvable, domain.domain))
             }
             for service in config.services where service.enabled {
-                for domain in service.domains {
+                for domain in service.resolvableDomains {
                     domainsToResolve.append((domain, service.name))
                 }
             }
@@ -3537,7 +3571,7 @@ final class RouteManager: ObservableObject {
         }
 
         // Source-aware stale entry removal
-        let currentEntries = Set(activeRoutes.map { SourceDest(source: $0.source, destination: $0.destination) })
+        let currentEntries = Set(listedRoutes.map { SourceDest(source: $0.source, destination: $0.destination) })
         let staleEntries = currentEntries.subtracting(expectedEntries)
         var removedCount = 0
         if !staleEntries.isEmpty {
@@ -4492,6 +4526,76 @@ final class RouteManager: ObservableObject {
         return nil
     }
 
+    // MARK: - Domains added to a built-in service
+
+    /// A built-in service's shipped domains, then the user's `extras` it does not ship.
+    nonisolated static func domains(of builtIn: ServiceEntry, extras: [String]?) -> [String] {
+        builtIn.domains + (extras ?? []).filter { !builtIn.domains.contains($0) }
+    }
+
+    /// Whether `domain` is one the user added to the built-in service `serviceId`, so the
+    /// Services page can offer to remove it. The shipped domains cannot be removed.
+    func isAddedToBuiltInService(_ domain: String, serviceId: String) -> Bool {
+        guard let shipped = Config.defaultServices.first(where: { $0.id == serviceId }) else { return false }
+        return !shipped.domains.contains(domain) && (config.builtInServiceExtras[serviceId] ?? []).contains(domain)
+    }
+
+    /// The domains the user added to the built-in service `serviceId`, in the order added.
+    func domainsAddedToBuiltInService(_ serviceId: String) -> [String] {
+        (config.builtInServiceExtras[serviceId] ?? []).filter { isAddedToBuiltInService($0, serviceId: serviceId) }
+    }
+
+    /// Adds `domain` to the built-in service `serviceId` and keeps it in
+    /// `builtInServiceExtras`, so the next launch puts it back. False when the service is not
+    /// a built-in one or already has the domain.
+    @discardableResult
+    func addDomainToBuiltInService(_ domain: String, serviceId: String) -> Bool {
+        guard Config.defaultServices.contains(where: { $0.id == serviceId }),
+              let index = config.services.firstIndex(where: { $0.id == serviceId && !$0.isCustom }),
+              !config.services[index].domains.contains(domain) else { return false }
+        config.builtInServiceExtras[serviceId, default: []].append(domain)
+        config.services[index].domains.append(domain)
+        saveConfig()
+        log(.success, "Added \(domain) to \(config.services[index].name)")
+        rerouteChangedService(config.services[index])
+        return true
+    }
+
+    /// Takes back a domain the user added to the built-in service `serviceId`. The shipped
+    /// domains stay. False when `domain` is not one the user added.
+    @discardableResult
+    func removeDomainFromBuiltInService(_ domain: String, serviceId: String) -> Bool {
+        guard isAddedToBuiltInService(domain, serviceId: serviceId),
+              let index = config.services.firstIndex(where: { $0.id == serviceId && !$0.isCustom }) else { return false }
+        config.builtInServiceExtras[serviceId]?.removeAll { $0 == domain }
+        if config.builtInServiceExtras[serviceId]?.isEmpty == true { config.builtInServiceExtras[serviceId] = nil }
+        config.services[index].domains.removeAll { $0 == domain }
+        saveConfig()
+        log(.info, "Removed \(domain) from \(config.services[index].name)")
+        rerouteChangedService(config.services[index])
+        return true
+    }
+
+    /// Brings the live routes in line with a switched-on service whose domains changed: in
+    /// Bypass mode its routes go and come back from the new list, as `updateCustomService`
+    /// does; in Custom mode the rules are applied again. A wildcard follows through
+    /// `saveConfig`, which syncs the helper's list.
+    private func rerouteChangedService(_ service: ServiceEntry) {
+        guard isVPNConnected, service.enabled else { return }
+        if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
+            Task { await reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
+            return
+        }
+        guard bypassListIsLive, acquireRouteOperation() else { return }
+        Task {
+            defer { releaseRouteOperation() }
+            await removeRoutesForSource(service.name)
+            await applyRoutesForService(service)
+            await reapplyRoutesSharing(service.name, excludingService: service.id)
+            if config.manageHostsFile { await updateHostsFile() }
+        }
+    }
+
     func removeCustomService(_ serviceId: String) {
         guard let index = config.services.firstIndex(where: { $0.id == serviceId && $0.isCustom }) else { return }
         let name = config.services[index].name
@@ -4619,7 +4723,7 @@ final class RouteManager: ObservableObject {
 
         // Resolve ALL domains in parallel (not sequentially)
         let domainResults = await withTaskGroup(of: (String, [String]?).self) { group in
-            for domain in service.domains {
+            for domain in service.resolvableDomains {
                 group.addTask {
                     let ips = await DNSResolver.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
                     return (domain, ips)
@@ -5023,14 +5127,14 @@ final class RouteManager: ObservableObject {
 
     /// Acquire exclusive route operation lock. Returns false if another operation is running.
     /// @MainActor guarantees atomic check-and-set between await suspension points.
-    private func acquireRouteOperation() -> Bool {
+    func acquireRouteOperation() -> Bool {
         guard !isShuttingDown, !isApplyingRoutes else { return false }
         isApplyingRoutes = true
         return true
     }
 
     /// Release exclusive route operation lock.
-    private func releaseRouteOperation() {
+    func releaseRouteOperation() {
         isApplyingRoutes = false
         if pendingModeApply { applyRoutingModeChange() }
     }
@@ -5184,7 +5288,7 @@ final class RouteManager: ObservableObject {
     /// The physical interface (e.g. "en0") whose route reaches the local gateway.
     /// Proxy upstream sockets bind to it so their hop leaves on real Wi-Fi/Ethernet
     /// instead of a full-tunnel VPN's utun.
-    private func detectPhysicalInterface() async -> String? {
+    func detectPhysicalInterface() async -> String? {
         guard let gateway = localGateway else { return nil }
         return await routeLookupAsync(gateway)?.interfaceName
     }
@@ -5340,6 +5444,9 @@ final class RouteManager: ObservableObject {
     var routeEpochForTests: UInt64 { routeEpoch }
 
     private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil, persistCache: Bool = true) async -> [ActiveRoute]? {
+        // A wildcard has nothing to resolve: its names are routed by the helper's forwarder as
+        // they are looked up. An empty result is a success, so no DNS retry is scheduled.
+        if WildcardDomain.isWildcard(domain) { return [] }
         guard let ips = await resolveIPs(for: domain) else {
             failedDomains.insert(domain)
             return nil
@@ -5411,8 +5518,9 @@ final class RouteManager: ObservableObject {
         let activeDomains: [DomainEntry] = config.routingMode == .vpnOnly ? config.inverseDomains : config.domains
 
         for domain in activeDomains {
-            // CIDR entries don't have domain names to map in hosts file
-            guard !domain.isCIDR else { continue }
+            // CIDR entries don't have domain names to map in hosts file, and a wildcard's names
+            // are answered by the helper's forwarder, never by a hosts line.
+            guard !domain.isCIDR, !domain.isWildcard else { continue }
             // Include enabled domains AND disabled domains that still have active kernel routes
             guard domain.enabled || activeRoutes.contains(where: { $0.source == domain.domain }) else { continue }
             let lookupDomain = domain.domain
@@ -5425,7 +5533,7 @@ final class RouteManager: ObservableObject {
         if config.routingMode == .bypass {
             for service in config.services {
                 guard service.enabled || activeRoutes.contains(where: { $0.source == service.name }) else { continue }
-                for domain in service.domains {
+                for domain in service.resolvableDomains {
                     if let ip = firstRoutedIP(for: domain, in: routedDestinations) {
                         entries.append((domain, ip))
                     }
@@ -5444,7 +5552,7 @@ final class RouteManager: ObservableObject {
         }()
         var coveredDomains = Set(entries.map { $0.domain })
         var orphanedSourcesSeen: Set<String> = []
-        for route in activeRoutes where !configSources.contains(route.source) {
+        for route in activeRoutes where !configSources.contains(route.source) && !WildcardDomain.isWildcard(route.source) {
             // Domain-name source: direct DNS cache lookup
             if !coveredDomains.contains(route.source) {
                 if let ip = firstRoutedIP(for: route.source, in: routedDestinations) {
@@ -5591,11 +5699,17 @@ final class RouteManager: ObservableObject {
             domain = String(domain[..<queryIndex])
         }
 
+        // A wildcard ("*.example.com") keeps its "*." and is cleaned like a name after it. The
+        // suffix needs two labels, so "*.com" cleans to nothing rather than to the TLD.
+        let isWildcard = domain.hasPrefix(WildcardDomain.prefix)
+        if isWildcard { domain.removeFirst(WildcardDomain.prefix.count) }
+
         // Reject characters that are invalid in domain names (prevents shell injection)
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-"))
         domain = String(domain.unicodeScalars.filter { allowed.contains($0) })
 
-        return domain.lowercased()
+        guard isWildcard else { return domain.lowercased() }
+        return WildcardDomain.normalizedSuffix(domain).map(WildcardDomain.entry(for:)) ?? ""
     }
     
     /// The value an add to `list` would save, or why it saves nothing. It does not look at
@@ -5812,6 +5926,9 @@ struct AddedDomain: Equatable {
         let listName = list.displayName(in: bundle)
         if entry.isCIDR {
             return String(localized: "Added the range \(entry.domain) to your \(listName) list.", bundle: bundle)
+        }
+        if entry.isWildcard {
+            return String(localized: "Added \(entry.domain) to your \(listName) list. Each name under it is routed as it is looked up.", bundle: bundle)
         }
         guard let typed = rewrittenFrom else {
             return String(localized: "Added \(entry.domain) to your \(listName) list.", bundle: bundle)
