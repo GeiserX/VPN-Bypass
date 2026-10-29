@@ -32,4 +32,21 @@ final class ConfigIsolationTests: XCTestCase {
         XCTAssertEqual(mtimeBefore, mtimeAfter,
                         "saveConfig() under XCTest must never write the real config.json — the temp-dir redirect in RouteManager.init is broken")
     }
+
+    /// The shared test base class snapshots and restores a config file around every test.
+    /// It must do that to the test config, never to the real one: restoring the real file
+    /// would undo whatever the running app saved during the test.
+    func testTheTestBaseClassNeverTouchesTheRealConfigFile() {
+        let base = RouteManagerTestCase()
+        let temp = FileManager.default.temporaryDirectory.path
+        XCTAssertTrue(base.configURL.path.hasPrefix(temp), "got \(base.configURL.path)")
+        XCTAssertTrue(base.testBackupURL.path.hasPrefix(temp), "got \(base.testBackupURL.path)")
+
+        let realPath = realConfigPath()
+        let inodeBefore = (try? FileManager.default.attributesOfItem(atPath: realPath))?[.systemFileNumber] as? Int
+        base.setUp()
+        base.tearDown()
+        let inodeAfter = (try? FileManager.default.attributesOfItem(atPath: realPath))?[.systemFileNumber] as? Int
+        XCTAssertEqual(inodeBefore, inodeAfter, "the real config.json was replaced by the test base class")
+    }
 }
