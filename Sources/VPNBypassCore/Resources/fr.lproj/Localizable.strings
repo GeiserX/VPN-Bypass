@@ -724,3 +724,17 @@
 "Direct rule" = "Règle Direct";
 "Added: %@" = "Ajouté : %@";
 "Remove %@ from %@" = "Retirer %1$@ de %2$@";
+
+/* DNS Lookups: removing a listed name */
+"Remove" = "Retirer";
+"Remove %@" = "Retirer %@";
+"Remove from %@" = "Retirer de %@";
+"Turn off %@" = "Désactiver %@";
+"Removed %@ from %@." = "%1$@ retiré de %2$@.";
+"Take it off the Bypass list" = "Le retirer de la liste Contournement";
+"Take it off the VPN Only list" = "Le retirer de la liste VPN uniquement";
+"Take %@ off the Bypass list. Every name under it stops bypassing the VPN." = "Retirer %@ de la liste Contournement. Tous les noms qu'il couvre cessent de contourner le VPN.";
+"Take %@ off the VPN Only list. Every name under it stops going through the VPN." = "Retirer %@ de la liste VPN uniquement. Tous les noms qu'il couvre cessent de passer par le VPN.";
+"Take %@ out of the service %@" = "Retirer %1$@ du service %2$@";
+"%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names." = "%1$@ inclut ce nom d'origine et ne peut pas le perdre. Désactiver %2$@ cesse de contourner le VPN pour tous ses noms.";
+"Delete the rule for %@ on the Rules page, which sends it to %@" = "Supprimer la règle de %1$@ de la page Règles, qui l'envoie par %2$@";

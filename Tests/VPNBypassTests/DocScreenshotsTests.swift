@@ -147,6 +147,9 @@ final class DocScreenshotsTests: XCTestCase {
     func testSettingsOnLookups() throws {
         seedBypass()
         seedLookups()
+        // The pointer on an unlisted row shows its add action; every other row stays quiet.
+        LookupsTab.hoveredForScreenshots = "api.openai.com"
+        defer { LookupsTab.hoveredForScreenshots = nil }
         let size = try renderSettings(page: .lookups, to: "lookups.png")
         XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
     }
@@ -217,15 +220,16 @@ final class DocScreenshotsTests: XCTestCase {
     }
 
     /// The DNS Lookups page on, with a morning of browsing counted: the two listed domains and
-    /// zoom.us (in the custom service Meetings) show as Bypassed, slack.com and the other names a
-    /// switched-off built-in service lists offer to turn that service on, the rest offer Add.
+    /// zoom.us (in the custom service Meetings) show as Bypassed; the rest show only their
+    /// names, long ones in full, until the pointer is on them.
     private func seedLookups() {
         rm.config.dnsLookupsEnabled = true
         rm.config.services.append(ServiceEntry(id: "custom_meetings", name: "Meetings", enabled: true,
                                                domains: ["zoom.us"], ipRanges: [], isCustom: true))
         let counts = ["github.com": 41, "slack.com": 33, "en.wikipedia.org": 27, "zoom.us": 19,
                       "api.openai.com": 14, "docs.google.com": 12, "news.ycombinator.com": 9,
-                      "registry.npmjs.org": 7, "status.example.com": 3]
+                      "registry.npmjs.org": 7, "http-intake.logs.us5.datadoghq.com": 6,
+                      "browser-intake-us5-datadoghq.com": 5, "status.example.com": 3]
         var tally = DNSLookupTally()
         let start = Date().addingTimeInterval(-3 * 3600)
         for round in 0..<(counts.values.max() ?? 0) {

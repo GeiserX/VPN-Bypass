@@ -724,3 +724,17 @@
 "Direct rule" = "Direct rule";
 "Added: %@" = "Added: %@";
 "Remove %@ from %@" = "Remove %@ from %@";
+
+/* DNS Lookups: removing a listed name */
+"Remove" = "Remove";
+"Remove %@" = "Remove %@";
+"Remove from %@" = "Remove from %@";
+"Turn off %@" = "Turn off %@";
+"Removed %@ from %@." = "Removed %@ from %@.";
+"Take it off the Bypass list" = "Take it off the Bypass list";
+"Take it off the VPN Only list" = "Take it off the VPN Only list";
+"Take %@ off the Bypass list. Every name under it stops bypassing the VPN." = "Take %@ off the Bypass list. Every name under it stops bypassing the VPN.";
+"Take %@ off the VPN Only list. Every name under it stops going through the VPN." = "Take %@ off the VPN Only list. Every name under it stops going through the VPN.";
+"Take %@ out of the service %@" = "Take %@ out of the service %@";
+"%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names." = "%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names.";
+"Delete the rule for %@ on the Rules page, which sends it to %@" = "Delete the rule for %@ on the Rules page, which sends it to %@";

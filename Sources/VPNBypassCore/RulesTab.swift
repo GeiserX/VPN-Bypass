@@ -183,6 +183,90 @@ extension RouteManager {
         return WildcardDomain.matches(name, suffix: suffix)
     }
 
+    /// What the Lookups page's remove action takes away for a listed `name` (see `lookupRemoval`).
+    func lookupRemoval(_ name: String) -> LookupRemoval? {
+        Self.lookupRemoval(name, config: config, vpnName: vpnType?.knownName)
+    }
+
+    /// What un-routes a listed `name`, from the entry that lists it (`lookupListing` picks the
+    /// same one): the name's own entry on the mode's list before a wildcard over it, and the
+    /// first switched-on service that holds it. A domain the user put in a service (a custom
+    /// service, or `builtInServiceExtras` of a built-in one) comes out of that service; a
+    /// domain a built-in service ships with cannot, so the service is turned off. In Custom
+    /// mode the rule in force is deleted. nil when the name is not listed or its own entry is
+    /// switched off (`.listedOff`: turning it on or off is the Domains page's switch).
+    nonisolated static func lookupRemoval(_ name: String, config: Config, vpnName: String? = nil,
+                                          shipped: [ServiceEntry] = Config.defaultServices) -> LookupRemoval? {
+        func onList(_ entries: [DomainEntry], _ list: DomainList) -> LookupRemoval? {
+            let held = entries.filter { $0.enabled && entry($0.domain, holds: name) }
+            guard let pick = held.first(where: { $0.domain == name }) ?? held.first else { return nil }
+            return .listEntry(id: pick.id, list: list, entry: pick.domain)
+        }
+        if config.routingMode == .vpnOnly { return onList(config.inverseDomains, .vpnOnly) }
+        if usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
+            let routes = Dictionary(config.routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let inForce = config.rules
+                .filter { rule in
+                    rule.enabled && (rule.matchType == .domain && rule.pattern == name
+                                     || rule.matchType == .suffix && WildcardDomain.matches(name, suffix: rule.pattern))
+                }
+                .sorted { $0.order < $1.order }
+                .first { routes[$0.routeId]?.enabled == true }
+            guard let rule = inForce, let route = routes[rule.routeId] else { return nil }
+            let shown = rule.matchType == .domain || WildcardDomain.isWildcard(rule.pattern)
+                ? rule.pattern : WildcardDomain.entry(for: rule.pattern)
+            return .rule(id: rule.id, entry: shown, routeName: route.friendlyName(vpnName: vpnName))
+        }
+        if let removal = onList(config.domains, .bypass) { return removal }
+        guard let service = config.services.first(where: { $0.enabled && $0.domains.contains { entry($0, holds: name) } }),
+              let held = service.domains.contains(name) ? name : service.domains.first(where: { entry($0, holds: name) })
+        else { return nil }
+        if service.isCustom {
+            return .serviceDomain(serviceId: service.id, service: service.name, entry: held)
+        }
+        let ships = shipped.first { $0.id == service.id }?.domains.contains(held) ?? true
+        if !ships, (config.builtInServiceExtras[service.id] ?? []).contains(held) {
+            return .serviceDomain(serviceId: service.id, service: service.name, entry: held)
+        }
+        return .turnOffService(serviceId: service.id, service: service.name)
+    }
+
+    /// Does what `removal` says, through the same paths as the Domains, Services and Rules
+    /// pages, so the routes go as they do there. The line to show, or nil when what it named
+    /// is gone (or the service is already off).
+    func removeLookup(_ removal: LookupRemoval) -> AddDomainFeedback? {
+        switch removal {
+        case .listEntry(let id, let list, let entry):
+            if list == .vpnOnly {
+                guard let item = config.inverseDomains.first(where: { $0.id == id }) else { return nil }
+                removeInverseDomain(item)
+            } else {
+                guard let item = config.domains.first(where: { $0.id == id }) else { return nil }
+                removeDomain(item)
+            }
+            return AddDomainFeedback(success: String(localized: "Removed \(entry)."))
+        case .rule(let id, let entry, _):
+            guard config.rules.contains(where: { $0.id == id }) else { return nil }
+            removeRule(id)
+            return AddDomainFeedback(success: String(localized: "Removed the rule for \(entry)."))
+        case .serviceDomain(let serviceId, _, let entry):
+            guard let service = config.services.first(where: { $0.id == serviceId }) else { return nil }
+            if service.isCustom {
+                if let clash = updateCustomService(id: service.id, name: service.name,
+                                                   domains: service.domains.filter { $0 != entry }, ipRanges: service.ipRanges) {
+                    return AddDomainFeedback(refusal: clash.message, typed: entry)
+                }
+            } else if !removeDomainFromBuiltInService(entry, serviceId: service.id) {
+                return nil
+            }
+            return AddDomainFeedback(success: String(localized: "Removed \(entry) from \(service.name)."))
+        case .turnOffService(let serviceId, _):
+            guard let service = config.services.first(where: { $0.id == serviceId }), service.enabled else { return nil }
+            toggleService(serviceId)
+            return AddDomainFeedback(success: String(localized: "Turned off \(service.name)."))
+        }
+    }
+
     /// The switched-off service, built-in or custom, whose domains hold exactly `name`: the
     /// Bypass mode row offers to turn it on. The first in the Services page order (custom
     /// services, then built-in ones) that can be turned on, falling back to one a custom
@@ -289,6 +373,54 @@ enum LookupListing: Equatable {
     case listedOff
     /// A Custom mode domain rule, and the name of the route it sends the name to.
     case rule(routeName: String)
+}
+
+/// What the Lookups page's remove action does for a listed name. `entry` is what comes out:
+/// the name itself, or a wildcard over it, which takes every name under it along.
+enum LookupRemoval: Equatable {
+    /// An entry on the Bypass or VPN Only list.
+    case listEntry(id: UUID, list: DomainList, entry: String)
+    /// A domain the user put in a service: a custom service's, or one added to a built-in one.
+    case serviceDomain(serviceId: String, service: String, entry: String)
+    /// A built-in service that ships with the name, which cannot come out of it.
+    case turnOffService(serviceId: String, service: String)
+    /// A Custom mode rule in force, and the route it sends the name to.
+    case rule(id: UUID, entry: String, routeName: String)
+
+    /// The button: what it does, naming the wildcard or the service when that is what goes.
+    func title(for name: String, in bundle: Bundle = .main) -> String {
+        switch self {
+        case .listEntry(_, _, let entry), .rule(_, let entry, _):
+            return entry == name ? String(localized: "Remove", bundle: bundle)
+                                 : String(localized: "Remove \(entry)", bundle: bundle)
+        case .serviceDomain(_, let service, let entry):
+            return entry == name ? String(localized: "Remove from \(service)", bundle: bundle)
+                                 : String(localized: "Remove \(entry) from \(service)", bundle: bundle)
+        case .turnOffService(_, let service):
+            return String(localized: "Turn off \(service)", bundle: bundle)
+        }
+    }
+
+    /// The tooltip: where it comes out of, and what else goes with it.
+    func help(for name: String, in bundle: Bundle = .main) -> String {
+        switch self {
+        case .listEntry(_, let list, let entry):
+            switch (list, entry == name) {
+            case (.bypass, true): return String(localized: "Take it off the Bypass list", bundle: bundle)
+            case (.vpnOnly, true): return String(localized: "Take it off the VPN Only list", bundle: bundle)
+            case (.bypass, false):
+                return String(localized: "Take \(entry) off the Bypass list. Every name under it stops bypassing the VPN.", bundle: bundle)
+            case (.vpnOnly, false):
+                return String(localized: "Take \(entry) off the VPN Only list. Every name under it stops going through the VPN.", bundle: bundle)
+            }
+        case .serviceDomain(_, let service, let entry):
+            return String(localized: "Take \(entry) out of the service \(service)", bundle: bundle)
+        case .turnOffService(_, let service):
+            return String(localized: "\(service) comes with this name and cannot lose it. Turning \(service) off stops bypassing all of its names.", bundle: bundle)
+        case .rule(_, let entry, let routeName):
+            return String(localized: "Delete the rule for \(entry) on the Rules page, which sends it to \(routeName)", bundle: bundle)
+        }
+    }
 }
 
 // MARK: - Proxy rule reach
