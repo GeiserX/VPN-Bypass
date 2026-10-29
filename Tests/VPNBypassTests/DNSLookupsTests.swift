@@ -187,25 +187,32 @@ final class LookupListingTests: RouteManagerTestCase {
         XCTAssertNil(rm.lookupListing("api.example.com"))
     }
 
-    func testOffersOnlyCustomServicesAlphabetically() {
+    /// Every service, built-in and custom, on or off, alphabetical when none is related.
+    func testOffersEveryServiceAlphabetically() {
         rm.addCustomService(name: "Zeta", domains: ["z.example"], ipRanges: [])
         rm.addCustomService(name: "alpha", domains: ["a.example"], ipRanges: [])
-        XCTAssertEqual(rm.lookupServices(for: "api.other.com").map(\.name), ["alpha", "Zeta"])
+        let offered = rm.lookupServices(for: "api.other.com").map(\.name)
+        XCTAssertEqual(offered.count, rm.config.services.count)
+        XCTAssertEqual(offered, offered.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending })
+        XCTAssertTrue(offered.contains("Slack"), "built-in services are offered too")
+        XCTAssertTrue(offered.contains("alpha") && offered.contains("Zeta"))
     }
 
-    /// A service that already holds a name under the same parent domain comes first; the one
+    /// A service that already holds a name under the same site domain comes first; the one
     /// that holds the name itself is left out.
     func testSuggestsServicesWithTheSameParentDomainFirst() {
         rm.addCustomService(name: "Alpha", domains: ["a.example"], ipRanges: [])
         rm.addCustomService(name: "Zeta Datadog", domains: ["app.DatadogHQ.com"], ipRanges: [])
         rm.addCustomService(name: "Monitoring", domains: ["status.example", "browser-intake-datadoghq.com"], ipRanges: [])
         rm.addCustomService(name: "Logs", domains: ["http-intake.logs.us5.datadoghq.com"], ipRanges: [])
-        XCTAssertEqual(rm.lookupServices(for: "http-intake.logs.us5.datadoghq.com").map(\.name),
-                       ["Zeta Datadog", "Alpha", "Monitoring"])
-        XCTAssertEqual(rm.lookupServices(for: "api.datadoghq.com").map(\.name),
-                       ["Logs", "Zeta Datadog", "Alpha", "Monitoring"])
-        XCTAssertEqual(rm.lookupServices(for: "localhost").map(\.name),
+        XCTAssertEqual(rm.lookupServices(for: "http-intake.logs.us5.datadoghq.com").first?.name, "Zeta Datadog")
+        XCTAssertFalse(rm.lookupServices(for: "http-intake.logs.us5.datadoghq.com").contains { $0.name == "Logs" })
+        XCTAssertEqual(rm.lookupServices(for: "api.datadoghq.com").prefix(2).map(\.name), ["Logs", "Zeta Datadog"])
+        XCTAssertEqual(rm.lookupServices(for: "localhost").map(\.name).filter { ["Alpha", "Logs", "Monitoring", "Zeta Datadog"].contains($0) },
                        ["Alpha", "Logs", "Monitoring", "Zeta Datadog"])
+        // A wildcard counts as a name under its site domain.
+        rm.addCustomService(name: "Wild", domains: ["*.datadoghq.com"], ipRanges: [])
+        XCTAssertEqual(rm.lookupServices(for: "api.datadoghq.com").prefix(3).map(\.name), ["Logs", "Wild", "Zeta Datadog"])
     }
 
     func testAddsToAServiceKeepingItsNameSwitchAndAddresses() {

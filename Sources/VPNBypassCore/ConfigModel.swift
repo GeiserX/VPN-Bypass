@@ -124,6 +124,10 @@ struct Config: Codable {
     var pinnedVPNProductHint: String? = nil
     /// The DNS Lookups page's switch (#176). Off until the user turns it on.
     var dnsLookupsEnabled: Bool = false
+    /// Domains the user added to a built-in service, by service id. Kept apart from
+    /// `services` because `mergeBuiltInServices` resets a built-in service's domains to the
+    /// shipped list at every launch; it adds these back after the shipped ones.
+    var builtInServiceExtras: [String: [String]] = [:]
 
     // Custom decoder for backward compatibility with configs missing new fields
     init(from decoder: Decoder) throws {
@@ -154,6 +158,7 @@ struct Config: Codable {
         pinnedVPNInterface = try container.decodeIfPresent(String.self, forKey: .pinnedVPNInterface)
         pinnedVPNProductHint = try container.decodeIfPresent(String.self, forKey: .pinnedVPNProductHint)
         dnsLookupsEnabled = try container.decodeIfPresent(Bool.self, forKey: .dnsLookupsEnabled) ?? false
+        builtInServiceExtras = try container.decodeIfPresent([String: [String]].self, forKey: .builtInServiceExtras) ?? [:]
 
         // One-time migration: derive the routes/rules representation from the
         // legacy bypass list + single proxy so the new model is populated for

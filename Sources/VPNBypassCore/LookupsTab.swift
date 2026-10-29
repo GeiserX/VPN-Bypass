@@ -144,8 +144,13 @@ struct LookupsTab: View {
                                 listing: routeManager.lookupListing(entry.name),
                                 onAdd: add,
                                 onTurnOn: { name, serviceId in feedback = routeManager.turnOnLookupService(serviceId, for: name) },
-                                onAddToService: { name, serviceId in feedback = routeManager.addLookup(name, toService: serviceId) },
-                                onNewService: { name in newServiceFor = NewServiceRequest(domain: name) }
+                                onAddChoice: { value, target in
+                                    if target == .newService {
+                                        newServiceFor = NewServiceRequest(domain: value)
+                                    } else {
+                                        feedback = routeManager.addLookup(value, to: target)
+                                    }
+                                }
                             )
                         }
                     }
@@ -201,9 +206,10 @@ private struct LookupRow: View {
     let onAdd: (String) -> Void
     /// Turns on a switched-off service that lists the name: the name, then the service id.
     let onTurnOn: (String, String) -> Void
-    let onAddToService: (String, String) -> Void
-    let onNewService: (String) -> Void
+    /// What the add panel chose to add (the name or a wildcard over it), then where.
+    let onAddChoice: (String, LookupAddTarget) -> Void
     @State private var isHovered = false
+    @State private var showingPanel = false
 
     static let countWidth: CGFloat = 76
     static let actionWidth: CGFloat = 170
@@ -247,8 +253,20 @@ private struct LookupRow: View {
         }
         .frame(height: 30)
         .padding(.horizontal, 14)
-        .background(isHovered ? Theme.bgHover : (striped ? Color.white.opacity(0.025) : Color.clear))
+        .background(isHovered || showingPanel ? Theme.bgHover : (striped ? Color.white.opacity(0.025) : Color.clear))
         .onHover { isHovered = $0 }
+        .popover(isPresented: $showingPanel, arrowEdge: .bottom) {
+            LookupAddPanel(
+                choices: LookupAddChoices(name: entry.name, mode: mode,
+                                          services: routeManager.lookupServices(for: entry.name)),
+                onAdd: { value, target in
+                    showingPanel = false
+                    // The New Service sheet opens once the popover has closed.
+                    DispatchQueue.main.async { onAddChoice(value, target) }
+                },
+                onCancel: { showingPanel = false }
+            )
+        }
     }
 
     private func status(_ listing: LookupListing) -> some View {
@@ -272,60 +290,43 @@ private struct LookupRow: View {
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder
+    /// The row's button, which adds the name as it always has, and the chevron beside it,
+    /// which opens the add panel for a wildcard or another place.
     private var action: some View {
-        if mode == .bypass {
-            // A switched-off service that lists the name is what the button turns on.
-            let offService = routeManager.lookupServiceToTurnOn(entry.name)
-            let title = offService.map { String(localized: "Turn on \($0.name)") } ?? mode.addTitle
-            let services = routeManager.lookupServices(for: entry.name)
-            Menu {
-                if let offService {
-                    Button(title) { onTurnOn(entry.name, offService.id) }
-                }
-                Button(String(localized: "Bypass list")) { onAdd(entry.name) }
-                Divider()
-                if !services.isEmpty {
-                    Section(String(localized: "Add to a service")) {
-                        ForEach(services) { service in
-                            Button(service.enabled ? service.name : String(localized: "\(service.name) (off)")) {
-                                onAddToService(entry.name, service.id)
-                            }
-                        }
-                    }
-                }
-                Button(String(localized: "New Service…")) { onNewService(entry.name) }
-            } label: {
-                Label(title, systemImage: offService == nil ? "plus" : "power")
-            } primaryAction: {
+        // A switched-off service that lists the name is what the button turns on (Bypass mode).
+        let offService = mode == .bypass ? routeManager.lookupServiceToTurnOn(entry.name) : nil
+        let title = offService.map { String(localized: "Turn on \($0.name)") } ?? mode.addTitle
+        let color = mode == .vpnOnly ? Theme.warning : Theme.success
+        return HStack(spacing: 2) {
+            Button {
                 if let offService {
                     onTurnOn(entry.name, offService.id)
                 } else {
                     onAdd(entry.name)
                 }
-            }
-            .menuStyle(.borderlessButton)
-            .controlSize(.small)
-            .fixedSize()
-            .tint(Theme.success)
-            .disabled(routeManager.isApplyingRoutes)
-            .help(offService.map { String(localized: "\($0.name) on the Services page lists this name and is off. Turn it on to bypass it. The arrow adds the name to the Bypass list or a service instead.") }
-                  ?? String(localized: "Add to the Bypass list. The arrow adds it to a service instead."))
-            .accessibilityLabel(String(localized: "\(title): \(entry.name)"))
-        } else {
-            let title = mode.addTitle
-            Button {
-                onAdd(entry.name)
             } label: {
-                Label(title, systemImage: "plus")
+                Label(title, systemImage: offService == nil ? "plus" : "power")
                     .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
             }
             .buttonStyle(.borderless)
-            .foregroundColor(mode == .vpnOnly ? Theme.warning : Theme.success)
-            .disabled(routeManager.isApplyingRoutes)
-            .help(mode.addHelp)
+            .help(offService.map { String(localized: "\($0.name) on the Services page lists this name and is off. Turn it on to bypass it.") } ?? mode.addHelp)
             .accessibilityLabel(String(localized: "\(title): \(entry.name)"))
+
+            Button {
+                showingPanel = true
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .frame(width: 16, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help(String(localized: "Add a wildcard, or add it somewhere else"))
+            .accessibilityLabel(String(localized: "More ways to add \(entry.name)"))
         }
+        .foregroundColor(color)
+        .disabled(routeManager.isApplyingRoutes)
     }
 
     /// The column title over the status and action column.
@@ -350,38 +351,6 @@ private struct LookupRow: View {
             return (routeName, nil, String(localized: "A rule on the Rules page sends it to this route"))
         case .listedOff:
             return (String(localized: "Off"), nil, String(localized: "On the Domains page, switched off. Turn it on there."))
-        }
-    }
-}
-
-/// The three ways the page can add a name, one per routing mode.
-private enum LookupMode {
-    case bypass, vpnOnly, custom
-
-    @MainActor init(_ routeManager: RouteManager) {
-        let config = routeManager.config
-        if config.routingMode == .vpnOnly {
-            self = .vpnOnly
-        } else if RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
-            self = .custom
-        } else {
-            self = .bypass
-        }
-    }
-
-    var addTitle: String {
-        switch self {
-        case .bypass: return String(localized: "Add to Bypass")
-        case .vpnOnly: return String(localized: "Add to VPN Only")
-        case .custom: return String(localized: "Send Direct")
-        }
-    }
-
-    var addHelp: String {
-        switch self {
-        case .bypass: return String(localized: "Add to the Bypass list")
-        case .vpnOnly: return String(localized: "Add to the VPN Only list")
-        case .custom: return String(localized: "Add a rule that sends it Direct")
         }
     }
 }

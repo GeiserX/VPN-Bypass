@@ -693,21 +693,33 @@
 "Add to Bypass" = "Añadir a Bypass";
 "Add to VPN Only" = "Añadir a Solo VPN";
 "Send Direct" = "Enviar Directo";
-"%@ (off)" = "%@ (desactivado)";
 "Create" = "Crear";
 "In the service %@" = "En el servicio %@";
-"Add to a service" = "Añadir a un servicio";
 "New Service…" = "Servicio nuevo…";
 "New Service" = "Servicio nuevo";
-"Add to the Bypass list. The arrow adds it to a service instead." = "Añadir a la Lista Bypass. La flecha lo añade a un servicio.";
 "This adds a custom service to the Services page, with %@ as its first domain. You can add more domains to it later." = "Esto añade un servicio personalizado a la página Servicios, con %@ como primer dominio. Después puedes añadirle más dominios.";
 "Service name" = "Nombre del servicio";
 "Added %@ to %@. The service is off; turn it on from the Services page to bypass it." = "%@ añadido a %@. El servicio está desactivado; actívalo en la página Servicios para que haga bypass.";
 "Made the service %@ with %@." = "Servicio %@ creado con %@.";
 "Turn on %@" = "Activar %@";
-"%@ on the Services page lists this name and is off. Turn it on to bypass it. The arrow adds the name to the Bypass list or a service instead." = "%@, en la página Servicios, incluye este nombre y está desactivado. Actívalo para que haga bypass. La flecha añade el nombre a la Lista Bypass o a un servicio.";
 "%@ is already in %@." = "%@ ya está en %@.";
 "Added %@ to %@." = "%@ añadido a %@.";
 "Off" = "Desactivado";
 "On the Domains page, switched off. Turn it on there." = "En la página Dominios, desactivado. Actívalo allí.";
 "The capture could not start." = "La captura no pudo empezar.";
+
+/* ===== DNS Lookups add panel ===== */
+"%@ on the Services page lists this name and is off. Turn it on to bypass it." = "%@, en la página Servicios, incluye este nombre y está desactivado. Actívalo para que haga bypass.";
+"Add a wildcard, or add it somewhere else" = "Añadir un comodín, o añadirlo en otro sitio";
+"More ways to add %@" = "Más formas de añadir %@";
+"WHAT TO ADD" = "QUÉ AÑADIR";
+"A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off." = "Un comodín cubre cada nombre bajo ese dominio. El asistente enruta cada uno en cuanto se consulta, así que Ver las consultas DNS puede seguir desactivado.";
+"WHERE" = "DÓNDE";
+"Matches every name under %@" = "Coincide con cada nombre bajo %@";
+"Matches this name only" = "Coincide solo con este nombre";
+"Add…" = "Añadir…";
+"No service matches \"%@\"" = "Ningún servicio coincide con «%@»";
+"off" = "desactivado";
+"Direct rule" = "Regla Directo";
+"Added: %@" = "Añadido: %@";
+"Remove %@ from %@" = "Quitar %1$@ de %2$@";

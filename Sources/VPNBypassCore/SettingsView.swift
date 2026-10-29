@@ -1014,6 +1014,31 @@ struct ServiceRow: View {
                     .font(.system(size: 10))
                     .foregroundColor(Theme.textSecondary)
 
+                // Domains the user added to a built-in service (from the DNS Lookups page).
+                // They follow the shipped ones across launches; only these can be removed.
+                if !service.isCustom {
+                    ForEach(routeManager.domainsAddedToBuiltInService(service.id), id: \.self) { domain in
+                        HStack(spacing: 4) {
+                            Text("Added: \(domain)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(Theme.textSecondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Button {
+                                routeManager.removeDomainFromBuiltInService(domain, serviceId: service.id)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(Theme.textTertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(routeManager.isApplyingRoutes)
+                            .help(String(localized: "Remove \(domain) from \(service.name)"))
+                            .accessibilityLabel(String(localized: "Remove \(domain) from \(service.name)"))
+                        }
+                    }
+                }
+
                 if let nameLine {
                     AddDomainFeedbackLine(feedback: AddDomainFeedback(refusal: nameLine, typed: service.name))
                         .padding(.top, 2)

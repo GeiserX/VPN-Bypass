@@ -151,6 +151,36 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
     }
 
+    /// The add panel a Lookups row's chevron opens. A popover does not draw in an offscreen
+    /// window, so the panel is drawn on its own, on the popover's dark ground, with a wildcard
+    /// and a service chosen so both halves show what they do.
+    func testLookupsAddPanel() throws {
+        seedBypass()
+        rm.config.services.append(ServiceEntry(id: "custom_datadog", name: "Datadog", enabled: true,
+                                               domains: ["app.datadoghq.com"], ipRanges: [], isCustom: true))
+        let name = "api.us5.datadoghq.com"
+        let choices = LookupAddChoices(name: name, mode: .bypass, services: rm.lookupServices(for: name))
+        XCTAssertEqual(choices.services.first?.name, "Datadog", "the service with a datadoghq.com name comes first")
+        let panel = LookupAddPanel(choices: choices, level: "*.datadoghq.com", target: .service("custom_datadog"),
+                                   onAdd: { _, _ in }, onCancel: {})
+            .environmentObject(rm)
+            .background(Self.popoverGround)
+        let hosting = NSHostingView(rootView: panel)
+        let window = DocScreenshotKeyWindow(contentRect: NSRect(x: 0, y: 0, width: LookupAddPanel.width, height: 600),
+                                            styleMask: [.borderless], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = hosting
+        show(window)
+        window.setContentSize(hosting.fittingSize)
+        window.makeFirstResponder(nil)
+        settle(hosting)
+        let size = try write(hosting, cornerRadius: 10, outline: NSColor(white: 1, alpha: 0.15), to: "lookups-add.png")
+        XCTAssertEqual(size.width, LookupAddPanel.width * 2)
+    }
+
+    /// Close to a popover's ground in dark mode.
+    private static let popoverGround = Color(red: 40 / 255, green: 40 / 255, blue: 42 / 255)
+
     // MARK: - Fake state
 
     /// WireGuard on utun4, helper ready, nothing on any list yet.

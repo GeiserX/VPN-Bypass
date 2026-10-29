@@ -341,6 +341,9 @@ final class RouteManager: ObservableObject {
     /// Preserves the user's enabled/disabled state while updating domains,
     /// ipRanges, and names from the latest source code definitions.
     /// Also adds any new built-in services that didn't exist when the user last saved.
+    /// The domains the user added to a built-in service (`builtInServiceExtras`) follow the
+    /// shipped ones, so they survive this reset; the shipped list stays authoritative for its
+    /// own entries.
     private func mergeBuiltInServices(autoSave: Bool = true) {
         let defaults = Config.defaultServices
         let savedById = Dictionary(uniqueKeysWithValues: config.services.map { ($0.id, $0) })
@@ -352,8 +355,9 @@ final class RouteManager: ObservableObject {
         
         // Walk the default list to preserve ordering from source code
         for builtIn in defaults {
+            let domains = Self.domains(of: builtIn, extras: config.builtInServiceExtras[builtIn.id])
             if let saved = savedById[builtIn.id] {
-                let domainsChanged = Set(saved.domains) != Set(builtIn.domains)
+                let domainsChanged = Set(saved.domains) != Set(domains)
                 let ipRangesChanged = Set(saved.ipRanges) != Set(builtIn.ipRanges)
                 if domainsChanged || ipRangesChanged || saved.name != builtIn.name {
                     updated += 1
@@ -362,12 +366,14 @@ final class RouteManager: ObservableObject {
                     id: builtIn.id,
                     name: builtIn.name,
                     enabled: saved.enabled,
-                    domains: builtIn.domains,
+                    domains: domains,
                     ipRanges: builtIn.ipRanges
                 ))
             } else {
                 added += 1
-                merged.append(builtIn)
+                var fresh = builtIn
+                fresh.domains = domains
+                merged.append(fresh)
             }
         }
         
@@ -4518,6 +4524,76 @@ final class RouteManager: ObservableObject {
             }
         }
         return nil
+    }
+
+    // MARK: - Domains added to a built-in service
+
+    /// A built-in service's shipped domains, then the user's `extras` it does not ship.
+    nonisolated static func domains(of builtIn: ServiceEntry, extras: [String]?) -> [String] {
+        builtIn.domains + (extras ?? []).filter { !builtIn.domains.contains($0) }
+    }
+
+    /// Whether `domain` is one the user added to the built-in service `serviceId`, so the
+    /// Services page can offer to remove it. The shipped domains cannot be removed.
+    func isAddedToBuiltInService(_ domain: String, serviceId: String) -> Bool {
+        guard let shipped = Config.defaultServices.first(where: { $0.id == serviceId }) else { return false }
+        return !shipped.domains.contains(domain) && (config.builtInServiceExtras[serviceId] ?? []).contains(domain)
+    }
+
+    /// The domains the user added to the built-in service `serviceId`, in the order added.
+    func domainsAddedToBuiltInService(_ serviceId: String) -> [String] {
+        (config.builtInServiceExtras[serviceId] ?? []).filter { isAddedToBuiltInService($0, serviceId: serviceId) }
+    }
+
+    /// Adds `domain` to the built-in service `serviceId` and keeps it in
+    /// `builtInServiceExtras`, so the next launch puts it back. False when the service is not
+    /// a built-in one or already has the domain.
+    @discardableResult
+    func addDomainToBuiltInService(_ domain: String, serviceId: String) -> Bool {
+        guard Config.defaultServices.contains(where: { $0.id == serviceId }),
+              let index = config.services.firstIndex(where: { $0.id == serviceId && !$0.isCustom }),
+              !config.services[index].domains.contains(domain) else { return false }
+        config.builtInServiceExtras[serviceId, default: []].append(domain)
+        config.services[index].domains.append(domain)
+        saveConfig()
+        log(.success, "Added \(domain) to \(config.services[index].name)")
+        rerouteChangedService(config.services[index])
+        return true
+    }
+
+    /// Takes back a domain the user added to the built-in service `serviceId`. The shipped
+    /// domains stay. False when `domain` is not one the user added.
+    @discardableResult
+    func removeDomainFromBuiltInService(_ domain: String, serviceId: String) -> Bool {
+        guard isAddedToBuiltInService(domain, serviceId: serviceId),
+              let index = config.services.firstIndex(where: { $0.id == serviceId && !$0.isCustom }) else { return false }
+        config.builtInServiceExtras[serviceId]?.removeAll { $0 == domain }
+        if config.builtInServiceExtras[serviceId]?.isEmpty == true { config.builtInServiceExtras[serviceId] = nil }
+        config.services[index].domains.removeAll { $0 == domain }
+        saveConfig()
+        log(.info, "Removed \(domain) from \(config.services[index].name)")
+        rerouteChangedService(config.services[index])
+        return true
+    }
+
+    /// Brings the live routes in line with a switched-on service whose domains changed: in
+    /// Bypass mode its routes go and come back from the new list, as `updateCustomService`
+    /// does; in Custom mode the rules are applied again. A wildcard follows through
+    /// `saveConfig`, which syncs the helper's list.
+    private func rerouteChangedService(_ service: ServiceEntry) {
+        guard isVPNConnected, service.enabled else { return }
+        if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
+            Task { await reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
+            return
+        }
+        guard bypassListIsLive, acquireRouteOperation() else { return }
+        Task {
+            defer { releaseRouteOperation() }
+            await removeRoutesForSource(service.name)
+            await applyRoutesForService(service)
+            await reapplyRoutesSharing(service.name, excludingService: service.id)
+            if config.manageHostsFile { await updateHostsFile() }
+        }
     }
 
     func removeCustomService(_ serviceId: String) {

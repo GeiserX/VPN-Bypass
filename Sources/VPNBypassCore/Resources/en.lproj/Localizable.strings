@@ -693,21 +693,33 @@
 "Add to Bypass" = "Add to Bypass";
 "Add to VPN Only" = "Add to VPN Only";
 "Send Direct" = "Send Direct";
-"%@ (off)" = "%@ (off)";
 "Create" = "Create";
 "In the service %@" = "In the service %@";
-"Add to a service" = "Add to a service";
 "New Service…" = "New Service…";
 "New Service" = "New Service";
-"Add to the Bypass list. The arrow adds it to a service instead." = "Add to the Bypass list. The arrow adds it to a service instead.";
 "This adds a custom service to the Services page, with %@ as its first domain. You can add more domains to it later." = "This adds a custom service to the Services page, with %@ as its first domain. You can add more domains to it later.";
 "Service name" = "Service name";
 "Added %@ to %@. The service is off; turn it on from the Services page to bypass it." = "Added %@ to %@. The service is off; turn it on from the Services page to bypass it.";
 "Made the service %@ with %@." = "Made the service %@ with %@.";
 "Turn on %@" = "Turn on %@";
-"%@ on the Services page lists this name and is off. Turn it on to bypass it. The arrow adds the name to the Bypass list or a service instead." = "%@ on the Services page lists this name and is off. Turn it on to bypass it. The arrow adds the name to the Bypass list or a service instead.";
 "%@ is already in %@." = "%@ is already in %@.";
 "Added %@ to %@." = "Added %@ to %@.";
 "Off" = "Off";
 "On the Domains page, switched off. Turn it on there." = "On the Domains page, switched off. Turn it on there.";
 "The capture could not start." = "The capture could not start.";
+
+/* ===== DNS Lookups add panel ===== */
+"%@ on the Services page lists this name and is off. Turn it on to bypass it." = "%@ on the Services page lists this name and is off. Turn it on to bypass it.";
+"Add a wildcard, or add it somewhere else" = "Add a wildcard, or add it somewhere else";
+"More ways to add %@" = "More ways to add %@";
+"WHAT TO ADD" = "WHAT TO ADD";
+"A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off." = "A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off.";
+"WHERE" = "WHERE";
+"Matches every name under %@" = "Matches every name under %@";
+"Matches this name only" = "Matches this name only";
+"Add…" = "Add…";
+"No service matches \"%@\"" = "No service matches \"%@\"";
+"off" = "off";
+"Direct rule" = "Direct rule";
+"Added: %@" = "Added: %@";
+"Remove %@ from %@" = "Remove %@ from %@";

@@ -693,21 +693,33 @@
 "Add to Bypass" = "Ajouter au Contournement";
 "Add to VPN Only" = "Ajouter à VPN uniquement";
 "Send Direct" = "Envoyer en Direct";
-"%@ (off)" = "%@ (désactivé)";
 "Create" = "Créer";
 "In the service %@" = "Dans le service %@";
-"Add to a service" = "Ajouter à un service";
 "New Service…" = "Nouveau service…";
 "New Service" = "Nouveau service";
-"Add to the Bypass list. The arrow adds it to a service instead." = "Ajouter à la liste Contournement. La flèche l'ajoute plutôt à un service.";
 "This adds a custom service to the Services page, with %@ as its first domain. You can add more domains to it later." = "Cela ajoute un service personnalisé à la page Services, avec %@ comme premier domaine. Vous pourrez lui ajouter d'autres domaines plus tard.";
 "Service name" = "Nom du service";
 "Added %@ to %@. The service is off; turn it on from the Services page to bypass it." = "%@ ajouté à %@. Le service est désactivé ; activez-le depuis la page Services pour le contourner.";
 "Made the service %@ with %@." = "Service %@ créé avec %@.";
 "Turn on %@" = "Activer %@";
-"%@ on the Services page lists this name and is off. Turn it on to bypass it. The arrow adds the name to the Bypass list or a service instead." = "%@, sur la page Services, contient ce nom et est désactivé. Activez-le pour le contourner. La flèche ajoute plutôt le nom à la liste Contournement ou à un service.";
 "%@ is already in %@." = "%@ est déjà dans %@.";
 "Added %@ to %@." = "%@ ajouté à %@.";
 "Off" = "Désactivé";
 "On the Domains page, switched off. Turn it on there." = "Sur la page Domaines, désactivé. Activez-le là-bas.";
 "The capture could not start." = "La capture n'a pas pu démarrer.";
+
+/* ===== DNS Lookups add panel ===== */
+"%@ on the Services page lists this name and is off. Turn it on to bypass it." = "%@, sur la page Services, contient ce nom et est désactivé. Activez-le pour le contourner.";
+"Add a wildcard, or add it somewhere else" = "Ajouter un joker, ou l'ajouter ailleurs";
+"More ways to add %@" = "Autres façons d'ajouter %@";
+"WHAT TO ADD" = "QUOI AJOUTER";
+"A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off." = "Un joker couvre chaque nom en dessous. L'assistant route chacun dès qu'il est résolu, donc Suivre les requêtes DNS peut rester désactivé.";
+"WHERE" = "OÙ";
+"Matches every name under %@" = "Correspond à chaque nom sous %@";
+"Matches this name only" = "Correspond à ce nom uniquement";
+"Add…" = "Ajouter…";
+"No service matches \"%@\"" = "Aucun service ne correspond à « %@ »";
+"off" = "désactivé";
+"Direct rule" = "Règle Direct";
+"Added: %@" = "Ajouté : %@";
+"Remove %@ from %@" = "Retirer %1$@ de %2$@";

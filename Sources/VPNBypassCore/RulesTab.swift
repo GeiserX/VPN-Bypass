@@ -81,7 +81,8 @@ extension RouteManager {
     /// others as `RulesTab.saveRule` appends a new one. An IP range ("10.0.0.0/24") becomes
     /// a `.cidr` rule, checked by the VPN Only list's range check, which is the Rules
     /// editor's `isValidCIDR`; a name or a pasted link becomes a `.domain` rule for its host,
-    /// cleaned as the Bypass list cleans it. Saves but does not re-apply; the caller does.
+    /// cleaned as the Bypass list cleans it, and a wildcard ("*.example.com") a `.suffix` rule
+    /// on its suffix, as `Config.derive` maps one. Saves but does not re-apply; the caller does.
     /// A rule with the same pattern refuses the add, naming its route: on Direct it is a
     /// repeat, and on another route it matches first, so a second rule would do nothing. A
     /// rule whose route is gone matches nothing, so it does not count. Returns the rule
@@ -96,13 +97,15 @@ extension RouteManager {
         case .success(let value):
             checked = value
         }
-        let matchType: MatchType = checked.isCIDR ? .cidr : .domain
+        let suffix = WildcardDomain.suffix(of: checked.value)
+        let matchType: MatchType = checked.isCIDR ? .cidr : (suffix == nil ? .domain : .suffix)
+        let pattern = suffix ?? checked.value
         guard let directRouteId = config.routes.first(where: { $0.egress == .direct })?.id else {
             log(.error, "Cannot add rule for \(checked.value): no Direct route found")
             return nil
         }
         let existing = config.rules
-            .filter { $0.matchType == matchType && $0.pattern == checked.value }
+            .filter { $0.matchType == matchType && $0.pattern == pattern }
             .compactMap { rule in config.routes.first(where: { $0.id == rule.routeId }) }
             .first
         if let route = existing {
@@ -111,7 +114,7 @@ extension RouteManager {
             return .failure(error)
         }
         let maxOrder = config.rules.map(\.order).max() ?? -1
-        let rule = Rule(matchType: matchType, pattern: checked.value, routeId: directRouteId, order: maxOrder + 1)
+        let rule = Rule(matchType: matchType, pattern: pattern, routeId: directRouteId, order: maxOrder + 1)
         config.rules.append(rule)
         saveConfig()
         log(.success, "Added rule: \(checked.value) → Direct")
@@ -141,31 +144,42 @@ extension RouteManager {
     }
 
     /// Where `name` already is, among the entries the current mode reads: the Bypass list or
-    /// an enabled service, the VPN Only list, or a Custom mode domain rule. nil when nowhere.
-    /// A list entry that is switched off is `.listedOff`: adding it again would be refused.
+    /// an enabled service, the VPN Only list, or a Custom mode domain or suffix rule. nil when
+    /// nowhere. A wildcard ("*.example.com") holds every name under it. A list entry that is
+    /// switched off is `.listedOff`: adding it again would be refused.
     func lookupListing(_ name: String) -> LookupListing? {
         if config.routingMode == .vpnOnly {
-            guard let entry = config.inverseDomains.first(where: { $0.domain == name }) else { return nil }
+            guard let entry = config.inverseDomains.first(where: { Self.entry($0.domain, holds: name) }) else { return nil }
             return entry.enabled ? .vpnOnlyList : .listedOff
         }
         if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
             // The rule the compiler would use: enabled, lowest order, with a route that is on.
             let routes = Dictionary(config.routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let match = config.rules
-                .filter { $0.enabled && $0.matchType == .domain && $0.pattern == name }
+                .filter { rule in
+                    rule.enabled && (rule.matchType == .domain && rule.pattern == name
+                                     || rule.matchType == .suffix && WildcardDomain.matches(name, suffix: rule.pattern))
+                }
                 .sorted { $0.order < $1.order }
                 .lazy.compactMap { routes[$0.routeId] }
                 .first { $0.enabled }
             guard let route = match else { return nil }
             return .rule(routeName: route.friendlyName(vpnName: vpnType?.knownName))
         }
-        if let entry = config.domains.first(where: { $0.domain == name }) {
+        if let entry = config.domains.first(where: { Self.entry($0.domain, holds: name) }) {
             return entry.enabled ? .bypassList : .listedOff
         }
-        if let service = config.services.first(where: { $0.enabled && $0.domains.contains(name) }) {
+        if let service = config.services.first(where: { $0.enabled && $0.domains.contains { Self.entry($0, holds: name) } }) {
             return .service(service.name)
         }
         return nil
+    }
+
+    /// A list or service entry holds `name` when it is the name, or a wildcard over it.
+    nonisolated static func entry(_ entry: String, holds name: String) -> Bool {
+        if entry == name { return true }
+        guard let suffix = WildcardDomain.suffix(of: entry) else { return false }
+        return WildcardDomain.matches(name, suffix: suffix)
     }
 
     /// The switched-off service, built-in or custom, whose domains hold exactly `name`: the
@@ -196,37 +210,36 @@ extension RouteManager {
         return AddDomainFeedback(success: String(localized: "Turned on \(service.name)."))
     }
 
-    /// The custom services a looked-up name can join in Bypass mode. Those that already hold
-    /// a name under the same parent domain (its last two labels, so any *.datadoghq.com for
+    /// The services a looked-up name can join in Bypass mode, built-in and custom, switched on
+    /// or off. Those that already hold a name under the same registrable domain
+    /// (`LookupAddLevels.registrableDomain`, so any *.datadoghq.com for
     /// http-intake.logs.datadoghq.com) come first, then the rest, each alphabetical. A service
-    /// that already holds `name` is left out. Built-in services are left out too: their
-    /// domains are reset to the shipped list at every launch.
+    /// that already holds `name` is left out. A name added to a built-in service is kept in
+    /// `builtInServiceExtras`, so the launch that resets its shipped domains keeps it.
     func lookupServices(for name: String) -> [ServiceEntry] {
-        let parent = Self.lookupParent(name)
+        let parent = LookupAddLevels.registrableDomain(name)
         let services = config.services
-            .filter { $0.isCustom && !$0.domains.contains(name) }
+            .filter { !$0.domains.contains(name) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         guard let parent else { return services }
-        let related = services.filter { $0.domains.contains { Self.lookupParent($0) == parent } }
+        let related = services.filter { $0.domains.contains { LookupAddLevels.registrableDomain($0) == parent } }
         return related + services.filter { service in !related.contains { $0.id == service.id } }
     }
 
-    /// The last two labels of `name`, lowercased, or nil for a name with fewer than two.
-    private static func lookupParent(_ name: String) -> String? {
-        let labels = name.lowercased().split(separator: ".")
-        guard labels.count >= 2 else { return nil }
-        return labels.suffix(2).joined(separator: ".")
-    }
-
-    /// Adds `name` to the custom service `serviceId`, keeping its name, switch and addresses.
+    /// Adds `name` to the service `serviceId`, keeping its name, switch and addresses: a custom
+    /// service through `updateCustomService`, a built-in one through `addDomainToBuiltInService`.
     /// The line to show, or nil when the service is gone.
     func addLookup(_ name: String, toService serviceId: String) -> AddDomainFeedback? {
-        guard let service = config.services.first(where: { $0.id == serviceId && $0.isCustom }) else { return nil }
+        guard let service = config.services.first(where: { $0.id == serviceId }) else { return nil }
         if service.domains.contains(name) {
             return AddDomainFeedback(refusal: String(localized: "\(name) is already in \(service.name)."), typed: name)
         }
-        if let clash = updateCustomService(id: service.id, name: service.name, domains: service.domains + [name], ipRanges: service.ipRanges) {
-            return AddDomainFeedback(refusal: clash.message, typed: name)
+        if service.isCustom {
+            if let clash = updateCustomService(id: service.id, name: service.name, domains: service.domains + [name], ipRanges: service.ipRanges) {
+                return AddDomainFeedback(refusal: clash.message, typed: name)
+            }
+        } else if !addDomainToBuiltInService(name, serviceId: service.id) {
+            return nil
         }
         let message = service.enabled
             ? String(localized: "Added \(name) to \(service.name).")
@@ -241,6 +254,21 @@ extension RouteManager {
             return AddDomainFeedback(refusal: clash.message, typed: name)
         }
         return AddDomainFeedback(success: String(localized: "Made the service \(serviceName) with \(name)."))
+    }
+
+    /// Adds what the Lookups add panel chose (`entry`, the looked-up name or a wildcard over
+    /// it) where it chose. The line to show, or nil for a Custom mode rule that saved (it says
+    /// nothing back, as the row's own button does) or a service that is gone. New Service
+    /// opens a sheet instead, so it never reaches here.
+    func addLookup(_ entry: String, to target: LookupAddTarget) -> AddDomainFeedback? {
+        switch target {
+        case .modeList, .directRule:
+            return addForCurrentMode(entry).map { AddDomainFeedback($0, typed: entry) }
+        case .service(let id):
+            return addLookup(entry, toService: id)
+        case .newService:
+            return nil
+        }
     }
 
     /// Saves and re-applies after a rule change (RulesTab's `persistAndReapply`).
