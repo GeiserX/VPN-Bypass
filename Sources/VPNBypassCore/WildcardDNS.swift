@@ -833,6 +833,15 @@ public enum WildcardLookup {
               let spec = specs.first(where: { $0.suffix == suffix }) else {
             return DNSWire.reply(to: query, rcode: DNSWire.rcodeRefused)
         }
+        // An earlier rule sends this name another way: answer it as the upstream does, and
+        // learn nothing.
+        if spec.excludes(name) {
+            guard let raw = forward(query, spec), let upstream = DNSWire.parse(raw) else {
+                return DNSWire.reply(to: query, rcode: DNSWire.rcodeServFail)
+            }
+            if !overTCP && raw.count > query.maxUDPSize { return DNSWire.truncated(upstream) }
+            return raw
+        }
         // The routes are IPv4 only; an IPv6 answer would take the connection past them.
         if question.type == DNSWire.typeAAAA { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNoError) }
 
@@ -930,19 +939,37 @@ public struct WildcardSpec: Equatable, Sendable {
     /// The route goes into a tunnel (VPN Only, a pinned VPN), whose names may resolve to
     /// private addresses on the company network. See `WildcardSafetyGuard.refusal`.
     public let intoTunnel: Bool
+    /// Names under the suffix an earlier Custom rule claims: an exact name (`a.example.com`)
+    /// or a narrower wildcard (`*.a.example.com`). They are answered as the upstream says,
+    /// with no route learned, because first match sends them another way.
+    public let excluded: [String]
 
-    public init(suffix: String, gateway: String, upstream: [String], interface: String, intoTunnel: Bool = false) {
+    /// At most this many exclusions cross to the helper.
+    public static let maxExcluded = 64
+
+    public init(suffix: String, gateway: String, upstream: [String], interface: String, intoTunnel: Bool = false,
+                excluded: [String] = []) {
         self.suffix = suffix
         self.gateway = gateway
         self.upstream = upstream
         self.interface = interface
         self.intoTunnel = intoTunnel
+        self.excluded = excluded
     }
 
     public var dictionary: [String: String] {
         var d = ["suffix": suffix, "gateway": gateway, "upstream": upstream.joined(separator: ","), "interface": interface]
         if intoTunnel { d["tunnel"] = "1" }
+        if !excluded.isEmpty { d["excluded"] = excluded.joined(separator: ",") }
         return d
+    }
+
+    /// Whether an earlier rule claims `name`, so no route is learned for it here.
+    public func excludes(_ name: String) -> Bool {
+        excluded.contains { entry in
+            if let narrower = WildcardDomain.suffix(of: entry) { return WildcardDomain.matches(name, suffix: narrower) }
+            return WildcardDomain.normalizedSuffix(name) == entry
+        }
     }
 
     /// Nil unless every field is something the helper may act on. The helper re-checks the
@@ -956,7 +983,16 @@ public struct WildcardSpec: Equatable, Sendable {
         guard !upstream.isEmpty, upstream.count <= 4,
               upstream.allSatisfy({ WildcardIPv4.parse($0) != nil && !$0.hasPrefix("127.") && $0 != "0.0.0.0" })
         else { return nil }
-        self.init(suffix: suffix, gateway: gateway, upstream: upstream, interface: interface, intoTunnel: d["tunnel"] == "1")
+        let excluded = (d["excluded"] ?? "").split(separator: ",").map(String.init)
+        guard excluded.count <= Self.maxExcluded, excluded.allSatisfy({ entry in
+            // An exact name may be the suffix itself; a narrower wildcard must be below it.
+            let narrower = WildcardDomain.isWildcard(entry)
+            let bare = narrower ? String(entry.dropFirst(WildcardDomain.prefix.count)) : entry
+            return WildcardDomain.normalizedSuffix(bare) == bare && WildcardDomain.matches(bare, suffix: suffix)
+                && !(narrower && bare == suffix)
+        }) else { return nil }
+        self.init(suffix: suffix, gateway: gateway, upstream: upstream, interface: interface, intoTunnel: d["tunnel"] == "1",
+                  excluded: excluded)
     }
 
     static func isValidGateway(_ g: String) -> Bool {

@@ -427,6 +427,21 @@ final class WildcardPayloadTests: XCTestCase {
         XCTAssertNil(WildcardSpec(dictionary: d))
     }
 
+    /// Exclusions cross to the helper, and only names under the spec's own suffix do.
+    func testExclusionsRoundTripAndStayUnderTheSuffix() {
+        let spec = WildcardSpec(suffix: "example.com", gateway: "192.168.10.1", upstream: ["1.1.1.1"], interface: "en0",
+                                excluded: ["example.com", "a.example.com", "*.b.example.com"])
+        XCTAssertEqual(WildcardSpec(dictionary: spec.dictionary), spec)
+        XCTAssertTrue(spec.excludes("EXAMPLE.com"))
+        XCTAssertTrue(spec.excludes("x.b.example.com"))
+        XCTAssertFalse(spec.excludes("x.a.example.com"), "an exact name holds no names under it")
+        var d = spec.dictionary
+        d["excluded"] = "other.org"
+        XCTAssertNil(WildcardSpec(dictionary: d))
+        d["excluded"] = "*.example.com"
+        XCTAssertNil(WildcardSpec(dictionary: d), "a wildcard excluding itself would serve nothing")
+    }
+
     func testLearnedRouteRoundTrips() {
         let r = LearnedWildcardRoute(ip: "34.149.66.165", suffix: "us5.datadoghq.com", gateway: "192.168.10.1")
         XCTAssertEqual(LearnedWildcardRoute(dictionary: r.dictionary), r)
@@ -601,6 +616,32 @@ final class WildcardPlannerTests: XCTestCase {
             Rule(matchType: .suffix, pattern: "a.lab.example.net", routeId: pinned.id, order: 7),
         ]
         XCTAssertEqual(WildcardPlanner.configuredSuffixes(c), ["x.free.example.org", "git.corp.example.net", "lab.example.net"])
+    }
+
+    /// First match wins for names a later wildcard covers too: an earlier exact rule (the apex
+    /// or a deeper name, from a domain rule or a service) and an earlier narrower suffix are
+    /// excluded from the wildcard's spec, so the helper learns no route for them.
+    func testNamesAnEarlierRuleClaimsAreExcludedFromALaterWildcard() {
+        var c = Config()
+        c.routingMode = .custom
+        c.schemaVersion = 2
+        let direct = Route(name: "Direct", egress: .direct)
+        let proxy = Route(name: "Proxy", egress: .proxySOCKS5, proxyHost: "p", proxyPort: 1080)
+        c.routes = [direct, proxy]
+        c.services = [ServiceEntry(id: "svc", name: "Svc", enabled: true, domains: ["login.example.com"], ipRanges: [])]
+        c.rules = [
+            Rule(matchType: .domain, pattern: "example.com", routeId: proxy.id, order: 0),
+            Rule(matchType: .domain, pattern: "Api.Example.com", routeId: proxy.id, order: 1),
+            Rule(matchType: .service, pattern: "svc", routeId: proxy.id, order: 2),
+            Rule(matchType: .suffix, pattern: "eu.example.com", routeId: proxy.id, order: 3),
+            Rule(matchType: .domain, pattern: "elsewhere.org", routeId: proxy.id, order: 4),
+            Rule(matchType: .suffix, pattern: "*.example.com", routeId: direct.id, order: 5),
+            Rule(matchType: .domain, pattern: "late.example.com", routeId: proxy.id, order: 6),
+        ]
+        let specs = WildcardPlanner.plan(c, env: env).specs
+        XCTAssertEqual(specs.map(\.suffix), ["example.com"])
+        XCTAssertEqual(specs.first?.excluded, ["example.com", "api.example.com", "login.example.com", "*.eu.example.com"])
+        XCTAssertEqual(specs.first.flatMap { WildcardSpec(dictionary: $0.dictionary) }, specs.first)
     }
 
     /// Around the VPN, the physical interface's servers as macOS has them now, not the ones
@@ -854,6 +895,32 @@ final class LearnedWildcardRouteTests: XCTestCase {
         XCTAssertNil(engine.ledger.seen["example.com"]?["34.8.8.8"])
     }
 
+    /// A route the startup sweep kept for a still-configured wildcard is tracked again even
+    /// when the helper serves nothing (here: no helper at all), so teardown and expiry can
+    /// take it out. A failed table read is tried again at the next pass.
+    func testLedgerRoutesAreAdoptedWhenTheHelperServesNothing() async {
+        let rm = RouteManager.shared
+        let engine = rm.wildcards
+        let saved = engine.kernelTable
+        defer { engine.kernelTable = saved }
+        let ours = RouteKernel.KernelRoute(destination: WildcardIPv4.parse("34.6.6.6")!, prefix: nil,
+                                           gatewayAddress: WildcardIPv4.parse("192.168.10.1")!,
+                                           gatewayInterfaceIndex: nil, flags: RTF_PROTO1 | RTF_HOST)
+        engine.kernelTable = { nil }
+        await engine.routesCleared()
+        engine.routesApplied()
+        engine.record([LearnedWildcardRoute(ip: "34.6.6.6", suffix: "example.com", gateway: "192.168.10.1")])
+        // As after a relaunch: the ledger and the kernel route are there, the model is empty.
+        rm.activeRoutes = []
+
+        await engine.syncForTests()
+        XCTAssertTrue(rm.activeRoutes.isEmpty, "nothing read, nothing adopted")
+        engine.kernelTable = { [ours] }
+        await engine.syncForTests()
+        XCTAssertEqual(rm.activeRoutes.map { "\($0.source)|\($0.destination)|\($0.gateway)" },
+                       ["*.example.com|34.6.6.6|192.168.10.1"])
+    }
+
     /// With no apply since launch (auto-apply off) or since Remove All Routes, a wildcard
     /// added while the VPN is up works at once, as a listed name does. Anything else leaves
     /// the engine suspended.
@@ -982,6 +1049,27 @@ final class WildcardLookupTests: XCTestCase {
         let (m, calls) = reply(query("git.corp.example.net"), upstream: upstreamAnswer("git.corp.example.net", [[10, 20, 30, 40]]))
         XCTAssertEqual(calls.installed, ["10.20.30.40"])
         XCTAssertEqual(addresses(m), ["10.20.30.40"])
+    }
+
+    /// A name an earlier rule claims is answered as the upstream says, AAAA too, and nothing
+    /// is learned for it.
+    func testAnExcludedNameIsAnsweredWithoutARoute() {
+        let excluding = WildcardSpec(suffix: "example.com", gateway: "192.168.10.1", upstream: ["1.1.1.1"], interface: "en0",
+                                     excluded: ["example.com"])
+        let up = upstreamAnswer("example.com", [[34, 1, 1, 1]])
+        let (m, calls) = reply(query("example.com"), specs: [excluding], upstream: up)
+        XCTAssertEqual(addresses(m), ["34.1.1.1"])
+        XCTAssertEqual(m?.answers.map(\.ttl), [600], "the upstream's answer, untouched")
+        XCTAssertEqual(calls.forwarded, 1)
+        XCTAssertTrue(calls.checked.isEmpty && calls.admitted.isEmpty && calls.installed.isEmpty)
+
+        let (aaaa, aaaaCalls) = reply(query("example.com", type: DNSWire.typeAAAA), specs: [excluding], upstream: up)
+        XCTAssertNotNil(aaaa)
+        XCTAssertEqual(aaaaCalls.forwarded, 1, "asked upstream, not answered empty")
+
+        let (other, otherCalls) = reply(query("api.example.com"), specs: [excluding], upstream: upstreamAnswer("api.example.com", [[34, 2, 2, 2]]))
+        XCTAssertEqual(addresses(other), ["34.2.2.2"])
+        XCTAssertEqual(otherCalls.installed, ["34.2.2.2"], "the rest of the wildcard is still routed")
     }
 
     func testAResponseIsNotAQuery() {

@@ -103,6 +103,14 @@ final class LookupAddChoicesTests: XCTestCase {
         XCTAssertEqual(choices.target(.modeList, whenSearching: "zzz"), .modeList)
     }
 
+    /// A picked service deleted while the panel is open is no longer the target once the
+    /// panel sees the new list (it rechecks when the service ids change).
+    func testAPickedServiceThatIsGoneIsDropped() {
+        let after = LookupAddChoices(name: "api.datadoghq.com", mode: .bypass, services: [services[0]])
+        XCTAssertEqual(after.target(.service("slack"), whenSearching: ""), .modeList)
+        XCTAssertEqual(after.target(.service("custom_dd"), whenSearching: ""), .service("custom_dd"))
+    }
+
     /// The box is as tall as a short list, and eight rows tall for a long one, which scrolls.
     func testTheServiceBoxHoldsEightRows() {
         XCTAssertEqual(LookupAddPanel.maxRows, 8)

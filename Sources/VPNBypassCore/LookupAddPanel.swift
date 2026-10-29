@@ -271,6 +271,8 @@ struct LookupAddPanel: View {
         }
         .padding(14)
         .frame(width: Self.width)
+        // A service picked here and deleted meanwhile is no longer picked.
+        .onChange(of: choices.services.map(\.id)) { _ in target = choices.target(target, whenSearching: search) }
     }
 
     private var serviceList: some View {

@@ -81,8 +81,10 @@ final class WildcardForwarder {
     func configure(_ specs: [WildcardSpec], guard newGuard: WildcardSafetyGuard) -> ConfigureResult {
         queue.sync {
             lastRenew = .now()
+            // A failed read keeps the networks known so far rather than none.
+            let known = safetyGuard.connectedNetworks
             safetyGuard = newGuard
-            safetyGuard.connectedNetworks = Self.connectedNetworks()
+            safetyGuard.connectedNetworks = Self.connectedNetworks() ?? known
             limiter.keep(only: Set(specs.map(\.suffix)))
             guard !specs.isEmpty else {
                 if stopLocked(reason: "no wildcard left") { Self.flushLater() }
@@ -187,11 +189,13 @@ final class WildcardForwarder {
         return result
     }
 
-    /// The IPv4 network of every interface that is up, loopback aside.
-    static func connectedNetworks() -> [(interface: String, network: UInt32, mask: UInt32)] {
+    /// The IPv4 network of every interface that is up, loopback aside. Nil when the
+    /// interfaces cannot be read: an empty list would let a tunnel wildcard learn an address
+    /// on the network this Mac is on.
+    static func connectedNetworks() -> [(interface: String, network: UInt32, mask: UInt32)]? {
         var out: [(interface: String, network: UInt32, mask: UInt32)] = []
         var head: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&head) == 0 else { return out }
+        guard getifaddrs(&head) == 0 else { return nil }
         defer { freeifaddrs(head) }
         var cursor = head
         while let ifa = cursor {
@@ -324,7 +328,10 @@ final class WildcardForwarder {
         var (specs, safetyGuard, generation) = queue.sync { (self.specs, self.safetyGuard, self.generation) }
         // The networks this Mac is on now, not when the list was set: a network joined since
         // must not be pulled into a tunnel. Only tunnel wildcards read them.
-        if specs.contains(where: \.intoTunnel) { safetyGuard.connectedNetworks = Self.connectedNetworks() }
+        // A failed read keeps the list in `safetyGuard`, the last one read.
+        if specs.contains(where: \.intoTunnel), let networks = Self.connectedNetworks() {
+            safetyGuard.connectedNetworks = networks
+        }
         return WildcardLookup.reply(
             to: bytes, overTCP: overTCP, specs: specs, guard: safetyGuard, ttlCap: Self.ttlCap,
             forward: { query, spec in Self.forward(bytes, query: query, spec: spec, overTCP: overTCP) },

@@ -214,6 +214,8 @@ private struct LookupRow: View {
     @State private var panelMode: LookupMode?
 
     static let countWidth: CGFloat = 76
+    /// How long, in tenths of a second, a panel add waits for a running apply.
+    static let applyWaitPolls = 300
     static let actionWidth: CGFloat = 170
 
     private var mode: LookupMode { LookupMode(routeManager) }
@@ -265,11 +267,17 @@ private struct LookupRow: View {
                 onAdd: { value, target in
                     showingPanel = false
                     let opened = panelMode
-                    // The New Service sheet opens once the popover has closed.
-                    DispatchQueue.main.async {
+                    // The New Service sheet opens once the popover has closed. An apply that
+                    // started meanwhile would skip the new entry's routes, so the add waits for it.
+                    DispatchQueue.main.async { Task { @MainActor in
+                        var polls = 0
+                        while routeManager.isApplyingRoutes && polls < Self.applyWaitPolls {
+                            try? await Task.sleep(nanoseconds: 100_000_000)
+                            polls += 1
+                        }
                         guard opened == LookupMode(routeManager) else { return }
                         onAddChoice(value, target)
-                    }
+                    } }
                 },
                 onCancel: { showingPanel = false }
             )

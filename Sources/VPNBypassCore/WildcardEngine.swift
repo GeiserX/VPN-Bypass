@@ -42,6 +42,8 @@ final class WildcardEngine {
     private var syncTask: Task<Void, Never>?
     private var syncAgain = false
     private var draining = false
+    /// The kernel table adoption reads; tests hand in their own.
+    var kernelTable: () -> [RouteKernel.KernelRoute]? = RouteKernel.currentTable
 
     init(manager: RouteManager, ledgerURL: URL) {
         self.manager = manager
@@ -127,6 +129,9 @@ final class WildcardEngine {
         }
         lastConfigured = configured
         await dropLearnedRoutes(notIn: configured)
+        // Whatever the helper serves: the startup sweep kept these routes for a wildcard that
+        // is still configured, and only a tracked route is taken out by teardown and expiry.
+        if !suspended { adoptLedgerIfNeeded(suffixes: configured) }
 
         guard HelperManager.shared.isHelperInstalled else {
             sentSpecs = nil
@@ -183,7 +188,6 @@ final class WildcardEngine {
 
         warnAboutShadowing(specs: specs, resolvers: resolvers)
         if isServing, let served = servedSpecs {
-            adoptLedgerIfNeeded(specs: served)
             await moveLearnedRoutes(to: served)
             startTimer()
         } else {
@@ -258,6 +262,11 @@ final class WildcardEngine {
             requestSync()
         }
         record(drained.routes)
+        // A table read that failed at the last pass is tried again here, not only at the next
+        // change that starts a pass.
+        if !suspended && !adoptedLedger {
+            adoptLedgerIfNeeded(suffixes: Set(WildcardPlanner.configuredSuffixes(manager.config)))
+        }
 
         if Date().timeIntervalSince(lastMaintenance) >= Self.maintenanceInterval {
             lastMaintenance = Date()
@@ -295,18 +304,17 @@ final class WildcardEngine {
 
     /// After a restart: ledger addresses still in the kernel as ours are tracked again; the
     /// rest went with the reboot or the sweep and are forgotten.
-    private func adoptLedgerIfNeeded(specs: [WildcardSpec]) {
+    private func adoptLedgerIfNeeded(suffixes: Set<String>) {
         guard !adoptedLedger else { return }
         guard !ledger.seen.isEmpty else {
             adoptedLedger = true
             return
         }
         // A failed read leaves the flag down, so the next pass tries again.
-        guard let table = RouteKernel.currentTable() else { return }
+        guard let table = kernelTable() else { return }
         adoptedLedger = true
         let ours = Dictionary(table.filter { $0.isOurs && $0.isHost }.map { ($0.destinationString, $0) },
                               uniquingKeysWith: { first, _ in first })
-        let suffixes = Set(specs.map(\.suffix))
         for (suffix, ips) in ledger.seen {
             guard suffixes.contains(suffix) else { continue }
             let source = WildcardDomain.entry(for: suffix)

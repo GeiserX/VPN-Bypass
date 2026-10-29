@@ -47,14 +47,16 @@ enum WildcardPlanner {
         }
         let suffix: String
         let via: Via
+        /// Names under it an earlier rule claims (`WildcardSpec.excluded`).
+        var excluded: [String] = []
     }
 
     static func configured(_ config: Config) -> [Configured] {
         var out: [Configured] = []
         var seen: Set<String> = []
-        func add(_ entry: String, _ via: Configured.Via) {
+        func add(_ entry: String, _ via: Configured.Via, excluded: [String] = []) {
             guard let suffix = WildcardDomain.suffix(of: entry), seen.insert(suffix).inserted else { return }
-            out.append(Configured(suffix: suffix, via: via))
+            out.append(Configured(suffix: suffix, via: via, excluded: excluded))
         }
 
         if RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
@@ -68,21 +70,31 @@ enum WildcardPlanner {
             // under it goes that way, so a later wildcard below it must not catch the name
             // first through a more specific resolver file.
             var claimed: [String] = []
+            // Every exact name an earlier rule claims. A later wildcard over it still gets its
+            // resolver file, so the name is excluded there: answered, never routed.
+            var claimedNames: [String] = []
             for rule in config.rules.filter(\.enabled).sorted(by: { $0.order < $1.order }) {
                 guard let route = routes[rule.routeId], route.enabled else { continue }
                 let entries: [String]
+                var names: [String] = []
                 switch rule.matchType {
                 case .suffix:
                     entries = [WildcardDomain.isWildcard(rule.pattern) ? rule.pattern : WildcardDomain.entry(for: rule.pattern)]
                 case .service:
-                    entries = (services[rule.pattern]?.domains ?? []).filter(WildcardDomain.isWildcard)
+                    let domains = services[rule.pattern]?.domains ?? []
+                    entries = domains.filter(WildcardDomain.isWildcard)
+                    names = domains.filter { !WildcardDomain.isWildcard($0) }
                 case .domain:
                     entries = WildcardDomain.isWildcard(rule.pattern) ? [rule.pattern] : []
+                    names = WildcardDomain.isWildcard(rule.pattern) ? [] : [rule.pattern]
                 case .ip, .cidr, .process:
                     entries = []
                 }
                 let suffixes = entries.compactMap(WildcardDomain.suffix(of:))
-                defer { claimed += suffixes }
+                defer {
+                    claimed += suffixes
+                    claimedNames += names.compactMap(WildcardDomain.normalizedSuffix)
+                }
                 let via: Configured.Via
                 switch route.egress {
                 case .direct: via = .physical
@@ -90,7 +102,15 @@ enum WildcardPlanner {
                 default: continue
                 }
                 for suffix in suffixes where !claimed.contains(where: { WildcardDomain.matches(suffix, suffix: $0) }) {
-                    add(WildcardDomain.entry(for: suffix), via)
+                    var excluded: [String] = []
+                    for name in claimedNames + claimed.map(WildcardDomain.entry(for:))
+                    where WildcardDomain.matches(WildcardDomain.suffix(of: name) ?? name, suffix: suffix) && !excluded.contains(name) {
+                        excluded.append(name)
+                    }
+                    // More than the helper takes: left out, as a wildcard under an earlier
+                    // suffix is, rather than route a name first match sends elsewhere.
+                    guard excluded.count <= WildcardSpec.maxExcluded else { continue }
+                    add(WildcardDomain.entry(for: suffix), via, excluded: excluded)
                 }
             }
             return out
@@ -135,7 +155,7 @@ enum WildcardPlanner {
                 continue
             }
             let spec = WildcardSpec(suffix: item.suffix, gateway: gateway, upstream: servers, interface: interface,
-                                    intoTunnel: item.via != .physical)
+                                    intoTunnel: item.via != .physical, excluded: item.excluded)
             // Same check the helper makes, so a spec it would refuse is never sent.
             guard WildcardSpec(dictionary: spec.dictionary) != nil else {
                 skipped[item.suffix] = "its gateway or interface is not one the helper accepts"
