@@ -681,3 +681,4 @@
 "The privileged helper is not running." = "El asistente con privilegios no está en marcha.";
 "The privileged helper did not answer." = "El asistente con privilegios no respondió.";
 "The capture could not start." = "La captura no pudo empezar.";
+"Add %@" = "Añadir %@";

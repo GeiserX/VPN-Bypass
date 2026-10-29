@@ -681,3 +681,4 @@
 "The privileged helper is not running." = "The privileged helper is not running.";
 "The privileged helper did not answer." = "The privileged helper did not answer.";
 "The capture could not start." = "The capture could not start.";
+"Add %@" = "Add %@";

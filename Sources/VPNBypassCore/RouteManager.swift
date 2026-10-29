@@ -659,6 +659,7 @@ final class RouteManager: ObservableObject {
                     await applyAllRoutesInternal(sendNotification: false)
                 }
             }
+            DNSLookupsMonitor.shared.followConfig()
 
             return true
         } catch {

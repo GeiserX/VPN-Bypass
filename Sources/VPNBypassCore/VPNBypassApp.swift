@@ -109,6 +109,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             RouteManager.shared.loadConfig()
 
+            // The DNS Lookups page, when the user turned it on before (off by default). It
+            // waits for the helper by itself, so it starts here, before the helper check.
+            DNSLookupsMonitor.shared.followConfig()
+
             // Ensure helper is installed, running, and at the correct version
             // BEFORE any route application. This prevents the "Setting Up" hang
             // when the helper is outdated after a Homebrew upgrade.
@@ -138,9 +142,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Start the auto DNS refresh timer
             RouteManager.shared.startDNSRefreshTimer()
-
-            // The DNS Lookups page, when the user turned it on before (off by default).
-            DNSLookupsMonitor.shared.resumeIfEnabled()
         }
         
         // Start network monitoring for changes (after a delay to avoid duplicate startup)

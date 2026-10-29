@@ -141,7 +141,9 @@ struct SettingsView: View {
     /// mode is not here; it is the Mode menu in the title bar, so no page button changes it.
     private var headerView: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
+            // Each item is at least 80 pt wide, so seven with 4 pt gaps need 584 pt of a 580 pt
+            // window; seven sit edge to edge instead.
+            HStack(spacing: visibleTabs.count > 6 ? 0 : 4) {
                 ForEach(visibleTabs, id: \.self) { tab in
                     SettingsToolbarItem(
                         title: tab.title,

@@ -3,7 +3,9 @@
 //
 // Read-only by construction. The arguments are fixed here and nothing the caller sends reaches
 // them; `-p` keeps every interface out of promiscuous mode, `-n` stops tcpdump resolving
-// addresses (which would add DNS traffic of its own), and the filter takes queries only.
+// addresses (which would add DNS traffic of its own), the filter takes queries only, and
+// `-Q out` keeps them to the ones this Mac sends: a LAN device asking a resolver on this Mac
+// is not this Mac's lookup. A query to a local resolver on loopback still counts.
 // Names stay in memory until the app drains them and are never logged.
 //
 // The capture runs on a lease. The app drains every few seconds; when nothing has drained for
@@ -16,7 +18,7 @@ final class DNSCapture {
     static let shared = DNSCapture()
 
     static let tcpdumpPath = "/usr/sbin/tcpdump"
-    static let arguments = ["-i", "any", "-p", "-l", "-n", "-t", "-s", "512", "udp dst port 53"]
+    static let arguments = ["-i", "any", "-Q", "out", "-p", "-l", "-n", "-t", "-s", "512", "udp dst port 53"]
     static let leaseSeconds: TimeInterval = 60
 
     private let queue = DispatchQueue(label: "com.geiserx.vpnbypass.helper.dnscapture")
@@ -38,13 +40,17 @@ final class DNSCapture {
             process.standardOutput = output
             process.standardError = FileHandle.nullDevice
             process.standardInput = FileHandle.nullDevice
-            output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            output.fileHandleForReading.readabilityHandler = { [weak self, weak process] handle in
                 let data = handle.availableData
                 guard !data.isEmpty else {
                     handle.readabilityHandler = nil
                     return
                 }
-                self?.queue.async { self?.buffer.append(data) }
+                // A stopped capture's last output must not land in the next one's buffer.
+                self?.queue.async {
+                    guard let self, let process, self.process === process else { return }
+                    self.buffer.append(data)
+                }
             }
             process.terminationHandler = { [weak self] ended in
                 self?.queue.async {
@@ -60,6 +66,15 @@ final class DNSCapture {
                 output.fileHandleForReading.readabilityHandler = nil
                 helperLog.error("DNS capture failed to start: \(error.localizedDescription, privacy: .public)")
                 return (false, "tcpdump could not start: \(error.localizedDescription)")
+            }
+            // tcpdump that cannot capture (no BPF device, a refused interface) exits at once
+            // with its reason on stderr. Report that instead of a capture that never yields.
+            let deadline = DispatchTime.now() + .milliseconds(500)
+            while process.isRunning && DispatchTime.now() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+            guard process.isRunning else {
+                output.fileHandleForReading.readabilityHandler = nil
+                helperLog.error("DNS capture: tcpdump exited at once (status \(process.terminationStatus, privacy: .public))")
+                return (false, "tcpdump exited at once (status \(process.terminationStatus))")
             }
             self.process = process
             buffer = DNSQueryBuffer()

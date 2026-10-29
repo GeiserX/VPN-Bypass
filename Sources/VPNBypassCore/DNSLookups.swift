@@ -60,6 +60,9 @@ final class DNSLookupsMonitor: ObservableObject {
 
     private var timer: Timer?
     private var tickInFlight = false
+    /// Bumped by Clear and by turning off, so a drain already on its way is not counted
+    /// into the fresh list.
+    private var generation = 0
 
     private var enabled: Bool { RouteManager.shared.config.dnsLookupsEnabled }
 
@@ -68,21 +71,20 @@ final class DNSLookupsMonitor: ObservableObject {
         guard on != enabled else { return }
         RouteManager.shared.config.dnsLookupsEnabled = on
         RouteManager.shared.saveConfig()
-        if on {
-            RouteManager.shared.log(.info, "DNS Lookups turned on")
-            start()
-        } else {
-            RouteManager.shared.log(.info, "DNS Lookups turned off; the list was cleared")
-            stop()
-        }
+        RouteManager.shared.log(.info, on ? "DNS Lookups turned on" : "DNS Lookups turned off; the list was cleared")
+        followConfig()
     }
 
-    /// At launch, once the helper is ready.
-    func resumeIfEnabled() {
-        if enabled { start() }
+    /// Starts or stops to match the saved switch: at launch, and after a config import. At
+    /// launch it runs whether or not the helper is ready yet; until it is, each tick shows why
+    /// and tries again, so a helper repaired later starts the capture without a relaunch.
+    func followConfig() {
+        if enabled, timer == nil { start() }
+        if !enabled, timer != nil { stop() }
     }
 
     func clear() {
+        generation += 1
         tally = DNSLookupTally()
         since = Date()
     }
@@ -97,6 +99,7 @@ final class DNSLookupsMonitor: ObservableObject {
     }
 
     private func stop() {
+        generation += 1
         timer?.invalidate()
         timer = nil
         isCapturing = false
@@ -113,9 +116,17 @@ final class DNSLookupsMonitor: ObservableObject {
         tickInFlight = true
         defer { tickInFlight = false }
 
+        let drainGeneration = generation
         if isCapturing, let names = await HelperManager.shared.drainDNSQueries() {
-            guard enabled else { return }
+            guard enabled, generation == drainGeneration else { return }
             if !names.isEmpty { tally.record(names, at: Date()) }
+            return
+        }
+        // At launch this runs before the helper check finishes: say so on the page, without a
+        // warning in the log each launch, and try again next tick.
+        guard HelperManager.shared.isHelperInstalled else {
+            problem = String(localized: "The privileged helper is not running.")
+            isCapturing = false
             return
         }
         let failure = await HelperManager.shared.startDNSCapture()

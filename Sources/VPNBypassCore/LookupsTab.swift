@@ -123,9 +123,12 @@ struct LookupsTab: View {
                     .font(.system(size: 11))
                     .foregroundColor(Theme.success)
             } else {
+                // Disabled while routes apply, like the Domains page's add field.
                 Button("Add") { add(entry.name) }
                     .controlSize(.small)
+                    .disabled(routeManager.isApplyingRoutes)
                     .help(addHelp)
+                    .accessibilityLabel(String(localized: "Add \(entry.name)"))
             }
         }
         .padding(.horizontal, 8)
