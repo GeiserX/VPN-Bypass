@@ -7,13 +7,15 @@
 // would have used anyway (`WildcardSpec.upstream`, over a socket bound to `interface`); the
 // IPv4 addresses in the answer pass the safety guard and the limiter, get their host route on
 // `HelperTool.routeQueue` through the same install path and pacer as every other route, and
-// only then does the answer go back. AAAA gets an empty answer and HTTPS loses its `ipv6hint`,
-// because the routes are IPv4 only.
+// only then does the answer go back, without any address that missed its route. AAAA gets an
+// empty answer and HTTPS loses its `ipv6hint`, because the routes are IPv4 only. The decision
+// itself is `WildcardLookup.reply`, tested from the app target; this file is its sockets.
 //
 // Runs only while the app has at least one wildcard set, and on a lease like DNSCapture: with
 // no set or drain for `leaseSeconds` (the app quit, crashed or hung) it stops and removes its
 // files, so lookups go back to the normal resolver instead of to a port nobody answers. At
-// helper start the files of a previous run are removed for the same reason.
+// helper start, and on SIGTERM (`launchctl bootout` for an upgrade or an uninstall), the files
+// are removed for the same reason.
 //
 // Names stay in memory for the length of one lookup and are never logged or kept.
 
@@ -28,8 +30,8 @@ final class WildcardForwarder {
     /// its route's "last seen" keeps moving.
     static let ttlCap: UInt32 = 300
     static let upstreamTimeout: TimeInterval = 2
-    /// The longest a reply waits for its routes. Past it the answer goes out anyway and the
-    /// routes land when `routeQueue` gets to them: a late route beats a failed lookup.
+    /// The longest a reply waits for its routes. Past it the answer goes out without the
+    /// addresses that wait, and their install is called off if it has not started.
     static let routeWait: TimeInterval = 1.5
     static let maxInFlight = 64
     static let maxTCPConnections = 16
@@ -39,6 +41,9 @@ final class WildcardForwarder {
     private let workQueue = DispatchQueue(label: "com.geiserx.vpnbypass.helper.wildcards.work", attributes: .concurrent)
     private let inFlight = DispatchSemaphore(value: WildcardForwarder.maxInFlight)
     private let tcpSlots = DispatchSemaphore(value: WildcardForwarder.maxTCPConnections)
+    /// Resolver cache flushes run here, off `queue`: each one can take seconds, and lookups
+    /// and drains wait on `queue`.
+    private static let flushQueue = DispatchQueue(label: "com.geiserx.vpnbypass.helper.wildcards.flush")
     /// Its own routing socket; the writes still go one at a time through `routeQueue` and the
     /// shared pacer.
     private let routeWriter = HelperTool()
@@ -50,8 +55,12 @@ final class WildcardForwarder {
     private var learned: [LearnedWildcardRoute] = []
     private var learnedSet: Set<LearnedWildcardRoute> = []
     private var lastRenew = DispatchTime.now()
+    /// Moves on every stop and every change of the served list. A lookup that started under an
+    /// older one installs nothing: the app has already stopped listening for its routes.
+    private var generation: UInt64 = 0
+    private var lastLimitLog: UInt64 = 0
     private var leaseTimer: DispatchSourceTimer?
-    private var udpFD: Int32 = -1
+    private var udpListener: UDPListener?
     private var tcpFD: Int32 = -1
     private var udpSource: DispatchSourceRead?
     private var tcpSource: DispatchSourceRead?
@@ -69,32 +78,42 @@ final class WildcardForwarder {
         queue.sync {
             lastRenew = .now()
             safetyGuard = newGuard
+            safetyGuard.connectedNetworks = Self.connectedNetworks()
             limiter.keep(only: Set(specs.map(\.suffix)))
             guard !specs.isEmpty else {
-                stopLocked(reason: "no wildcard left")
+                if stopLocked(reason: "no wildcard left") { Self.flushLater() }
                 return ConfigureResult(ok: true, unserved: [], error: nil)
             }
             // Listeners first: a resolver file pointing at a port nobody answers would break
             // every lookup under its suffix.
-            if udpFD < 0 {
+            if udpListener == nil {
                 if let error = startListenersLocked() {
-                    stopLocked(reason: "listener failed")
+                    if stopLocked(reason: "listener failed") { Self.flushLater() }
                     return ConfigureResult(ok: false, unserved: [], error: error)
                 }
             }
-            self.specs = specs
             let result = Self.syncResolverFiles(wanted: Set(specs.map(\.suffix)))
             // A suffix whose file is someone else's is not ours to answer.
-            self.specs = specs.filter { !result.foreign.contains($0.suffix) }
+            let served = specs.filter { !result.foreign.contains($0.suffix) }
+            if served != self.specs { generation &+= 1 }
+            self.specs = served
+            var changed = result.changed
             if self.specs.isEmpty {
-                stopLocked(reason: "every resolver file belongs to someone else")
+                changed = stopLocked(reason: "every resolver file belongs to someone else") || changed
             } else {
                 armLease()
             }
-            if result.changed { HelperTool.flushResolverCaches() }
+            if changed { Self.flushLater() }
             helperLog.info("wildcard: serving \(self.specs.count, privacy: .public), \(result.foreign.count, privacy: .public) left to another resolver file")
             return ConfigureResult(ok: true, unserved: result.foreign.sorted(), error: nil)
         }
+    }
+
+    /// Stops serving and removes the resolver files, for SIGTERM. Flushes before it returns,
+    /// because the process exits next.
+    func shutdown() {
+        let changed = queue.sync { stopLocked(reason: "stopped: the helper is quitting") }
+        if changed { HelperTool.flushResolverCaches() }
     }
 
     /// The routes learned since the last drain, and whether the forwarder runs. Renews the lease.
@@ -105,7 +124,7 @@ final class WildcardForwarder {
                 learned.removeAll()
                 learnedSet.removeAll()
             }
-            return (udpFD >= 0, learned)
+            return (udpListener != nil, learned)
         }
     }
 
@@ -114,6 +133,10 @@ final class WildcardForwarder {
     static func removeLeftoverResolverFiles() {
         let result = syncResolverFiles(wanted: [])
         if result.changed { HelperTool.flushResolverCaches() }
+    }
+
+    private static func flushLater() {
+        flushQueue.async { HelperTool.flushResolverCaches() }
     }
 
     // MARK: - Lease
@@ -125,93 +148,59 @@ final class WildcardForwarder {
         timer.setEventHandler { [weak self] in
             guard let self else { return }
             let idle = Double(DispatchTime.now().uptimeNanoseconds - self.lastRenew.uptimeNanoseconds) / 1_000_000_000
-            if idle > Self.leaseSeconds { self.stopLocked(reason: "stopped: the app stopped asking") }
+            if idle > Self.leaseSeconds, self.stopLocked(reason: "stopped: the app stopped asking") { Self.flushLater() }
         }
         leaseTimer = timer
         timer.resume()
     }
 
-    private func stopLocked(reason: String) {
+    /// Stops serving and removes our resolver files. Returns whether a file went, so the
+    /// caller flushes the resolver caches, outside `queue`.
+    @discardableResult
+    private func stopLocked(reason: String) -> Bool {
         leaseTimer?.cancel()
         leaseTimer = nil
-        let wasRunning = udpFD >= 0 || !specs.isEmpty
+        let wasRunning = udpListener != nil || !specs.isEmpty
         specs = []
+        generation &+= 1
         udpSource?.cancel()
         tcpSource?.cancel()
         udpSource = nil
         tcpSource = nil
-        udpFD = -1
+        udpListener = nil
         tcpFD = -1
         let result = Self.syncResolverFiles(wanted: [])
-        if result.changed { HelperTool.flushResolverCaches() }
         if wasRunning { helperLog.info("wildcard forwarder \(reason, privacy: .public)") }
+        return result.changed
     }
 
     // MARK: - Resolver files
 
-    /// Writes our file for every suffix in `wanted` and removes our files for every other one.
-    /// A file without our marker, or anything that is not a regular file, is someone else's:
-    /// it is never written over or removed, and its suffix is reported in `foreign`.
-    static func syncResolverFiles(wanted: Set<String>) -> (changed: Bool, foreign: Set<String>) {
-        let dir = WildcardResolverFile.directory
-        let fm = FileManager.default
-        var changed = false
-        var foreign: Set<String> = []
-
-        for name in (try? fm.contentsOfDirectory(atPath: dir)) ?? [] where !wanted.contains(name) {
-            let path = dir + "/" + name
-            guard isRegularFile(path), let text = try? String(contentsOfFile: path, encoding: .utf8),
-                  WildcardResolverFile.isOurs(text) else { continue }
-            if unlink(path) == 0 { changed = true }
-        }
-
-        guard !wanted.isEmpty else { return (changed, foreign) }
-        var info = stat()
-        if lstat(dir, &info) != 0 {
-            guard mkdir(dir, 0o755) == 0 else {
-                helperLog.error("wildcard: cannot create \(dir, privacy: .public): \(String(cString: strerror(errno)), privacy: .public)")
-                return (changed, wanted)
-            }
-        } else if info.st_mode & S_IFMT != S_IFDIR {
-            helperLog.error("wildcard: \(dir, privacy: .public) is not a directory")
-            return (changed, wanted)
-        }
-
-        let contents = WildcardResolverFile.contents
-        for suffix in wanted {
-            // `WildcardSpec` already refused anything that is not a plain DNS name, so the
-            // suffix cannot name a path; the check stays as the last word.
-            guard WildcardDomain.normalizedSuffix(suffix) == suffix else { foreign.insert(suffix); continue }
-            let path = dir + "/" + suffix
-            var st = stat()
-            if lstat(path, &st) == 0 {
-                guard st.st_mode & S_IFMT == S_IFREG,
-                      let text = try? String(contentsOfFile: path, encoding: .utf8),
-                      WildcardResolverFile.isOurs(text) else {
-                    foreign.insert(suffix)
-                    continue
-                }
-                if text == contents { continue }
-            }
-            // Write beside it, then rename over: the resolver never sees half a file.
-            let temp = dir + "/.vpnbypass-" + suffix
-            unlink(temp)
-            guard fm.createFile(atPath: temp, contents: Data(contents.utf8),
-                                attributes: [.posixPermissions: 0o644]),
-                  rename(temp, path) == 0 else {
-                unlink(temp)
-                helperLog.error("wildcard: cannot write a resolver file: \(String(cString: strerror(errno)), privacy: .public)")
-                foreign.insert(suffix)
-                continue
-            }
-            changed = true
-        }
-        return (changed, foreign)
+    /// `WildcardResolverFile.sync` on /etc/resolver, with its errors logged.
+    static func syncResolverFiles(wanted: Set<String>) -> WildcardResolverFile.SyncResult {
+        let result = WildcardResolverFile.sync(wanted: wanted)
+        for error in result.errors { helperLog.error("wildcard: \(error, privacy: .public)") }
+        return result
     }
 
-    private static func isRegularFile(_ path: String) -> Bool {
-        var st = stat()
-        return lstat(path, &st) == 0 && st.st_mode & S_IFMT == S_IFREG
+    /// The IPv4 network of every interface that is up, loopback aside.
+    static func connectedNetworks() -> [(interface: String, network: UInt32, mask: UInt32)] {
+        var out: [(interface: String, network: UInt32, mask: UInt32)] = []
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0 else { return out }
+        defer { freeifaddrs(head) }
+        var cursor = head
+        while let ifa = cursor {
+            defer { cursor = ifa.pointee.ifa_next }
+            let flags = Int32(ifa.pointee.ifa_flags)
+            guard flags & IFF_UP != 0, flags & IFF_LOOPBACK == 0,
+                  let addr = ifa.pointee.ifa_addr, addr.pointee.sa_family == sa_family_t(AF_INET),
+                  let netmask = ifa.pointee.ifa_netmask else { continue }
+            let ip = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+            let mask = netmask.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+            out.append((String(cString: ifa.pointee.ifa_name), ip & mask, mask))
+        }
+        return out
     }
 
     // MARK: - Listeners
@@ -225,12 +214,18 @@ final class WildcardForwarder {
             if tcp >= 0 { close(tcp) }
             return "the DNS forwarder could not listen on TCP port \(WildcardResolverFile.port)"
         }
-        udpFD = udp
+        let listener = UDPListener(fd: udp)
+        udpListener = listener
         tcpFD = tcp
 
         let us = DispatchSource.makeReadSource(fileDescriptor: udp, queue: ioQueue)
-        us.setEventHandler { [weak self] in self?.readUDP(udp) }
-        us.setCancelHandler { close(udp) }
+        us.setEventHandler { [weak self] in self?.readUDP(listener) }
+        // On `ioQueue`, like every reply's `sendto`: a reply that comes later sees `closed`
+        // and is dropped, never sent on a number the system has handed to another socket.
+        us.setCancelHandler {
+            listener.closed = true
+            close(udp)
+        }
         let ts = DispatchSource.makeReadSource(fileDescriptor: tcp, queue: ioQueue)
         ts.setEventHandler { [weak self] in self?.acceptTCP(tcp) }
         ts.setCancelHandler { close(tcp) }
@@ -264,7 +259,15 @@ final class WildcardForwarder {
         return fd
     }
 
-    private func readUDP(_ fd: Int32) {
+    /// The UDP socket and whether it has been closed. Only touched on `ioQueue`.
+    private final class UDPListener {
+        let fd: Int32
+        var closed = false
+        init(fd: Int32) { self.fd = fd }
+    }
+
+    private func readUDP(_ listener: UDPListener) {
+        let fd = listener.fd
         var buffer = [UInt8](repeating: 0, count: 4096)
         while true {
             var from = sockaddr_storage()
@@ -276,12 +279,15 @@ final class WildcardForwarder {
             let query = Array(buffer[0..<n])
             // Over the cap the query is dropped; the client retries in a second.
             guard inFlight.wait(timeout: .now()) == .success else { continue }
-            workQueue.async { [weak self] in
+            workQueue.async { [weak self, ioQueue] in
                 defer { self?.inFlight.signal() }
                 guard let self, let reply = self.answer(query, overTCP: false) else { return }
-                var to = from
-                _ = withUnsafePointer(to: &to) { sp in
-                    sp.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(fd, reply, reply.count, 0, $0, fromLen) }
+                ioQueue.async {
+                    guard !listener.closed else { return }
+                    var to = from
+                    _ = withUnsafePointer(to: &to) { sp in
+                        sp.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(fd, reply, reply.count, 0, $0, fromLen) }
+                    }
                 }
             }
         }
@@ -311,59 +317,66 @@ final class WildcardForwarder {
 
     /// The reply to one query, or nil to send nothing (a message that is not a query).
     func answer(_ bytes: [UInt8], overTCP: Bool) -> [UInt8]? {
-        guard let query = DNSWire.parse(bytes), !query.isResponse, query.opcode == 0,
-              query.questions.count == 1, let question = query.questions.first else { return nil }
-        let name = question.name
+        let (specs, safetyGuard, generation) = queue.sync { (self.specs, self.safetyGuard, self.generation) }
+        return WildcardLookup.reply(
+            to: bytes, overTCP: overTCP, specs: specs, guard: safetyGuard, ttlCap: Self.ttlCap,
+            forward: { query, spec in Self.forward(bytes, query: query, spec: spec, overTCP: overTCP) },
+            admit: { candidates, spec in
+                let now = DispatchTime.now().uptimeNanoseconds
+                return self.queue.sync {
+                    let admitted = candidates.filter { self.limiter.admit($0, suffix: spec.suffix, nowNS: now) }
+                    // Count only, at most once a minute: a zone at its cap refuses every lookup.
+                    if admitted.count < candidates.count, now &- self.lastLimitLog > 60_000_000_000 {
+                        self.lastLimitLog = now
+                        helperLog.info("wildcard: the limiter refused \(candidates.count - admitted.count, privacy: .public) new address(es)")
+                    }
+                    return admitted
+                }
+            },
+            install: { ips, spec in self.installRoutes(ips, spec: spec, generation: generation) }
+        )
+    }
 
-        // DDR probe: say nothing, so the system has no encrypted endpoint to move to.
-        if name == DNSWire.ddrName { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNoError) }
-
-        let (specs, safetyGuard) = queue.sync { (self.specs, self.safetyGuard) }
-        guard let suffix = WildcardDomain.mostSpecific(for: name, among: specs.map(\.suffix)),
-              let spec = specs.first(where: { $0.suffix == suffix }) else {
-            return DNSWire.reply(to: query, rcode: DNSWire.rcodeRefused)
-        }
-        // The routes are IPv4 only; an IPv6 answer would take the connection past them.
-        if question.type == DNSWire.typeAAAA { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNoError) }
-
-        guard let raw = Self.forward(bytes, query: query, spec: spec, overTCP: overTCP),
-              let response = DNSWire.parse(raw) else {
-            return DNSWire.reply(to: query, rcode: DNSWire.rcodeServFail)
-        }
-
-        // Guard, then limiter, then the kernel; only what got its route is kept as a hint.
-        let candidates = DNSWire.addresses(in: response).filter { safetyGuard.refusal(for: $0) == nil }
-        let now = DispatchTime.now().uptimeNanoseconds
-        let admitted = queue.sync { candidates.filter { limiter.admit($0, suffix: suffix, nowNS: now) } }
-        let routed = Set(installRoutes(admitted, gateway: spec.gateway, suffix: suffix))
-
-        let rewritten = DNSWire.rewriteForWildcard(response, ttlCap: Self.ttlCap, keepHint: { routed.contains($0) })
-        guard let out = DNSWire.encode(rewritten) else { return DNSWire.reply(to: query, rcode: DNSWire.rcodeServFail) }
-        if !overTCP && out.count > query.maxUDPSize { return DNSWire.truncated(rewritten) }
-        return out
+    /// One install handed to `routeQueue`. The lookup gives up on it after `routeWait`; if it
+    /// has not started by then it never does.
+    private final class PendingInstall {
+        let lock = NSLock()
+        var started = false
+        var abandoned = false
+        var installed: [String] = []
     }
 
     /// Adds the routes on `routeQueue` and waits for them, at most `routeWait`.
-    private func installRoutes(_ ips: [String], gateway: String, suffix: String) -> [String] {
+    private func installRoutes(_ ips: [String], spec: WildcardSpec, generation: UInt64) -> [String] {
         guard !ips.isEmpty else { return [] }
         let done = DispatchSemaphore(value: 0)
-        var installed: [String] = []
-        let lock = NSLock()
+        let pending = PendingInstall()
         HelperTool.routeQueue.async { [routeWriter, weak self] in
-            let result = routeWriter.installLearnedRoutes(ips, gateway: gateway)
-            lock.lock()
-            installed = result
-            lock.unlock()
-            self?.record(result, suffix: suffix, gateway: gateway)
-            done.signal()
+            defer { done.signal() }
+            guard let self else { return }
+            pending.lock.lock()
+            let go = !pending.abandoned
+            pending.started = go
+            pending.lock.unlock()
+            // A stop or a new list since the lookup began: the app no longer takes these routes.
+            guard go, self.queue.sync(execute: { self.generation == generation }) else { return }
+            let result = routeWriter.installLearnedRoutes(ips, gateway: spec.gateway)
+            pending.lock.lock()
+            pending.installed = result
+            pending.lock.unlock()
+            self.record(result, suffix: spec.suffix, gateway: spec.gateway)
         }
         guard done.wait(timeout: .now() + Self.routeWait) == .success else {
-            helperLog.info("wildcard: replied before \(ips.count, privacy: .public) route(s) were in; the route queue was busy")
+            pending.lock.lock()
+            let started = pending.started
+            pending.abandoned = true
+            pending.lock.unlock()
+            helperLog.info("wildcard: replied without \(ips.count, privacy: .public) address(es); the route queue was busy\(started ? "" : ", install called off", privacy: .public)")
             return []
         }
-        lock.lock()
-        defer { lock.unlock() }
-        return installed
+        pending.lock.lock()
+        defer { pending.lock.unlock() }
+        return pending.installed
     }
 
     private func record(_ ips: [String], suffix: String, gateway: String) {

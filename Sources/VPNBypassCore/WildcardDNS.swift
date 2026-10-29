@@ -375,8 +375,8 @@ public enum DNSWire {
         var seen: Set<String> = []
         func add(_ ip: String) { if seen.insert(ip).inserted { out.append(ip) } }
         for record in m.answers {
-            if record.type == typeA, record.rclass == 1, record.data.count == 4 {
-                add(WildcardIPv4.dotted(record.data.reduce(0) { $0 << 8 | UInt32($1) }))
+            if let ip = ipv4(of: record) {
+                add(ip)
             } else if record.type == typeHTTPS || record.type == typeSVCB {
                 for ip in svcHints(record.data) { add(ip) }
             }
@@ -384,32 +384,41 @@ public enum DNSWire {
         return out
     }
 
+    /// The address of an A record, nil for any other record.
+    static func ipv4(of record: Record) -> String? {
+        guard record.type == typeA, record.rclass == 1, record.data.count == 4 else { return nil }
+        return WildcardIPv4.dotted(record.data.reduce(0) { $0 << 8 | UInt32($1) })
+    }
+
     /// The answer as the client gets it:
     /// - every AAAA record dropped (the app routes IPv4 only, so an IPv6 answer would carry the
     ///   connection past the route we just added);
+    /// - every A record in the answer section whose address `keepAddress` refuses dropped, so
+    ///   the client never connects to an address that missed its route;
     /// - every HTTPS and SVCB record without `ipv6hint`, and with only the `ipv4hint` addresses
-    ///   `keepHint` accepts (the key goes when none is left); a record whose data cannot be read
-    ///   is dropped rather than passed on with hints we could not check;
+    ///   `keepAddress` accepts (the key goes when none is left); a record whose data cannot be
+    ///   read is dropped rather than passed on with hints we could not check;
     /// - every TTL capped at `ttlCap`, so the client asks again and the route's "last seen" moves.
     /// The OPT record is left alone: its TTL field holds EDNS flags, not a time.
-    public static func rewriteForWildcard(_ m: Message, ttlCap: UInt32, keepHint: (String) -> Bool) -> Message {
-        func rewrite(_ records: [Record]) -> [Record] {
+    public static func rewriteForWildcard(_ m: Message, ttlCap: UInt32, keepAddress: (String) -> Bool) -> Message {
+        func rewrite(_ records: [Record], filterA: Bool) -> [Record] {
             records.compactMap { record in
                 if record.type == typeOPT { return record }
                 if record.type == typeAAAA { return nil }
+                if filterA, let ip = ipv4(of: record), !keepAddress(ip) { return nil }
                 var r = record
                 r.ttl = min(r.ttl, ttlCap)
                 if r.type == typeHTTPS || r.type == typeSVCB {
-                    guard let data = rewriteSVC(r.data, keepHint: keepHint) else { return nil }
+                    guard let data = rewriteSVC(r.data, keepHint: keepAddress) else { return nil }
                     r.data = data
                 }
                 return r
             }
         }
         var out = m
-        out.answers = rewrite(m.answers)
-        out.authority = rewrite(m.authority)
-        out.additional = rewrite(m.additional)
+        out.answers = rewrite(m.answers, filterA: true)
+        out.authority = rewrite(m.authority, filterA: false)
+        out.additional = rewrite(m.additional, filterA: false)
         return out
     }
 
@@ -490,6 +499,8 @@ public struct WildcardSafetyGuard: Equatable {
         case excludedHost
         /// Inside a VPN Only range the user listed.
         case insideExcludedRange
+        /// On a network this Mac is directly attached to, other than the wildcard's tunnel.
+        case connectedNetwork
     }
 
     /// Blocks no public address may be learned into: RFC 6890 special-purpose space.
@@ -499,8 +510,19 @@ public struct WildcardSafetyGuard: Equatable {
         "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
     ].compactMap { WildcardIPv4.parseCIDR($0).map { ($0.network, $0.mask) } }
 
+    /// What a wildcard into a tunnel still refuses. Its names live on the company network, so
+    /// private and CGNAT space is exactly what it must route; this-network, loopback,
+    /// link-local, multicast and reserved space never can be.
+    static let neverRoutedBlocks: [(UInt32, UInt32)] = [
+        "0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "240.0.0.0/4",
+    ].compactMap { WildcardIPv4.parseCIDR($0).map { ($0.network, $0.mask) } }
+
     public var excludedHosts: Set<UInt32>
     public var excludedRanges: [(network: UInt32, mask: UInt32)]
+    /// The IPv4 networks of the Mac's own interfaces, by interface. Filled in by the helper
+    /// from the live interfaces, never sent over XPC: a tunnel wildcard must not pull a host
+    /// of the local network into the tunnel.
+    public var connectedNetworks: [(interface: String, network: UInt32, mask: UInt32)] = []
 
     public init(excludedHosts: [String] = [], excludedRanges: [String] = []) {
         self.excludedHosts = Set(excludedHosts.compactMap(WildcardIPv4.parse))
@@ -512,10 +534,19 @@ public struct WildcardSafetyGuard: Equatable {
             && a.excludedRanges.map { [$0.network, $0.mask] } == b.excludedRanges.map { [$0.network, $0.mask] }
     }
 
-    /// Why `ip` must not be learned, or nil when it may.
-    public func refusal(for ip: String) -> Refusal? {
+    /// Why `ip` must not be learned for `spec`, or nil when it may. A wildcard around the VPN
+    /// learns public addresses only; one into a tunnel may learn private ones too, except on a
+    /// network the Mac is attached to by another interface.
+    public func refusal(for ip: String, spec: WildcardSpec? = nil) -> Refusal? {
         guard let v = WildcardIPv4.parse(ip) else { return .notPublic }
-        if Self.nonPublicBlocks.contains(where: { v & $0.1 == $0.0 }) { return .notPublic }
+        if let spec, spec.intoTunnel {
+            if Self.neverRoutedBlocks.contains(where: { v & $0.1 == $0.0 }) { return .notPublic }
+            if connectedNetworks.contains(where: { $0.interface != spec.interface && v & $0.mask == $0.network }) {
+                return .connectedNetwork
+            }
+        } else if Self.nonPublicBlocks.contains(where: { v & $0.1 == $0.0 }) {
+            return .notPublic
+        }
         if ProtectedDestinations.isProtected(ip) { return .protected }
         if excludedHosts.contains(v) { return .excludedHost }
         if excludedRanges.contains(where: { v & $0.mask == $0.network }) { return .insideExcludedRange }
@@ -538,30 +569,40 @@ public struct WildcardSafetyGuard: Equatable {
     }
 }
 
-/// Caps how many addresses each wildcard learns: in total for the life of the forwarder, and
-/// new ones per minute. A zone that answers every lookup with a fresh address can otherwise
-/// fill the routing table. An address already learned is always accepted, so a busy wildcard
-/// keeps its "last seen" times moving.
+/// Caps how many addresses each wildcard learns: in total over the last day, and new ones per
+/// minute. A zone that answers every lookup with a fresh address can otherwise fill the routing
+/// table. An address already learned is always accepted, so a busy wildcard keeps its "last
+/// seen" times moving. One not seen for a day is forgotten once the cap is reached, as the app
+/// expires its route after a day unused, so a CDN whose addresses rotate keeps learning.
 public struct WildcardLearnLimiter {
     public static let maxPerWildcard = 2048
     public static let maxNewPerMinute = 120
+    public static let forgetAfterNS: UInt64 = 24 * 3600 * 1_000_000_000
 
-    private var known: [String: Set<String>] = [:]
+    /// Suffix, then address, then when it was last admitted.
+    private var known: [String: [String: UInt64]] = [:]
     private var recent: [String: [UInt64]] = [:]
 
     public init() {}
 
     public mutating func admit(_ ip: String, suffix: String, nowNS: UInt64) -> Bool {
-        if known[suffix]?.contains(ip) == true { return true }
+        if known[suffix]?[ip] != nil {
+            known[suffix]?[ip] = nowNS
+            return true
+        }
         let minuteAgo = nowNS > 60_000_000_000 ? nowNS - 60_000_000_000 : 0
         var times = (recent[suffix] ?? []).filter { $0 > minuteAgo }
+        if (known[suffix]?.count ?? 0) >= Self.maxPerWildcard {
+            let dayAgo = nowNS > Self.forgetAfterNS ? nowNS - Self.forgetAfterNS : 0
+            known[suffix] = known[suffix]?.filter { $0.value > dayAgo }
+        }
         guard (known[suffix]?.count ?? 0) < Self.maxPerWildcard, times.count < Self.maxNewPerMinute else {
             recent[suffix] = times
             return false
         }
         times.append(nowNS)
         recent[suffix] = times
-        known[suffix, default: []].insert(ip)
+        known[suffix, default: [:]][ip] = nowNS
         return true
     }
 
@@ -594,6 +635,135 @@ public enum WildcardResolverFile {
     public static func isOurs(_ text: String) -> Bool {
         text.hasPrefix(marker)
     }
+
+    public struct SyncResult: Equatable {
+        public var changed = false
+        /// Suffixes whose file is someone else's, or could not be written.
+        public var foreign: Set<String> = []
+        /// What went wrong, for the helper's log. Never a suffix or a name.
+        public var errors: [String] = []
+    }
+
+    /// Writes our file for every suffix in `wanted` and removes our files for every other one.
+    /// A file without our marker, or anything that is not a regular file, is someone else's:
+    /// it is never written over or removed, and its suffix is reported in `foreign`.
+    public static func sync(wanted: Set<String>, in dir: String = directory) -> SyncResult {
+        let fm = FileManager.default
+        var result = SyncResult()
+
+        for name in (try? fm.contentsOfDirectory(atPath: dir)) ?? [] where !wanted.contains(name) {
+            let path = dir + "/" + name
+            guard isRegularFile(path), let text = try? String(contentsOfFile: path, encoding: .utf8),
+                  isOurs(text) else { continue }
+            if unlink(path) == 0 { result.changed = true }
+        }
+
+        guard !wanted.isEmpty else { return result }
+        var info = stat()
+        if lstat(dir, &info) != 0 {
+            guard mkdir(dir, 0o755) == 0 else {
+                result.errors.append("cannot create \(dir): \(String(cString: strerror(errno)))")
+                result.foreign = wanted
+                return result
+            }
+        } else if info.st_mode & S_IFMT != S_IFDIR {
+            result.errors.append("\(dir) is not a directory")
+            result.foreign = wanted
+            return result
+        }
+
+        for suffix in wanted {
+            // `WildcardSpec` already refused anything that is not a plain DNS name, so the
+            // suffix cannot name a path; the check stays as the last word.
+            guard WildcardDomain.normalizedSuffix(suffix) == suffix else { result.foreign.insert(suffix); continue }
+            let path = dir + "/" + suffix
+            var st = stat()
+            if lstat(path, &st) == 0 {
+                guard st.st_mode & S_IFMT == S_IFREG,
+                      let text = try? String(contentsOfFile: path, encoding: .utf8),
+                      isOurs(text) else {
+                    result.foreign.insert(suffix)
+                    continue
+                }
+                if text == contents { continue }
+            }
+            // Write beside it, then rename over: the resolver never sees half a file.
+            let temp = dir + "/.vpnbypass-" + suffix
+            unlink(temp)
+            guard fm.createFile(atPath: temp, contents: Data(contents.utf8),
+                                attributes: [.posixPermissions: 0o644]),
+                  rename(temp, path) == 0 else {
+                unlink(temp)
+                result.errors.append("cannot write a resolver file: \(String(cString: strerror(errno)))")
+                result.foreign.insert(suffix)
+                continue
+            }
+            result.changed = true
+        }
+        return result
+    }
+
+    private static func isRegularFile(_ path: String) -> Bool {
+        var st = stat()
+        return lstat(path, &st) == 0 && st.st_mode & S_IFMT == S_IFREG
+    }
+}
+
+// MARK: - One lookup
+
+/// The forwarder's answer to one query, without its sockets or the kernel, so every branch is
+/// tested: the helper passes in how to ask the upstream, how the limiter admits and how the
+/// routes go in.
+public enum WildcardLookup {
+    /// The reply to `bytes`, or nil to send nothing (a message that is not a query).
+    /// - `forward`: the upstream's raw answer for the spec, nil when none came.
+    /// - `admit`: the addresses the limiter lets the suffix learn.
+    /// - `install`: the addresses that now have their route.
+    public static func reply(
+        to bytes: [UInt8], overTCP: Bool, specs: [WildcardSpec], guard safetyGuard: WildcardSafetyGuard,
+        ttlCap: UInt32,
+        forward: (DNSWire.Message, WildcardSpec) -> [UInt8]?,
+        admit: ([String], WildcardSpec) -> [String],
+        install: ([String], WildcardSpec) -> [String]
+    ) -> [UInt8]? {
+        guard let query = DNSWire.parse(bytes), !query.isResponse, query.opcode == 0,
+              query.questions.count == 1, let question = query.questions.first else { return nil }
+        let name = question.name
+
+        // DDR probe: say nothing, so the system has no encrypted endpoint to move to.
+        if name == DNSWire.ddrName { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNoError) }
+
+        guard let suffix = WildcardDomain.mostSpecific(for: name, among: specs.map(\.suffix)),
+              let spec = specs.first(where: { $0.suffix == suffix }) else {
+            return DNSWire.reply(to: query, rcode: DNSWire.rcodeRefused)
+        }
+        // The routes are IPv4 only; an IPv6 answer would take the connection past them.
+        if question.type == DNSWire.typeAAAA { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNoError) }
+
+        guard let raw = forward(query, spec), let response = DNSWire.parse(raw) else {
+            return DNSWire.reply(to: query, rcode: DNSWire.rcodeServFail)
+        }
+
+        // Guard, then limiter, then the kernel. An address the guard refuses is left to the
+        // routing table, as it would be without the wildcard. One it passed that got no route
+        // (the limiter, a failed install, a busy route queue) is taken out of the answer: a
+        // connection opened before its route lands goes the wrong way, and breaks or leaks
+        // when the route arrives.
+        let candidates = DNSWire.addresses(in: response).filter { safetyGuard.refusal(for: $0, spec: spec) == nil }
+        let routed = Set(install(admit(candidates, spec), spec))
+        let unrouted = Set(candidates).subtracting(routed)
+
+        let rewritten = DNSWire.rewriteForWildcard(response, ttlCap: ttlCap, keepAddress: { !unrouted.contains($0) })
+        // Every address gone: fail the lookup so the client asks again, rather than say the
+        // name has none.
+        let hadA = response.answers.contains { DNSWire.ipv4(of: $0) != nil }
+        if hadA && !rewritten.answers.contains(where: { DNSWire.ipv4(of: $0) != nil }) {
+            return DNSWire.reply(to: query, rcode: DNSWire.rcodeServFail)
+        }
+        guard let out = DNSWire.encode(rewritten) else { return DNSWire.reply(to: query, rcode: DNSWire.rcodeServFail) }
+        if !overTCP && out.count > query.maxUDPSize { return DNSWire.truncated(rewritten) }
+        return out
+    }
 }
 
 // MARK: - XPC payloads
@@ -608,16 +778,22 @@ public struct WildcardSpec: Equatable, Sendable {
     /// The interface those queries leave by (`IP_BOUND_IF`): the physical one for Bypass and
     /// Direct, the tunnel for VPN Only and a pinned VPN.
     public let interface: String
+    /// The route goes into a tunnel (VPN Only, a pinned VPN), whose names may resolve to
+    /// private addresses on the company network. See `WildcardSafetyGuard.refusal`.
+    public let intoTunnel: Bool
 
-    public init(suffix: String, gateway: String, upstream: [String], interface: String) {
+    public init(suffix: String, gateway: String, upstream: [String], interface: String, intoTunnel: Bool = false) {
         self.suffix = suffix
         self.gateway = gateway
         self.upstream = upstream
         self.interface = interface
+        self.intoTunnel = intoTunnel
     }
 
     public var dictionary: [String: String] {
-        ["suffix": suffix, "gateway": gateway, "upstream": upstream.joined(separator: ","), "interface": interface]
+        var d = ["suffix": suffix, "gateway": gateway, "upstream": upstream.joined(separator: ","), "interface": interface]
+        if intoTunnel { d["tunnel"] = "1" }
+        return d
     }
 
     /// Nil unless every field is something the helper may act on. The helper re-checks the
@@ -631,7 +807,7 @@ public struct WildcardSpec: Equatable, Sendable {
         guard !upstream.isEmpty, upstream.count <= 4,
               upstream.allSatisfy({ WildcardIPv4.parse($0) != nil && !$0.hasPrefix("127.") && $0 != "0.0.0.0" })
         else { return nil }
-        self.init(suffix: suffix, gateway: gateway, upstream: upstream, interface: interface)
+        self.init(suffix: suffix, gateway: gateway, upstream: upstream, interface: interface, intoTunnel: d["tunnel"] == "1")
     }
 
     static func isValidGateway(_ g: String) -> Bool {

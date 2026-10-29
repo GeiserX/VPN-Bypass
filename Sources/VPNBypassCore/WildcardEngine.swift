@@ -196,8 +196,10 @@ final class WildcardEngine {
             let hidden = ScutilDNS.shadowing(spec.suffix, in: resolvers)
             if !hidden.isEmpty { now[spec.suffix] = hidden }
         }
+        // Count only: the hiding domains are another resolver's (a VPN's split DNS, say), not
+        // the user's own entries, so they stay out of the log.
         for (suffix, hidden) in now.sorted(by: { $0.key < $1.key }) where warnedShadows[suffix] != hidden {
-            manager.log(.warning, "Wildcard *.\(suffix): names under \(hidden.joined(separator: ", ")) are answered by another resolver and are not routed")
+            manager.log(.warning, "Wildcard *.\(suffix): \(hidden.count) more specific resolver(s) answer part of it, and names there are not routed")
         }
         if !specs.isEmpty || !resolvers.isEmpty { warnedShadows = now }
     }

@@ -127,7 +127,8 @@ enum WildcardPlanner {
                 skipped[item.suffix] = "no DNS server is known for \(interface)"
                 continue
             }
-            let spec = WildcardSpec(suffix: item.suffix, gateway: gateway, upstream: servers, interface: interface)
+            let spec = WildcardSpec(suffix: item.suffix, gateway: gateway, upstream: servers, interface: interface,
+                                    intoTunnel: item.via != .physical)
             // Same check the helper makes, so a spec it would refuse is never sent.
             guard WildcardSpec(dictionary: spec.dictionary) != nil else {
                 skipped[item.suffix] = "its gateway or interface is not one the helper accepts"

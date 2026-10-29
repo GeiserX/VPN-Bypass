@@ -176,11 +176,11 @@ final class DNSWireTests: XCTestCase {
     func testRewriteDropsAAAAAndCapsTTLButLeavesOPT() throws {
         var m = try XCTUnwrap(DNSWire.parse(compressedAnswer()))
         m.additional = [DNSWire.Record(labels: [], type: DNSWire.typeOPT, rclass: 1232, ttl: 0x8000, data: [])]
-        let out = DNSWire.rewriteForWildcard(m, ttlCap: 300, keepHint: { _ in true })
+        let out = DNSWire.rewriteForWildcard(m, ttlCap: 300, keepAddress: { _ in true })
         XCTAssertEqual(out.answers.map(\.type), [DNSWire.typeCNAME, DNSWire.typeA])
         XCTAssertEqual(out.answers.map(\.ttl), [300, 300])
         XCTAssertEqual(out.additional.first?.ttl, 0x8000, "OPT's TTL holds EDNS flags")
-        let short = DNSWire.rewriteForWildcard(m, ttlCap: 7200, keepHint: { _ in true })
+        let short = DNSWire.rewriteForWildcard(m, ttlCap: 7200, keepAddress: { _ in true })
         XCTAssertEqual(short.answers.first?.ttl, 3600, "a TTL under the cap is left as it is")
     }
 
@@ -198,10 +198,10 @@ final class DNSWireTests: XCTestCase {
         let m = DNSWire.Message(id: 1, flags: 0x8180, questions: [], answers: [record], authority: [], additional: [])
         XCTAssertEqual(DNSWire.addresses(in: m), ["34.1.1.1", "34.2.2.2"])
 
-        let out = DNSWire.rewriteForWildcard(m, ttlCap: 300, keepHint: { $0 == "34.1.1.1" })
+        let out = DNSWire.rewriteForWildcard(m, ttlCap: 300, keepAddress: { $0 == "34.1.1.1" })
         XCTAssertEqual(out.answers.first?.data, httpsData(v4: [[34, 1, 1, 1]], v6: false))
 
-        let none = DNSWire.rewriteForWildcard(m, ttlCap: 300, keepHint: { _ in false })
+        let none = DNSWire.rewriteForWildcard(m, ttlCap: 300, keepAddress: { _ in false })
         XCTAssertEqual(none.answers.first?.data, httpsData(v4: [], v6: false), "the hint key goes when no address is left")
     }
 
@@ -209,7 +209,7 @@ final class DNSWireTests: XCTestCase {
         let record = DNSWire.Record(labels: labels("a.example.com"), type: DNSWire.typeHTTPS, rclass: 1, ttl: 60,
                                     data: [0, 1, 0, 0, 6, 0, 16, 1])   // ipv6hint says 16 bytes, has 1
         let m = DNSWire.Message(id: 1, flags: 0x8180, questions: [], answers: [record], authority: [], additional: [])
-        XCTAssertTrue(DNSWire.rewriteForWildcard(m, ttlCap: 300, keepHint: { _ in true }).answers.isEmpty)
+        XCTAssertTrue(DNSWire.rewriteForWildcard(m, ttlCap: 300, keepAddress: { _ in true }).answers.isEmpty)
     }
 
     func testMalformedMessagesAreRefused() {
@@ -264,14 +264,15 @@ final class WildcardSafetyGuardTests: XCTestCase {
         let g = WildcardSafetyGuard()
         for ip in ["10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.10.1", "100.64.0.1", "100.100.100.100",
                    "127.0.0.1", "169.254.1.1", "224.0.0.251", "239.255.255.250", "240.0.0.1", "255.255.255.255",
-                   "0.0.0.0", "198.18.0.1", "203.0.113.7", "not-an-ip", "1.2.3"] {
+                   "0.0.0.0", "198.18.0.1", "203.0.113.7", "not-an-ip", "1.2.3",
+                   "192.0.0.8", "192.0.2.1", "198.51.100.1", "198.19.255.1", "100.127.255.255"] {
             XCTAssertEqual(g.refusal(for: ip), .notPublic, ip)
         }
     }
 
     func testPublicAddressesPass() {
         let g = WildcardSafetyGuard()
-        for ip in ["34.149.66.165", "1.1.1.1", "172.32.0.1", "100.128.0.1", "8.8.8.8"] {
+        for ip in ["34.149.66.165", "1.1.1.1", "172.32.0.1", "100.128.0.1", "8.8.8.8", "172.15.255.255", "100.63.255.255"] {
             XCTAssertNil(g.refusal(for: ip), ip)
         }
     }
@@ -282,6 +283,26 @@ final class WildcardSafetyGuardTests: XCTestCase {
         XCTAssertEqual(g.refusal(for: "34.10.10.10"), .excludedHost)
         XCTAssertEqual(g.refusal(for: "34.200.7.7"), .insideExcludedRange)
         XCTAssertNil(g.refusal(for: "34.201.7.7"))
+    }
+
+    /// A wildcard into a tunnel routes the company's private addresses, but never one on a
+    /// network the Mac is attached to by another interface, nor loopback or link-local.
+    func testATunnelWildcardMayLearnPrivateAddresses() {
+        var g = WildcardSafetyGuard(excludedHosts: ["10.0.0.53"])
+        g.connectedNetworks = [("en0", 0xC0A8_0A00, 0xFFFF_FF00), ("utun4", 0x0A08_0000, 0xFFFF_0000)]
+        let tunnel = WildcardSpec(suffix: "corp.example.com", gateway: "iface:utun4", upstream: ["10.0.0.53"],
+                                  interface: "utun4", intoTunnel: true)
+        let around = WildcardSpec(suffix: "example.com", gateway: "192.168.10.1", upstream: ["1.1.1.1"], interface: "en0")
+        XCTAssertNil(g.refusal(for: "10.20.30.40", spec: tunnel))
+        XCTAssertNil(g.refusal(for: "172.16.5.5", spec: tunnel))
+        XCTAssertNil(g.refusal(for: "10.8.1.1", spec: tunnel), "the tunnel's own network")
+        XCTAssertEqual(g.refusal(for: "192.168.10.20", spec: tunnel), .connectedNetwork)
+        XCTAssertEqual(g.refusal(for: "127.0.0.1", spec: tunnel), .notPublic)
+        XCTAssertEqual(g.refusal(for: "169.254.1.1", spec: tunnel), .notPublic)
+        XCTAssertEqual(g.refusal(for: "224.0.0.251", spec: tunnel), .notPublic)
+        XCTAssertEqual(g.refusal(for: "10.0.0.53", spec: tunnel), .excludedHost)
+        XCTAssertEqual(g.refusal(for: "10.20.30.40", spec: around), .notPublic)
+        XCTAssertEqual(g.refusal(for: "10.20.30.40"), .notPublic, "no spec is the strict rule")
     }
 
     func testTheGuardCrossesXPCIntact() {
@@ -310,6 +331,11 @@ final class WildcardSafetyGuardTests: XCTestCase {
             if limiter.admit("34.\(i / 65536).\(i / 256 % 256).\(i % 256)", suffix: "example.com", nowNS: now) { admitted += 1 }
         }
         XCTAssertEqual(admitted, WildcardLearnLimiter.maxPerWildcard)
+        XCTAssertFalse(limiter.admit("37.0.0.1", suffix: "example.com", nowNS: now + 61_000_000_000), "full")
+        // A day later the addresses nobody looked up again are forgotten; one in use stays.
+        let later = now + WildcardLearnLimiter.forgetAfterNS + 61_000_000_000
+        XCTAssertTrue(limiter.admit("34.0.0.0", suffix: "example.com", nowNS: later - 1_000_000_000))
+        XCTAssertTrue(limiter.admit("37.0.0.1", suffix: "example.com", nowNS: later), "room again after a day")
         limiter.keep(only: [])
         XCTAssertTrue(limiter.admit("36.0.0.1", suffix: "example.com", nowNS: now), "forgotten with its wildcard")
     }
@@ -324,6 +350,10 @@ final class WildcardPayloadTests: XCTestCase {
         XCTAssertEqual(WildcardSpec(dictionary: spec.dictionary), spec)
         let iface = WildcardSpec(suffix: "corp.example.net", gateway: "iface:utun4", upstream: ["10.0.0.53"], interface: "utun4")
         XCTAssertEqual(WildcardSpec(dictionary: iface.dictionary), iface)
+        let tunnel = WildcardSpec(suffix: "corp.example.net", gateway: "iface:utun4", upstream: ["10.0.0.53"],
+                                  interface: "utun4", intoTunnel: true)
+        XCTAssertEqual(WildcardSpec(dictionary: tunnel.dictionary), tunnel)
+        XCTAssertNotEqual(WildcardSpec(dictionary: tunnel.dictionary), iface)
 
         var d = spec.dictionary
         d["suffix"] = "../../etc"
@@ -356,6 +386,40 @@ final class WildcardPayloadTests: XCTestCase {
         XCTAssertFalse(WildcardResolverFile.isOurs("nameserver 10.0.0.1\n"), "someone else's file")
         XCTAssertFalse(WildcardResolverFile.isOurs("nameserver 1.1.1.1\n# VPN-BYPASS-MANAGED wildcard resolver"),
                        "the marker counts only as the first line")
+    }
+
+    /// Our files come and go with the wanted list; someone else's file, a symlink and a stray
+    /// file without the marker are never touched.
+    func testResolverFileSyncTouchesOnlyOurFiles() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("wildcard-resolver-\(UUID().uuidString)").path
+        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(atPath: dir) }
+        let ours = WildcardResolverFile.contents
+        try "nameserver 10.0.0.1\n".write(toFile: dir + "/corp.example.com", atomically: true, encoding: .utf8)
+        try ours.write(toFile: dir + "/gone.example.com", atomically: true, encoding: .utf8)
+        try (WildcardResolverFile.marker + " old\n").write(toFile: dir + "/stale.example.com", atomically: true, encoding: .utf8)
+        let target = dir + "-target"
+        try ours.write(toFile: target, atomically: true, encoding: .utf8)
+        defer { try? fm.removeItem(atPath: target) }
+        try fm.createSymbolicLink(atPath: dir + "/link.example.com", withDestinationPath: target)
+
+        let result = WildcardResolverFile.sync(
+            wanted: ["new.example.com", "stale.example.com", "corp.example.com", "link.example.com"], in: dir)
+        XCTAssertTrue(result.changed)
+        XCTAssertEqual(result.foreign, ["corp.example.com", "link.example.com"])
+        XCTAssertEqual(try String(contentsOfFile: dir + "/new.example.com", encoding: .utf8), ours)
+        XCTAssertEqual(try String(contentsOfFile: dir + "/stale.example.com", encoding: .utf8), ours, "an old version of ours is rewritten")
+        XCTAssertEqual(try String(contentsOfFile: dir + "/corp.example.com", encoding: .utf8), "nameserver 10.0.0.1\n")
+        XCTAssertNotNil(try? fm.destinationOfSymbolicLink(atPath: dir + "/link.example.com"), "the symlink stays")
+        XCTAssertFalse(fm.fileExists(atPath: dir + "/gone.example.com"), "ours, no longer wanted")
+
+        let none = WildcardResolverFile.sync(wanted: [], in: dir)
+        XCTAssertTrue(none.changed)
+        XCTAssertEqual(Set(try fm.contentsOfDirectory(atPath: dir)), ["corp.example.com", "link.example.com"],
+                       "every file of ours goes, and nothing else")
+        XCTAssertTrue(fm.fileExists(atPath: target), "a symlink to a file of ours is not followed")
+        XCTAssertFalse(WildcardResolverFile.sync(wanted: [], in: dir).changed)
     }
 
     /// The helper compiles these from the Makefile's file list, not from Package.swift.
@@ -401,7 +465,7 @@ final class WildcardPlannerTests: XCTestCase {
         var c = bypassConfig()
         c.routingMode = .vpnOnly
         XCTAssertEqual(WildcardPlanner.plan(c, env: env).specs, [
-            WildcardSpec(suffix: "corp.example.net", gateway: "10.20.0.1", upstream: ["10.20.0.53"], interface: "utun4"),
+            WildcardSpec(suffix: "corp.example.net", gateway: "10.20.0.1", upstream: ["10.20.0.53"], interface: "utun4", intoTunnel: true),
         ])
     }
 
@@ -441,7 +505,7 @@ final class WildcardPlannerTests: XCTestCase {
         XCTAssertEqual(WildcardPlanner.configuredSuffixes(c), ["direct.example.com", "lab.example.com"])
         XCTAssertEqual(WildcardPlanner.plan(c, env: e).specs, [
             WildcardSpec(suffix: "direct.example.com", gateway: "192.168.10.1", upstream: ["192.168.10.1"], interface: "en0"),
-            WildcardSpec(suffix: "lab.example.com", gateway: "iface:utun7", upstream: ["10.7.0.53"], interface: "utun7"),
+            WildcardSpec(suffix: "lab.example.com", gateway: "iface:utun7", upstream: ["10.7.0.53"], interface: "utun7", intoTunnel: true),
         ])
     }
 
@@ -653,5 +717,110 @@ final class LearnedWildcardRouteTests: XCTestCase {
         XCTAssertNotNil(engine.ledger.seen["example.com"]?["34.7.7.7"])
         engine.record([LearnedWildcardRoute(ip: "34.7.7.7", suffix: "example.com", gateway: "iface:utun4")])
         XCTAssertEqual(rm.activeRoutes.filter { $0.destination == "34.7.7.7" }.map(\.gateway), ["iface:utun4"], "a new gateway replaces the old")
+    }
+}
+
+// MARK: - One lookup
+
+/// The forwarder's decision for one query (`WildcardLookup.reply`), with the upstream, the
+/// limiter and the kernel replaced by closures that record what they were asked.
+final class WildcardLookupTests: XCTestCase {
+
+    private let spec = WildcardSpec(suffix: "example.com", gateway: "192.168.10.1", upstream: ["1.1.1.1"], interface: "en0")
+    private let tunnelSpec = WildcardSpec(suffix: "corp.example.net", gateway: "iface:utun4", upstream: ["10.0.0.53"],
+                                          interface: "utun4", intoTunnel: true)
+
+    private func labels(_ name: String) -> [[UInt8]] {
+        name.split(separator: ".").map { Array($0.utf8) }
+    }
+
+    private func query(_ name: String, type: UInt16 = DNSWire.typeA) -> [UInt8] {
+        DNSWire.encode(DNSWire.Message(id: 7, flags: 0x0100, questions: [.init(labels: labels(name), type: type, qclass: 1)],
+                                       answers: [], authority: [], additional: []))!
+    }
+
+    private func upstreamAnswer(_ name: String, _ ips: [[UInt8]]) -> [UInt8] {
+        let records = ips.map { DNSWire.Record(labels: labels(name), type: DNSWire.typeA, rclass: 1, ttl: 600, data: $0) }
+        return DNSWire.encode(DNSWire.Message(id: 7, flags: 0x8180, questions: [.init(labels: labels(name), type: DNSWire.typeA, qclass: 1)],
+                                              answers: records, authority: [], additional: []))!
+    }
+
+    private struct Calls {
+        var forwarded = 0
+        var admitted: [String] = []
+        var installed: [String] = []
+    }
+
+    private func reply(_ bytes: [UInt8], specs: [WildcardSpec]? = nil, guard g: WildcardSafetyGuard = WildcardSafetyGuard(),
+                       upstream: [UInt8]?, admit: @escaping ([String]) -> [String] = { $0 },
+                       install: @escaping ([String]) -> [String] = { $0 }) -> (DNSWire.Message?, Calls) {
+        var calls = Calls()
+        let out = WildcardLookup.reply(
+            to: bytes, overTCP: false, specs: specs ?? [spec, tunnelSpec], guard: g, ttlCap: 300,
+            forward: { _, _ in calls.forwarded += 1; return upstream },
+            admit: { ips, _ in calls.admitted += ips; return admit(ips) },
+            install: { ips, _ in calls.installed += ips; return install(ips) })
+        return (out.flatMap(DNSWire.parse), calls)
+    }
+
+    private func addresses(_ m: DNSWire.Message?) -> [String] {
+        m.map(DNSWire.addresses(in:)) ?? []
+    }
+
+    func testTheDDRProbeIsAnsweredEmptyWithoutAskingUpstream() throws {
+        let (m, calls) = reply(query(DNSWire.ddrName, type: DNSWire.typeSVCB), upstream: nil)
+        XCTAssertEqual(m?.rcode, DNSWire.rcodeNoError)
+        XCTAssertEqual(m?.answers.isEmpty, true)
+        XCTAssertEqual(calls.forwarded, 0)
+    }
+
+    func testANameOutsideEveryWildcardIsRefused() {
+        let (m, calls) = reply(query("example.org"), upstream: nil)
+        XCTAssertEqual(m?.rcode, DNSWire.rcodeRefused)
+        XCTAssertEqual(calls.forwarded, 0)
+    }
+
+    func testAAAAIsAnsweredEmptyUnderAWildcardOnly() {
+        let (m, calls) = reply(query("api.example.com", type: DNSWire.typeAAAA), upstream: nil)
+        XCTAssertEqual(m?.rcode, DNSWire.rcodeNoError)
+        XCTAssertEqual(m?.answers.isEmpty, true)
+        XCTAssertEqual(calls.forwarded, 0)
+        XCTAssertEqual(reply(query("example.org", type: DNSWire.typeAAAA), upstream: nil).0?.rcode, DNSWire.rcodeRefused,
+                       "the suffix is checked before the type")
+    }
+
+    func testNoUpstreamAnswerIsServFail() {
+        XCTAssertEqual(reply(query("api.example.com"), upstream: nil).0?.rcode, DNSWire.rcodeServFail)
+    }
+
+    func testOnlyAddressesThatPassTheGuardReachTheLimiterAndTheKernel() {
+        let (m, calls) = reply(query("api.example.com"), upstream: upstreamAnswer("api.example.com", [[34, 1, 1, 1], [10, 0, 0, 5]]))
+        XCTAssertEqual(calls.admitted, ["34.1.1.1"])
+        XCTAssertEqual(calls.installed, ["34.1.1.1"])
+        // The private address is left to the routing table, as without the wildcard.
+        XCTAssertEqual(addresses(m), ["34.1.1.1", "10.0.0.5"])
+        XCTAssertEqual(m?.answers.map(\.ttl), [300, 300])
+    }
+
+    func testAnAddressThatMissedItsRouteIsTakenOut() {
+        let up = upstreamAnswer("api.example.com", [[34, 1, 1, 1], [34, 2, 2, 2], [34, 3, 3, 3]])
+        let (m, _) = reply(query("api.example.com"), upstream: up,
+                           admit: { $0.filter { $0 != "34.2.2.2" } }, install: { $0.filter { $0 != "34.3.3.3" } })
+        XCTAssertEqual(addresses(m), ["34.1.1.1"], "refused by the limiter, or not installed in time: never handed out")
+
+        let (none, _) = reply(query("api.example.com"), upstream: up, install: { _ in [] })
+        XCTAssertEqual(none?.rcode, DNSWire.rcodeServFail, "no address left: the client asks again")
+    }
+
+    func testATunnelWildcardRoutesPrivateAddresses() {
+        let (m, calls) = reply(query("git.corp.example.net"), upstream: upstreamAnswer("git.corp.example.net", [[10, 20, 30, 40]]))
+        XCTAssertEqual(calls.installed, ["10.20.30.40"])
+        XCTAssertEqual(addresses(m), ["10.20.30.40"])
+    }
+
+    func testAResponseIsNotAQuery() {
+        let (m, calls) = reply(upstreamAnswer("api.example.com", [[34, 1, 1, 1]]), upstream: nil)
+        XCTAssertNil(m)
+        XCTAssertEqual(calls.forwarded, 0)
     }
 }
