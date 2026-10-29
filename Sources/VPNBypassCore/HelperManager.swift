@@ -401,6 +401,40 @@ final class HelperManager: ObservableObject {
         }
     }
 
+    // MARK: - Wildcard domains
+
+    /// Sets the wildcards the helper's forwarder serves; an empty list stops it.
+    func setWildcards(_ specs: [WildcardSpec], guard safetyGuard: WildcardSafetyGuard) async -> (ok: Bool, unserved: [String], error: String?) {
+        guard isHelperInstalled else { return (false, [], "the privileged helper is not running") }
+        let connection = getOrCreateConnection()
+        let failed = (ok: false, unserved: [String](), error: Optional("the privileged helper did not answer"))
+        // The helper may flush the resolver caches (two bounded children of 3 s each).
+        return await withXPCDeadline(seconds: xpcTimeout + 6, fallback: failed) { once in
+            guard let helper = connection.remoteObjectProxyWithErrorHandler({ _ in once.complete(failed) }) as? HelperProtocol else {
+                once.complete(failed)
+                return
+            }
+            helper.setWildcards(specs: specs.map(\.dictionary), context: safetyGuard.dictionary) { ok, unserved, error in
+                once.complete((ok, unserved, error))
+            }
+        }
+    }
+
+    /// The routes the forwarder learned since the last drain; nil when the helper could not be asked.
+    func drainWildcardRoutes() async -> (running: Bool, routes: [LearnedWildcardRoute])? {
+        guard isHelperInstalled else { return nil }
+        let connection = getOrCreateConnection()
+        return await withXPCDeadline(seconds: xpcTimeout, fallback: (running: Bool, routes: [LearnedWildcardRoute])?.none) { once in
+            guard let helper = connection.remoteObjectProxyWithErrorHandler({ _ in once.complete(nil) }) as? HelperProtocol else {
+                once.complete(nil)
+                return
+            }
+            helper.drainWildcardRoutes { running, routes in
+                once.complete((running, routes.compactMap(LearnedWildcardRoute.init(dictionary:))))
+            }
+        }
+    }
+
     // MARK: - Helper Installation
 
     func installHelper() async -> Bool {

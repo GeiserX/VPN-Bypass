@@ -216,7 +216,7 @@ struct Config: Codable {
         case .bypass, .custom:
             defaultRouteId = vpnRoute.id
             for d in domains where d.enabled {
-                rules.append(Rule(matchType: d.isCIDR ? .cidr : .domain, pattern: d.domain, routeId: directRoute.id, order: order))
+                rules.append(rule(for: d, routeId: directRoute.id, order: order))
                 order += 1
             }
             for s in services where s.enabled {
@@ -227,12 +227,24 @@ struct Config: Codable {
         case .vpnOnly:
             defaultRouteId = directRoute.id
             for d in inverseDomains where d.enabled {
-                rules.append(Rule(matchType: d.isCIDR ? .cidr : .domain, pattern: d.domain, routeId: vpnRoute.id, order: order))
+                rules.append(rule(for: d, routeId: vpnRoute.id, order: order))
                 order += 1
             }
         }
 
         return (routes, rules, defaultRouteId)
+    }
+
+    /// The Custom-mode rule a list entry becomes: a range a `cidr` rule, a wildcard a `suffix`
+    /// rule on its suffix (the form `RuleResolver` matches), anything else a `domain` rule.
+    private static func rule(for entry: DomainEntry, routeId: UUID, order: Int) -> Rule {
+        if entry.isCIDR {
+            return Rule(matchType: .cidr, pattern: entry.domain, routeId: routeId, order: order)
+        }
+        if entry.isWildcard, let suffix = WildcardDomain.suffix(of: entry.domain) {
+            return Rule(matchType: .suffix, pattern: suffix, routeId: routeId, order: order)
+        }
+        return Rule(matchType: .domain, pattern: entry.domain, routeId: routeId, order: order)
     }
 
     /// Whether `preparedForCustomMode()` builds rules from the lists: there are no rules yet,
@@ -530,7 +542,8 @@ struct DomainEntry: Codable, Identifiable, Equatable {
         self.domain = domain
         self.enabled = enabled
         self.isCIDR = isCIDR
-        self.isWildcard = isWildcard
+        // A "*.suffix" entry is a wildcard however it was made, so no caller can forget the flag.
+        self.isWildcard = isWildcard || WildcardDomain.isWildcard(domain)
     }
 
     init(from decoder: Decoder) throws {
@@ -542,6 +555,7 @@ struct DomainEntry: Codable, Identifiable, Equatable {
         lastResolved = try container.decodeIfPresent(Date.self, forKey: .lastResolved)
         isCIDR = try container.decodeIfPresent(Bool.self, forKey: .isCIDR) ?? false
         isWildcard = try container.decodeIfPresent(Bool.self, forKey: .isWildcard) ?? false
+            || WildcardDomain.isWildcard(domain)
     }
 }
 
@@ -552,6 +566,10 @@ struct ServiceEntry: Codable, Identifiable {
     var domains: [String]
     var ipRanges: [String]
     var isCustom: Bool = false
+
+    /// The domains a lookup can resolve: every one but the wildcards, which the helper's
+    /// forwarder routes as their names are looked up (see WildcardEngine).
+    var resolvableDomains: [String] { domains.filter { !WildcardDomain.isWildcard($0) } }
 
     init(id: String, name: String, enabled: Bool, domains: [String], ipRanges: [String], isCustom: Bool = false) {
         self.id = id

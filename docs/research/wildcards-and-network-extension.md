@@ -1,6 +1,6 @@
 # Wildcard domains and Network Extension: decision document
 
-Research of October 2026. It describes what we decided to build and why; nothing here is shipped yet.
+Research of October 2026. It describes what we decided to build and why; option B below is built (helper 2.5.0); Network Extension is not.
 
 **Terms used below**
 - **Host route:** a kernel routing-table entry for one IP address (`/32`).

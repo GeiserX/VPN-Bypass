@@ -350,6 +350,7 @@
 "%@ already has a rule on the %@ route, and the first matching rule wins. To send it direct, change that rule's route on the Rules page." = "%1$@ already has a rule on the %2$@ route, and the first matching rule wins. To send it direct, change that rule's route on the Rules page.";
 "“%@” is the name of a service, and the two would share routes. Add a different domain." = "“%@” is the name of a service, and the two would share routes. Add a different domain.";
 "Added the range %@ to your %@ list." = "Added the range %1$@ to your %2$@ list.";
+"Added %@ to your %@ list. Each name under it is routed as it is looked up." = "Added %1$@ to your %2$@ list. Each name under it is routed as it is looked up.";
 "Added %@ to your %@ list." = "Added %1$@ to your %2$@ list.";
 "Added %@, from the link you pasted." = "Added %@, from the link you pasted.";
 "Added %@, cleaned up from “%@”." = "Added %1$@, cleaned up from “%2$@”.";

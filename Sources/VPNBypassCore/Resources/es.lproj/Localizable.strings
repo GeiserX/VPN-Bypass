@@ -350,6 +350,7 @@
 "%@ already has a rule on the %@ route, and the first matching rule wins. To send it direct, change that rule's route on the Rules page." = "%1$@ ya tiene una regla en la ruta %2$@, y gana la primera regla que coincide. Para que vaya directo, cambia la ruta de esa regla en la página Reglas.";
 "“%@” is the name of a service, and the two would share routes. Add a different domain." = "“%@” es el nombre de un servicio y los dos compartirían rutas. Añade otro dominio.";
 "Added the range %@ to your %@ list." = "Se añadió el rango %1$@ a tu lista %2$@.";
+"Added %@ to your %@ list. Each name under it is routed as it is looked up." = "Se añadió %1$@ a tu lista %2$@. Cada nombre bajo ese dominio se enruta en cuanto se consulta.";
 "Added %@ to your %@ list." = "Se añadió %1$@ a tu lista %2$@.";
 "Added %@, from the link you pasted." = "Se añadió %@, sacado del enlace que pegaste.";
 "Added %@, cleaned up from “%@”." = "Se añadió %1$@, limpiado a partir de “%2$@”.";
