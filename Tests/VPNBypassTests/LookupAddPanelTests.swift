@@ -93,9 +93,25 @@ final class LookupAddChoicesTests: XCTestCase {
         XCTAssertTrue(choices.services(matching: "zzz").isEmpty)
     }
 
-    /// The box shows up to eight rows and scrolls beyond that.
+    /// The box is as tall as a short list, and eight rows tall for a long one, which scrolls.
     func testTheServiceBoxHoldsEightRows() {
         XCTAssertEqual(LookupAddPanel.maxRows, 8)
+        XCTAssertEqual(LookupAddPanel.listHeight(count: 3), 3 * LookupAddPanel.rowHeight)
+        XCTAssertEqual(LookupAddPanel.listHeight(count: 20), 8 * LookupAddPanel.rowHeight)
+    }
+
+    /// A hosting or CDN domain is not one site: its widest wildcard is the customer's name.
+    func testNeverOffersAHostingDomainAsTheSite() {
+        XCTAssertEqual(LookupAddLevels.levels(for: "d1abc.cloudfront.net"), ["d1abc.cloudfront.net", "*.d1abc.cloudfront.net"])
+        XCTAssertEqual(LookupAddLevels.levels(for: "docs.foo.github.io"), ["docs.foo.github.io", "*.foo.github.io"])
+        XCTAssertEqual(LookupAddLevels.levels(for: "github.io"), ["github.io"])
+    }
+
+    func testTheSuggestedServiceNameIsTheSiteName() {
+        XCTAssertEqual(NewServiceSheet.suggestedName(for: "http-intake.logs.us5.datadoghq.com"), "Datadoghq")
+        XCTAssertEqual(NewServiceSheet.suggestedName(for: "*.bbc.co.uk"), "Bbc")
+        XCTAssertEqual(NewServiceSheet.suggestedName(for: "api.bbc.co.uk"), "Bbc")
+        XCTAssertEqual(NewServiceSheet.suggestedName(for: "localhost"), "localhost")
     }
 }
 

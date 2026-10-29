@@ -40,11 +40,22 @@ enum LookupAddLevels {
         "com.sa", "com.eg", "com.ng", "com.ph", "com.pk", "com.vn", "com.bd", "com.np",
     ]
 
+    /// Hosting and CDN domains that give each customer a name of their own (from the private
+    /// section of the Public Suffix List). `*.cloudfront.net` would take in every site on
+    /// CloudFront, company ones too, so under these the site is the three-label name as well.
+    static let hostingSuffixes: Set<String> = [
+        "cloudfront.net", "amazonaws.com", "azurewebsites.net", "azureedge.net", "cloudapp.net",
+        "github.io", "gitlab.io", "herokuapp.com", "vercel.app", "netlify.app", "pages.dev",
+        "workers.dev", "appspot.com", "web.app", "firebaseapp.com", "fastly.net", "blogspot.com",
+        "onrender.com", "fly.dev",
+    ]
+
     /// How many labels a site's own domain has under `labels`: three under a two-label public
-    /// suffix, two otherwise. A name that is itself such a suffix ("co.uk") has fewer, so it
+    /// suffix or a hosting domain, two otherwise. A name that is itself such a suffix ("co.uk") has fewer, so it
     /// has no site domain and no wildcard.
     static func floor(_ labels: [Substring]) -> Int {
-        twoLabelPublicSuffixes.contains(labels.suffix(2).joined(separator: ".")) ? 3 : 2
+        let last2 = labels.suffix(2).joined(separator: ".")
+        return twoLabelPublicSuffixes.contains(last2) || hostingSuffixes.contains(last2) ? 3 : 2
     }
 
     /// The site's own domain under `name` ("datadoghq.com", "bbc.co.uk"), lowercased, or nil
@@ -177,6 +188,11 @@ struct LookupAddPanel: View {
     static let maxRows = 8
     static let width: CGFloat = 340
 
+    /// The service box's height: as tall as `count` rows, up to `maxRows`.
+    static func listHeight(count: Int) -> CGFloat {
+        CGFloat(min(count, maxRows)) * rowHeight
+    }
+
     init(choices: LookupAddChoices, level: String? = nil, target: LookupAddTarget? = nil,
          onAdd: @escaping (String, LookupAddTarget) -> Void, onCancel: @escaping () -> Void) {
         self.choices = choices
@@ -258,7 +274,7 @@ struct LookupAddPanel: View {
                         serviceRows(shown)
                         ScrollView { serviceRows(shown) }
                     }
-                    .frame(height: CGFloat(min(shown.count, Self.maxRows)) * Self.rowHeight)
+                    .frame(height: Self.listHeight(count: shown.count))
                 }
             }
             .padding(.vertical, 2)

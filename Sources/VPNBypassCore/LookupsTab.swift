@@ -322,7 +322,9 @@ private struct LookupRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
-            .help(String(localized: "Add a wildcard, or add it somewhere else"))
+            // Only Bypass mode offers other places (a new service, any service).
+            .help(mode == .bypass ? String(localized: "Add a wildcard, or add it somewhere else")
+                                  : String(localized: "Add a wildcard instead"))
             .accessibilityLabel(String(localized: "More ways to add \(entry.name)"))
         }
         .foregroundColor(color)
@@ -356,7 +358,7 @@ private struct LookupRow: View {
 }
 
 /// Names a new custom service whose first domain is the looked-up name.
-private struct NewServiceSheet: View {
+struct NewServiceSheet: View {
     let domain: String
     let onCreate: (String) -> Void
     let onCancel: () -> Void
@@ -369,12 +371,12 @@ private struct NewServiceSheet: View {
         _name = State(initialValue: NewServiceSheet.suggestedName(for: domain))
     }
 
-    /// The label before the top-level domain, capitalized: "Datadoghq" for
-    /// "http-intake.logs.us5.datadoghq.com". The user edits it before saving.
+    /// The first label of the site's own domain, capitalized: "Datadoghq" for
+    /// "http-intake.logs.us5.datadoghq.com", "Bbc" for "*.bbc.co.uk". The user edits it before
+    /// saving.
     static func suggestedName(for domain: String) -> String {
-        let labels = domain.split(separator: ".")
-        guard labels.count >= 2 else { return domain }
-        return labels[labels.count - 2].prefix(1).uppercased() + labels[labels.count - 2].dropFirst()
+        guard let site = LookupAddLevels.registrableDomain(domain), let first = site.split(separator: ".").first else { return domain }
+        return first.prefix(1).uppercased() + first.dropFirst()
     }
 
     var body: some View {

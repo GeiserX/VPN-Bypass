@@ -164,6 +164,25 @@ final class LookupListingTests: RouteManagerTestCase {
         XCTAssertEqual(rm.lookupListing("api.example.com"), .listedOff)
     }
 
+    /// A switched-off wildcard neither hides an enabled entry or service nor blocks adding
+    /// the name itself.
+    func testASwitchedOffWildcardIsNotAListing() {
+        rm.config.domains = [DomainEntry(domain: "*.example.com", enabled: false)]
+        XCTAssertNil(rm.lookupListing("api.example.com"), "adding api.example.com is accepted")
+        rm.config.domains.append(DomainEntry(domain: "api.example.com"))
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .bypassList)
+
+        rm.config.domains = [DomainEntry(domain: "*.example.com", enabled: false)]
+        rm.addCustomService(name: "Example", domains: ["api.example.com"], ipRanges: [])
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .service("Example"))
+
+        rm.config.routingMode = .vpnOnly
+        rm.config.inverseDomains = [DomainEntry(domain: "*.example.com", enabled: false)]
+        XCTAssertNil(rm.lookupListing("api.example.com"))
+        rm.config.inverseDomains.append(DomainEntry(domain: "api.example.com"))
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .vpnOnlyList)
+    }
+
     /// Custom mode names the route of the rule the compiler would use: enabled, lowest
     /// order, with a route that is on.
     func testCustomModeNamesTheRouteOfTheRuleInForce() {

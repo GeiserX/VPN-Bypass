@@ -145,12 +145,14 @@ extension RouteManager {
 
     /// Where `name` already is, among the entries the current mode reads: the Bypass list or
     /// an enabled service, the VPN Only list, or a Custom mode domain or suffix rule. nil when
-    /// nowhere. A wildcard ("*.example.com") holds every name under it. A list entry that is
-    /// switched off is `.listedOff`: adding it again would be refused.
+    /// nowhere. A wildcard ("*.example.com") holds every name under it. An enabled entry or
+    /// service wins over a switched-off one. The name's own entry switched off is
+    /// `.listedOff`: adding it again would be refused. A switched-off wildcard over it is not
+    /// a listing, since adding the name itself is accepted.
     func lookupListing(_ name: String) -> LookupListing? {
         if config.routingMode == .vpnOnly {
-            guard let entry = config.inverseDomains.first(where: { Self.entry($0.domain, holds: name) }) else { return nil }
-            return entry.enabled ? .vpnOnlyList : .listedOff
+            if config.inverseDomains.contains(where: { $0.enabled && Self.entry($0.domain, holds: name) }) { return .vpnOnlyList }
+            return config.inverseDomains.contains { $0.domain == name } ? .listedOff : nil
         }
         if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
             // The rule the compiler would use: enabled, lowest order, with a route that is on.
@@ -166,13 +168,11 @@ extension RouteManager {
             guard let route = match else { return nil }
             return .rule(routeName: route.friendlyName(vpnName: vpnType?.knownName))
         }
-        if let entry = config.domains.first(where: { Self.entry($0.domain, holds: name) }) {
-            return entry.enabled ? .bypassList : .listedOff
-        }
+        if config.domains.contains(where: { $0.enabled && Self.entry($0.domain, holds: name) }) { return .bypassList }
         if let service = config.services.first(where: { $0.enabled && $0.domains.contains { Self.entry($0, holds: name) } }) {
             return .service(service.name)
         }
-        return nil
+        return config.domains.contains { $0.domain == name } ? .listedOff : nil
     }
 
     /// A list or service entry holds `name` when it is the name, or a wildcard over it.

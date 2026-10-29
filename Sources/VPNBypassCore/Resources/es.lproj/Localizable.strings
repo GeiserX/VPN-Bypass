@@ -711,6 +711,7 @@
 /* ===== DNS Lookups add panel ===== */
 "%@ on the Services page lists this name and is off. Turn it on to bypass it." = "%@, en la página Servicios, incluye este nombre y está desactivado. Actívalo para que haga bypass.";
 "Add a wildcard, or add it somewhere else" = "Añadir un comodín, o añadirlo en otro sitio";
+"Add a wildcard instead" = "Añadir un comodín en su lugar";
 "More ways to add %@" = "Más formas de añadir %@";
 "WHAT TO ADD" = "QUÉ AÑADIR";
 "A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off." = "Un comodín cubre cada nombre bajo ese dominio. El asistente enruta cada uno en cuanto se consulta, así que Ver las consultas DNS puede seguir desactivado.";

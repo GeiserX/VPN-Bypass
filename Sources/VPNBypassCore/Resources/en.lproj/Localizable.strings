@@ -711,6 +711,7 @@
 /* ===== DNS Lookups add panel ===== */
 "%@ on the Services page lists this name and is off. Turn it on to bypass it." = "%@ on the Services page lists this name and is off. Turn it on to bypass it.";
 "Add a wildcard, or add it somewhere else" = "Add a wildcard, or add it somewhere else";
+"Add a wildcard instead" = "Add a wildcard instead";
 "More ways to add %@" = "More ways to add %@";
 "WHAT TO ADD" = "WHAT TO ADD";
 "A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off." = "A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off.";

@@ -711,6 +711,7 @@
 /* ===== DNS Lookups add panel ===== */
 "%@ on the Services page lists this name and is off. Turn it on to bypass it." = "%@, sur la page Services, contient ce nom et est désactivé. Activez-le pour le contourner.";
 "Add a wildcard, or add it somewhere else" = "Ajouter un joker, ou l'ajouter ailleurs";
+"Add a wildcard instead" = "Ajouter un joker à la place";
 "More ways to add %@" = "Autres façons d'ajouter %@";
 "WHAT TO ADD" = "QUOI AJOUTER";
 "A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off." = "Un joker couvre chaque nom en dessous. L'assistant route chacun dès qu'il est résolu, donc Suivre les requêtes DNS peut rester désactivé.";
