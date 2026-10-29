@@ -75,6 +75,8 @@ final class DocScreenshotsTests: XCTestCase {
         windows = []
         rm.refreshStatusOverrideForTests = nil
         rm.config = saved.config
+        DNSLookupsMonitor.shared.tally = DNSLookupTally()
+        DNSLookupsMonitor.shared.since = nil
         rm.isVPNConnected = saved.connected
         rm.vpnInterface = saved.iface
         rm.vpnType = saved.type
@@ -142,6 +144,13 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
     }
 
+    func testSettingsOnLookups() throws {
+        seedBypass()
+        seedLookups()
+        let size = try renderSettings(page: .lookups, to: "lookups.png")
+        XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
+    }
+
     // MARK: - Fake state
 
     /// WireGuard on utun4, helper ready, nothing on any list yet.
@@ -175,6 +184,22 @@ final class DocScreenshotsTests: XCTestCase {
                                      "en.wikipedia.org": 4, "news.ycombinator.com": 4],
                                     gateway: "192.168.1.1")
         rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-23), routeCount: 62, failedCount: 0)
+    }
+
+    /// The DNS Lookups page on, with a morning of browsing counted: the two listed domains show
+    /// as listed, the rest offer Add.
+    private func seedLookups() {
+        rm.config.dnsLookupsEnabled = true
+        let counts = ["github.com": 41, "slack.com": 33, "en.wikipedia.org": 27, "zoom.us": 19,
+                      "api.openai.com": 14, "docs.google.com": 12, "news.ycombinator.com": 9,
+                      "registry.npmjs.org": 7, "status.example.com": 3]
+        var tally = DNSLookupTally()
+        let start = Date().addingTimeInterval(-3 * 3600)
+        for round in 0..<(counts.values.max() ?? 0) {
+            tally.record(counts.filter { $0.value > round }.map(\.key), at: start.addingTimeInterval(Double(round) * 60))
+        }
+        DNSLookupsMonitor.shared.tally = tally
+        DNSLookupsMonitor.shared.since = start
     }
 
     /// A domain to a SOCKS5 proxy, a service direct, a subnet to the VPN, the rest direct.

@@ -354,6 +354,53 @@ final class HelperManager: ObservableObject {
         }
     }
 
+    // MARK: - DNS Lookups capture
+
+    /// Starts the helper's DNS capture. `nil` when it runs, otherwise why it does not.
+    func startDNSCapture() async -> String? {
+        guard isHelperInstalled else { return String(localized: "The privileged helper is not running.") }
+        let connection = getOrCreateConnection()
+        return await withXPCDeadline(seconds: xpcTimeout, fallback: String?.some(String(localized: "The privileged helper did not answer."))) { once in
+            guard let helper = connection.remoteObjectProxyWithErrorHandler({ _ in
+                once.complete(String(localized: "The privileged helper did not answer."))
+            }) as? HelperProtocol else {
+                once.complete(String(localized: "The privileged helper did not answer."))
+                return
+            }
+            helper.startDNSCapture { ok, error in
+                once.complete(ok ? nil : (error ?? String(localized: "The capture could not start.")))
+            }
+        }
+    }
+
+    func stopDNSCapture() async {
+        guard isHelperInstalled else { return }
+        let connection = getOrCreateConnection()
+        await withXPCDeadline(seconds: xpcTimeout, fallback: ()) { once in
+            guard let helper = connection.remoteObjectProxyWithErrorHandler({ _ in once.complete(()) }) as? HelperProtocol else {
+                once.complete(())
+                return
+            }
+            helper.stopDNSCapture { once.complete(()) }
+        }
+    }
+
+    /// The names queried since the last drain; `nil` when the capture is not running or the
+    /// helper could not be asked.
+    func drainDNSQueries() async -> [String]? {
+        guard isHelperInstalled else { return nil }
+        let connection = getOrCreateConnection()
+        return await withXPCDeadline(seconds: xpcTimeout, fallback: [String]?.none) { once in
+            guard let helper = connection.remoteObjectProxyWithErrorHandler({ _ in once.complete(nil) }) as? HelperProtocol else {
+                once.complete(nil)
+                return
+            }
+            helper.drainDNSQueries { running, names in
+                once.complete(running ? names : nil)
+            }
+        }
+    }
+
     // MARK: - Helper Installation
 
     func installHelper() async -> Bool {

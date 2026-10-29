@@ -498,6 +498,26 @@ class HelperTool: NSObject, HelperProtocol {
         reply(true, TunnelOwnership.sweep().map(\.asDictionary))
     }
 
+    // MARK: - DNS Lookups
+
+    // Off unless the user turns the DNS Lookups page on. Nothing from the caller reaches the
+    // tcpdump command line; see DNSCapture.
+
+    func startDNSCapture(withReply reply: @escaping (Bool, String?) -> Void) {
+        let (ok, error) = DNSCapture.shared.start()
+        reply(ok, error)
+    }
+
+    func stopDNSCapture(withReply reply: @escaping () -> Void) {
+        DNSCapture.shared.stop()
+        reply()
+    }
+
+    func drainDNSQueries(withReply reply: @escaping (Bool, [String]) -> Void) {
+        let (running, names) = DNSCapture.shared.drain()
+        reply(running, names)
+    }
+
     private func logFlushOutcome(_ name: String, _ outcome: ProcessDeadline.Outcome) {
         switch outcome {
         case .failedToStart:

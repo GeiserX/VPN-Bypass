@@ -23,6 +23,8 @@ build-helper:
 		Sources/VPNBypassCore/HelperProtocol.swift \
 		Sources/VPNBypassCore/RouteKernel.swift \
 		Sources/VPNBypassCore/TunnelOwnership.swift \
+		Sources/VPNBypassCore/DNSQueryLine.swift \
+		Helper/DNSCapture.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
 	@swiftc -O \
@@ -32,6 +34,8 @@ build-helper:
 		Sources/VPNBypassCore/HelperProtocol.swift \
 		Sources/VPNBypassCore/RouteKernel.swift \
 		Sources/VPNBypassCore/TunnelOwnership.swift \
+		Sources/VPNBypassCore/DNSQueryLine.swift \
+		Helper/DNSCapture.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
 	@lipo -create \

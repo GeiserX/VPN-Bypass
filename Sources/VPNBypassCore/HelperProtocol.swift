@@ -79,6 +79,19 @@ protocol HelperProtocol {
     ///   "could not ask", which matters because utun numbers are recycled: keeping a stale map
     ///   would paint a departed tunnel's label onto whatever claims its number next.
     func listTunnelOwners(withReply reply: @escaping (Bool, [[String: String]]) -> Void)
+
+    /// Starts the opt-in DNS Lookups capture (a root tcpdump reading outgoing DNS queries), or
+    /// renews the lease of one already running. The arguments are fixed in the helper.
+    /// - Parameter reply: `(true, nil)` when it runs, `(false, reason)` when it could not start.
+    func startDNSCapture(withReply reply: @escaping (Bool, String?) -> Void)
+
+    /// Stops the capture and forgets every name not yet drained.
+    func stopDNSCapture(withReply reply: @escaping () -> Void)
+
+    /// The queried names since the last drain, oldest first. Renews the lease; without a drain
+    /// for a minute the helper stops the capture by itself.
+    /// - Parameter reply: whether the capture is still running, and the names.
+    func drainDNSQueries(withReply reply: @escaping (Bool, [String]) -> Void)
 }
 
 // MARK: - Helper Constants
@@ -146,7 +159,9 @@ struct HelperConstants {
     // 2.3.1: every hosts write ends with chmod 644. The atomic write kept the mode it found, and
     // a 0440 /etc/hosts left by another tool is unreadable to mDNSResponder (not in wheel), so
     // every entry was silently ignored. Bumped so installed 2.3.0 helpers reinstall and pick this up.
-    static let helperVersion = "2.3.1"
+    // 2.4.0: the opt-in DNS Lookups capture (#176): start/stop/drain of one fixed-argument
+    // tcpdump. Bumped so installed 2.3.1 helpers, which have no such methods, reinstall.
+    static let helperVersion = "2.4.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"
