@@ -734,8 +734,8 @@
 "Removed %@ from %@." = "Removed %@ from %@.";
 "Take it off the Bypass list" = "Take it off the Bypass list";
 "Take it off the VPN Only list" = "Take it off the VPN Only list";
-"Take %@ off the Bypass list. Every name under it stops bypassing the VPN." = "Take %@ off the Bypass list. Every name under it stops bypassing the VPN.";
-"Take %@ off the VPN Only list. Every name under it stops going through the VPN." = "Take %@ off the VPN Only list. Every name under it stops going through the VPN.";
+"Take %@ off the Bypass list. Names under it stop bypassing the VPN unless another entry lists them." = "Take %@ off the Bypass list. Names under it stop bypassing the VPN unless another entry lists them.";
+"Take %@ off the VPN Only list. Names under it stop going through the VPN unless another entry lists them." = "Take %@ off the VPN Only list. Names under it stop going through the VPN unless another entry lists them.";
 "Take %@ out of the service %@" = "Take %@ out of the service %@";
 "%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names." = "%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names.";
 "Delete the rule for %@ on the Rules page, which sends it to %@" = "Delete the rule for %@ on the Rules page, which sends it to %@";

@@ -439,9 +439,9 @@ enum LookupRemoval: Equatable {
             case (.bypass, true): return String(localized: "Take it off the Bypass list", bundle: bundle)
             case (.vpnOnly, true): return String(localized: "Take it off the VPN Only list", bundle: bundle)
             case (.bypass, false):
-                return String(localized: "Take \(entry) off the Bypass list. Every name under it stops bypassing the VPN.", bundle: bundle)
+                return String(localized: "Take \(entry) off the Bypass list. Names under it stop bypassing the VPN unless another entry lists them.", bundle: bundle)
             case (.vpnOnly, false):
-                return String(localized: "Take \(entry) off the VPN Only list. Every name under it stops going through the VPN.", bundle: bundle)
+                return String(localized: "Take \(entry) off the VPN Only list. Names under it stop going through the VPN unless another entry lists them.", bundle: bundle)
             }
         case .serviceDomain(_, let service, let entry):
             return String(localized: "Take \(entry) out of the service \(service)", bundle: bundle)

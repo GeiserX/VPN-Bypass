@@ -68,7 +68,7 @@ A name the mode already routes says so in small grey text: Bypassed, with the se
 | Where the name is listed | The button | What it does |
 |---|---|---|
 | The name itself on the Bypass or VPN Only list | Remove | Takes the entry off the list |
-| A wildcard on the list that covers it | Remove `*.example.com` | Takes the wildcard off, and with it every name under it |
+| A wildcard on the list that covers it | Remove `*.example.com` | Takes the wildcard off; names under it stop unless another entry lists them |
 | The name in a custom service, or added to a built-in one | Remove from Service | Takes only that domain out of the service |
 | A wildcard in such a service | Remove `*.example.com` from Service | Takes the wildcard out of the service |
 | A domain a built-in service ships with | Turn off Service | Turns the service off, which stops all of its names |

@@ -339,7 +339,10 @@ private struct LookupRow: View {
         return HStack(spacing: 4) {
             Image(systemName: isOff ? "pause.circle" : "checkmark.circle")
                 .font(.system(size: 10))
+            // Capped like the detail: in Custom mode the title is a route name of any length.
             Text(title)
+                .truncationMode(.tail)
+                .frame(maxWidth: Self.statusDetailWidth, alignment: .leading)
             if let detail {
                 // Capped, so a long service name truncates instead of squeezing the domain.
                 Text(detail)

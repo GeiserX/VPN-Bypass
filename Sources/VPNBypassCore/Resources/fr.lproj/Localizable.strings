@@ -734,8 +734,8 @@
 "Removed %@ from %@." = "%1$@ retiré de %2$@.";
 "Take it off the Bypass list" = "Le retirer de la liste Contournement";
 "Take it off the VPN Only list" = "Le retirer de la liste VPN uniquement";
-"Take %@ off the Bypass list. Every name under it stops bypassing the VPN." = "Retirer %@ de la liste Contournement. Tous les noms qu'il couvre cessent de contourner le VPN.";
-"Take %@ off the VPN Only list. Every name under it stops going through the VPN." = "Retirer %@ de la liste VPN uniquement. Tous les noms qu'il couvre cessent de passer par le VPN.";
+"Take %@ off the Bypass list. Names under it stop bypassing the VPN unless another entry lists them." = "Retirer %@ de la liste Contournement. Les noms qu'il couvre cessent de contourner le VPN, sauf si une autre entrée les inclut.";
+"Take %@ off the VPN Only list. Names under it stop going through the VPN unless another entry lists them." = "Retirer %@ de la liste VPN uniquement. Les noms qu'il couvre cessent de passer par le VPN, sauf si une autre entrée les inclut.";
 "Take %@ out of the service %@" = "Retirer %1$@ du service %2$@";
 "%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names." = "%1$@ inclut ce nom d'origine et ne peut pas le perdre. Désactiver %2$@ cesse de contourner le VPN pour tous ses noms.";
 "Delete the rule for %@ on the Rules page, which sends it to %@" = "Supprimer la règle de %1$@ de la page Règles, qui l'envoie par %2$@";
