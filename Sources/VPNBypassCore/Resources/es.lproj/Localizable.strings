@@ -419,6 +419,7 @@
 "1 IP range" = "1 rango de IP";
 "%lld IP ranges" = "%lld rangos de IP";
 "Removed the rule for %@." = "Se quitó la regla de %@.";
+"%@ is still listed by another entry; point at it again to remove that one." = "%@ sigue en la lista por otra entrada; vuelve a señalarlo para quitar esa.";
 "Removed the route %@." = "Se quitó la ruta %@.";
 "Turned on %@." = "Has activado %@.";
 "Turned off %@." = "Has desactivado %@.";
@@ -724,3 +725,17 @@
 "Direct rule" = "Regla Directo";
 "Added: %@" = "Añadido: %@";
 "Remove %@ from %@" = "Quitar %1$@ de %2$@";
+
+/* DNS Lookups: removing a listed name */
+"Remove" = "Quitar";
+"Remove %@" = "Quitar %@";
+"Remove from %@" = "Quitar de %@";
+"Turn off %@" = "Desactivar %@";
+"Removed %@ from %@." = "Se quitó %1$@ de %2$@.";
+"Take it off the Bypass list" = "Quitarlo de la Lista Bypass";
+"Take it off the VPN Only list" = "Quitarlo de la Lista Solo VPN";
+"Take %@ off the Bypass list. Names under it stop bypassing the VPN unless another entry lists them." = "Quitar %@ de la Lista Bypass. Los nombres que cubre dejan de saltarse la VPN, salvo que otra entrada los incluya.";
+"Take %@ off the VPN Only list. Names under it stop going through the VPN unless another entry lists them." = "Quitar %@ de la Lista Solo VPN. Los nombres que cubre dejan de ir por la VPN, salvo que otra entrada los incluya.";
+"Take %@ out of the service %@" = "Quitar %1$@ del servicio %2$@";
+"%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names." = "%1$@ trae este nombre de serie y no se le puede quitar. Desactivar %2$@ deja de saltarse la VPN para todos sus nombres.";
+"Delete the rule for %@ on the Rules page, which sends it to %@" = "Borrar la regla de %1$@ de la página Reglas, que lo envía por %2$@";

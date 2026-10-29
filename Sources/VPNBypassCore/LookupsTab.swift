@@ -14,6 +14,8 @@ struct LookupsTab: View {
     /// Rows drawn at once. The line under the table says when there are more, and search
     /// reaches them.
     static let shownLimit = 300
+    /// The doc screenshots draw this name's row as if the pointer were on it.
+    static var hoveredForScreenshots: String?
 
     private var isOn: Bool { routeManager.config.dnsLookupsEnabled }
 
@@ -142,7 +144,9 @@ struct LookupsTab: View {
                                 share: Double(entry.count) / Double(max(top, 1)),
                                 striped: index % 2 == 1,
                                 listing: routeManager.lookupListing(entry.name),
+                                removal: routeManager.lookupRemoval(entry.name),
                                 onAdd: add,
+                                onRemove: { removal in feedback = routeManager.removeLookup(removal, for: entry.name) },
                                 onTurnOn: { name, serviceId in feedback = routeManager.turnOnLookupService(serviceId, for: name) },
                                 onAddChoice: { value, target in
                                     if target == .newService {
@@ -176,7 +180,6 @@ struct LookupsTab: View {
             Text("NAME")
             Spacer(minLength: 8)
             Text(LookupRow.statusHeader(routeManager))
-                .frame(width: LookupRow.actionWidth, alignment: .trailing)
         }
         .font(.system(size: 10, weight: .bold, design: .rounded))
         .tracking(1)
@@ -195,6 +198,24 @@ private struct NewServiceRequest: Identifiable {
     var id: String { domain }
 }
 
+/// What a row shows at its right end. Pure, so the rest and hover rules are unit-tested.
+enum LookupRowTrailing: Equatable {
+    /// Nothing: an unlisted name at rest gives the whole row to the name.
+    case none
+    /// The quiet word for where the name is listed.
+    case status
+    /// The add action and its chevron.
+    case add
+    /// The remove action.
+    case remove
+
+    /// `active` is the pointer on the row or its add panel open.
+    static func resolve(listed: Bool, canRemove: Bool, active: Bool) -> LookupRowTrailing {
+        guard listed else { return active ? .add : .none }
+        return active && canRemove ? .remove : .status
+    }
+}
+
 /// One looked-up name: how often, the name, and what the current mode can do with it.
 private struct LookupRow: View {
     @EnvironmentObject var routeManager: RouteManager
@@ -203,7 +224,10 @@ private struct LookupRow: View {
     let share: Double
     let striped: Bool
     let listing: LookupListing?
+    /// What un-routes a listed name, or nil when the page offers nothing for it.
+    let removal: LookupRemoval?
     let onAdd: (String) -> Void
+    let onRemove: (LookupRemoval) -> Void
     /// Turns on a switched-off service that lists the name: the name, then the service id.
     let onTurnOn: (String, String) -> Void
     /// What the add panel chose to add (the name or a wildcard over it), then where.
@@ -214,11 +238,20 @@ private struct LookupRow: View {
     @State private var panelMode: LookupMode?
 
     static let countWidth: CGFloat = 76
+    /// The most a listed row's service name takes beside its status.
+    static let statusDetailWidth: CGFloat = 120
     /// How long, in tenths of a second, a panel add waits for a running apply.
     static let applyWaitPolls = 300
-    static let actionWidth: CGFloat = 170
-
     private var mode: LookupMode { LookupMode(routeManager) }
+    private var modeColor: Color { mode == .vpnOnly ? Theme.warning : Theme.success }
+    /// A switched-off service that lists the name is what the add turns on (Bypass mode).
+    private var offService: ServiceEntry? { mode == .bypass ? routeManager.lookupServiceToTurnOn(entry.name) : nil }
+    private var addTitle: String { offService.map { String(localized: "Turn on \($0.name)") } ?? mode.addTitle }
+    /// The pointer on the row, or its add panel open.
+    private var isActive: Bool { isHovered || showingPanel || LookupsTab.hoveredForScreenshots == entry.name }
+    private var trailing: LookupRowTrailing {
+        LookupRowTrailing.resolve(listed: listing != nil, canRemove: removal != nil, active: isActive)
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -237,28 +270,43 @@ private struct LookupRow: View {
             .frame(width: Self.countWidth, alignment: .trailing)
             .help(String(localized: "Times looked up"))
 
+            // The name takes every point the right end does not use right now.
             Text(entry.name)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(listing == nil ? .white : Theme.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 8)
-
-            Group {
-                if let listing {
-                    status(listing)
-                } else {
-                    action
-                }
+            switch trailing {
+            case .none:
+                EmptyView()
+            case .status:
+                if let listing { status(listing) }
+            case .add:
+                addAction
+            case .remove:
+                if let removal { removeAction(removal) }
             }
-            .frame(width: Self.actionWidth, alignment: .trailing)
         }
         .frame(height: 30)
         .padding(.horizontal, 14)
-        .background(isHovered || showingPanel ? Theme.bgHover : (striped ? Color.white.opacity(0.025) : Color.clear))
+        .background(isActive ? Theme.bgHover : (striped ? Color.white.opacity(0.025) : Color.clear))
+        .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        // The actions show only under the pointer, so VoiceOver reaches them on the row itself.
+        .accessibilityElement(children: .combine)
+        .accessibilityActions {
+            if routeManager.isApplyingRoutes {
+                EmptyView()
+            } else if listing == nil {
+                Button(addTitle, action: add)
+                Button(String(localized: "More ways to add \(entry.name)"), action: openPanel)
+            } else if let removal {
+                Button(removal.title(for: entry.name)) { onRemove(removal) }
+            }
+        }
         .popover(isPresented: $showingPanel, arrowEdge: .bottom) {
             LookupAddPanel(
                 choices: LookupAddChoices(name: entry.name, mode: mode,
@@ -284,56 +332,60 @@ private struct LookupRow: View {
         }
     }
 
+    /// Where the name is listed, small and grey: the content is the name, not the status.
     private func status(_ listing: LookupListing) -> some View {
         let (title, detail, help) = Self.describe(listing)
         let isOff = listing == .listedOff
-        return HStack(spacing: 5) {
-            Image(systemName: isOff ? "pause.circle" : "checkmark.circle.fill")
-                .font(.system(size: 11))
+        return HStack(spacing: 4) {
+            Image(systemName: isOff ? "pause.circle" : "checkmark.circle")
+                .font(.system(size: 10))
+            // Capped like the detail: in Custom mode the title is a route name of any length.
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
+                .truncationMode(.tail)
+                .frame(maxWidth: Self.statusDetailWidth, alignment: .leading)
             if let detail {
+                // Capped, so a long service name truncates instead of squeezing the domain.
                 Text(detail)
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textSecondary)
-                    .lineLimit(1)
+                    .foregroundColor(Theme.textTertiary)
                     .truncationMode(.tail)
+                    .frame(maxWidth: Self.statusDetailWidth, alignment: .leading)
             }
         }
-        .foregroundColor(isOff ? Theme.textSecondary : (mode == .vpnOnly ? Theme.warning : Theme.success))
+        .font(.system(size: 11))
+        .lineLimit(1)
+        .foregroundColor(Theme.textSecondary)
+        .fixedSize()
         .help(help)
-        .accessibilityElement(children: .combine)
+    }
+
+    private func add() {
+        if let offService {
+            onTurnOn(entry.name, offService.id)
+        } else {
+            onAdd(entry.name)
+        }
+    }
+
+    private func openPanel() {
+        panelMode = mode
+        showingPanel = true
     }
 
     /// The row's button, which adds the name as it always has, and the chevron beside it,
     /// which opens the add panel for a wildcard or another place.
-    private var action: some View {
-        // A switched-off service that lists the name is what the button turns on (Bypass mode).
-        let offService = mode == .bypass ? routeManager.lookupServiceToTurnOn(entry.name) : nil
-        let title = offService.map { String(localized: "Turn on \($0.name)") } ?? mode.addTitle
-        let color = mode == .vpnOnly ? Theme.warning : Theme.success
-        return HStack(spacing: 2) {
-            Button {
-                if let offService {
-                    onTurnOn(entry.name, offService.id)
-                } else {
-                    onAdd(entry.name)
-                }
-            } label: {
-                Label(title, systemImage: offService == nil ? "plus" : "power")
-                    .font(.system(size: 11, weight: .semibold))
+    private var addAction: some View {
+        HStack(spacing: 2) {
+            Button(action: add) {
+                Label(addTitle, systemImage: offService == nil ? "plus" : "power")
+                    .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
             }
             .buttonStyle(.borderless)
             .help(offService.map { String(localized: "\($0.name) on the Services page lists this name and is off. Turn it on to bypass it.") } ?? mode.addHelp)
-            .accessibilityLabel(String(localized: "\(title): \(entry.name)"))
 
-            Button {
-                panelMode = mode
-                showingPanel = true
-            } label: {
+            Button(action: openPanel) {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 9, weight: .semibold))
                     .frame(width: 16, height: 18)
                     .contentShape(Rectangle())
             }
@@ -341,9 +393,26 @@ private struct LookupRow: View {
             // Only Bypass mode offers other places (a new service, any service).
             .help(mode == .bypass ? String(localized: "Add a wildcard, or add it somewhere else")
                                   : String(localized: "Add a wildcard instead"))
-            .accessibilityLabel(String(localized: "More ways to add \(entry.name)"))
         }
-        .foregroundColor(color)
+        .foregroundColor(modeColor)
+        .fixedSize()
+        .disabled(routeManager.isApplyingRoutes)
+    }
+
+    /// Takes the name out of what lists it, saying which: the list, a wildcard, a service.
+    private func removeAction(_ removal: LookupRemoval) -> some View {
+        let turnsOff = { if case .turnOffService = removal { return true } else { return false } }()
+        return Button {
+            onRemove(removal)
+        } label: {
+            Label(removal.title(for: entry.name), systemImage: turnsOff ? "power" : "minus.circle")
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+        }
+        .buttonStyle(.borderless)
+        .foregroundColor(.white)
+        .fixedSize()
+        .help(removal.help(for: entry.name))
         .disabled(routeManager.isApplyingRoutes)
     }
 

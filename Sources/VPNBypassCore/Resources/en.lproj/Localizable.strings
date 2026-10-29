@@ -419,6 +419,7 @@
 "1 IP range" = "1 IP range";
 "%lld IP ranges" = "%lld IP ranges";
 "Removed the rule for %@." = "Removed the rule for %@.";
+"%@ is still listed by another entry; point at it again to remove that one." = "%@ is still listed by another entry; point at it again to remove that one.";
 "Removed the route %@." = "Removed the route %@.";
 "Turned on %@." = "Turned on %@.";
 "Turned off %@." = "Turned off %@.";
@@ -724,3 +725,17 @@
 "Direct rule" = "Direct rule";
 "Added: %@" = "Added: %@";
 "Remove %@ from %@" = "Remove %@ from %@";
+
+/* DNS Lookups: removing a listed name */
+"Remove" = "Remove";
+"Remove %@" = "Remove %@";
+"Remove from %@" = "Remove from %@";
+"Turn off %@" = "Turn off %@";
+"Removed %@ from %@." = "Removed %@ from %@.";
+"Take it off the Bypass list" = "Take it off the Bypass list";
+"Take it off the VPN Only list" = "Take it off the VPN Only list";
+"Take %@ off the Bypass list. Names under it stop bypassing the VPN unless another entry lists them." = "Take %@ off the Bypass list. Names under it stop bypassing the VPN unless another entry lists them.";
+"Take %@ off the VPN Only list. Names under it stop going through the VPN unless another entry lists them." = "Take %@ off the VPN Only list. Names under it stop going through the VPN unless another entry lists them.";
+"Take %@ out of the service %@" = "Take %@ out of the service %@";
+"%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names." = "%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names.";
+"Delete the rule for %@ on the Rules page, which sends it to %@" = "Delete the rule for %@ on the Rules page, which sends it to %@";
