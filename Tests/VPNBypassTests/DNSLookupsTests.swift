@@ -156,6 +156,35 @@ final class LookupListingTests: RouteManagerTestCase {
         XCTAssertNil(rm.lookupListing("api.example.com"))
         rm.config.inverseDomains = [DomainEntry(domain: "api.example.com")]
         XCTAssertEqual(rm.lookupListing("api.example.com"), .vpnOnlyList)
+        rm.config.inverseDomains = [DomainEntry(domain: "api.example.com", enabled: false)]
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .listedOff)
+
+        rm.config.routingMode = .bypass
+        rm.config.domains = [DomainEntry(domain: "api.example.com", enabled: false)]
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .listedOff)
+    }
+
+    /// Custom mode names the route of the rule the compiler would use: enabled, lowest
+    /// order, with a route that is on.
+    func testCustomModeNamesTheRouteOfTheRuleInForce() {
+        rm.config.schemaVersion = 2
+        rm.config.routingMode = .custom
+        let direct = rm.config.routes.first { $0.egress == .direct }!
+        var proxy = Route(name: "Office proxy", egress: .proxyHTTP, enabled: true)
+        rm.config.routes.append(proxy)
+        rm.config.rules = [
+            Rule(matchType: .domain, pattern: "api.example.com", routeId: proxy.id, order: 2),
+            Rule(matchType: .domain, pattern: "api.example.com", routeId: direct.id, enabled: false, order: 0),
+        ]
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .rule(routeName: "Office proxy"))
+
+        rm.config.rules.append(Rule(matchType: .domain, pattern: "api.example.com", routeId: direct.id, order: 1))
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .rule(routeName: "Direct"))
+
+        proxy.enabled = false
+        rm.config.routes[rm.config.routes.firstIndex { $0.id == proxy.id }!] = proxy
+        rm.config.rules.removeLast()
+        XCTAssertNil(rm.lookupListing("api.example.com"))
     }
 
     func testOffersOnlyCustomServicesAsGroups() {

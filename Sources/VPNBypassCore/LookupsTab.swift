@@ -250,8 +250,9 @@ private struct LookupRow: View {
 
     private func status(_ listing: LookupListing) -> some View {
         let (title, detail, help) = Self.describe(listing)
+        let isOff = listing == .listedOff
         return HStack(spacing: 5) {
-            Image(systemName: "checkmark.circle.fill")
+            Image(systemName: isOff ? "pause.circle" : "checkmark.circle.fill")
                 .font(.system(size: 11))
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
@@ -263,7 +264,7 @@ private struct LookupRow: View {
                     .truncationMode(.tail)
             }
         }
-        .foregroundColor(mode == .vpnOnly ? Theme.warning : Theme.success)
+        .foregroundColor(isOff ? Theme.textSecondary : (mode == .vpnOnly ? Theme.warning : Theme.success))
         .help(help)
         .accessibilityElement(children: .combine)
     }
@@ -332,8 +333,9 @@ private struct LookupRow: View {
         case .vpnOnlyList:
             return (String(localized: "Via VPN"), nil, String(localized: "On the VPN Only list"))
         case .rule(let routeName):
-            return (routeName.isEmpty ? String(localized: "Has a rule") : routeName, nil,
-                    String(localized: "A rule on the Rules page sends it to this route"))
+            return (routeName, nil, String(localized: "A rule on the Rules page sends it to this route"))
+        case .listedOff:
+            return (String(localized: "Off"), nil, String(localized: "On the Domains page, switched off. Turn it on there."))
         }
     }
 }

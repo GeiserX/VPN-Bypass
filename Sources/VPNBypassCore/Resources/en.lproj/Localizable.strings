@@ -686,7 +686,6 @@
 "RULE" = "RULE";
 "Bypassed" = "Bypassed";
 "Via VPN" = "Via VPN";
-"Has a rule" = "Has a rule";
 "On the Bypass list" = "On the Bypass list";
 "In the group %@" = "In the group %@";
 "On the VPN Only list" = "On the VPN Only list";
@@ -706,4 +705,6 @@
 "Added %@ to %@." = "Added %@ to %@.";
 "Added %@ to %@. The group is off; turn it on in Services to bypass it." = "Added %@ to %@. The group is off; turn it on in Services to bypass it.";
 "Made the group %@ with %@." = "Made the group %@ with %@.";
+"Off" = "Off";
+"On the Domains page, switched off. Turn it on there." = "On the Domains page, switched off. Turn it on there.";
 "The capture could not start." = "The capture could not start.";

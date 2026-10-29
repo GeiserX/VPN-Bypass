@@ -686,7 +686,6 @@
 "RULE" = "REGLA";
 "Bypassed" = "Con bypass";
 "Via VPN" = "Por la VPN";
-"Has a rule" = "Tiene una regla";
 "On the Bypass list" = "En la Lista Bypass";
 "In the group %@" = "En el grupo %@";
 "On the VPN Only list" = "En la lista Solo VPN";
@@ -706,4 +705,6 @@
 "Added %@ to %@." = "%@ añadido a %@.";
 "Added %@ to %@. The group is off; turn it on in Services to bypass it." = "%@ añadido a %@. El grupo está desactivado; actívalo en Servicios para que haga bypass.";
 "Made the group %@ with %@." = "Grupo %@ creado con %@.";
+"Off" = "Desactivado";
+"On the Domains page, switched off. Turn it on there." = "En la página Dominios, desactivado. Actívalo allí.";
 "The capture could not start." = "La captura no pudo empezar.";

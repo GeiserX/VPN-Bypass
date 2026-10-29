@@ -142,15 +142,26 @@ extension RouteManager {
 
     /// Where `name` already is, among the entries the current mode reads: the Bypass list or
     /// an enabled service, the VPN Only list, or a Custom mode domain rule. nil when nowhere.
+    /// A list entry that is switched off is `.listedOff`: adding it again would be refused.
     func lookupListing(_ name: String) -> LookupListing? {
         if config.routingMode == .vpnOnly {
-            return config.inverseDomains.contains { $0.domain == name } ? .vpnOnlyList : nil
+            guard let entry = config.inverseDomains.first(where: { $0.domain == name }) else { return nil }
+            return entry.enabled ? .vpnOnlyList : .listedOff
         }
         if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
-            guard let rule = config.rules.first(where: { $0.matchType == .domain && $0.pattern == name }) else { return nil }
-            return .rule(routeName: config.routes.first { $0.id == rule.routeId }?.name ?? "")
+            // The rule the compiler would use: enabled, lowest order, with a route that is on.
+            let routes = Dictionary(config.routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let match = config.rules
+                .filter { $0.enabled && $0.matchType == .domain && $0.pattern == name }
+                .sorted { $0.order < $1.order }
+                .lazy.compactMap { routes[$0.routeId] }
+                .first { $0.enabled }
+            guard let route = match else { return nil }
+            return .rule(routeName: route.friendlyName(vpnName: vpnType?.knownName))
         }
-        if config.domains.contains(where: { $0.domain == name }) { return .bypassList }
+        if let entry = config.domains.first(where: { $0.domain == name }) {
+            return entry.enabled ? .bypassList : .listedOff
+        }
         if let service = config.services.first(where: { $0.enabled && $0.domains.contains(name) }) {
             return .group(service.name)
         }
@@ -200,6 +211,8 @@ enum LookupListing: Equatable {
     case bypassList
     case group(String)
     case vpnOnlyList
+    /// On the current mode's list, switched off.
+    case listedOff
     /// A Custom mode domain rule, and the name of the route it sends the name to.
     case rule(routeName: String)
 }
