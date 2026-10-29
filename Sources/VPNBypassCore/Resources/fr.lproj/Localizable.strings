@@ -704,7 +704,7 @@
 "Added %@ to %@. The service is off; turn it on from the Services page to bypass it." = "%@ ajouté à %@. Le service est désactivé ; activez-le depuis la page Services pour le contourner.";
 "Made the service %@ with %@." = "Service %@ créé avec %@.";
 "Turn on %@" = "Activer %@";
-"%@ on the Services page lists this name and is off. Turn it on to bypass it. The arrow adds the name to a list or service instead." = "%@, sur la page Services, contient ce nom et est désactivé. Activez-le pour le contourner. La flèche ajoute plutôt le nom à une liste ou à un service.";
+"%@ on the Services page lists this name and is off. Turn it on to bypass it. The arrow adds the name to the Bypass list or a service instead." = "%@, sur la page Services, contient ce nom et est désactivé. Activez-le pour le contourner. La flèche ajoute plutôt le nom à la liste Contournement ou à un service.";
 "%@ is already in %@." = "%@ est déjà dans %@.";
 "Added %@ to %@." = "%@ ajouté à %@.";
 "Off" = "Désactivé";

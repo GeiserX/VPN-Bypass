@@ -309,7 +309,7 @@ private struct LookupRow: View {
             .fixedSize()
             .tint(Theme.success)
             .disabled(routeManager.isApplyingRoutes)
-            .help(offService.map { String(localized: "\($0.name) on the Services page lists this name and is off. Turn it on to bypass it. The arrow adds the name to a list or service instead.") }
+            .help(offService.map { String(localized: "\($0.name) on the Services page lists this name and is off. Turn it on to bypass it. The arrow adds the name to the Bypass list or a service instead.") }
                   ?? String(localized: "Add to the Bypass list. The arrow adds it to a service instead."))
             .accessibilityLabel(String(localized: "\(title): \(entry.name)"))
         } else {

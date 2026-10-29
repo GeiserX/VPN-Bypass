@@ -281,4 +281,15 @@ final class LookupListingTests: RouteManagerTestCase {
         XCTAssertEqual(line?.message, ServiceNameClash.builtInOffMessage(custom: "slack"))
         XCTAssertFalse(rm.config.services.first { $0.id == "slack" }!.enabled)
     }
+
+    /// When the first switched-off service with the name is held off, a later one that can be
+    /// turned on is offered instead.
+    func testSkipsAServiceACustomOneHoldsOffWhenAnotherCanBeTurnedOn() {
+        setEnabled("slack", false)
+        setEnabled("discord", false)
+        rm.config.services[rm.config.services.firstIndex { $0.id == "discord" }!].domains.append("slack.com")
+        rm.config.services.append(ServiceEntry(id: "custom_slack", name: "slack", enabled: false,
+                                               domains: ["chat.example"], ipRanges: [], isCustom: true))
+        XCTAssertEqual(rm.lookupServiceToTurnOn("slack.com")?.id, "discord")
+    }
 }

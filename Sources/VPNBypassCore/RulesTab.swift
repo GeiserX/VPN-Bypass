@@ -170,15 +170,18 @@ extension RouteManager {
 
     /// The switched-off service, built-in or custom, whose domains hold exactly `name`: the
     /// Bypass mode row offers to turn it on. The first in the Services page order (custom
-    /// services, then built-in ones), or nil outside Bypass mode and when the name is already
-    /// listed (`lookupListing`). Only an exact match counts: a service routes the addresses of
-    /// its own domains, never their subdomains.
+    /// services, then built-in ones) that can be turned on, falling back to one a custom
+    /// service holds off by its name (`ServiceNameClash`), so the click shows why. nil outside
+    /// Bypass mode and when the name is already listed (`lookupListing`). Only an exact match
+    /// counts: a service routes the addresses of its own domains, never their subdomains.
     func lookupServiceToTurnOn(_ name: String) -> ServiceEntry? {
         guard config.routingMode != .vpnOnly,
               !Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode),
               lookupListing(name) == nil else { return nil }
         let off = config.services.filter { !$0.enabled && $0.domains.contains(name) }
-        return off.first(where: \.isCustom) ?? off.first
+        return off.first(where: \.isCustom)
+            ?? off.first { customServiceHolding(nameOf: $0) == nil }
+            ?? off.first
     }
 
     /// Turns on the service `serviceId` for the looked-up `name`, through `toggleService`.
