@@ -53,8 +53,13 @@ enum LookupAddLevels {
     /// How many labels a site's own domain has under `labels`: three under a two-label public
     /// suffix or a hosting domain, two otherwise. A name that is itself such a suffix ("co.uk") has fewer, so it
     /// has no site domain and no wildcard.
+    ///
+    /// Under amazonaws.com everything but the first label is a shared AWS endpoint
+    /// (`s3.amazonaws.com`, `execute-api.eu-west-1.amazonaws.com`), so the whole name is the
+    /// customer's, and a name of three labels or fewer is an endpoint with no wildcard.
     static func floor(_ labels: [Substring]) -> Int {
         let last2 = labels.suffix(2).joined(separator: ".")
+        if last2 == "amazonaws.com" { return max(labels.count, 4) }
         return twoLabelPublicSuffixes.contains(last2) || hostingSuffixes.contains(last2) ? 3 : 2
     }
 
@@ -170,12 +175,21 @@ struct LookupAddChoices {
         guard !query.isEmpty else { return services }
         return services.filter { $0.name.localizedCaseInsensitiveContains(query) }
     }
+
+    /// The target once the search reads `search`: a service the search hides is no longer
+    /// picked, so Add can never send the name somewhere the panel does not show.
+    func target(_ current: LookupAddTarget, whenSearching search: String) -> LookupAddTarget {
+        guard case .service(let id) = current, !services(matching: search).contains(where: { $0.id == id }) else { return current }
+        return defaultTarget
+    }
 }
 
 // MARK: - The panel
 
 struct LookupAddPanel: View {
     let choices: LookupAddChoices
+    /// True while routes are being applied: Add waits, as the row's own buttons do.
+    var isBusy = false
     /// What to add, then where; the panel closes itself after.
     let onAdd: (String, LookupAddTarget) -> Void
     let onCancel: () -> Void
@@ -193,9 +207,10 @@ struct LookupAddPanel: View {
         CGFloat(min(count, maxRows)) * rowHeight
     }
 
-    init(choices: LookupAddChoices, level: String? = nil, target: LookupAddTarget? = nil,
+    init(choices: LookupAddChoices, level: String? = nil, target: LookupAddTarget? = nil, isBusy: Bool = false,
          onAdd: @escaping (String, LookupAddTarget) -> Void, onCancel: @escaping () -> Void) {
         self.choices = choices
+        self.isBusy = isBusy
         self.onAdd = onAdd
         self.onCancel = onCancel
         _level = State(initialValue: level ?? choices.defaultLevel)
@@ -251,6 +266,7 @@ struct LookupAddPanel: View {
                     onAdd(level, target)
                 }
                 .keyboardShortcut(.defaultAction)
+                .disabled(isBusy)
             }
         }
         .padding(14)
@@ -261,6 +277,7 @@ struct LookupAddPanel: View {
         let shown = choices.services(matching: search)
         return VStack(alignment: .leading, spacing: 6) {
             LogSearchField(text: $search, placeholder: String(localized: "Search services"))
+                .onChange(of: search) { newValue in target = choices.target(target, whenSearching: newValue) }
             Group {
                 if shown.isEmpty {
                     Text("No service matches \"\(search)\"")

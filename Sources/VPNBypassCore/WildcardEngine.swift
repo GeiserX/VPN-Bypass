@@ -24,8 +24,14 @@ final class WildcardEngine {
 
     /// True from launch, and from every Remove All Routes, until the next apply commits.
     private(set) var suspended = true
-    /// What the helper serves, as last set. Nil when unknown: the next pass sets it again.
+    /// What the helper was last asked to serve. Nil when unknown: the next pass sets it again.
     private var sentSpecs: [WildcardSpec]?
+    /// The part of `sentSpecs` the helper actually serves: a suffix whose resolver file is
+    /// another program's is left out. Reset with `sentSpecs`.
+    private var servedSpecs: [WildcardSpec]?
+    /// The wildcards configured at the last pass, to tell when one is added. Nil after launch
+    /// and after Remove All Routes: the next pass only takes note.
+    private var lastConfigured: Set<String>?
     private var sentGuard: WildcardSafetyGuard?
     private var lastSkipped: [String: String] = [:]
     private var warnedShadows: [String: [String]] = [:]
@@ -43,7 +49,7 @@ final class WildcardEngine {
         ledger = WildcardLedger.load(from: ledgerURL)
     }
 
-    var isServing: Bool { !(sentSpecs ?? []).isEmpty }
+    var isServing: Bool { !(servedSpecs ?? []).isEmpty }
 
     // MARK: - Triggers
 
@@ -77,6 +83,7 @@ final class WildcardEngine {
     /// listed domains forget theirs.
     func routesCleared() async {
         suspended = true
+        lastConfigured = nil
         stopTimer()
         if !ledger.seen.isEmpty {
             ledger = WildcardLedger()
@@ -87,6 +94,13 @@ final class WildcardEngine {
         if HelperManager.shared.isHelperInstalled, sentSpecs != [] {
             let result = await HelperManager.shared.setWildcards([], guard: WildcardSafetyGuard())
             sentSpecs = result.ok ? [] : nil
+            servedSpecs = sentSpecs
+            // A lookup that finished just before the stop may have added a route the app has
+            // not drained yet. Nothing installs after the stop, so one drain gets them all;
+            // `record` takes them out again while suspended.
+            if result.ok, let drained = await HelperManager.shared.drainWildcardRoutes() {
+                record(drained.routes)
+            }
         }
     }
 
@@ -98,14 +112,25 @@ final class WildcardEngine {
 
     // MARK: - One pass
 
+    /// One pass, awaited, for tests.
+    func syncForTests() async { await sync() }
+
     private func sync() async {
         guard !manager.isShuttingDown else { return }
         let config = manager.config
         let configured = Set(WildcardPlanner.configuredSuffixes(config))
+        // A wildcard added while routes are live works at once, as a listed name does, even
+        // when no apply has run since launch (auto-apply off) or since Remove All Routes.
+        if suspended, manager.isVPNConnected, let before = lastConfigured, !configured.subtracting(before).isEmpty {
+            suspended = false
+            adoptedLedger = false
+        }
+        lastConfigured = configured
         await dropLearnedRoutes(notIn: configured)
 
         guard HelperManager.shared.isHelperInstalled else {
             sentSpecs = nil
+            servedSpecs = nil
             stopTimer()
             return
         }
@@ -132,6 +157,7 @@ final class WildcardEngine {
         // pass from a helper older than 2.5.0 until it is replaced.
         if configured.isEmpty && sentSpecs == nil {
             sentSpecs = []
+            servedSpecs = []
             sentGuard = safetyGuard
         }
 
@@ -140,6 +166,7 @@ final class WildcardEngine {
             guard !manager.isShuttingDown else { return }
             if result.ok {
                 sentSpecs = specs
+                servedSpecs = specs.filter { !result.unserved.contains($0.suffix) }
                 sentGuard = safetyGuard
                 if !specs.isEmpty {
                     manager.log(.info, "Wildcards: \(specs.count - result.unserved.count) served by the helper's DNS forwarder")
@@ -149,14 +176,15 @@ final class WildcardEngine {
                 }
             } else {
                 sentSpecs = nil
+                servedSpecs = nil
                 manager.log(.error, "Wildcards could not be served: \(result.error ?? "the helper did not answer")")
             }
         }
 
         warnAboutShadowing(specs: specs, resolvers: resolvers)
-        if isServing {
-            adoptLedgerIfNeeded(specs: specs)
-            await moveLearnedRoutes(to: specs)
+        if isServing, let served = servedSpecs {
+            adoptLedgerIfNeeded(specs: served)
+            await moveLearnedRoutes(to: served)
             startTimer()
         } else {
             stopTimer()
@@ -164,8 +192,8 @@ final class WildcardEngine {
     }
 
     private func environment(config: Config, resolvers: [ScutilDNS.Resolver]) async -> WildcardPlanner.Environment {
-        var physicalDNS = manager.detectedDNSServerDisplay.map { [$0] } ?? []
-        if physicalDNS.isEmpty { physicalDNS = config.fallbackDNS.filter { WildcardIPv4.parse($0) != nil } }
+        let physicalInterface = await manager.detectPhysicalInterface()
+        let physicalDNS = WildcardPlanner.physicalDNS(interface: physicalInterface, resolvers: resolvers, fallback: config.fallbackDNS)
         let vpnInterface = manager.vpnInterface
         var vpnDNS = vpnInterface.map { ScutilDNS.nameservers(forInterface: $0, in: resolvers) } ?? []
         if vpnDNS.isEmpty, let iface = vpnInterface {
@@ -179,7 +207,7 @@ final class WildcardEngine {
         let manager = self.manager
         return WildcardPlanner.Environment(
             localGateway: manager.localGateway,
-            physicalInterface: await manager.detectPhysicalInterface(),
+            physicalInterface: physicalInterface,
             physicalDNS: physicalDNS,
             vpnGateway: manager.vpnGateway,
             vpnInterface: vpnInterface,
@@ -226,6 +254,7 @@ final class WildcardEngine {
         if !drained.running && isServing {
             // The helper restarted and lost its list (and removed its files): set it again.
             sentSpecs = nil
+            servedSpecs = nil
             requestSync()
         }
         record(drained.routes)
@@ -268,8 +297,13 @@ final class WildcardEngine {
     /// rest went with the reboot or the sweep and are forgotten.
     private func adoptLedgerIfNeeded(specs: [WildcardSpec]) {
         guard !adoptedLedger else { return }
+        guard !ledger.seen.isEmpty else {
+            adoptedLedger = true
+            return
+        }
+        // A failed read leaves the flag down, so the next pass tries again.
+        guard let table = RouteKernel.currentTable() else { return }
         adoptedLedger = true
-        guard !ledger.seen.isEmpty, let table = RouteKernel.currentTable() else { return }
         let ours = Dictionary(table.filter { $0.isOurs && $0.isHost }.map { ($0.destinationString, $0) },
                               uniquingKeysWith: { first, _ in first })
         let suffixes = Set(specs.map(\.suffix))
@@ -333,18 +367,24 @@ final class WildcardEngine {
     }
 
     /// Takes out a day-old learned route nobody is connected to.
-    private func expire() async {
+    func expire(at now: Date = Date()) async {
         let netstat = await manager.runProcessAsync("/usr/sbin/netstat", arguments: ["-an", "-p", "tcp"], timeout: 5)
         // Without the connection list nothing expires: a route in use must never go.
         guard let netstat, netstat.exitCode == 0 else { return }
-        let expired = ledger.expired(at: Date(), openPeers: OpenTCPPeers.parse(netstat.output))
+        let expired = ledger.expired(at: now, openPeers: OpenTCPPeers.parse(netstat.output))
         guard !expired.isEmpty else { return }
-        let keys = Set(expired.map { "\(WildcardDomain.entry(for: $0.suffix))|\($0.ip)" })
-        let removed = await removeLearned { keys.contains("\($0.source)|\($0.destination)") }
+        let key: (String, String) -> String = { "\($0)|\($1)" }
+        let keys = Set(expired.map { key(WildcardDomain.entry(for: $0.suffix), $0.ip) })
+        let removed = await removeLearned { keys.contains(key($0.source, $0.destination)) }
         guard removed else { return }
-        for entry in expired { ledger.remove(entry.ip, suffix: entry.suffix) }
+        // A route whose kernel removal failed keeps its entry, and so its ledger line: the
+        // next pass tries again.
+        let left = Set(manager.activeRoutes.map { key($0.source, $0.destination) })
+        let gone = expired.filter { !left.contains(key(WildcardDomain.entry(for: $0.suffix), $0.ip)) }
+        guard !gone.isEmpty else { return }
+        for entry in gone { ledger.remove(entry.ip, suffix: entry.suffix) }
         ledgerDirty = true
-        manager.log(.info, "Wildcards: \(expired.count) learned route(s) expired after a day unused")
+        manager.log(.info, "Wildcards: \(gone.count) learned route(s) expired after a day unused")
     }
 
     /// Removes the learned entries `matches` picks, and their kernel routes unless another

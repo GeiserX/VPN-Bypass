@@ -210,6 +210,8 @@ private struct LookupRow: View {
     let onAddChoice: (String, LookupAddTarget) -> Void
     @State private var isHovered = false
     @State private var showingPanel = false
+    /// The mode the panel was opened in. A choice made for one mode is never added in another.
+    @State private var panelMode: LookupMode?
 
     static let countWidth: CGFloat = 76
     static let actionWidth: CGFloat = 170
@@ -259,10 +261,15 @@ private struct LookupRow: View {
             LookupAddPanel(
                 choices: LookupAddChoices(name: entry.name, mode: mode,
                                           services: routeManager.lookupServices(for: entry.name)),
+                isBusy: routeManager.isApplyingRoutes,
                 onAdd: { value, target in
                     showingPanel = false
+                    let opened = panelMode
                     // The New Service sheet opens once the popover has closed.
-                    DispatchQueue.main.async { onAddChoice(value, target) }
+                    DispatchQueue.main.async {
+                        guard opened == LookupMode(routeManager) else { return }
+                        onAddChoice(value, target)
+                    }
                 },
                 onCancel: { showingPanel = false }
             )
@@ -314,6 +321,7 @@ private struct LookupRow: View {
             .accessibilityLabel(String(localized: "\(title): \(entry.name)"))
 
             Button {
+                panelMode = mode
                 showingPanel = true
             } label: {
                 Image(systemName: "chevron.down")

@@ -540,16 +540,20 @@ extension RouteKernel {
         }
 
         /// Runs everything submitted so far, in order. Call it only on the route queue.
-        public func drain() {
+        /// - Returns: whether anything ran, so a batch knows its table read may be out of date.
+        @discardableResult
+        public func drain() -> Bool {
+            var ran = false
             while true {
                 lock.lock()
                 guard !pending.isEmpty else {
                     lock.unlock()
-                    return
+                    return ran
                 }
                 let work = pending.removeFirst()
                 lock.unlock()
                 work()
+                ran = true
             }
         }
     }

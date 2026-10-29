@@ -93,6 +93,16 @@ final class LookupAddChoicesTests: XCTestCase {
         XCTAssertTrue(choices.services(matching: "zzz").isEmpty)
     }
 
+    /// A service the search hides is no longer the target, so Add cannot send the name to a
+    /// place the panel does not show. Any other target stays.
+    func testASearchThatHidesThePickedServiceDropsIt() {
+        let choices = LookupAddChoices(name: "api.datadoghq.com", mode: .bypass, services: services)
+        XCTAssertEqual(choices.target(.service("slack"), whenSearching: "zzz"), .modeList)
+        XCTAssertEqual(choices.target(.service("slack"), whenSearching: "sla"), .service("slack"))
+        XCTAssertEqual(choices.target(.newService, whenSearching: "zzz"), .newService)
+        XCTAssertEqual(choices.target(.modeList, whenSearching: "zzz"), .modeList)
+    }
+
     /// The box is as tall as a short list, and eight rows tall for a long one, which scrolls.
     func testTheServiceBoxHoldsEightRows() {
         XCTAssertEqual(LookupAddPanel.maxRows, 8)
@@ -105,6 +115,18 @@ final class LookupAddChoicesTests: XCTestCase {
         XCTAssertEqual(LookupAddLevels.levels(for: "d1abc.cloudfront.net"), ["d1abc.cloudfront.net", "*.d1abc.cloudfront.net"])
         XCTAssertEqual(LookupAddLevels.levels(for: "docs.foo.github.io"), ["docs.foo.github.io", "*.foo.github.io"])
         XCTAssertEqual(LookupAddLevels.levels(for: "github.io"), ["github.io"])
+    }
+
+    /// Under amazonaws.com all but the first label is a shared AWS endpoint: never
+    /// `*.s3.amazonaws.com`, which would take in every bucket.
+    func testNeverOffersASharedAWSEndpoint() {
+        XCTAssertEqual(LookupAddLevels.levels(for: "my-bucket.s3.amazonaws.com"),
+                       ["my-bucket.s3.amazonaws.com", "*.my-bucket.s3.amazonaws.com"])
+        XCTAssertEqual(LookupAddLevels.levels(for: "my-bucket.s3.eu-west-1.amazonaws.com"),
+                       ["my-bucket.s3.eu-west-1.amazonaws.com", "*.my-bucket.s3.eu-west-1.amazonaws.com"])
+        XCTAssertEqual(LookupAddLevels.levels(for: "s3.amazonaws.com"), ["s3.amazonaws.com"])
+        XCTAssertEqual(LookupAddLevels.levels(for: "s3-external-1.amazonaws.com"), ["s3-external-1.amazonaws.com"])
+        XCTAssertEqual(LookupAddLevels.registrableDomain("my-bucket.s3.amazonaws.com"), "my-bucket.s3.amazonaws.com")
     }
 
     func testTheSuggestedServiceNameIsTheSiteName() {
@@ -162,6 +184,26 @@ final class LookupAddTargetTests: RouteManagerTestCase {
         // The same suffix again is refused, naming its route.
         XCTAssertEqual(rm.addLookup("*.us5.datadoghq.com", to: .directRule)?.isError, true)
         XCTAssertEqual(rm.config.rules.count, 2)
+    }
+
+    /// A rule that routes nothing (switched off, or on a route that is off) does not refuse a
+    /// new Direct rule for the same name, which the Lookups page shows as not listed.
+    func testASwitchedOffRuleDoesNotBlockADirectRule() {
+        rm.config.schemaVersion = 2
+        rm.config.routingMode = .custom
+        let direct = rm.config.routes.first { $0.egress == .direct }!
+        var offRoute = Route(name: "Off", egress: .direct)
+        offRoute.enabled = false
+        rm.config.routes.append(offRoute)
+        defer { rm.config.routes.removeAll { $0.id == offRoute.id } }
+        var offRule = Rule(matchType: .domain, pattern: "api.datadoghq.com", routeId: direct.id, order: 0)
+        offRule.enabled = false
+        rm.config.rules = [offRule, Rule(matchType: .suffix, pattern: "us5.datadoghq.com", routeId: offRoute.id, order: 1)]
+
+        XCTAssertNil(rm.addLookup("api.datadoghq.com", to: .directRule))
+        XCTAssertNil(rm.addLookup("*.us5.datadoghq.com", to: .directRule))
+        XCTAssertEqual(rm.config.rules.count, 4)
+        XCTAssertEqual(rm.lookupListing("intake.us5.datadoghq.com"), .rule(routeName: "Direct"))
     }
 
     func testAddsAWildcardToACustomService() {

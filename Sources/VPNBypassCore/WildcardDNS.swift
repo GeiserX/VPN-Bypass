@@ -720,7 +720,17 @@ public enum WildcardResolverFile {
         let fm = FileManager.default
         var result = SyncResult()
 
-        for name in (try? fm.contentsOfDirectory(atPath: dir)) ?? [] where !wanted.contains(name) {
+        // A directory that cannot be read is reported, never taken for an empty one: the files
+        // of ours in it are still there, and the next sync tries again.
+        var names: [String] = []
+        do {
+            names = try fm.contentsOfDirectory(atPath: dir)
+        } catch CocoaError.fileReadNoSuchFile {
+            // No directory, no files of ours.
+        } catch {
+            result.errors.append("cannot list \(dir): \((error as NSError).localizedFailureReason ?? "unreadable")")
+        }
+        for name in names where !wanted.contains(name) {
             let path = dir + "/" + name
             guard isRegularFile(path), let text = try? String(contentsOfFile: path, encoding: .utf8),
                   isOurs(text) else { continue }

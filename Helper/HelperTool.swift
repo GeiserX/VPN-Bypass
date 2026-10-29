@@ -137,11 +137,12 @@ class HelperTool: NSObject, HelperProtocol {
             var lastError: String?
 
             // ONE silent table read for the whole batch — replaces a forked, event-emitting
-            // `route -n get` per destination.
-            let snapshot = self.kernelSnapshot()
+            // `route -n get` per destination. Read again only after a wildcard install ran in
+            // between, so "already correct" is never decided on a route it has just changed.
+            var snapshot = self.kernelSnapshot()
 
             for route in routes {
-                Self.priorityLane.drain()
+                if Self.priorityLane.drain() { snapshot = self.kernelSnapshot() }
                 guard let destination = route["destination"] as? String,
                       let gateway = route["gateway"] as? String else {
                     failureCount += 1

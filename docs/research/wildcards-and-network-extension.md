@@ -17,7 +17,7 @@ Ship wildcards now through a **scoped local resolver inside the existing root he
 
 For each wildcard, the helper writes `/etc/resolver/<suffix>` pointing at its own forwarder on `127.0.0.1:53530`. The forwarder sends the query upstream to the right DNS server. For every IPv4 address in the answer it **adds the host route first and returns the answer second**. That removes the race for every app that uses the system resolver. Chrome is included: its built-in DNS client switches to the system resolver whenever more than one non-mDNS resolver exists (Chromium `net/dns/dns_config_watcher_mac.cc:95-108`).
 
-This is always on while at least one wildcard exists. It does not depend on the Lookups switch. It works for the Bypass list, the VPN Only list and Custom-mode `suffix` rules routed Direct, VPN or Tailscale, at any depth.
+This is always on while at least one wildcard exists. It does not depend on the Lookups switch. It works for the Bypass list, the VPN Only list and Custom-mode `suffix` rules routed Direct or through a VPN route pinned to one tunnel, at any depth. Proxy and Tailscale Peer routes get no wildcard forwarder: a kernel route cannot point at a listener.
 
 On Network Extension: yes, it is worth thinking about, but not for wildcards.
 - A DNS proxy (`NEDNSProxyProvider`) would do the same job the forwarder does. It costs entitlements, two provisioning profiles, hand signing and an approval prompt, and it still can't see DoH. It does **not** need MDM on macOS.
@@ -62,7 +62,7 @@ So the answer is: build the forwarder now, and treat NE as a separate per-app fe
 - **File contents:** `nameserver 127.0.0.1`, `port 53530`, `search_order 1`.
 - **Upstream.** Send each query to the server that would have answered without our file, unless the route says otherwise.
   - Bypass mode and Direct routes: the non-VPN DNS server (`RouteManager.swift:5194-5251`). Bind the socket to the physical interface: `IP_BOUND_IF` on a BSD socket (new code), or `NWParameters.requiredInterface` as `ProxyForwarder.swift:746` does.
-  - VPN Only mode and VPN/Tailscale routes: the DNS servers of that tunnel's resolver, with the socket bound to its `utun`. This keeps internal names under a corporate suffix working.
+  - VPN Only mode and VPN routes pinned to a tunnel: the DNS servers of that tunnel's resolver, with the socket bound to its `utun`. This keeps internal names under a corporate suffix working.
   - Never `getaddrinfo`. It would send the query straight back to our forwarder.
 - **Records we can't route.**
   - The app routes IPv4 only: `RouteKernel.ipv4ToUInt32` (`RouteKernel.swift:312`, used `:79-87`).
@@ -201,7 +201,7 @@ Bound by `docs/MULTI-ROUTE-DESIGN.md:359` (no NE entitlements) until the owner l
 2. **Ship B.** All three lists, at any depth.
    - Wildcard branch in `cleanDomain`, which strips `*` today through its character filter (`RouteManager.swift:5594-5596`).
    - Forwarder, safety guard, ledger, shadowing warning, learned routes in the existing sweep and reconcile, and the helper protocol bump.
-   - Custom `suffix` rules with Direct, VPN or Tailscale routes.
+   - Custom `suffix` rules with Direct routes or VPN routes pinned to one tunnel.
    - Firefox canary file.
    - Fix CLAUDE.md.
 3. **Watch, then decide.** If shared-IP spill or route-table growth bites in real use, spike D1 (fake IP plus root utun). Still no entitlement.

@@ -477,6 +477,17 @@ final class WildcardPayloadTests: XCTestCase {
         XCTAssertFalse(WildcardResolverFile.sync(wanted: [], in: dir).changed)
     }
 
+    /// A resolver directory that cannot be listed is an error, never an empty directory; one
+    /// that does not exist holds nothing of ours.
+    func testAnUnreadableResolverDirectoryIsReported() throws {
+        let fm = FileManager.default
+        let file = fm.temporaryDirectory.appendingPathComponent("wildcard-resolver-file-\(UUID().uuidString)").path
+        try "x".write(toFile: file, atomically: true, encoding: .utf8)
+        defer { try? fm.removeItem(atPath: file) }
+        XCTAssertEqual(WildcardResolverFile.sync(wanted: [], in: file).errors.count, 1)
+        XCTAssertTrue(WildcardResolverFile.sync(wanted: [], in: file + "-missing").errors.isEmpty)
+    }
+
     /// The helper compiles these from the Makefile's file list, not from Package.swift.
     func testTheHelperBuildIncludesTheForwarder() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -562,6 +573,54 @@ final class WildcardPlannerTests: XCTestCase {
             WildcardSpec(suffix: "direct.example.com", gateway: "192.168.10.1", upstream: ["192.168.10.1"], interface: "en0"),
             WildcardSpec(suffix: "lab.example.com", gateway: "iface:utun7", upstream: ["10.7.0.53"], interface: "utun7", intoTunnel: true),
         ])
+    }
+
+    /// First match wins: a wildcard below a suffix an earlier rule claims would catch its
+    /// names first through a more specific resolver file, so it is left out. The earlier rule
+    /// claims whatever its route, a proxy too, but only while the rule and its route are on.
+    func testAWildcardBelowAnEarlierRulesSuffixIsLeftOut() {
+        var c = Config()
+        c.routingMode = .custom
+        c.schemaVersion = 2
+        let direct = Route(name: "Direct", egress: .direct)
+        let proxy = Route(name: "Proxy", egress: .proxySOCKS5, proxyHost: "p", proxyPort: 1080)
+        var off = Route(name: "Off", egress: .direct)
+        off.enabled = false
+        let pinned = Route(name: "Lab", egress: .vpnDefault, vpnSelector: VPNSelector(kind: .interface, interfaceName: "utun7"))
+        c.routes = [direct, proxy, off, pinned]
+        var disabled = Rule(matchType: .suffix, pattern: "free.example.org", routeId: proxy.id, order: 2)
+        disabled.enabled = false
+        c.rules = [
+            Rule(matchType: .suffix, pattern: "example.com", routeId: proxy.id, order: 0),
+            Rule(matchType: .suffix, pattern: "*.api.example.com", routeId: direct.id, order: 1),
+            disabled,
+            Rule(matchType: .suffix, pattern: "x.free.example.org", routeId: direct.id, order: 3),
+            Rule(matchType: .suffix, pattern: "corp.example.net", routeId: off.id, order: 4),
+            Rule(matchType: .suffix, pattern: "git.corp.example.net", routeId: direct.id, order: 5),
+            Rule(matchType: .suffix, pattern: "lab.example.net", routeId: direct.id, order: 6),
+            Rule(matchType: .suffix, pattern: "a.lab.example.net", routeId: pinned.id, order: 7),
+        ]
+        XCTAssertEqual(WildcardPlanner.configuredSuffixes(c), ["x.free.example.org", "git.corp.example.net", "lab.example.net"])
+    }
+
+    /// Around the VPN, the physical interface's servers as macOS has them now, not the ones
+    /// found at launch; the Settings fallback only when it has none.
+    func testThePhysicalDNSIsTheCurrentNetworks() {
+        let resolvers = ScutilDNS.parse("""
+            DNS configuration (for scoped queries)
+
+            resolver #1
+              nameserver[0] : 192.168.50.1
+              nameserver[1] : 127.0.0.1
+              if_index : 14 (en0)
+
+            resolver #2
+              nameserver[0] : 10.20.0.53
+              if_index : 22 (utun4)
+            """)
+        XCTAssertEqual(WildcardPlanner.physicalDNS(interface: "en0", resolvers: resolvers, fallback: ["1.1.1.1"]), ["192.168.50.1"])
+        XCTAssertEqual(WildcardPlanner.physicalDNS(interface: "en7", resolvers: resolvers, fallback: ["1.1.1.1", "dns.example"]), ["1.1.1.1"])
+        XCTAssertEqual(WildcardPlanner.physicalDNS(interface: nil, resolvers: resolvers, fallback: ["8.8.8.8"]), ["8.8.8.8"])
     }
 
     func testTheGuardExcludesOurGatewaysDNSServersAndVPNOnlyRanges() {
@@ -722,6 +781,7 @@ final class LearnedWildcardRouteTests: XCTestCase {
     override func tearDown() {
         let rm = RouteManager.shared
         rm.removeRoutesBatchOverrideForTests = nil
+        rm.isVPNConnected = false
         rm.activeRoutes = []
         rm.config = savedConfig
         super.tearDown()
@@ -772,6 +832,46 @@ final class LearnedWildcardRouteTests: XCTestCase {
         XCTAssertNotNil(engine.ledger.seen["example.com"]?["34.7.7.7"])
         engine.record([LearnedWildcardRoute(ip: "34.7.7.7", suffix: "example.com", gateway: "iface:utun4")])
         XCTAssertEqual(rm.activeRoutes.filter { $0.destination == "34.7.7.7" }.map(\.gateway), ["iface:utun4"], "a new gateway replaces the old")
+    }
+
+    /// A day-old route whose kernel removal failed is still installed: it keeps its entry and
+    /// its ledger line, so the next expiry pass tries again instead of forgetting it.
+    func testAnExpiredRouteWhoseRemovalFailedIsKeptForTheNextPass() async {
+        let rm = RouteManager.shared
+        let engine = rm.wildcards
+        engine.routesApplied()
+        engine.record([LearnedWildcardRoute(ip: "34.8.8.8", suffix: "example.com", gateway: "192.168.10.1")])
+        let later = Date().addingTimeInterval(2 * WildcardLedger.maxAge)
+
+        rm.removeRoutesBatchOverrideForTests = { dests in (0, dests.count, dests, "busy") }
+        await engine.expire(at: later)
+        XCTAssertEqual(rm.activeRoutes.filter { $0.destination == "34.8.8.8" }.map(\.source), ["*.example.com"])
+        XCTAssertNotNil(engine.ledger.seen["example.com"]?["34.8.8.8"], "still installed, so still expiring")
+
+        rm.removeRoutesBatchOverrideForTests = { dests in (dests.count, 0, [], nil) }
+        await engine.expire(at: later)
+        XCTAssertTrue(rm.activeRoutes.filter { $0.destination == "34.8.8.8" }.isEmpty)
+        XCTAssertNil(engine.ledger.seen["example.com"]?["34.8.8.8"])
+    }
+
+    /// With no apply since launch (auto-apply off) or since Remove All Routes, a wildcard
+    /// added while the VPN is up works at once, as a listed name does. Anything else leaves
+    /// the engine suspended.
+    func testAWildcardAddedWhileSuspendedWakesTheEngine() async {
+        let rm = RouteManager.shared
+        let engine = rm.wildcards
+        rm.isVPNConnected = true
+        await engine.routesCleared()
+        await engine.syncForTests()
+        XCTAssertTrue(engine.suspended, "the first pass only takes note of the list")
+
+        rm.config.domains = []
+        await engine.syncForTests()
+        XCTAssertTrue(engine.suspended, "a wildcard removed wakes nothing")
+
+        rm.config.domains = [DomainEntry(domain: "*.new.example.com")]
+        await engine.syncForTests()
+        XCTAssertFalse(engine.suspended)
     }
 }
 
@@ -1051,5 +1151,19 @@ final class WildcardHeldQueueTests: XCTestCase {
         _ = finished.wait(timeout: .now() + 5)
         queue.sync {}
         XCTAssertEqual(ran, [0, 1, 2, 3, 4])
+    }
+
+    /// A batch reads the routing table again only after the lane ran something, so it never
+    /// calls a route "already correct" that a wildcard install has just changed.
+    func testTheLaneSaysWhetherItRanAnything() {
+        let queue = DispatchQueue(label: "test.routes.ran")
+        let lane = RouteKernel.PriorityLane()
+        queue.sync { XCTAssertFalse(lane.drain(), "nothing waiting") }
+        queue.suspend()
+        lane.submit(on: queue) {}
+        XCTAssertTrue(lane.drain(), "one job waiting")
+        XCTAssertFalse(lane.drain())
+        queue.resume()
+        queue.sync {}
     }
 }

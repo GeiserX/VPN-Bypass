@@ -64,26 +64,33 @@ enum WildcardPlanner {
             // listener that a routing table cannot point at.
             let routes = Dictionary(config.routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let services = Dictionary(config.services.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            // Every suffix an earlier rule claims, whatever its route (a proxy too): a name
+            // under it goes that way, so a later wildcard below it must not catch the name
+            // first through a more specific resolver file.
+            var claimed: [String] = []
             for rule in config.rules.filter(\.enabled).sorted(by: { $0.order < $1.order }) {
                 guard let route = routes[rule.routeId], route.enabled else { continue }
+                let entries: [String]
+                switch rule.matchType {
+                case .suffix:
+                    entries = [WildcardDomain.isWildcard(rule.pattern) ? rule.pattern : WildcardDomain.entry(for: rule.pattern)]
+                case .service:
+                    entries = (services[rule.pattern]?.domains ?? []).filter(WildcardDomain.isWildcard)
+                case .domain:
+                    entries = WildcardDomain.isWildcard(rule.pattern) ? [rule.pattern] : []
+                case .ip, .cidr, .process:
+                    entries = []
+                }
+                let suffixes = entries.compactMap(WildcardDomain.suffix(of:))
+                defer { claimed += suffixes }
                 let via: Configured.Via
                 switch route.egress {
                 case .direct: via = .physical
                 case .vpnDefault where route.vpnSelector?.kind == .interface: via = .pinned(route)
                 default: continue
                 }
-                switch rule.matchType {
-                case .suffix:
-                    let pattern = WildcardDomain.isWildcard(rule.pattern) ? rule.pattern : WildcardDomain.entry(for: rule.pattern)
-                    add(pattern, via)
-                case .service:
-                    for domain in services[rule.pattern]?.domains ?? [] where WildcardDomain.isWildcard(domain) {
-                        add(domain, via)
-                    }
-                case .domain:
-                    if WildcardDomain.isWildcard(rule.pattern) { add(rule.pattern, via) }
-                case .ip, .cidr, .process:
-                    break
+                for suffix in suffixes where !claimed.contains(where: { WildcardDomain.matches(suffix, suffix: $0) }) {
+                    add(WildcardDomain.entry(for: suffix), via)
                 }
             }
             return out
@@ -137,6 +144,14 @@ enum WildcardPlanner {
             specs.append(spec)
         }
         return (specs, skipped)
+    }
+
+    /// The DNS servers around the VPN: what macOS has for the physical interface now, so a
+    /// new network brings its own; `fallback` (Settings) when it has none we can ask.
+    static func physicalDNS(interface: String?, resolvers: [ScutilDNS.Resolver], fallback: [String]) -> [String] {
+        let usable: (String) -> Bool = { WildcardIPv4.parse($0) != nil && !$0.hasPrefix("127.") }
+        let current = interface.map { ScutilDNS.nameservers(forInterface: $0, in: resolvers) }?.filter(usable) ?? []
+        return current.isEmpty ? fallback.filter(usable) : current
     }
 
     /// The addresses no wildcard may learn, on top of the helper's fixed list: our gateways,

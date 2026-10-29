@@ -104,9 +104,10 @@ extension RouteManager {
             log(.error, "Cannot add rule for \(checked.value): no Direct route found")
             return nil
         }
+        // Only a rule that routes counts: one switched off, or on a route that is off, does not.
         let existing = config.rules
-            .filter { $0.matchType == matchType && $0.pattern == pattern }
-            .compactMap { rule in config.routes.first(where: { $0.id == rule.routeId }) }
+            .filter { $0.enabled && $0.matchType == matchType && $0.pattern == pattern }
+            .compactMap { rule in config.routes.first(where: { $0.id == rule.routeId && $0.enabled }) }
             .first
         if let route = existing {
             let error = AddDomainError.ruleExists(value: checked.value, route: route, vpnName: vpnType?.knownName)

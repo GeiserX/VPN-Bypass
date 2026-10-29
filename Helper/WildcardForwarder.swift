@@ -321,7 +321,10 @@ final class WildcardForwarder {
 
     /// The reply to one query, or nil to send nothing (a message that is not a query).
     func answer(_ bytes: [UInt8], overTCP: Bool) -> [UInt8]? {
-        let (specs, safetyGuard, generation) = queue.sync { (self.specs, self.safetyGuard, self.generation) }
+        var (specs, safetyGuard, generation) = queue.sync { (self.specs, self.safetyGuard, self.generation) }
+        // The networks this Mac is on now, not when the list was set: a network joined since
+        // must not be pulled into a tunnel. Only tunnel wildcards read them.
+        if specs.contains(where: \.intoTunnel) { safetyGuard.connectedNetworks = Self.connectedNetworks() }
         return WildcardLookup.reply(
             to: bytes, overTCP: overTCP, specs: specs, guard: safetyGuard, ttlCap: Self.ttlCap,
             forward: { query, spec in Self.forward(bytes, query: query, spec: spec, overTCP: overTCP) },
@@ -372,13 +375,20 @@ final class WildcardForwarder {
             let go = !pending.abandoned
             pending.started = go
             pending.lock.unlock()
-            // A stop or a new list since the lookup began: the app no longer takes these routes.
-            guard go, self.queue.sync(execute: { self.generation == generation }) else { return }
-            let result = routeWriter.installLearnedRoutes(ips, gateway: spec.gateway)
+            guard go else { return }
+            // The check and the write hold `queue`, where a stop or a new list happens, so
+            // neither can land during the write: a stop or a new list since the lookup began
+            // installs nothing, and whatever this write adds is in `learned` before either
+            // runs, for the app's next drain.
+            let result: [String] = self.queue.sync {
+                guard self.generation == generation else { return [] }
+                let installed = routeWriter.installLearnedRoutes(ips, gateway: spec.gateway)
+                self.recordLocked(installed, suffix: spec.suffix, gateway: spec.gateway)
+                return installed
+            }
             pending.lock.lock()
             pending.installed = result
             pending.lock.unlock()
-            self.record(result, suffix: spec.suffix, gateway: spec.gateway)
         }
         guard done.wait(timeout: .now() + Self.routeWait) == .success else {
             pending.lock.lock()
@@ -395,11 +405,14 @@ final class WildcardForwarder {
     }
 
     private func record(_ ips: [String], suffix: String, gateway: String) {
-        queue.async {
-            for ip in ips {
-                let route = LearnedWildcardRoute(ip: ip, suffix: suffix, gateway: gateway)
-                if self.learnedSet.insert(route).inserted { self.learned.append(route) }
-            }
+        queue.async { self.recordLocked(ips, suffix: suffix, gateway: gateway) }
+    }
+
+    /// `record` for a caller already on `queue`.
+    private func recordLocked(_ ips: [String], suffix: String, gateway: String) {
+        for ip in ips {
+            let route = LearnedWildcardRoute(ip: ip, suffix: suffix, gateway: gateway)
+            if learnedSet.insert(route).inserted { learned.append(route) }
         }
     }
 
