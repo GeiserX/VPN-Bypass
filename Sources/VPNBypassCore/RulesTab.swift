@@ -163,40 +163,81 @@ extension RouteManager {
             return entry.enabled ? .bypassList : .listedOff
         }
         if let service = config.services.first(where: { $0.enabled && $0.domains.contains(name) }) {
-            return .group(service.name)
+            return .service(service.name)
         }
         return nil
     }
 
-    /// Custom services, the Bypass mode groups a looked-up name can join. Built-in services
-    /// are left out: their domains are reset to the shipped list at every launch.
-    var lookupGroups: [ServiceEntry] {
-        config.services.filter(\.isCustom).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    /// The switched-off service, built-in or custom, whose domains hold exactly `name`: the
+    /// Bypass mode row offers to turn it on. The first in the Services page order (custom
+    /// services, then built-in ones), or nil outside Bypass mode and when the name is already
+    /// listed (`lookupListing`). Only an exact match counts: a service routes the addresses of
+    /// its own domains, never their subdomains.
+    func lookupServiceToTurnOn(_ name: String) -> ServiceEntry? {
+        guard config.routingMode != .vpnOnly,
+              !Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode),
+              lookupListing(name) == nil else { return nil }
+        let off = config.services.filter { !$0.enabled && $0.domains.contains(name) }
+        return off.first(where: \.isCustom) ?? off.first
     }
 
-    /// Adds `name` to the custom service `groupId`, keeping its name, switch and addresses.
-    /// The line to show, or nil when the group is gone.
-    func addLookup(_ name: String, toGroup groupId: String) -> AddDomainFeedback? {
-        guard let group = config.services.first(where: { $0.id == groupId && $0.isCustom }) else { return nil }
-        if group.domains.contains(name) {
-            return AddDomainFeedback(refusal: String(localized: "\(name) is already in \(group.name)."), typed: name)
+    /// Turns on the service `serviceId` for the looked-up `name`, through `toggleService`.
+    /// A built-in service a custom one holds off (see `ServiceNameClash`) stays off and the
+    /// line says why. nil when the service is gone or already on.
+    func turnOnLookupService(_ serviceId: String, for name: String) -> AddDomainFeedback? {
+        guard let service = config.services.first(where: { $0.id == serviceId }), !service.enabled else { return nil }
+        if let custom = customServiceHolding(nameOf: service) {
+            return AddDomainFeedback(refusal: ServiceNameClash.builtInOffMessage(custom: custom.name), typed: name)
         }
-        if let clash = updateCustomService(id: group.id, name: group.name, domains: group.domains + [name], ipRanges: group.ipRanges) {
+        toggleService(service.id)
+        return AddDomainFeedback(success: String(localized: "Turned on \(service.name)."))
+    }
+
+    /// The custom services a looked-up name can join in Bypass mode. Those that already hold
+    /// a name under the same parent domain (its last two labels, so any *.datadoghq.com for
+    /// http-intake.logs.datadoghq.com) come first, then the rest, each alphabetical. A service
+    /// that already holds `name` is left out. Built-in services are left out too: their
+    /// domains are reset to the shipped list at every launch.
+    func lookupServices(for name: String) -> [ServiceEntry] {
+        let parent = Self.lookupParent(name)
+        let services = config.services
+            .filter { $0.isCustom && !$0.domains.contains(name) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        guard let parent else { return services }
+        let related = services.filter { $0.domains.contains { Self.lookupParent($0) == parent } }
+        return related + services.filter { service in !related.contains { $0.id == service.id } }
+    }
+
+    /// The last two labels of `name`, lowercased, or nil for a name with fewer than two.
+    private static func lookupParent(_ name: String) -> String? {
+        let labels = name.lowercased().split(separator: ".")
+        guard labels.count >= 2 else { return nil }
+        return labels.suffix(2).joined(separator: ".")
+    }
+
+    /// Adds `name` to the custom service `serviceId`, keeping its name, switch and addresses.
+    /// The line to show, or nil when the service is gone.
+    func addLookup(_ name: String, toService serviceId: String) -> AddDomainFeedback? {
+        guard let service = config.services.first(where: { $0.id == serviceId && $0.isCustom }) else { return nil }
+        if service.domains.contains(name) {
+            return AddDomainFeedback(refusal: String(localized: "\(name) is already in \(service.name)."), typed: name)
+        }
+        if let clash = updateCustomService(id: service.id, name: service.name, domains: service.domains + [name], ipRanges: service.ipRanges) {
             return AddDomainFeedback(refusal: clash.message, typed: name)
         }
-        let message = group.enabled
-            ? String(localized: "Added \(name) to \(group.name).")
-            : String(localized: "Added \(name) to \(group.name). The group is off; turn it on in Services to bypass it.")
+        let message = service.enabled
+            ? String(localized: "Added \(name) to \(service.name).")
+            : String(localized: "Added \(name) to \(service.name). The service is off; turn it on from the Services page to bypass it.")
         return AddDomainFeedback(success: message)
     }
 
-    /// Makes a custom service named `groupName` whose first domain is `name`.
-    func addLookup(_ name: String, toNewGroup groupName: String) -> AddDomainFeedback {
-        let groupName = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let clash = addCustomService(name: groupName, domains: [name], ipRanges: []) {
+    /// Makes a custom service named `serviceName` whose first domain is `name`.
+    func addLookup(_ name: String, toNewService serviceName: String) -> AddDomainFeedback {
+        let serviceName = serviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let clash = addCustomService(name: serviceName, domains: [name], ipRanges: []) {
             return AddDomainFeedback(refusal: clash.message, typed: name)
         }
-        return AddDomainFeedback(success: String(localized: "Made the group \(groupName) with \(name)."))
+        return AddDomainFeedback(success: String(localized: "Made the service \(serviceName) with \(name)."))
     }
 
     /// Saves and re-applies after a rule change (RulesTab's `persistAndReapply`).
@@ -209,7 +250,8 @@ extension RouteManager {
 /// Where a looked-up name already is, for the Lookups page's last column.
 enum LookupListing: Equatable {
     case bypassList
-    case group(String)
+    /// An enabled service lists it; the service's name.
+    case service(String)
     case vpnOnlyList
     /// On the current mode's list, switched off.
     case listedOff

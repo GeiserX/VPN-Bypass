@@ -8,8 +8,8 @@ struct LookupsTab: View {
     @ObservedObject private var monitor = DNSLookupsMonitor.shared
     @State private var query = ""
     @State private var feedback: AddDomainFeedback?
-    /// The name the New Group sheet is open for.
-    @State private var newGroupFor: NewGroupRequest?
+    /// The name the New Service sheet is open for.
+    @State private var newServiceFor: NewServiceRequest?
 
     /// Rows drawn at once. The line under the table says when there are more, and search
     /// reaches them.
@@ -25,12 +25,12 @@ struct LookupsTab: View {
                 lookups
             }
         }
-        .sheet(item: $newGroupFor) { request in
-            NewGroupSheet(domain: request.domain) { groupName in
-                feedback = routeManager.addLookup(request.domain, toNewGroup: groupName)
-                newGroupFor = nil
+        .sheet(item: $newServiceFor) { request in
+            NewServiceSheet(domain: request.domain) { serviceName in
+                feedback = routeManager.addLookup(request.domain, toNewService: serviceName)
+                newServiceFor = nil
             } onCancel: {
-                newGroupFor = nil
+                newServiceFor = nil
             }
         }
         .onChange(of: routeManager.config.routingMode) { _ in feedback = nil }
@@ -143,8 +143,9 @@ struct LookupsTab: View {
                                 striped: index % 2 == 1,
                                 listing: routeManager.lookupListing(entry.name),
                                 onAdd: add,
-                                onAddToGroup: { name, groupId in feedback = routeManager.addLookup(name, toGroup: groupId) },
-                                onNewGroup: { name in newGroupFor = NewGroupRequest(domain: name) }
+                                onTurnOn: { name, serviceId in feedback = routeManager.turnOnLookupService(serviceId, for: name) },
+                                onAddToService: { name, serviceId in feedback = routeManager.addLookup(name, toService: serviceId) },
+                                onNewService: { name in newServiceFor = NewServiceRequest(domain: name) }
                             )
                         }
                     }
@@ -184,7 +185,7 @@ struct LookupsTab: View {
     }
 }
 
-private struct NewGroupRequest: Identifiable {
+private struct NewServiceRequest: Identifiable {
     let domain: String
     var id: String { domain }
 }
@@ -198,8 +199,10 @@ private struct LookupRow: View {
     let striped: Bool
     let listing: LookupListing?
     let onAdd: (String) -> Void
-    let onAddToGroup: (String, String) -> Void
-    let onNewGroup: (String) -> Void
+    /// Turns on a switched-off service that lists the name: the name, then the service id.
+    let onTurnOn: (String, String) -> Void
+    let onAddToService: (String, String) -> Void
+    let onNewService: (String) -> Void
     @State private var isHovered = false
 
     static let countWidth: CGFloat = 76
@@ -271,35 +274,46 @@ private struct LookupRow: View {
 
     @ViewBuilder
     private var action: some View {
-        let title = mode.addTitle
         if mode == .bypass {
-            let groups = routeManager.lookupGroups
+            // A switched-off service that lists the name is what the button turns on.
+            let offService = routeManager.lookupServiceToTurnOn(entry.name)
+            let title = offService.map { String(localized: "Turn on \($0.name)") } ?? mode.addTitle
+            let services = routeManager.lookupServices(for: entry.name)
             Menu {
+                if let offService {
+                    Button(title) { onTurnOn(entry.name, offService.id) }
+                }
                 Button(String(localized: "Bypass list")) { onAdd(entry.name) }
                 Divider()
-                if !groups.isEmpty {
-                    Section(String(localized: "Add to a group")) {
-                        ForEach(groups) { group in
-                            Button(group.enabled ? group.name : String(localized: "\(group.name) (off)")) {
-                                onAddToGroup(entry.name, group.id)
+                if !services.isEmpty {
+                    Section(String(localized: "Add to a service")) {
+                        ForEach(services) { service in
+                            Button(service.enabled ? service.name : String(localized: "\(service.name) (off)")) {
+                                onAddToService(entry.name, service.id)
                             }
                         }
                     }
                 }
-                Button(String(localized: "New Group…")) { onNewGroup(entry.name) }
+                Button(String(localized: "New Service…")) { onNewService(entry.name) }
             } label: {
-                Label(title, systemImage: "plus")
+                Label(title, systemImage: offService == nil ? "plus" : "power")
             } primaryAction: {
-                onAdd(entry.name)
+                if let offService {
+                    onTurnOn(entry.name, offService.id)
+                } else {
+                    onAdd(entry.name)
+                }
             }
             .menuStyle(.borderlessButton)
             .controlSize(.small)
             .fixedSize()
             .tint(Theme.success)
             .disabled(routeManager.isApplyingRoutes)
-            .help(String(localized: "Add to the Bypass list. The arrow adds it to a group instead."))
+            .help(offService.map { String(localized: "\($0.name) on the Services page lists this name and is off. Turn it on to bypass it. The arrow adds the name to a list or service instead.") }
+                  ?? String(localized: "Add to the Bypass list. The arrow adds it to a service instead."))
             .accessibilityLabel(String(localized: "\(title): \(entry.name)"))
         } else {
+            let title = mode.addTitle
             Button {
                 onAdd(entry.name)
             } label: {
@@ -323,13 +337,13 @@ private struct LookupRow: View {
         }
     }
 
-    /// The word for a listed name, the group or route beside it, and the tooltip.
+    /// The word for a listed name, the service or route beside it, and the tooltip.
     static func describe(_ listing: LookupListing) -> (String, String?, String) {
         switch listing {
         case .bypassList:
             return (String(localized: "Bypassed"), nil, String(localized: "On the Bypass list"))
-        case .group(let name):
-            return (String(localized: "Bypassed"), name, String(localized: "In the group \(name)"))
+        case .service(let name):
+            return (String(localized: "Bypassed"), name, String(localized: "In the service \(name)"))
         case .vpnOnlyList:
             return (String(localized: "Via VPN"), nil, String(localized: "On the VPN Only list"))
         case .rule(let routeName):
@@ -372,8 +386,8 @@ private enum LookupMode {
     }
 }
 
-/// Names a new group (a custom service) whose first domain is the looked-up name.
-private struct NewGroupSheet: View {
+/// Names a new custom service whose first domain is the looked-up name.
+private struct NewServiceSheet: View {
     let domain: String
     let onCreate: (String) -> Void
     let onCancel: () -> Void
@@ -383,7 +397,7 @@ private struct NewGroupSheet: View {
         self.domain = domain
         self.onCreate = onCreate
         self.onCancel = onCancel
-        _name = State(initialValue: NewGroupSheet.suggestedName(for: domain))
+        _name = State(initialValue: NewServiceSheet.suggestedName(for: domain))
     }
 
     /// The label before the top-level domain, capitalized: "Datadoghq" for
@@ -396,13 +410,13 @@ private struct NewGroupSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("New Group")
+            Text("New Service")
                 .font(.system(size: 15, weight: .bold, design: .rounded))
-            Text("A group is a custom service on the Services page: one name for a set of domains, turned on and off together. \(domain) will be its first domain.")
+            Text("This adds a custom service to the Services page, with \(domain) as its first domain. You can add more domains to it later.")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            TextField(String(localized: "Group name"), text: $name)
+            TextField(String(localized: "Service name"), text: $name)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(create)
             HStack {

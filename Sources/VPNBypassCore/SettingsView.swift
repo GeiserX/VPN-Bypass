@@ -490,7 +490,7 @@ struct AddDomainFeedback: Equatable {
         fieldText = typed
     }
 
-    /// A save from another form, such as a name added to a group.
+    /// A save from another form, such as a name added to a service.
     init(success message: String) {
         isError = false
         self.message = message

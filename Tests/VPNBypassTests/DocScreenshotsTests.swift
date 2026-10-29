@@ -186,8 +186,9 @@ final class DocScreenshotsTests: XCTestCase {
         rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-23), routeCount: 62, failedCount: 0)
     }
 
-    /// The DNS Lookups page on, with a morning of browsing counted: the two listed domains show
-    /// as listed, the rest offer Add.
+    /// The DNS Lookups page on, with a morning of browsing counted: the two listed domains and
+    /// zoom.us (in the custom service Meetings) show as Bypassed, slack.com and the other names a
+    /// switched-off built-in service lists offer to turn that service on, the rest offer Add.
     private func seedLookups() {
         rm.config.dnsLookupsEnabled = true
         rm.config.services.append(ServiceEntry(id: "custom_meetings", name: "Meetings", enabled: true,

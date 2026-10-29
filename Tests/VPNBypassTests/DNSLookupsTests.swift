@@ -138,16 +138,16 @@ final class LookupListingTests: RouteManagerTestCase {
         rm.config.services.removeAll(where: { $0.isCustom })
     }
 
-    func testNamesTheListOrGroupThatHasTheName() {
+    func testNamesTheListOrServiceThatHasTheName() {
         XCTAssertNil(rm.lookupListing("api.example.com"))
         rm.config.domains = [DomainEntry(domain: "api.example.com")]
         XCTAssertEqual(rm.lookupListing("api.example.com"), .bypassList)
 
         rm.config.domains = []
         rm.addCustomService(name: "Example", domains: ["api.example.com"], ipRanges: [])
-        XCTAssertEqual(rm.lookupListing("api.example.com"), .group("Example"))
+        XCTAssertEqual(rm.lookupListing("api.example.com"), .service("Example"))
 
-        // A group that is off does not route the name, so the page still offers Add.
+        // A service that is off does not route the name, so the page offers to turn it on.
         let id = rm.config.services.first { $0.name == "Example" }!.id
         rm.config.services[rm.config.services.firstIndex { $0.id == id }!].enabled = false
         XCTAssertNil(rm.lookupListing("api.example.com"))
@@ -187,35 +187,98 @@ final class LookupListingTests: RouteManagerTestCase {
         XCTAssertNil(rm.lookupListing("api.example.com"))
     }
 
-    func testOffersOnlyCustomServicesAsGroups() {
+    func testOffersOnlyCustomServicesAlphabetically() {
         rm.addCustomService(name: "Zeta", domains: ["z.example"], ipRanges: [])
         rm.addCustomService(name: "alpha", domains: ["a.example"], ipRanges: [])
-        XCTAssertEqual(rm.lookupGroups.map(\.name), ["alpha", "Zeta"])
+        XCTAssertEqual(rm.lookupServices(for: "api.other.com").map(\.name), ["alpha", "Zeta"])
     }
 
-    func testAddsToAGroupKeepingItsNameSwitchAndAddresses() {
+    /// A service that already holds a name under the same parent domain comes first; the one
+    /// that holds the name itself is left out.
+    func testSuggestsServicesWithTheSameParentDomainFirst() {
+        rm.addCustomService(name: "Alpha", domains: ["a.example"], ipRanges: [])
+        rm.addCustomService(name: "Zeta Datadog", domains: ["app.DatadogHQ.com"], ipRanges: [])
+        rm.addCustomService(name: "Monitoring", domains: ["status.example", "browser-intake-datadoghq.com"], ipRanges: [])
+        rm.addCustomService(name: "Logs", domains: ["http-intake.logs.us5.datadoghq.com"], ipRanges: [])
+        XCTAssertEqual(rm.lookupServices(for: "http-intake.logs.us5.datadoghq.com").map(\.name),
+                       ["Zeta Datadog", "Alpha", "Monitoring"])
+        XCTAssertEqual(rm.lookupServices(for: "api.datadoghq.com").map(\.name),
+                       ["Logs", "Zeta Datadog", "Alpha", "Monitoring"])
+        XCTAssertEqual(rm.lookupServices(for: "localhost").map(\.name),
+                       ["Alpha", "Logs", "Monitoring", "Zeta Datadog"])
+    }
+
+    func testAddsToAServiceKeepingItsNameSwitchAndAddresses() {
         rm.addCustomService(name: "Example", domains: ["a.example.com"], ipRanges: ["10.0.0.0/8"])
         let id = rm.config.services.first { $0.name == "Example" }!.id
 
-        let added = rm.addLookup("b.example.com", toGroup: id)
+        let added = rm.addLookup("b.example.com", toService: id)
         XCTAssertEqual(added?.isError, false)
-        let group = rm.config.services.first { $0.id == id }!
-        XCTAssertEqual(group.domains, ["a.example.com", "b.example.com"])
-        XCTAssertEqual(group.ipRanges, ["10.0.0.0/8"])
-        XCTAssertTrue(group.enabled)
-        XCTAssertEqual(rm.lookupListing("b.example.com"), .group("Example"))
+        let service = rm.config.services.first { $0.id == id }!
+        XCTAssertEqual(service.domains, ["a.example.com", "b.example.com"])
+        XCTAssertEqual(service.ipRanges, ["10.0.0.0/8"])
+        XCTAssertTrue(service.enabled)
+        XCTAssertEqual(rm.lookupListing("b.example.com"), .service("Example"))
 
-        XCTAssertEqual(rm.addLookup("b.example.com", toGroup: id)?.isError, true)
+        XCTAssertEqual(rm.addLookup("b.example.com", toService: id)?.isError, true)
         XCTAssertEqual(rm.config.services.first { $0.id == id }!.domains.count, 2)
     }
 
-    func testMakesANewGroupAndRefusesATakenName() {
-        let made = rm.addLookup("c.example.com", toNewGroup: "  Example  ")
+    func testMakesANewServiceAndRefusesATakenName() {
+        let made = rm.addLookup("c.example.com", toNewService: "  Example  ")
         XCTAssertFalse(made.isError)
-        XCTAssertEqual(rm.lookupListing("c.example.com"), .group("Example"))
+        XCTAssertEqual(rm.lookupListing("c.example.com"), .service("Example"))
 
-        let clash = rm.addLookup("d.example.com", toNewGroup: "example")
+        let clash = rm.addLookup("d.example.com", toNewService: "example")
         XCTAssertTrue(clash.isError)
         XCTAssertNil(rm.lookupListing("d.example.com"))
+    }
+
+    // MARK: - Turning on the service that lists the name
+
+    private func setEnabled(_ id: String, _ on: Bool) {
+        rm.config.services[rm.config.services.firstIndex { $0.id == id }!].enabled = on
+    }
+
+    /// Only an exact domain of a switched-off service counts, the custom one first (the
+    /// Services page lists custom services before built-in ones), and only in Bypass mode.
+    func testFindsTheSwitchedOffServiceThatListsTheName() {
+        setEnabled("slack", false)
+        XCTAssertEqual(rm.lookupServiceToTurnOn("slack.com")?.id, "slack")
+        XCTAssertNil(rm.lookupServiceToTurnOn("api.slack.com"), "a parent-domain match would not route the name")
+
+        rm.addCustomService(name: "Chat", domains: ["slack.com"], ipRanges: [])
+        XCTAssertEqual(rm.lookupListing("slack.com"), .service("Chat"))
+        XCTAssertNil(rm.lookupServiceToTurnOn("slack.com"), "an enabled service already routes it")
+
+        let chat = rm.config.services.first { $0.name == "Chat" }!.id
+        setEnabled(chat, false)
+        XCTAssertEqual(rm.lookupServiceToTurnOn("slack.com")?.id, chat)
+
+        rm.config.routingMode = .vpnOnly
+        XCTAssertNil(rm.lookupServiceToTurnOn("slack.com"))
+    }
+
+    func testTurningOnTheServiceRoutesTheName() {
+        setEnabled("slack", false)
+        let line = rm.turnOnLookupService("slack", for: "slack.com")
+        XCTAssertEqual(line?.isError, false)
+        XCTAssertTrue(rm.config.services.first { $0.id == "slack" }!.enabled)
+        XCTAssertEqual(rm.lookupListing("slack.com"), .service("Slack"))
+        XCTAssertNil(rm.lookupServiceToTurnOn("slack.com"))
+        XCTAssertNil(rm.turnOnLookupService("slack", for: "slack.com"), "already on: nothing to do")
+    }
+
+    /// A built-in service a custom one holds off by its name stays off, and the line says why.
+    func testRefusesABuiltInServiceACustomOneHoldsOff() {
+        setEnabled("slack", false)
+        rm.config.services.append(ServiceEntry(id: "custom_slack", name: "slack", enabled: false,
+                                               domains: ["chat.example"], ipRanges: [], isCustom: true))
+        XCTAssertEqual(rm.lookupServiceToTurnOn("slack.com")?.id, "slack")
+
+        let line = rm.turnOnLookupService("slack", for: "slack.com")
+        XCTAssertEqual(line?.isError, true)
+        XCTAssertEqual(line?.message, ServiceNameClash.builtInOffMessage(custom: "slack"))
+        XCTAssertFalse(rm.config.services.first { $0.id == "slack" }!.enabled)
     }
 }
