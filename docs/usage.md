@@ -200,6 +200,6 @@ example.org is not on your list, so it follows the VPN. The check saw it leave t
   match: none  expected: tunnel:utun4  verdict: ok
 ```
 
-With `--json`, `result.why` holds `match` (`route`, `wildcard`, `rule`, `defaultRoute`, `listed`, `none`, `unresolved`), `entry`, `expected` (`physical` or `tunnel:<interface>`, absent for a proxy or exit node, which the routing table does not decide), `checks` and `control` (`interface`, `sourceAddress`, `answer`, `latencyMs`, `verdict`), `verdict` (`ok`, `noAnswer`, `wrongWay`, `unknown`, `checkBroken`, `notChecked`, `noVPN`, `unresolved`), the `summary` sentence in the app's language, and `canAdd` when nothing lists it.
+With `--json`, `result.why` holds `match` (`route`, `wildcard`, `rule`, `defaultRoute`, `listed`, `none`, `unresolved`), `entry`, `expected` (`physical` or `tunnel:<interface>`, absent for a proxy or exit node, which the routing table does not decide), `checks` (`interface`, `sourceAddress`, `answer`, `latencyMs`, and `verdict`, left out when the control is broken), `control` (the same fields without `verdict`, absent when no control ran), `verdict` (`ok`, `noAnswer`, `wrongWay`, `unknown`, `checkBroken`, `notChecked`, `noVPN`, `unresolved`), the `summary` sentence in the app's language, and `canAdd` when nothing lists it.
 
 The [MCP server](mcp-server.md) uses the same socket, so an AI agent can do all of this too.

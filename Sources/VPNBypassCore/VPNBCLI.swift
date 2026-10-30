@@ -32,7 +32,9 @@ public enum VPNBCLI {
         var parsed = ParsedArgs(cmd: argv[0], args: [:], readPassFromStdin: false, malformed: [])
         for token in argv.dropFirst() {
             // `vpnb why <host>`: the one verb whose argument may come bare.
-            if parsed.cmd == "why", !token.contains("="), parsed.args["host"] == nil, !token.hasPrefix("-") {
+            // A pasted link counts as bare even when its query holds "=".
+            let isLink = token.lowercased().hasPrefix("http://") || token.lowercased().hasPrefix("https://")
+            if parsed.cmd == "why", isLink || !token.contains("="), parsed.args["host"] == nil, !token.hasPrefix("-") {
                 parsed.args["host"] = token
                 continue
             }

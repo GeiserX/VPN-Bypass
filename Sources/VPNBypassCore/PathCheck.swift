@@ -115,9 +115,10 @@ public enum PathCheck {
 
     // MARK: - Pure decisions
 
-    /// Tunnel interfaces by name, as macOS and the VPN clients name them.
+    /// Tunnel interfaces by name, as macOS and the VPN clients name them: the same prefixes
+    /// the app's VPN detection accepts (Fortinet's feth, ZeroTier's zt included).
     public static func isTunnel(_ interface: String) -> Bool {
-        ["utun", "ipsec", "ppp", "tun", "tap", "gpd"].contains { interface.hasPrefix($0) }
+        ["utun", "ipsec", "ppp", "tun", "tap", "gpd", "feth", "zt"].contains { interface.hasPrefix($0) }
     }
 
     /// Whether `interface` is the way `way` describes. Loopback and other non-tunnel interfaces

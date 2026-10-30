@@ -4955,6 +4955,8 @@ final class RouteManager: ObservableObject {
         let probes = await probeAll(plan.destinations)
 
         var results: [RouteVerificationResult] = []
+        // Sent only once the run is known to be current, so a dropped run alerts nobody.
+        var alerts: [(route: String, reason: String)] = []
         for probe in probes {
             let destination = probe.address
             let expected = gateways[destination].flatMap {
@@ -4969,20 +4971,20 @@ final class RouteManager: ObservableObject {
             } else {
                 log(.warning, "Route check: \(destination)\(source) \(Self.pathLogReason(probe, expected: expected, control: control))")
                 if case .broken = control { continue }
-                NotificationManager.shared.notifyRouteVerificationFailed(
-                    route: destination,
-                    reason: result.error ?? "Unreachable"
-                )
+                alerts.append((route: destination, reason: result.error ?? "Unreachable"))
             }
+        }
+        guard generation == routeCheckGeneration else {
+            log(.info, "Route check: result dropped, routes were removed or another check started while it ran")
+            return
+        }
+        for alert in alerts {
+            NotificationManager.shared.notifyRouteVerificationFailed(route: alert.route, reason: alert.reason)
         }
         if case .broken(let interface) = control, !results.isEmpty {
             // One notification for the run, not one per address.
             NotificationManager.shared.notifyRouteVerificationFailed(route: String(localized: "Route check"),
                                                                      reason: SiteRoute.checkSentence(.checkBroken, interface: interface, expected: nil) ?? "")
-        }
-        guard generation == routeCheckGeneration else {
-            log(.info, "Route check: result dropped, routes were removed or another check started while it ran")
-            return
         }
         lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: logsFrom, at: Date())
 

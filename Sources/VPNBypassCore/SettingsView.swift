@@ -1565,7 +1565,7 @@ struct GeneralTab: View {
                 SettingsToggleRow(
                     icon: "checkmark.circle.fill",
                     title: "Verify Routes After Apply",
-                    subtitle: "Ping test routes to ensure they're working",
+                    subtitle: "Check that routes leave the right way and answer on port 443",
                     isOn: Binding(
                         get: { routeManager.config.verifyRoutesAfterApply },
                         set: { routeManager.config.verifyRoutesAfterApply = $0; routeManager.saveConfig() }

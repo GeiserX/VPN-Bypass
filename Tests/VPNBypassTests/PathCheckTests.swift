@@ -38,6 +38,16 @@ final class PathCheckTests: XCTestCase {
 
     /// The right way without an answer is not the same failure as the wrong way: it is a site
     /// that does not answer on 443, which the old ping check could not tell from a bad route.
+    /// The interfaces the app's VPN detection accepts all count as tunnels, so a Bypass address
+    /// that leaked into Fortinet's feth or ZeroTier's zt does not pass as physical.
+    func testEveryVPNInterfacePrefixIsATunnel() {
+        for name in ["utun4", "ipsec0", "ppp0", "gpd0", "tun0", "tap0", "feth0", "zt0"] {
+            XCTAssertTrue(PathCheck.isTunnel(name), name)
+            XCTAssertFalse(PathCheck.matches(name, .physical), name)
+        }
+        XCTAssertFalse(PathCheck.isTunnel("en0"))
+    }
+
     func testRightWayWithoutAnAnswerIsNoAnswer() {
         XCTAssertEqual(PathCheck.verdict(probe(via: "en0", .noAnswer), expected: .physical), .noAnswer)
         XCTAssertEqual(PathCheck.verdict(probe(via: "en0", .failed), expected: .physical), .noAnswer)

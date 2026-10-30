@@ -199,9 +199,50 @@ final class SiteRouteTests: XCTestCase {
         XCTAssertNil(found.expected)
     }
 
-    func testAPinnedVPNRouteExpectsItsTunnel() {
+    /// A pinned route expects the tunnel its pin resolves to now, not the saved name, which goes
+    /// stale when macOS renumbers the utun; a pin that is not up takes the system's default.
+    func testAPinnedVPNRouteExpectsTheTunnelItResolvesTo() {
         let pinned = Route(name: "WG", egress: .vpnDefault, vpnSelector: VPNSelector(kind: .interface, interfaceName: "utun9"))
-        XCTAssertEqual(SiteRoute.way(for: pinned, vpnInterface: "utun4"), .tunnel("utun9"))
+        XCTAssertEqual(SiteRoute.way(for: pinned, vpnInterface: "utun4", pinned: [pinned.id: "utun7"]), .tunnel("utun7"))
+        XCTAssertEqual(SiteRoute.way(for: pinned, vpnInterface: "utun4", pinned: [:]), .tunnel("utun4"))
+        let rules = [Rule(matchType: .domain, pattern: "example.com", routeId: pinned.id, order: 0)]
+        var s = snapshot(mode: .custom, rules: rules, routes: [pinned, direct])
+        s.pinnedInterfaces = [pinned.id: "utun7"]
+        XCTAssertEqual(SiteRoute.match(host: "example.com", addresses: ["203.0.113.5"], in: s).expected, .tunnel("utun7"))
+    }
+
+    /// In Custom the engine installs routes only for rules, so the control, which no rule
+    /// claims, follows the VPN whatever the default route is set to.
+    func testCustomControlFollowsTheVPNWhateverTheDefaultRoute() {
+        var config = RouteManager.Config()
+        config.schemaVersion = 2
+        config.routingMode = .custom
+        config.routes = [direct, corp]
+        config.defaultRouteId = direct.id
+        XCTAssertEqual(SiteRoute.unroutedWay(config: config, vpnInterface: "utun4"), .tunnel("utun4"))
+        config.defaultRouteId = nil
+        XCTAssertEqual(SiteRoute.unroutedWay(config: config, vpnInterface: "utun4"), .tunnel("utun4"))
+        XCTAssertNil(SiteRoute.unroutedWay(config: config, vpnInterface: nil))
+    }
+
+    /// Loopback never enters a tunnel, so an unlisted loopback address expects no tunnel.
+    func testUnlistedLoopbackExpectsNoTunnel() {
+        XCTAssertEqual(SiteRoute.match(host: "localhost", addresses: ["127.0.0.1"], in: snapshot()).expected, .physical)
+        XCTAssertEqual(SiteRoute.match(host: "localhost", addresses: ["127.0.0.1"],
+                                       in: snapshot(mode: .custom, routes: [direct, corp])).expected, .physical)
+        XCTAssertEqual(SiteRoute.match(host: "example.org", addresses: ["203.0.113.7"], in: snapshot()).expected, .tunnel("utun4"))
+    }
+
+    /// The address whose route decided the answer is always among those checked.
+    func testTheMatchedAddressIsAlwaysChecked() {
+        let addresses = ["203.0.113.1", "203.0.113.2", "203.0.113.3", "203.0.113.4", "203.0.113.5"]
+        let s = snapshot(list: [DomainEntry(domain: "example.com")], active: [("203.0.113.5", local, "example.com")])
+        let found = SiteRoute.match(host: "example.com", addresses: addresses, in: s)
+        XCTAssertEqual(found.address, "203.0.113.5")
+        XCTAssertEqual(SiteRoute.addressesToCheck(addresses, matched: found.address),
+                       ["203.0.113.1", "203.0.113.2", "203.0.113.3", "203.0.113.5"])
+        XCTAssertEqual(SiteRoute.addressesToCheck(addresses, matched: "203.0.113.2"), Array(addresses.prefix(4)))
+        XCTAssertEqual(SiteRoute.addressesToCheck(addresses, matched: nil), Array(addresses.prefix(4)))
     }
 
     // MARK: The answer
@@ -241,6 +282,7 @@ final class SiteRouteTests: XCTestCase {
                                  control: (probe("192.0.2.1", via: "en0", .notTried), .broken(interface: "en0")),
                                  vpnConnected: true)
         XCTAssertEqual(a.verdict, .checkBroken)
+        XCTAssertNil(a.checks.first?.verdict, "a broken control leaves no address judged")
     }
 
     func testAnswerNotListedOffersAdd() {
@@ -281,6 +323,10 @@ final class SiteRouteTests: XCTestCase {
         XCTAssertEqual(parsed.malformed, [])
         XCTAssertEqual(VPNBCLI.parse(["why", "host=example.com"]).args, ["host": "example.com"])
         XCTAssertEqual(VPNBCLI.parse(["status", "example.com"]).malformed, ["example.com"], "only why takes a bare token")
+        // A pasted link stays whole even when its query holds "=".
+        let link = VPNBCLI.parse(["why", "https://example.com/search?q=a&b=c"])
+        XCTAssertEqual(link.args, ["host": "https://example.com/search?q=a&b=c"])
+        XCTAssertEqual(link.malformed, [])
     }
 
     func testWhyIsAReadVerb() {

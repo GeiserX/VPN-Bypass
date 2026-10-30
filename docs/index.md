@@ -121,7 +121,7 @@ flowchart LR
 
 ## Privacy
 
-- The app talks to no server of its own: no telemetry, no update check, no account. The only network activity it starts is resolving the domains you list, forwarding traffic to a proxy you configured, and, when you check routes, opening a connection to port 443 of up to 10 routed destinations and of the site you ask `vpnb why` about.
+- The app talks to no server of its own: no telemetry, no update check, no account. The only network activity it starts is resolving the domains you list, forwarding traffic to a proxy you configured, and, when you check routes, opening a connection to port 443 of up to 10 routed destinations and of the site you ask `vpnb why` about, plus one connection attempt to a documentation address (`192.0.2.1`, `198.51.100.1` or `203.0.113.1`) that serves as the check's control and is closed before it completes.
 - Config, logs and proxy credentials stay in your account's Application Support folder. The Logs tab shows local events only.
 - Proxy credentials live in the config file, readable by your account alone, and the local listener asks for them, so another account on the same Mac cannot spend them. `vpnb` reads passwords from standard input, never from the command line.
 

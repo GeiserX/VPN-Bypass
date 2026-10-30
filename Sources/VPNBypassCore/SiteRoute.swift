@@ -108,11 +108,17 @@ enum SiteRoute {
         var localGateway: String?
         /// Nil while no VPN is connected.
         var vpnInterface: String?
+        /// Custom routes pinned to one tunnel, by id: the interface the pin resolves to now
+        /// (`RouteManager.ifaceGateway`, which follows a renumbered utun). A pinned route
+        /// missing here is not up, so its traffic takes the system's default.
+        var pinnedInterfaces: [UUID: String] = [:]
     }
 
     /// What `match` found, before the check.
     struct Found: Equatable {
         var match: SiteRouteAnswer.Match
+        /// route: the address whose installed route matched, so the check probes it.
+        var address: String? = nil
         var entry: String? = nil
         var routedDestination: String? = nil
         var rulePosition: Int? = nil
@@ -131,6 +137,8 @@ enum SiteRoute {
         let listedWay: PathCheck.Way = s.mode == .vpnOnly ? vpnWay : .physical
         let unlistedWay: PathCheck.Way = s.mode == .vpnOnly ? .physical : vpnWay
         let serviceNames = Dictionary(s.services.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        // Loopback never enters a tunnel, whatever the mode, so an unrouted one expects no tunnel.
+        let loopback = addresses.allSatisfy { $0.hasPrefix("127.") }
 
         // 1. An installed route, host routes before ranges. VPN Only's catch-alls are what an
         //    unlisted address takes, so they are not a match.
@@ -139,7 +147,7 @@ enum SiteRoute {
             let hit = installed.first { $0.destination == address }
                 ?? installed.first { $0.destination.contains("/") && RuleResolver.ipv4(address, inCIDR: $0.destination) }
             if let hit {
-                return Found(match: .route, entry: serviceNames[hit.source] ?? hit.source,
+                return Found(match: .route, address: address, entry: serviceNames[hit.source] ?? hit.source,
                              routedDestination: hit.destination,
                              expected: PathCheck.way(forGateway: hit.gateway, localGateway: s.localGateway,
                                                      vpnInterface: s.vpnInterface))
@@ -161,13 +169,13 @@ enum SiteRoute {
                       let route = byId[rule.routeId], route.enabled else { continue }
                 return Found(match: .rule, entry: rule.pattern, rulePosition: index + 1,
                              ruleMatchType: rule.matchType.rawValue, routeName: route.name,
-                             expected: way(for: route, vpnInterface: s.vpnInterface))
+                             expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
             }
             if let id = s.defaultRouteId, let route = byId[id] {
                 return Found(match: .defaultRoute, routeName: route.name,
-                             expected: way(for: route, vpnInterface: s.vpnInterface))
+                             expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
             }
-            return Found(match: .none, expected: s.vpnInterface.map { .tunnel($0) })
+            return Found(match: .none, expected: loopback ? .physical : s.vpnInterface.map { .tunnel($0) })
         }
 
         // 2. A listed wildcard (the most specific one, as macOS picks the resolver file).
@@ -194,7 +202,7 @@ enum SiteRoute {
             return Found(match: .listed, entry: service.name, expected: listedWay)
         }
 
-        return Found(match: .none, expected: unlistedWay)
+        return Found(match: .none, expected: loopback ? .physical : unlistedWay)
     }
 
     /// A list or service entry that covers `host`: the same name, or a wildcard above it.
@@ -219,26 +227,28 @@ enum SiteRoute {
     }
 
     /// The way a Custom route sends traffic: Direct around every tunnel, a VPN route into its
-    /// tunnel. Nil for a proxy or a Tailscale exit, which the routing table does not decide.
-    static func way(for route: Route, vpnInterface: String?) -> PathCheck.Way? {
+    /// tunnel. A pinned route takes the tunnel its pin resolves to now (`pinned`), not the saved
+    /// name, which goes stale when macOS renumbers the utun; a pin that is not up falls back to
+    /// the system's default, as the engine does. Nil for a proxy or a Tailscale exit, which the
+    /// routing table does not decide.
+    static func way(for route: Route, vpnInterface: String?, pinned: [UUID: String] = [:]) -> PathCheck.Way? {
         switch route.egress {
         case .direct: return .physical
         case .vpnDefault:
-            if route.vpnSelector?.kind == .interface, let name = route.vpnSelector?.interfaceName { return .tunnel(name) }
+            if route.vpnSelector?.kind == .interface, let name = pinned[route.id] { return .tunnel(name) }
             return vpnInterface.map { .tunnel($0) }
         case .tailscaleExit, .proxyHTTP, .proxySOCKS5: return nil
         }
     }
 
     /// The way an address no route covers takes, for the control. Nil while no VPN is
-    /// connected (one way out), and in Custom when the default route is not a kernel route.
+    /// connected (one way out). In Custom it is the system's default route, the VPN: the engine
+    /// installs kernel routes only for rules (RouteCompiler), never for the default route, so
+    /// an address no rule claims follows the VPN whatever the default route says.
     static func unroutedWay(config: Config, vpnInterface: String?) -> PathCheck.Way? {
         guard let vpn = vpnInterface else { return nil }
         if RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
-            guard let id = config.defaultRouteId, let route = config.routes.first(where: { $0.id == id }) else {
-                return .tunnel(vpn)
-            }
-            return way(for: route, vpnInterface: vpn)
+            return .tunnel(vpn)
         }
         return PathCheck.ways(mode: config.routingMode.rawValue, vpnInterface: vpn)?.unlisted
     }
@@ -249,8 +259,11 @@ enum SiteRoute {
                        probes: [PathCheck.Probe], control: (probe: PathCheck.Probe, outcome: PathCheck.Control)?,
                        vpnConnected: Bool) -> SiteRouteAnswer {
         let expected = found.expected
+        // A broken control means no address can be judged, so none carries a verdict.
+        var controlBroken = false
+        if case .broken = control?.outcome { controlBroken = true }
         let checks = probes.map { probe in
-            SiteRouteCheck(probe, verdict: expected.map { PathCheck.verdict(probe, expected: $0) })
+            SiteRouteCheck(probe, verdict: controlBroken ? nil : expected.map { PathCheck.verdict(probe, expected: $0) })
         }
         let verdict: SiteRouteAnswer.Verdict
         var reported = probes.first
@@ -339,6 +352,14 @@ enum SiteRoute {
         }
     }
 
+    /// The first `maxChecked` addresses, with the one whose route matched swapped in when it
+    /// falls outside them, so the address that decided the answer is always checked.
+    static func addressesToCheck(_ addresses: [String], matched: String?) -> [String] {
+        var out = Array(addresses.prefix(maxChecked))
+        if let matched, !out.contains(matched), !out.isEmpty { out[out.count - 1] = matched }
+        return out
+    }
+
     // MARK: - Resolving
 
     /// The host's IPv4 addresses from the macOS resolver: what a browser connects to, with the
@@ -377,6 +398,25 @@ enum SiteRoute {
 // MARK: - RouteManager
 
 extension RouteManager {
+    /// The interface each pinned Custom route resolves to now, read only when an enabled rule
+    /// points at one (listing the tunnels runs ifconfig), as the apply does.
+    func pinnedInterfaces() async -> [UUID: String] {
+        guard Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) else { return [:] }
+        let referenced = Set(config.rules.filter(\.enabled).map(\.routeId))
+        let pinned = config.routes.filter {
+            referenced.contains($0.id) && $0.egress == .vpnDefault && $0.vpnSelector?.kind == .interface
+        }
+        guard !pinned.isEmpty else { return [:] }
+        let links = await listVPNLinks()
+        var out: [UUID: String] = [:]
+        for route in pinned {
+            if let gateway = ifaceGateway(for: route, links: links), gateway.hasPrefix("iface:") {
+                out[route.id] = String(gateway.dropFirst("iface:".count))
+            }
+        }
+        return out
+    }
+
     var siteRouteSnapshot: SiteRoute.Snapshot {
         let custom = Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
         return SiteRoute.Snapshot(
@@ -403,12 +443,13 @@ extension RouteManager {
                 addresses.append(ip)
             }
         }
-        let snapshot = siteRouteSnapshot
+        var snapshot = siteRouteSnapshot
+        snapshot.pinnedInterfaces = await pinnedInterfaces()
         let found = SiteRoute.match(host: host, addresses: addresses, in: snapshot)
         var probes: [PathCheck.Probe] = []
         var control: (probe: PathCheck.Probe, outcome: PathCheck.Control)?
         if found.match != .unresolved {
-            probes = await probeAll(Array(addresses.prefix(SiteRoute.maxChecked)))
+            probes = await probeAll(SiteRoute.addressesToCheck(addresses, matched: found.address))
             if let unrouted = SiteRoute.unroutedWay(config: config, vpnInterface: snapshot.vpnInterface),
                let address = PathCheck.controlAddress(routed: snapshot.activeRoutes
                    .filter { $0.source != ClassicRouteCompiler.catchAllSource }.map(\.destination)) {

@@ -92,7 +92,7 @@
 "Manage /etc/hosts" = "Gérer /etc/hosts";
 "Add DNS bypass entries (requires admin)" = "Ajouter des entrées DNS de contournement (nécessite admin)";
 "Verify Routes After Apply" = "Vérifier les routes après application";
-"Ping test routes to ensure they're working" = "Tester les routes par ping pour vérifier leur fonctionnement";
+"Check that routes leave the right way and answer on port 443" = "Vérifier que les routes sortent par le bon chemin et répondent sur le port 443";
 "DNS Refresh" = "Actualisation DNS";
 "Auto DNS Refresh" = "Actualisation DNS automatique";
 "Periodically re-resolve domains and update routes" = "Résoudre périodiquement les domaines et mettre à jour les routes";
