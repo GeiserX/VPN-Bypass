@@ -13,7 +13,7 @@ Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow he
 - a field to add a domain to the current mode's list. In Custom mode it adds a rule on the Direct route instead: an IP range such as `10.0.0.0/24` becomes a CIDR rule, and a name or a pasted link becomes a domain rule for its host. A value it cannot save stays in the field with a line under it that says why: a range with a prefix outside /2 to /32, or a value that already has a rule. When that rule is on another route, such as your VPN or a proxy, the line names the route, since the first matching rule wins and a Direct rule after it would do nothing;
 - what your lists route, one row per service, domain or IP range you added, with how many addresses it routes, under Skipping the VPN in Bypass or Through the VPN in VPN Only. Hover over a row to see its addresses. A row that routes no address while no apply is running or waiting after a reconnect gets an amber mark and "no addresses". In VPN Only the app's own catch-alls are one line, "Everything else: direct", and the counts leave them out: the card, the header's Addresses fact, the line under the buttons, the Status page's Addresses section and the Addresses Routed notification all count only the addresses your lists route. Addresses owned under Tunnels on the Status page counts the kernel's routes that carry the app's tag by the same rule and names the catch-alls apart, as in "2, plus 4 catch-alls". With only the catch-alls in place, the pill still reads ON, since everything else is routed direct. In Custom mode, Routes In Use comes first, then Routed by your rules lists the rules that routed an address. Addresses that no entry on your lists owns, such as those of an entry you just removed, are one "Left from earlier" line;
 - Refresh Routes, a Verify Routes icon, and a "…" menu with Refresh Routes, Verify Routes, Re-resolve DNS Now, Open Logs, Settings…, Quit VPN Bypass and Remove All Routes…, which asks before it removes anything;
-- after Verify Routes, a Route check card above the buttons. Verify pings at most 10 of the routed addresses: single addresses only, because ping cannot test a range, and the first 10 in sort order. The card says how many of how many addresses it checked, for example "Checked 10 of 62 addresses (single addresses only).", lists the addresses that did not answer first, up to three with what each is routed for and why it failed and then "+ N more", then one line for the rest with their response times. "Show all 10 results in Logs" opens Settings on the Logs page, where each address has its own line. With only address ranges routed, the card says there was nothing ping could check;
+- after Verify Routes, a Route check card above the buttons. Verify path-checks at most 10 of the routed addresses: single addresses only, because a range has no one address to connect to, and the first 10 in sort order. Each must leave the way its route points and answer on port 443, and a control address the app does not route must leave the other way, or every result reads "Check broken" (see [Path check](how-it-works.md#path-check)). The card says how many of how many addresses it checked, for example "Checked 10 of 62 addresses (single addresses only).", lists the addresses that did not answer first, up to three with what each is routed for and why it failed ("Went into utun4", "No answer on 443 via en0") and then "+ N more", then one line for the rest with their response times. "Show all 10 results in Logs" opens Settings on the Logs page, where each address has its own line. With only address ranges routed, the card says there was nothing the path check could test;
 - one line under the buttons with the result of the last apply, for example "62 addresses routed 23 s ago, none failed";
 - after a change made through `vpnb` or an [MCP server](mcp-server.md), a line at the foot that names it, for example "Last change: added en.wikipedia.org via the command line, 2 min ago". Click it to open Logs showing only the lines that came through the control socket. A change you make in the app removes the line;
 - the gear that opens Settings and the power button that quits the app.
@@ -181,5 +181,25 @@ vpnb routes.active --json | jq -r '.result.activeRoutes[] | "\(.destination) \(.
 - No password or proxy user name is ever in the reply. A route says `hasPassword` and `hasProxyUser` instead.
 - In `routes.active`, `source` is the list entry, service or rule the route was installed for, not an application: see [Which app uses a route](how-it-works.md#which-app-uses-a-route). [Routing priority](how-it-works.md#routing-priority) explains how these routes win over the VPN's and how to spot them in `netstat -rn`.
 - `help` and a bare `vpnb` still print the help text.
+
+### Where does this site go? (`vpnb why`)
+
+`vpnb why <host>` takes a name, a link or an address and says which entry decides its way, then path-checks it. It works in every mode and changes nothing.
+
+```bash
+vpnb why example.org
+vpnb why https://en.wikipedia.org/wiki/VPN --json
+```
+
+The host is resolved as the macOS resolver answers it (what a browser connects to, hosts file and wildcards included) and as the app resolves its list. Then, in order: an installed route for one of its addresses, named by its `source`; a listed wildcard that covers it; in Custom mode the rules, first match by order, name and address rules alike, then the default route; a list entry with no route yet; nothing. Up to 4 addresses are checked as in [Path check](how-it-works.md#path-check), with the same control. The text reply is one or two sentences, a line per address and one for the control, then the facts:
+
+```
+example.org is not on your list, so it follows the VPN. The check saw it leave through utun4, and it answered on port 443.
+  203.0.113.7  via utun4 from 10.8.0.2  443: connected in 24 ms  ok
+  control 192.0.2.1  via utun4 from 10.8.0.2
+  match: none  expected: tunnel:utun4  verdict: ok
+```
+
+With `--json`, `result.why` holds `match` (`route`, `wildcard`, `rule`, `defaultRoute`, `listed`, `none`, `unresolved`), `entry`, `expected` (`physical` or `tunnel:<interface>`, absent for a proxy or exit node, which the routing table does not decide), `checks` (`interface`, `sourceAddress`, `answer`, `latencyMs`, and `verdict`, left out when the control is broken), `control` (the same fields without `verdict`, absent when no control ran), `verdict` (`ok`, `noAnswer`, `wrongWay`, `unknown`, `checkBroken`, `notChecked`, `noVPN`, `unresolved`), the `summary` sentence in the app's language, and `canAdd` when nothing lists it.
 
 The [MCP server](mcp-server.md) uses the same socket, so an AI agent can do all of this too.

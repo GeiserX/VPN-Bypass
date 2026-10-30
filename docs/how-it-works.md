@@ -22,7 +22,7 @@
 1. **VPN Detection**: Monitors network interfaces and running processes to detect VPN type
 2. **Gateway Detection**: Identifies your local gateway (Wi-Fi/Ethernet router)
 3. **Route Management**: A small privileged helper adds/removes host routes to steer traffic per your mode — around the VPN (Bypass), through it (VPN Only), or to the route a rule selects (Custom). The helper is cdhash-pinned to this app and uses no Network Extension entitlements.
-4. **Route Verification**: Pings up to 10 routed single addresses (ping cannot test a range) to check they answer, after an apply when that option is on or when the apply had failures, or from Verify Routes in the menu
+4. **Route Verification**: Path-checks up to 10 routed single addresses (a range has no one address to connect to), after an apply when that option is on or when the apply had failures, or from Verify Routes in the menu. See [Path check](#path-check)
 5. **DNS Bypass**: Optionally adds entries to `/etc/hosts` to bypass VPN DNS
 
 ### VPN Detection Logic
@@ -79,6 +79,14 @@ Destination        Gateway            Flags               Netif Expire
 ### Wildcards
 
 A wildcard such as `*.example.com` cannot be a route, because routes are per address. The helper writes `/etc/resolver/example.com` pointing at its own DNS forwarder on `127.0.0.1:53530`. For each lookup under the suffix, the forwarder asks the DNS server the wildcard's route would use, installs a host route for each IPv4 address in the answer, and replies once those routes are in, so the route is normally in place before the app connects. A reply waits at most 1.5 seconds for its routes. If they are not in by then, a Bypass or Direct wildcard still returns the address with a 10-second TTL, and a connection made before its route lands goes through the VPN; a VPN Only or pinned-VPN wildcard withholds the address instead. These routes appear in `vpnb routes.active` with the source `*.example.com`. Only lookups that go through the macOS resolver reach the forwarder: a browser with its own DNS over HTTPS, or a program with a hardcoded resolver, gets addresses the app never sees. The forwarder keeps names in memory for one lookup only and never logs them.
+
+## Path check
+
+Verify Routes and `vpnb why` ask which way an address actually leaves, not only whether it answers. For each address the app asks the routing table which interface it takes (the same question `route -n get` asks), opens a TCP connection to port 443 and reads the local address the system bound the connection to, which names the interface it left through. The result is right when that interface is the one the address's route points at (around the VPN in Bypass, into the tunnel in VPN Only, the rule's route in Custom, with a pinned tunnel read as it is numbered now) and the site answered on 443 that way; a refused connection counts as an answer. Otherwise the reason is "Went into utun4" (the wrong way), "No answer on 443 via en0" (the right way, nothing answering), or "Could not connect".
+
+Each run also checks a control: the first of `192.0.2.1`, `198.51.100.1` and `203.0.113.1` (documentation addresses no site uses) that the app does not route. It must leave the other way: through the VPN in Bypass, around it in VPN Only, and through the VPN in Custom, since the app installs routes only for rules, so an address no rule claims follows the system's default route whatever the default route setting says. The control only needs its path, so the app closes that connection before it can complete. When the control leaves the same way as the routed addresses, the check cannot tell the two ways apart, and every result reads "Check broken". That is what you see with a split-tunnel VPN that does not capture public addresses at all. With no VPN connected there is one way out, so only the answer is checked, and the same holds when the app routes all three control addresses.
+
+Both steps read the same routing table, so the check reports the route the system picks and whether the site answers that way. It cannot see a packet-filter `route-to` rule, a content filter, or a VPN that captures traffic below the routing table, such as a kill switch.
 
 ## Which app uses a route
 
