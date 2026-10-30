@@ -154,7 +154,8 @@ final class RouteManager: ObservableObject {
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
     private var orphanedServiceDomains: [String: [String]] = [:]  // Deleted service name -> its domains (for hosts reconstruction)
     private(set) var routeEpoch: UInt64 = 0  // Incremented by removeAllRoutes — lets in-flight applies detect preemption
-    private var gatewayDetectedAt: Date?
+    /// When `localGateway` was last detected; set by tests to stand in for a fresh detection.
+    var gatewayDetectedAt: Date?
     private var lastInterfaceReroute: Date?
     /// A re-route (interface change or Tailscale profile change) that was NEEDED but
     /// couldn't run when it was detected — the route-operation gate was held (e.g. by a
@@ -4712,75 +4713,82 @@ final class RouteManager: ObservableObject {
     
     /// Apply routes for a single service (incremental add) - parallel DNS + batch routes
     private func applyRoutesForService(_ service: ServiceEntry, gateway: String) async {
+        await applyRoutesForServices([service], gateway: gateway)
+    }
+
+    /// Apply routes for several services at once (incremental add): every name is looked up
+    /// once, in parallel, and every new kernel route goes in ONE batch, so switching on ten
+    /// services from the catalogue writes the routing table once instead of ten times while
+    /// a VPN is up. Each service still owns its own addresses (`ActiveRoute.source`).
+    private func applyRoutesForServices(_ services: [ServiceEntry], gateway: String) async {
+        guard !services.isEmpty else { return }
         let epoch = routeEpoch
         var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool)] = []
 
         // Track existing destinations (for kernel-add dedup) and existing ownership (for source dedup)
         let existingDestinations = Set(activeRoutes.map { $0.destination })
-        let existingOwnership = Set(activeRoutes.map { "\($0.source)|\($0.destination)" })
+        var ownership = Set(activeRoutes.map { "\($0.source)|\($0.destination)" })
         var kernelAddedDests: Set<String> = []
 
         // Capture DNS settings for parallel resolution
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
 
-        // Resolve ALL domains in parallel (not sequentially)
-        let domainResults = await withTaskGroup(of: (String, [String]?).self) { group in
-            for domain in service.resolvableDomains {
+        // Resolve every name of every service in parallel, each name once
+        var names: [String] = []
+        for name in services.flatMap(\.resolvableDomains) where !names.contains(name) { names.append(name) }
+        let resolved = await withTaskGroup(of: (String, [String]?).self) { group in
+            for domain in names {
                 group.addTask {
                     let ips = await DNSResolver.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
                     return (domain, ips)
                 }
             }
 
-            var results: [(String, [String]?)] = []
-            for await result in group {
-                results.append(result)
+            var results: [String: [String]] = [:]
+            for await (domain, ips) in group {
+                if let ips { results[domain] = ips }
             }
             return results
         }
 
-        // Collect routes from resolved domains
-        var cacheUpdated = false
-        for (domain, ips) in domainResults {
-            guard let ips = ips else { continue }
-
-            // Cache all IPs (disk) and first IP (memory) for hosts file and startup
+        // Cache all IPs (disk) and first IP (memory) for hosts file and startup
+        for (domain, ips) in resolved {
             dnsDiskCache[domain] = ips
-            cacheUpdated = true
             if let firstIP = ips.first {
                 dnsCache[domain] = firstIP
             }
+        }
 
-            for ip in ips {
-                // Only add kernel route if destination is new (not already in kernel)
-                if !existingDestinations.contains(ip) && !kernelAddedDests.contains(ip) {
-                    kernelAddedDests.insert(ip)
-                    routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false))
-                }
-                // Always record ownership entry if this service doesn't already own this destination
-                let ownershipKey = "\(service.name)|\(ip)"
-                if !existingOwnership.contains(ownershipKey) {
-                    newRoutes.append(ActiveRoute(destination: ip, gateway: gateway, source: service.name, timestamp: Date()))
-                }
+        /// The new routes of each service, by name, for its log line.
+        var addedFor: [String: Int] = [:]
+        func take(_ destination: String, isNetwork: Bool, for service: ServiceEntry) {
+            // Only add kernel route if destination is new (not already in kernel)
+            if !existingDestinations.contains(destination) && !kernelAddedDests.contains(destination) {
+                kernelAddedDests.insert(destination)
+                routesToAdd.append((destination: destination, gateway: gateway, isNetwork: isNetwork))
+            }
+            // Always record ownership entry if this service doesn't already own this destination
+            let ownershipKey = "\(service.name)|\(destination)"
+            if !ownership.contains(ownershipKey) {
+                ownership.insert(ownershipKey)
+                newRoutes.append(ActiveRoute(destination: destination, gateway: gateway, source: service.name, timestamp: Date()))
             }
         }
 
-        // Add IP ranges (no DNS needed)
-        for range in service.ipRanges {
-            if !existingDestinations.contains(range) && !kernelAddedDests.contains(range) {
-                kernelAddedDests.insert(range)
-                routesToAdd.append((destination: range, gateway: gateway, isNetwork: true))
+        for service in services {
+            for domain in service.resolvableDomains {
+                for ip in resolved[domain] ?? [] { take(ip, isNetwork: false, for: service) }
             }
-            let ownershipKey = "\(service.name)|\(range)"
-            if !existingOwnership.contains(ownershipKey) {
-                newRoutes.append(ActiveRoute(destination: range, gateway: gateway, source: service.name, timestamp: Date()))
-            }
+            // Add IP ranges (no DNS needed)
+            for range in service.ipRanges { take(range, isNetwork: true, for: service) }
         }
 
         // Persist DNS cache so cache-based startup can use these IPs
-        if cacheUpdated { saveDNSCache() }
+        if !resolved.isEmpty { saveDNSCache() }
+
+        let label = services.count == 1 ? services[0].name : "\(services.count) services"
 
         // Apply new kernel routes in single batch, exclude failed destinations from ownership
         var failedDests: Set<String> = []
@@ -4788,7 +4796,7 @@ final class RouteManager: ObservableObject {
             let result = await addRoutesBatchTracked(routes: routesToAdd)
             failedDests = Set(result.failedDestinations)
             if result.failureCount > 0 {
-                log(.warning, "Batch route add for \(service.name): \(result.successCount) succeeded, \(result.failureCount) failed")
+                log(.warning, "Batch route add for \(label): \(result.successCount) succeeded, \(result.failureCount) failed")
             }
         }
 
@@ -4803,7 +4811,7 @@ final class RouteManager: ObservableObject {
 
         // Preemption check before committing
         guard routeEpoch == epoch else {
-            log(.info, "Service apply aborted for \(service.name): routes were cleared during operation")
+            log(.info, "Service apply aborted for \(label): routes were cleared during operation")
             await unstrandRoutes(attempted: Set(routesToAdd.map { $0.destination }), addFailed: failedDests)
             return
         }
@@ -4812,8 +4820,13 @@ final class RouteManager: ObservableObject {
             activeRoutes.append(contentsOf: confirmedRoutes)
         }
 
-        if !confirmedRoutes.isEmpty {
-            log(.success, "Added \(confirmedRoutes.count) route entries for \(service.name) (\(routesToAdd.count - failedDests.count) kernel routes)")
+        for route in confirmedRoutes { addedFor[route.source, default: 0] += 1 }
+        for service in services {
+            guard let count = addedFor[service.name] else { continue }
+            addedFor[service.name] = nil
+            let kernel = Set(confirmedRoutes.filter { $0.source == service.name }.map(\.destination))
+                .intersection(kernelAddedDests).subtracting(failedDests).count
+            log(.success, "Added \(count) route entries for \(service.name) (\(kernel) kernel routes)")
         }
     }
     
@@ -4855,11 +4868,12 @@ final class RouteManager: ObservableObject {
                 log(.error, "Cannot enable services: no local gateway detected")
                 return
             }
-            for service in servicesToChange {
-                guard routeEpoch == epoch else { return }
-                if enabled, let gw = gateway {
-                    await applyRoutesForService(service, gateway: gw)
-                } else if !enabled {
+            if enabled, let gw = gateway {
+                // One lookup pass and one batch of route writes for all of them.
+                await applyRoutesForServices(servicesToChange, gateway: gw)
+            } else if !enabled {
+                for service in servicesToChange {
+                    guard routeEpoch == epoch else { return }
                     await removeRoutesForSource(service.name)
                 }
             }
