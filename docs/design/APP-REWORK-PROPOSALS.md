@@ -10,6 +10,7 @@ We picked on 2026-10-30. All of it ships in 6.0.0, in the order of section 6.
 - **Every bug in section 4:** A1 to A7 and B1 to B4.
 - **Every flow fix in section 4:** 1 to 8.
 - **Every new idea in section 5:** 1 to 12. Idea 8, the kill-switch warning, already shipped in [#189](https://github.com/GeiserX/VPN-Bypass/pull/189). Ideas the table marks Later, Maybe or After #185 are built too, as step 15 of section 6.
+- **Already on `release/6.0`:** `vpnb --json` from #184 ([#187](https://github.com/GeiserX/VPN-Bypass/pull/187)), the #185 service catalogue ([#190](https://github.com/GeiserX/VPN-Bypass/pull/190)), and the engine and CLI of ideas 1 and 2, the path check and `vpnb why` ([#193](https://github.com/GeiserX/VPN-Bypass/pull/193)). Step 13 still adds the Status page field for idea 2, and step 7 builds on the merged catalogue.
 
 The rest of this doc is the proposal those picks came from. The first round, [`UI-UX-PROPOSALS.md`](UI-UX-PROPOSALS.md), fixed sixteen problems one at a time and shipped as 5.0.0. This round looks at the whole app at once: the menu bar dropdown, the Settings window and every page in it.
 
