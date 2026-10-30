@@ -98,6 +98,7 @@ After CI completes: `brew update && brew upgrade --cask vpn-bypass` to install l
 - **Consider security**: Review code for potential security vulnerabilities
 - **Conventional commits**: Use conventional commit messages (feat:, fix:, docs:, chore:, refactor:, test:, style:)
 - **Semantic versioning**: Follow semver (MAJOR.MINOR.PATCH) for version numbers
+- **The service catalogue is best effort.** The catalogue (`Sources/VPNBypassCore/Resources/catalogue/`) gives each user a sensible starting point, not a complete or always-current list. We avoid constant changes to it: no PRs that chase every CDN host or domain shuffle, and no churn. We accept two kinds of change: a new service in a clear category, and a fix for a domain that no longer works. Each user is expected to adjust a service as needed, by adding names to a built-in service from the Lookups or Services page, or by making a custom service. That is preferred over editing the catalogue. Ids never change: saved configs, `vpnb` and the MCP server refer to them. How to add an entry: the catalogue's `README.md`.
 
 ## Learned Patterns
 
