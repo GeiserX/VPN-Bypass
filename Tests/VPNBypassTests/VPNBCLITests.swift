@@ -234,10 +234,10 @@ private final class MuteListener: @unchecked Sendable {
             }
         }
         guard bound == 0, listen(fd, 4) == 0 else { close(fd); throw POSIXError(.EADDRINUSE) }
-        let fd = self.fd
+        let listenFD = self.fd
         Thread.detachNewThread {
             while true {
-                let client = accept(fd, nil, nil)
+                let client = accept(listenFD, nil, nil)
                 if client < 0 { return }
                 close(client)
             }
