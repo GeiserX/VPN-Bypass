@@ -237,7 +237,12 @@ private struct LookupRow: View {
     /// The mode the panel was opened in. A choice made for one mode is never added in another.
     @State private var panelMode: LookupMode?
 
-    static let countWidth: CGFloat = 76
+    /// The bar, the gap and the number, so every row's bar starts at the same x.
+    static let countWidth: CGFloat = barWidth + 8 + countNumberWidth
+    static let barWidth: CGFloat = 30
+    /// Fits "999.999" in 11 pt monospaced; a longer count shrinks to fit instead of
+    /// widening the row and pushing its bar out of line.
+    static let countNumberWidth: CGFloat = 48
     /// The most a listed row's service name takes beside its status.
     static let statusDetailWidth: CGFloat = 120
     /// How long, in tenths of a second, a panel add waits for a running apply.
@@ -258,16 +263,18 @@ private struct LookupRow: View {
             HStack(spacing: 8) {
                 Capsule()
                     .fill(Theme.cyan.opacity(0.18))
-                    .frame(width: 30, height: 4)
+                    .frame(width: Self.barWidth, height: 4)
                     .overlay(alignment: .leading) {
-                        Capsule().fill(Theme.cyan.opacity(0.8)).frame(width: max(3, 30 * share), height: 4)
+                        Capsule().fill(Theme.cyan.opacity(0.8)).frame(width: max(3, Self.barWidth * share), height: 4)
                     }
                 Text("\(entry.count)")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(Theme.textSecondary)
-                    .frame(minWidth: 26, alignment: .trailing)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .frame(width: Self.countNumberWidth, alignment: .trailing)
             }
-            .frame(width: Self.countWidth, alignment: .trailing)
+            .frame(width: Self.countWidth, alignment: .leading)
             .help(String(localized: "Times looked up"))
 
             // The name takes every point the right end does not use right now.

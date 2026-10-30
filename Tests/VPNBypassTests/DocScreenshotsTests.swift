@@ -226,14 +226,15 @@ final class DocScreenshotsTests: XCTestCase {
         rm.config.dnsLookupsEnabled = true
         rm.config.services.append(ServiceEntry(id: "custom_meetings", name: "Meetings", enabled: true,
                                                domains: ["zoom.us"], ipRanges: [], isCustom: true))
-        let counts = ["github.com": 41, "slack.com": 33, "en.wikipedia.org": 27, "zoom.us": 19,
-                      "api.openai.com": 14, "docs.google.com": 12, "news.ycombinator.com": 9,
-                      "registry.npmjs.org": 7, "http-intake.logs.us5.datadoghq.com": 6,
-                      "browser-intake-us5-datadoghq.com": 5, "status.example.com": 3]
+        // Counts from one to four digits, so the shot shows the bars still line up.
+        let counts = ["github.com": 1602, "slack.com": 755, "en.wikipedia.org": 548, "zoom.us": 321,
+                      "api.openai.com": 214, "docs.google.com": 181, "news.ycombinator.com": 96,
+                      "registry.npmjs.org": 41, "http-intake.logs.us5.datadoghq.com": 12,
+                      "browser-intake-us5-datadoghq.com": 7, "status.example.com": 3]
         var tally = DNSLookupTally()
         let start = Date().addingTimeInterval(-3 * 3600)
         for round in 0..<(counts.values.max() ?? 0) {
-            tally.record(counts.filter { $0.value > round }.map(\.key), at: start.addingTimeInterval(Double(round) * 60))
+            tally.record(counts.filter { $0.value > round }.map(\.key), at: start.addingTimeInterval(Double(round) * 6))
         }
         DNSLookupsMonitor.shared.tally = tally
         DNSLookupsMonitor.shared.since = start
