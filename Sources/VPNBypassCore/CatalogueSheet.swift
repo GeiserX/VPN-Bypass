@@ -158,13 +158,18 @@ struct CatalogueSheet: View {
             .background(Theme.bgInput)
             .cornerRadius(8)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    chip(String(localized: "All"), selected: category == nil) { category = nil }
-                    ForEach(CatalogueSelection.categories(rows), id: \.self) { cat in
-                        chip(cat.displayName(), selected: category == cat) { category = cat }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        chip(String(localized: "All"), selected: category == nil) { category = nil }
+                        ForEach(CatalogueSelection.categories(rows), id: \.self) { cat in
+                            chip(cat.displayName(), selected: category == cat) { category = cat }
+                                .id(cat)
+                        }
                     }
                 }
+                // A sheet opened on a category shows its chip, which may sit past the edge.
+                .onAppear { if let category { proxy.scrollTo(category, anchor: .trailing) } }
             }
 
             ScrollView {
