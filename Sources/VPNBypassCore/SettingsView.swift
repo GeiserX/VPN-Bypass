@@ -108,7 +108,7 @@ struct SettingsView: View {
             // The Logs filter resets when the page is left, as it always has.
             if tab != .logs { logsFilter = LogFilter() }
         }
-        // A page asked for from outside, such as the dropdown's "All 37 services…" row. The
+        // A page asked for from outside, such as the dropdown's "All N services…" row. The
         // publisher sends its current value on subscribe, so a fresh window opens on it too.
         .onReceive(SettingsPageRequest.shared.$page) { page in
             guard let page else { return }
@@ -604,22 +604,24 @@ struct DomainRow: View {
 // MARK: - Services Tab
 
 /// How the Services page splits the list: an On section with the services that were on when
-/// the page opened, then the custom and the built-in services that were not, each in the
-/// catalogue's order. Kept pure so the split, its wording and its edge cases are unit-tested.
+/// the page opened, then the custom services that were not, each in the catalogue's order. A
+/// catalogue service that is off is not on the page: it waits in the catalogue sheet
+/// (`CatalogueSheet`), and switching one off on the page sends it back there. Kept pure so the
+/// split, its wording and its edge cases are unit-tested.
 ///
 /// The split follows the switches as they were when the page opened (`pinned`), not as they
 /// are now, so a switch flipped on the page leaves its row where it is. The row moves on the
 /// next visit, never from under the pointer. A service added since the page opened, such as a
-/// custom service just created, goes by its own switch, and the page pins it as soon as it sees
-/// it, so flipping its switch does not move it either.
+/// custom service just created or a service added from the catalogue, goes by its own switch,
+/// and the page pins it as soon as it sees it, so flipping its switch does not move it either.
+/// A catalogue service switched off on the page keeps its row, switch off, until the next visit.
 struct ServiceSections {
     enum Kind: CaseIterable {
-        case on, custom, builtIn
+        case on, custom
     }
 
     var on: [ServiceEntry]
     var custom: [ServiceEntry]
-    var builtIn: [ServiceEntry]
 
     /// Each service's switch as it is now, by id: what the page pins when it opens.
     static func pin(_ services: [ServiceEntry]) -> [String: Bool] {
@@ -645,7 +647,16 @@ struct ServiceSections {
         let isOn = { (service: ServiceEntry) in pinned[service.id] ?? service.enabled }
         on = shown.filter { isOn($0) }
         custom = shown.filter { !isOn($0) && $0.isCustom }
-        builtIn = shown.filter { !isOn($0) && !$0.isCustom }
+    }
+
+    /// What Turn All On switches on: the page's own rows that are off, less those a custom
+    /// service holds off by its name. Never the catalogue: that would turn on every service
+    /// the app ships.
+    static func turnAllOn(services: [ServiceEntry], pinned: [String: Bool]) -> [ServiceEntry] {
+        let page = ServiceSections(services: services, pinned: pinned, search: "")
+        return (page.on + page.custom).filter {
+            !$0.enabled && ServiceNameClash.customServiceHolding(nameOf: $0, in: services) == nil
+        }
     }
 
     /// The sections that have rows, top to bottom.
@@ -660,7 +671,6 @@ struct ServiceSections {
         switch kind {
         case .on: return on
         case .custom: return custom
-        case .builtIn: return builtIn
         }
     }
 
@@ -670,7 +680,6 @@ struct ServiceSections {
         switch kind {
         case .on: return String(localized: "services.section.on", defaultValue: "ON", bundle: bundle)
         case .custom: return String(localized: "CUSTOM SERVICES", bundle: bundle)
-        case .builtIn: return String(localized: "BUILT-IN SERVICES", bundle: bundle)
         }
     }
 }
@@ -687,6 +696,9 @@ struct ServicesTab: View {
     @State private var editingService: RouteManager.ServiceEntry?
     /// Each service's switch when the page opened; nil until it appears.
     @State private var pinned: [String: Bool]?
+    /// The catalogue sheet is open, with `catalogueSeed` in its search field.
+    @State private var showingCatalogue = false
+    @State private var catalogueSeed = ""
 
     /// The argument seeds the question Turn All On asks, for a rendered screenshot.
     init(turnOnQuestion: ServiceBulkSwitch.Question? = nil) {
@@ -724,9 +736,17 @@ struct ServicesTab: View {
                 Spacer()
 
                 if !isVPNOnly {
-                    Text("\(enabledCount)/\(routeManager.config.services.count) enabled")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textSecondary)
+                    Button {
+                        openCatalogue()
+                    } label: {
+                        Image(systemName: "books.vertical.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(Theme.purpleLight)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .help(String(localized: "Browse catalogue…"))
+                    .accessibilityLabel(String(localized: "Browse catalogue…"))
 
                     Button {
                         editingService = nil
@@ -878,6 +898,8 @@ struct ServicesTab: View {
                             RoundedRectangle(cornerRadius: 10)
                                 .fill(Theme.bgElevated)
                         )
+                    } else {
+                        emptyPage
                     }
                 }
                 .onAppear {
@@ -898,6 +920,18 @@ struct ServicesTab: View {
             CustomServiceEditor(service: editingService)
                 .environmentObject(routeManager)
         }
+        .sheet(isPresented: $showingCatalogue) {
+            CatalogueSheet(search: catalogueSeed) { picked in
+                addFromCatalogue(picked)
+            }
+            .environmentObject(routeManager)
+        }
+        // The first-run dropdown's "All services…" row opens the page with the sheet up.
+        .onReceive(SettingsPageRequest.shared.$openCatalogue) { open in
+            guard open, !isVPNOnly else { return }
+            SettingsPageRequest.shared.openCatalogue = false
+            openCatalogue()
+        }
         .alert(turnOnQuestion?.title ?? "", isPresented: Binding(
             get: { turnOnQuestion != nil },
             set: { if !$0 { turnOnQuestion = nil } }
@@ -910,8 +944,50 @@ struct ServicesTab: View {
         }
     }
 
+    /// The page's own rows Turn All On switches on; never the catalogue.
     private var offServices: [RouteManager.ServiceEntry] {
-        routeManager.servicesTurnAllOnSwitchesOn
+        let services = routeManager.config.services
+        return ServiceSections.turnAllOn(services: services, pinned: pinned ?? ServiceSections.pin(services))
+    }
+
+    /// What the page shows with no row: the way to the catalogue, and with a search the same
+    /// search in the catalogue, since most services live there now.
+    private var emptyPage: some View {
+        VStack(spacing: 10) {
+            Text(searchText.isEmpty
+                 ? String(localized: "No services yet. Pick the ones you use from the catalogue.")
+                 : String(localized: "Nothing on this page matches \u{201C}\(searchText)\u{201D}."))
+                .font(.system(size: 12))
+                .foregroundColor(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+            Button(searchText.isEmpty ? String(localized: "Browse catalogue…") : String(localized: "Search the catalogue")) {
+                openCatalogue(seed: searchText)
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(Theme.purpleGradient)
+            .cornerRadius(7)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+
+    private func openCatalogue(seed: String = "") {
+        catalogueSeed = seed
+        showingCatalogue = true
+    }
+
+    /// The sheet's primary button: every picked service on in one save and one batch of route
+    /// writes, one undo line, and the new rows pinned on so they show at once.
+    private func addFromCatalogue(_ ids: Set<String>) {
+        showingCatalogue = false
+        let changed = routeManager.setServicesEnabled(ids, true)
+        // The ids did not change, so onChange(of: ids) does not pin them; pin here.
+        pinned = ServiceSections.pin(routeManager.config.services)
+        if !changed.isEmpty { settingsUndo.record(.servicesSwitched(ids: changed, on: true)) }
     }
 
     private func turnAllOn() {
@@ -923,7 +999,8 @@ struct ServicesTab: View {
     }
 
     private func switchAll(_ on: Bool) {
-        let changed = routeManager.setAllServicesEnabled(on)
+        let changed = on ? routeManager.setServicesEnabled(Set(offServices.map(\.id)), true)
+            : routeManager.setAllServicesEnabled(false)
         // The pointer is on the menu, not on a row: show the new split now.
         pinned = ServiceSections.pin(routeManager.config.services)
         if !changed.isEmpty { settingsUndo.record(.servicesSwitched(ids: changed, on: on)) }
@@ -2556,6 +2633,8 @@ final class SettingsPageRequest: ObservableObject {
     @Published var page: SettingsView.SettingsTab?
     /// The filter the Logs page opens with, read together with `page`.
     var logFilter: LogFilter?
+    /// The Services page opens its catalogue sheet; the page takes it and clears it.
+    @Published var openCatalogue = false
 }
 
 @MainActor

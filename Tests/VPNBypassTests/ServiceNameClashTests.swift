@@ -496,13 +496,15 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         XCTAssertTrue(rm.recentLogs.contains { $0.message == "Netflix not turned on: Your custom service \u{201C}netflix\u{201D} has this name. Rename it to turn this service on." },
                       rm.recentLogs.map(\.message).joined(separator: "\n"))
 
-        let promised = rm.servicesTurnAllOnSwitchesOn.map(\.id)
-        XCTAssertFalse(promised.contains("netflix"), "the Services page does not count or name it")
-        let switched = rm.setAllServicesEnabled(true)
+        // The page as if Netflix and Spotify were on when it opened and were switched off on it.
+        let pinned = ServiceSections.pinNew(rm.config.services, into: ["netflix": true, "spotify": true])
+        let promised = ServiceSections.turnAllOn(services: rm.config.services, pinned: pinned).map(\.id)
+        XCTAssertEqual(promised, ["spotify"], "the Services page does not count or name it")
+        let switched = rm.setServicesEnabled(Set(promised), true)
         XCTAssertEqual(Set(switched), Set(promised), "Turn All On switches what the page promised")
-        XCTAssertFalse(switched.contains("netflix"))
         XCTAssertFalse(try service("netflix").enabled, "Turn All On leaves it off")
         XCTAssertTrue(try service("spotify").enabled)
+        XCTAssertEqual(rm.setServicesEnabled(["netflix"], true), [], "the catalogue sheet cannot turn it on either")
 
         let response = await ControlSurface.handle(ControlRequest(cmd: "service.enable", args: ["id": "netflix"]))
         XCTAssertEqual(response.error?.code, "already_exists", "vpnb gets an error, not a success with the service still off")

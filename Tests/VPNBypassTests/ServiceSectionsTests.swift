@@ -1,7 +1,9 @@
 // ServiceSectionsTests.swift
 // How the Services page splits its list (proposal 11 of #119): the services that were on when
-// the page opened come first, the rest keep the catalogue's order, a switch flipped on the
-// page does not move its row, search filters every section, and the headers are translated.
+// the page opened come first, then the custom services that are off, each in the catalogue's
+// order. A catalogue service that is off is not on the page: it waits in the catalogue sheet. A
+// switch flipped on the page does not move its row, search filters every section, Turn All On
+// covers the page only, and the headers are translated.
 
 import XCTest
 @testable import VPNBypassCore
@@ -25,21 +27,24 @@ final class ServiceSectionsTests: XCTestCase {
     func testTheServicesThatAreOnComeFirstAndTheRestKeepTheirOrder() {
         let sections = ServiceSections(services: catalogue, pinned: ServiceSections.pin(catalogue), search: "")
         XCTAssertEqual(ids(sections.on), ["telegram", "whatsapp", "youtube", "slack"])
-        XCTAssertEqual(ids(sections.builtIn), ["signal", "netflix", "discord"])
         XCTAssertEqual(sections.custom.count, 0)
-        XCTAssertEqual(sections.nonEmpty.map(\.kind), [.on, .builtIn])
+        XCTAssertEqual(sections.nonEmpty.map(\.kind), [.on], "the services that are off stay in the catalogue")
     }
 
-    func testTheDefaultCatalogueWithFourOnSplitsFourAndThirtyThree() {
+    func testTheDefaultCatalogueWithFourOnShowsOnlyThoseFour() {
         var services = RouteManager.Config().services.filter { !$0.isCustom }
         for i in services.indices where ["telegram", "whatsapp", "youtube", "slack"].contains(services[i].id) {
             services[i].enabled = true
         }
         let sections = ServiceSections(services: services, pinned: ServiceSections.pin(services), search: "")
-        XCTAssertEqual(services.count, 37)
+        XCTAssertEqual(services.count, Config.defaultServices.count)
         XCTAssertEqual(ids(sections.on), ["telegram", "whatsapp", "youtube", "slack"])
-        XCTAssertEqual(sections.builtIn.count, 33)
-        XCTAssertEqual(sections.builtIn.first?.id, "signal")
+        XCTAssertEqual(sections.nonEmpty.map(\.kind), [.on], "nothing else shown")
+    }
+
+    func testAFreshInstallShowsAnEmptyPage() {
+        let services = RouteManager.Config().services
+        XCTAssertTrue(ServiceSections(services: services, pinned: ServiceSections.pin(services), search: "").nonEmpty.isEmpty)
     }
 
     func testCustomServicesThatAreOnJoinTheOnSectionInCatalogueOrder() {
@@ -48,27 +53,35 @@ final class ServiceSectionsTests: XCTestCase {
         let sections = ServiceSections(services: services, pinned: ServiceSections.pin(services), search: "")
         XCTAssertEqual(ids(sections.on), ["mine", "telegram"])
         XCTAssertEqual(ids(sections.custom), ["draft"])
-        XCTAssertEqual(ids(sections.builtIn), ["signal"])
-        XCTAssertEqual(sections.nonEmpty.map(\.kind), [.on, .custom, .builtIn])
+        XCTAssertEqual(sections.nonEmpty.map(\.kind), [.on, .custom], "signal is off: in the catalogue")
     }
 
-    /// The page pins the split when it opens. Turning a service off there keeps it in On with
-    /// its switch off, and turning one on keeps it below, until the next visit pins again.
-    func testAFlippedSwitchKeepsItsRowUntilTheNextVisit() {
+    /// The page pins the split when it opens. Turning a catalogue service off there keeps its
+    /// row in On with its switch off; the next visit sends it back to the catalogue.
+    func testAServiceSwitchedOffKeepsItsRowUntilTheNextVisit() {
         let opened = catalogue
         let pinned = ServiceSections.pin(opened)
         var now = opened
         now[0].enabled = false   // telegram off
-        now[2].enabled = true    // signal on
 
         let sameVisit = ServiceSections(services: now, pinned: pinned, search: "")
         XCTAssertEqual(ids(sameVisit.on), ["telegram", "whatsapp", "youtube", "slack"])
         XCTAssertEqual(sameVisit.on.first?.enabled, false, "the row shows the live switch")
-        XCTAssertEqual(ids(sameVisit.builtIn), ["signal", "netflix", "discord"])
 
         let nextVisit = ServiceSections(services: now, pinned: ServiceSections.pin(now), search: "")
-        XCTAssertEqual(ids(nextVisit.on), ["whatsapp", "signal", "youtube", "slack"])
-        XCTAssertEqual(ids(nextVisit.builtIn), ["telegram", "netflix", "discord"])
+        XCTAssertEqual(ids(nextVisit.on), ["whatsapp", "youtube", "slack"], "telegram is back in the catalogue")
+        XCTAssertTrue(nextVisit.custom.isEmpty)
+    }
+
+    /// A catalogue service turned on from the sheet, Lookups or vpnb shows once the page pins
+    /// again, as the sheet does after its button.
+    func testAServiceTurnedOnFromTheCatalogueShowsOnceThePageRepins() {
+        var now = catalogue
+        now[2].enabled = true    // signal on from the sheet
+        XCTAssertFalse(ids(ServiceSections(services: now, pinned: ServiceSections.pin(catalogue), search: "").on).contains("signal"),
+                       "control: the old pin still has it off")
+        XCTAssertEqual(ids(ServiceSections(services: now, pinned: ServiceSections.pin(now), search: "").on),
+                       ["telegram", "whatsapp", "signal", "youtube", "slack"])
     }
 
     /// A service the page has not seen, such as a custom service just created, goes by its own
@@ -111,8 +124,7 @@ final class ServiceSectionsTests: XCTestCase {
         let pinned = ServiceSections.pin(services)
 
         let byDomain = ServiceSections(services: services, pinned: pinned, search: ".ORG")
-        XCTAssertEqual(ids(byDomain.on), ["telegram"])
-        XCTAssertEqual(ids(byDomain.builtIn), ["signal"])
+        XCTAssertEqual(ids(byDomain.on), ["telegram"], "signal is off, so it is not on the page")
 
         let byName = ServiceSections(services: services, pinned: pinned, search: "sla")
         XCTAssertEqual(ids(byName.on), ["slack"])
@@ -122,10 +134,22 @@ final class ServiceSectionsTests: XCTestCase {
         XCTAssertTrue(nothing.nonEmpty.isEmpty)
     }
 
-    func testWithNothingOnThereIsNoOnSection() {
-        let services = [service("telegram"), service("signal")]
+    func testWithNothingOnOnlyCustomServicesShow() {
+        let services = [service("telegram"), service("signal"), service("draft", custom: true)]
         let sections = ServiceSections(services: services, pinned: ServiceSections.pin(services), search: "")
-        XCTAssertEqual(sections.nonEmpty.map(\.kind), [.builtIn])
+        XCTAssertEqual(sections.nonEmpty.map(\.kind), [.custom])
+        XCTAssertEqual(ids(sections.custom), ["draft"])
+    }
+
+    // MARK: - Turn All On covers the page only
+
+    func testTurnAllOnNeverTurnsOnTheCatalogue() {
+        var now = catalogue + [service("draft", custom: true)]
+        now[0].enabled = false   // telegram switched off on the page this visit
+        let pinned = ServiceSections.pin(catalogue + [service("draft", custom: true)])
+        XCTAssertEqual(ids(ServiceSections.turnAllOn(services: now, pinned: pinned)), ["telegram", "draft"],
+                       "the page's own rows that are off; signal, netflix and discord stay in the catalogue")
+        XCTAssertEqual(ids(ServiceSections.turnAllOn(services: catalogue, pinned: ServiceSections.pin(catalogue))), [])
     }
 
     func testPinCopesWithADuplicateID() {
@@ -144,11 +168,11 @@ final class ServiceSectionsTests: XCTestCase {
     func testTheHeadersAreTranslated() throws {
         let en = try lproj("en"), es = try lproj("es"), fr = try lproj("fr")
         XCTAssertEqual(ServiceSections.Kind.allCases.map { ServiceSections.title($0, in: en) },
-                       ["ON", "CUSTOM SERVICES", "BUILT-IN SERVICES"])
+                       ["ON", "CUSTOM SERVICES"])
         XCTAssertEqual(ServiceSections.Kind.allCases.map { ServiceSections.title($0, in: es) },
-                       ["ACTIVADOS", "SERVICIOS PERSONALIZADOS", "SERVICIOS INTEGRADOS"])
+                       ["ACTIVADOS", "SERVICIOS PERSONALIZADOS"])
         XCTAssertEqual(ServiceSections.Kind.allCases.map { ServiceSections.title($0, in: fr) },
-                       ["ACTIVÉS", "SERVICES PERSONNALISÉS", "SERVICES INTÉGRÉS"])
+                       ["ACTIVÉS", "SERVICES PERSONNALISÉS"])
         // The dropdown's pill keeps its own word.
         XCTAssertEqual(String(localized: "ON", bundle: es), "ON")
     }

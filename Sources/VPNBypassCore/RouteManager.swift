@@ -4675,12 +4675,6 @@ final class RouteManager: ObservableObject {
         ServiceNameClash.customServiceHolding(nameOf: service, in: config.services)
     }
 
-    /// The services Turn All On switches on: the ones off, less those a custom service holds
-    /// off. The Services page counts and names these in its menu and question.
-    var servicesTurnAllOnSwitchesOn: [ServiceEntry] {
-        config.services.filter { !$0.enabled && customServiceHolding(nameOf: $0) == nil }
-    }
-
     func toggleService(_ serviceId: String) {
         guard let index = config.services.firstIndex(where: { $0.id == serviceId }) else { return }
         if !config.services[index].enabled, let custom = customServiceHolding(nameOf: config.services[index]) {

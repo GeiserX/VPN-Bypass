@@ -275,7 +275,11 @@ struct MenuContent: View {
                 // A fresh install: ask what should skip the VPN, in place of the mode control
                 // and the route actions, which have nothing to act on yet.
                 FirstRunSetupView(
-                    onOpenServices: { openSettings(page: .services) },
+                    onOpenServices: {
+                        // A fresh install has no service on, so the page opens on its catalogue.
+                        SettingsPageRequest.shared.openCatalogue = true
+                        openSettings(page: .services)
+                    },
                     onUseVPNOnly: {
                         // Through the run loop, for the reason given in DropdownModeRow.
                         RunLoop.main.perform(inModes: [.common]) {
@@ -1778,7 +1782,7 @@ enum FirstRunSetup {
 }
 
 /// The question a fresh install asks, as a grouped list: six common services with the Services
-/// page's own switch, a row that opens that page, a row to add a site, and a line that offers
+/// page's own switch, a row that opens that page on its catalogue, a row to add a site, and a line that offers
 /// VPN Only. Each switch and each add applies at once, through the same RouteManager calls.
 struct FirstRunSetupView: View {
     @EnvironmentObject var routeManager: RouteManager
@@ -1820,7 +1824,7 @@ struct FirstRunSetupView: View {
                 Button(action: onOpenServices) {
                     HStack(spacing: 9) {
                         tile("magnifyingglass", Self.gray)
-                        Text(FirstRunSetup.allServices(routeManager.config.services.count))
+                        Text(FirstRunSetup.allServices(Config.defaultServices.count))
                             .font(.system(size: 12.5))
                             .foregroundColor(Theme.textSecondary)
                         Spacer(minLength: 0)
