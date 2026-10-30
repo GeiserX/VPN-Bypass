@@ -15,6 +15,10 @@ final class RouteManager: ObservableObject {
     @Published var isVPNConnected = false
     @Published var vpnInterface: String?
     @Published var vpnType: VPNType?
+    /// A connected VPN's setting that sends every connection into its tunnel above the routing
+    /// table (Proton VPN's kill switch), so the routes installed here have no effect. Nil when
+    /// none is on or it could not be read. Re-read with every VPN detection.
+    @Published var vpnKillSwitch: VPNKillSwitch?
     @Published var localGateway: String?
     @Published var vpnGateway: String?
     @Published var activeRoutes: [ActiveRoute] = [] {
@@ -1148,7 +1152,38 @@ final class RouteManager: ObservableObject {
         }
 
         // Use ifconfig to detect VPN
-        return await detectVPNViaIfconfig(hintType: runningVPNType)
+        let result = await detectVPNViaIfconfig(hintType: runningVPNType)
+        await refreshVPNKillSwitch(connected: result.connected, trackedInterface: result.interface)
+        return result
+    }
+
+    /// Re-reads whether a connected VPN has a kill switch on. Runs on every detection pass,
+    /// which is never a tight loop: one `scutil --nc list`, and the configuration file only
+    /// when a NetworkExtension VPN is connected. A lookup that fails keeps the last reading:
+    /// clearing it would read as "no kill switch" and let a Refresh report success.
+    private func refreshVPNKillSwitch(connected: Bool, trackedInterface: String?) async {
+        var found: VPNKillSwitch?
+        if connected {
+            guard let list = await runProcessAsync("/usr/sbin/scutil", arguments: ["--nc", "list"], timeout: 3.0),
+                  list.exitCode == 0 else { return }
+            let ids = VPNKillSwitchReader.connectedIDs(fromNCList: list.output)
+            if !ids.isEmpty {
+                let reading: VPNKillSwitch?? = await withCheckedContinuation { continuation in
+                    vpnBypassProcessQueue.async {
+                        continuation.resume(returning: VPNKillSwitchReader.read(connected: ids, trackedInterface: trackedInterface))
+                    }
+                }
+                guard let reading else { return }
+                found = reading
+            }
+        }
+        guard found != vpnKillSwitch else { return }
+        if let found {
+            log(.warning, "\(found.name ?? "The VPN") sends every connection into its tunnel (\(found.flagNames.joined(separator: ", "))): routes set here have no effect until that is off")
+        } else if vpnKillSwitch != nil {
+            log(.info, "The VPN no longer forces every connection into its tunnel")
+        }
+        vpnKillSwitch = found
     }
     
     /// Detect which VPN client process is running
@@ -1165,6 +1200,12 @@ final class RouteManager: ObservableObject {
         }
         if output.contains("vpnagent") || output.contains("cisco") || output.contains("anyconnect") || output.contains("secureclient") {
             return .ciscoAnyConnect
+        }
+        // Before OpenVPN and WireGuard: Proton's tunnel extension carries the protocol's name.
+        // Only the extension, which runs while a tunnel is up; the Proton app stays open when
+        // disconnected and must not rename another VPN.
+        if output.split(separator: "\n").contains(where: { $0.contains("protonvpn") && $0.contains("extension") }) {
+            return .protonVPN
         }
         if output.contains("openvpn") {
             return .openVPN
@@ -2298,8 +2339,9 @@ final class RouteManager: ObservableObject {
             failedDomains.removeAll()
         }
 
-        // Only send notification when explicitly requested (Refresh button)
-        if sendNotification && routedAddressCount > 0 {
+        // Only send notification when explicitly requested (Refresh button), and not while a
+        // VPN kill switch makes the routes have no effect: the count would read as success.
+        if sendNotification && routedAddressCount > 0 && vpnKillSwitch == nil {
             NotificationManager.shared.notifyRoutesApplied(count: routedAddressCount, failedCount: totalFailures)
         }
 
@@ -2421,7 +2463,7 @@ final class RouteManager: ObservableObject {
             log(.success, "Applied \(confirmedUniqueCount) unique custom route(s)")
         }
 
-        if sendNotification && routedAddressCount > 0 {
+        if sendNotification && routedAddressCount > 0 && vpnKillSwitch == nil {
             NotificationManager.shared.notifyRoutesApplied(count: routedAddressCount, failedCount: batchFailureCount)
         }
 

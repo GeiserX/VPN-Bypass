@@ -6,7 +6,7 @@ Two words mean one thing each on screen. A **route** is a way out for traffic in
 
 Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow head on the top line while routes are enforced. The dropdown shows:
 
-- a pill that reads ON, WAITING (the app waits for a reconnected tunnel to hold before it re-applies routes), HELD BACK (the tunnel dropped right after several applies, so the app is not applying until it has held for 30 minutes), NOTHING ROUTED (no address is routed), NOT SET UP (a fresh install with nothing configured), NOT ENFORCING (the helper is down) or OFF (no VPN);
+- a pill that reads ON, WAITING (the app waits for a reconnected tunnel to hold before it re-applies routes), HELD BACK (the tunnel dropped right after several applies, so the app is not applying until it has held for 30 minutes), NOTHING ROUTED (no address is routed), NOT SET UP (a fresh install with nothing configured), NOT ENFORCING (the helper is down), NO EFFECT (the VPN's kill switch sends all traffic through it, so the routes change nothing; see [VPN kill switches](coexistence.md#vpn-kill-switches)) or OFF (no VPN);
 - the VPN it found, one sentence on what your lists route, and two facts: how many addresses were last routed, when, and whether any failed, and when DNS was checked and runs next. While the pill reads WAITING or HELD BACK, the header says how long is left instead;
 - on a fresh install in Bypass mode, in place of everything down to the gear: the question "What should skip the VPN?", six common services with their switches, a row that opens Settings on the Services page, a field to add a site, and a line that offers VPN Only. Once a service is on or a site is on the list, the normal dropdown below takes its place at once;
 - the Mode control, with Bypass, VPN Only and Custom in every mode. Picking another mode asks first, and the selection moves only after you confirm. Entering Custom turns your lists into rules here too, when Custom has no rules yet and the current mode's list has an entry switched on, and the question says so only then, as the Settings sheet does;
@@ -52,7 +52,7 @@ Rules (Custom mode): the ordered rule list (first match wins) mapping domains/su
 
 Routes (Custom mode): your egresses: auto-detected Direct + VPN links, plus any proxy or Tailscale-peer routes you add.
 
-Status: whether the app is working right now, on one page. A line at the top gives the verdict ("Working", "Not working", "No VPN connected") and the same sentence as the dropdown, for example "4 services and 2 domains skip the VPN. 62 addresses routed 23 s ago, none failed." Under it:
+Status: whether the app is working right now, on one page. A line at the top gives the verdict ("Working", "Not working", "No effect" under a VPN kill switch, "No VPN connected") and the same sentence as the dropdown, for example "4 services and 2 domains skip the VPN. 62 addresses routed 23 s ago, none failed." Under it:
 
 - Helper: the privileged helper's state and version. When it is not ready, its box turns red and the row has an Install, Update or Retry button. This is the page the dropdown's Fix… button opens.
 - Connection: the VPN and its interface, the normal connection (Wi-Fi network and gateway), and which interface carries the default route.
@@ -146,5 +146,40 @@ vpnb logs limit=20 level=error
 - `vpnb status` prints the running app's version as `app: <version>` (the `appVersion` field on the socket).
 - `logs` prints the newest entries first. It takes `limit` from 1 to 200 (default 50) and `level` as `info`, `success`, `warning` or `error`.
 - An app older than 4.9.0 answers these commands with `unknown_command`.
+
+### JSON output
+
+Add `--json` anywhere on the line and `vpnb` prints the app's reply as one line of JSON instead of text, for every command. A script can then read it with `jq` rather than parse the text, which may change between versions.
+
+```bash
+vpnb --json status
+```
+
+```json
+{"ok":true,"result":{"defaultRouteId":"6F1C2E4A-8B3D-4F5E-9A7C-1D2E3F4A5B6C","mode":"bypass","routes":[{"egress":"vpnDefault","enabled":true,"hasPassword":false,"hasProxyUser":false,"id":"6F1C2E4A-8B3D-4F5E-9A7C-1D2E3F4A5B6C","name":"Corporate VPN"},{"egress":"direct","enabled":true,"hasPassword":false,"hasProxyUser":false,"id":"0A9B8C7D-6E5F-4A3B-8C2D-1E0F9A8B7C6D","name":"Direct"}],"runtime":{"appVersion":"5.2.0","enforcedRouteCount":3,"enforcing":true,"helperReady":true,"helperState":"Helper Installed","vpnConnected":true,"vpnInterface":"utun4","vpnType":"WireGuard"},"schemaVersion":1,"supportedVersion":1},"v":1}
+```
+
+```bash
+vpnb routes.active --json
+```
+
+```json
+{"ok":true,"result":{"activeRoutes":[{"destination":"93.184.216.34","gateway":"192.168.1.1","source":"example.com"},{"destination":"203.0.113.0/24","gateway":"192.168.1.1","source":"Example Service"}]},"v":1}
+```
+
+```bash
+vpnb routes.active --json | jq -r '.result.activeRoutes[] | "\(.destination) \(.source)"'
+```
+
+```
+93.184.216.34 example.com
+203.0.113.0/24 Example Service
+```
+
+- Keys are sorted, and a field that does not apply is left out rather than set to `null`. `status` lists under `routes` the route table that Custom mode's rules point at; normally it holds at least the VPN and Direct routes, which the app adds when the list is empty, but `route.rm` can remove either, so a script should not assume them. `defaultRouteId` names the route unmatched traffic takes. `runtime.helperState` is display text in the app's language; test `helperReady` and `enforcing` instead. Every reply has `v` and `ok`, then `result` on success or `error` (`code` and `message`) on failure.
+- Exit codes stay the same: 0 ok, 1 the app answered with an error, 2 the app could not be reached. On exit 2 the message still goes to stderr, and stdout carries an error object too, with the code `app_unreachable`, `no_response` or `no_stdin`, so a script always gets one JSON object to read.
+- No password or proxy user name is ever in the reply. A route says `hasPassword` and `hasProxyUser` instead.
+- In `routes.active`, `source` is the list entry, service or rule the route was installed for, not an application: see [Which app uses a route](how-it-works.md#which-app-uses-a-route). [Routing priority](how-it-works.md#routing-priority) explains how these routes win over the VPN's and how to spot them in `netstat -rn`.
+- `help` and a bare `vpnb` still print the help text.
 
 The [MCP server](mcp-server.md) uses the same socket, so an AI agent can do all of this too.

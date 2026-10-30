@@ -2,8 +2,10 @@
 // vpnb — the command-line client for VPN Bypass's scripting/control surface
 // (multi-route P1, see docs/MULTI-ROUTE-DESIGN.md, "Scripting / automation
 // surface"). Deliberately thin: parse argv into a ControlRequest, send it as
-// one newline-delimited JSON line over the app's UNIX control socket, print
-// the one-line JSON response back, and exit. All validation and mutation
+// one newline-delimited JSON line over the app's UNIX control socket, decode
+// the one-line JSON reply, print it as text (or, with --json, as one JSON
+// object with sorted keys), and exit. Parsing and rendering live in
+// VPNBypassCore's VPNBCLI so the tests reach them; all validation and mutation
 // logic lives server-side in CommandRouter — this file never duplicates it.
 
 import Foundation
@@ -19,7 +21,7 @@ func printUsage() {
     vpnb — VPN Bypass control CLI
 
     Usage:
-      vpnb <cmd> [key=value ...] [pass:-]
+      vpnb <cmd> [key=value ...] [pass:-] [--json]
 
     Commands:
       status                                    Mode, routes, live enforcement (helper/VPN/route facts)
@@ -66,6 +68,15 @@ func printUsage() {
 
       help | --help | -h                        Show this help
 
+    JSON output:
+      --json, anywhere on the line, prints the reply as one line of JSON with
+      sorted keys instead of text: {"ok":true,"result":{...},"v":1}, or
+      {"error":{"code":"...","message":"..."},"ok":false,"v":1}. A field that
+      does not apply is left out, never null. The exit codes are the same. When
+      the app cannot be reached (exit 2) the message still goes to stderr, and
+      stdout carries an error object too (code app_unreachable, no_response or
+      no_stdin), so a script always reads one JSON object.
+
     Secrets:
       Never pass a password as key=value — argv is world-visible via `ps` and
       shell history. Instead pass the bare token "pass:-" (or the flag
@@ -86,36 +97,6 @@ func printUsage() {
       2  couldn't reach VPN Bypass's control socket (app not running, or no reply)
     """
     print(usage)
-}
-
-// MARK: - Argument parsing
-
-struct ParsedArgs {
-    var cmd: String
-    var args: [String: String]
-    var readPassFromStdin: Bool
-}
-
-func parseArguments(_ rawArgs: [String]) -> ParsedArgs {
-    let cmd = rawArgs[0]
-    var args: [String: String] = [:]
-    var readPassFromStdin = false
-
-    for token in rawArgs.dropFirst() {
-        if token == "pass:-" || token == "--pass-stdin" {
-            readPassFromStdin = true
-            continue
-        }
-        guard let eqIndex = token.firstIndex(of: "=") else {
-            FileHandle.standardError.write(Data("vpnb: ignoring malformed argument (expected key=value): \(token)\n".utf8))
-            continue
-        }
-        let key = String(token[token.startIndex..<eqIndex])
-        let value = String(token[token.index(after: eqIndex)...])
-        args[key] = value
-    }
-
-    return ParsedArgs(cmd: cmd, args: args, readPassFromStdin: readPassFromStdin)
 }
 
 // MARK: - Socket I/O
@@ -210,110 +191,28 @@ func sendRequestAndReadResponse(fd: Int32, request: ControlRequest) -> ControlRe
 
 // MARK: - Output
 
-func printResult(_ response: ControlResponse) {
-    if let error = response.error {
-        print("error: \(error.code): \(error.message)")
-        return
-    }
-    guard let result = response.result else {
-        print("ok")
-        return
-    }
+var jsonOutput = false
 
-    if let routes = result.routes {
-        if routes.isEmpty {
-            print("no routes")
-        } else {
-            for r in routes {
-                var line = "\(r.id)  \(r.name)  [\(r.egress.rawValue)]  \(r.enabled ? "enabled" : "disabled")"
-                if let host = r.proxyHost, let port = r.proxyPort {
-                    line += "  \(host):\(port)"
-                }
-                if r.hasProxyUser { line += "  user:yes" }
-                if r.hasPassword { line += "  pass:yes" }
-                if let exitNode = r.tailscaleExitNode { line += "  tailscale:\(exitNode)" }
-                if let listenerPort = r.listenerPort { line += "  listening:127.0.0.1:\(listenerPort)" }
-                print(line)
-            }
-        }
+func printResponse(_ response: ControlResponse) {
+    if jsonOutput {
+        print(VPNBCLI.renderJSON(response))
+    } else {
+        for line in VPNBCLI.textLines(response) { print(line) }
     }
+}
 
-    if let rules = result.rules {
-        if rules.isEmpty {
-            print("no rules")
-        } else {
-            for rule in rules.sorted(by: { $0.order < $1.order }) {
-                let state = rule.enabled ? "enabled" : "disabled"
-                print("\(rule.order)  \(rule.id)  \(rule.matchType.rawValue):\(rule.pattern) -> \(rule.routeId)  \(state)")
-            }
-        }
-    }
-
-    if let domains = result.domains {
-        if domains.isEmpty {
-            print("no domains")
-        } else {
-            for d in domains {
-                var line = "\(d.id)  \(d.domain)  [\(d.list)]  \(d.enabled ? "enabled" : "disabled")"
-                if d.isCIDR { line += "  cidr" }
-                if d.isWildcard { line += "  wildcard" }
-                print(line)
-            }
-        }
-    }
-
-    if let services = result.services {
-        if services.isEmpty {
-            print("no services")
-        } else {
-            for s in services {
-                var line = "\(s.id)  \(s.name)  \(s.enabled ? "enabled" : "disabled")  domains:\(s.domainCount)  ipRanges:\(s.ipRangeCount)"
-                if s.isCustom { line += "  custom" }
-                print(line)
-                for d in s.domains ?? [] { print("  domain  \(d)") }
-                for r in s.ipRanges ?? [] { print("  ipRange  \(r)") }
-            }
-        }
-    }
-
-    if let activeRoutes = result.activeRoutes {
-        if activeRoutes.isEmpty {
-            print("no active routes")
-        } else {
-            for r in activeRoutes {
-                print("\(r.destination) -> \(r.gateway)  (\(r.source))")
-            }
-        }
-    }
-
-    if let logs = result.logs {
-        if logs.isEmpty {
-            print("no log lines")
-        } else {
-            for l in logs {
-                print("\(l.time)  \(l.level)  \(l.message)")
-            }
-        }
-    }
-
-    if let runtime = result.runtime {
-        var line = "helper: \(runtime.helperState)  vpn: \(runtime.vpnConnected ? (runtime.vpnInterface ?? "connected") : "disconnected")"
-        line += "  routes: \(runtime.enforcedRouteCount)  enforcing: \(runtime.enforcing)"
-        if let version = runtime.appVersion { line += "  app: \(version)" }
-        print(line)
-    }
-
-    if let mode = result.mode { print("mode: \(mode)") }
-    if let defaultRouteId = result.defaultRouteId { print("default route: \(defaultRouteId)") }
-    if let schemaVersion = result.schemaVersion { print("schemaVersion: \(schemaVersion)") }
-    if let supportedVersion = result.supportedVersion { print("supportedVersion: \(supportedVersion)") }
-    if let listenerPort = result.listenerPort { print("listenerPort: \(listenerPort)") }
-    if let message = result.message { print(message) }
+/// A failure before or instead of an answer from the app: the text on stderr as always, plus
+/// the same as a JSON error object on stdout under --json. Exits 2.
+func failUnreachable(code: String, message: String) -> Never {
+    FileHandle.standardError.write(Data((message + "\n").utf8))
+    if jsonOutput { print(VPNBCLI.renderJSON(VPNBCLI.clientError(code: code, message: message))) }
+    exit(2)
 }
 
 // MARK: - Entry point
 
-let rawArgs = Array(CommandLine.arguments.dropFirst())
+let (rawArgs, wantsJSON) = VPNBCLI.stripJSONFlag(Array(CommandLine.arguments.dropFirst()))
+jsonOutput = wantsJSON
 
 if rawArgs.isEmpty {
     printUsage()
@@ -325,13 +224,15 @@ if rawArgs[0] == "help" || rawArgs[0] == "--help" || rawArgs[0] == "-h" {
     exit(0)
 }
 
-let parsed = parseArguments(rawArgs)
+let parsed = VPNBCLI.parse(rawArgs)
+for token in parsed.malformed {
+    FileHandle.standardError.write(Data("vpnb: ignoring malformed argument (expected key=value): \(token)\n".utf8))
+}
 
 var secrets: [String: String] = [:]
 if parsed.readPassFromStdin {
     guard let line = readLine(strippingNewline: true) else {
-        FileHandle.standardError.write(Data("vpnb: pass:- (or --pass-stdin) given but no input on stdin\n".utf8))
-        exit(2)
+        failUnreachable(code: "no_stdin", message: "vpnb: pass:- (or --pass-stdin) given but no input on stdin")
     }
     secrets["pass"] = line
 }
@@ -346,15 +247,14 @@ let request = ControlRequest(
 // install). Falls back to the app's standard user-only socket otherwise.
 let socketPath = ProcessInfo.processInfo.environment["VPNB_SOCKET"] ?? ControlSocketServer.defaultSocketPath()
 guard let fd = connectToSocket(path: socketPath) else {
-    FileHandle.standardError.write(Data("VPN Bypass isn't running, or its control socket is unavailable. Start the app and try again.\n".utf8))
-    exit(2)
+    failUnreachable(code: "app_unreachable",
+                    message: "VPN Bypass isn't running, or its control socket is unavailable. Start the app and try again.")
 }
 defer { close(fd) }
 
 guard let response = sendRequestAndReadResponse(fd: fd, request: request) else {
-    FileHandle.standardError.write(Data("vpnb: no response from VPN Bypass (connection closed or malformed reply)\n".utf8))
-    exit(2)
+    failUnreachable(code: "no_response", message: "vpnb: no response from VPN Bypass (connection closed or malformed reply)")
 }
 
-printResult(response)
+printResponse(response)
 exit(response.ok ? 0 : 1)
