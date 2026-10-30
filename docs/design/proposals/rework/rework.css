@@ -106,7 +106,7 @@
 .side { width: 190px; background: var(--side); border-right: .5px solid rgba(255,255,255,.08); padding: 12px 10px; flex: none; }
 .side .tl { display: flex; gap: 8px; padding: 2px 4px 14px; }
 .side .tl i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-.side .grp { font: 600 11px -apple-system, system-ui; color: var(--t3); margin: 12px 8px 4px; }
+.side .grp { font: 600 11px -apple-system, system-ui; color: var(--t2); margin: 12px 8px 4px; }
 .side .it { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; font: 400 13px -apple-system, system-ui; color: var(--t1); }
 .side .it .g { color: var(--t2); }
 .side .it.sel .g { color: var(--accentText); }
