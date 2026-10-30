@@ -22,8 +22,8 @@
   --hover: rgba(255,255,255,.06);
   --sel: rgba(37,99,235,.28);
   --ctl: rgba(255,255,255,.10);  /* native bordered control fill */
-  /* Egress colours: only ever on a route chip's dot */
-  --eDirect: #9CA3AF; --eVPN: #60A5FA; --eSocks: #A78BFA; --eHTTP: #22D3EE;
+  /* No egress colours: a route chip says where traffic goes with a glyph and a word, in grey,
+     so blue stays the accent (switch on, selection) and green stays live state. */
 }
 
 /* Type scale: five steps plus mono */
@@ -70,9 +70,9 @@
 .field.focus { border-color: var(--accentText); box-shadow: 0 0 0 2.5px rgba(56,189,248,.28); color: var(--t1); }
 .kbd { font: 500 10px -apple-system, system-ui; color: var(--t3); border: .5px solid rgba(255,255,255,.2); border-radius: 4px; padding: 0 4px; }
 
-/* Route chip: the one place egress colour appears */
+/* Route chip: a grey glyph and a word; no egress colour */
 .rchip { display: inline-flex; align-items: center; gap: 5px; font: 400 12px -apple-system, system-ui; padding: 1px 6px 1px 7px; border-radius: 6px; background: var(--ctl); white-space: nowrap; }
-.rchip i { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.rchip .g { width: 12px; height: 12px; color: var(--t2); }
 
 /* Group box: section title above, rows inside */
 .sec { margin: 0 0 6px 2px; }

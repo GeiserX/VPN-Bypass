@@ -5,7 +5,7 @@
  .nmenu2 div { padding:3px 10px; border-radius:4px; } .nmenu2 div.hl { background:var(--accent); } .nmenu2 hr { border:0; height:1px; background:rgba(255,255,255,.12); margin:4px 8px; } </style>
 </head><body>
 <div class="head"><span class="num">7</span><span class="title">New ideas where they would live: the site you are on, Pause, and "where does this site go?"</span></div>
-<p class="caption">Three of the ideas in section 5, drawn in the recommended system. None needs a Network Extension. The suggestion row reads the front browser tab through Apple Events (one Automation prompt per browser). Pause removes the app's routes and puts them back on a timer. The path check opens a real connection and reads which interface it left from, instead of a ping.</p>
+<p class="caption">Three of the ideas in section 5, drawn in the recommended system. None needs a Network Extension. The suggestion row reads the front browser tab through Apple Events (one Automation prompt per browser). Pause is drawn in Bypass, where it removes the app's routes and puts them back on a timer; VPN Only offers no Pause, because removing its routes would send listed sites outside the VPN. The path check reads the route the kernel picks and whether the site answers on 443 that way, instead of a ping.</p>
 <div class="cols" style="gap:24px">
   <div class="col">
     <div class="label after">Dropdown: bypass the site you are on, and Pause</div>
@@ -56,7 +56,7 @@
         <div class="box" style="margin-top:10px">
           <div class="row2 two"><span class="lead"><i data-g="checkc" class="live"></i></span><div class="fill"><div class="name">Leaves through Wi-Fi (en0)</div><div class="det">Bypass list → 4 addresses, all 4 connected outside the VPN</div></div></div>
         </div>
-        <div class="ty-detail" style="margin-top:10px;line-height:1.5">Same answer from the CLI: <span class="ty-mono" style="font-size:11px;color:var(--t1)">vpnb why cdn.example.net --json</span> (after #184). The check opens a TCP connection to port 443 and reads its source address with getsockname, so sites that block ping still get an answer.</div>
+        <div class="ty-detail" style="margin-top:10px;line-height:1.5">Same answer from the CLI: <span class="ty-mono" style="font-size:11px;color:var(--t1)">vpnb why cdn.example.net --json</span> (after #184). The check opens a TCP connection to port 443 and reads its source address with getsockname, so sites that block ping still get an answer. A control address the app does not route must come back the other way, or the result says the check is broken.</div>
       </div>
     </div>
   </div>

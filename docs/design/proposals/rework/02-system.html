@@ -10,7 +10,7 @@
   .ts .k { width:70px; font:400 11px ui-monospace,monospace; color:var(--t3); }
   .sp { display:inline-block; background:rgba(56,189,248,.35); height:14px; vertical-align:middle; }
 </style></head><body>
-<div class="head"><span class="num">2</span><span class="title">The system: tokens and the five shared components</span></div>
+<div class="head"><span class="num">2</span><span class="title">The system: tokens and the seven shared components</span></div>
 <p class="caption">Everything a page needs, and nothing more. Each colour has one meaning; each component has one look on every page. The names on the left are the proposed Theme.swift names.</p>
 <div class="cols" style="gap:24px">
   <div class="col" style="width:470px">
@@ -24,8 +24,7 @@
       <div class="sw2"><b style="background:#EF4444"></b><span class="k">failure</span><span class="m">a failed write; destructive confirm buttons</span></div>
       <div class="sw2"><b style="background:#2563EB"></b><span class="k">accent</span><span class="m">primary button, switch on, selected row (Brand.blue)</span></div>
       <div class="sw2"><b style="background:#38BDF8"></b><span class="k">accentText</span><span class="m">links, focus ring, selected glyph (Brand.sky)</span></div>
-      <div class="sw2"><b style="background:linear-gradient(90deg,#9CA3AF 25%,#60A5FA 25% 50%,#A78BFA 50% 75%,#22D3EE 75%)"></b><span class="k">egress.*</span><span class="m">Direct, VPN, SOCKS5, HTTP: the route chip dot only</span></div>
-      <div class="ty-detail" style="margin-top:4px">Mode has no colour: it is a word and an icon. Gradients go, except in the brand art.</div>
+            <div class="ty-detail" style="margin-top:4px">Mode and egress have no colour: each is a word and a glyph. Gradients go, except in the brand art.</div>
     </div>
     <div class="label after" style="margin-top:14px">Type, spacing, radii</div>
     <div class="panel" style="display:flex;flex-direction:column;gap:8px">
@@ -53,15 +52,15 @@
     </div>
     <div class="cols" style="gap:16px;margin-top:14px">
       <div class="col" style="width:272px">
-        <div class="label after">Page header</div>
+        <div class="label after">Page header: search, and + where adding opens a sheet</div>
         <div class="panel" style="padding:0;overflow:hidden">
-          <div class="tbar"><span class="ty-title">Domains</span><span class="fill"></span><span class="field" style="width:80px"><i data-g="search"></i>Search</span><span class="btn icon"><i data-g="plus" style="color:#fff"></i></span></div>
+          <div class="tbar"><span class="ty-title">Routes</span><span class="fill"></span><span class="field" style="width:80px"><i data-g="search"></i>Search</span><span class="btn icon"><i data-g="plus" style="color:#fff"></i></span></div>
           <div class="ty-body" style="color:var(--t2);padding:10px 16px 12px">One line that says what the page is for.</div>
         </div>
         <div class="label after" style="margin-top:14px">Status chip: shape, word, then colour</div>
         <div class="panel r gap8" style="flex-wrap:wrap"><span class="chip live"><i></i>On</span><span class="chip attn"><i></i>Not routing</span><span class="chip wait"><i></i>Waiting</span><span class="chip pause"><i></i>Paused</span><span class="chip off"><i></i>Off</span></div>
-        <div class="label after" style="margin-top:14px">Route chip</div>
-        <div class="panel r gap8" style="flex-wrap:wrap"><span class="rchip"><i style="background:var(--eDirect)"></i>Direct</span><span class="rchip"><i style="background:var(--eVPN)"></i>WireGuard</span><span class="rchip"><i style="background:var(--eSocks)"></i>office-proxy</span></div>
+        <div class="label after" style="margin-top:14px">Route chip: glyph and word, grey</div>
+        <div class="panel r gap8" style="flex-wrap:wrap"><span class="rchip"><i data-g="out"></i>Direct</span><span class="rchip"><i data-g="key"></i>WireGuard</span><span class="rchip"><i data-g="branch"></i>office-proxy</span></div>
       </div>
       <div class="col" style="width:272px">
         <div class="label after">Empty state, inside the group box</div>
