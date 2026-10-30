@@ -1,0 +1,115 @@
+import Foundation
+
+/// What the app sends the extension. Delivered with `sendProviderMessage`, held in memory only,
+/// never written to `providerConfiguration` (that plist is world-readable).
+public struct SpikePolicy: Codable, Equatable {
+    public static let currentVersion = 1
+
+    public var version: Int
+    /// Bumped by the app on every push, echoed back in the status.
+    public var generation: Int
+    /// Bundle ids (match exactly or on a dot boundary) or bare executable names.
+    public var apps: [String]
+    /// Hostnames (match exactly or as a parent domain). Only connect-by-name flows carry one.
+    public var hostnames: [String]
+    /// Without a fresh push within this many seconds the extension declines every flow.
+    public var leaseSeconds: Int
+    /// Physical interface to egress on; nil picks the most preferred Wi-Fi or Ethernet interface.
+    public var interfaceName: String?
+
+    public init(version: Int = SpikePolicy.currentVersion, generation: Int, apps: [String], hostnames: [String],
+                leaseSeconds: Int = 120, interfaceName: String? = nil) {
+        self.version = version
+        self.generation = generation
+        self.apps = apps
+        self.hostnames = hostnames
+        self.leaseSeconds = leaseSeconds
+        self.interfaceName = interfaceName
+    }
+
+    /// An empty policy: the include rule stays installed, every flow is declined ("pause").
+    public var isEmpty: Bool { apps.isEmpty && hostnames.isEmpty }
+
+    /// Normalises the host names a person typed: splits on commas, newlines and spaces, trims,
+    /// lowercases, drops trailing dots, blanks and duplicates.
+    public static func parseList(_ text: String, lowercase: Bool) -> [String] {
+        parse(text, lowercase: lowercase, separators: [",", "\n", " "])
+    }
+
+    /// The Apps field: commas and newlines only, because an executable name can hold spaces
+    /// (`Google Chrome Helper`).
+    public static func parseAppList(_ text: String) -> [String] {
+        parse(text, lowercase: false, separators: [",", "\n"])
+    }
+
+    private static func parse(_ text: String, lowercase: Bool, separators: Set<Character>) -> [String] {
+        var seen = Set<String>()
+        return text.split(whereSeparator: { separators.contains($0) })
+            .map { s -> String in
+                var t = s.trimmingCharacters(in: .whitespaces)
+                if lowercase { t = t.lowercased() }
+                while t.hasSuffix(".") { t.removeLast() }
+                return t
+            }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+}
+
+/// App to extension. `policy == nil` asks for the status only.
+public struct SpikeRequest: Codable, Equatable {
+    public var policy: SpikePolicy?
+    public init(policy: SpikePolicy?) { self.policy = policy }
+}
+
+/// Extension to app. Integers and two fixed tokens only: no app ids, no addresses, no host names.
+public struct SpikeStatus: Codable, Equatable {
+    public var extensionPID: Int32 = 0
+    public var startedAt: Int = 0
+    public var scope: String = ""
+    public var policyGeneration: Int = 0
+    public var policyLive: Bool = false
+    public var interfaceName: String = ""
+    public var counters: [String: Int] = [:]
+
+    public init() {}
+
+    /// True when this reply shows `p` live in the extension. A reply to a policy the extension
+    /// rejected (an unknown version) carries generation 0 and no lease.
+    public func confirms(_ p: SpikePolicy) -> Bool {
+        policyGeneration == p.generation && policyLive
+    }
+}
+
+/// Which outbound TCP the include rule hands to the extension. Set once at start, never changed at
+/// runtime (a change would need `setTunnelNetworkSettings`, which may close flows).
+public enum IncludeScope: Equatable {
+    /// Every outbound TCP flow except loopback (the v1 design).
+    case allTCP
+    /// Only outbound TCP to this remote port, over IPv4. Port 80 keeps a VPN client's own TLS
+    /// connections (port 443) outside the include rule, for the first, narrow pass.
+    case tcpPort(UInt16)
+
+    public init?(_ text: String?) {
+        guard let t = text?.trimmingCharacters(in: .whitespaces).lowercased(), !t.isEmpty else { return nil }
+        if t == "all" { self = .allTCP; return }
+        if t.hasPrefix("port:"), let p = UInt16(t.dropFirst(5)), p > 0 { self = .tcpPort(p); return }
+        return nil
+    }
+
+    public var token: String {
+        switch self {
+        case .allTCP: return "all"
+        case .tcpPort(let p): return "port:\(p)"
+        }
+    }
+
+    /// The narrow scope: plain HTTP only.
+    public static let narrow = IncludeScope.tcpPort(80)
+
+    /// The scope a provider start uses. Only a start the app makes carries a scope; a start by the
+    /// OS (boot, wake, a restart after a crash or kill) has no options, or nothing we can read, and
+    /// gets the narrow scope, never `all`. Scope `all` exists only while someone asked for it.
+    public static func atStart(_ token: String?) -> IncludeScope {
+        IncludeScope(token) ?? .narrow
+    }
+}
