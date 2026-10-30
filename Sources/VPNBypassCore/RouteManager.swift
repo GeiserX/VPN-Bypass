@@ -4943,7 +4943,10 @@ final class RouteManager: ObservableObject {
             NotificationManager.shared.notifyRouteVerificationFailed(route: String(localized: "Route check"),
                                                                      reason: SiteRoute.checkSentence(.checkBroken, interface: interface, expected: nil) ?? "")
         }
-        lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: logsFrom, at: Date())
+        let broken: Bool
+        if case .broken = control { broken = !results.isEmpty } else { broken = false }
+        lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: logsFrom, at: Date(),
+                                        controlBroken: broken)
 
         let checked = results.count
         let failedCount = results.filter { !$0.isReachable }.count

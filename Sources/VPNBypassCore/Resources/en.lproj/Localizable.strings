@@ -785,7 +785,8 @@
 "%lld failed in the last apply." = "%lld failed in the last apply.";
 "1 entry has no addresses." = "1 entry has no addresses.";
 "%lld entries have no addresses." = "%lld entries have no addresses.";
-"%lld of %lld checked addresses did not answer." = "%1$lld of %2$lld checked addresses did not answer.";
+"%lld of %lld checked addresses left the wrong way." = "%1$lld of %2$lld checked addresses left the wrong way.";
+"The last route check is broken: it cannot tell the two ways apart." = "The last route check is broken: it cannot tell the two ways apart.";
 "Partly working" = "Partly working";
 "Add a Direct rule…" = "Add a Direct rule…";
 "Added as rule %lld, to the Direct route." = "Added as rule %lld, to the Direct route.";

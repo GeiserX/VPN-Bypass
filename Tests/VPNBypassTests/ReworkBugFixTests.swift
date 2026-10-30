@@ -60,7 +60,7 @@ final class ReworkStatusTests: XCTestCase {
     }
 
     /// A4: the pill stayed a green ON with failures, with an entry at zero addresses, and with
-    /// checked addresses not answering.
+    /// checked addresses leaving the wrong way or a broken check.
     func testFailuresMakeItPartlyRouted() {
         let failed = status {
             $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-5), routeCount: 60, failedCount: 7)
@@ -77,24 +77,71 @@ final class ReworkStatusTests: XCTestCase {
         XCTAssertEqual(empty.note, "1 entry has no addresses.")
         XCTAssertEqual(status { $0.entriesWithoutAddresses = 3 }.note, "3 entries have no addresses.")
 
-        let checked = status { $0.lastCheckCount = 5; $0.lastCheckFailures = 4 }
+        let checked = status { $0.lastCheckCount = 5; $0.lastCheckWrongWay = 4 }
         XCTAssertEqual(checked.pill, "PARTLY ROUTED")
-        XCTAssertEqual(checked.note, "4 of 5 checked addresses did not answer.")
+        XCTAssertEqual(checked.note, "4 of 5 checked addresses left the wrong way.")
+
+        let broken = status { $0.lastCheckCount = 5; $0.lastCheckBroken = true; $0.lastCheckWrongWay = 2 }
+        XCTAssertEqual(broken.pill, "PARTLY ROUTED")
+        XCTAssertEqual(broken.note, "The last route check is broken: it cannot tell the two ways apart.",
+                       "a broken control says why, not a wrong-way count it cannot trust")
 
         let all = status {
             $0.lastRouteChange = .init(kind: .applied, at: self.now, routeCount: 62, failedCount: 1)
             $0.entriesWithoutAddresses = 2
-            $0.lastCheckCount = 5; $0.lastCheckFailures = 1
+            $0.lastCheckCount = 5; $0.lastCheckWrongWay = 1
         }
-        XCTAssertEqual(all.note, "1 failed in the last apply. 2 entries have no addresses. 1 of 5 checked addresses did not answer.")
+        XCTAssertEqual(all.note, "1 failed in the last apply. 2 entries have no addresses. 1 of 5 checked addresses left the wrong way.")
     }
 
     func testNothingWrongStaysOn() {
-        let s = status { $0.lastCheckCount = 5; $0.lastCheckFailures = 0 }
+        let s = status { $0.lastCheckCount = 5; $0.lastCheckWrongWay = 0 }
         XCTAssertEqual(s.pill, "ON")
         XCTAssertEqual(s.tone, .ok)
         XCTAssertFalse(s.isPartial)
         XCTAssertNil(s.note)
+    }
+
+    /// A4: the last-check signal comes from the path check. A site that drops 443 on the right
+    /// way is not partly routed; an address that left through the wrong interface is, and so is
+    /// a run whose control was broken.
+    @MainActor
+    func testTheLastCheckSignalComesFromThePathCheck() {
+        func probe(_ address: String, via interface: String, _ answer: PathCheck.Answer = .connected) -> PathCheck.Probe {
+            PathCheck.Probe(address: address, routeInterface: interface, sourceInterface: interface, answer: answer)
+        }
+        let silent = PathCheck.verificationResult(probe("192.0.2.10", via: "en0", .noAnswer), expected: .physical, control: .passed)
+        let wrong = PathCheck.verificationResult(probe("192.0.2.11", via: "utun4"), expected: .physical, control: .passed)
+        let fine = PathCheck.verificationResult(probe("192.0.2.12", via: "en0"), expected: .physical, control: .passed)
+        XCTAssertFalse(silent.isReachable)
+        XCTAssertFalse(silent.leftWrongWay)
+        XCTAssertTrue(wrong.leftWrongWay)
+        XCTAssertFalse(fine.leftWrongWay)
+        let underBroken = PathCheck.verificationResult(probe("192.0.2.11", via: "utun4"), expected: .physical,
+                                                       control: .broken(interface: "utun4"))
+        XCTAssertFalse(underBroken.leftWrongWay, "a broken control is reported once, not per address")
+
+        let rm = RouteManager.shared
+        let saved = rm.lastRouteCheck
+        defer { rm.lastRouteCheck = saved }
+        let plan = RouteCheck.Plan(destinations: ["192.0.2.10", "192.0.2.11", "192.0.2.12"], sources: [:],
+                                   singleAddresses: 3, routeCount: 3)
+        rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: [silent, fine], logsFrom: Date(), at: Date())
+        var live = DropdownStatus.Input.current(rm, helperReady: true)
+        XCTAssertEqual(live.lastCheckWrongWay, 0)
+        XCTAssertFalse(DropdownStatus.partialReasons(live).contains { $0.contains("checked addresses") },
+                       "a site that does not answer on 443 does not turn the pill amber")
+
+        rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: [silent, wrong, fine], logsFrom: Date(), at: Date())
+        live = DropdownStatus.Input.current(rm, helperReady: true)
+        XCTAssertEqual(live.lastCheckCount, 3)
+        XCTAssertEqual(live.lastCheckWrongWay, 1)
+
+        rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: [underBroken], logsFrom: Date(), at: Date(),
+                                           controlBroken: true)
+        live = DropdownStatus.Input.current(rm, helperReady: true)
+        XCTAssertTrue(live.lastCheckBroken)
+        XCTAssertTrue(DropdownStatus.partialReasons(live).contains("The last route check is broken: it cannot tell the two ways apart."))
     }
 
     /// The Status page reads the same state, so it does not say Working either.
@@ -127,14 +174,16 @@ final class ReworkStatusTests: XCTestCase {
         let live = DropdownStatus.Input.current(rm, helperReady: true)
         XCTAssertEqual(live.entriesWithoutAddresses, 1, "b.example.com has none")
         XCTAssertEqual(live.lastCheckCount, 1)
-        XCTAssertEqual(live.lastCheckFailures, 1)
+        XCTAssertEqual(live.lastCheckWrongWay, 0, "an address that only did not answer is not counted")
+        XCTAssertFalse(live.lastCheckBroken)
     }
 
     /// The pill's strings exist in Spanish and French.
     func testTheNewStatusWordsAreTranslated() throws {
         let keys = ["STARTING", "Starting…", "Detecting the VPN and applying routes.", "PARTLY ROUTED",
                     "1 failed in the last apply.", "%lld failed in the last apply.", "1 entry has no addresses.",
-                    "%lld entries have no addresses.", "%lld of %lld checked addresses did not answer.", "Partly working",
+                    "%lld entries have no addresses.", "%lld of %lld checked addresses left the wrong way.",
+                    "The last route check is broken: it cannot tell the two ways apart.", "Partly working",
                     "Add a Direct rule…", "Added as rule %lld, to the Direct route.",
                     "Added as rule %lld; rule %lld matches first.",
                     "Connect to a VPN to send\nyour listed sites through it.",

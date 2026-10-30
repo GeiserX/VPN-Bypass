@@ -1066,9 +1066,13 @@ enum RouteCheck {
         /// When the check started logging: its result lines are all at or after this.
         let logsFrom: Date
         let at: Date
+        /// The control left the same way as the routed addresses, so the run proves nothing.
+        let controlBroken: Bool
 
-        init(plan: Plan, results: [RouteVerificationResult], logsFrom: Date, at: Date) {
+        init(plan: Plan, results: [RouteVerificationResult], logsFrom: Date, at: Date,
+             controlBroken: Bool = false) {
             self.results = results
+            self.controlBroken = controlBroken
             self.sources = plan.sources
             self.singleAddresses = plan.singleAddresses
             self.routeCount = plan.routeCount
@@ -1086,6 +1090,8 @@ enum RouteCheck {
 
         var failures: [RouteVerificationResult] { results.filter { !$0.isReachable } }
         var reachable: [RouteVerificationResult] { results.filter(\.isReachable) }
+        /// Addresses the path check saw leave another way than their route says.
+        var leftWrongWay: [RouteVerificationResult] { results.filter(\.leftWrongWay) }
     }
 
     /// What to check. In VPN Only the app's catch-all ranges are left out of the count, as the
@@ -1568,9 +1574,12 @@ struct DropdownStatus: Equatable {
         /// Entries that should have routes and have none, with no apply running or waiting
         /// that could add them (`RoutedBySource.Summary.problemCount`).
         var entriesWithoutAddresses: Int = 0
-        /// The last Verify Routes: how many addresses it checked, and how many did not answer.
+        /// The last Verify Routes: how many addresses it checked, how many the path check saw
+        /// leave the wrong way, and whether its control was broken. An address that only did
+        /// not answer on 443 is not counted: a site may block that whatever the route.
         var lastCheckCount: Int = 0
-        var lastCheckFailures: Int = 0
+        var lastCheckWrongWay: Int = 0
+        var lastCheckBroken: Bool = false
     }
 
     let pill: String
@@ -1702,7 +1711,8 @@ struct DropdownStatus: Equatable {
     }
 
     /// Why ON is only partly true, one sentence per reason: the last apply had failures, an
-    /// entry has no addresses, or the last route check found addresses that did not answer.
+    /// entry has no addresses, or the last route check saw addresses leave the wrong way or
+    /// could not tell the ways apart.
     static func partialReasons(_ input: Input) -> [String] {
         var reasons: [String] = []
         if let change = DropdownCopy.shownRouteChange(input.lastRouteChange, currentRouteCount: input.installedRoutes),
@@ -1716,8 +1726,10 @@ struct DropdownStatus: Equatable {
         case 1: reasons.append(String(localized: "1 entry has no addresses."))
         default: reasons.append(String(localized: "\(input.entriesWithoutAddresses) entries have no addresses."))
         }
-        if input.lastCheckFailures > 0 {
-            reasons.append(String(localized: "\(input.lastCheckFailures) of \(input.lastCheckCount) checked addresses did not answer."))
+        if input.lastCheckBroken {
+            reasons.append(String(localized: "The last route check is broken: it cannot tell the two ways apart."))
+        } else if input.lastCheckWrongWay > 0 {
+            reasons.append(String(localized: "\(input.lastCheckWrongWay) of \(input.lastCheckCount) checked addresses left the wrong way."))
         }
         return reasons
     }

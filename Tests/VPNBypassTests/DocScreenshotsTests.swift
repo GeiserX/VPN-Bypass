@@ -148,7 +148,10 @@ final class DocScreenshotsTests: XCTestCase {
             }
             return PathCheck.verificationResult(probe, expected: .physical, control: control)
         }
-        rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: Date(), at: Date())
+        var broken = false
+        if case .broken = control { broken = true }
+        rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: Date(), at: Date(),
+                                           controlBroken: broken)
         defer { rm.clearRouteCheck() }
         let size = try renderDropdown(to: name)
         XCTAssertEqual(size.width, 680)

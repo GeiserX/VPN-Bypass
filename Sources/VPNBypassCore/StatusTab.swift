@@ -354,7 +354,8 @@ extension DropdownStatus.Input {
                 busy: RoutedBySource.mayStillAddRoutes(running: routeManager.isLoading || routeManager.isApplyingRoutes,
                                                        pending: routeManager.pendingReconnectApply))?.problemCount ?? 0,
             lastCheckCount: routeManager.lastRouteCheck?.results.count ?? 0,
-            lastCheckFailures: routeManager.lastRouteCheck?.failures.count ?? 0
+            lastCheckWrongWay: routeManager.lastRouteCheck?.leftWrongWay.count ?? 0,
+            lastCheckBroken: routeManager.lastRouteCheck?.controlBroken ?? false
         )
     }
 }

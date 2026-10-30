@@ -73,6 +73,9 @@ struct RouteVerificationResult: Identifiable {
     let error: String?
     /// What the path check saw for it: the interface, the source address and the answer.
     var path: PathCheck.Probe? = nil
+    /// The path check saw it leave another way than its route says. Not answering on 443 is
+    /// not this: a site may drop the connection however it is routed.
+    var leftWrongWay: Bool = false
 }
 
 // SOCKS5 Proxy configuration for aggressive VPN bypass (corporate VPNs that block UDP)

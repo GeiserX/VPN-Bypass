@@ -785,7 +785,8 @@
 "%lld failed in the last apply." = "%lld fallaron en la última aplicación.";
 "1 entry has no addresses." = "1 entrada no tiene direcciones.";
 "%lld entries have no addresses." = "%lld entradas no tienen direcciones.";
-"%lld of %lld checked addresses did not answer." = "%1$lld de %2$lld direcciones comprobadas no respondieron.";
+"%lld of %lld checked addresses left the wrong way." = "%1$lld de %2$lld direcciones comprobadas salieron por el camino equivocado.";
+"The last route check is broken: it cannot tell the two ways apart." = "La última comprobación de rutas está rota: no distingue los dos caminos.";
 "Partly working" = "Funciona en parte";
 "Add a Direct rule…" = "Añadir una regla Directo…";
 "Added as rule %lld, to the Direct route." = "Añadida como regla %lld, a la ruta Directo.";

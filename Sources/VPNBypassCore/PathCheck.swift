@@ -196,13 +196,16 @@ public enum PathCheck {
     static func verificationResult(_ probe: Probe, expected: Way?, control: Control,
                                    at date: Date = Date()) -> RouteVerificationResult {
         let error: String?
+        var leftWrongWay = false
         if case .broken = control {
             error = brokenReason
         } else if let expected {
             switch verdict(probe, expected: expected) {
             case .ok: error = nil
             case .noAnswer: error = noAnswerReason(probe)
-            case .wrongWay: error = wrongWayReason(probe.interface ?? "?", expected: expected)
+            case .wrongWay:
+                error = wrongWayReason(probe.interface ?? "?", expected: expected)
+                leftWrongWay = true
             case .unknown: error = String(localized: "No interface")
             }
         } else {
@@ -211,7 +214,8 @@ public enum PathCheck {
         }
         return RouteVerificationResult(destination: probe.address, isReachable: error == nil,
                                        latency: error == nil ? probe.latencyMs : nil,
-                                       timestamp: date, error: error, path: probe)
+                                       timestamp: date, error: error, path: probe,
+                                       leftWrongWay: leftWrongWay)
     }
 
     static func noAnswerReason(_ probe: Probe) -> String {
