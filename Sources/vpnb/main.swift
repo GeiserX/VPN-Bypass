@@ -66,6 +66,12 @@ func printUsage() {
       logs [limit=1..200] [level=info|success|warning|error]
                                                  Recent log lines, newest first (default 50)
 
+    Any mode:
+      why <host>                                Where a site goes: the entry or rule that routes it,
+                                                 then a path check (the interface its connection to
+                                                 port 443 leaves through, and whether it answers),
+                                                 with a control address that must leave the other way
+
       help | --help | -h                        Show this help
 
     JSON output:

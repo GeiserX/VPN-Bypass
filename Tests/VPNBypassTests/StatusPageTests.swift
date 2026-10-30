@@ -271,7 +271,7 @@ final class StatusPageTests: XCTestCase {
 
     private func result(_ ip: String, ok: Bool, ago: TimeInterval) -> RouteVerificationResult {
         RouteVerificationResult(destination: ip, isReachable: ok, latency: ok ? 12 : nil,
-                                timestamp: now.addingTimeInterval(-ago), error: ok ? nil : "Ping timed out")
+                                timestamp: now.addingTimeInterval(-ago), error: ok ? nil : "Left through en0, but nothing answered on port 443")
     }
 
     func testLastCheckSaysHowManyOfTheRoutesItChecked() {

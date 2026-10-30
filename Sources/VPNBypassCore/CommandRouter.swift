@@ -99,6 +99,8 @@ public struct ControlResult: Codable, Equatable, Sendable {
     public var services: [ControlService]? = nil
     public var activeRoutes: [ControlActiveRoute]? = nil
     public var logs: [ControlLogEntry]? = nil
+    /// `why`: which entry routes a host, and the path check on it.
+    public var why: SiteRouteAnswer? = nil
 }
 
 /// Live enforcement facts for `status` — the answer to "is it actually working?", which the
@@ -249,7 +251,7 @@ enum CommandRouter {
     static func isMutating(_ cmd: String) -> Bool {
         switch cmd {
         case "status", "route.list", "rule.list",
-             "domain.list", "service.list", "routes.active", "logs": return false
+             "domain.list", "service.list", "routes.active", "logs", "why": return false
         default: return true
         }
     }

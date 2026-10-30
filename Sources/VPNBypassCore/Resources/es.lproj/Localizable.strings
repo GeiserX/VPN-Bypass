@@ -463,8 +463,8 @@
 
 /* ===== Barra de menús: qué comprobó Verificar rutas ===== */
 "Route check" = "Comprobación de rutas";
-"Nothing to check: the only address is a range, which ping cannot test" = "Nada que comprobar: la única dirección es un rango, y ping no puede comprobar rangos";
-"Nothing to check: all %lld addresses are ranges, which ping cannot test" = "Nada que comprobar: las %lld direcciones son rangos, y ping no puede comprobar rangos";
+"Nothing to check: the only address is a range, which the path check cannot test" = "Nada que comprobar: la única dirección es un rango, y la comprobación de ruta no puede comprobar rangos";
+"Nothing to check: all %lld addresses are ranges, which the path check cannot test" = "Nada que comprobar: las %lld direcciones son rangos, y la comprobación de ruta no puede comprobar rangos";
 "Checked the only address" = "Comprobada la única dirección";
 "Checked all %lld addresses" = "Comprobadas las %lld direcciones";
 "Checked %lld of %lld addresses" = "Comprobadas %1$lld de %2$lld direcciones";
@@ -473,8 +473,6 @@
 "All reachable." = "Todas son accesibles.";
 "1 not reachable" = "1 no accesible";
 "%lld not reachable" = "%lld no accesibles";
-"Ping timed out" = "Tiempo de ping agotado";
-"Host unreachable" = "Host inaccesible";
 "1 reachable" = "1 accesible";
 "%lld reachable" = "%lld accesibles";
 "%lld ms" = "%lld ms";
@@ -781,3 +779,30 @@
 "Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it." = "%@ añadido a %@. El servicio está desactivado; añádelo desde Explorar el catálogo en la página Servicios para que haga bypass.";
 "catalogue.category.government" = "Administración pública";
 "catalogue.category.banks" = "Bancos";
+
+/* Path check and "where does this site go?" */
+"No interface" = "Sin interfaz";
+"Could not connect via %@" = "No se pudo conectar por %@";
+"No answer on 443 via %@" = "Sin respuesta en 443 por %@";
+"Went into %@" = "Entró en %@";
+"Went via %@, not %@" = "Salió por %@, no por %@";
+"Check broken" = "Comprobación rota";
+"%@ did not resolve, so there is nothing to check." = "%@ no se resolvió, así que no hay nada que comprobar.";
+"%@ is on your list, and its address %@ has a route." = "%@ está en tu lista y su dirección %@ tiene una ruta.";
+"%@ uses %@, which has a route added for %@." = "%@ usa %@, que tiene una ruta añadida para %@.";
+"%@ is covered by %@, which adds its routes when it is looked up." = "%@ está cubierto por %@, que añade sus rutas cuando se busca el nombre.";
+"%@ is listed under %@, but none of its addresses has a route now; Re-resolve DNS adds them." = "%@ está en la lista como %@, pero ninguna de sus direcciones tiene ruta ahora; Volver a resolver el DNS las añade.";
+"%@ matches rule %lld, %@ %@, which sends it to %@." = "%@ coincide con la regla %lld, %@ %@, que lo envía a %@.";
+"%@ matches no rule, so it takes the default route, %@." = "%@ no coincide con ninguna regla, así que toma la ruta predeterminada, %@.";
+"%@ is not on your list, so it follows the VPN." = "%@ no está en tu lista, así que sigue la VPN.";
+"%@ is not on your list, so it goes around the VPN." = "%@ no está en tu lista, así que evita la VPN.";
+"%@ matches no rule, so it follows the system's own routing." = "%@ no coincide con ninguna regla, así que sigue el enrutamiento del propio sistema.";
+"The check saw it leave through %@, and it answered on port 443." = "La comprobación lo vio salir por %@ y respondió en el puerto 443.";
+"The check saw it leave through %@, but nothing answered on port 443." = "La comprobación lo vio salir por %@, pero nada respondió en el puerto 443.";
+"But the check saw it leave through %@, not through %@." = "Pero la comprobación lo vio salir por %@, no por %@.";
+"But the check saw it leave through %@, a tunnel, not around the VPN." = "Pero la comprobación lo vio salir por %@, un túnel, en lugar de evitar la VPN.";
+"The routing table named no interface for it." = "La tabla de rutas no indicó ninguna interfaz para él.";
+"The check is broken: an address the app does not route also left through %@, so it cannot tell the two ways apart." = "La comprobación está rota: una dirección que la app no enruta también salió por %@, así que no distingue los dos caminos.";
+"A proxy or an exit node carries it, which the routing table does not decide, so the path was not checked." = "Lo lleva un proxy o un nodo de salida, que la tabla de rutas no decide, así que no se comprobó el camino.";
+"The VPN is not connected, so it leaves through %@ like everything else." = "La VPN no está conectada, así que sale por %@ como todo lo demás.";
+"%@ is on your list, but none of its addresses has a route now; Re-resolve DNS adds them." = "%@ está en tu lista, pero ninguna de sus direcciones tiene ruta ahora; Volver a resolver el DNS las añade.";

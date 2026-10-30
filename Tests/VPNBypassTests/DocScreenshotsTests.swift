@@ -120,6 +120,40 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size.width, 680)
     }
 
+    /// The dropdown after Verify Routes, with the path check's three kinds of result: one address
+    /// that went into the tunnel, one that left the right way without an answer on 443, and the
+    /// rest the right way and answering.
+    func testDropdownWithARouteCheck() throws {
+        try renderRouteCheck(control: .passed, to: "route-check.png")
+    }
+
+    /// The same check when its control left around the VPN too: every result reads "Check broken".
+    func testDropdownWithABrokenRouteCheck() throws {
+        try renderRouteCheck(control: .broken(interface: "en0"), to: "route-check-broken.png")
+    }
+
+    private func renderRouteCheck(control: PathCheck.Control, to name: String) throws {
+        seedBypass()
+        let plan = RouteCheck.plan(routes: rm.activeRoutes.map { .init(destination: $0.destination, source: $0.source) },
+                                   vpnOnly: false, isSingleAddress: { !$0.contains("/") })
+        let results = plan.destinations.enumerated().map { index, address -> RouteVerificationResult in
+            let probe: PathCheck.Probe
+            switch index {
+            case 0: probe = .init(address: address, routeInterface: "utun4", sourceAddress: "10.8.0.2",
+                                  sourceInterface: "utun4", answer: .connected, latencyMs: 31)
+            case 1: probe = .init(address: address, routeInterface: "en0", sourceAddress: "192.168.1.20",
+                                  sourceInterface: "en0", answer: .noAnswer)
+            default: probe = .init(address: address, routeInterface: "en0", sourceAddress: "192.168.1.20",
+                                   sourceInterface: "en0", answer: .connected, latencyMs: Double(18 + index * 7))
+            }
+            return PathCheck.verificationResult(probe, expected: .physical, control: control)
+        }
+        rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: Date(), at: Date())
+        defer { rm.clearRouteCheck() }
+        let size = try renderDropdown(to: name)
+        XCTAssertEqual(size.width, 680)
+    }
+
     func testSettingsOnServices() throws {
         seedBypass()
         let size = try renderSettings(page: .services, to: "services.png")

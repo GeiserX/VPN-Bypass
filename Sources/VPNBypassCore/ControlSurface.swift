@@ -72,6 +72,9 @@ public enum ControlSurface {
         if request.v == 1, let response = await ClassicControl.handle(request) {
             return response
         }
+        if request.v == 1, request.cmd == "why" {
+            return await why(request.args ?? [:])
+        }
 
         let ports = ProxyListenerManager.shared.activePorts
         var (newConfig, response) = CommandRouter.apply(request, to: RouteManager.shared.config, listenerPorts: ports)
@@ -124,6 +127,18 @@ public enum ControlSurface {
         await RouteManager.shared.reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: reapply)
 
         return response
+    }
+
+    /// `why host=<name, link or address>`: which entry routes it, and the path check on it.
+    @MainActor
+    private static func why(_ args: [String: String]) async -> ControlResponse {
+        guard let host = args["host"], !host.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return ControlResponse(ok: false, error: ControlError(code: "invalid_args", message: "why needs host=<name or address>"))
+        }
+        guard let answer = await RouteManager.shared.whereDoesItGo(host) else {
+            return ControlResponse(ok: false, error: ControlError(code: "invalid_args", message: "'\(host)' holds no host name or address"))
+        }
+        return ControlResponse(ok: true, result: ControlResult(why: answer))
     }
 
     /// The running app's CFBundleShortVersionString, or nil when the bundle has none

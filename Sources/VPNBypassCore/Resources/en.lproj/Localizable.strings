@@ -463,8 +463,8 @@
 
 /* ===== Menu bar: what Verify Routes checked ===== */
 "Route check" = "Route check";
-"Nothing to check: the only address is a range, which ping cannot test" = "Nothing to check: the only address is a range, which ping cannot test";
-"Nothing to check: all %lld addresses are ranges, which ping cannot test" = "Nothing to check: all %lld addresses are ranges, which ping cannot test";
+"Nothing to check: the only address is a range, which the path check cannot test" = "Nothing to check: the only address is a range, which the path check cannot test";
+"Nothing to check: all %lld addresses are ranges, which the path check cannot test" = "Nothing to check: all %lld addresses are ranges, which the path check cannot test";
 "Checked the only address" = "Checked the only address";
 "Checked all %lld addresses" = "Checked all %lld addresses";
 "Checked %lld of %lld addresses" = "Checked %1$lld of %2$lld addresses";
@@ -473,8 +473,6 @@
 "All reachable." = "All reachable.";
 "1 not reachable" = "1 not reachable";
 "%lld not reachable" = "%lld not reachable";
-"Ping timed out" = "Ping timed out";
-"Host unreachable" = "Host unreachable";
 "1 reachable" = "1 reachable";
 "%lld reachable" = "%lld reachable";
 "%lld ms" = "%lld ms";
@@ -781,3 +779,30 @@
 "Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it." = "Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it.";
 "catalogue.category.government" = "Government";
 "catalogue.category.banks" = "Banks";
+
+/* Path check and "where does this site go?" */
+"No interface" = "No interface";
+"Could not connect via %@" = "Could not connect via %@";
+"No answer on 443 via %@" = "No answer on 443 via %@";
+"Went into %@" = "Went into %@";
+"Went via %@, not %@" = "Went via %@, not %@";
+"Check broken" = "Check broken";
+"%@ did not resolve, so there is nothing to check." = "%@ did not resolve, so there is nothing to check.";
+"%@ is on your list, and its address %@ has a route." = "%@ is on your list, and its address %@ has a route.";
+"%@ uses %@, which has a route added for %@." = "%@ uses %@, which has a route added for %@.";
+"%@ is covered by %@, which adds its routes when it is looked up." = "%@ is covered by %@, which adds its routes when it is looked up.";
+"%@ is listed under %@, but none of its addresses has a route now; Re-resolve DNS adds them." = "%@ is listed under %@, but none of its addresses has a route now; Re-resolve DNS adds them.";
+"%@ matches rule %lld, %@ %@, which sends it to %@." = "%@ matches rule %lld, %@ %@, which sends it to %@.";
+"%@ matches no rule, so it takes the default route, %@." = "%@ matches no rule, so it takes the default route, %@.";
+"%@ is not on your list, so it follows the VPN." = "%@ is not on your list, so it follows the VPN.";
+"%@ is not on your list, so it goes around the VPN." = "%@ is not on your list, so it goes around the VPN.";
+"%@ matches no rule, so it follows the system's own routing." = "%@ matches no rule, so it follows the system's own routing.";
+"The check saw it leave through %@, and it answered on port 443." = "The check saw it leave through %@, and it answered on port 443.";
+"The check saw it leave through %@, but nothing answered on port 443." = "The check saw it leave through %@, but nothing answered on port 443.";
+"But the check saw it leave through %@, not through %@." = "But the check saw it leave through %@, not through %@.";
+"But the check saw it leave through %@, a tunnel, not around the VPN." = "But the check saw it leave through %@, a tunnel, not around the VPN.";
+"The routing table named no interface for it." = "The routing table named no interface for it.";
+"The check is broken: an address the app does not route also left through %@, so it cannot tell the two ways apart." = "The check is broken: an address the app does not route also left through %@, so it cannot tell the two ways apart.";
+"A proxy or an exit node carries it, which the routing table does not decide, so the path was not checked." = "A proxy or an exit node carries it, which the routing table does not decide, so the path was not checked.";
+"The VPN is not connected, so it leaves through %@ like everything else." = "The VPN is not connected, so it leaves through %@ like everything else.";
+"%@ is on your list, but none of its addresses has a route now; Re-resolve DNS adds them." = "%@ is on your list, but none of its addresses has a route now; Re-resolve DNS adds them.";

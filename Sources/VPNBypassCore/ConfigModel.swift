@@ -71,6 +71,8 @@ struct RouteVerificationResult: Identifiable {
     let latency: Double? // in milliseconds
     let timestamp: Date
     let error: String?
+    /// What the path check saw for it: the interface, the source address and the answer.
+    var path: PathCheck.Probe? = nil
 }
 
 // SOCKS5 Proxy configuration for aggressive VPN bypass (corporate VPNs that block UDP)
@@ -93,7 +95,7 @@ struct Config: Codable {
     var autoApplyOnVPN: Bool = true
     var manageHostsFile: Bool = true
     var checkInterval: TimeInterval = 300 // 5 minutes
-    var verifyRoutesAfterApply: Bool = false  // Disabled by default - many servers block ping
+    var verifyRoutesAfterApply: Bool = false  // Off by default: a check opens a connection to each sampled address
     var autoDNSRefresh: Bool = true  // Periodically re-resolve DNS and update routes
     var dnsRefreshInterval: TimeInterval = 3600  // 1 hour default
     var fallbackDNS: [String] = ["1.1.1.1", "8.8.8.8"]  // Fallback DNS servers (IP or DoH URL)
