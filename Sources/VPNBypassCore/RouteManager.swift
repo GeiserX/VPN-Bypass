@@ -4926,8 +4926,10 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Route Verification
     
-    /// Pings a sample of the routed single addresses (`RouteCheck.plan`) and logs one line per
-    /// result, so the card's "Show all results in Logs" has them all.
+    /// Path-checks a sample of the routed single addresses (`RouteCheck.plan`) and logs one line
+    /// per result, so the card's "Show all results in Logs" has them all. Each address must leave
+    /// the way its route sends it and answer on port 443; the run's control, an address the app
+    /// does not route, must leave the other way, or every result reads "check broken".
     func verifyRoutes() async {
         log(.info, "Verifying routes...")
         // Every result line is logged after this, so the card can tell when the log lost them.
@@ -4946,25 +4948,43 @@ final class RouteManager: ObservableObject {
         // A check dropped by a newer one must not turn the newer one's spinner off.
         defer { if generation == routeCheckGeneration { isCheckingRoutes = false } }
 
+        let vpn = isVPNConnected ? vpnInterface : nil
+        let local = localGateway
+        let gateways = Dictionary(activeRoutes.map { ($0.destination, $0.gateway) }, uniquingKeysWith: { first, _ in first })
+        let control = await runPathControl(vpnInterface: vpn)
+        let probes = await probeAll(plan.destinations)
+
         var results: [RouteVerificationResult] = []
-        for destination in plan.destinations {
-            let result = await verifyRoute(destination)
+        // Sent only once the run is known to be current, so a dropped run alerts nobody.
+        var alerts: [(route: String, reason: String)] = []
+        for probe in probes {
+            let destination = probe.address
+            let expected = gateways[destination].flatMap {
+                PathCheck.way(forGateway: $0, localGateway: local, vpnInterface: vpn)
+            }
+            let result = PathCheck.verificationResult(probe, expected: expected, control: control)
             results.append(result)
             let source = plan.sources[destination].map { " (\($0))" } ?? ""
             if result.isReachable {
                 let time = result.latency.map { " in \(Int($0.rounded())) ms" } ?? ""
-                log(.info, "Route check: \(destination)\(source) reachable\(time)")
+                log(.info, "Route check: \(destination)\(source) left through \(probe.interface ?? "?"), answered\(time)")
             } else {
-                log(.warning, "Route check: \(destination)\(source) not reachable: \(result.error ?? "Unreachable")")
-                NotificationManager.shared.notifyRouteVerificationFailed(
-                    route: destination,
-                    reason: result.error ?? "Unreachable"
-                )
+                log(.warning, "Route check: \(destination)\(source) \(Self.pathLogReason(probe, expected: expected, control: control))")
+                if case .broken = control { continue }
+                alerts.append((route: destination, reason: result.error ?? "Unreachable"))
             }
         }
         guard generation == routeCheckGeneration else {
             log(.info, "Route check: result dropped, routes were removed or another check started while it ran")
             return
+        }
+        for alert in alerts {
+            NotificationManager.shared.notifyRouteVerificationFailed(route: alert.route, reason: alert.reason)
+        }
+        if case .broken(let interface) = control, !results.isEmpty {
+            // One notification for the run, not one per address.
+            NotificationManager.shared.notifyRouteVerificationFailed(route: String(localized: "Route check"),
+                                                                     reason: SiteRoute.checkSentence(.checkBroken, interface: interface, expected: nil) ?? "")
         }
         lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: logsFrom, at: Date())
 
@@ -4972,12 +4992,76 @@ final class RouteManager: ObservableObject {
         let failedCount = results.filter { !$0.isReachable }.count
         let scope = "checked \(checked) of \(plan.routeCount) routes\(plan.singleAddresses < plan.routeCount ? ", single addresses only" : "")"
         if checked == 0 {
-            log(.info, "Route check: nothing to check, all \(plan.routeCount) routes are address ranges, which ping cannot test")
+            log(.info, "Route check: nothing to check, all \(plan.routeCount) routes are address ranges, which the path check cannot test")
+        } else if case .broken = control {
+            log(.warning, "Route check: check broken, the control left the same way as the routed addresses (\(scope))")
         } else if failedCount > 0 {
-            log(.warning, "Route check: \(failedCount) of \(checked) not reachable (\(scope))")
+            log(.warning, "Route check: \(failedCount) of \(checked) failed (\(scope))")
         } else {
-            log(.success, "Route check: all \(checked) reachable (\(scope))")
+            log(.success, "Route check: all \(checked) left the right way and answered (\(scope))")
         }
+    }
+
+    /// The control for a path check: one address no route of the app covers, which must leave
+    /// the way unrouted addresses take in this mode. Logged either way.
+    func runPathControl(vpnInterface vpn: String?) async -> PathCheck.Control {
+        guard let unrouted = SiteRoute.unroutedWay(config: config, vpnInterface: vpn) else {
+            log(.info, "Route check: no control, \(vpn == nil ? "the VPN is not connected, so there is one way out" : "the default route does not use the routing table")")
+            return .notRun
+        }
+        let routed = activeRoutes.filter { $0.source != ClassicRouteCompiler.catchAllSource }.map(\.destination)
+        guard let address = PathCheck.controlAddress(routed: routed) else {
+            log(.info, "Route check: no control, every control address is routed")
+            return .notRun
+        }
+        let probe = await pathProbe(address, waitForAnswer: false)
+        let control = PathCheck.control(probe, unrouted: unrouted)
+        switch control {
+        case .passed:
+            log(.info, "Route check: control \(address) left through \(probe.interface ?? "?"), the way unrouted addresses take")
+        case .broken(let interface):
+            log(.warning, "Route check: control \(address) left through \(interface ?? "no interface"), expected \(unrouted.code): check broken")
+        case .notRun:
+            break
+        }
+        return control
+    }
+
+    /// Tests answer path probes here instead of opening connections.
+    var pathProbeOverrideForTests: ((_ address: String, _ waitForAnswer: Bool) async -> PathCheck.Probe)?
+
+    func pathProbe(_ address: String, waitForAnswer: Bool = true) async -> PathCheck.Probe {
+        if let override = pathProbeOverrideForTests { return await override(address, waitForAnswer) }
+        return await PathCheck.probeAsync(address, waitForAnswer: waitForAnswer)
+    }
+
+    /// Probes every address at once, in their order.
+    func probeAll(_ addresses: [String]) async -> [PathCheck.Probe] {
+        if pathProbeOverrideForTests != nil {
+            var out: [PathCheck.Probe] = []
+            for address in addresses { out.append(await pathProbe(address)) }
+            return out
+        }
+        return await withTaskGroup(of: (Int, PathCheck.Probe).self) { group in
+            for (index, address) in addresses.enumerated() {
+                group.addTask { (index, await PathCheck.probeAsync(address)) }
+            }
+            var out: [(Int, PathCheck.Probe)] = []
+            for await item in group { out.append(item) }
+            return out.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+    }
+
+    /// The log's English reason for a failed path check.
+    nonisolated static func pathLogReason(_ probe: PathCheck.Probe, expected: PathCheck.Way?,
+                                          control: PathCheck.Control) -> String {
+        let via = probe.interface ?? "no interface"
+        if case .broken = control { return "left through \(via), check broken" }
+        if let expected, let interface = probe.interface, !PathCheck.matches(interface, expected) {
+            return "left through \(via), expected \(expected.code)"
+        }
+        if probe.interface == nil { return "the routing table named no interface" }
+        return "left through \(via), \(probe.answer == .failed ? "the connection could not start" : "nothing answered on port 443")"
     }
     
     /// Drops the card, and the result of any check still running.
@@ -4987,44 +5071,6 @@ final class RouteManager: ObservableObject {
         isCheckingRoutes = false
     }
 
-    func verifyRoute(_ destination: String) async -> RouteVerificationResult {
-        let startTime = Date()
-        
-        // Use helper with timeout - ping itself has 3s timeout, we add 1s buffer
-        guard let result = await runProcessAsync("/sbin/ping", arguments: ["-c", "1", "-t", "3", destination], timeout: 4.0) else {
-            return RouteVerificationResult(
-                destination: destination,
-                isReachable: false,
-                latency: nil,
-                timestamp: Date(),
-                error: String(localized: "Ping timed out")
-            )
-        }
-        
-        let elapsed = Date().timeIntervalSince(startTime) * 1000 // Convert to ms
-        let output = result.output
-        
-        // Parse ping output for round-trip time
-        var latency: Double? = nil
-        if let timeRange = output.range(of: "time=") {
-            let timeStr = output[timeRange.upperBound...]
-            if let endRange = timeStr.range(of: " ms") {
-                let msStr = String(timeStr[..<endRange.lowerBound])
-                latency = Double(msStr)
-            }
-        }
-        
-        let isReachable = result.exitCode == 0
-        
-        return RouteVerificationResult(
-            destination: destination,
-            isReachable: isReachable,
-            latency: latency ?? (isReachable ? elapsed : nil),
-            timestamp: Date(),
-            error: isReachable ? nil : String(localized: "Host unreachable")
-        )
-    }
-    
     // MARK: - Private Methods
     
     /// One sweep per launch: has the orphan sweep already run this session?
@@ -5541,7 +5587,7 @@ final class RouteManager: ObservableObject {
         return routes.isEmpty ? nil : routes
     }
     
-    private func resolveIPs(for domain: String) async -> [String]? {
+    func resolveIPs(for domain: String) async -> [String]? {
         if let override = resolveIPsOverrideForTests { return await override(domain) }
         // Use nonisolated static method for true parallelism
         let userDNS = detectedDNSServer
