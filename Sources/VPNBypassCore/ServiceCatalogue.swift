@@ -46,6 +46,9 @@ enum ServiceCatalogue {
     /// What the app ships, read once: `Config.defaultServices` is read for every row.
     static let shipped: [Entry] = loaded.entries
 
+    /// The ids of what the app ships.
+    static let shippedIds: Set<String> = Set(shipped.map(\.service.id))
+
     /// Why a shipped file or entry was left out, for the log. Empty unless a bad file got past CI.
     static var problems: [String] { loaded.problems }
 

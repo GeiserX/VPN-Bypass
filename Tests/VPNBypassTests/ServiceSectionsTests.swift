@@ -56,6 +56,17 @@ final class ServiceSectionsTests: XCTestCase {
         XCTAssertEqual(sections.nonEmpty.map(\.kind), [.on, .custom], "signal is off: in the catalogue")
     }
 
+    /// A saved built-in service the catalogue no longer has cannot wait in the sheet, so it
+    /// stays on the page while it is off, or it would be lost from both.
+    func testABuiltInServiceTheCatalogueDroppedStaysOnThePageWhenOff() {
+        let services = [service("telegram", on: true), service("signal"), service("retired_service")]
+        XCTAssertFalse(ServiceCatalogue.shippedIds.contains("retired_service"))
+        XCTAssertTrue(ServiceCatalogue.shippedIds.contains("signal"))
+        let sections = ServiceSections(services: services, pinned: ServiceSections.pin(services), search: "")
+        XCTAssertEqual(ids(sections.on), ["telegram"])
+        XCTAssertEqual(ids(sections.custom), ["retired_service"], "signal waits in the sheet; the dropped one has no row there")
+    }
+
     /// The page pins the split when it opens. Turning a catalogue service off there keeps its
     /// row in On with its switch off; the next visit sends it back to the catalogue.
     func testAServiceSwitchedOffKeepsItsRowUntilTheNextVisit() {

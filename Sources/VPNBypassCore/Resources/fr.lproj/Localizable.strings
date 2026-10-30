@@ -754,6 +754,11 @@
 "Search by name, domain or country" = "Rechercher par nom, domaine ou pays";
 "No service in the catalogue matches “%@”. Make a custom service with the + button." = "Aucun service du catalogue ne correspond à « %@ ». Créez un service personnalisé avec le bouton +.";
 "Select all %@" = "Tout sélectionner : %@";
+"No service in %@ matches “%@”. Choose All to see the matches in other categories." = "Aucun service de la catégorie %1$@ ne correspond à « %2$@ ». Choisissez Tous pour voir les correspondances dans les autres catégories.";
+"Deselect all %@" = "Tout désélectionner : %@";
+"All selected" = "Tous sélectionnés";
+"Some selected" = "Certains sélectionnés";
+"None selected" = "Aucun sélectionné";
 "Already on" = "Déjà activé";
 "Bypass services" = "Contourner des services";
 "Bypass 1 service" = "Contourner 1 service";

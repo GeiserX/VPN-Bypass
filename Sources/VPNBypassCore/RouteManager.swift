@@ -4441,9 +4441,15 @@ final class RouteManager: ObservableObject {
     // MARK: - Custom Service Management
 
     /// The service or Bypass list entry a custom service called `name` would share its routes
-    /// with, or nil when the name is free. `excluding` is the service being edited.
-    func customServiceNameClash(_ name: String, excluding id: String? = nil) -> ServiceNameClash? {
-        ServiceNameClash.find(name, excluding: id, services: config.services, domains: config.domains)
+    /// with, or nil when the name is free. `excluding` is the service being edited. A built-in
+    /// service that is off is no clash when the edited service already has `name` (or
+    /// `keepsName` says so, for a service put back by Undo): it holds that built-in off.
+    func customServiceNameClash(_ name: String, excluding id: String? = nil, keepsName: Bool = false) -> ServiceNameClash? {
+        let ownName = id.flatMap { id in config.services.first { $0.id == id }?.name }
+        let keeps = keepsName || ownName.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        } == true
+        return ServiceNameClash.find(name, excluding: id, keepsName: keeps, services: config.services, domains: config.domains)
     }
 
     /// Saves nothing and returns the clash when `name` is taken (see `ServiceNameClash`).
@@ -4472,7 +4478,7 @@ final class RouteManager: ObservableObject {
             log(.warning, "Custom service \(service.name) is still listed, nothing to restore")
             return false
         }
-        if let clash = customServiceNameClash(service.name, excluding: service.id) {
+        if let clash = customServiceNameClash(service.name, excluding: service.id, keepsName: true) {
             log(.warning, "Custom service \(service.name) not restored: \(clash.message)")
             return false
         }

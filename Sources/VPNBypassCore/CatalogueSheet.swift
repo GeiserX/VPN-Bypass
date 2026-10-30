@@ -173,7 +173,16 @@ struct CatalogueSheet: View {
             }
 
             ScrollView {
-                if groups.isEmpty {
+                if groups.isEmpty, let category,
+                   !CatalogueSelection.groups(rows, category: nil, search: search).isEmpty {
+                    // The matches are in other categories, hidden by the chip.
+                    Text(String(localized: "No service in \(category.displayName()) matches \u{201C}\(search)\u{201D}. Choose All to see the matches in other categories."))
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 30)
+                } else if groups.isEmpty {
                     Text(String(localized: "No service in the catalogue matches \u{201C}\(search)\u{201D}. Make a custom service with the + button."))
                         .font(.system(size: 12))
                         .foregroundColor(Theme.textSecondary)
@@ -238,12 +247,27 @@ struct CatalogueSheet: View {
 
     private func groupHeader(_ cat: ServiceCatalogue.Category, rows: [CatalogueSelection.Row]) -> some View {
         let state = CatalogueSelection.state(of: rows, picked: picked)
+        // Every row already on: the box shows them checked, as the rows do, but cannot be clicked.
+        let allOn = state == .unavailable && rows.allSatisfy(\.isOn)
         let symbol: String
+        let value: String
         switch state {
-        case .all: symbol = "checkmark.square.fill"
-        case .some: symbol = "minus.square.fill"
-        case .none, .unavailable: symbol = "square"
+        case .all:
+            symbol = "checkmark.square.fill"
+            value = String(localized: "All selected")
+        case .some:
+            symbol = "minus.square.fill"
+            value = String(localized: "Some selected")
+        case .none:
+            symbol = "square"
+            value = String(localized: "None selected")
+        case .unavailable:
+            symbol = allOn ? "checkmark.square.fill" : "square"
+            value = allOn ? String(localized: "Already on") : String(localized: "None selected")
         }
+        let label = state == .all
+            ? String(localized: "Deselect all \(cat.displayName())")
+            : String(localized: "Select all \(cat.displayName())")
         return HStack(spacing: 8) {
             Button {
                 picked = CatalogueSelection.toggleAll(rows, picked: picked)
@@ -254,7 +278,8 @@ struct CatalogueSheet: View {
             }
             .buttonStyle(.plain)
             .disabled(state == .unavailable)
-            .accessibilityLabel(String(localized: "Select all \(cat.displayName())"))
+            .accessibilityLabel(label)
+            .accessibilityValue(value)
             Text(cat.displayName().uppercased())
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .foregroundColor(Theme.textSecondary)

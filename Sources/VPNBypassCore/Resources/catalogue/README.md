@@ -11,9 +11,9 @@ We accept two kinds of change:
 - a new service in a clear category;
 - a fix for a domain that no longer works.
 
-Each user is expected to adjust a service as needed: add names to a built-in service from the DNS Lookups page or the Services page, or make a custom service. That is preferred over editing the catalogue.
+Each user is expected to adjust a service as needed: add names to a built-in service from the Lookups page (the Services page lists them and can remove them), or make a custom service. That is preferred over editing the catalogue.
 
-Ids never change. Saved configs, `vpnb` and the MCP server refer to them.
+Ids never change. Saved configs, `vpnb` and the MCP server refer to them. Prefer fixing a service to removing it; a removed service a user still has stays on their Services page, with the custom services.
 
 ## File format
 

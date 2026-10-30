@@ -143,17 +143,19 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         return url
     }
 
-    func testImportRefusesACustomServiceNamedLikeABuiltInOne() throws {
-        // The file has no built-in services at all; the merge adds Netflix back, and the clash
-        // is with that one.
-        let url = try exportFile(services: [custom("custom_n", "netflix")], domains: [])
-        let before = rm.config.services.map(\.id)
+    func testImportKeepsACustomServiceNamedLikeABuiltInOneAndHoldsTheBuiltInOff() throws {
+        // A backup made before an update brought in a built-in service of the custom one's
+        // name (the file has no built-in services at all; the merge adds Netflix back). It
+        // imports as config.json loads: the custom one keeps its name, the built-in one is off.
+        var builtIn = try XCTUnwrap(Config.defaultServices.first { $0.id == "netflix" })
+        builtIn.enabled = true
+        let url = try exportFile(services: [builtIn, custom("custom_n", "netflix")], domains: [])
 
-        XCTAssertFalse(rm.importConfig(from: url))
-        XCTAssertEqual(rm.config.services.map(\.id), before, "nothing was imported")
-        XCTAssertEqual(rm.config.domains.map(\.domain), ["example.com"])
-        XCTAssertEqual(rm.lastImportRefusal,
-                       "Nothing was imported. The custom service \u{201C}netflix\u{201D} has the same name as the service \u{201C}Netflix\u{201D}. Rename it in the file and import again.")
+        XCTAssertTrue(rm.importConfig(from: url))
+        XCTAssertNil(rm.lastImportRefusal)
+        XCTAssertEqual(try XCTUnwrap(rm.config.services.first { $0.id == "custom_n" }).name, "netflix")
+        XCTAssertFalse(try XCTUnwrap(rm.config.services.first { $0.id == "netflix" }).enabled,
+                       "the two never route under one name")
     }
 
     func testImportRefusesACustomServiceNamedLikeAnEntryOnItsBypassList() throws {
@@ -173,7 +175,7 @@ final class ServiceNameClashTests: RouteManagerTestCase {
     }
 
     func testImportOfDistinctNamesWorksAndClearsTheLastRefusal() throws {
-        let bad = try exportFile(services: [custom("custom_n", "Netflix")], domains: [])
+        let bad = try exportFile(services: [custom("custom_a", "Mine"), custom("custom_b", "mine")], domains: [])
         XCTAssertFalse(rm.importConfig(from: bad))
         XCTAssertNotNil(rm.lastImportRefusal)
 
@@ -487,8 +489,22 @@ final class ServiceNameClashTests: RouteManagerTestCase {
         XCTAssertEqual(try service("custom_n").name, "netflix", "the custom service keeps its name")
         XCTAssertTrue(try service("custom_n").enabled, "and stays on")
         XCTAssertEqual(rm.customServiceHolding(nameOf: try service("netflix"))?.id, "custom_n")
-        XCTAssertEqual(rm.customServiceNameClash("netflix", excluding: "custom_n"), .service(name: "Netflix"),
-                       "the custom service's row and editor show the line asking for another name")
+        XCTAssertNil(rm.customServiceNameClash("netflix", excluding: "custom_n"),
+                     "the custom service's row shows no clash line: it holds the built-in one off")
+        XCTAssertNil(rm.updateCustomService(id: "custom_n", name: "netflix", domains: ["custom_n.test", "more.test"], ipRanges: []),
+                     "an edit that keeps its name saves")
+        XCTAssertEqual(try service("custom_n").domains, ["custom_n.test", "more.test"])
+        XCTAssertEqual(rm.addCustomService(name: "Netflix", domains: ["x.test"], ipRanges: []), .service(name: "Netflix"),
+                       "a new custom service still may not take the name")
+        rm.config.services.append(custom("custom_o", "Other"))
+        XCTAssertEqual(rm.updateCustomService(id: "custom_o", name: "NETFLIX", domains: ["o.test"], ipRanges: []),
+                       .service(name: "Netflix"), "nor may another custom service be renamed onto it")
+        rm.config.services.removeAll { $0.id == "custom_o" }
+        var on = try service("netflix")
+        on.enabled = true
+        XCTAssertEqual(ServiceNameClash.find("netflix", excluding: "custom_n", keepsName: true,
+                                             services: [on, try service("custom_n")], domains: []),
+                       .service(name: "Netflix"), "a built-in service that is on is still a clash")
 
         rm.recentLogs = []
         rm.toggleService("netflix")

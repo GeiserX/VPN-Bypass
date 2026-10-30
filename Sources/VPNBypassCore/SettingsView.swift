@@ -606,7 +606,9 @@ struct DomainRow: View {
 /// How the Services page splits the list: an On section with the services that were on when
 /// the page opened, then the custom services that were not, each in the catalogue's order. A
 /// catalogue service that is off is not on the page: it waits in the catalogue sheet
-/// (`CatalogueSheet`), and switching one off on the page sends it back there. Kept pure so the
+/// (`CatalogueSheet`), and switching one off on the page sends it back there. A saved built-in
+/// service that is off and no longer in the catalogue has no sheet row to wait in, so it stays
+/// on the page with the custom services, where it can be turned back on. Kept pure so the
 /// split, its wording and its edge cases are unit-tested.
 ///
 /// The split follows the switches as they were when the page opened (`pinned`), not as they
@@ -646,7 +648,7 @@ struct ServiceSections {
         let shown = services.filter { Self.matches($0, search: search) }
         let isOn = { (service: ServiceEntry) in pinned[service.id] ?? service.enabled }
         on = shown.filter { isOn($0) }
-        custom = shown.filter { !isOn($0) && $0.isCustom }
+        custom = shown.filter { !isOn($0) && ($0.isCustom || !ServiceCatalogue.shippedIds.contains($0.id)) }
     }
 
     /// What Turn All On switches on: the page's own rows that are off, less those a custom
