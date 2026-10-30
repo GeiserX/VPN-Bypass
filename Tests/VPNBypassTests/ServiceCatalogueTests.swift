@@ -48,7 +48,26 @@ final class ServiceCatalogueTests: XCTestCase {
         "steam", "epicgames", "playstation", "xbox",
         "github", "gitlab", "stackoverflow", "tailscale",
         "openai", "anthropic", "perplexity",
+        "fr_gov",
+        "fr_societegenerale", "fr_bnpparibas", "fr_creditagricole", "fr_banquepopulaire", "fr_caisseepargne",
+        "fr_lcl", "fr_labanquepostale", "fr_boursobank", "fr_fortuneo", "fr_hellobank", "fr_monabanq",
+        "fr_cic", "fr_creditmutuel",
     ]
+
+    /// The French entries are wildcards only and each names its country, so search finds
+    /// them by "France"; none hides another (`*.gouv.fr` already holds impots.gouv.fr).
+    func testTheFrenchEntriesAreWildcardsOverTheirOwnSites() {
+        let french = ServiceCatalogue.shipped.filter { $0.region == "FR" }
+        XCTAssertEqual(french.count, 14)
+        for entry in french {
+            for domain in entry.service.domains {
+                XCTAssertTrue(WildcardDomain.isWildcard(domain), domain)
+                let suffix = WildcardDomain.suffix(of: domain)!
+                let others = entry.service.domains.filter { $0 != domain }.compactMap(WildcardDomain.suffix(of:))
+                XCTAssertFalse(others.contains { WildcardDomain.matches(suffix, suffix: $0) }, "\(domain) is covered by another entry")
+            }
+        }
+    }
 
     func testTheBuiltInIdsAndTheirOrderAreFrozen() {
         XCTAssertEqual(Config.defaultServices.map(\.id), Self.frozenIds)
@@ -70,6 +89,8 @@ final class ServiceCatalogueTests: XCTestCase {
         let fr = try XCTUnwrap(Bundle(url: root.appendingPathComponent("fr.lproj")))
         XCTAssertEqual(ServiceCatalogue.Category.messaging.displayName(in: es), "Mensajería")
         XCTAssertEqual(ServiceCatalogue.Category.cloud.displayName(in: fr), "Stockage en ligne")
+        XCTAssertEqual(ServiceCatalogue.Category.banks.displayName(in: es), "Bancos")
+        XCTAssertEqual(ServiceCatalogue.Category.government.displayName(in: fr), "Administration")
         XCTAssertEqual(ServiceCatalogue.Category.cloud.displayName(in: .main), "Cloud storage")
     }
 

@@ -759,3 +759,5 @@
 "Bypass 1 service" = "Hacer bypass de 1 servicio";
 "Bypass %lld services" = "Hacer bypass de %lld servicios";
 "Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it." = "%@ añadido a %@. El servicio está desactivado; añádelo desde Explorar el catálogo en la página Servicios para que haga bypass.";
+"catalogue.category.government" = "Administración pública";
+"catalogue.category.banks" = "Bancos";

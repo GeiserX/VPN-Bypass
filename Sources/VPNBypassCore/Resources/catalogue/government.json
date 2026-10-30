@@ -1,0 +1,19 @@
+{
+  "category": "government",
+  "services": [
+    {
+      "id": "fr_gov",
+      "name": "French government",
+      "region": "FR",
+      "domains": [
+        "*.gouv.fr",
+        "*.service-public.fr",
+        "*.ameli.fr",
+        "*.caf.fr",
+        "*.francetravail.fr",
+        "*.pole-emploi.fr",
+        "*.lassuranceretraite.fr"
+      ]
+    }
+  ]
+}

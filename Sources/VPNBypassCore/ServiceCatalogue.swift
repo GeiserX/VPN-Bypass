@@ -15,7 +15,7 @@ enum ServiceCatalogue {
     /// The catalogue's groups, in the order the sheet shows them and the Services page lists
     /// their services. A file is named after its category: `video.json` holds `video`.
     enum Category: String, CaseIterable, Codable {
-        case messaging, video, music, social, work, cloud, gaming, developer, ai
+        case messaging, video, music, social, work, cloud, gaming, developer, ai, government, banks
 
         func displayName(in bundle: Bundle = .main) -> String {
             switch self {
@@ -28,6 +28,8 @@ enum ServiceCatalogue {
             case .gaming: return String(localized: "catalogue.category.gaming", defaultValue: "Gaming", bundle: bundle)
             case .developer: return String(localized: "catalogue.category.developer", defaultValue: "Developer", bundle: bundle)
             case .ai: return String(localized: "catalogue.category.ai", defaultValue: "AI", bundle: bundle)
+            case .government: return String(localized: "catalogue.category.government", defaultValue: "Government", bundle: bundle)
+            case .banks: return String(localized: "catalogue.category.banks", defaultValue: "Banks", bundle: bundle)
             }
         }
     }
