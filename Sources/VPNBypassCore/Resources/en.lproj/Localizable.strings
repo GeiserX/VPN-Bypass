@@ -276,6 +276,14 @@
 "NOT ENFORCING" = "NOT ENFORCING";
 "%@ connected" = "%@ connected";
 "Nothing is routed while the privileged helper is not running." = "Nothing is routed while the privileged helper is not running.";
+"NO EFFECT" = "NO EFFECT";
+"No effect" = "No effect";
+"%@'s kill switch sends all traffic through the VPN. Sites set to skip it still go through it." = "%@'s kill switch sends all traffic through the VPN. Sites set to skip it still go through it.";
+"%@ makes its own routes win over this app's. Sites set to skip it still go through it." = "%@ makes its own routes win over this app's. Sites set to skip it still go through it.";
+"Turn off its kill switch, or use its own split tunnelling." = "Turn off its kill switch, or use its own split tunnelling.";
+"Turn off that setting in the VPN app, or use its own split tunnelling." = "Turn off that setting in the VPN app, or use its own split tunnelling.";
+"Local-network addresses still skip it." = "Local-network addresses still skip it.";
+"VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it" = "VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it";
 "The scheduled re-apply still runs in %@." = "The scheduled re-apply still runs in %@.";
 "The scheduled re-apply runs now." = "The scheduled re-apply runs now.";
 "HELD BACK" = "HELD BACK";

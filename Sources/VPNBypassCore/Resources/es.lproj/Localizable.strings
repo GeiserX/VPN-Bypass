@@ -276,6 +276,14 @@
 "NOT ENFORCING" = "SIN APLICAR";
 "%@ connected" = "%@ conectada";
 "Nothing is routed while the privileged helper is not running." = "No se enruta nada mientras el asistente privilegiado no esté en marcha.";
+"NO EFFECT" = "SIN EFECTO";
+"No effect" = "Sin efecto";
+"%@'s kill switch sends all traffic through the VPN. Sites set to skip it still go through it." = "El kill switch de %@ envía todo el tráfico por la VPN. Los sitios que deberían evitarla siguen pasando por ella.";
+"%@ makes its own routes win over this app's. Sites set to skip it still go through it." = "%@ hace que sus rutas manden sobre las de esta app. Los sitios que deberían evitarla siguen pasando por ella.";
+"Turn off its kill switch, or use its own split tunnelling." = "Desactiva su kill switch o usa su propio túnel dividido.";
+"Turn off that setting in the VPN app, or use its own split tunnelling." = "Desactiva ese ajuste en la app de la VPN o usa su propio túnel dividido.";
+"Local-network addresses still skip it." = "Las direcciones de la red local sí la siguen evitando.";
+"VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it" = "VPN Bypass: el kill switch de la VPN envía todo el tráfico por ella, así que nada la evita";
 "The scheduled re-apply still runs in %@." = "La reaplicación programada se ejecuta igualmente en %@.";
 "The scheduled re-apply runs now." = "La reaplicación programada se ejecuta ahora.";
 "HELD BACK" = "EN PAUSA";

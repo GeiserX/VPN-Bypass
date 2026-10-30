@@ -24,7 +24,9 @@ struct MenuBarLabel: View {
     private var currentIcon: NSImage? {
         if helperManager.helperState.isFailed {
             return Self.iconError
-        } else if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty {
+        } else if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty
+                    && routeManager.vpnKillSwitch == nil {
+            // No arrow under a kill switch: the routes are in, but none of them takes effect.
             return Self.iconActive
         }
         return Self.iconDefault
@@ -43,6 +45,9 @@ struct MenuBarLabel: View {
         }
         guard routeManager.isVPNConnected else {
             return String(localized: "VPN Bypass: no VPN detected, nothing is being routed")
+        }
+        if routeManager.vpnKillSwitch != nil {
+            return String(localized: "VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it")
         }
         let count = routeManager.routedAddressCount
         guard !routeManager.activeRoutes.isEmpty else {
@@ -1471,6 +1476,9 @@ struct DropdownStatus: Equatable {
         /// VPN Only's catch-alls are installed. They are not counted, but they are routed, so
         /// with them in place the app is routing even when `installedRoutes` is 0.
         var everythingElseDirect: Bool = false
+        /// The connected VPN sends every connection into its tunnel above the routing table
+        /// (`VPNKillSwitchReader`), so no route set here takes effect.
+        var killSwitch: VPNKillSwitch? = nil
     }
 
     let pill: String
@@ -1510,6 +1518,15 @@ struct DropdownStatus: Equatable {
                                   headline: String(localized: "\(name) connected"),
                                   sentence: String(localized: "Nothing is routed while the privileged helper is not running."),
                                   note: nil, facts: [])
+        }
+
+        // Before WAITING and ON: the routes stay installed, since the kill switch can be turned
+        // off at any time, but while it is on none of them changes where traffic goes.
+        if let killSwitch = input.killSwitch {
+            return DropdownStatus(pill: String(localized: "NO EFFECT"), tone: .warn,
+                                  headline: String(localized: "\(name) connected"),
+                                  sentence: killSwitchSentence(killSwitch, fallbackName: name),
+                                  note: killSwitchNote(killSwitch), facts: [])
         }
 
         // Once something applied or removed routes after the reconnect (Refresh Routes, a mode
@@ -1573,6 +1590,23 @@ struct DropdownStatus: Equatable {
     }
 
     // MARK: Pieces
+
+    /// What a kill switch does to the app's routes, in one sentence.
+    static func killSwitchSentence(_ killSwitch: VPNKillSwitch, fallbackName: String) -> String {
+        let name = killSwitch.name ?? fallbackName
+        return killSwitch.includeAllNetworks
+            ? String(localized: "\(name)'s kill switch sends all traffic through the VPN. Sites set to skip it still go through it.")
+            : String(localized: "\(name) makes its own routes win over this app's. Sites set to skip it still go through it.")
+    }
+
+    /// How to get out of it, and what still skips the VPN.
+    static func killSwitchNote(_ killSwitch: VPNKillSwitch) -> String {
+        let fix = killSwitch.includeAllNetworks
+            ? String(localized: "Turn off its kill switch, or use its own split tunnelling.")
+            : String(localized: "Turn off that setting in the VPN app, or use its own split tunnelling.")
+        guard killSwitch.includeAllNetworks && killSwitch.excludeLocalNetworks else { return fix }
+        return fix + " " + String(localized: "Local-network addresses still skip it.")
+    }
 
     /// What a mode does, in one line. The Mode control shows it as its tooltip.
     static func modeDescription(_ mode: DropdownCopy.Mode) -> String {
