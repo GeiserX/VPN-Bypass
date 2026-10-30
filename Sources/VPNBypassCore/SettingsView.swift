@@ -782,163 +782,133 @@ struct ServicesTab: View {
                 }
             }
 
-            if isVPNOnly {
-                // VPN Only mode banner
-                HStack(spacing: 10) {
-                    Image(systemName: "info.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(Theme.warning)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Services disabled in VPN Only mode")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(Theme.warning)
-                        Text("Switch to Bypass mode above to manage services.")
-                            .font(.system(size: 11))
+            // Search and bulk actions. No VPN Only banner: this page is not offered in VPN
+            // Only (`SettingsView.tabs(for:)`), so it could never show (B3).
+            HStack(spacing: 10) {
+                // Search box
+                HStack(spacing: 8) {
+                    // The magnifier carries ⌘F, so the shortcut has a control to belong to.
+                    Button {
+                        isSearchFocused = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 12))
                             .foregroundColor(Theme.textSecondary)
                     }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut("f", modifiers: .command)
+                    .help(ControlNames.help(String(localized: "Search services"), shortcut: "⌘F"))
+                    .accessibilityLabel(String(localized: "Search services"))
 
-                    Spacer()
-                }
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Theme.warning.opacity(0.08))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Theme.warning.opacity(0.2), lineWidth: 1)
-                        )
-                )
+                    TextField("Search services...", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .focused($isSearchFocused)
+                        .disabled(routeManager.isApplyingRoutes)
 
-                Spacer()
-            } else {
-                // Search and bulk actions
-                HStack(spacing: 10) {
-                    // Search box
-                    HStack(spacing: 8) {
-                        // The magnifier carries ⌘F, so the shortcut has a control to belong to.
+                    if !searchText.isEmpty {
                         Button {
-                            isSearchFocused = true
+                            searchText = ""
                         } label: {
-                            Image(systemName: "magnifyingglass")
+                            Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 12))
                                 .foregroundColor(Theme.textSecondary)
                         }
                         .buttonStyle(.plain)
-                        .keyboardShortcut("f", modifiers: .command)
-                        .help(ControlNames.help(String(localized: "Search services"), shortcut: "⌘F"))
-                        .accessibilityLabel(String(localized: "Search services"))
+                        .accessibilityLabel(String(localized: "Clear search"))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Theme.bgInput)
+                .cornerRadius(8)
 
-                        TextField("Search services...", text: $searchText)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12))
-                            .focused($isSearchFocused)
-                            .disabled(routeManager.isApplyingRoutes)
+                // Loading indicator
+                if routeManager.isApplyingRoutes {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                            .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
+                        Text("Applying...")
+                            .font(.system(size: 10))
+                            .foregroundColor(Theme.textSecondary)
+                    }
+                    .frame(width: 80)
+                } else {
+                    BulkSwitchMenu(
+                        turnAllOnTitle: ServiceBulkSwitch.turnAllOnTitle(offCount: offServices.count),
+                        canTurnOn: !offServices.isEmpty,
+                        canTurnOff: enabledCount > 0,
+                        onTurnAllOn: turnAllOn,
+                        onTurnAllOff: { switchAll(false) }
+                    )
+                }
+            }
 
-                        if !searchText.isEmpty {
-                            Button {
-                                searchText = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 12))
+            if let change = settingsUndo.last, change.page == .services {
+                UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
+            }
+
+            // Services list: the services that were on when the page opened, then the rest
+            ScrollView {
+                if !sections.nonEmpty.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(sections.nonEmpty.enumerated()), id: \.element.kind) { index, section in
+                            if index > 0 {
+                                Rectangle()
+                                    .fill(Theme.divider.opacity(0.6))
+                                    .frame(height: 1)
+                                    .padding(.horizontal, 12)
+                                    .padding(.top, 4)
+                            }
+
+                            HStack(spacing: 8) {
+                                Text(ServiceSections.title(section.kind))
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
                                     .foregroundColor(Theme.textSecondary)
+                                Text(verbatim: String(section.services.count))
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(Theme.textTertiary)
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(String(localized: "Clear search"))
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Theme.bgInput)
-                    .cornerRadius(8)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 8)
 
-                    // Loading indicator
-                    if routeManager.isApplyingRoutes {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .scaleEffect(0.6)
-                                .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
-                            Text("Applying...")
-                                .font(.system(size: 10))
-                                .foregroundColor(Theme.textSecondary)
-                        }
-                        .frame(width: 80)
-                    } else {
-                        BulkSwitchMenu(
-                            turnAllOnTitle: ServiceBulkSwitch.turnAllOnTitle(offCount: offServices.count),
-                            canTurnOn: !offServices.isEmpty,
-                            canTurnOff: enabledCount > 0,
-                            onTurnAllOn: turnAllOn,
-                            onTurnAllOff: { switchAll(false) }
-                        )
-                    }
-                }
-
-                if let change = settingsUndo.last, change.page == .services {
-                    UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
-                }
-
-                // Services list: the services that were on when the page opened, then the rest
-                ScrollView {
-                    if !sections.nonEmpty.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(sections.nonEmpty.enumerated()), id: \.element.kind) { index, section in
-                                if index > 0 {
-                                    Rectangle()
-                                        .fill(Theme.divider.opacity(0.6))
-                                        .frame(height: 1)
-                                        .padding(.horizontal, 12)
-                                        .padding(.top, 4)
-                                }
-
-                                HStack(spacing: 8) {
-                                    Text(ServiceSections.title(section.kind))
-                                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                                        .foregroundColor(Theme.textSecondary)
-                                    Text(verbatim: String(section.services.count))
-                                        .font(.system(size: 10, weight: .medium))
-                                        .foregroundColor(Theme.textTertiary)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.top, 8)
-
-                                LazyVStack(spacing: 2) {
-                                    ForEach(section.services) { service in
-                                        ServiceRow(service: service, onEdit: service.isCustom ? {
-                                            editingService = service
-                                            showingCustomServiceEditor = true
-                                        } : nil, onDelete: { removeCustomService(service) })
-                                    }
+                            LazyVStack(spacing: 2) {
+                                ForEach(section.services) { service in
+                                    ServiceRow(service: service, onEdit: service.isCustom ? {
+                                        editingService = service
+                                        showingCustomServiceEditor = true
+                                    } : nil, onDelete: { removeCustomService(service) })
                                 }
                             }
                         }
-                        .padding(.bottom, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Theme.bgElevated)
-                        )
-                    } else {
-                        emptyPage
                     }
+                    .padding(.bottom, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Theme.bgElevated)
+                    )
+                } else {
+                    emptyPage
                 }
-                .onAppear {
-                    pinned = ServiceSections.pin(routeManager.config.services)
+            }
+            .onAppear {
+                pinned = ServiceSections.pin(routeManager.config.services)
+            }
+            .onChange(of: routeManager.config.services.map(\.id)) { _ in
+                if let current = pinned {
+                    pinned = ServiceSections.pinNew(routeManager.config.services, into: current)
                 }
-                .onChange(of: routeManager.config.services.map(\.id)) { _ in
-                    if let current = pinned {
-                        pinned = ServiceSections.pinNew(routeManager.config.services, into: current)
-                    }
+            }
+            // A catalogue service switched on elsewhere while the page is open shows at once.
+            .onChange(of: routeManager.config.services.filter(\.enabled).map(\.id)) { _ in
+                if let current = pinned {
+                    pinned = ServiceSections.pinSwitchedOn(routeManager.config.services, into: current)
                 }
-                // A catalogue service switched on elsewhere while the page is open shows at once.
-                .onChange(of: routeManager.config.services.filter(\.enabled).map(\.id)) { _ in
-                    if let current = pinned {
-                        pinned = ServiceSections.pinSwitchedOn(routeManager.config.services, into: current)
-                    }
-                }
-                // An undone Turn All On/Off moves many rows at once, like the switch itself.
-                .onChange(of: settingsUndo.undoneCount) { _ in
-                    pinned = ServiceSections.pin(routeManager.config.services)
-                }
+            }
+            // An undone Turn All On/Off moves many rows at once, like the switch itself.
+            .onChange(of: settingsUndo.undoneCount) { _ in
+                pinned = ServiceSections.pin(routeManager.config.services)
             }
         }
         .sheet(isPresented: $showingCustomServiceEditor) {
@@ -2139,12 +2109,17 @@ struct SettingsToggleRow: View {
     let title: LocalizedStringKey
     let subtitle: LocalizedStringKey
     @Binding var isOn: Bool
+
+    /// Green only while the setting is on, so the icon agrees with its switch (B2).
+    static func iconColor(isOn: Bool) -> Color {
+        isOn ? Theme.success : Theme.textDisabled
+    }
     
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 14))
-                .foregroundColor(Theme.success)
+                .foregroundColor(Self.iconColor(isOn: isOn))
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 2) {

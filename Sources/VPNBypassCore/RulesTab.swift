@@ -126,17 +126,20 @@ extension RouteManager {
     /// page: the Bypass list, the VPN Only list, or in Custom mode a rule to the Direct route.
     /// Custom mode routes from `config.rules`, not `config.domains` (see `usesCustomEngine`),
     /// so a Bypass-list add would silently do nothing there; the rule is the same mapping
-    /// `Config.derive()` uses for a bypass-mode domain. nil is Custom mode's add when it saved,
-    /// which says nothing back, or found no Direct route, which it logs.
+    /// `Config.derive()` uses for a bypass-mode domain. A Custom mode add says where the rule
+    /// went: it goes last, where an earlier rule may match first (A5). nil is Custom mode's
+    /// add when it found no Direct route, which it logs.
     func addForCurrentMode(_ input: String) -> Result<AddedDomain, AddDomainError>? {
         if config.routingMode == .vpnOnly { return addInverseDomain(input) }
         guard Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) else {
             return addDomain(input)
         }
         switch addDirectRule(input) {
-        case .success?:
+        case .success(let rule)?:
             Task { await reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
-            return nil
+            return .success(AddedDomain(rule: rule, typed: input,
+                                        place: RulePlace(of: rule, in: config.rules, routes: config.routes,
+                                                         services: config.services)))
         case .failure(let error)?:
             return .failure(error)
         case nil:
@@ -331,10 +334,14 @@ extension RouteManager {
     /// http-intake.logs.datadoghq.com) come first, then the rest, each alphabetical. A service
     /// that already holds `name` is left out. A name added to a built-in service is kept in
     /// `builtInServiceExtras`, so the launch that resets its shipped domains keeps it.
+    ///
+    /// A built-in service the catalogue no longer ships is left out: a saved config can still
+    /// hold one, but `addDomainToBuiltInService` refuses it, so picking it added nothing.
     func lookupServices(for name: String) -> [ServiceEntry] {
         let parent = LookupAddLevels.registrableDomain(name)
+        let shipped = Set(Config.defaultServices.map(\.id))
         let services = config.services
-            .filter { !$0.domains.contains(name) }
+            .filter { ($0.isCustom || shipped.contains($0.id)) && !$0.domains.contains(name) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         guard let parent else { return services }
         let related = services.filter { $0.domains.contains { LookupAddLevels.registrableDomain($0) == parent } }
@@ -961,7 +968,11 @@ struct RouteChipMenu: View {
         } label: {
             RouteChip(route: selectedRoute, vpnName: routeManager.vpnType?.knownName)
         }
-        .menuStyle(.borderlessButton)
+        // The chip draws its own colour and chevron. A borderless-button menu redraws the label
+        // as plain menu text, dropping the colour, and adds a second chevron (B1).
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .fixedSize()
     }
 

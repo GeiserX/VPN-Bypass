@@ -49,7 +49,7 @@ enum StatusPage {
         let status = DropdownStatus.make(input, now: now)
         let title: String
         var sentence = status.sentence
-        if !input.isVPNConnected {
+        if input.isStarting || !input.isVPNConnected {
             title = status.headline
         } else if !input.helperReady {
             title = String(localized: "Not working", bundle: bundle)
@@ -63,7 +63,9 @@ enum StatusPage {
         } else if input.installedRoutes == 0 && !input.everythingElseDirect {
             title = String(localized: "Nothing routed", bundle: bundle)
         } else {
-            title = String(localized: "Working", bundle: bundle)
+            title = status.isPartial
+                ? String(localized: "Partly working", bundle: bundle)
+                : String(localized: "Working", bundle: bundle)
             if let change = DropdownCopy.shownRouteChange(input.lastRouteChange,
                                                           currentRouteCount: input.installedRoutes),
                change.kind == .applied {
@@ -130,14 +132,11 @@ enum StatusPage {
         }
     }
 
-    /// The connection traffic takes when it skips the VPN.
-    static func normalConnectionLine(ssid: String?, gateway: String?, bundle: Bundle = .main) -> Line {
-        switch (ssid, gateway) {
-        case let (ssid?, gateway?): return Line(text: String(localized: "Wi-Fi “\(ssid)”, gateway \(gateway)", bundle: bundle))
-        case let (nil, gateway?): return Line(text: String(localized: "Gateway \(gateway)", bundle: bundle))
-        case let (ssid?, nil): return Line(text: String(localized: "Wi-Fi “\(ssid)”, no gateway found", bundle: bundle), tone: .warn)
-        case (nil, nil): return Line(text: String(localized: "No gateway found", bundle: bundle), tone: .warn)
-        }
+    /// The connection traffic takes when it skips the VPN. No Wi-Fi name: the app read it from
+    /// `airport -I`, which current macOS no longer has, so it never showed.
+    static func normalConnectionLine(gateway: String?, bundle: Bundle = .main) -> Line {
+        guard let gateway else { return Line(text: String(localized: "No gateway found", bundle: bundle), tone: .warn) }
+        return Line(text: String(localized: "Gateway \(gateway)", bundle: bundle))
     }
 
     /// Which interface carries the default route, and what it is to this app. Nil
@@ -348,7 +347,14 @@ extension DropdownStatus.Input {
                                                      services: config.services,
                                                      installedRoutes: routeManager.routedAddressCount),
             everythingElseDirect: routeManager.everythingElseDirect,
-            killSwitch: routeManager.vpnKillSwitch
+            killSwitch: routeManager.vpnKillSwitch,
+            isStarting: routeManager.isLoading && routeManager.lastUpdate == nil,
+            entriesWithoutAddresses: RoutedBySource.make(
+                mode: mode, config: config, routes: routeManager.installedRoutes,
+                busy: RoutedBySource.mayStillAddRoutes(running: routeManager.isLoading || routeManager.isApplyingRoutes,
+                                                       pending: routeManager.pendingReconnectApply))?.problemCount ?? 0,
+            lastCheckCount: routeManager.lastRouteCheck?.results.count ?? 0,
+            lastCheckFailures: routeManager.lastRouteCheck?.failures.count ?? 0
         )
     }
 }
@@ -469,8 +475,7 @@ struct StatusTab: View {
                                                    interface: routeManager.vpnInterface))
             StatusDivider()
             StatusLineRow(label: String(localized: "Normal connection"),
-                          line: StatusPage.normalConnectionLine(ssid: routeManager.currentNetworkSSID,
-                                                                gateway: routeManager.localGateway))
+                          line: StatusPage.normalConnectionLine(gateway: routeManager.localGateway))
             StatusDivider()
             StatusLineRow(label: String(localized: "Default route"), line: StatusPage.defaultRouteLine(snapshot))
         }

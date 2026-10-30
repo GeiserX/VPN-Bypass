@@ -187,12 +187,15 @@ struct BrandedAppName: View {
             //
             // The gap is required: set solid, "VPN"+"Bypass" reads as one word, "VPNBypass".
             // The banner has always had this gap; the SwiftUI lockup was missing it.
-            Text("VPN")
+            //
+            // Verbatim: the product name is never translated. "Bypass" is also the mode's name,
+            // which French translates, so a looked-up Text read "VPN Contournement".
+            Text(verbatim: "VPN")
                 .font(.system(size: fontSize, weight: .heavy, design: .rounded))
                 .foregroundColor(Theme.textPrimary)
                 .padding(.trailing, fontSize * 0.16)
 
-            Text("Bypass")
+            Text(verbatim: "Bypass")
                 .font(.system(size: fontSize, weight: .light, design: .rounded))
                 .foregroundColor(Theme.Brand.sky)
         }
@@ -201,10 +204,11 @@ struct BrandedAppName: View {
 
 // MARK: - Quick add
 
-/// The dropdown's quick-add field, with why the last add saved nothing under it.
+/// The dropdown's quick-add field, with why the last add saved nothing under it, or where a
+/// Custom mode rule went.
 struct QuickAddField: View {
     @Binding var text: String
-    let error: AddDomainFeedback?
+    let feedback: AddDomainFeedback?
     let onAdd: () -> Void
     let onCancel: () -> Void
 
@@ -249,8 +253,8 @@ struct QuickAddField: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(String(localized: "Cancel"))
             }
-            if let error {
-                AddDomainFeedbackLine(feedback: error)
+            if let feedback {
+                AddDomainFeedbackLine(feedback: feedback)
             }
         }
     }
@@ -266,7 +270,7 @@ struct MenuContent: View {
     @State private var newDomain = ""
     @State private var isAddingDomain = false
     /// Why the last quick-add saved nothing, shown under the field, which stays open.
-    @State private var quickAddError: AddDomainFeedback?
+    @State private var quickAddFeedback: AddDomainFeedback?
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
 
@@ -311,12 +315,25 @@ struct MenuContent: View {
                     .padding(.vertical, 8)
 
                 // Main content
-                if routeManager.isLoading && routeManager.lastUpdate == nil {
-                    loadingContent
-                } else if routeManager.isVPNConnected {
-                    connectedContent
-                } else {
-                    disconnectedContent
+                Group {
+                    if routeManager.isLoading && routeManager.lastUpdate == nil {
+                        loadingContent
+                    } else if routeManager.isVPNConnected {
+                        connectedContent
+                    } else {
+                        disconnectedContent
+                    }
+                }
+                // Here, not on one state's content: Remove All Routes… is offered connected
+                // and disconnected alike.
+                .alert(removeAllCopy.title, isPresented: $confirmingRemoveAll) {
+                    Button(String(localized: "Remove Routes"), role: .destructive) {
+                        Task { await routeManager.removeAllRoutes() }
+                    }
+                    Button(String(localized: "Cancel"), role: .cancel) {}
+                        .keyboardShortcut(.defaultAction)
+                } message: {
+                    Text(removeAllCopy.message)
                 }
             }
 
@@ -409,9 +426,9 @@ struct MenuContent: View {
         VStack(spacing: 12) {
             // Quick add domain
             if isAddingDomain {
-                QuickAddField(text: $newDomain, error: quickAddError, onAdd: addDomainAndClose, onCancel: closeQuickAdd)
+                QuickAddField(text: $newDomain, feedback: quickAddFeedback, onAdd: addDomainAndClose, onCancel: closeQuickAdd)
                     .onChange(of: newDomain) { text in
-                        if text != quickAddError?.fieldText { quickAddError = nil }
+                        if text != quickAddFeedback?.fieldText { quickAddFeedback = nil }
                     }
             } else {
                 Button {
@@ -422,7 +439,7 @@ struct MenuContent: View {
                     HStack {
                         Image(systemName: "plus.circle")
                             .font(.system(size: 12))
-                        Text(routeManager.config.routingMode == .vpnOnly ? String(localized: "Add Domain to VPN") : String(localized: "Add Domain to Bypass"))
+                        Text(DropdownCopy.quickAddLabel(statusInput.mode))
                             .font(.system(size: 12, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
@@ -454,15 +471,6 @@ struct MenuContent: View {
             }
             
             actionButtons
-        }
-        .alert(removeAllCopy.title, isPresented: $confirmingRemoveAll) {
-            Button(String(localized: "Remove Routes"), role: .destructive) {
-                Task { await routeManager.removeAllRoutes() }
-            }
-            Button(String(localized: "Cancel"), role: .cancel) {}
-                .keyboardShortcut(.defaultAction)
-        } message: {
-            Text(removeAllCopy.message)
         }
     }
 
@@ -529,40 +537,49 @@ struct MenuContent: View {
                 .help(String(localized: "Verify Routes"))
                 .accessibilityLabel(String(localized: "Verify Routes"))
 
-                // The shortcuts here only answer while the menu is open; the buttons that do
-                // the same thing (Refresh Routes, the gear, the power button) carry them too.
-                Menu {
-                    Button(DropdownShortcut.refreshRoutes.title) { refresh() }
-                        .keyboardShortcut(.refreshRoutes)
-                        .disabled(isBusy)
-                    Button(String(localized: "Verify Routes")) { verify() }
-                        .disabled(routeManager.isCheckingRoutes || routeManager.activeRoutes.isEmpty)
-                    Button(String(localized: "Re-resolve DNS Now")) { routeManager.forceDNSRefresh() }
-                        .disabled(isBusy)
-                    Button(String(localized: "Open Logs")) { openSettings(page: .logs) }
-                    Divider()
-                    Button(DropdownShortcut.settings.title) { openSettings() }
-                        .keyboardShortcut(.settings)
-                    Button(DropdownShortcut.quit.title) { quit() }
-                        .keyboardShortcut(.quit)
-                    Divider()
-                    Button(String(localized: "Remove All Routes…")) { confirmingRemoveAll = true }
-                        .disabled(routeManager.activeRoutes.isEmpty)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .frame(width: 34, height: 30)
-                .background(Color.secondary.opacity(0.12))
-                .cornerRadius(6)
-                .help(String(localized: "More actions"))
-                .accessibilityLabel(String(localized: "More actions"))
+                moreActionsMenu
             }
 
             routeChangeLine
         }
+    }
+
+    /// The "…" menu: every action, and the one that removes every route. The shortcuts here
+    /// only answer while the menu is open; the buttons that do the same thing (Refresh Routes,
+    /// the gear, the power button) carry them too. With no VPN connected it keeps what still
+    /// makes sense, Remove All Routes… among it: routes kept for a reconnect, or left by a
+    /// removal that failed, must stay removable (A7).
+    private var moreActionsMenu: some View {
+        Menu {
+            if routeManager.isVPNConnected {
+                Button(DropdownShortcut.refreshRoutes.title) { refresh() }
+                    .keyboardShortcut(.refreshRoutes)
+                    .disabled(isBusy)
+                Button(String(localized: "Verify Routes")) { verify() }
+                    .disabled(routeManager.isCheckingRoutes || routeManager.activeRoutes.isEmpty)
+                Button(String(localized: "Re-resolve DNS Now")) { routeManager.forceDNSRefresh() }
+                    .disabled(isBusy)
+            }
+            Button(String(localized: "Open Logs")) { openSettings(page: .logs) }
+            Divider()
+            Button(DropdownShortcut.settings.title) { openSettings() }
+                .keyboardShortcut(.settings)
+            Button(DropdownShortcut.quit.title) { quit() }
+                .keyboardShortcut(.quit)
+            Divider()
+            Button(String(localized: "Remove All Routes…")) { confirmingRemoveAll = true }
+                .disabled(routeManager.activeRoutes.isEmpty)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 34, height: 30)
+        .background(Color.secondary.opacity(0.12))
+        .cornerRadius(6)
+        .help(String(localized: "More actions"))
+        .accessibilityLabel(String(localized: "More actions"))
     }
 
     /// The result of the last apply (or Remove All), under the buttons. Ticks once a second so
@@ -570,7 +587,8 @@ struct MenuContent: View {
     @ViewBuilder
     private var routeChangeLine: some View {
         if let outcome = DropdownCopy.shownRouteChange(routeManager.lastRouteChange,
-                                                       currentRouteCount: routeManager.routedAddressCount) {
+                                                       currentRouteCount: routeManager.routedAddressCount,
+                                                       helperReady: helperManager.helperState.isReady) {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let line = DropdownCopy.routeChangeLine(outcome, now: context.date)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -643,7 +661,8 @@ struct MenuContent: View {
     // MARK: - Disconnected Content
     
     private var disconnectedContent: some View {
-        VStack(spacing: 16) {
+        let mode = statusInput.mode
+        return VStack(spacing: 16) {
             Image(systemName: "wifi.slash")
                 .font(.system(size: 36))
                 .foregroundStyle(.secondary)
@@ -652,37 +671,30 @@ struct MenuContent: View {
                 Text("No VPN Connection")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                 
-                Text("Connect to a VPN to start bypassing\ntraffic for configured services.")
+                Text(DropdownCopy.disconnectedSentence(mode))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
             
-            // Show enabled counts (mode-aware)
-            if routeManager.config.routingMode == .vpnOnly {
-                let enabledDomains = routeManager.config.inverseDomains.filter { $0.enabled }
-                HStack(spacing: 16) {
-                    StatBadge(value: "\(enabledDomains.count)", label: "VPN Entries")
-                }
-            } else {
-                let enabledServices = routeManager.config.services.filter { $0.enabled }
-                let enabledDomains = routeManager.config.domains.filter { $0.enabled }
-                HStack(spacing: 16) {
-                    StatBadge(value: "\(enabledServices.count)", label: "Services")
-                    StatBadge(value: "\(enabledDomains.count)", label: "Domains")
+            // What the mode routes once a VPN connects: Custom counts its rules.
+            HStack(spacing: 16) {
+                ForEach(DropdownCopy.disconnectedBadges(mode, config: routeManager.config), id: \.label) { badge in
+                    StatBadge(value: "\(badge.value)", label: badge.label)
                 }
             }
-            
-            // Network info
-            if let ssid = routeManager.currentNetworkSSID {
-                HStack(spacing: 6) {
-                    Image(systemName: "wifi")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                    Text(ssid)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
+
+            // Routes still installed: kept for the reconnect in Bypass, or left by a removal
+            // that failed. They stay listed, and removable from the "…" menu (A7).
+            if let routed = RoutedBySource.make(mode: mode, config: routeManager.config,
+                                                routes: routeManager.installedRoutes,
+                                                busy: false, routedOnly: true) {
+                RoutedBySourceCard(summary: routed)
+            }
+
+            HStack {
+                Spacer()
+                moreActionsMenu
             }
         }
         .padding(.vertical, 8)
@@ -781,31 +793,36 @@ struct MenuContent: View {
         let result = routeManager.addForCurrentMode(newDomain)
         let next = Self.quickAdd(after: result, typed: newDomain)
         newDomain = next.text
-        quickAddError = next.error
+        quickAddFeedback = next.feedback
         isAddingDomain = next.isOpen
     }
 
     /// The quick-add after an add. A refused one stays open with the text and says why,
     /// as the Domains tab does, because closing would look like it worked. A saved one
-    /// closes. nil is Custom mode's rule add when it saved, which says nothing back, or found
+    /// closes, except Custom mode's rule, which stays open to say where the rule went: it goes
+    /// last, and an earlier rule may match first (A5). nil is Custom mode's add when it found
     /// no Direct route, which it logs.
     static func quickAdd(after result: Result<AddedDomain, AddDomainError>?, typed: String) -> QuickAddState {
         guard let result else { return .closed }
         let shown = AddDomainFeedback(result, typed: typed)
-        return shown.isError ? QuickAddState(text: shown.fieldText, isOpen: true, error: shown) : .closed
+        if shown.isError { return QuickAddState(text: shown.fieldText, isOpen: true, feedback: shown) }
+        if case .success(let added) = result, added.rulePlace != nil {
+            return QuickAddState(text: "", isOpen: true, feedback: shown)
+        }
+        return .closed
     }
 
     struct QuickAddState: Equatable {
         let text: String
         let isOpen: Bool
-        let error: AddDomainFeedback?
+        let feedback: AddDomainFeedback?
 
-        static let closed = QuickAddState(text: "", isOpen: false, error: nil)
+        static let closed = QuickAddState(text: "", isOpen: false, feedback: nil)
     }
 
     private func closeQuickAdd() {
         newDomain = ""
-        quickAddError = nil
+        quickAddFeedback = nil
         isAddingDomain = false
     }
 
@@ -888,11 +905,52 @@ enum DropdownCopy {
     /// is installed now, so it stops showing once the route count moves: a DNS refresh, a new
     /// domain or a newly enabled service brings routes back without a full apply, and the line
     /// would otherwise keep saying "All routes removed" under a list of live routes.
+    ///
+    /// With the helper not ready nothing is enforced, so a past apply's "62 addresses routed"
+    /// would contradict the banner above it saying nothing is routed (A2).
     static func shownRouteChange(_ outcome: RouteManager.RouteChangeOutcome?,
-                                 currentRouteCount: Int) -> RouteManager.RouteChangeOutcome? {
-        guard let outcome else { return nil }
+                                 currentRouteCount: Int,
+                                 helperReady: Bool = true) -> RouteManager.RouteChangeOutcome? {
+        guard let outcome, helperReady else { return nil }
         if outcome.kind == .removedAll && outcome.routeCount != currentRouteCount { return nil }
         return outcome
+    }
+
+    /// What the dropdown says while no VPN is connected: what connecting does in this mode.
+    static func disconnectedSentence(_ mode: Mode, in bundle: Bundle = .main) -> String {
+        switch mode {
+        case .bypass:
+            return String(localized: "Connect to a VPN to start bypassing\ntraffic for configured services.", bundle: bundle)
+        case .vpnOnly:
+            return String(localized: "Connect to a VPN to send\nyour listed sites through it.", bundle: bundle)
+        case .custom:
+            return String(localized: "Connect to a VPN to start\nrouting traffic by your rules.", bundle: bundle)
+        }
+    }
+
+    /// The counts under it, from the lists the mode reads: Custom routes by its rules, not by
+    /// the Bypass services and domains.
+    static func disconnectedBadges(_ mode: Mode, config: RouteManager.Config,
+                                   in bundle: Bundle = .main) -> [(value: Int, label: String)] {
+        switch mode {
+        case .bypass:
+            return [(config.services.filter(\.enabled).count, String(localized: "Services", bundle: bundle)),
+                    (config.domains.filter(\.enabled).count, String(localized: "Domains", bundle: bundle))]
+        case .vpnOnly:
+            return [(config.inverseDomains.filter(\.enabled).count, String(localized: "VPN Entries", bundle: bundle))]
+        case .custom:
+            return [(config.rules.filter(\.enabled).count, String(localized: "Rules", bundle: bundle))]
+        }
+    }
+
+    /// The quick-add button: the Bypass list, the VPN Only list, or a Custom mode rule to the
+    /// Direct route, which is not a list (A5).
+    static func quickAddLabel(_ mode: Mode, in bundle: Bundle = .main) -> String {
+        switch mode {
+        case .bypass: return String(localized: "Add Domain to Bypass", bundle: bundle)
+        case .vpnOnly: return String(localized: "Add Domain to VPN", bundle: bundle)
+        case .custom: return String(localized: "Add a Direct rule…", bundle: bundle)
+        }
     }
 
     /// The tooltip on the result line. Its failed count counts addresses, so the tooltip says so.
@@ -1141,6 +1199,8 @@ enum RoutedBySource {
         let hiddenRows: Int
         /// VPN Only's catch-alls are installed: everything not listed goes direct.
         let everythingElseDirect: Bool
+        /// Entries that should have routes and have none, shown or not (`Row.isProblem`).
+        var problemCount: Int = 0
 
         var countText: String { routes(routeCount) }
     }
@@ -1204,9 +1264,10 @@ enum RoutedBySource {
     static var direct: String { String(localized: "direct") }
 
     /// nil when there is nothing to list: no entry on and no route installed (the status line
-    /// above already says so).
+    /// above already says so). `routedOnly` lists only entries that have routes, for the
+    /// disconnected dropdown, where an entry without any is expected, not a problem.
     static func make(mode: DropdownCopy.Mode, config: RouteManager.Config,
-                     routes: [InstalledRoute], busy: Bool) -> Summary? {
+                     routes: [InstalledRoute], busy: Bool, routedOnly: Bool = false) -> Summary? {
         // Each entry's route `source` (what its routes are recorded under) and how it reads.
         // Custom rules that use a proxy or the primary VPN install no kernel route, so a rule
         // with none is normal and is not listed.
@@ -1249,7 +1310,7 @@ enum RoutedBySource {
         for entry in entries where !listed.contains(entry.source) {
             listed.insert(entry.source)
             let destinations = bySource[entry.source] ?? []
-            if destinations.isEmpty && !entry.expectsRoutes { continue }
+            if destinations.isEmpty && (!entry.expectsRoutes || routedOnly) { continue }
             rows.append(row(id: entry.source, name: entry.name, icon: entry.icon,
                             destinations: destinations, expectsRoutes: entry.expectsRoutes))
         }
@@ -1271,7 +1332,8 @@ enum RoutedBySource {
                        routeCount: addressCount(routes, vpnOnly: mode == .vpnOnly),
                        rows: Array(rows.prefix(visibleRows)),
                        hiddenRows: max(0, rows.count - visibleRows),
-                       everythingElseDirect: everythingElseDirect)
+                       everythingElseDirect: everythingElseDirect,
+                       problemCount: rows.filter(\.isProblem).count)
     }
 
     private static func routes(_ count: Int) -> String {
@@ -1422,7 +1484,11 @@ struct StatusPill: View {
     var body: some View {
         let color = status.tone.color
         HStack(spacing: 4) {
-            if status.tone == .idle {
+            if status.isPartial {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundColor(color)
+            } else if status.tone == .idle {
                 Circle()
                     .strokeBorder(color, lineWidth: 1.3)
                     .frame(width: 7, height: 7)
@@ -1495,6 +1561,15 @@ struct DropdownStatus: Equatable {
         /// The connected VPN sends every connection into its tunnel above the routing table
         /// (`VPNKillSwitchReader`), so no route set here takes effect.
         var killSwitch: VPNKillSwitch? = nil
+        /// The app's first detection is still running: nothing it would say about the VPN or
+        /// the routes is known yet.
+        var isStarting: Bool = false
+        /// Entries that should have routes and have none, with no apply running or waiting
+        /// that could add them (`RoutedBySource.Summary.problemCount`).
+        var entriesWithoutAddresses: Int = 0
+        /// The last Verify Routes: how many addresses it checked, and how many did not answer.
+        var lastCheckCount: Int = 0
+        var lastCheckFailures: Int = 0
     }
 
     let pill: String
@@ -1503,9 +1578,20 @@ struct DropdownStatus: Equatable {
     let sentence: String
     let note: String?
     let facts: [Fact]
+    /// ON, but not everything is routed: the pill draws ▲ instead of a dot.
+    var isPartial: Bool = false
 
     static func make(_ input: Input, now: Date) -> DropdownStatus {
         let name = input.vpnName ?? String(localized: "VPN")
+
+        // Before anything else: at launch the VPN and the routes are not read yet, so "No VPN
+        // connected" or "NOTHING ROUTED" would be a guess (A3).
+        if input.isStarting {
+            return DropdownStatus(pill: String(localized: "STARTING"), tone: .idle,
+                                  headline: String(localized: "Starting…"),
+                                  sentence: String(localized: "Detecting the VPN and applying routes."),
+                                  note: nil, facts: [])
+        }
 
         guard input.isVPNConnected else {
             // Only Bypass keeps its routes across a drop on purpose. VPN Only and Custom tear
@@ -1600,9 +1686,39 @@ struct DropdownStatus: Equatable {
                                   sentence: String(localized: "Nothing is routed right now."),
                                   note: scheduledNote, facts: facts)
         }
+        let problems = partialReasons(input)
+        if !problems.isEmpty {
+            // Some of it is routed and some is not: amber, never a green ON (A4).
+            return DropdownStatus(pill: String(localized: "PARTLY ROUTED"), tone: .warn,
+                                  headline: String(localized: "\(name) connected"),
+                                  sentence: whatIsRouted(input),
+                                  note: ([scheduledNote].compactMap { $0 } + problems).joined(separator: " "),
+                                  facts: facts, isPartial: true)
+        }
         return DropdownStatus(pill: String(localized: "ON"), tone: .ok,
                               headline: String(localized: "\(name) connected"),
                               sentence: whatIsRouted(input), note: scheduledNote, facts: facts)
+    }
+
+    /// Why ON is only partly true, one sentence per reason: the last apply had failures, an
+    /// entry has no addresses, or the last route check found addresses that did not answer.
+    static func partialReasons(_ input: Input) -> [String] {
+        var reasons: [String] = []
+        if let change = DropdownCopy.shownRouteChange(input.lastRouteChange, currentRouteCount: input.installedRoutes),
+           change.kind == .applied, change.failedCount > 0 {
+            reasons.append(change.failedCount == 1
+                ? String(localized: "1 failed in the last apply.")
+                : String(localized: "\(change.failedCount) failed in the last apply."))
+        }
+        switch input.entriesWithoutAddresses {
+        case 0: break
+        case 1: reasons.append(String(localized: "1 entry has no addresses."))
+        default: reasons.append(String(localized: "\(input.entriesWithoutAddresses) entries have no addresses."))
+        }
+        if input.lastCheckFailures > 0 {
+            reasons.append(String(localized: "\(input.lastCheckFailures) of \(input.lastCheckCount) checked addresses did not answer."))
+        }
+        return reasons
     }
 
     // MARK: Pieces
@@ -2251,7 +2367,8 @@ struct RouteCheckCard: View {
 
 struct StatBadge: View {
     let value: String
-    let label: LocalizedStringKey
+    /// Already in the app's language.
+    let label: String
     
     var body: some View {
         VStack(spacing: 2) {
