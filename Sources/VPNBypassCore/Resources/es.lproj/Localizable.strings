@@ -278,8 +278,12 @@
 "Nothing is routed while the privileged helper is not running." = "No se enruta nada mientras el asistente privilegiado no esté en marcha.";
 "NO EFFECT" = "SIN EFECTO";
 "No effect" = "Sin efecto";
-"%@'s kill switch sends all traffic through the VPN. Sites set to skip it still go through it." = "El kill switch de %@ envía todo el tráfico por la VPN. Los sitios que deberían evitarla siguen pasando por ella.";
-"%@ makes its own routes win over this app's. Sites set to skip it still go through it." = "%@ hace que sus rutas manden sobre las de esta app. Los sitios que deberían evitarla siguen pasando por ella.";
+"%@'s kill switch sends all traffic through the VPN." = "El kill switch de %@ envía todo el tráfico por la VPN.";
+"%@ makes its own routes win over this app's." = "%@ hace que sus rutas manden sobre las de esta app.";
+"Sites set to skip it still go through it." = "Los sitios que deberían evitarla siguen pasando por ella.";
+"Everything meant to skip it still goes through it." = "Todo lo que debería evitarla sigue pasando por ella.";
+"Rules set to go direct still go through it." = "Las reglas que deberían ir directas siguen pasando por ella.";
+"VPN Bypass: the VPN's own routes win over this app's, so nothing skips it" = "VPN Bypass: las rutas de la VPN mandan sobre las de esta app, así que nada la evita";
 "Turn off its kill switch, or use its own split tunnelling." = "Desactiva su kill switch o usa su propio túnel dividido.";
 "Turn off that setting in the VPN app, or use its own split tunnelling." = "Desactiva ese ajuste en la app de la VPN o usa su propio túnel dividido.";
 "Local-network addresses still skip it." = "Las direcciones de la red local sí la siguen evitando.";

@@ -278,8 +278,12 @@
 "Nothing is routed while the privileged helper is not running." = "Nothing is routed while the privileged helper is not running.";
 "NO EFFECT" = "NO EFFECT";
 "No effect" = "No effect";
-"%@'s kill switch sends all traffic through the VPN. Sites set to skip it still go through it." = "%@'s kill switch sends all traffic through the VPN. Sites set to skip it still go through it.";
-"%@ makes its own routes win over this app's. Sites set to skip it still go through it." = "%@ makes its own routes win over this app's. Sites set to skip it still go through it.";
+"%@'s kill switch sends all traffic through the VPN." = "%@'s kill switch sends all traffic through the VPN.";
+"%@ makes its own routes win over this app's." = "%@ makes its own routes win over this app's.";
+"Sites set to skip it still go through it." = "Sites set to skip it still go through it.";
+"Everything meant to skip it still goes through it." = "Everything meant to skip it still goes through it.";
+"Rules set to go direct still go through it." = "Rules set to go direct still go through it.";
+"VPN Bypass: the VPN's own routes win over this app's, so nothing skips it" = "VPN Bypass: the VPN's own routes win over this app's, so nothing skips it";
 "Turn off its kill switch, or use its own split tunnelling." = "Turn off its kill switch, or use its own split tunnelling.";
 "Turn off that setting in the VPN app, or use its own split tunnelling." = "Turn off that setting in the VPN app, or use its own split tunnelling.";
 "Local-network addresses still skip it." = "Local-network addresses still skip it.";

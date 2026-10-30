@@ -3,8 +3,8 @@
 //
 // A VPN built on Apple's NetworkExtension can set `includeAllNetworks` (what Proton VPN's kill
 // switch turns on) or `enforceRoutes`. Either one makes the system send connections into the
-// tunnel above the routing table, so the host routes this app installs stay in the table and do
-// nothing. With `includeAllNetworks`, `excludeLocalNetworks` lets local-network addresses out.
+// tunnel above the routing table (every connection, or with `enforceRoutes` those the VPN's own
+// routes cover), so the host routes this app installs stay in the table and do nothing. With `includeAllNetworks`, `excludeLocalNetworks` lets local-network addresses out.
 //
 // macOS keeps every NetworkExtension configuration in one world-readable file,
 // `/Library/Preferences/com.apple.networkextension.plist`, an NSKeyedArchiver archive. Its top
@@ -114,14 +114,22 @@ public enum VPNKillSwitchReader {
         return ids
     }
 
-    /// The kill switch of a connected VPN, or nil. When several connected VPNs have one, the
-    /// one on `trackedInterface` (the tunnel the app acts on) wins, then the first by id.
+    /// The kill switch of a connected VPN, or nil. `includeAllNetworks` takes every connection
+    /// whichever tunnel the app acts on, so any connected VPN with it counts. `enforceRoutes`
+    /// only takes what the VPN's own routes cover, so it counts only on `trackedInterface` (the
+    /// tunnel the app acts on): a split VPN beside it leaves the app's routes working. When
+    /// several count, the one on `trackedInterface` wins, then the first by id.
     public static func killSwitch(configurations: [NEVPNConfigurationInfo], connected: Set<String>,
                                   interfaces: [String: String] = [:],
                                   trackedInterface: String? = nil) -> VPNKillSwitch? {
-        let candidates = configurations.filter { connected.contains($0.id) && $0.defeatsRoutes }
+        let onTracked = { (c: NEVPNConfigurationInfo) in
+            trackedInterface != nil && interfaces[c.id] == trackedInterface
+        }
+        let candidates = configurations.filter {
+            connected.contains($0.id) && ($0.includeAllNetworks == true || ($0.enforceRoutes == true && onTracked($0)))
+        }
         guard !candidates.isEmpty else { return nil }
-        let chosen = candidates.first { trackedInterface != nil && interfaces[$0.id] == trackedInterface }
+        let chosen = candidates.first(where: onTracked)
             ?? candidates.min { $0.id < $1.id }!
         let product = chosen.application.flatMap {
             TunnelOwnership.productLabel(processName: "", executablePath: $0)
@@ -219,21 +227,17 @@ final class NEConfigurationStub: NSObject, NSSecureCoding {
 @objc(VPNBypassNEVPNStub)
 final class NEVPNStub: NSObject, NSSecureCoding {
     static var supportsSecureCoding: Bool { true }
-    let enabled: Bool?
     let proto: NEVPNProtocolStub?
 
-    init(enabled: Bool?, proto: NEVPNProtocolStub?) {
-        self.enabled = enabled
+    init(proto: NEVPNProtocolStub?) {
         self.proto = proto
     }
 
     init?(coder: NSCoder) {
-        enabled = optionalBool(coder, "Enabled")
         proto = coder.decodeObject(of: NEVPNProtocolStub.self, forKey: "Protocol")
     }
 
     func encode(with coder: NSCoder) {
-        if let enabled { coder.encode(enabled, forKey: "Enabled") }
         coder.encode(proto, forKey: "Protocol")
     }
 }

@@ -46,8 +46,10 @@ struct MenuBarLabel: View {
         guard routeManager.isVPNConnected else {
             return String(localized: "VPN Bypass: no VPN detected, nothing is being routed")
         }
-        if routeManager.vpnKillSwitch != nil {
-            return String(localized: "VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it")
+        if let killSwitch = routeManager.vpnKillSwitch {
+            return killSwitch.includeAllNetworks
+                ? String(localized: "VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it")
+                : String(localized: "VPN Bypass: the VPN's own routes win over this app's, so nothing skips it")
         }
         let count = routeManager.routedAddressCount
         guard !routeManager.activeRoutes.isEmpty else {
@@ -1525,7 +1527,7 @@ struct DropdownStatus: Equatable {
         if let killSwitch = input.killSwitch {
             return DropdownStatus(pill: String(localized: "NO EFFECT"), tone: .warn,
                                   headline: String(localized: "\(name) connected"),
-                                  sentence: killSwitchSentence(killSwitch, fallbackName: name),
+                                  sentence: killSwitchSentence(killSwitch, fallbackName: name, mode: input.mode),
                                   note: killSwitchNote(killSwitch), facts: [])
         }
 
@@ -1591,12 +1593,20 @@ struct DropdownStatus: Equatable {
 
     // MARK: Pieces
 
-    /// What a kill switch does to the app's routes, in one sentence.
-    static func killSwitchSentence(_ killSwitch: VPNKillSwitch, fallbackName: String) -> String {
+    /// What a kill switch does to the app's routes: the cause, then what it means in this mode.
+    static func killSwitchSentence(_ killSwitch: VPNKillSwitch, fallbackName: String,
+                                   mode: DropdownCopy.Mode) -> String {
         let name = killSwitch.name ?? fallbackName
-        return killSwitch.includeAllNetworks
-            ? String(localized: "\(name)'s kill switch sends all traffic through the VPN. Sites set to skip it still go through it.")
-            : String(localized: "\(name) makes its own routes win over this app's. Sites set to skip it still go through it.")
+        let cause = killSwitch.includeAllNetworks
+            ? String(localized: "\(name)'s kill switch sends all traffic through the VPN.")
+            : String(localized: "\(name) makes its own routes win over this app's.")
+        let effect: String
+        switch mode {
+        case .bypass: effect = String(localized: "Sites set to skip it still go through it.")
+        case .vpnOnly: effect = String(localized: "Everything meant to skip it still goes through it.")
+        case .custom: effect = String(localized: "Rules set to go direct still go through it.")
+        }
+        return cause + " " + effect
     }
 
     /// How to get out of it, and what still skips the VPN.

@@ -196,9 +196,25 @@ final class VPNKillSwitchReaderTests: XCTestCase {
     func testEnforceRoutesAloneCounts() {
         let configs = VPNKillSwitchReader.vpnConfigurations(from: archive([
             vpnEntry(idA, flags: ["IncludeAllNetworks": false, "EnforceRoutes": true, "ExcludeLocalNetworks": true])]))
-        let ks = VPNKillSwitchReader.killSwitch(configurations: configs, connected: [idA])
+        let ks = VPNKillSwitchReader.killSwitch(configurations: configs, connected: [idA],
+                                                interfaces: [idA: "utun4"], trackedInterface: "utun4")
         XCTAssertEqual(ks?.enforceRoutes, true)
         XCTAssertEqual(ks?.flagNames, ["enforceRoutes"], "excludeLocalNetworks only matters with includeAllNetworks")
+    }
+
+    /// enforceRoutes only takes what the VPN's own routes cover, so a split VPN connected next
+    /// to the tunnel the app acts on leaves the app's routes working. includeAllNetworks does not.
+    func testEnforceRoutesCountsOnlyOnTheTrackedTunnel() {
+        let configs = VPNKillSwitchReader.vpnConfigurations(from: archive([
+            vpnEntry(idA, flags: ["EnforceRoutes": true]),
+            vpnEntry(idB, flags: killSwitchFlags)]))
+        XCTAssertNil(VPNKillSwitchReader.killSwitch(configurations: configs, connected: [idA],
+                                                    interfaces: [idA: "utun4"], trackedInterface: "utun7"))
+        XCTAssertNil(VPNKillSwitchReader.killSwitch(configurations: configs, connected: [idA]),
+                     "an enforceRoutes VPN whose tunnel is unknown gives no warning")
+        XCTAssertEqual(VPNKillSwitchReader.killSwitch(configurations: configs, connected: [idB],
+                                                      interfaces: [idB: "utun4"], trackedInterface: "utun7")?.includeAllNetworks,
+                       true, "includeAllNetworks counts on any tunnel")
     }
 
     func testNamesTheProductFromItsAppThenTheConfiguration() {
@@ -325,6 +341,14 @@ final class KillSwitchStatusTests: XCTestCase {
         let s = DropdownStatus.make(input { $0.vpnName = "WireGuard"; $0.killSwitch = enforce }, now: now)
         XCTAssertEqual(s.sentence, "WireGuard makes its own routes win over this app's. Sites set to skip it still go through it.")
         XCTAssertEqual(s.note, "Turn off that setting in the VPN app, or use its own split tunnelling.")
+    }
+
+    /// The second half of the sentence says what the routes were for in the current mode.
+    func testTheSentenceFollowsTheMode() {
+        XCTAssertEqual(DropdownStatus.make(input { $0.mode = .vpnOnly; $0.killSwitch = self.proton }, now: now).sentence,
+                       "Proton VPN's kill switch sends all traffic through the VPN. Everything meant to skip it still goes through it.")
+        XCTAssertEqual(DropdownStatus.make(input { $0.mode = .custom; $0.killSwitch = self.proton }, now: now).sentence,
+                       "Proton VPN's kill switch sends all traffic through the VPN. Rules set to go direct still go through it.")
     }
 
     func testNoVPNAndHelperDownStillComeFirst() {

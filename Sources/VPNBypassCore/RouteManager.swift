@@ -1193,7 +1193,9 @@ final class RouteManager: ObservableObject {
             return .ciscoAnyConnect
         }
         // Before OpenVPN and WireGuard: Proton's tunnel extension carries the protocol's name.
-        if output.contains("protonvpn") {
+        // Only the extension, which runs while a tunnel is up; the Proton app stays open when
+        // disconnected and must not rename another VPN.
+        if output.split(separator: "\n").contains(where: { $0.contains("protonvpn") && $0.contains("extension") }) {
             return .protonVPN
         }
         if output.contains("openvpn") {
@@ -2328,8 +2330,9 @@ final class RouteManager: ObservableObject {
             failedDomains.removeAll()
         }
 
-        // Only send notification when explicitly requested (Refresh button)
-        if sendNotification && routedAddressCount > 0 {
+        // Only send notification when explicitly requested (Refresh button), and not while a
+        // VPN kill switch makes the routes have no effect: the count would read as success.
+        if sendNotification && routedAddressCount > 0 && vpnKillSwitch == nil {
             NotificationManager.shared.notifyRoutesApplied(count: routedAddressCount, failedCount: totalFailures)
         }
 
@@ -2451,7 +2454,7 @@ final class RouteManager: ObservableObject {
             log(.success, "Applied \(confirmedUniqueCount) unique custom route(s)")
         }
 
-        if sendNotification && routedAddressCount > 0 {
+        if sendNotification && routedAddressCount > 0 && vpnKillSwitch == nil {
             NotificationManager.shared.notifyRoutesApplied(count: routedAddressCount, failedCount: batchFailureCount)
         }
 
