@@ -110,7 +110,7 @@ flowchart LR
 - The app watches the network interfaces and running processes. A tunnel counts as a VPN when it is up and has an IPv4 address in a VPN range; Tailscale counts only when it is an exit node. See [Supported VPN types](how-it-works.md#supported-vpn-types).
 - When the VPN connects, disconnects, or the network changes, the routes are rebuilt. Domains are re-resolved on a schedule, so a route follows a CDN when its addresses rotate.
 - With several tunnels up, Bypass and VPN Only act on one and leave the others alone; in Custom mode a VPN route can name a specific tunnel. See [Other VPNs and proxies](coexistence.md).
-- Route verification pings up to 10 routed single addresses, shows which ones answer, and says how many of the routes it checked.
+- Route verification checks which way up to 10 routed single addresses leave and whether they answer on port 443, with a control address that must leave the other way, and says how many of the routes it checked. `vpnb why <host>` answers the same for any site, with the entry or rule that routes it.
 - A proxy route is a listener on `127.0.0.1` that forwards to the proxy you gave it; a Tailscale peer route sends traffic out through a device already in your tailnet. The app runs no VPN of its own.
 
 ## What it does not do
@@ -121,7 +121,7 @@ flowchart LR
 
 ## Privacy
 
-- The app talks to no server of its own: no telemetry, no update check, no account. The only network activity it starts is resolving the domains you list, forwarding traffic to a proxy you configured, and, when route verification is on, pinging the routed destinations.
+- The app talks to no server of its own: no telemetry, no update check, no account. The only network activity it starts is resolving the domains you list, forwarding traffic to a proxy you configured, and, when you check routes, opening a connection to port 443 of up to 10 routed destinations and of the site you ask `vpnb why` about, plus one connection attempt to a documentation address (`192.0.2.1`, `198.51.100.1` or `203.0.113.1`) that serves as the check's control and is closed before it completes.
 - Config, logs and proxy credentials stay in your account's Application Support folder. The Logs tab shows local events only.
 - Proxy credentials live in the config file, readable by your account alone, and the local listener asks for them, so another account on the same Mac cannot spend them. `vpnb` reads passwords from standard input, never from the command line.
 

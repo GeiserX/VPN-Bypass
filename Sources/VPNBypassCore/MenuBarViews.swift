@@ -1034,18 +1034,19 @@ enum DropdownCopy {
 
 // MARK: - Route check
 
-/// What Verify Routes checks and how its card words the result. Verify pings a sample: single
-/// addresses only, because ping cannot test a range, and at most `sampleSize` of them, the first
-/// in sort order. The card says how many of how many routes that was, lists failures first, and
-/// keeps the order the addresses were pinged in. Pure, so the scope and the wording are tested.
+/// What Verify Routes checks and how its card words the result. Verify path-checks a sample
+/// (PathCheck): single addresses only, because a range has no one address to connect to, and at
+/// most `sampleSize` of them, the first in sort order. The card says how many of how many routes
+/// that was, lists failures first, and keeps the sample's order. Pure, so the scope and the
+/// wording are tested.
 enum RouteCheck {
-    /// Addresses pinged per check, so a check stays short: each ping can wait 4 s.
+    /// Addresses checked per run, so a check stays short: each connection can wait 3 s.
     static let sampleSize = 10
     /// Failures listed in the card before "+ N more".
     static let visibleFailures = 3
 
     struct Plan: Equatable {
-        /// The addresses to ping, in the order they are pinged.
+        /// The addresses to check, in the order they are checked.
         let destinations: [String]
         /// What each of them is routed for: the service, domain or rule that added its route.
         let sources: [String: String]
@@ -1057,7 +1058,7 @@ enum RouteCheck {
 
     /// The result of one check, as the card shows it.
     struct Run {
-        /// In the order the addresses were pinged.
+        /// In the order the addresses were checked.
         let results: [RouteVerificationResult]
         let sources: [String: String]
         let singleAddresses: Int
@@ -1087,7 +1088,7 @@ enum RouteCheck {
         var reachable: [RouteVerificationResult] { results.filter(\.isReachable) }
     }
 
-    /// What to ping. In VPN Only the app's catch-all ranges are left out of the count, as the
+    /// What to check. In VPN Only the app's catch-all ranges are left out of the count, as the
     /// list above the card leaves them out. A destination recorded under several sources reads
     /// as the first one.
     static func plan(routes: [RoutedBySource.InstalledRoute], vpnOnly: Bool,
@@ -1115,8 +1116,8 @@ enum RouteCheck {
     static func scope(checked: Int, singleAddresses: Int, routeCount: Int) -> Scope {
         if checked == 0 {
             return Scope(main: routeCount == 1
-                ? String(localized: "Nothing to check: the only address is a range, which ping cannot test")
-                : String(localized: "Nothing to check: all \(routeCount) addresses are ranges, which ping cannot test"),
+                ? String(localized: "Nothing to check: the only address is a range, which the path check cannot test")
+                : String(localized: "Nothing to check: all \(routeCount) addresses are ranges, which the path check cannot test"),
                          qualifier: nil)
         }
         if checked >= routeCount {

@@ -31,6 +31,13 @@ public enum VPNBCLI {
     public static func parse(_ argv: [String]) -> ParsedArgs {
         var parsed = ParsedArgs(cmd: argv[0], args: [:], readPassFromStdin: false, malformed: [])
         for token in argv.dropFirst() {
+            // `vpnb why <host>`: the one verb whose argument may come bare.
+            // A pasted link counts as bare even when its query holds "=".
+            let isLink = token.lowercased().hasPrefix("http://") || token.lowercased().hasPrefix("https://")
+            if parsed.cmd == "why", isLink || !token.contains("="), parsed.args["host"] == nil, !token.hasPrefix("-") {
+                parsed.args["host"] = token
+                continue
+            }
             if token == "pass:-" || token == "--pass-stdin" {
                 parsed.readPassFromStdin = true
                 continue
@@ -61,6 +68,27 @@ public enum VPNBCLI {
             return #"{"error":{"code":"encode_failed","message":"vpnb could not encode the reply as JSON"},"ok":false,"v":1}"#
         }
         return line
+    }
+
+    /// `why`: the app's sentence, then one line per checked address and one for the control.
+    static func whyLines(_ why: SiteRouteAnswer) -> [String] {
+        var out = [why.summary]
+        func line(_ check: SiteRouteCheck, label: String) -> String {
+            var text = "  \(label)\(check.address)  via \(check.interface ?? "?")"
+            if let source = check.sourceAddress { text += " from \(source)" }
+            if check.answer != .notTried { text += "  443: \(check.answer.rawValue)" }
+            if let ms = check.latencyMs { text += " in \(Int(ms.rounded())) ms" }
+            if let verdict = check.verdict { text += "  \(verdict.rawValue)" }
+            return text
+        }
+        for check in why.checks { out.append(line(check, label: "")) }
+        if let control = why.control { out.append(line(control, label: "control ")) }
+        var facts = "  match: \(why.match.rawValue)"
+        if let entry = why.entry { facts += "  entry: \(entry)" }
+        if let expected = why.expected { facts += "  expected: \(expected)" }
+        facts += "  verdict: \(why.verdict.rawValue)"
+        out.append(facts)
+        return out
     }
 
     /// The reply as the text lines `vpnb` prints without `--json`.
@@ -156,6 +184,8 @@ public enum VPNBCLI {
             if let killSwitch = runtime.killSwitch { line += "  kill switch: \(killSwitch.joined(separator: ","))" }
             out.append(line)
         }
+
+        if let why = result.why { out += whyLines(why) }
 
         if let mode = result.mode { out.append("mode: \(mode)") }
         if let defaultRouteId = result.defaultRouteId { out.append("default route: \(defaultRouteId)") }
