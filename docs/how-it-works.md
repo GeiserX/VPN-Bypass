@@ -13,6 +13,7 @@
 | Cloudflare WARP | ✅ Full |
 | Pulse Secure | ✅ Full |
 | Check Point | ✅ Full |
+| Proton VPN | ✅ Full (kill switch on: routes have no effect, see [VPN kill switches](coexistence.md#vpn-kill-switches)) |
 | Tailscale (exit node) | ✅ Full |
 | Tailscale (mesh only) | ❌ Not VPN |
 

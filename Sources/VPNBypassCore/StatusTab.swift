@@ -53,6 +53,8 @@ enum StatusPage {
             title = status.headline
         } else if !input.helperReady {
             title = String(localized: "Not working", bundle: bundle)
+        } else if input.killSwitch != nil {
+            title = String(localized: "No effect", bundle: bundle)
         } else if isWaiting(input) {
             // WAITING or HELD BACK: the dropdown's headline already says what the tunnel did.
             title = status.headline
@@ -345,7 +347,8 @@ extension DropdownStatus.Input {
                                                      domains: config.domains,
                                                      services: config.services,
                                                      installedRoutes: routeManager.routedAddressCount),
-            everythingElseDirect: routeManager.everythingElseDirect
+            everythingElseDirect: routeManager.everythingElseDirect,
+            killSwitch: routeManager.vpnKillSwitch
         )
     }
 }

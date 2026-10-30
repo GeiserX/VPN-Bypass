@@ -6,7 +6,7 @@ Two words mean one thing each on screen. A **route** is a way out for traffic in
 
 Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow head on the top line while routes are enforced. The dropdown shows:
 
-- a pill that reads ON, WAITING (the app waits for a reconnected tunnel to hold before it re-applies routes), HELD BACK (the tunnel dropped right after several applies, so the app is not applying until it has held for 30 minutes), NOTHING ROUTED (no address is routed), NOT SET UP (a fresh install with nothing configured), NOT ENFORCING (the helper is down) or OFF (no VPN);
+- a pill that reads ON, WAITING (the app waits for a reconnected tunnel to hold before it re-applies routes), HELD BACK (the tunnel dropped right after several applies, so the app is not applying until it has held for 30 minutes), NOTHING ROUTED (no address is routed), NOT SET UP (a fresh install with nothing configured), NOT ENFORCING (the helper is down), NO EFFECT (the VPN's kill switch sends all traffic through it, so the routes change nothing; see [VPN kill switches](coexistence.md#vpn-kill-switches)) or OFF (no VPN);
 - the VPN it found, one sentence on what your lists route, and two facts: how many addresses were last routed, when, and whether any failed, and when DNS was checked and runs next. While the pill reads WAITING or HELD BACK, the header says how long is left instead;
 - on a fresh install in Bypass mode, in place of everything down to the gear: the question "What should skip the VPN?", six common services with their switches, a row that opens Settings on the Services page, a field to add a site, and a line that offers VPN Only. Once a service is on or a site is on the list, the normal dropdown below takes its place at once;
 - the Mode control, with Bypass, VPN Only and Custom in every mode. Picking another mode asks first, and the selection moves only after you confirm. Entering Custom turns your lists into rules here too, when Custom has no rules yet and the current mode's list has an entry switched on, and the question says so only then, as the Settings sheet does;
@@ -48,7 +48,7 @@ Rules (Custom mode): the ordered rule list (first match wins) mapping domains/su
 
 Routes (Custom mode): your egresses: auto-detected Direct + VPN links, plus any proxy or Tailscale-peer routes you add.
 
-Status: whether the app is working right now, on one page. A line at the top gives the verdict ("Working", "Not working", "No VPN connected") and the same sentence as the dropdown, for example "4 services and 2 domains skip the VPN. 62 addresses routed 23 s ago, none failed." Under it:
+Status: whether the app is working right now, on one page. A line at the top gives the verdict ("Working", "Not working", "No effect" under a VPN kill switch, "No VPN connected") and the same sentence as the dropdown, for example "4 services and 2 domains skip the VPN. 62 addresses routed 23 s ago, none failed." Under it:
 
 - Helper: the privileged helper's state and version. When it is not ready, its box turns red and the row has an Install, Update or Retry button. This is the page the dropdown's Fix… button opens.
 - Connection: the VPN and its interface, the normal connection (Wi-Fi network and gateway), and which interface carries the default route.
