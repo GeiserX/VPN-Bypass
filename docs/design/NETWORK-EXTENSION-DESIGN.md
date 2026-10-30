@@ -20,7 +20,8 @@ The kernel engine routes by destination IP. Three things are out of its reach:
   rule type exists in the model (`Sources/VPNBypassCore/RouteModel.swift:43`) and is accepted by `vpnb`
   (`CommandRouter.swift:392`), but nothing acts on it: `RuleResolver.swift:29,45`,
   `RuleDestinationBuilder.swift:73,99` and `WildcardRoutes.swift:90` all skip it. Today a process rule is a
-  silent no-op. Users asked for per-app routing in #2 (Discord voice), #184 and #186.
+  silent no-op. Users asked for per-app routing in #2 (Discord voice), #184 and #186. #2 is UDP, so
+  the TCP-only v1 does not fix it; it needs the UDP stage (3.6).
 - **Proxy routes for apps that ignore `HTTPS_PROXY`.** A kernel route cannot point at a loopback listener,
   so proxy and Tailscale-peer routes reach only apps that opt in through the env, the `route-on` hook or
   the PAC (`RouteCompiler.swift:94-95`, `docs/MULTI-ROUTE-DESIGN.md:303-310`).
@@ -48,9 +49,12 @@ The kernel engine routes by destination IP. Three things are out of its reach:
   Nothing leaks.
 - It writes no kernel routes, so it adds nothing to the route churn that has troubled GlobalProtect
   before (#65, #106).
-- It needs no DNS work.
-- The egress mechanism is the one the proxy listeners already use beside GlobalProtect:
-  `parameters.requiredInterface = interface` (`ProxyForwarder.swift:746`).
+- It needs no new DNS machinery. The cost of that: a bypassed app still resolves through the VPN's DNS,
+  so the VPN's resolver sees the names it looks up, and a CDN may hand it an address for the VPN's
+  region rather than the user's.
+- Interface scoping is the egress the proxy listeners already use beside GlobalProtect
+  (`parameters.requiredInterface = interface`, `ProxyForwarder.swift:746`). The extension reaches it
+  through the C Network API instead, because it must also carry the flow's metadata (3.5).
 
 **What stays on kernel routes:** everything that works today, in every mode. Domains, services, IPs,
 CIDRs, wildcards, VPN Only, multi-VPN, the helper, `/etc/hosts`, the forwarder. The kernel engine stays
@@ -85,8 +89,11 @@ VPN Bypass.app/Contents/
 
 - Extension id: `com.geiserx.vpn-bypass.proxy`.
 - Extension `Info.plist`: `NSSystemExtensionUsageDescription`, `LSMinimumSystemVersion` 15.0, and
-  `NetworkExtension = { NEProviderClasses = { com.apple.networkextension.app-proxy = <Module>.FlowProxy } }`.
-  Use `@objc(FlowProxy)` so the class name does not depend on the SwiftPM module name.
+  `NetworkExtension = { NEProviderClasses = { com.apple.networkextension.app-proxy = FlowProxy } }`.
+  The class is declared `@objc(FlowProxy)`, so its Objective-C runtime name is `FlowProxy` whatever the
+  SwiftPM module is called, and the plist value is that bare name (not `<Module>.FlowProxy`). CI checks
+  that the plist value names a class in the built binary (`otool -ov` or `nm` on the ObjC class list),
+  because a mismatch would only show at activation.
 - No app group and no `NEMachServiceName`. The shipping mitmproxy redirector runs without either (its
   extension `Info.plist` has only `NEProviderClasses`). If activation on macOS 27 rejects that, add the
   app group `624WUVM8B4.com.geiserx.vpn-bypass` as `NEMachServiceName`; another app proxy on the test
@@ -140,7 +147,13 @@ binary never carries them.
   - a lease length.
 - **Lease.** Same idea as the helper's wildcard lease (`HelperProtocol.swift:113-115`). Without a fresh
   policy within the lease (2 minutes), the extension declines every flow. That is exactly today's
-  behaviour, so a quit or crashed app can never leave stale per-app routing behind.
+  behaviour, so a quit or crashed app can never leave stale per-app routing behind. A menu bar app
+  that sits idle can have its timers delayed by App Nap and timer coalescing, so `FlowEngineManager`
+  holds a `ProcessInfo` activity while the engine is on, the heartbeat runs every 30 s (a quarter of
+  the lease), and the extension counts lease expiries in the status counters so a lapse is visible.
+- **Unknown policy version.** An extension that receives a policy version it does not know (a new app
+  talking to an old extension whose replacement is still pending, 6.4) treats it as no policy and
+  declines every flow, and reports the mismatch in the heartbeat reply.
 - **When the app pushes:** on every rule or mode change (`commitAppliedRoutes`, `RouteManager.swift:2872`),
   on a network or VPN change (same moment the listeners re-bind, `reconcileProxyListeners`,
   `RouteManager.swift:5208`), when the extension reports it (re)started (the manager's status turns
@@ -164,12 +177,26 @@ except loopback, `NENetworkRule.h:116-122`.)
 `ProtectedDestinations`, `HelperProtocol.swift:325-331`), fc00::/7, fe80::/10, ff00::/8, fd7a:115c:a1e0::/48.
 Apple says exclusions win, but FB14453214 reports them ignored, so `handleNewFlow` repeats the checks.
 
+What "include all TCP" means for R1: every TCP flow on the Mac matches the include rule, including the
+VPN client's own TCP connections (GlobalProtect's portal, HIP reports and its SSL fallback tunnel). The
+verdict in `handleNewFlow` declines them, but a start or stop of the proxy acts on matching flows
+before any verdict (3.7). So under the narrow reading of "a start closes matching flows", the VPN's
+TCP is still in scope. We do not add the VPN gateway's address to the exclusions in v1: it changes
+when the client picks another gateway, and every change would need `setTunnelNetworkSettings`, which
+may itself close flows. L1 decides whether that trade is worth revisiting.
+
 `handleNewFlow` is synchronous and must never block: no DNS, no I/O, no XPC. It reads one in-memory
 table:
 1. No live policy (none yet, or lease expired): return `false`.
-2. Flow from our own app, helper or extension, from a VPN or security client
-   (`com.paloaltonetworks.*`, `io.tailscale.*`, and the other VPN types the app already detects), or from
-   `mDNSResponder`, captive-portal or Apple push daemons: return `false`.
+2. Flow from our own app, helper or extension, from a VPN or security client, or from `mDNSResponder`,
+   captive-portal or Apple push daemons: return `false`. VPN and security clients are recognised by
+   **team identifier**, not by signing id: GlobalProtect's daemon is signed `Identifier=PanGPS`,
+   `TeamIdentifier=PXPZ95SK77`, so a `com.paloaltonetworks.*` prefix would never match it.
+   `NEFlowMetaData` carries no team id, so the extension reads it from `sourceAppAuditToken`
+   (`SecCodeCopyGuestWithAttributes` with the audit token, then `SecCodeCopySigningInformation`),
+   cached per audit token. The list of declined teams (Palo Alto `PXPZ95SK77` and the other VPN vendors
+   the app already detects) lives in the pure `FlowDecider`, so it is unit-tested. `ruleAdd` and the
+   app chooser refuse a process rule whose bundle id or basename belongs to a declined team's app.
 3. `flow.isBound` is true (the app bound its own socket to an interface): return `false`.
 4. Match `metaData.sourceAppSigningIdentifier` against process matchers:
    - a bundle id matches exactly or on a dot boundary (`com.google.Chrome` covers
@@ -181,24 +208,33 @@ table:
    egress on the physical interface is a live question). The flow stays in the VPN.
 7. Otherwise claim it (return `true`) and re-emit (3.5).
 
-`remoteHostname` is not used in v1. It is set only for connect-by-name callers (URLSession,
-Network.framework); Chrome, curl and Go arrive as bare IPs.
+`remoteHostname` is not used for matching in v1. It is set only for connect-by-name callers
+(URLSession, Network.framework); Chrome, curl and Go arrive as bare IPs.
 
 ### 3.5 Re-emit path
 
-For a claimed flow:
-1. Open an `NWConnection` to the flow's remote endpoint with `requiredInterface` set to the policy's
-   physical interface, `TCP_NODELAY` on, and a short connect timeout (5 s). Interface scoping beats the
-   routing table for a routes-only tunnel (Apple, "Routing your VPN network traffic"; XNU
-   `ip_output.c` `IP_BOUND_IF`), and the test Mac has the scoped defaults this needs (`default UGScIg en0`
-   and `en8`). Do not copy PIA's source-IP bind: it moves zero bytes behind a VPN's `0/1` routes on
-   macOS 26.3 (pia-foss/desktop#93).
-2. Call `flow.setMetadata` with the connection's parameters, so any later proxy still sees the original
-   app.
-3. When the connection is ready, `flow.open`, then copy both ways with a bounded buffer per direction
+For a claimed flow, in this order (the order matters):
+1. Build an `nw_parameters_t` with the C Network API: `nw_parameters_create_secure_tcp` with TLS
+   disabled and, in the TCP configure block, no-delay on and a 5 s connect timeout; then
+   `nw_parameters_require_interface` with the `nw_interface_t` of the policy's physical interface.
+   Interface scoping beats the routing table for a routes-only tunnel (Apple, "Routing your VPN network
+   traffic"; XNU `ip_output.c` `IP_BOUND_IF`), and the test Mac has the scoped defaults this needs
+   (`default UGScIg en0` and `en8`). Do not copy PIA's source-IP bind: it moves zero bytes behind a
+   VPN's `0/1` routes on macOS 26.3 (pia-foss/desktop#93).
+2. Call `flow.setMetadata(params)`. It writes the flow's `NEFlowMetaData` into those parameters, and
+   only a connection created from them afterwards carries it, so any later transparent proxy sees the
+   original app instead of our extension (`NEAppProxyFlow.h`, `setMetadata:`). Calling it after the
+   connection exists does nothing.
+3. `nw_connection_create(endpoint, params)`. The Swift `NWParameters`/`NWConnection` API cannot be used
+   for this egress: it has no public way to wrap an `nw_parameters_t`, so it cannot carry the metadata.
+   A BSD socket with `IP_BOUND_IF` (Proton's way) cannot carry it either.
+4. The endpoint is the flow's `remoteFlowEndpoint`. For a connect-by-name flow that is host:port: dial
+   the name with the same scoped parameters, so it resolves on the physical interface. The name is held
+   in memory for that connection only, never logged or stored (3.8).
+5. When the connection is ready, `flow.open`, then copy both ways with a bounded buffer per direction
    (Apple warns that unbounded buffering gets the provider jetsam-killed).
-4. If the connect fails, close the flow with an error. A claimed flow cannot be handed back.
-5. A connection that sat claimed but idle stays open; no read timeouts (Proton tears idle flows down after
+6. If the connect fails, close the flow with an error. A claimed flow cannot be handed back.
+7. A connection that sat claimed but idle stays open; no read timeouts (Proton tears idle flows down after
    3 s, which breaks long-lived connections).
 
 ### 3.6 UDP
@@ -216,21 +252,37 @@ CONNECT cannot carry UDP.
 
 ### 3.7 Failure behaviour: a crash must never break the VPN session
 
-The VPN client's own sockets are never ours: they are declined by signing id (3.4 step 2), and the
-gateway's IP is never in a claimed set. What remains are the moments the OS itself touches flows.
+The VPN client's own flows are never claimed: they are declined by team identifier (3.4 step 2), and
+no process matcher can name them. That protects them from our verdict, not from the moments the OS
+itself acts on flows, which come before any verdict.
 
 - **Start, stop and restart.** Apple: "Starting a transparent proxy should close all flows"
   (forums thread 827831). We do not know yet whether "all" means only matching flows or every flow on the
-  Mac, which could include GlobalProtect's gateway socket. Until live test L1 answers it:
-  - the engine is only ever started or stopped by an explicit user action, with a warning when a VPN is
-    connected ("turning this on may reset open connections, including the VPN's");
-  - nothing starts it automatically while a VPN is connected: not app launch, not an update, not crash
-    recovery;
-  - rule changes never restart it (3.3).
-  If L1 shows only matching flows are closed, the warning goes and the app may start the engine at launch.
+  Mac. Either way it covers the VPN client's TCP, because the include rule matches all outbound TCP (3.4).
+  So while a VPN is connected the start warning stays, whatever L1 shows about non-matching flows.
+- **Starts and stops the app makes.** The app controls only these: turning the engine on or off,
+  saving the manager, filing an activation or replacement request, and the watchdog's automatic stops
+  below. Rules for them:
+  - an on or off by the user, with a VPN connected, shows the warning ("turning this on may reset open
+    connections, including the VPN's");
+  - the app never starts the engine by itself while a VPN is connected: not at app launch, not after an
+    update, not as crash recovery;
+  - rule changes never restart it (3.3);
+  - the watchdog's automatic disables (below) are stops while a VPN may be connected. They are taken
+    only when the extension is already failing every new connection, where the stop is the lesser harm.
+- **Starts and stops the OS makes on its own.** Once the configuration is enabled, `nesessionmanager`
+  starts the provider again without asking us: at boot or login (often while GlobalProtect is
+  auto-connecting), after a provider crash, after sleep and wake, and when `sysextd` replaces or
+  removes the extension (6.4). The only lever we have is `isEnabled = false` on the configuration,
+  which stops those restarts and is itself a stop. Live tests L1, L8, L9 and L11 cover these with a VPN
+  connected.
+- **If L1 shows the VPN's sockets are closed by a start**, the only safe v1 is one where the
+  configuration does not stay enabled across reboots: the user turns the engine on per session, and
+  the app sets `isEnabled = false` when it quits and at logout. Otherwise R1 becomes an accepted risk,
+  written down as such. If L1 shows they are not closed, the app may keep the configuration enabled.
 - **Crash.** Flows the extension was copying die; those are only the per-app flows. New flows: undocumented
-  (direct, stalled or failed; live test L8). The app watches the extension with a ping inside the lease
-  heartbeat:
+  (direct, stalled or failed; live test L8). The OS restarts the provider by itself (above). The app
+  watches the extension with a ping inside the lease heartbeat:
   - extension restarted by the OS: re-push the policy, show a notice;
   - extension silent while new connections stall (L8 decides how we detect it): disable the
     configuration, notify, fall back to kernel routes. A Mac whose every new connection hangs is already
@@ -240,10 +292,16 @@ gateway's IP is never in a claimed set. What remains are the moments the OS itse
   go into the VPN, which is safe.
 - **Another VPN with `includeAllNetworks` or `enforceRoutes`.** Interface scoping cannot escape it
   (Apple: `enforceRoutes` "supersedes the system routing table and scoping operations by apps"). The
-  engine stops claiming (policy push with no matchers) and shows the kill-switch banner the
-  kill-switch lane adds.
+  engine stops claiming (policy push with no matchers) and says why. The engine reads the flags itself
+  from the NE preferences (`includeAllNetworks` and `enforceRoutes` of the enabled VPN configurations)
+  and does not wait on the kill-switch warning (#186), which detects a kill switch by behaviour and is
+  written for kernel routes. Once that warning is merged, the engine also stands down on its detection
+  (stage 6).
 - **Kill switch for us.** A menu item "Pause per-app routing" pushes an empty policy (no restart, no
-  flows closed). "Turn off" disables the configuration (closes flows, warned).
+  flows closed). Pause is not an off switch: the include rule stays installed, so every new TCP
+  connection on the Mac still goes through a synchronous call into the extension and a hang would still
+  stall it (R8). The UI copy says so. Only "Turn off" (`isEnabled = false`, closes flows, warned)
+  removes that call.
 
 ### 3.8 Logging and privacy
 
@@ -326,8 +384,8 @@ In every state except `active`, the kernel engine runs exactly as today. No proc
 no-op again.
 
 **Remove.** An in-app "Remove per-app routing" does `removeFromPreferences`, then a deactivation
-request. Homebrew cannot do it: a cask cannot launch the app, and `brew uninstall` leaves the extension
-active until reboot. The troubleshooting doc gets a "remove the extension" entry with
+request. Homebrew cannot do it: a cask cannot launch the app. We expect `brew uninstall` to leave the
+extension active until reboot, but nobody has tested it; live test L9 checks it. The troubleshooting doc gets a "remove the extension" entry with
 `systemextensionsctl` steps.
 
 ## 6. Packaging, CI and the cask
@@ -369,7 +427,8 @@ Inside out:
   Prove the gate can go red once with a deliberately wrong profile. If the runner does not enforce AMFI,
   the gate is worthless and section 3.2's fallback (nested activator) applies.
 - `ci.yml`: add the extension binary to the universal-architecture loop (`:98-107`); assert its
-  `Info.plist` has `SYSX` and `NetworkExtension`. CI bundles stay unsigned and entitlement-free.
+  `Info.plist` has `SYSX` and `NetworkExtension`, and that its `NEProviderClasses` value is an ObjC
+  class in the built binary. CI bundles stay unsigned and entitlement-free.
 - `auto-tag.yml:22-31`: add `entitlements/**` and `scripts/**` to the paths.
 - `.gitignore`: add `*.provisionprofile`. Profiles and keys never enter git.
 
@@ -380,8 +439,18 @@ No change to the stanzas. `app` installs to /Applications. A user with `--appdir
 keeps working. No preflight or postflight (`release.yml:277-287` already forbids them). The app relaunches
 itself after an update (`AppUpdateRelauncher.swift`) and resubmits the activation request; the delegate
 answers `.replace` when the version differs. That replacement is a restart of the extension, so the
-"never restart while a VPN is connected" rule (3.7) applies: the app defers it until the VPN disconnects
-or the user agrees.
+app defers it until the VPN disconnects or the user agrees (3.7).
+
+That deferral is unproven, and part of the update is not ours to defer. Homebrew removes the old bundle
+and then moves the new one in (`AppUpdateRelauncher.swift` names the `missing` state in between).
+`sysextd` may treat the containing app as removed and stop or uninstall the running extension before
+our app runs again, which would be a stop while the VPN is up. Live test L9 answers it with a real
+`brew upgrade` and an in-place bundle swap. Until it does, the doc claims no deferral works.
+
+For a user whose VPN is always on, "defer until the VPN disconnects" can mean never. A new app then
+talks to an old extension: the policy carries a version, and an extension that does not know it
+declines every flow (3.3), so per-app routing stops and the card says an update of the extension is
+waiting, with a button that replaces it now (warned).
 
 ## 7. App Store Connect steps (run later, idempotent)
 
@@ -407,21 +476,33 @@ the release path.
 
 ### 8.1 Unit (Mac mini, `swift test`)
 
-- `FlowDecider`: no policy declines; expired lease declines; self, VPN clients and system daemons decline;
+- `FlowDecider`: no policy declines; expired lease declines; unknown policy version declines; self,
+  system daemons and VPN clients decline (VPN clients by team id, with a bare-identifier case such as
+  `PanGPS` under team `PXPZ95SK77`);
   `isBound` declines; bundle-id dot-boundary match (positive `com.x.App.helper`, negative `com.x.AppX`);
   basename match; IPv6 declines; VPN-default route declines; Direct claims.
 - `FlowPolicyCompiler`: Bypass "Apps" and Custom process rules compile to the same matchers; rule order
   kept; no hostname or credential ends up in the blob (assert on the encoded bytes).
-- `ruleAdd` validation: accepts bundle ids and basenames, rejects paths and wildcards.
+- `ruleAdd` validation: accepts bundle ids and basenames, rejects paths, wildcards and declined-team
+  apps.
 - Logging: a compile-time check that the extension's log function takes no `String`.
 - Each new test is first run against a deliberately broken decider and must fail.
 
-### 8.2 Mac mini (no GlobalProtect)
+### 8.2 Mac mini (no GlobalProtect): the first live tests
 
-The mini has SIP disabled and no personal signing identity, so it cannot test AMFI or activation. It
-builds, runs unit tests and checks the bundle layout. It can host an iperf3 server for L10.
+The mini has SIP disabled and no personal signing identity. It cannot test AMFI (L0), because AMFI is
+not enforced there. It can test activation: with SIP off, `systemextensionsctl developer on` lets it
+activate a build signed on the MacBook and copied over. So the riskiest questions are answered there
+first, where a dropped VPN costs nothing:
+- builds, unit tests, bundle layout checks, and an iperf3 server for L10;
+- **stage 4b:** copy the signed spike build, turn on sysext developer mode, bring up a throwaway
+  WireGuard tunnel, and keep a long `ssh` session and a long TCP download running through it and
+  outside it. Run L1, L8, L9 and L11 there (8.3 says how).
 
-### 8.3 Live test on the MacBook, GlobalProtect connected
+Go to the MacBook only if the mini shows that flows outside the include rule survive a start and a
+stop. L0 stays on the MacBook, where AMFI is enforced.
+
+### 8.3 Live tests: the mini first (L1, L8, L9, L11), then the MacBook with GlobalProtect connected
 
 Hard rules for every step: never restart, reconnect or reconfigure GlobalProtect or any VPN; watch only.
 Read GlobalProtect's logs (`PanGPS.log`, `pan_gp_event.log`) for `Broken pipe` and ProcDrv quit before,
@@ -436,22 +517,23 @@ the timestamps.
 4. Back in the app, the "VPN Bypass would like to add proxy configurations" prompt appears. Click Allow.
 5. Confirm with `systemextensionsctl list` (state `activated enabled`) and the card showing `active`.
 
-Live questions, in this order. Do not move past L1 until it is answered.
+Live questions, in this order. L1, L8, L9 and L11 run on the mini first (8.2), then again on the
+MacBook. Do not move past L1 on the MacBook until the mini has answered it.
 
 | # | Question | Positive control | Negative control |
 |---|---|---|---|
 | L0 | Does AMFI accept the hand-signed app and extension (no SIGKILL at launch)? | the release build launches | a build with the app profile removed is SIGKILLed (proves the check) |
-| L1 | Does starting or stopping the engine with an **empty policy** close flows outside our rules? Watch an `ssh` session to a mini, a long `curl` download, and GlobalProtect's logs | a matching flow (curl from a listed test binary) is reset by the start | the same ssh session with the engine never touched over the same period |
+| L1 | Does starting or stopping the engine close flows, and which? Two passes, both with an **empty policy**. Pass A: the include rule narrowed to one test destination (a host on the mini); a long TCP download to it matches, an `ssh` session elsewhere does not. Pass B: the v1 include-all-TCP rule, watching the VPN client's TCP (`lsof -i -P \| grep PanGPS` on the MacBook, the WireGuard peer's sessions on the mini) and its logs. Also a reboot or login with the configuration enabled while the VPN auto-connects | pass A: the download to the test destination is reset by the start (proves the start closes matching flows) | pass A: the `ssh` session outside the narrowed rule; both passes: the same sessions with the engine never touched over the same period |
 | L2 | Does a claimed flow leave on the physical interface? One rule: a test binary only, never a browser. Check `tcpdump -i en0` vs `utun5`, and the public IP the flow sees | the bypassed binary sees the home IP | an unlisted `curl` sees the VPN's IP |
 | L3 | Does GlobalProtect react (HIP report, enforcer, re-route) to scoped egress? | | engine paused: no GP log lines |
 | L4 | Which signing id arrives for Safari (WebKit networking), Chrome helpers, `nsurlsessiond`, curl, an unsigned Go binary? Read through counters per rule, never by logging ids | | |
 | L5 | With the owner's other transparent proxy enabled too: who sees flows first, and does `setMetadata` keep attribution? Run with both orders seen | | |
 | L6 | Sleep and wake, Wi-Fi to Ethernet (en0 and en8): new flows still claimed and leaving on the new interface | | |
 | L7 | UDP: does an include rule for UDP break Chrome QUIC for flows we decline? (gates the UDP stage) | | |
-| L8 | `kill -9` of the extension: new matching flows go direct, stall or fail, and for how long? Is it restarted? | | |
-| L9 | Version bump of the extension: does the configuration stay enabled, is a new approval asked, are flows reset? | | |
+| L8 | `kill -9` of the extension: new matching flows go direct, stall or fail, and for how long? Does the OS restart it, and does that restart close the VPN's flows? | | |
+| L9 | Version bump of the extension, by a real `brew upgrade` (remove, then move) and by an in-place bundle swap, with the engine active: does `sysextd` stop or uninstall the running extension when the old app goes (watch `systemextensionsctl list` and the VPN's logs), does the configuration stay enabled, is a new approval asked, are flows reset? Also `brew uninstall`: is the extension still active until reboot? | | |
 | L10 | Throughput and CPU through the extension vs direct, iperf3 to the mini; added latency of new connections | | |
-| L11 | Does the consent survive a reboot (PIA #94)? | | |
+| L11 | Does the consent survive a reboot (PIA #94)? Does the OS start the provider at boot or login while the VPN connects, and does that close the VPN's flows? | | |
 | L12 | A soak of 8 hours or more with GlobalProtect connected: drop count vs a baseline day with the engine off. GP logs are local time, ours UTC | | |
 
 Before L1 is answered, every step uses one narrow rule. No browser rule before L4.
@@ -460,19 +542,29 @@ Before L1 is answered, every step uses one narrow rule. No browser rule before L
 
 | # | Risk | Hard or impossible |
 |---|---|---|
-| R1 | Starting the proxy closes all flows; if that includes GlobalProtect's gateway socket, every start is a VPN drop and maybe a logout | **Hard.** The OS behaviour is fixed (Apple calls it deliberate, FB8969320 open), but we control when we start: only on user action, warned, never automatically while a VPN is up (3.7). L1 tells us how strict that must be |
+| R1 | Starting the proxy closes flows, and with include-all-TCP that covers the VPN client's TCP; if it also covers GlobalProtect's gateway socket, every start is a VPN drop and maybe a logout | **Hard**, partly not in our hands. The OS behaviour is fixed (Apple calls it deliberate, FB8969320 open). We control the starts we make: only on user action, warned (3.7). We do not control the OS's own restarts (boot, login, crash, extension replacement); the only lever is leaving the configuration disabled. L1, L8, L9 and L11, first on the mini, decide between a per-session engine and an accepted risk stated plainly |
 | R2 | Order between several transparent proxies is unspecified without MDM; another proxy running after ours may re-route our flows into the tunnel | **Impossible to control** from our side without MDM's `Order` (an OS rule). Mitigation: `setMetadata` so attribution survives; detect and report via L5 |
 | R3 | A VPN with `includeAllNetworks` or `enforceRoutes` | **Impossible** to escape: Apple says it supersedes scoping by apps, and `NETransparentProxyManager` cannot opt out. We stand down and say so |
 | R4 | MDM sets `AllowUserOverrides=false` | **Impossible** on that Mac unless its admin allow-lists team 624WUVM8B4. Kernel engine stays |
 | R5 | Bad profile kills the whole app at launch | **Hard.** Release launch gate proven red (6.3), or the nested activator |
 | R6 | Chrome QUIC breaks on diverted UDP | **Hard**, an Apple bug (FB23636906). v1 is TCP-only; UDP waits on L7 |
 | R7 | Resolve-then-connect apps give no hostname | **Hard.** Name rules for them keep using kernel routes and the forwarder |
-| R8 | Extension hang stalls every new connection on the Mac | **Hard.** Never block `handleNewFlow`; watchdog disables it (3.7); L8 measures |
+| R8 | Extension hang stalls every new connection on the Mac, including while paused (the include rule stays installed) | **Hard.** Never block `handleNewFlow`; watchdog disables it (3.7); L8 measures. Only Turn off removes the exposure |
 | R9 | Throughput loss through user space | **Hard.** Claim only listed apps' flows; L10 measures |
 | R10 | Known Apple bugs with any transparent proxy installed: FaceTime/AirDrop, captive portals, flows lost after sleep | **Hard**, outside our code. Decline Apple daemons, pause on captive networks, document; L6 |
 | R11 | Homebrew cannot remove the extension | **Hard.** In-app remove plus a documented manual path |
 
-## 10. Staged plan (small PRs, each green and releasable)
+## 10. Staged plan (small PRs, each green)
+
+Base branches. A merge to `main` that touches `Sources/**` (or the other paths in `auto-tag.yml`)
+cuts a release by itself, so "releasable" is not enough: a stage must also be safe to ship to every
+user the moment it merges.
+- Stages 1 to 3 target `release/6.0` (no NE code, no entitlements).
+- Stage 4 and later stay off `main` and out of 6.0.0 until the launch gate is proven red, unless they
+  ship behind a build flag that leaves the entitlements and the extension out of the released bundle.
+- Whether the engine itself gates the 6.0.0 release is the owner's call. This doc's size estimate
+  (below) puts it weeks behind the rest of 6.0, so the default here is that 6.0.0 ships without it and
+  the engine follows in a later minor release.
 
 1. **This doc** and the lifted rule recorded in the old docs.
 2. **Stop the silent no-op.** Process rules show "inactive: needs per-app routing"; `vpnb rule.add
@@ -483,9 +575,14 @@ Before L1 is answered, every step uses one narrow rule. No browser rule before L
    script and release gate with entitlements on an app that still does nothing with them, plus an empty
    extension that declines every flow. Release gate proven red once. This is L0.
 5. **Spike build** (not released): the extension with the TCP copier and the `FlowEngineManager`, one
-   hard-coded test rule. The owner approves it on the MacBook; run L1 to L4.
+   hard-coded test rule.
+   - **4b, on the mini:** sysext developer mode, a throwaway WireGuard tunnel; run L1, L8, L9 and L11
+     (8.2). Stop here if flows outside the include rule do not survive.
+   - **On the MacBook:** the owner approves it; run L0 to L4, then L8, L9 and L11 again.
 6. **Engine v1:** per-app bypass, TCP, Direct egress, Custom process rules. State machine, card,
-   `vpnb engine.*`, status fields, watchdog, lease. Behind the opt-in.
+   `vpnb engine.*`, status fields, watchdog, lease. Behind the opt-in. Depends on the kill-switch
+   warning (#186) only for the extra stand-down signal (3.7); the engine reads the
+   `includeAllNetworks`/`enforceRoutes` flags itself.
 7. **Bypass-mode "Apps" list** and the app chooser.
 8. **Remove path** and troubleshooting doc; MCP server tools (its own repo).
 9. **Proxy and Tailscale-peer routes for any app:** relay claimed flows to the route's loopback listener
