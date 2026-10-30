@@ -29,10 +29,14 @@ How it behaves:
 - **Include scope** is chosen at start. `port:80` sends the extension only TCP to remote port 80, so a
   VPN client's own TLS connections (443) are not even offered to it. `all` is the v1 design: every
   outbound TCP flow except loopback, private, link-local, multicast and 100.64/10.
-- **A start by the OS is always `port:80`.** Only the app's **2. Start proxy** passes a scope. When macOS
-  starts the extension itself (boot, wake, a restart after a crash or `kill -9`) there are no options,
-  and the extension comes up on `port:80`, never `all`, whatever scope ran before. The status pane
-  shows the scope in force (`scope port:80` or `scope all`).
+- **A start by the OS is always `port:80`.** Only the app's **2. Start proxy** passes a scope. If macOS
+  starts the extension itself with no options, it comes up on `port:80`, never `all`, whatever scope
+  ran before. The status pane shows the scope in force (`scope port:80` or `scope all`).
+- **After a crash or `kill -9` the proxy stays off.** On the mini (macOS 26.6.1, Part A, A3) macOS did
+  not restart the extension: about 5 s after the kill it logged "Extension exit timer expired", the
+  session went to disconnected ("Plugin failed"), and it stayed off until the next start. Traffic
+  then goes the way it would without the spike. During those 5 s, new flows inside the include scope
+  hang and claimed flows die.
 - **No policy, no claims.** Until you press *Push policy*, and whenever the app has not refreshed the
   policy for 2 minutes (the lease; the app re-sends it every 30 s), the extension declines every flow.
 - **What it claims:** a TCP flow from an app in the *Apps* list (bundle id, exact or on a dot boundary,
@@ -74,9 +78,8 @@ crash does) to be answered first on the Mac mini, where a dropped tunnel costs n
 B4, and B3 if you choose to run it under `all`. **Gate: no step with scope `all` runs on the MacBook
 until A2 with scope `all` has passed on the mini** (download, `ssh` session and Tailscale's
 connections all survived the start and the stop). That covers B4 and any B3 step under `all`,
-B3.4 `kill -9` included. Every other step runs with `port:80`. A `kill -9` under `all` does not
-stay under `all`: the OS restarts the extension on `port:80` (see above), so after B3.4 press
-**Turn off** and **2. Start proxy** with `all` again if the next step needs it.
+B3.4 `kill -9` included. Every other step runs with `port:80`. A `kill -9` leaves the proxy off (see
+above), so after B3.4 run **2. Start proxy** and **3. Push policy** again before the next step.
 
 Rules for both parts: never restart, reconnect or reconfigure GlobalProtect or any VPN to make a test
 work. If GlobalProtect drops at any point: press **Turn off** in the spike, write down the time, then
@@ -167,7 +170,7 @@ names `ipv4.icanhazip.com`, click **3. Push policy**.
 | `"$F" http://api4.ipify.org` | 200, `claimed.app` +1, `egressOnPolicyInterface` +1 |
 | `curl -s http://api4.ipify.org` | answer, `declined.noMatch` +1 |
 | `nscurl http://ipv4.icanhazip.com` | answer, `claimed.hostname` +1 (NSURLSession connects by name) |
-| `curl -s http://ipv4.icanhazip.com` | answer, `declined.noMatch` +1 (curl resolves itself: no host name on the flow) |
+| `curl -s http://ipv4.icanhazip.com` | answer, `claimed.hostname` +1 on macOS 26.6.1 (Part A: macOS fills in the flow's host name even for clients that resolve it themselves; the design expected `declined.noMatch`) |
 
 Without a VPN all of them show the same public IP; here the counters are the result.
 
@@ -196,10 +199,11 @@ echo "$pid"                     # exactly one number; stop here if it is empty o
 sudo kill -9 "$pid"
 ```
 
-After the kill the OS restarts the extension on scope `port:80`, whatever scope it ran before.
+Expected from Part A: about 5 s later macOS logs "Extension exit timer expired" and the session goes
+to disconnected; the extension is not restarted, so the proxy stays off until the next start.
 
-Watch the `spike-fetch` lines (do new requests fail, stall or go direct, and for how long), whether the
-pid in the status pane changes (the OS restarting it), and whether Tailscale's connections survive.
+Watch the `spike-fetch` lines (do new requests fail, stall or go direct, and for how long), whether a
+new extension pid appears, and whether Tailscale's connections survive.
 
 ## Part B: the MacBook with GlobalProtect connected
 
@@ -265,10 +269,11 @@ GlobalProtect's log and `lsof` list show no change against `/tmp/gp-before.txt`.
    when you reopen it. Push again afterwards.
 3. **Stop session**: does the claimed download die, do new requests go to VPN_IP at once, does
    GlobalProtect log anything?
-4. **Kill -9** (only if Part A's A3 showed the restart left Tailscale's connections alone):
+4. **Kill -9** (Part A's A3 left Tailscale's connections alone):
    find `pid` and kill it with the commands in A3 (check it is exactly one number first), then watch
-   as in A3. Under scope `all` this step also needs A2 with `all` passed; the restart comes up on
-   `port:80`.
+   as in A3. Expect about 5 s in which new flows inside the include scope hang (under `all` that
+   includes GlobalProtect's new connections), then the proxy stays off. Under scope `all` this step
+   also needs A2 with `all` passed. Start and push again afterwards.
 
 **B4, scope `all`** (only if Part A's A2 showed unmatched connections survive a start and a stop with
 scope `all`): **Turn off**, choose `all`, **Start**, **Push policy**, then repeat B1 with `https://`
@@ -300,7 +305,8 @@ GlobalProtect:
    at the latest).
 4. On the mini only (SIP is off there): `systemextensionsctl uninstall 624WUVM8B4 com.geiserx.vpn-bypass.spike.proxy`.
 
-Do not `kill -9` the extension to stop it: while its configuration is enabled the OS starts it again.
+Do not `kill -9` the extension to stop it: that leaves the configuration enabled with a dead
+session, and new flows hang for about 5 s first. Use **Turn off** (or `spike turn-off`).
 
 ## Rebuilding
 
