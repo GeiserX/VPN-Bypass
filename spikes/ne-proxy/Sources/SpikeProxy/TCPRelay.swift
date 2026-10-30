@@ -84,7 +84,7 @@ final class TCPRelay {
             self.queue.async {
                 if error != nil {
                     self.counters.add("flowOpenFailed")
-                    self.closeAll()
+                    self.closeAll(Self.aborted)
                     return
                 }
                 self.opened = true
@@ -100,11 +100,10 @@ final class TCPRelay {
             counters.add("egressFailed")
             SpikeLog.event(.egressFailed, error.map { Int(nw_error_get_error_code($0)) } ?? -1)
             // A claimed flow cannot be handed back: close it so the app sees a failed connect.
-            let err = NSError(domain: NEAppProxyErrorDomain, code: NEAppProxyFlowError.hostUnreachable.rawValue)
-            flow.closeReadWithError(err)
-            flow.closeWriteWithError(err)
+            closeAll(NSError(domain: NEAppProxyErrorDomain, code: NEAppProxyFlowError.hostUnreachable.rawValue))
+            return
         }
-        closeAll()
+        closeAll(Self.aborted)
     }
 
     /// App to server.
@@ -113,7 +112,8 @@ final class TCPRelay {
             guard let self else { return }
             self.queue.async {
                 guard !self.finished else { return }
-                guard error == nil, let data, !data.isEmpty else {
+                if error != nil { self.closeAll(Self.aborted); return }
+                guard let data, !data.isEmpty else {
                     // EOF from the app: half-close towards the server.
                     nw_connection_send(self.connection, nil, _nw_content_context_final_send, true) { _ in }
                     self.upDone = true
@@ -124,7 +124,7 @@ final class TCPRelay {
                 let content = data.withUnsafeBytes { DispatchData(bytes: $0) }
                 nw_connection_send(self.connection, content as __DispatchData, _nw_content_context_default_message, false) { sendError in
                     self.queue.async {
-                        if sendError != nil { self.closeAll(); return }
+                        if sendError != nil { self.closeAll(Self.aborted); return }
                         self.pumpUp()
                     }
                 }
@@ -141,13 +141,13 @@ final class TCPRelay {
                 self.bytesDown += data.count
                 self.flow.write(data) { writeError in
                     self.queue.async {
-                        if writeError != nil { self.closeAll(); return }
+                        if writeError != nil { self.closeAll(Self.aborted); return }
                         if isComplete { self.endDown() } else { self.pumpDown() }
                     }
                 }
                 return
             }
-            if error != nil { self.closeAll(); return }
+            if error != nil { self.closeAll(Self.aborted); return }
             if isComplete { self.endDown(); return }
             self.pumpDown()
         }
@@ -163,10 +163,15 @@ final class TCPRelay {
         if upDone && downDone { closeAll() }
     }
 
-    private func closeAll() {
+    /// A transport failure after the flow opened: the app must see an error, not a clean end that
+    /// would pass a truncated response off as complete.
+    private static let aborted = NSError(domain: NEAppProxyErrorDomain, code: NEAppProxyFlowError.aborted.rawValue)
+
+    /// Closes both directions of the flow, with `error` when the relay broke (nil only for a clean end).
+    private func closeAll(_ error: Error? = nil) {
         guard !finished else { return }
-        flow.closeReadWithError(nil)
-        flow.closeWriteWithError(nil)
+        flow.closeReadWithError(error)
+        flow.closeWriteWithError(error)
         nw_connection_cancel(connection)
         finish()
     }

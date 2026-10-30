@@ -133,19 +133,22 @@ by the NO-NE section below, restored on 2026-10-30 when that rule was lifted: se
 Extension). It is the *only* mechanism that reliably intercepts a workstation's **own** outbound flows
 per-destination — and it hands the handler the **hostname before DNS** (`flow.remoteHostname`), which is
 exactly what makes domain-based routing *and* the DNS fix possible. mitmproxy (local mode), ProxyBridge,
-Antify, and Surge all converge on it.
+Antify, and Surge all converge on it. *(Since 2026-10-30, `remoteHostname` is not used for matching in v1:
+resolve-then-connect apps such as Chrome, curl and Go give no name. Matching starts per app; hostname rules
+come later, for connect-by-name flows only. See section 3.4 and risk R7 of the NE design.)*
 
 Per-flow handler logic (`handleNewFlow`):
 - **VPN route** → return `false` (the OS keeps the flow on the VPN's default).
 - **Proxy route** → open the route's upstream and `CONNECT <hostname>:<port>` (SOCKS5 ATYP=domain / HTTP
   CONNECT). **The proxy resolves the name remotely → no local DNS at all, which is precisely how we dodge
   the "corporate DNS captures the lookup" bug** we hit with the hostname proxy URL.
-- **Direct route** → open a socket **bound to the physical interface's IP** (`en0`); the kernel then routes
-  it out `en0` *regardless of the VPN's routing table* (this is Surge "Enhanced Mode") — robust against the
-  VPN re-asserting routes, with no host-route chasing.
+- **Direct route** → open an `nw_connection` whose parameters **require the physical interface**
+  (`nw_parameters_require_interface`, after `flow.setMetadata`); interface scoping beats the VPN's routing
+  table, with no host-route chasing. *(Corrected 2026-10-30: binding a socket to the interface's source IP,
+  as first written here, moves zero bytes behind a VPN's `0/1` routes. See section 3.5 of the NE design.)*
 
 Per-route **DNS**: proxy routes need none (the proxy resolves); direct routes resolve via the
-interface-bound socket; everything else uses **`/etc/resolver/<domain>` files** pointing at a non-VPN
+interface-scoped connection; everything else uses **`/etc/resolver/<domain>` files** pointing at a non-VPN
 resolver. (`NEDNSSettings.matchDomains` inside a transparent proxy is **silently ignored** by macOS —
 `/etc/resolver` is the working path.)
 
@@ -202,7 +205,7 @@ Bypass. *(Listener-port assignment + the `route-on` CLI design come from the hoo
   listeners; since 2026-10-30 the transparent proxy is the planned opt-in engine for app-agnostic capture:
   `docs/design/NETWORK-EXTENSION-DESIGN.md`.)* (PF-`rdr` rejected as a redsocks-style redirect — it can't touch the
   box's own traffic).
-- **Per-route DNS** → proxy routes: the proxy resolves remotely; direct: interface-bound resolve; else
+- **Per-route DNS** → proxy routes: the proxy resolves remotely; direct: interface-scoped resolve; else
   `/etc/resolver/<domain>` (`NEDNSSettings.matchDomains` is silently ignored).
 - **Schema** → typed-outbound (sing-box model) + the three residential session modes (see *Provider abstraction*).
 - **Selectors** → ship `manual` + `url-test` + `fallback` in v1 (universal; the `tolerance` field prevents
@@ -221,9 +224,10 @@ Bypass. *(Listener-port assignment + the `route-on` CLI design come from the hoo
 - **P1 — proxy route + local listeners:** generalize the single `proxyConfig` into N proxy routes, each
   with a `127.0.0.1:PORT` forwarder (the `oxy-on` forwarder, made general + auth-injecting + VPN-escaping).
   Ship `route-on <name>`. This alone delivers the proven 3-way, generically.
-- **P2 — app-agnostic capture:** *(NE was out from 2026-07-03 to 2026-10-30; now planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`.)* the
-  entitlement-free **PF + local-CA** transparent path (not `NETransparentProxy`) for app-agnostic
-  per-destination routing + per-route DNS + health-check/failover selectors.
+- **P2 — app-agnostic capture:** *(NE was out from 2026-07-03 to 2026-10-30; now planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`.)* an
+  opt-in **`NETransparentProxyProvider`** engine (a system extension) that claims the flows of the apps a
+  rule names and re-emits them on the route's egress, staged in section 10 of that doc. The default engine
+  stays kernel routes + local listeners. *(The PF + local-CA path first planned here is dropped.)*
 - **P3 — providers:** WireGuard/OpenVPN/Tailscale route types; PAC for browsers; UI for routes+rules.
 
 ## 2026-07-03 — Research corrections + locked build plan

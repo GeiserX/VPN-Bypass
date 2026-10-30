@@ -3,7 +3,8 @@
 Run on 2026-10-30, 14:34 to 14:36 local time, macOS 27, spike 0.1.4 (5), driven from a shell with
 the spike CLI. The corporate VPN (a GlobalProtect client) was connected the whole time on a utun
 interface and carried both test hosts. HOME_IP is the home line's public address, VPN_IP the VPN's.
-Only the owner's two approvals were clicks. Scope `all` (B4) was not run.
+Only the owner's two approvals were clicks. Scope `all` (B4) ran later, 15:32 to 15:34 (its own
+section below); `kill -9` under `all` was not run.
 
 ## B1, egress outside the tunnel
 

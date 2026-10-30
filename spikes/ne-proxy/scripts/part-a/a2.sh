@@ -23,7 +23,9 @@ if [ "$mode" = control ]; then
 else
   ev "turn-off"; spike turn-off 2>&1 | tail -3 | tee -a "$label-events.log"; ev "turn-off returned"
   sleep 10; ts T1
-  ev "start --scope $mode"; spike start --scope "$mode" 2>&1 | tee -a "$label-events.log"; ev "start returned"
+  ev "start --scope $mode"; spike start --scope "$mode" 2>&1 | tee -a "$label-events.log"
+  [ "${PIPESTATUS[0]}" = 0 ] || { ev "ABORT: start failed, the run measures nothing"; pkill -f 'curl -sS --limit-rate 1M http'; pkill -f "root@$OTHER while"; exit 1; }
+  ev "start returned"
   sleep 15
   if [ -n "${MID:-}" ]; then
     ev "new flows under the running proxy: https $(curl -sS -o /dev/null -m 10 -w '%{http_code} %{time_total}s' https://api4.ipify.org) http $(curl -sS -o /dev/null -m 10 -w '%{http_code} %{time_total}s' http://api4.ipify.org) ssh $(ssh -o BatchMode=yes -o ConnectTimeout=5 root@"$OTHER" true && echo ok || echo FAIL)"

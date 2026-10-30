@@ -13,6 +13,8 @@ ev "turn-off"; spike turn-off | head -1
 ev "start --scope $scope"; spike start --scope "$scope" | sed -n '2,4p' | tee -a "$label-events.log"
 nohup sudo launchctl asuser "$(id -u sergio)" sudo -u sergio "$B" push --apps com.geiserx.vpn-bypass.spike.fetch --hosts ipv4.icanhazip.com --hold > "$label-hold.log" 2>&1 &
 sleep 3; ev "push --hold running: $(head -1 "$label-hold.log")"
+# Without a live policy no flow is claimed and the kill -9 answers nothing about claimed flows.
+grep -q '^policy pushed' "$label-hold.log" || { ev "ABORT: push --hold did not take"; pkill -INT -f "VPNBypassNESpike push"; exit 1; }
 ( ssh -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=3 root@"$OTHER" 'while :; do date +%T; sleep 1; done' 2>&1; echo "ssh exit $?" ) | python3 -u stamp.py > "$label-ssh.log" 2>&1 &
 ( curl -sS --limit-rate 1M http://ipv4.download.thinkbroadband.com/1GB.zip; echo "curl80 exit $?" >&2 ) 2>"$label-dl80.err" | python3 -u meter.py > "$label-dl80.log" &
 "$F" --every 120 http://api4.ipify.org 2>&1 | sed -E 's/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/PUBLIC_IP/g' > "$label-fetch.log" &

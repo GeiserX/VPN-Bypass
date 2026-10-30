@@ -44,8 +44,13 @@ enum CLI {
             }
         }
         func push(apps: [String], hosts: [String], iface: String?, hold: Bool) {
-            controller.push(apps: apps, hostnames: hosts, interfaceName: iface) { s in
+            controller.push(apps: apps, hostnames: hosts, interfaceName: iface) { s, accepted in
                 guard s != nil else { print("push failed: proxy not connected"); finish(1) }
+                guard accepted else {
+                    print("push failed: the extension did not take the policy")
+                    controller.describe(s).forEach { print($0) }
+                    finish(1)
+                }
                 print("policy pushed: \(apps.count) app(s), \(hosts.count) host name(s)")
                 controller.describe(s).forEach { print($0) }
                 fflush(stdout)
@@ -80,6 +85,7 @@ enum CLI {
             }
             controller.activate()
         case "start":
+            guard opts.onlyKnown(["--scope"]) else { print(usage); finish(2) }
             guard let scope = IncludeScope(opts.value("--scope") ?? "port:80") else {
                 print("bad --scope; use port:<n> or all"); finish(2)
             }
@@ -95,7 +101,7 @@ enum CLI {
                 }
             }
         case "push":
-            let apps = SpikePolicy.parseList(opts.value("--apps") ?? "", lowercase: false)
+            let apps = SpikePolicy.parseAppList(opts.value("--apps") ?? "")
             let hosts = SpikePolicy.parseList(opts.value("--hosts") ?? "", lowercase: true)
             push(apps: apps, hosts: hosts, iface: opts.value("--iface"), hold: opts.flag("--hold"))
         case "pause":
@@ -103,7 +109,7 @@ enum CLI {
         case "stop-session":
             controller.stopSession { finish(0) }
         case "turn-off":
-            controller.turnOff { finish(0) }
+            controller.turnOff { ok in finish(ok ? 0 : 1) }
         case "remove":
             controller.onRequestEnd = { end in finish(end == .needsApproval ? 3 : end == .failed ? 1 : 0) }
             controller.remove()
@@ -125,5 +131,10 @@ enum CLI {
             return args[i + 1]
         }
         func flag(_ name: String) -> Bool { args.contains(name) }
+        /// False when an argument is an option outside `known` (a typo would otherwise fall back
+        /// to a default silently).
+        func onlyKnown(_ known: Set<String>) -> Bool {
+            args.allSatisfy { !$0.hasPrefix("--") || known.contains($0) }
+        }
     }
 }

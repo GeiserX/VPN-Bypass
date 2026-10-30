@@ -72,18 +72,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func push() {
-        let apps = SpikePolicy.parseList(appsField.stringValue, lowercase: false)
+        let apps = SpikePolicy.parseAppList(appsField.stringValue)
         let hosts = SpikePolicy.parseList(hostsField.stringValue, lowercase: true)
         let iface = interfaceField.stringValue.trimmingCharacters(in: .whitespaces)
-        controller.push(apps: apps, hostnames: hosts, interfaceName: iface.isEmpty ? nil : iface) { [weak self] s in
-            self?.log(s == nil ? "push failed: proxy not connected" : "policy pushed: \(apps.count) app(s), \(hosts.count) host name(s), heartbeat every 30 s")
+        controller.push(apps: apps, hostnames: hosts, interfaceName: iface.isEmpty ? nil : iface) { [weak self] s, accepted in
+            self?.log(s == nil ? "push failed: proxy not connected"
+                      : !accepted ? "push failed: the extension did not take the policy"
+                      : "policy pushed: \(apps.count) app(s), \(hosts.count) host name(s), heartbeat every 30 s")
             self?.show(s)
         }
     }
 
     @objc private func pause() {
-        controller.push(apps: [], hostnames: [], interfaceName: nil) { [weak self] s in
-            self?.log(s == nil ? "pause failed: proxy not connected" : "paused: empty policy, include rule still installed")
+        controller.push(apps: [], hostnames: [], interfaceName: nil) { [weak self] s, accepted in
+            self?.log(s == nil ? "pause failed: proxy not connected"
+                      : !accepted ? "pause failed: the extension did not take the policy"
+                      : "paused: empty policy, include rule still installed")
             self?.show(s)
         }
     }

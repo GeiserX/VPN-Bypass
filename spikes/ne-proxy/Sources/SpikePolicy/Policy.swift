@@ -30,10 +30,21 @@ public struct SpikePolicy: Codable, Equatable {
     /// An empty policy: the include rule stays installed, every flow is declined ("pause").
     public var isEmpty: Bool { apps.isEmpty && hostnames.isEmpty }
 
-    /// Normalises what a person typed: trims, lowercases host names, drops blanks and duplicates.
+    /// Normalises the host names a person typed: splits on commas, newlines and spaces, trims,
+    /// lowercases, drops trailing dots, blanks and duplicates.
     public static func parseList(_ text: String, lowercase: Bool) -> [String] {
+        parse(text, lowercase: lowercase, separators: [",", "\n", " "])
+    }
+
+    /// The Apps field: commas and newlines only, because an executable name can hold spaces
+    /// (`Google Chrome Helper`).
+    public static func parseAppList(_ text: String) -> [String] {
+        parse(text, lowercase: false, separators: [",", "\n"])
+    }
+
+    private static func parse(_ text: String, lowercase: Bool, separators: Set<Character>) -> [String] {
         var seen = Set<String>()
-        return text.split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == " " })
+        return text.split(whereSeparator: { separators.contains($0) })
             .map { s -> String in
                 var t = s.trimmingCharacters(in: .whitespaces)
                 if lowercase { t = t.lowercased() }
@@ -61,6 +72,12 @@ public struct SpikeStatus: Codable, Equatable {
     public var counters: [String: Int] = [:]
 
     public init() {}
+
+    /// True when this reply shows `p` live in the extension. A reply to a policy the extension
+    /// rejected (an unknown version) carries generation 0 and no lease.
+    public func confirms(_ p: SpikePolicy) -> Bool {
+        policyGeneration == p.generation && policyLive
+    }
 }
 
 /// Which outbound TCP the include rule hands to the extension. Set once at start, never changed at

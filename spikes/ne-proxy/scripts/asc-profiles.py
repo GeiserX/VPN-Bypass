@@ -62,7 +62,7 @@ class ASC:
                                      data=json.dumps(body).encode() if body is not None else None,
                                      headers={"Authorization": f"Bearer {self.tok}", "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req) as r:
+            with urllib.request.urlopen(req, timeout=60) as r:
                 raw = r.read()
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as e:
@@ -76,8 +76,10 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     out = os.path.abspath(os.path.expanduser(a.out))
-    if subprocess.run(["git", "-C", os.path.dirname(out) if not os.path.isdir(out) else out, "rev-parse"],
-                      capture_output=True).returncode == 0:
+    probe = out  # the nearest directory that exists: a missing --out may be several levels deep
+    while not os.path.isdir(probe):
+        probe = os.path.dirname(probe)
+    if subprocess.run(["git", "-C", probe, "rev-parse"], capture_output=True).returncode == 0:
         sys.exit(f"error: {out} is inside a git checkout; profiles never enter git")
     sha1 = os.environ["SIGN_SHA1"].upper()
     asc = ASC(token(os.environ["ASC_ISSUER"], os.environ["ASC_KEY_ID"], os.path.expanduser(os.environ["ASC_KEY"])), a.dry_run)
@@ -138,6 +140,9 @@ def main() -> None:
             prof = r["data"]
             print(f"  profile {prof['id']} created ({prof['attributes']['profileState']})")
         path = os.path.join(out, f"{stem}.provisionprofile")
+        if a.dry_run:
+            print(f"  dry-run: would write {path}")
+            continue
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(base64.b64decode(prof["attributes"]["profileContent"]))

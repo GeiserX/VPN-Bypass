@@ -120,15 +120,16 @@ final class Controller: NSObject, OSSystemExtensionRequestDelegate {
     }
 
     /// Disables the configuration: stops the proxy and keeps the OS from restarting it.
-    func turnOff(done: @escaping () -> Void = {}) {
+    /// `done(false)` when the disable could not be saved.
+    func turnOff(done: @escaping (Bool) -> Void = { _ in }) {
         stopHeartbeat()
         loadManager { m in
-            guard let m else { self.onLog("no configuration"); done(); return }
+            guard let m else { self.onLog("no configuration"); done(true); return }
             m.isEnabled = false
             m.saveToPreferences { error in
                 DispatchQueue.main.async {
                     self.onLog(error.map { "disable failed: \($0.localizedDescription)" } ?? "configuration disabled")
-                    done()
+                    done(error == nil)
                 }
             }
         }
@@ -141,7 +142,13 @@ final class Controller: NSObject, OSSystemExtensionRequestDelegate {
             guard let m else { self.onLog("no configuration to remove"); self.deactivate(); return }
             m.removeFromPreferences { error in
                 DispatchQueue.main.async {
-                    self.onLog(error.map { "remove failed: \($0.localizedDescription)" } ?? "configuration removed")
+                    if let error {
+                        // The configuration is still installed: keep the extension it needs.
+                        self.onLog("remove failed: \(error.localizedDescription)")
+                        self.onRequestEnd(.failed)
+                        return
+                    }
+                    self.onLog("configuration removed")
                     self.manager = nil
                     self.deactivate()
                 }
@@ -151,12 +158,21 @@ final class Controller: NSObject, OSSystemExtensionRequestDelegate {
 
     // MARK: Policy
 
-    func push(apps: [String], hostnames: [String], interfaceName: String?, completion: @escaping (SpikeStatus?) -> Void) {
+    /// Sends a policy. `completion(status, accepted)`: `accepted` only when the reply shows this
+    /// policy live. Only an accepted policy goes to the heartbeat, so a failed or rejected push never
+    /// applies later without a report.
+    func push(apps: [String], hostnames: [String], interfaceName: String?,
+              completion: @escaping (SpikeStatus?, Bool) -> Void) {
         generation += 1
         let p = SpikePolicy(generation: generation, apps: apps, hostnames: hostnames, interfaceName: interfaceName)
-        lastPolicy = p
-        send(SpikeRequest(policy: p), completion: completion)
-        startHeartbeat()
+        send(SpikeRequest(policy: p)) { s in
+            let accepted = s?.confirms(p) ?? false
+            if accepted {
+                self.lastPolicy = p
+                self.startHeartbeat()
+            }
+            completion(s, accepted)
+        }
     }
 
     func status(completion: @escaping (SpikeStatus?) -> Void) {

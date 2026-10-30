@@ -6,11 +6,16 @@
 #     scripts/sign.sh "build/VPN Bypass NE Spike.app"
 #   SKIP_NOTARIZE=1 ...   signs and checks only
 set -euo pipefail
-cd "$(dirname "$0")/.."
 
 app="${1:?usage: $0 APP}"
 : "${SIGN_IDENTITY:?SIGN_IDENTITY (certificate SHA-1) is not set}"
 : "${PROFILE_DIR:?PROFILE_DIR is not set}"
+# Relative paths are the caller's: resolve them before moving to the package directory.
+[ -d "$app" ] || { echo "error: $app is not a directory" >&2; exit 1; }
+[ -d "$PROFILE_DIR" ] || { echo "error: $PROFILE_DIR is not a directory" >&2; exit 1; }
+app=$(cd "$app" && pwd)
+PROFILE_DIR=$(cd "$PROFILE_DIR" && pwd)
+cd "$(dirname "$0")/.."
 team=624WUVM8B4
 app_id=com.geiserx.vpn-bypass.spike
 ext_id=com.geiserx.vpn-bypass.spike.proxy

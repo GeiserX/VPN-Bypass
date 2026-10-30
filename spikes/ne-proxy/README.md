@@ -45,8 +45,8 @@ How it behaves:
   `PXPZ95SK77`) or Tailscale (`W5364U7YZB`), a socket the app bound itself, IPv6.
 - **How it re-emits:** a new `nw_connection` with the flow's metadata, IPv4 only, required to use the
   physical interface (the most preferred Wi-Fi or Ethernet one, or the one typed in *Egress interface*).
-- **What it logs:** fixed events with numbers only. No app ids, no addresses, no host names; nothing
-  written to disk. The window shows counters (`claimed.app`, `claimed.hostname`, `declined.<reason>`,
+- **What it logs:** fixed events with numbers only, to the macOS unified log (which macOS keeps on
+  disk by its own rules). No app ids, no addresses, no host names; no log file of its own. The window shows counters (`claimed.app`, `claimed.hostname`, `declined.<reason>`,
   `egressOnPolicyInterface`, `activeFlows`, bytes, `leaseExpiries`).
 
 ## Build, sign, verify (already done for the current artifact)
@@ -127,6 +127,9 @@ Exit codes: 0 ok, 1 failed, 2 usage, 3 needs the owner's approval. A push withou
 lease that ends 2 minutes later (the process exits, so nothing re-sends it); `--hold` keeps the 30 s
 heartbeat going until the process gets SIGINT or SIGTERM. Any first argument that is not a flag runs
 the command line (an unknown one prints the usage); no arguments opens the window.
+
+Drive it from one place at a time: the window and a `--hold` process each re-send their own last
+policy every 30 s, so a `pause` from the shell lasts only until an open window's next heartbeat.
 
 `status` prints macOS's last disconnect error for the session, which is where a refused
 `setTunnelNetworkSettings` shows up (`Either a non-wildcard port or a non-wildcard address must be
@@ -243,7 +246,7 @@ so do not paste them anywhere public.
 | `"$F" http://api4.ipify.org` | app | **HOME_IP** |
 | `curl -s http://api4.ipify.org` | nothing | **VPN_IP** |
 | `nscurl http://ipv4.icanhazip.com` | host name | **HOME_IP** |
-| `curl -s http://ipv4.icanhazip.com` | nothing (connects by IP) | **VPN_IP** |
+| `curl -s http://ipv4.icanhazip.com` | host name (macOS fills in the name even though curl connects by IP, as Part A showed) | **HOME_IP** |
 | `nscurl http://api4.ipify.org` | nothing | **VPN_IP** |
 
 While a claimed download runs, see where its upstream socket lives:

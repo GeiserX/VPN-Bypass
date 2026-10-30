@@ -113,6 +113,29 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(SpikePolicy.parseList(" , ", lowercase: true), [])
     }
 
+    func testAppListKeepsSpacesInExecutableNames() {
+        XCTAssertEqual(SpikePolicy.parseAppList("Google Chrome Helper, com.X.App\ncurl ,"),
+                       ["Google Chrome Helper", "com.X.App", "curl"])
+        let path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome Helper"
+        XCTAssertTrue(Matching.appMatches(SpikePolicy.parseAppList("Google Chrome Helper"),
+                                          signingIdentifier: "com.google.Chrome.helper", executablePath: { path }))
+    }
+
+    func testStatusConfirmsOnlyTheLivePushedPolicy() {
+        let p = SpikePolicy(generation: 3, apps: ["curl"], hostnames: [])
+        var s = SpikeStatus()
+        s.policyGeneration = 3
+        s.policyLive = true
+        XCTAssertTrue(s.confirms(p))
+        // The extension rejected the policy (unknown version): it cleared its state.
+        var rejected = SpikeStatus()
+        rejected.policyGeneration = 0
+        rejected.policyLive = false
+        XCTAssertFalse(rejected.confirms(p))
+        s.policyGeneration = 2
+        XCTAssertFalse(s.confirms(p))
+    }
+
     func testScope() {
         XCTAssertEqual(IncludeScope("all"), .allTCP)
         XCTAssertEqual(IncludeScope("port:80"), .tcpPort(80))

@@ -62,7 +62,10 @@ func fetchOnce(_ url: URL, timeout: TimeInterval) -> String {
     return line
 }
 
+/// Byte counters, touched only on `queue`: URLSession delivers on it and the per-second report runs
+/// on it, so no bytes fall between a report's read and its reset.
 final class Streamer: NSObject, URLSessionDataDelegate {
+    let queue = DispatchQueue(label: "spike-fetch.stream")
     var total = 0
     var window = 0
     let done = DispatchSemaphore(value: 0)
@@ -86,9 +89,12 @@ if download {
     let s = Streamer()
     let config = URLSessionConfiguration.ephemeral
     config.timeoutIntervalForRequest = 30
-    let session = URLSession(configuration: config, delegate: s, delegateQueue: nil)
+    let delegateQueue = OperationQueue()
+    delegateQueue.underlyingQueue = s.queue
+    delegateQueue.maxConcurrentOperationCount = 1
+    let session = URLSession(configuration: config, delegate: s, delegateQueue: delegateQueue)
     session.dataTask(with: url).resume()
-    let timer = DispatchSource.makeTimerSource(queue: .global())
+    let timer = DispatchSource.makeTimerSource(queue: s.queue)
     timer.schedule(deadline: .now() + 1, repeating: 1)
     timer.setEventHandler {
         print("\(stamp())  \(s.window) B/s, \(s.total) total")
