@@ -21,7 +21,7 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 <p align="center">
   <img src="docs/images/screenshots/menu-bar.png" alt="The VPN Bypass dropdown in Bypass mode: WireGuard connected, ON, four services and two domains skip the VPN" width="300">
   &nbsp;&nbsp;
-  <img src="docs/images/screenshots/services.png" alt="The Settings window on the Services tab: 4 of 37 services on, Telegram, WhatsApp, YouTube and Spotify listed first under On" width="400">
+  <img src="docs/images/screenshots/services.png" alt="The Settings window on the Services tab: Telegram, WhatsApp, YouTube and Spotify under On, with the Browse catalogue button at the top" width="400">
   <br>
   <sub>The dropdown in Bypass mode, and the Settings window on the Services tab</sub>
 </p>
@@ -29,13 +29,13 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 ## Features
 
 - Three modes: Bypass sends the destinations you list around the VPN, VPN Only sends only them through it, and Custom routes each rule where you say, first match wins.
-- 37 built-in service packs (Telegram, WhatsApp, YouTube, Netflix, Spotify, Zoom, GitHub and more) plus any domain, wildcard or subnet you add.
+- A catalogue of 51 services (Telegram, WhatsApp, YouTube, Netflix, Spotify, Zoom, GitHub, French government sites and French banks, and more) plus any domain, wildcard or subnet you add.
 - Not sure what to add? Turn on Lookups (off by default) to see the names your Mac looks up, most frequent first, and add any of them with one click.
 - In Custom mode a rule can exit direct, through a specific VPN when several are up, through an HTTP or SOCKS5 proxy, or through a Tailscale peer.
 - Routes come back on their own when the VPN reconnects or the network changes, and domains are re-resolved as their addresses rotate.
-- Detects GlobalProtect, Cisco AnyConnect, OpenVPN, WireGuard, FortiClient, Zscaler, Cloudflare WARP, Pulse Secure, Check Point and Tailscale exit nodes.
+- Detects GlobalProtect, Cisco AnyConnect, OpenVPN, WireGuard, FortiClient, Zscaler, Cloudflare WARP, Pulse Secure, Check Point, Proton VPN and Tailscale exit nodes, and says when a VPN's kill switch leaves routes with no effect.
 - Leaves Tailscale's own range, loopback and the other tunnels alone, so a mesh VPN and local proxies keep working next to it.
-- `vpnb` scripts everything the app does over a socket only your account can open, and reads passwords from standard input, never from the command line.
+- `vpnb` scripts everything the app does over a socket only your account can open, answers in JSON with `--json`, and reads passwords from standard input, never from the command line.
 - No kernel or system extension to approve: one small root helper does the routing, and only this app can talk to it.
 - Optional `/etc/hosts` DNS bypass, route verification, notifications, launch at login, and config import and export.
 

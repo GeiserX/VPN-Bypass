@@ -21,7 +21,7 @@ planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`, with kernel routes kept as
 | **Menu Bar App** | ✅ Done | Real-time VPN status, route count, quick controls |
 | **Domain-based Bypass** | ✅ Done | Custom domains + 37+ pre-configured services |
 | **Route Management** | ✅ Done | Kernel routing table + `/etc/hosts` DNS bypass |
-| **VPN Detection** | ✅ Done | GlobalProtect, Cisco, OpenVPN, WireGuard, Fortinet, Zscaler, WARP, Tailscale, Check Point |
+| **VPN Detection** | ✅ Done | GlobalProtect, Cisco, OpenVPN, WireGuard, Fortinet, Zscaler, WARP, Tailscale, Check Point, Proton VPN |
 | **Network Change Handling** | ✅ Done | NWPathMonitor + debouncing, auto-refresh on wake |
 | **Notifications** | ✅ Done | Per-event toggles, silent mode, System Settings integration |
 | **Route Verification** | ✅ Done | Ping test (disabled by default - many servers block ICMP) |
