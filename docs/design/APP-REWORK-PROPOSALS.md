@@ -1,6 +1,17 @@
 # App rework proposals: one visual system for the whole app, and what to build next
 
-These are proposals, not decisions. The first round, [`UI-UX-PROPOSALS.md`](UI-UX-PROPOSALS.md), fixed sixteen problems one at a time and shipped as 5.0.0. This round looks at the whole app at once: the menu bar dropdown, the Settings window and every page in it.
+## Decided
+
+We picked on 2026-10-30. All of it ships in 6.0.0, in the order of section 6.
+
+- **Direction: 2A, quiet native** (section 2).
+- **Settings: the sidebar, 3.2 B.**
+- **Global SOCKS5 proxy: 3.5 A.** It moves behind an Advanced disclosure and is hidden in Custom mode.
+- **Every bug in section 4:** A1 to A7 and B1 to B4.
+- **Every flow fix in section 4:** 1 to 8.
+- **Every new idea in section 5:** 1 to 12. Idea 8, the kill-switch warning, already shipped in [#189](https://github.com/GeiserX/VPN-Bypass/pull/189). Ideas the table marks Later, Maybe or After #185 are built too, as step 15 of section 6.
+
+The rest of this doc is the proposal those picks came from. The first round, [`UI-UX-PROPOSALS.md`](UI-UX-PROPOSALS.md), fixed sixteen problems one at a time and shipped as 5.0.0. This round looks at the whole app at once: the menu bar dropdown, the Settings window and every page in it.
 
 Every claim about the current app points at the code as of `main` at [`4a45639`](https://github.com/GeiserX/VPN-Bypass/commit/4a45639) (5.5.2). The "before" halves of the images are crops of real renders of the app at that commit, drawn offscreen with the app's own views and placeholder data (WireGuard, `192.0.2.x`, `198.51.100.x`, `example.com`). Copies are kept in [`proposals/rework/before/`](proposals/rework/before/), so a re-render gives the same crops. One artefact of rendering inside the test runner: the Info crop shows "v16.0", the runner's own version, where the app shows its release number. The "after" halves are HTML mockups in [`proposals/rework/`](proposals/rework/). Their colours come from [`Theme.swift`](../../Sources/VPNBypassCore/Theme.swift), and the proposed tokens are written out in [`rework.css`](proposals/rework/rework.css). Re-render with [`proposals/rework/render.sh`](proposals/rework/render.sh), then run `pngquant --quality 80-95` over each PNG.
 
@@ -50,7 +61,7 @@ The Lanes navy and blue on every surface: a hero card for status, gradient prima
 
 **Trade-off.** Distinctive. It also adds the most chrome, makes lists about a third taller, and puts a custom ground under macOS 26's own materials. HIG asks for Liquid Glass to stay out of the content layer and for colour to keep one meaning ([colour](https://developer.apple.com/design/human-interface-guidelines/color), [materials](https://developer.apple.com/design/human-interface-guidelines/materials)). It is also the opposite of "prefer removals".
 
-**Recommendation: 2A.** It is the only direction that removes more than it adds, it is the look the owner already picked on Lookups, and it follows the platform rather than competing with it. The rest of this doc is drawn in 2A.
+**Recommendation: 2A (decided).** It is the only direction that removes more than it adds, it is the look the owner already picked on Lookups, and it follows the platform rather than competing with it. The rest of this doc is drawn in 2A.
 
 ### The recommended system, as tokens and components
 
@@ -137,13 +148,13 @@ Numbers use `monospacedDigit()` so columns line up. `design: .rounded` stays in 
 
 **What it costs.** A user who changes mode can lose the page they were on, and in VPN Only every page after Domains moves. The other mode's list can only be reached by switching the whole Mac's routing. Long pages scroll inside a short, fixed box, and two of them nest a second scroll view inside the page's own (`SettingsView.swift:843` and `:2120`, inside `:171`).
 
-**Proposal.** Pick one of these:
+**Proposal.** Three options; B is decided:
 
 - **(A) Keep the toolbar, show every page in every mode.** The cheapest. But nine items do not fit at 580 pt, so the window gets wider and the toolbar is still a flat row with no grouping.
 - **(B) A sidebar (recommended).** Status at the top, then three groups. Routing holds Domains, Services, Rules and Routes. Insight holds Lookups and Logs. App holds General and About. The mode popup sits at the top of the sidebar. Pages for another mode stay listed, greyed, and open read-only with one line: "Rules apply in Custom mode. You are in Bypass. [Switch…]". The window gets a minimum size of about 720×480 and can grow. The last page reopens and the page name is the window title. Search is in the title bar on every list page. `NavigationSplitView` is available on macOS 13, which is the app's target (`Package.swift:8`).
 - **(C) A main window and a separate small Settings window**, the way the Tailscale app went. It is the most flexible but means two windows to explain, for an app that has one job.
 
-**Recommendation: B.** The sidebar never changes shape, because a mode change only greys different items. It also delivers the unbuilt "later step" from the first round's proposal 2 (`UI-UX-PROPOSALS.md:43`): the inactive mode's list shown read-only. The nested scroll views go, because the page itself scrolls.
+**Recommendation: B (decided).** The sidebar never changes shape, because a mode change only greys different items. It also delivers the unbuilt "later step" from the first round's proposal 2 (`UI-UX-PROPOSALS.md:43`): the inactive mode's list shown read-only. The nested scroll views go, because the page itself scrolls.
 
 **Size.** M. `SettingsView.swift`'s shell and `RoutingModeSwitcher.swift`. The pages themselves move in their own PRs.
 
@@ -188,7 +199,7 @@ No image. Both keep their content and take the shared components.
 **Proposal.**
 
 - **General as five native groups with no icons:** Startup, Routing, DNS outside the VPN, Notifications, Configuration. Notification kinds become checkboxes. "Auto DNS Refresh" and "Refresh Interval" merge into one popup, "Look up addresses again: Every hour / … / Never". "Verify Routes After Apply" becomes "Check the path after applying", which runs idea 1 in section 5 instead of ping.
-- **The global SOCKS5 proxy.** Two options:
+- **The global SOCKS5 proxy.** Two options; A is decided:
   - **(A) Move it behind an Advanced disclosure and hide it in Custom mode (recommended).** One sentence points Custom users to Routes. Nothing changes for people who use it.
   - **(B) Retire it in favour of Custom mode's SOCKS5 routes.** Simpler in the long run, but it breaks the setup of anyone using it in Bypass mode. That needs a migration and a release note.
 - **About replaces Info**: wordmark, version, licence, author, three buttons (Website, GitHub, Report a problem…), and one "Support the project" row with a popup holding the four ways to give. "Report a problem…" copies a diagnostics bundle (versions, VPN type, mode, counts, recent errors, no names) and opens a new issue. That is item 15 of the August improvement plan, which was never built.
@@ -205,7 +216,7 @@ No image. There are six sheets with three header styles, three footer layouts an
 
 ## 4. UX flow fixes, ranked by what they cost the user
 
-### Fix first, whatever direction is picked
+### Fix first
 
 These are bugs. Each is S, and none depends on the rework.
 
@@ -262,7 +273,7 @@ Filtered from the product research. Two facts shape the list. First, every per-a
 | 5 | **Learn a site in 60 s** | Sites break because their CDN, sign-in or API names are not listed. Lookups counts names from the moment it started, with no "this site" view. | "Learn…" runs the existing helper DNS capture for 60 s while the user reloads the page. It lists the names first seen in that window, grouped by parent domain, with one Add and a wildcard offer for a parent with 3 or more names. Memory only, like Lookups (`docs/usage.md:77`). | S-M | No | **Build** after 1 and 2. |
 | 6 | **Stale entries** | A domain that stopped resolving stays forever and slows every refresh. | After N failed refreshes while the VPN is up, the row reads "Hasn't resolved since 3 Oct", with Remove on hover, and the Domains header offers a filter. Failures while the VPN is down do not count, because an internal name only resolves through it. | S | No | **Build.** It is a row state in `ListRow`. |
 | 7 | **VPN Only: block listed sites when the VPN drops** | When the VPN drops in VPN Only, the app removes the routes into it (`RouteManager.swift:1085-1110`), so the listed sites load over the open connection. That is the leak a VPN Only user chose the mode to avoid. | Opt-in. Swap the listed routes for reject routes through the helper, and restore them when the VPN returns. The dropdown says "VPN down: 12 listed sites blocked" with "Open them directly" as the way out. Needs its own route kind (the helper's existence check treats a reject route as missing, `HelperProtocol.swift:142`) and cleanup in the startup sweep. | M | No | **Later.** It needs a helper change, so batch it with others (each helper version costs every user an admin prompt), plus tests on the reconnect paths behind #61, #67 and #106. The same reasoning is why Pause is not offered in VPN Only (flow fix 2): nothing the app does should open that path on purpose. |
-| 8 | **Kill-switch warning** ([#186](https://github.com/GeiserX/VPN-Bypass/issues/186)) | With another VPN's kill switch on, our route can be right while the traffic is still dropped. The user sees "bypassed" next to a dead site. | Detect it by behaviour, not by product name: check 1 sees the physical interface picked while connections time out, across several addresses, while the VPN path works. Then say once, in Status and as a notification, that another app is blocking traffic outside its VPN. | M | No | **Being built for 6.0.** Proton's kill switch is the system's `includeAllNetworks` tunnel setting, so no route can get around it. The app reads that flag (and `enforceRoutes`) for the connected VPN and says bypass has no effect, instead of Working. |
+| 8 | **Kill-switch warning** ([#186](https://github.com/GeiserX/VPN-Bypass/issues/186)) | With another VPN's kill switch on, our route can be right while the traffic is still dropped. The user sees "bypassed" next to a dead site. | Detect it by behaviour, not by product name: check 1 sees the physical interface picked while connections time out, across several addresses, while the VPN path works. Then say once, in Status and as a notification, that another app is blocking traffic outside its VPN. | M | No | **Shipped in [#189](https://github.com/GeiserX/VPN-Bypass/pull/189).** Proton's kill switch is the system's `includeAllNetworks` tunnel setting, so no route can get around it. The app reads that flag (and `enforceRoutes`) for the connected VPN and says bypass has no effect, instead of Working. |
 | 9 | **Profiles per network** | Home, office and travel need different lists or modes (ROADMAP "Connection Profiles"). | A profile is a saved mode plus lists. Networks are told apart by the router (gateway IP plus its ARP MAC plus interface type), which needs no prompt and works on Ethernet. The alternative is the Wi-Fi name through CoreWLAN, which needs Location permission and does nothing on Ethernet. The SSID code the ROADMAP assumed is dead (B4). | M | No | **Later.** Profiles must reuse #185's catalogue, not copy it. |
 | 10 | **Shortcuts actions** | Automation today means the CLI or the MCP server. Most Mac users use Shortcuts. | App Intents for Pause, Resume, Set mode, Add domain, Turn a service on or off, and Get status, through the same entry point as `ControlSurface`, so outside changes show in the footer as `vpnb` changes do (`OutsideChange.swift`). Focus and time automations come from Shortcuts, which replaces the ROADMAP's "Scheduled Rules". | S-M | No | **Later.** Ship the intents. Which macOS versions run Shortcuts automations on the Mac is not verified, so treat triggers as a bonus. |
 | 11 | **Shared address warning** | Routing is per IP. A listed site behind a shared CDN address takes every other site on that address with it. That limit is written in CLAUDE.md and nowhere in the UI. | Check resolved addresses against bundled CDN ranges and say so in the row's detail line. | S-M | No | **Maybe.** The ranges go stale; informational only. |
@@ -276,11 +287,11 @@ Filtered from the product research. Two facts shape the list. First, every per-a
 
 **Dropped:** a bandwidth monitor and statistics (high effort, and idea 1 answers the real question), blocklists (a different product), iCloud sync (export and import plus profiles cover it), built-in schedules (idea 10 covers it), IPv6 leak protection (already handled: the forwarder answers AAAA empty, `WildcardDNS.swift:394-407`, and the resolver asks for IPv4 only, `DNSResolver.swift:149`), a separate DNS leak feature (hosts pinning and the scoped resolver cover listed names, and what is left is browser DoH, which is parked with NE), and MDM templates (no demand). Any history or suggestions feature must not keep observed DNS names on disk without a new explicit decision.
 
-## 6. Suggested build order, in small PRs
+## 6. Build order, in small PRs
 
 Each step is one PR unless it says otherwise. Every new string goes in EN, ES and FR (`check-localizations.py`), and every new control gets a VoiceOver name.
 
-**How it ships.** Everything here that gets picked ships in 6.0.0, together with #184, the #185 catalogue, the #186 kill-switch warning and the Network Extension engine. Each step's PR targets the `release/6.0` branch, so `main` and its auto-tag stay still; 6.0.0 is cut once, by merging `release/6.0` into `main`, after a full test on the Mac and a live test on the VPN.
+**How it ships.** Everything decided at the top ships in 6.0.0, together with #184, the #185 catalogue, the #186 kill-switch warning and the Network Extension engine. Each step's PR targets the `release/6.0` branch, so `main` and its auto-tag stay still; 6.0.0 is cut once, by merging `release/6.0` into `main`, after a full test on the Mac and a live test on the VPN.
 
 1. **Bugs A1 to A7 and B1 to B4**, one or two PRs. S each.
 2. **Tokens and components:** `Theme.Font`, `Theme.Space`, `Theme.Radius`, the colour roles, and `Components.swift` with the seven components, each with a snapshot in `DocScreenshotsTests`. No page changes. M.
@@ -291,17 +302,17 @@ Each step is one PR unless it says otherwise. Every new string goes in EN, ES an
 7. **Services** on the components. If #185 has not merged when the series starts, this step leaves the series and follows #185 instead. M.
 8. **Rules and Routes**, with the route chip fix. M.
 9. **Status and Logs** on the components. S each.
-10. **General and About**, with the SOCKS5 option picked in 3.5, and **Sheets** on `SheetScaffold`. M and S.
+10. **General and About**, with SOCKS5 option A from 3.5 (behind Advanced, hidden in Custom), and **Sheets** on `SheetScaffold`. M and S.
 11. **Dropdown rows and add field**, once `ListRow` has been proven on the list pages: always-open add field, row actions, scrolling list. M. Remove the old `Theme` aliases in this last PR of the series.
 12. **Pause** (idea 4 / flow fix 2). S.
 13. **Path check and "where does this site go?"** (ideas 1 and 2), which builds on #184's `--json`. M.
 14. **Bypass the site you are on, Learn a site, and stale entries** (ideas 3, 5 and 6). One PR each.
-15. Then the later ideas (7 to 12). The helper changes (7, and any others by then) are batched into one helper version.
+15. Then ideas 7 and 9 to 12 (8 shipped as #189). The helper changes (7, and any others by then) are batched into one helper version.
 
 ## Summary
 
 - The app has no shared visual system: colour-only tokens, about fifteen meanings for green, eleven row layouts. The dropdown also works out its state in several places that contradict each other. That is why it reads as a draft where Lookups does not.
-- The recommended direction is "quiet native", picked from three drawn side by side: system controls, colour only for state (green means live and nothing else), one row with actions on hover, and a sidebar where no page vanishes when the mode changes.
-- Fix the eleven bugs first, whatever is decided. The worst are the French product name, "none failed" under "helper not running", and a green ON over failures.
+- The direction is "quiet native", picked from three drawn side by side: system controls, colour only for state (green means live and nothing else), one row with actions on hover, and a sidebar where no page vanishes when the mode changes.
+- Fix the eleven bugs first. The worst are the French product name, "none failed" under "helper not running", and a green ON over failures.
 - The new ideas worth building first are a path check that replaces ping, with "where does this site go?", Pause (never in VPN Only), and bypass the site you are on. None needs a Network Extension. Per-app routing comes with the Network Extension engine.
-- **Your call:** the direction (2A), the sidebar (3.2 B), and what to do with the global SOCKS5 proxy (3.5 A or B).
+- **Decided:** direction 2A, the sidebar (3.2 B), the SOCKS5 proxy behind Advanced and hidden in Custom (3.5 A), and every bug, flow fix and idea, built in the section 6 order.
