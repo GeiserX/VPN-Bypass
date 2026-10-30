@@ -95,6 +95,49 @@ catch-all.
 
 ---
 
+## VPN kill switches
+
+Some VPNs can send every connection into their tunnel whatever the routing table says. Then no
+route this app adds changes anything: sites on your Bypass list still go through the VPN, and in
+VPN Only mode everything else does too.
+
+A VPN built on Apple's NetworkExtension does this with one of two settings:
+
+- **`includeAllNetworks`**. macOS ties every connection to the tunnel before the routing table is
+  read, and drops traffic while the VPN is not connected. This is what Proton VPN's kill switch
+  turns on. Apple lets a few things out: its own control traffic, captive portals, and what the VPN
+  allows on top. With **`excludeLocalNetworks`** (Proton calls it Allow LAN), addresses on your
+  local network still go direct, and so do routes this app adds to them.
+- **`enforceRoutes`**. The VPN's own routes win over the routing table and over apps that pick an
+  interface. With a VPN that takes all traffic, that is everything.
+
+No app that works through the routing table can get around either one, this one included. That
+is how they are meant to work.
+
+The app warns when a connected VPN has `includeAllNetworks` on, whichever tunnel it acts on, or
+when the VPN it acts on has `enforceRoutes` on. A split VPN with `enforceRoutes` next to it leaves
+the routes working, so it gives no warning. Then the dropdown's pill reads NO EFFECT and its
+sentence says why, for example "Proton VPN's kill switch sends all traffic through the VPN. Sites
+set to skip it still go through it." With `enforceRoutes` it says instead that anything the VPN's
+own routes cover goes through it, since the app does not read those routes. Settings > Status says "No effect", the menu bar mark loses
+its arrow, the log has a warning, and `vpnb status` shows `kill switch: includeAllNetworks`
+(`killSwitch` on the socket). `excludeLocalNetworks` in that list means local-network addresses
+still go direct. The routes stay installed, so they work again as soon as the setting is off.
+
+There are two ways out:
+
+1. **Turn the kill switch off** in the VPN app. The routes take effect at once. The pill catches
+   up on the app's next VPN check: within 30 seconds, or when you open the menu.
+2. **Use the VPN's own split tunnelling**, if it has one. Proton VPN's excludes apps from inside
+   the tunnel, so it works where routes cannot. Proton turns its kill switch off when
+   split tunnelling is on.
+
+The app reads these settings from `/Library/Preferences/com.apple.networkextension.plist`, which
+any user can read, each time it checks the VPN. A VPN that keeps its traffic in the tunnel some
+other way, such as a firewall rule, is not detected.
+
+---
+
 ## Checking what is actually happening
 
 ```sh

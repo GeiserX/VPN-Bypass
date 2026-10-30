@@ -92,12 +92,13 @@ final class VPNBCLITests: XCTestCase {
                                    schemaVersion: 2, supportedVersion: 1)
         result.activeRoutes = activeRoutesReply.result?.activeRoutes
         result.runtime = RuntimeStatus(helperReady: true, helperState: "Ready", vpnConnected: true, vpnInterface: "utun4",
-                                       enforcedRouteCount: 2, enforcing: true, appVersion: "5.2.0")
+                                       enforcedRouteCount: 2, enforcing: false, appVersion: "5.2.0",
+                                       killSwitch: ["includeAllNetworks"])
         XCTAssertEqual(VPNBCLI.textLines(ControlResponse(ok: true, result: result)), [
             "11111111-1111-1111-1111-111111111111  Proxy  [proxySOCKS5]  enabled  proxy.example.com:1080  user:yes  pass:yes  listening:127.0.0.1:18042",
             "93.184.216.34 -> 192.168.1.1  (example.com)",
             "203.0.113.0/24 -> 192.168.1.1  (Example Service)",
-            "helper: Ready  vpn: utun4  routes: 2  enforcing: true  app: 5.2.0",
+            "helper: Ready  vpn: utun4  routes: 2  enforcing: false  app: 5.2.0  kill switch: includeAllNetworks",
             "mode: custom",
             "schemaVersion: 2",
             "supportedVersion: 1",

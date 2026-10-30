@@ -153,6 +153,7 @@ public enum VPNBCLI {
             var line = "helper: \(runtime.helperState)  vpn: \(runtime.vpnConnected ? (runtime.vpnInterface ?? "connected") : "disconnected")"
             line += "  routes: \(runtime.enforcedRouteCount)  enforcing: \(runtime.enforcing)"
             if let version = runtime.appVersion { line += "  app: \(version)" }
+            if let killSwitch = runtime.killSwitch { line += "  kill switch: \(killSwitch.joined(separator: ","))" }
             out.append(line)
         }
 
