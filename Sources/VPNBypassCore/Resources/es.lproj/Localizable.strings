@@ -41,7 +41,6 @@
 "Add a domain above to bypass VPN" = "Añade un dominio arriba para evitar la VPN";
 
 /* ===== Ajustes — Pestaña Servicios ===== */
-"%lld/%lld enabled" = "%lld/%lld habilitados";
 "Services disabled in VPN Only mode" = "Servicios deshabilitados en modo Solo VPN";
 "Search services..." = "Buscar servicios...";
 "Create Custom Service" = "Crear servicio personalizado";
@@ -50,7 +49,6 @@
 /* Services page section headers; the On header is not the dropdown's ON pill */
 "services.section.on" = "ACTIVADOS";
 "CUSTOM SERVICES" = "SERVICIOS PERSONALIZADOS";
-"BUILT-IN SERVICES" = "SERVICIOS INTEGRADOS";
 
 /* ===== Ajustes — Editor de servicio ===== */
 "Edit Service" = "Editar servicio";
@@ -754,3 +752,32 @@
 "Take %@ out of the service %@" = "Quitar %1$@ del servicio %2$@";
 "%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names." = "%1$@ trae este nombre de serie y no se le puede quitar. Desactivar %2$@ deja de saltarse la VPN para todos sus nombres.";
 "Delete the rule for %@ on the Rules page, which sends it to %@" = "Borrar la regla de %1$@ de la página Reglas, que lo envía por %2$@";
+"catalogue.category.messaging" = "Mensajería";
+"catalogue.category.video" = "Vídeo";
+"catalogue.category.music" = "Música";
+"catalogue.category.social" = "Redes sociales";
+"catalogue.category.work" = "Trabajo";
+"catalogue.category.cloud" = "Almacenamiento en la nube";
+"catalogue.category.gaming" = "Juegos";
+"catalogue.category.developer" = "Desarrollo";
+"catalogue.category.ai" = "IA";
+"Browse catalogue…" = "Explorar el catálogo…";
+"No services yet. Pick the ones you use from the catalogue." = "Aún no hay servicios. Elige los que usas en el catálogo.";
+"Nothing on this page matches “%@”." = "Nada en esta página coincide con “%@”.";
+"Search the catalogue" = "Buscar en el catálogo";
+"Service catalogue" = "Catálogo de servicios";
+"Search by name, domain or country" = "Buscar por nombre, dominio o país";
+"No service in the catalogue matches “%@”. Make a custom service with the + button." = "Ningún servicio del catálogo coincide con “%@”. Crea un servicio personalizado con el botón +.";
+"Select all %@" = "Seleccionar todo: %@";
+"No service in %@ matches “%@”. Choose All to see the matches in other categories." = "Ningún servicio de %1$@ coincide con “%2$@”. Elige Todos para ver los que coinciden en otras categorías.";
+"Deselect all %@" = "Deseleccionar todo: %@";
+"All selected" = "Todos seleccionados";
+"Some selected" = "Algunos seleccionados";
+"None selected" = "Ninguno seleccionado";
+"Already on" = "Ya activado";
+"Bypass services" = "Hacer bypass de servicios";
+"Bypass 1 service" = "Hacer bypass de 1 servicio";
+"Bypass %lld services" = "Hacer bypass de %lld servicios";
+"Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it." = "%@ añadido a %@. El servicio está desactivado; añádelo desde Explorar el catálogo en la página Servicios para que haga bypass.";
+"catalogue.category.government" = "Administración pública";
+"catalogue.category.banks" = "Bancos";

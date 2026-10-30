@@ -9,8 +9,10 @@
 //
 // An app update can still bring a built-in service whose name a user's custom service already
 // has. The custom one keeps its name and its routes; the built-in one stays off until the
-// custom one is renamed (see `customServiceHolding`), and the custom one's row shows the line
-// asking for a new name.
+// custom one is renamed (see `customServiceHolding`). That off built-in service is no clash for
+// the custom service that already has the name: its row shows no line, its edits save, and an
+// export made before the update imports. Only a new name, or a name taken by a service that is
+// on, is refused.
 
 import Foundation
 
@@ -22,12 +24,16 @@ enum ServiceNameClash: Error, Equatable {
 
     /// The service or Bypass list entry that already uses `name`, ignoring case and the
     /// spaces around it, or nil when the name is free. `excluding` is the id of the service
-    /// being edited, so keeping its own name is not a clash.
-    static func find(_ name: String, excluding id: String?,
+    /// being edited, so keeping its own name is not a clash. `keepsName` says the custom
+    /// service already has `name`: then a built-in service that is off is no clash, because
+    /// the custom service holds it off (see `customServiceHolding`).
+    static func find(_ name: String, excluding id: String?, keepsName: Bool = false,
                      services: [ServiceEntry], domains: [DomainEntry]) -> ServiceNameClash? {
         let key = normalized(name)
         guard !key.isEmpty else { return nil }
-        if let other = services.first(where: { $0.id != id && normalized($0.name) == key }) {
+        if let other = services.first(where: {
+            $0.id != id && normalized($0.name) == key && !(keepsName && !$0.isCustom && !$0.enabled)
+        }) {
             return .service(name: other.name)
         }
         if let entry = domains.first(where: { normalized($0.domain) == key }) {
@@ -38,13 +44,17 @@ enum ServiceNameClash: Error, Equatable {
 
     /// The first custom service in an imported config whose name clashes, checked against the
     /// services the config will hold once the built-in ones are merged in: every built-in
-    /// under its current name, plus the file's own services the merge keeps.
+    /// under its current name, plus the file's own services the merge keeps. A built-in
+    /// service named like a custom one in the file is no clash: the merge keeps it off, as it
+    /// does when config.json loads, so a backup made before an update brought that name in
+    /// still imports.
     static func firstInImport(_ config: Config) -> (service: String, clash: ServiceNameClash)? {
         let builtIns = Config.defaultServices
         let builtInIds = Set(builtIns.map(\.id))
         let merged = builtIns + config.services.filter { !builtInIds.contains($0.id) }
         for service in merged where service.isCustom {
-            if let clash = find(service.name, excluding: service.id, services: merged, domains: config.domains) {
+            if let clash = find(service.name, excluding: service.id, keepsName: true,
+                                services: merged, domains: config.domains) {
                 return (service.name, clash)
             }
         }

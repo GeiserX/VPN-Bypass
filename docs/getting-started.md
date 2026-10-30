@@ -48,7 +48,7 @@ A fresh install routes nothing. The pill in the dropdown reads NOT SET UP, and t
 
 ![The dropdown right after install: WireGuard connected, the pill reads NOT SET UP, and the question What should skip the VPN? over six services with switches and a field to add a site](images/screenshots/first-run.png){ width="340" }
 
-Switch on a service there, or type a site into the field and press Return. "All 37 services…" opens Settings on the Services page. If you want the opposite, only a few sites on the VPN, click "Use VPN Only instead…". It worked when:
+Switch on a service there, or type a site into the field and press Return. "All 51 services…" opens Settings on the Services page with the service catalogue open. If you want the opposite, only a few sites on the VPN, click "Use VPN Only instead…". It worked when:
 
 - the pill reads ON;
 - the menu bar mark shows its arrow head (it is two plain lines and a bar while nothing is routed);

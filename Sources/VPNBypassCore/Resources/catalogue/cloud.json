@@ -1,0 +1,33 @@
+{
+  "category": "cloud",
+  "services": [
+    {
+      "id": "dropbox",
+      "name": "Dropbox",
+      "domains": [
+        "dropbox.com",
+        "www.dropbox.com",
+        "dl.dropboxusercontent.com"
+      ]
+    },
+    {
+      "id": "gdrive",
+      "name": "Google Drive",
+      "domains": [
+        "drive.google.com",
+        "docs.google.com",
+        "sheets.google.com",
+        "slides.google.com"
+      ]
+    },
+    {
+      "id": "icloud",
+      "name": "iCloud",
+      "domains": [
+        "icloud.com",
+        "www.icloud.com",
+        "apple-cloudkit.com"
+      ]
+    }
+  ]
+}

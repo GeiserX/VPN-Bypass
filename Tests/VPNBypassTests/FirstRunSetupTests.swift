@@ -287,8 +287,9 @@ final class FirstRunSetupViewTests: XCTestCase {
 
     /// The "All N services…" row opens Settings on the Services page, and the request is used
     /// once. The Domains page, the default, has no switch with an empty list; the Services page
-    /// has one per service.
+    /// has one per service that is on (here Telegram only; the rest are in the catalogue).
     func testTheSettingsWindowOpensOnTheRequestedPage() throws {
+        rm.config.services[try XCTUnwrap(rm.config.services.firstIndex { $0.id == "telegram" })].enabled = true
         func settings() -> some View {
             SettingsView()
                 .environmentObject(rm)
@@ -303,7 +304,31 @@ final class FirstRunSetupViewTests: XCTestCase {
 
         SettingsPageRequest.shared.page = .services
         let asked = host(settings(), size: NSSize(width: 580, height: 680))
-        XCTAssertGreaterThan(switches(in: asked).count, 5, "the Services page, with its switches")
+        XCTAssertEqual(switches(in: asked).count, 1, "the Services page, with the one service that is on")
         XCTAssertNil(SettingsPageRequest.shared.page, "the window took the request")
+        XCTAssertFalse(SettingsPageRequest.shared.openCatalogue, "control: nobody asked for the catalogue")
+    }
+
+    /// The row asks for the catalogue sheet too: the Services page takes the request and clears
+    /// it, so the next visit opens without the sheet.
+    func testTheAllServicesRowOpensTheCatalogue() throws {
+        SettingsPageRequest.shared.openCatalogue = true
+        SettingsPageRequest.shared.page = .services
+        defer { SettingsPageRequest.shared.openCatalogue = false }
+        _ = host(SettingsView()
+                    .environmentObject(rm)
+                    .environmentObject(NotificationManager.shared)
+                    .environmentObject(LaunchAtLoginManager.shared)
+                    .environmentObject(ModeSwitchRequest())
+                    .environmentObject(SettingsUndo(routeManager: rm)),
+                 size: NSSize(width: 580, height: 680))
+        XCTAssertNil(SettingsPageRequest.shared.page)
+        XCTAssertFalse(SettingsPageRequest.shared.openCatalogue, "the Services page took the request")
+    }
+
+    /// The row counts the catalogue, not the services in the config, which may hold custom ones.
+    func testTheAllServicesRowCountsTheCatalogue() {
+        XCTAssertEqual(FirstRunSetup.allServices(Config.defaultServices.count),
+                       "All \(ServiceCatalogue.shipped.count) services…")
     }
 }

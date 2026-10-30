@@ -356,9 +356,13 @@ extension RouteManager {
         } else if !addDomainToBuiltInService(name, serviceId: service.id) {
             return nil
         }
+        // A catalogue service that is off is not on the Services page: it is added from the
+        // catalogue, which puts it there.
         let message = service.enabled
             ? String(localized: "Added \(name) to \(service.name).")
-            : String(localized: "Added \(name) to \(service.name). The service is off; turn it on from the Services page to bypass it.")
+            : service.isCustom
+            ? String(localized: "Added \(name) to \(service.name). The service is off; turn it on from the Services page to bypass it.")
+            : String(localized: "Added \(name) to \(service.name). The service is off; add it from Browse catalogue on the Services page to bypass it.")
         return AddDomainFeedback(success: message)
     }
 

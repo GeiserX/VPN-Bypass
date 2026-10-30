@@ -158,7 +158,8 @@ final class RouteManager: ObservableObject {
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
     private var orphanedServiceDomains: [String: [String]] = [:]  // Deleted service name -> its domains (for hosts reconstruction)
     private(set) var routeEpoch: UInt64 = 0  // Incremented by removeAllRoutes — lets in-flight applies detect preemption
-    private var gatewayDetectedAt: Date?
+    /// When `localGateway` was last detected; set by tests to stand in for a fresh detection.
+    var gatewayDetectedAt: Date?
     private var lastInterfaceReroute: Date?
     /// A re-route (interface change or Tailscale profile change) that was NEEDED but
     /// couldn't run when it was detected — the route-operation gate was held (e.g. by a
@@ -306,6 +307,10 @@ final class RouteManager: ObservableObject {
     func loadConfig() {
         // Load DNS cache for faster startup / fallback
         loadDNSCache()
+        // A catalogue file CI should have refused; its other services still load.
+        for problem in ServiceCatalogue.problems {
+            log(.error, "Service catalogue: \(problem)")
+        }
         
         guard FileManager.default.fileExists(atPath: configURL.path) else {
             isConfigLoadFailed = false
@@ -4478,9 +4483,15 @@ final class RouteManager: ObservableObject {
     // MARK: - Custom Service Management
 
     /// The service or Bypass list entry a custom service called `name` would share its routes
-    /// with, or nil when the name is free. `excluding` is the service being edited.
-    func customServiceNameClash(_ name: String, excluding id: String? = nil) -> ServiceNameClash? {
-        ServiceNameClash.find(name, excluding: id, services: config.services, domains: config.domains)
+    /// with, or nil when the name is free. `excluding` is the service being edited. A built-in
+    /// service that is off is no clash when the edited service already has `name` (or
+    /// `keepsName` says so, for a service put back by Undo): it holds that built-in off.
+    func customServiceNameClash(_ name: String, excluding id: String? = nil, keepsName: Bool = false) -> ServiceNameClash? {
+        let ownName = id.flatMap { id in config.services.first { $0.id == id }?.name }
+        let keeps = keepsName || ownName.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        } == true
+        return ServiceNameClash.find(name, excluding: id, keepsName: keeps, services: config.services, domains: config.domains)
     }
 
     /// Saves nothing and returns the clash when `name` is taken (see `ServiceNameClash`).
@@ -4509,7 +4520,7 @@ final class RouteManager: ObservableObject {
             log(.warning, "Custom service \(service.name) is still listed, nothing to restore")
             return false
         }
-        if let clash = customServiceNameClash(service.name, excluding: service.id) {
+        if let clash = customServiceNameClash(service.name, excluding: service.id, keepsName: true) {
             log(.warning, "Custom service \(service.name) not restored: \(clash.message)")
             return false
         }
@@ -4712,12 +4723,6 @@ final class RouteManager: ObservableObject {
         ServiceNameClash.customServiceHolding(nameOf: service, in: config.services)
     }
 
-    /// The services Turn All On switches on: the ones off, less those a custom service holds
-    /// off. The Services page counts and names these in its menu and question.
-    var servicesTurnAllOnSwitchesOn: [ServiceEntry] {
-        config.services.filter { !$0.enabled && customServiceHolding(nameOf: $0) == nil }
-    }
-
     func toggleService(_ serviceId: String) {
         guard let index = config.services.firstIndex(where: { $0.id == serviceId }) else { return }
         if !config.services[index].enabled, let custom = customServiceHolding(nameOf: config.services[index]) {
@@ -4750,75 +4755,82 @@ final class RouteManager: ObservableObject {
     
     /// Apply routes for a single service (incremental add) - parallel DNS + batch routes
     private func applyRoutesForService(_ service: ServiceEntry, gateway: String) async {
+        await applyRoutesForServices([service], gateway: gateway)
+    }
+
+    /// Apply routes for several services at once (incremental add): every name is looked up
+    /// once, in parallel, and every new kernel route goes in ONE batch, so switching on ten
+    /// services from the catalogue writes the routing table once instead of ten times while
+    /// a VPN is up. Each service still owns its own addresses (`ActiveRoute.source`).
+    private func applyRoutesForServices(_ services: [ServiceEntry], gateway: String) async {
+        guard !services.isEmpty else { return }
         let epoch = routeEpoch
         var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool)] = []
 
         // Track existing destinations (for kernel-add dedup) and existing ownership (for source dedup)
         let existingDestinations = Set(activeRoutes.map { $0.destination })
-        let existingOwnership = Set(activeRoutes.map { "\($0.source)|\($0.destination)" })
+        var ownership = Set(activeRoutes.map { "\($0.source)|\($0.destination)" })
         var kernelAddedDests: Set<String> = []
 
         // Capture DNS settings for parallel resolution
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
 
-        // Resolve ALL domains in parallel (not sequentially)
-        let domainResults = await withTaskGroup(of: (String, [String]?).self) { group in
-            for domain in service.resolvableDomains {
+        // Resolve every name of every service in parallel, each name once
+        var names: [String] = []
+        for name in services.flatMap(\.resolvableDomains) where !names.contains(name) { names.append(name) }
+        let resolved = await withTaskGroup(of: (String, [String]?).self) { group in
+            for domain in names {
                 group.addTask {
                     let ips = await DNSResolver.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
                     return (domain, ips)
                 }
             }
 
-            var results: [(String, [String]?)] = []
-            for await result in group {
-                results.append(result)
+            var results: [String: [String]] = [:]
+            for await (domain, ips) in group {
+                if let ips { results[domain] = ips }
             }
             return results
         }
 
-        // Collect routes from resolved domains
-        var cacheUpdated = false
-        for (domain, ips) in domainResults {
-            guard let ips = ips else { continue }
-
-            // Cache all IPs (disk) and first IP (memory) for hosts file and startup
+        // Cache all IPs (disk) and first IP (memory) for hosts file and startup
+        for (domain, ips) in resolved {
             dnsDiskCache[domain] = ips
-            cacheUpdated = true
             if let firstIP = ips.first {
                 dnsCache[domain] = firstIP
             }
+        }
 
-            for ip in ips {
-                // Only add kernel route if destination is new (not already in kernel)
-                if !existingDestinations.contains(ip) && !kernelAddedDests.contains(ip) {
-                    kernelAddedDests.insert(ip)
-                    routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false))
-                }
-                // Always record ownership entry if this service doesn't already own this destination
-                let ownershipKey = "\(service.name)|\(ip)"
-                if !existingOwnership.contains(ownershipKey) {
-                    newRoutes.append(ActiveRoute(destination: ip, gateway: gateway, source: service.name, timestamp: Date()))
-                }
+        /// The new routes of each service, by name, for its log line.
+        var addedFor: [String: Int] = [:]
+        func take(_ destination: String, isNetwork: Bool, for service: ServiceEntry) {
+            // Only add kernel route if destination is new (not already in kernel)
+            if !existingDestinations.contains(destination) && !kernelAddedDests.contains(destination) {
+                kernelAddedDests.insert(destination)
+                routesToAdd.append((destination: destination, gateway: gateway, isNetwork: isNetwork))
+            }
+            // Always record ownership entry if this service doesn't already own this destination
+            let ownershipKey = "\(service.name)|\(destination)"
+            if !ownership.contains(ownershipKey) {
+                ownership.insert(ownershipKey)
+                newRoutes.append(ActiveRoute(destination: destination, gateway: gateway, source: service.name, timestamp: Date()))
             }
         }
 
-        // Add IP ranges (no DNS needed)
-        for range in service.ipRanges {
-            if !existingDestinations.contains(range) && !kernelAddedDests.contains(range) {
-                kernelAddedDests.insert(range)
-                routesToAdd.append((destination: range, gateway: gateway, isNetwork: true))
+        for service in services {
+            for domain in service.resolvableDomains {
+                for ip in resolved[domain] ?? [] { take(ip, isNetwork: false, for: service) }
             }
-            let ownershipKey = "\(service.name)|\(range)"
-            if !existingOwnership.contains(ownershipKey) {
-                newRoutes.append(ActiveRoute(destination: range, gateway: gateway, source: service.name, timestamp: Date()))
-            }
+            // Add IP ranges (no DNS needed)
+            for range in service.ipRanges { take(range, isNetwork: true, for: service) }
         }
 
         // Persist DNS cache so cache-based startup can use these IPs
-        if cacheUpdated { saveDNSCache() }
+        if !resolved.isEmpty { saveDNSCache() }
+
+        let label = services.count == 1 ? services[0].name : "\(services.count) services"
 
         // Apply new kernel routes in single batch, exclude failed destinations from ownership
         var failedDests: Set<String> = []
@@ -4826,7 +4838,7 @@ final class RouteManager: ObservableObject {
             let result = await addRoutesBatchTracked(routes: routesToAdd)
             failedDests = Set(result.failedDestinations)
             if result.failureCount > 0 {
-                log(.warning, "Batch route add for \(service.name): \(result.successCount) succeeded, \(result.failureCount) failed")
+                log(.warning, "Batch route add for \(label): \(result.successCount) succeeded, \(result.failureCount) failed")
             }
         }
 
@@ -4841,7 +4853,7 @@ final class RouteManager: ObservableObject {
 
         // Preemption check before committing
         guard routeEpoch == epoch else {
-            log(.info, "Service apply aborted for \(service.name): routes were cleared during operation")
+            log(.info, "Service apply aborted for \(label): routes were cleared during operation")
             await unstrandRoutes(attempted: Set(routesToAdd.map { $0.destination }), addFailed: failedDests)
             return
         }
@@ -4850,8 +4862,13 @@ final class RouteManager: ObservableObject {
             activeRoutes.append(contentsOf: confirmedRoutes)
         }
 
-        if !confirmedRoutes.isEmpty {
-            log(.success, "Added \(confirmedRoutes.count) route entries for \(service.name) (\(routesToAdd.count - failedDests.count) kernel routes)")
+        for route in confirmedRoutes { addedFor[route.source, default: 0] += 1 }
+        for service in services {
+            guard let count = addedFor[service.name] else { continue }
+            addedFor[service.name] = nil
+            let kernel = Set(confirmedRoutes.filter { $0.source == service.name }.map(\.destination))
+                .intersection(kernelAddedDests).subtracting(failedDests).count
+            log(.success, "Added \(count) route entries for \(service.name) (\(kernel) kernel routes)")
         }
     }
     
@@ -4893,11 +4910,12 @@ final class RouteManager: ObservableObject {
                 log(.error, "Cannot enable services: no local gateway detected")
                 return
             }
-            for service in servicesToChange {
-                guard routeEpoch == epoch else { return }
-                if enabled, let gw = gateway {
-                    await applyRoutesForService(service, gateway: gw)
-                } else if !enabled {
+            if enabled, let gw = gateway {
+                // One lookup pass and one batch of route writes for all of them.
+                await applyRoutesForServices(servicesToChange, gateway: gw)
+            } else if !enabled {
+                for service in servicesToChange {
+                    guard routeEpoch == epoch else { return }
                     await removeRoutesForSource(service.name)
                 }
             }
@@ -5141,12 +5159,15 @@ final class RouteManager: ObservableObject {
         // reaching that address via the PHYSICAL interface; vendor documentation describes
         // connect-then-flap-within-a-minute when that stops being true.
         var routes = routes
+        // Refused gateway destinations count as failed, so callers never record them as owned.
+        var protectedDests: [String] = []
         if let gw = vpnGateway, !gw.hasPrefix("iface:") {
             let protected = routes.filter { $0.destination == gw || $0.destination == gw + "/32" }
             if !protected.isEmpty {
                 log(.warning, "Refusing \(protected.count) route(s) targeting the VPN gateway \(gw) — protected")
                 routes.removeAll { $0.destination == gw || $0.destination == gw + "/32" }
-                if routes.isEmpty { return (0, protected.count, protected.map { $0.destination }, "protected: VPN gateway") }
+                protectedDests = protected.map { $0.destination }
+                if routes.isEmpty { return (0, protected.count, protectedDests, "protected: VPN gateway") }
             }
         }
         pendingKernelAdds.formUnion(routes.map { $0.destination })
@@ -5164,7 +5185,9 @@ final class RouteManager: ObservableObject {
         }
         // Failed destinations never reached the kernel — nothing to sweep for them.
         pendingKernelAdds.subtract(result.failedDestinations)
-        return result
+        guard !protectedDests.isEmpty else { return result }
+        return (result.successCount, result.failureCount + protectedDests.count,
+                result.failedDestinations + protectedDests, result.error)
     }
 
     /// Acquire exclusive route operation lock. Returns false if another operation is running.
@@ -5715,7 +5738,10 @@ final class RouteManager: ObservableObject {
         return result.success
     }
     
-    nonisolated func cleanDomain(_ input: String) -> String {
+    nonisolated func cleanDomain(_ input: String) -> String { Self.cleanDomain(input) }
+
+    /// `cleanDomain` without an instance, for code off the main actor (the service catalogue).
+    nonisolated static func cleanDomain(_ input: String) -> String {
         var domain = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Remove any protocol scheme (http, https, ssh, ftp, etc.) using regex
@@ -5801,7 +5827,9 @@ final class RouteManager: ObservableObject {
         return bits == 0 || bits == 1
     }
 
-    nonisolated func isValidIP(_ string: String) -> Bool {
+    nonisolated func isValidIP(_ string: String) -> Bool { Self.isValidIP(string) }
+
+    nonisolated static func isValidIP(_ string: String) -> Bool {
         let parts = string.components(separatedBy: ".")
         guard parts.count == 4 else { return false }
         return parts.allSatisfy {
@@ -5813,7 +5841,9 @@ final class RouteManager: ObservableObject {
 
     /// Validate CIDR notation (e.g., "192.168.1.0/24")
     /// Rejects /0 and /1, which collide with full-tunnel VPN catch-alls.
-    nonisolated func isValidCIDR(_ string: String) -> Bool {
+    nonisolated func isValidCIDR(_ string: String) -> Bool { Self.isValidCIDR(string) }
+
+    nonisolated static func isValidCIDR(_ string: String) -> Bool {
         let parts = string.components(separatedBy: "/")
         guard parts.count == 2,
               isValidIP(parts[0]),

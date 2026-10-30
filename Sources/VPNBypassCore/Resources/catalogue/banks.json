@@ -1,0 +1,113 @@
+{
+  "category": "banks",
+  "services": [
+    {
+      "id": "fr_societegenerale",
+      "name": "Société Générale",
+      "region": "FR",
+      "domains": [
+        "*.societegenerale.fr",
+        "*.societegenerale.com",
+        "*.sg.fr"
+      ]
+    },
+    {
+      "id": "fr_bnpparibas",
+      "name": "BNP Paribas",
+      "region": "FR",
+      "domains": [
+        "*.mabanque.bnpparibas"
+      ]
+    },
+    {
+      "id": "fr_creditagricole",
+      "name": "Crédit Agricole",
+      "region": "FR",
+      "domains": [
+        "*.credit-agricole.fr",
+        "*.ca-des-savoie.fr"
+      ]
+    },
+    {
+      "id": "fr_banquepopulaire",
+      "name": "Banque Populaire",
+      "region": "FR",
+      "domains": [
+        "*.banquepopulaire.fr"
+      ]
+    },
+    {
+      "id": "fr_caisseepargne",
+      "name": "Caisse d'Epargne",
+      "region": "FR",
+      "domains": [
+        "*.caisse-epargne.fr"
+      ]
+    },
+    {
+      "id": "fr_lcl",
+      "name": "LCL",
+      "region": "FR",
+      "domains": [
+        "*.lcl.fr"
+      ]
+    },
+    {
+      "id": "fr_labanquepostale",
+      "name": "La Banque Postale",
+      "region": "FR",
+      "domains": [
+        "*.labanquepostale.fr"
+      ]
+    },
+    {
+      "id": "fr_boursobank",
+      "name": "BoursoBank",
+      "region": "FR",
+      "domains": [
+        "*.boursobank.com",
+        "*.boursorama.com"
+      ]
+    },
+    {
+      "id": "fr_fortuneo",
+      "name": "Fortuneo",
+      "region": "FR",
+      "domains": [
+        "*.fortuneo.fr"
+      ]
+    },
+    {
+      "id": "fr_hellobank",
+      "name": "Hello bank!",
+      "region": "FR",
+      "domains": [
+        "*.hellobank.fr"
+      ]
+    },
+    {
+      "id": "fr_monabanq",
+      "name": "Monabanq",
+      "region": "FR",
+      "domains": [
+        "*.monabanq.com"
+      ]
+    },
+    {
+      "id": "fr_cic",
+      "name": "CIC",
+      "region": "FR",
+      "domains": [
+        "*.cic.fr"
+      ]
+    },
+    {
+      "id": "fr_creditmutuel",
+      "name": "Crédit Mutuel",
+      "region": "FR",
+      "domains": [
+        "*.creditmutuel.fr"
+      ]
+    }
+  ]
+}
