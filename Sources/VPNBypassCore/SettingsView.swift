@@ -636,6 +636,23 @@ struct ServiceSections {
         pinned.merging(pin(services)) { kept, _ in kept }
     }
 
+    /// Whether a service that is off has a row on the page: a custom service, or a saved
+    /// built-in the catalogue no longer ships. Any other service that is off waits in the sheet.
+    static func keepsRowWhenOff(_ service: ServiceEntry) -> Bool {
+        service.isCustom || !ServiceCatalogue.shippedIds.contains(service.id)
+    }
+
+    /// The pin with every service that is on now but pinned off and hidden pinned on: a
+    /// catalogue service switched on outside the page (the sheet, the menu bar, vpnb). The page
+    /// had no row for it, so pinning it moves nothing; rows the page shows keep their pin.
+    static func pinSwitchedOn(_ services: [ServiceEntry], into pinned: [String: Bool]) -> [String: Bool] {
+        var next = pinned
+        for service in services where service.enabled && pinned[service.id] == false && !keepsRowWhenOff(service) {
+            next[service.id] = true
+        }
+        return next
+    }
+
     /// Whether a service shows for the search text: its name or one of its domains contains
     /// the text, ignoring case. Empty text shows everything.
     static func matches(_ service: ServiceEntry, search: String) -> Bool {
@@ -648,7 +665,7 @@ struct ServiceSections {
         let shown = services.filter { Self.matches($0, search: search) }
         let isOn = { (service: ServiceEntry) in pinned[service.id] ?? service.enabled }
         on = shown.filter { isOn($0) }
-        custom = shown.filter { !isOn($0) && ($0.isCustom || !ServiceCatalogue.shippedIds.contains($0.id)) }
+        custom = shown.filter { !isOn($0) && Self.keepsRowWhenOff($0) }
     }
 
     /// What Turn All On switches on: the page's own rows that are off, less those a custom
@@ -912,6 +929,12 @@ struct ServicesTab: View {
                         pinned = ServiceSections.pinNew(routeManager.config.services, into: current)
                     }
                 }
+                // A catalogue service switched on elsewhere while the page is open shows at once.
+                .onChange(of: routeManager.config.services.filter(\.enabled).map(\.id)) { _ in
+                    if let current = pinned {
+                        pinned = ServiceSections.pinSwitchedOn(routeManager.config.services, into: current)
+                    }
+                }
                 // An undone Turn All On/Off moves many rows at once, like the switch itself.
                 .onChange(of: settingsUndo.undoneCount) { _ in
                     pinned = ServiceSections.pin(routeManager.config.services)
@@ -987,8 +1010,9 @@ struct ServicesTab: View {
     private func addFromCatalogue(_ ids: Set<String>) {
         showingCatalogue = false
         let changed = routeManager.setServicesEnabled(ids, true)
-        // The ids did not change, so onChange(of: ids) does not pin them; pin here.
-        pinned = ServiceSections.pin(routeManager.config.services)
+        // Pin the new rows on now; every row already on the page keeps its pin.
+        let services = routeManager.config.services
+        pinned = ServiceSections.pinSwitchedOn(services, into: pinned.map { ServiceSections.pinNew(services, into: $0) } ?? ServiceSections.pin(services))
         if !changed.isEmpty { settingsUndo.record(.servicesSwitched(ids: changed, on: true)) }
     }
 

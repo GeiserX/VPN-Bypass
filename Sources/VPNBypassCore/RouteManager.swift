@@ -5159,12 +5159,15 @@ final class RouteManager: ObservableObject {
         // reaching that address via the PHYSICAL interface; vendor documentation describes
         // connect-then-flap-within-a-minute when that stops being true.
         var routes = routes
+        // Refused gateway destinations count as failed, so callers never record them as owned.
+        var protectedDests: [String] = []
         if let gw = vpnGateway, !gw.hasPrefix("iface:") {
             let protected = routes.filter { $0.destination == gw || $0.destination == gw + "/32" }
             if !protected.isEmpty {
                 log(.warning, "Refusing \(protected.count) route(s) targeting the VPN gateway \(gw) — protected")
                 routes.removeAll { $0.destination == gw || $0.destination == gw + "/32" }
-                if routes.isEmpty { return (0, protected.count, protected.map { $0.destination }, "protected: VPN gateway") }
+                protectedDests = protected.map { $0.destination }
+                if routes.isEmpty { return (0, protected.count, protectedDests, "protected: VPN gateway") }
             }
         }
         pendingKernelAdds.formUnion(routes.map { $0.destination })
@@ -5182,7 +5185,9 @@ final class RouteManager: ObservableObject {
         }
         // Failed destinations never reached the kernel — nothing to sweep for them.
         pendingKernelAdds.subtract(result.failedDestinations)
-        return result
+        guard !protectedDests.isEmpty else { return result }
+        return (result.successCount, result.failureCount + protectedDests.count,
+                result.failedDestinations + protectedDests, result.error)
     }
 
     /// Acquire exclusive route operation lock. Returns false if another operation is running.

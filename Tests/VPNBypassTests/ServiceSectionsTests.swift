@@ -95,6 +95,32 @@ final class ServiceSectionsTests: XCTestCase {
                        ["telegram", "whatsapp", "signal", "youtube", "slack"])
     }
 
+    /// A catalogue service switched on outside the page while it is open (vpnb service.enable)
+    /// shows in On at once, without a new visit. Rows the page shows keep their pin.
+    func testAServiceTurnedOnElsewhereShowsWhileThePageIsOpen() {
+        let opened = catalogue + [service("mine", custom: true)]
+        var now = opened
+        now[2].enabled = true    // signal on from vpnb
+        now[7].enabled = true    // mine on from its own row on the page
+        let pinned = ServiceSections.pinSwitchedOn(now, into: ServiceSections.pin(opened))
+        let sections = ServiceSections(services: now, pinned: pinned, search: "")
+        XCTAssertEqual(ids(sections.on), ["telegram", "whatsapp", "signal", "youtube", "slack"])
+        XCTAssertEqual(ids(sections.custom), ["mine"], "a row flipped on the page does not move")
+    }
+
+    /// Adding from the catalogue pins the new rows on and keeps every other pin, so a catalogue
+    /// service switched off on the page keeps its row until the next visit.
+    func testAddingFromTheCatalogueKeepsARowSwitchedOffOnThePage() {
+        let opened = catalogue
+        var now = opened
+        now[0].enabled = false   // telegram off on the page
+        now[4].enabled = true    // netflix added from the sheet
+        let pinned = ServiceSections.pinSwitchedOn(now, into: ServiceSections.pinNew(now, into: ServiceSections.pin(opened)))
+        let sections = ServiceSections(services: now, pinned: pinned, search: "")
+        XCTAssertEqual(ids(sections.on), ["telegram", "whatsapp", "youtube", "netflix", "slack"])
+        XCTAssertEqual(sections.on.first?.enabled, false)
+    }
+
     /// A service the page has not seen, such as a custom service just created, goes by its own
     /// switch instead of falling into the off sections.
     func testAServiceAddedSinceThePageOpenedGoesByItsOwnSwitch() {
