@@ -1,0 +1,42 @@
+{
+  "category": "gaming",
+  "services": [
+    {
+      "id": "steam",
+      "name": "Steam",
+      "domains": [
+        "steampowered.com",
+        "store.steampowered.com",
+        "steamcommunity.com",
+        "steamcdn-a.akamaihd.net"
+      ]
+    },
+    {
+      "id": "epicgames",
+      "name": "Epic Games",
+      "domains": [
+        "epicgames.com",
+        "www.epicgames.com",
+        "launcher-public-service-prod.ol.epicgames.com"
+      ]
+    },
+    {
+      "id": "playstation",
+      "name": "PlayStation Network",
+      "domains": [
+        "playstation.com",
+        "www.playstation.com",
+        "store.playstation.com"
+      ]
+    },
+    {
+      "id": "xbox",
+      "name": "Xbox Live",
+      "domains": [
+        "xbox.com",
+        "www.xbox.com",
+        "xboxlive.com"
+      ]
+    }
+  ]
+}

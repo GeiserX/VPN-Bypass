@@ -739,3 +739,12 @@
 "Take %@ out of the service %@" = "Retirer %1$@ du service %2$@";
 "%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names." = "%1$@ inclut ce nom d'origine et ne peut pas le perdre. Désactiver %2$@ cesse de contourner le VPN pour tous ses noms.";
 "Delete the rule for %@ on the Rules page, which sends it to %@" = "Supprimer la règle de %1$@ de la page Règles, qui l'envoie par %2$@";
+"catalogue.category.messaging" = "Messagerie";
+"catalogue.category.video" = "Vidéo";
+"catalogue.category.music" = "Musique";
+"catalogue.category.social" = "Réseaux sociaux";
+"catalogue.category.work" = "Travail";
+"catalogue.category.cloud" = "Stockage en ligne";
+"catalogue.category.gaming" = "Jeux";
+"catalogue.category.developer" = "Développement";
+"catalogue.category.ai" = "IA";

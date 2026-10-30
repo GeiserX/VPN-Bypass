@@ -739,3 +739,12 @@
 "Take %@ out of the service %@" = "Take %@ out of the service %@";
 "%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names." = "%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names.";
 "Delete the rule for %@ on the Rules page, which sends it to %@" = "Delete the rule for %@ on the Rules page, which sends it to %@";
+"catalogue.category.messaging" = "Messaging";
+"catalogue.category.video" = "Video";
+"catalogue.category.music" = "Music";
+"catalogue.category.social" = "Social";
+"catalogue.category.work" = "Work";
+"catalogue.category.cloud" = "Cloud storage";
+"catalogue.category.gaming" = "Gaming";
+"catalogue.category.developer" = "Developer";
+"catalogue.category.ai" = "AI";

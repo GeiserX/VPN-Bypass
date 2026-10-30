@@ -302,6 +302,10 @@ final class RouteManager: ObservableObject {
     func loadConfig() {
         // Load DNS cache for faster startup / fallback
         loadDNSCache()
+        // A catalogue file CI should have refused; its other services still load.
+        for problem in ServiceCatalogue.problems {
+            log(.error, "Service catalogue: \(problem)")
+        }
         
         guard FileManager.default.fileExists(atPath: configURL.path) else {
             isConfigLoadFailed = false
@@ -5673,7 +5677,10 @@ final class RouteManager: ObservableObject {
         return result.success
     }
     
-    nonisolated func cleanDomain(_ input: String) -> String {
+    nonisolated func cleanDomain(_ input: String) -> String { Self.cleanDomain(input) }
+
+    /// `cleanDomain` without an instance, for code off the main actor (the service catalogue).
+    nonisolated static func cleanDomain(_ input: String) -> String {
         var domain = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Remove any protocol scheme (http, https, ssh, ftp, etc.) using regex
@@ -5759,7 +5766,9 @@ final class RouteManager: ObservableObject {
         return bits == 0 || bits == 1
     }
 
-    nonisolated func isValidIP(_ string: String) -> Bool {
+    nonisolated func isValidIP(_ string: String) -> Bool { Self.isValidIP(string) }
+
+    nonisolated static func isValidIP(_ string: String) -> Bool {
         let parts = string.components(separatedBy: ".")
         guard parts.count == 4 else { return false }
         return parts.allSatisfy {
@@ -5771,7 +5780,9 @@ final class RouteManager: ObservableObject {
 
     /// Validate CIDR notation (e.g., "192.168.1.0/24")
     /// Rejects /0 and /1, which collide with full-tunnel VPN catch-alls.
-    nonisolated func isValidCIDR(_ string: String) -> Bool {
+    nonisolated func isValidCIDR(_ string: String) -> Bool { Self.isValidCIDR(string) }
+
+    nonisolated static func isValidCIDR(_ string: String) -> Bool {
         let parts = string.components(separatedBy: "/")
         guard parts.count == 2,
               isValidIP(parts[0]),
