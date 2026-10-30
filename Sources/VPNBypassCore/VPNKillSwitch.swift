@@ -144,12 +144,14 @@ public enum VPNKillSwitchReader {
     // MARK: - Live
 
     /// The kill switch of a connected VPN, from the archive at `path` and the `connected` ids
-    /// (`scutil --nc list`). Blocking but cheap: one file read, and a status call only for a
-    /// connected configuration that has a flag on. Never call it on the main thread.
+    /// (`scutil --nc list`). `.some(nil)` is a successful read with no kill switch; nil means
+    /// the file could not be read, so the caller keeps what it knew. Blocking but cheap: one
+    /// file read, and a status call only for a connected configuration that has a flag on.
+    /// Never call it on the main thread.
     static func read(connected: Set<String>, trackedInterface: String?,
-                     path: String = configurationsPath) -> VPNKillSwitch? {
-        guard !connected.isEmpty,
-              let data = FileManager.default.contents(atPath: path) else { return nil }
+                     path: String = configurationsPath) -> VPNKillSwitch?? {
+        guard !connected.isEmpty else { return .some(nil) }
+        guard let data = FileManager.default.contents(atPath: path) else { return nil }
         let configurations = vpnConfigurations(from: data)
         var interfaces: [String: String] = [:]
         for config in configurations where connected.contains(config.id) && config.defeatsRoutes {

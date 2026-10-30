@@ -262,10 +262,22 @@ final class VPNKillSwitchReaderTests: XCTestCase {
         try archive([vpnEntry(idA, name: "Proton VPN", app: "ch.protonvpn.mac", flags: killSwitchFlags),
                      vpnEntry(idB, flags: offFlags)]).write(to: url)
         let ks = VPNKillSwitchReader.read(connected: [idA], trackedInterface: "utun9", path: url.path)
-        XCTAssertEqual(ks, VPNKillSwitch(name: "Proton VPN", includeAllNetworks: true, enforceRoutes: false,
-                                         excludeLocalNetworks: true))
-        XCTAssertNil(VPNKillSwitchReader.read(connected: [idB], trackedInterface: nil, path: url.path))
-        XCTAssertNil(VPNKillSwitchReader.read(connected: [idA], trackedInterface: nil, path: url.path + ".missing"))
+        XCTAssertEqual(ks, .some(VPNKillSwitch(name: "Proton VPN", includeAllNetworks: true, enforceRoutes: false,
+                                               excludeLocalNetworks: true)))
+        let off = try XCTUnwrap(VPNKillSwitchReader.read(connected: [idB], trackedInterface: nil, path: url.path),
+                                "a file that reads is an answer")
+        XCTAssertNil(off, "and the answer is no kill switch")
+    }
+
+    /// A file that cannot be read is "unknown", not "no kill switch": the app keeps its last
+    /// reading instead of clearing the warning and letting a Refresh report success.
+    func testAnUnreadableFileIsUnknownNotOff() {
+        let missing = VPNKillSwitchReader.read(connected: [idA], trackedInterface: nil,
+                                               path: "/nonexistent/ne-\(UUID().uuidString).plist")
+        if case .some = missing { XCTFail("an unreadable file must not read as an answer: \(String(describing: missing))") }
+        let nothingConnected = VPNKillSwitchReader.read(connected: [], trackedInterface: nil,
+                                                        path: "/nonexistent/ne.plist")
+        XCTAssertEqual(nothingConnected, .some(nil), "nothing connected is a real \"no\", file or not")
     }
 
     /// Set VPNB_NE_PLIST to a copy of a real archive to see what the reader makes of it.
@@ -336,11 +348,35 @@ final class KillSwitchStatusTests: XCTestCase {
                        "Turn off its kill switch, or use its own split tunnelling. Local-network addresses still skip it.")
     }
 
+    /// `enforceRoutes` takes only what the VPN's own routes cover, which the app does not read,
+    /// so the sentence must not say a given site still goes through it, in any mode.
     func testEnforceRoutesHasItsOwnWording() {
         let enforce = VPNKillSwitch(name: nil, includeAllNetworks: false, enforceRoutes: true, excludeLocalNetworks: false)
-        let s = DropdownStatus.make(input { $0.vpnName = "WireGuard"; $0.killSwitch = enforce }, now: now)
-        XCTAssertEqual(s.sentence, "WireGuard makes its own routes win over this app's. Sites set to skip it still go through it.")
-        XCTAssertEqual(s.note, "Turn off that setting in the VPN app, or use its own split tunnelling.")
+        for mode in [DropdownCopy.Mode.bypass, .vpnOnly, .custom] {
+            let s = DropdownStatus.make(input { $0.vpnName = "WireGuard"; $0.mode = mode; $0.killSwitch = enforce }, now: now)
+            XCTAssertEqual(s.sentence, "WireGuard makes its own routes win over this app's. Anything its routes cover goes through it, whatever is set here.")
+            XCTAssertEqual(s.note, "Turn off that setting in the VPN app, or use its own split tunnelling.")
+        }
+    }
+
+    /// `includeAllNetworks` counts on any connected VPN, so an unnamed one is not given the
+    /// name of the VPN the app acts on.
+    func testAnUnnamedKillSwitchIsNotGivenTheTrackedVPNsName() {
+        let unnamed = VPNKillSwitch(name: nil, includeAllNetworks: true, enforceRoutes: false, excludeLocalNetworks: false)
+        let s = DropdownStatus.make(input { $0.vpnName = "WireGuard"; $0.killSwitch = unnamed }, now: now)
+        XCTAssertEqual(s.headline, "WireGuard connected")
+        XCTAssertEqual(s.sentence, "A connected VPN's kill switch sends all traffic through the VPN. Sites set to skip it still go through it.")
+    }
+
+    func testTheMenuBarLabelMatchesTheFlags() {
+        XCTAssertEqual(MenuBarLabel.killSwitchAccessibilityLabel(proton),
+                       "VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it")
+        let lan = VPNKillSwitch(name: "Proton VPN", includeAllNetworks: true, enforceRoutes: false, excludeLocalNetworks: true)
+        XCTAssertEqual(MenuBarLabel.killSwitchAccessibilityLabel(lan),
+                       "VPN Bypass: the VPN's kill switch sends all traffic through it except local-network addresses")
+        let enforce = VPNKillSwitch(name: nil, includeAllNetworks: false, enforceRoutes: true, excludeLocalNetworks: true)
+        XCTAssertEqual(MenuBarLabel.killSwitchAccessibilityLabel(enforce),
+                       "VPN Bypass: the VPN's own routes win over this app's, so routes set here have no effect")
     }
 
     /// The second half of the sentence says what the routes were for in the current mode.

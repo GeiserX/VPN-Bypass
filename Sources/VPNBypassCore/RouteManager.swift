@@ -1154,18 +1154,22 @@ final class RouteManager: ObservableObject {
 
     /// Re-reads whether a connected VPN has a kill switch on. Runs on every detection pass,
     /// which is never a tight loop: one `scutil --nc list`, and the configuration file only
-    /// when a NetworkExtension VPN is connected.
+    /// when a NetworkExtension VPN is connected. A lookup that fails keeps the last reading:
+    /// clearing it would read as "no kill switch" and let a Refresh report success.
     private func refreshVPNKillSwitch(connected: Bool, trackedInterface: String?) async {
         var found: VPNKillSwitch?
-        if connected, let list = await runProcessAsync("/usr/sbin/scutil", arguments: ["--nc", "list"], timeout: 3.0),
-           list.exitCode == 0 {
+        if connected {
+            guard let list = await runProcessAsync("/usr/sbin/scutil", arguments: ["--nc", "list"], timeout: 3.0),
+                  list.exitCode == 0 else { return }
             let ids = VPNKillSwitchReader.connectedIDs(fromNCList: list.output)
             if !ids.isEmpty {
-                found = await withCheckedContinuation { continuation in
+                let reading: VPNKillSwitch?? = await withCheckedContinuation { continuation in
                     vpnBypassProcessQueue.async {
                         continuation.resume(returning: VPNKillSwitchReader.read(connected: ids, trackedInterface: trackedInterface))
                     }
                 }
+                guard let reading else { return }
+                found = reading
             }
         }
         guard found != vpnKillSwitch else { return }

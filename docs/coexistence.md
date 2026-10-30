@@ -118,7 +118,8 @@ The app warns when a connected VPN has `includeAllNetworks` on, whichever tunnel
 when the VPN it acts on has `enforceRoutes` on. A split VPN with `enforceRoutes` next to it leaves
 the routes working, so it gives no warning. Then the dropdown's pill reads NO EFFECT and its
 sentence says why, for example "Proton VPN's kill switch sends all traffic through the VPN. Sites
-set to skip it still go through it." Settings > Status says "No effect", the menu bar mark loses
+set to skip it still go through it." With `enforceRoutes` it says instead that anything the VPN's
+own routes cover goes through it, since the app does not read those routes. Settings > Status says "No effect", the menu bar mark loses
 its arrow, the log has a warning, and `vpnb status` shows `kill switch: includeAllNetworks`
 (`killSwitch` on the socket). `excludeLocalNetworks` in that list means local-network addresses
 still go direct. The routes stay installed, so they work again as soon as the setting is off.

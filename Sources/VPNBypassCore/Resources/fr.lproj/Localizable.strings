@@ -283,7 +283,10 @@
 "Sites set to skip it still go through it." = "Les sites censés le contourner passent quand même par lui.";
 "Everything meant to skip it still goes through it." = "Tout ce qui devrait le contourner passe quand même par lui.";
 "Rules set to go direct still go through it." = "Les règles censées aller en direct passent quand même par lui.";
-"VPN Bypass: the VPN's own routes win over this app's, so nothing skips it" = "VPN Bypass : les routes du VPN passent avant celles de cette app, donc rien ne le contourne";
+"VPN Bypass: the VPN's own routes win over this app's, so routes set here have no effect" = "VPN Bypass : les routes du VPN passent avant celles de cette app, donc les routes définies ici sont sans effet";
+"VPN Bypass: the VPN's kill switch sends all traffic through it except local-network addresses" = "VPN Bypass : le kill switch du VPN fait passer tout le trafic par lui, sauf les adresses du réseau local";
+"Anything its routes cover goes through it, whatever is set here." = "Tout ce que couvrent ses routes passe par lui, quels que soient les réglages ici.";
+"A connected VPN's kill switch sends all traffic through the VPN." = "Le kill switch d'un VPN connecté fait passer tout le trafic par le VPN.";
 "Turn off its kill switch, or use its own split tunnelling." = "Désactivez son kill switch, ou utilisez son propre split tunneling.";
 "Turn off that setting in the VPN app, or use its own split tunnelling." = "Désactivez ce réglage dans l'app du VPN, ou utilisez son propre split tunneling.";
 "Local-network addresses still skip it." = "Les adresses du réseau local, elles, le contournent toujours.";
