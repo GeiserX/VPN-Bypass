@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>com.geiserx.vpn-bypass.spike.proxy</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.geiserx.vpn-bypass.spike.proxy</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>VPN Bypass NE Spike Proxy</string>
+	<key>CFBundleDisplayName</key>
+	<string>VPN Bypass NE Spike</string>
+	<key>CFBundlePackageType</key>
+	<string>SYSX</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>NSSystemExtensionUsageDescription</key>
+	<string>Test build: sends the traffic of apps you list outside the VPN.</string>
+	<key>NetworkExtension</key>
+	<dict>
+		<key>NEProviderClasses</key>
+		<dict>
+			<key>com.apple.networkextension.app-proxy</key>
+			<string>FlowProxy</string>
+		</dict>
+	</dict>
+</dict>
+</plist>
