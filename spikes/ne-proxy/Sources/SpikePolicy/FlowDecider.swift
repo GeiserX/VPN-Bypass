@@ -166,6 +166,14 @@ public enum AddressRanges {
         excludedIPv4.map { (dotted($0.network), $0.prefix) }
     }
 
+    /// The ranges `excludedNetworkRules` can carry. Leaves out 0/8: its network address is 0.0.0.0,
+    /// and an excluded rule (port 0, any) on 0.0.0.0 is wildcard address plus wildcard port, which
+    /// macOS rejects ("Either a non-wildcard port or a non-wildcard address must be specified"), so
+    /// `setTunnelNetworkSettings` fails and the proxy never starts. `isExcluded` still declines 0/8.
+    public static var excludedRuleCIDRs: [(address: String, prefix: Int)] {
+        excludedIPv4.filter { $0.network != 0 }.map { (dotted($0.network), $0.prefix) }
+    }
+
     public static func isExcluded(_ a: UInt32) -> Bool {
         excludedIPv4.contains { r in
             let mask: UInt32 = r.prefix == 0 ? 0 : ~UInt32(0) << UInt32(32 - r.prefix)

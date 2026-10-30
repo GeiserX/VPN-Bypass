@@ -39,7 +39,7 @@ final class FlowProxy: NETransparentProxyProvider {
                                                            remotePrefix: 0, localNetworkEndpoint: nil, localPrefix: 0,
                                                            protocol: .TCP, direction: .outbound)]
         }
-        var excluded = AddressRanges.excludedIPv4CIDRs.map {
+        var excluded = AddressRanges.excludedRuleCIDRs.map {
             NENetworkRule(destinationNetworkEndpoint: Self.endpoint($0.address, 0), prefix: $0.prefix, protocol: .TCP)
         }
         for (address, prefix) in [("fc00::", 7), ("fe80::", 10), ("ff00::", 8)] {

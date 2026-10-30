@@ -39,12 +39,18 @@ final class Egress {
     }
 
     /// Plain TCP, IPv4 only, no-delay, 5 s connect timeout, required to leave on `iface`.
+    ///
+    /// Built from an empty stack, not `nw_parameters_create_secure_tcp(_nw_parameters_configure_protocol_disable, …)`:
+    /// Swift hands that sentinel over as a fresh block, Network does not recognise it, and the
+    /// connection ran a TLS handshake against port 80 ("bad protocol version"), so every claimed
+    /// flow failed.
     static func parameters(on iface: nw_interface_t) -> nw_parameters_t {
-        let params = nw_parameters_create_secure_tcp(_nw_parameters_configure_protocol_disable) { tcp in
-            nw_tcp_options_set_no_delay(tcp, true)
-            nw_tcp_options_set_connection_timeout(tcp, 5)
-        }
+        let params = nw_parameters_create()
         let stack = nw_parameters_copy_default_protocol_stack(params)
+        let tcp = nw_tcp_create_options()
+        nw_tcp_options_set_no_delay(tcp, true)
+        nw_tcp_options_set_connection_timeout(tcp, 5)
+        nw_protocol_stack_set_transport_protocol(stack, tcp)
         let ip = nw_protocol_stack_copy_internet_protocol(stack)
         if let ip { nw_ip_options_set_version(ip, nw_ip_version_4) }
         nw_parameters_require_interface(params, iface)

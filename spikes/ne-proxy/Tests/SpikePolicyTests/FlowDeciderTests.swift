@@ -154,4 +154,14 @@ final class PolicyTests: XCTestCase {
         XCTAssertTrue(cidrs.contains("100.64.0.0/10"))
         XCTAssertTrue(cidrs.contains("172.16.0.0/12"))
     }
+
+    /// An excluded rule is built with port 0 (any); on 0.0.0.0 that is all wildcards and macOS
+    /// refuses the whole settings object, so the proxy never starts. 0/8 stays declined in code.
+    func testExcludedRulesHaveNoWildcardAddress() {
+        let rules = AddressRanges.excludedRuleCIDRs.map { "\($0.address)/\($0.prefix)" }
+        XCTAssertFalse(rules.contains { $0.hasPrefix("0.0.0.0/") }, "\(rules)")
+        XCTAssertEqual(rules.count, AddressRanges.excludedIPv4.count - 1)
+        XCTAssertTrue(rules.contains("100.64.0.0/10"))
+        XCTAssertTrue(AddressRanges.isExcluded(AddressRanges.parse("0.1.2.3")!))
+    }
 }
