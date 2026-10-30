@@ -98,7 +98,8 @@ enum SiteRoute {
         var custom: Bool
         /// The current mode's list: the Bypass list, or VPN Only's.
         var list: [DomainEntry]
-        /// Bypass only: the enabled services.
+        /// Bypass: the enabled services. Custom: every service, since a service rule reads its
+        /// service whether or not the Bypass list has it on (RuleDestinationBuilder).
         var services: [ServiceEntry]
         var rules: [Rule]
         var routes: [Route]
@@ -154,8 +155,10 @@ enum SiteRoute {
             let byId = Dictionary(s.routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let ordered = s.rules.filter(\.enabled).sorted { $0.order < $1.order }
             for (index, rule) in ordered.enumerated() {
+                // A rule whose route is gone or turned off is inert, as RouteCompiler and
+                // WildcardRoutes treat it: the name falls through to a later rule.
                 guard ruleMatches(rule, host: host, addresses: addresses, services: servicesOfHost),
-                      let route = byId[rule.routeId] else { continue }
+                      let route = byId[rule.routeId], route.enabled else { continue }
                 return Found(match: .rule, entry: rule.pattern, rulePosition: index + 1,
                              ruleMatchType: rule.matchType.rawValue, routeName: route.name,
                              expected: way(for: route, vpnInterface: s.vpnInterface))
@@ -203,7 +206,8 @@ enum SiteRoute {
     /// The matchers RuleResolver uses, for a name and its addresses at once.
     static func ruleMatches(_ rule: Rule, host: String, addresses: [String], services: Set<String>) -> Bool {
         switch rule.matchType {
-        case .domain: return rule.pattern.caseInsensitiveCompare(host) == .orderedSame
+        // A wildcard written as a name rule covers the names under it, as WildcardRoutes reads it.
+        case .domain: return domainCovers(rule.pattern, host)
         case .suffix:
             let pattern = WildcardDomain.suffix(of: rule.pattern) ?? rule.pattern
             return RuleResolver.domainMatchesSuffix(host, suffix: pattern)
@@ -378,7 +382,7 @@ extension RouteManager {
         return SiteRoute.Snapshot(
             mode: config.routingMode, custom: custom,
             list: config.routingMode == .vpnOnly ? config.inverseDomains : config.domains,
-            services: config.services.filter(\.enabled),
+            services: custom ? config.services : config.services.filter(\.enabled),
             rules: config.rules, routes: config.routes, defaultRouteId: config.defaultRouteId,
             activeRoutes: activeRoutes.map { ($0.destination, $0.gateway, $0.source) },
             localGateway: localGateway, vpnInterface: isVPNConnected ? vpnInterface : nil)

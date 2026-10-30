@@ -137,6 +137,44 @@ final class SiteRouteTests: XCTestCase {
         XCTAssertEqual(SiteRoute.match(host: "api.github.com", addresses: ["203.0.113.5"], in: s).match, .rule)
     }
 
+    /// A rule whose route is turned off is inert, as RouteCompiler skips it: the name falls
+    /// through to the next rule.
+    func testCustomRuleOnADisabledRouteFallsThrough() {
+        let off = Route(name: "Off", egress: .direct, enabled: false)
+        let rules = [Rule(matchType: .domain, pattern: "example.com", routeId: off.id, order: 0),
+                     Rule(matchType: .suffix, pattern: "example.com", routeId: corp.id, order: 1)]
+        let s = snapshot(mode: .custom, rules: rules, routes: [off, direct, corp], defaultRouteId: direct.id)
+        let found = SiteRoute.match(host: "example.com", addresses: ["203.0.113.5"], in: s)
+        XCTAssertEqual(found.match, .rule)
+        XCTAssertEqual(found.rulePosition, 2)
+        XCTAssertEqual(found.routeName, "Corp VPN")
+    }
+
+    /// A wildcard typed into a name rule covers the names under it, as WildcardRoutes reads it.
+    func testCustomWildcardNameRuleCoversNamesUnderIt() {
+        let rules = [Rule(matchType: .domain, pattern: "*.example.com", routeId: direct.id, order: 0)]
+        let s = snapshot(mode: .custom, rules: rules, routes: [direct, corp], defaultRouteId: corp.id)
+        XCTAssertEqual(SiteRoute.match(host: "api.example.com", addresses: ["203.0.113.5"], in: s).match, .rule)
+    }
+
+    /// Custom service rules read the service whether or not the Bypass list has it on, as
+    /// RuleDestinationBuilder does, so the snapshot keeps every service there.
+    @MainActor
+    func testCustomSnapshotKeepsServicesTheBypassListHasOff() {
+        let manager = RouteManager.shared
+        let saved = manager.config
+        defer { manager.config = saved }
+        var config = saved
+        config.schemaVersion = 2
+        config.routingMode = .custom
+        config.services = [ServiceEntry(id: "github", name: "GitHub", enabled: false, domains: ["github.com"], ipRanges: [])]
+        manager.config = config
+        XCTAssertEqual(manager.siteRouteSnapshot.services.map(\.id), ["github"])
+        config.routingMode = .bypass
+        manager.config = config
+        XCTAssertTrue(manager.siteRouteSnapshot.services.isEmpty)
+    }
+
     func testCustomWithNoMatchTakesTheDefaultRoute() {
         let s = snapshot(mode: .custom, routes: [direct, corp], defaultRouteId: direct.id)
         let found = SiteRoute.match(host: "example.org", addresses: ["203.0.113.5"], in: s)
