@@ -1,6 +1,7 @@
 // LookupsTab.swift
 // The DNS Lookups page (#176): turn the capture on, then add any name this Mac looks up.
 
+import AppKit
 import SwiftUI
 
 struct LookupsTab: View {
@@ -98,6 +99,8 @@ struct LookupsTab: View {
     private var lookups: some View {
         let ranked = monitor.tally.ranked(matching: query)
         let top = ranked.first?.count ?? 1
+        // Sized from the biggest count shown: every number fits, and none sits far from its bar.
+        let countColumn = LookupRow.countColumnWidth(top: top, header: String(localized: "LOOKUPS"))
         VStack(alignment: .leading, spacing: 10) {
             if let problem = monitor.problem {
                 Label(problem, systemImage: "exclamationmark.triangle.fill")
@@ -128,7 +131,7 @@ struct LookupsTab: View {
             }
 
             VStack(spacing: 0) {
-                tableHeader
+                tableHeader(countColumn: countColumn.column)
                 Rectangle().fill(Theme.divider).frame(height: 1)
                 if ranked.isEmpty {
                     Text(query.isEmpty ? String(localized: "Waiting for lookups…") : String(localized: "No name matches \"\(query)\""))
@@ -142,6 +145,7 @@ struct LookupsTab: View {
                             LookupRow(
                                 entry: entry,
                                 share: Double(entry.count) / Double(max(top, 1)),
+                                countColumn: countColumn,
                                 striped: index % 2 == 1,
                                 listing: routeManager.lookupListing(entry.name),
                                 removal: routeManager.lookupRemoval(entry.name),
@@ -173,10 +177,10 @@ struct LookupsTab: View {
         }
     }
 
-    private var tableHeader: some View {
+    private func tableHeader(countColumn: CGFloat) -> some View {
         HStack(spacing: 12) {
             Text("LOOKUPS")
-                .frame(width: LookupRow.countWidth, alignment: .trailing)
+                .frame(width: countColumn, alignment: .trailing)
             Text("NAME")
             Spacer(minLength: 8)
             Text(LookupRow.statusHeader(routeManager))
@@ -217,11 +221,13 @@ enum LookupRowTrailing: Equatable {
 }
 
 /// One looked-up name: how often, the name, and what the current mode can do with it.
-private struct LookupRow: View {
+struct LookupRow: View {
     @EnvironmentObject var routeManager: RouteManager
     let entry: DNSLookupTally.Entry
     /// This name's count over the top count, for the bar beside the number.
     let share: Double
+    /// The count column's width and the number's, the same on every row.
+    let countColumn: (column: CGFloat, number: CGFloat)
     let striped: Bool
     let listing: LookupListing?
     /// What un-routes a listed name, or nil when the page offers nothing for it.
@@ -237,12 +243,26 @@ private struct LookupRow: View {
     /// The mode the panel was opened in. A choice made for one mode is never added in another.
     @State private var panelMode: LookupMode?
 
-    /// The bar, the gap and the number, so every row's bar starts at the same x.
-    static let countWidth: CGFloat = barWidth + 8 + countNumberWidth
     static let barWidth: CGFloat = 30
-    /// Fits "999.999" in 11 pt monospaced; a longer count shrinks to fit instead of
-    /// widening the row and pushing its bar out of line.
-    static let countNumberWidth: CGFloat = 48
+    static let barGap: CGFloat = 8
+    static let countFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+    /// The header's font as SwiftUI draws it (10 pt bold rounded), to measure the title.
+    static let headerFont: NSFont = {
+        let bold = NSFont.systemFont(ofSize: 10, weight: .bold)
+        return bold.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 10) } ?? bold
+    }()
+
+    /// The count column for a list whose biggest count is `top`. The number is as wide as
+    /// `top` printed, so it fits every row and no row's number sits far from its bar; the
+    /// column is at least as wide as its header. Every row uses the same widths, and rows
+    /// align to the right, so all bars start at the same x.
+    static func countColumnWidth(top: Int, header: String) -> (column: CGFloat, number: CGFloat) {
+        let number = ceil((format(top) as NSString).size(withAttributes: [.font: countFont]).width) + 1
+        let title = ceil(NSAttributedString(string: header, attributes: [.font: headerFont, .kern: 1]).size().width) + 2
+        return (max(barWidth + barGap + number, title), number)
+    }
+
+    static func format(_ count: Int) -> String { count.formatted(.number) }
     /// The most a listed row's service name takes beside its status.
     static let statusDetailWidth: CGFloat = 120
     /// How long, in tenths of a second, a panel add waits for a running apply.
@@ -260,21 +280,21 @@ private struct LookupRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 8) {
+            HStack(spacing: Self.barGap) {
                 Capsule()
                     .fill(Theme.cyan.opacity(0.18))
                     .frame(width: Self.barWidth, height: 4)
                     .overlay(alignment: .leading) {
                         Capsule().fill(Theme.cyan.opacity(0.8)).frame(width: max(3, Self.barWidth * share), height: 4)
                     }
-                Text("\(entry.count)")
+                Text(Self.format(entry.count))
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(Theme.textSecondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
-                    .frame(width: Self.countNumberWidth, alignment: .trailing)
+                    .frame(width: countColumn.number, alignment: .trailing)
             }
-            .frame(width: Self.countWidth, alignment: .leading)
+            .frame(width: countColumn.column, alignment: .trailing)
             .help(String(localized: "Times looked up"))
 
             // The name takes every point the right end does not use right now.
