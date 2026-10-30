@@ -149,6 +149,8 @@ final class NamedControlsTests: XCTestCase {
         defer { rm.config = saved }
         var cfg = RouteManager.Config()
         cfg.routingMode = .bypass
+        // The page lists the services that are on; the rest wait in the catalogue.
+        for i in cfg.services.indices.prefix(8) { cfg.services[i].enabled = true }
         rm.config = cfg
 
         let window = host(ServicesTab().environmentObject(rm).environmentObject(SettingsUndo()).frame(width: 640, height: 720))
@@ -168,12 +170,14 @@ final class NamedControlsTests: XCTestCase {
         defer { rm.config = saved }
         var cfg = RouteManager.Config()
         cfg.routingMode = .bypass
+        // The page lists the services that are on; the rest wait in the catalogue.
+        for i in cfg.services.indices.prefix(8) { cfg.services[i].enabled = true }
         rm.config = cfg
 
         let window = host(ServicesTab().environmentObject(rm).environmentObject(SettingsUndo()).frame(width: 640, height: 720))
         func switches(in view: NSView) -> [NSSwitch] { ((view as? NSSwitch).map { [$0] } ?? []) + view.subviews.flatMap(switches) }
         let found = switches(in: window.contentView!)
-        XCTAssertGreaterThan(found.count, 5, "control: the page shows the catalogue's switches")
+        XCTAssertGreaterThan(found.count, 5, "control: the page shows the switches of the services that are on")
         XCTAssertEqual(found.filter { $0.controlSize != .small }.count, 0, "a switch is not the small size")
     }
 

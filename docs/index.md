@@ -73,7 +73,7 @@ Everything lives in the dropdown: the VPN it found, a pill that says whether rou
 
 Status comes first and says whether it is working right now: the helper, the VPN and gateway, the routes, DNS, the tunnels and recent warnings. Bypass and VPN Only use the Domains and Services tabs. Custom mode swaps them for Rules and Routes. General holds launch at login, `/etc/hosts` and notifications; Logs and Info are for debugging. See [Settings](usage.md#settings).
 
-![The Services tab: the four services that are on, Telegram, WhatsApp, YouTube and Spotify, listed first under On, then the other built-in services, each with a switch](images/screenshots/services.png){ width="580" }
+![The Services tab: the four services that are on, Telegram, WhatsApp, YouTube and Spotify, under On, each with a switch, and the Browse catalogue button at the top](images/screenshots/services.png){ width="580" }
 
 <div class="vb-gallery vb-gallery--2" markdown>
 <figure markdown>

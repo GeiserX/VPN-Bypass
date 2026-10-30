@@ -126,6 +126,21 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
     }
 
+    /// The catalogue sheet on the Banks chip, two banks picked: "Bypass 2 services".
+    func testCatalogueSheet() throws {
+        seedBypass()
+        let hosting = NSHostingView(rootView: CatalogueSheet(category: .banks, picked: ["fr_lcl", "fr_boursobank"]) { _ in }
+            .environmentObject(rm))
+        let window = DocScreenshotKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
+                                            styleMask: [.borderless], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = hosting
+        show(window)
+        settle(hosting)
+        let size = try write(hosting, cornerRadius: 12, outline: NSColor(white: 1, alpha: 0.2), to: "catalogue.png")
+        XCTAssertEqual(size.width, 1040)
+    }
+
     func testSettingsOnDomains() throws {
         seedBypass()
         let size = try renderSettings(page: .domains, to: "domains.png")

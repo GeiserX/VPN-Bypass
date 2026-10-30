@@ -81,6 +81,10 @@ bundle: build build-helper
 	@cp assets/menubar-icon-error@2x.png "$(APP_BUNDLE)/Contents/Resources/"
 	@# Copy localizations
 	@cp -R Sources/VPNBypassCore/Resources/*.lproj "$(APP_BUNDLE)/Contents/Resources/"
+	@# Copy the service catalogue; an empty copy fails here instead of shipping no services
+	@mkdir -p "$(APP_BUNDLE)/Contents/Resources/catalogue"
+	@cp Sources/VPNBypassCore/Resources/catalogue/*.json "$(APP_BUNDLE)/Contents/Resources/catalogue/"
+	@ls "$(APP_BUNDLE)"/Contents/Resources/catalogue/*.json >/dev/null
 	@echo "App bundle created: $(APP_BUNDLE)"
 
 clean:

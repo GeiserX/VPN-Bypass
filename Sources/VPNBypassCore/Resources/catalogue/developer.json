@@ -1,0 +1,44 @@
+{
+  "category": "developer",
+  "services": [
+    {
+      "id": "github",
+      "name": "GitHub",
+      "domains": [
+        "github.com",
+        "www.github.com",
+        "api.github.com",
+        "raw.githubusercontent.com",
+        "gist.github.com"
+      ]
+    },
+    {
+      "id": "gitlab",
+      "name": "GitLab",
+      "domains": [
+        "gitlab.com",
+        "www.gitlab.com",
+        "registry.gitlab.com"
+      ]
+    },
+    {
+      "id": "stackoverflow",
+      "name": "Stack Overflow",
+      "domains": [
+        "stackoverflow.com",
+        "www.stackoverflow.com",
+        "stackexchange.com"
+      ]
+    },
+    {
+      "id": "tailscale",
+      "name": "Tailscale",
+      "domains": [
+        "login.tailscale.com",
+        "controlplane.tailscale.com",
+        "tailscale.com",
+        "pkgs.tailscale.com"
+      ]
+    }
+  ]
+}

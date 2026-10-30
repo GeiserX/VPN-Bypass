@@ -115,10 +115,15 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
     public var enforcing: Bool
     /// CFBundleShortVersionString of the running app; nil (omitted) when unknown.
     public var appVersion: String? = nil
+    /// The connected VPN's settings that send every connection into its tunnel, by Apple's
+    /// names (`includeAllNetworks`, `enforceRoutes`, plus `excludeLocalNetworks` when it lets
+    /// local addresses out). Nil (omitted) when none is on; then `enforcing` can be true.
+    public var killSwitch: [String]? = nil
 
     public init(helperReady: Bool, helperState: String, vpnConnected: Bool,
                 vpnInterface: String? = nil, vpnType: String? = nil,
-                enforcedRouteCount: Int, enforcing: Bool, appVersion: String? = nil) {
+                enforcedRouteCount: Int, enforcing: Bool, appVersion: String? = nil,
+                killSwitch: [String]? = nil) {
         self.helperReady = helperReady
         self.helperState = helperState
         self.vpnConnected = vpnConnected
@@ -127,6 +132,7 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
         self.enforcedRouteCount = enforcedRouteCount
         self.enforcing = enforcing
         self.appVersion = appVersion
+        self.killSwitch = killSwitch
     }
 }
 

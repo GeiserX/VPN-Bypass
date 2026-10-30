@@ -41,7 +41,6 @@
 "Add a domain above to bypass VPN" = "Ajoutez un domaine ci-dessus pour contourner le VPN";
 
 /* ===== Réglages — Onglet Services ===== */
-"%lld/%lld enabled" = "%lld/%lld activés";
 "Services disabled in VPN Only mode" = "Services désactivés en mode VPN uniquement";
 "Search services..." = "Rechercher des services...";
 "Create Custom Service" = "Créer un service personnalisé";
@@ -50,7 +49,6 @@
 /* Services page section headers; the On header is not the dropdown's ON pill */
 "services.section.on" = "ACTIVÉS";
 "CUSTOM SERVICES" = "SERVICES PERSONNALISÉS";
-"BUILT-IN SERVICES" = "SERVICES INTÉGRÉS";
 
 /* ===== Réglages — Éditeur de service ===== */
 "Edit Service" = "Modifier le service";
@@ -276,6 +274,21 @@
 "NOT ENFORCING" = "INACTIF";
 "%@ connected" = "%@ connecté";
 "Nothing is routed while the privileged helper is not running." = "Rien n'est routé tant que l'assistant privilégié ne tourne pas.";
+"NO EFFECT" = "SANS EFFET";
+"No effect" = "Sans effet";
+"%@'s kill switch sends all traffic through the VPN." = "Le kill switch de %@ fait passer tout le trafic par le VPN.";
+"%@ makes its own routes win over this app's." = "%@ fait passer ses propres routes avant celles de cette app.";
+"Sites set to skip it still go through it." = "Les sites censés le contourner passent quand même par lui.";
+"Everything meant to skip it still goes through it." = "Tout ce qui devrait le contourner passe quand même par lui.";
+"Rules set to go direct still go through it." = "Les règles censées aller en direct passent quand même par lui.";
+"VPN Bypass: the VPN's own routes win over this app's, so routes set here have no effect" = "VPN Bypass : les routes du VPN passent avant celles de cette app, donc les routes définies ici sont sans effet";
+"VPN Bypass: the VPN's kill switch sends all traffic through it except local-network addresses" = "VPN Bypass : le kill switch du VPN fait passer tout le trafic par lui, sauf les adresses du réseau local";
+"Anything its routes cover goes through it, whatever is set here." = "Tout ce que couvrent ses routes passe par lui, quels que soient les réglages ici.";
+"A connected VPN's kill switch sends all traffic through the VPN." = "Le kill switch d'un VPN connecté fait passer tout le trafic par le VPN.";
+"Turn off its kill switch, or use its own split tunnelling." = "Désactivez son kill switch, ou utilisez son propre split tunneling.";
+"Turn off that setting in the VPN app, or use its own split tunnelling." = "Désactivez ce réglage dans l'app du VPN, ou utilisez son propre split tunneling.";
+"Local-network addresses still skip it." = "Les adresses du réseau local, elles, le contournent toujours.";
+"VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it" = "VPN Bypass : le kill switch du VPN fait passer tout le trafic par lui, donc rien ne le contourne";
 "The scheduled re-apply still runs in %@." = "La réapplication prévue a toujours lieu dans %@.";
 "The scheduled re-apply runs now." = "La réapplication prévue a lieu maintenant.";
 "HELD BACK" = "EN PAUSE";
@@ -739,3 +752,32 @@
 "Take %@ out of the service %@" = "Retirer %1$@ du service %2$@";
 "%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names." = "%1$@ inclut ce nom d'origine et ne peut pas le perdre. Désactiver %2$@ cesse de contourner le VPN pour tous ses noms.";
 "Delete the rule for %@ on the Rules page, which sends it to %@" = "Supprimer la règle de %1$@ de la page Règles, qui l'envoie par %2$@";
+"catalogue.category.messaging" = "Messagerie";
+"catalogue.category.video" = "Vidéo";
+"catalogue.category.music" = "Musique";
+"catalogue.category.social" = "Réseaux sociaux";
+"catalogue.category.work" = "Travail";
+"catalogue.category.cloud" = "Stockage en ligne";
+"catalogue.category.gaming" = "Jeux";
+"catalogue.category.developer" = "Développement";
+"catalogue.category.ai" = "IA";
+"Browse catalogue…" = "Parcourir le catalogue…";
+"No services yet. Pick the ones you use from the catalogue." = "Aucun service pour l'instant. Choisissez ceux que vous utilisez dans le catalogue.";
+"Nothing on this page matches “%@”." = "Rien sur cette page ne correspond à « %@ ».";
+"Search the catalogue" = "Rechercher dans le catalogue";
+"Service catalogue" = "Catalogue de services";
+"Search by name, domain or country" = "Rechercher par nom, domaine ou pays";
+"No service in the catalogue matches “%@”. Make a custom service with the + button." = "Aucun service du catalogue ne correspond à « %@ ». Créez un service personnalisé avec le bouton +.";
+"Select all %@" = "Tout sélectionner : %@";
+"No service in %@ matches “%@”. Choose All to see the matches in other categories." = "Aucun service de la catégorie %1$@ ne correspond à « %2$@ ». Choisissez Tous pour voir les correspondances dans les autres catégories.";
+"Deselect all %@" = "Tout désélectionner : %@";
+"All selected" = "Tous sélectionnés";
+"Some selected" = "Certains sélectionnés";
+"None selected" = "Aucun sélectionné";
+"Already on" = "Déjà activé";
+"Bypass services" = "Contourner des services";
+"Bypass 1 service" = "Contourner 1 service";
+"Bypass %lld services" = "Contourner %lld services";
+"Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it." = "%@ ajouté à %@. Le service est désactivé ; ajoutez-le depuis Parcourir le catalogue sur la page Services pour le contourner.";
+"catalogue.category.government" = "Administration";
+"catalogue.category.banks" = "Banques";
