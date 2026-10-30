@@ -67,5 +67,10 @@ sleep 15
 kill -0 "$pid" 2>/dev/null || fail "the app exited within 15 s of launching"
 log_after=$(stat -f %z "$applog" 2>/dev/null || echo 0)
 [ "$log_after" -gt "$log_before" ] || fail "the app wrote nothing to $applog"
+# The service catalogue ships as files in Contents/Resources/catalogue; a bundle without
+# them launches fine but offers no services, and says so in the log.
+if tail -c +"$((log_before + 1))" "$applog" | grep -q "Service catalogue:"; then
+  fail "the app could not read its service catalogue"
+fi
 echo "--- app log (this launch) ---"; tail -c +"$((log_before + 1))" "$applog"
 echo "Smoke launch passed: VPN Bypass $version launched, opened its control socket and kept running."
