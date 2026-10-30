@@ -97,16 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func show(_ s: SpikeStatus?) {
-        var lines = ["proxy: \(controller.connectionState)"]
-        if let s {
-            lines.append("extension pid \(s.extensionPID), started \(Date(timeIntervalSince1970: TimeInterval(s.startedAt)))")
-            lines.append("scope \(s.scope), policy generation \(s.policyGeneration), lease \(s.policyLive ? "live" : "NOT live (declining all)")")
-            lines.append("egress interface \(s.interfaceName)")
-            for (k, v) in s.counters.sorted(by: { $0.key < $1.key }) { lines.append("  \(k) = \(v)") }
-        } else {
-            lines.append("(no reply from the extension)")
-        }
-        statusView.string = lines.joined(separator: "\n")
+        statusView.string = controller.describe(s).joined(separator: "\n")
     }
 
     private func log(_ line: String) {

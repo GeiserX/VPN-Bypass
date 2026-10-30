@@ -11,6 +11,10 @@ final class Controller: NSObject, OSSystemExtensionRequestDelegate {
     static let heartbeatSeconds: TimeInterval = 30
 
     var onLog: (String) -> Void = { _ in }
+    /// Called when a system extension request ends: `.completed`, `.willCompleteAfterReboot`,
+    /// `.needsApproval` (the owner must click) or `.failed`. The command-line mode waits on it.
+    var onRequestEnd: (RequestEnd) -> Void = { _ in }
+    enum RequestEnd { case completed, willCompleteAfterReboot, needsApproval, failed }
     private var manager: NETransparentProxyManager?
     private var heartbeat: Timer?
     private var generation = 0
@@ -41,14 +45,17 @@ final class Controller: NSObject, OSSystemExtensionRequestDelegate {
 
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
         onLog("waiting for approval: System Settings > General > Login Items & Extensions > Network Extensions")
+        onRequestEnd(.needsApproval)
     }
 
     func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
         onLog("system extension request finished: \(result == .completed ? "completed" : "completes after reboot")")
+        onRequestEnd(result == .completed ? .completed : .willCompleteAfterReboot)
     }
 
     func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
         onLog("system extension request failed: \(error.localizedDescription) (\((error as NSError).code))")
+        onRequestEnd(.failed)
     }
 
     // MARK: Proxy configuration
@@ -68,7 +75,7 @@ final class Controller: NSObject, OSSystemExtensionRequestDelegate {
 
     /// Saves the configuration enabled (first time: the "would like to add proxy configurations"
     /// prompt), then starts the proxy with the chosen include scope.
-    func start(scope: IncludeScope) {
+    func start(scope: IncludeScope, done: @escaping (Bool) -> Void = { _ in }) {
         loadManager { existing in
             let m = existing ?? NETransparentProxyManager()
             let needsSave = existing == nil || !m.isEnabled
@@ -84,14 +91,16 @@ final class Controller: NSObject, OSSystemExtensionRequestDelegate {
                 do {
                     try (m.connection as? NETunnelProviderSession)?.startTunnel(options: ["scope": scope.token as NSString])
                     self.onLog("start requested, scope \(scope.token)")
+                    done(true)
                 } catch {
                     self.onLog("start failed: \(error.localizedDescription)")
+                    done(false)
                 }
             }
             guard needsSave else { self.manager = m; go(); return }
             m.saveToPreferences { error in
                 DispatchQueue.main.async {
-                    if let error { self.onLog("save failed: \(error.localizedDescription)"); return }
+                    if let error { self.onLog("save failed: \(error.localizedDescription)"); done(false); return }
                     self.onLog("configuration saved, enabled")
                     // A saved manager must be reloaded before its connection can start.
                     m.loadFromPreferences { _ in DispatchQueue.main.async { self.manager = m; go() } }
@@ -102,21 +111,25 @@ final class Controller: NSObject, OSSystemExtensionRequestDelegate {
 
     /// Stops the running session only. The configuration stays enabled, so the OS may start the
     /// provider again on its own (wake, reboot).
-    func stopSession() {
+    func stopSession(done: @escaping () -> Void = {}) {
         loadManager { m in
             m?.connection.stopVPNTunnel()
             self.onLog(m == nil ? "no configuration" : "session stop requested (configuration stays enabled)")
+            done()
         }
     }
 
     /// Disables the configuration: stops the proxy and keeps the OS from restarting it.
-    func turnOff() {
+    func turnOff(done: @escaping () -> Void = {}) {
         stopHeartbeat()
         loadManager { m in
-            guard let m else { self.onLog("no configuration"); return }
+            guard let m else { self.onLog("no configuration"); done(); return }
             m.isEnabled = false
             m.saveToPreferences { error in
-                DispatchQueue.main.async { self.onLog(error.map { "disable failed: \($0.localizedDescription)" } ?? "configuration disabled") }
+                DispatchQueue.main.async {
+                    self.onLog(error.map { "disable failed: \($0.localizedDescription)" } ?? "configuration disabled")
+                    done()
+                }
             }
         }
     }
@@ -166,6 +179,37 @@ final class Controller: NSObject, OSSystemExtensionRequestDelegate {
             guard let self, let p = self.lastPolicy else { return }
             self.send(SpikeRequest(policy: p)) { _ in }
         }
+    }
+
+    /// Why the last session ended, as macOS recorded it (e.g. a `setTunnelNetworkSettings` refusal).
+    func lastDisconnectError(_ done: @escaping (String?) -> Void) {
+        loadManager { m in
+            guard let m else { done(nil); return }
+            m.connection.fetchLastDisconnectError { error in
+                DispatchQueue.main.async { done(error.map { $0.localizedDescription }) }
+            }
+        }
+    }
+
+    /// The status pane's text, shared by the window and the command line.
+    func describe(_ s: SpikeStatus?) -> [String] {
+        var lines = ["proxy: \(connectionState)"]
+        if let s {
+            lines.append("extension pid \(s.extensionPID), started \(Date(timeIntervalSince1970: TimeInterval(s.startedAt)))")
+            lines.append("scope \(s.scope), policy generation \(s.policyGeneration), lease \(s.policyLive ? "live" : "NOT live (declining all)")")
+            lines.append("egress interface \(s.interfaceName)")
+            for (k, v) in s.counters.sorted(by: { $0.key < $1.key }) { lines.append("  \(k) = \(v)") }
+        } else {
+            lines.append("(no reply from the extension)")
+        }
+        return lines
+    }
+
+    /// The session's own status, read fresh (the cached manager may be stale).
+    var isConnected: Bool { manager?.connection.status == .connected }
+    var isSettled: Bool {
+        guard let st = manager?.connection.status else { return true }
+        return st == .connected || st == .disconnected || st == .invalid
     }
 
     var connectionState: String {

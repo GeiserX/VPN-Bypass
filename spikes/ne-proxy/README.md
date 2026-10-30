@@ -99,6 +99,36 @@ reconnect GlobalProtect yourself the way you always do.
    configurations"): **Allow**. Note the real wording.
 7. The status pane says `proxy: connected, configuration enabled` and shows the extension pid.
 
+## Drive it from a shell
+
+The app binary takes commands, so everything except the owner's two approvals runs over `ssh`
+without a click. Each command calls the same `Controller` method as its button, prints what the
+window would log plus the status pane, and exits. Run it as the console user from the installed
+bundle (the configuration belongs to that user's app):
+
+```sh
+B="/Applications/VPN Bypass NE Spike.app/Contents/MacOS/VPNBypassNESpike"
+spike() { sudo launchctl asuser "$(id -u sergio)" sudo -u sergio "$B" "$@"; }
+
+spike status                    # proxy state, last disconnect error, the extension's counters
+spike activate                  # 1. Activate extension; exit 3 = the owner must approve it
+spike start --scope port:80     # 2. Start proxy (port:80 or all); waits up to 20 s for "connected"
+spike push --apps com.geiserx.vpn-bypass.spike.fetch --hosts ipv4.icanhazip.com [--iface en0] [--hold]
+spike pause [--hold]            # empty policy
+spike stop-session
+spike turn-off
+spike remove                    # configuration, then the extension; macOS may ask for a password
+```
+
+Exit codes: 0 ok, 1 failed, 2 usage, 3 needs the owner's approval. A push without `--hold` leaves a
+lease that ends 2 minutes later (the process exits, so nothing re-sends it); `--hold` keeps the 30 s
+heartbeat going until the process gets SIGINT or SIGTERM. Any first argument that is not a flag runs
+the command line (an unknown one prints the usage); no arguments opens the window.
+
+`status` prints macOS's last disconnect error for the session, which is where a refused
+`setTunnelNetworkSettings` shows up (`Either a non-wildcard port or a non-wildcard address must be
+specified` was the 0.1.1 start failure: an excluded rule on 0.0.0.0/8 with port 0).
+
 ## Part A: the Mac mini (no GlobalProtect)
 
 **What Part A can and cannot answer.** The mini runs with SIP off and the boot argument
@@ -282,4 +312,7 @@ rsync -a "<build mac>:<scratch>/ne-proxy/build/VPN Bypass NE Spike.app" spikes/n
 ```
 
 Bump `CFBundleVersion` and `CFBundleShortVersionString` in both `bundle/*.plist` before installing a
-new build over an activated one: macOS replaces an extension only when its version changes.
+new build over an activated one: macOS replaces an extension only when its version changes. Then
+`spike activate` replaces it without a new approval (same team, higher version: "replacing extension
+0.1.3 with 0.1.4", no prompt on the mini). The replacement ends the running session (`status` shows
+`NEAgentErrorDomain error 2`), so run `spike start` and `spike push` again.
