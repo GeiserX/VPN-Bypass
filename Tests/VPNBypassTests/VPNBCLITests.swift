@@ -82,6 +82,8 @@ final class VPNBCLITests: XCTestCase {
 
     // MARK: - text rendering (unchanged by #184)
 
+    /// Pins the lines this change moved into `VPNBCLI.textLines` that a status, routes.active or
+    /// error reply prints; the rules, domains, services and logs branches are not covered here.
     func testTextOutputIsUnchanged() {
         let routeId = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let route = Route(id: routeId, name: "Proxy", egress: .proxySOCKS5, proxyHost: "proxy.example.com", proxyPort: 1080,
@@ -108,21 +110,23 @@ final class VPNBCLITests: XCTestCase {
 
     // MARK: - the real binary against a stub socket
 
-    /// The `vpnb` the package built, next to the test bundle. Run `swift build` first: `swift test`
-    /// alone does not rebuild an executable the tests do not depend on.
+    /// The `vpnb` the package built, next to the test bundle. `swift build` and `swift test` both
+    /// build it; the test skips only when it is missing (for example under a filtered Xcode run).
     private func vpnbBinary() throws -> URL {
         let url = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vpnb")
         guard FileManager.default.isExecutableFile(atPath: url.path) else {
-            throw XCTSkip("vpnb is not built next to the test bundle (\(url.path)); run swift build first")
+            throw XCTSkip("vpnb is not built next to the test bundle (\(url.path))")
         }
         return url
     }
 
-    private func run(_ binary: URL, _ args: [String], socket: String) throws -> (status: Int32, out: String, err: String) {
+    private func run(_ binary: URL, _ args: [String], socket: String,
+                     stdin: FileHandle? = nil) throws -> (status: Int32, out: String, err: String) {
         let process = Process()
         process.executableURL = binary
         process.arguments = args
         process.environment = ["VPNB_SOCKET": socket]
+        if let stdin { process.standardInput = stdin }
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
@@ -178,6 +182,72 @@ final class VPNBCLITests: XCTestCase {
         XCTAssertEqual(text.status, 2)
         XCTAssertEqual(text.out, "", "without --json stdout stays empty, as before")
         XCTAssertTrue(text.err.contains("isn't running"))
+    }
+
+    func testBinaryNoStdinExits2WithJSONCode() throws {
+        let binary = try vpnbBinary()
+        let missing = NSTemporaryDirectory() + "vpnb-none-\(UUID().uuidString.prefix(8)).sock"
+        // stdin is read before the socket is opened, so no server is needed.
+        let json = try run(binary, ["route.set", "id=x", "pass:-", "--json"], socket: missing,
+                           stdin: FileHandle.nullDevice)
+        XCTAssertEqual(json.status, 2)
+        XCTAssertTrue(json.err.contains("no input on stdin"), json.err)
+        let decoded = try JSONDecoder().decode(ControlResponse.self, from: Data(json.out.utf8))
+        XCTAssertFalse(decoded.ok)
+        XCTAssertEqual(decoded.error?.code, "no_stdin")
+    }
+
+    func testBinaryNoResponseExits2WithJSONCode() throws {
+        let binary = try vpnbBinary()
+        let path = NSTemporaryDirectory() + "vpnb-mute-\(UUID().uuidString.prefix(8)).sock"
+        let listener = try MuteListener(path: path)
+        defer { listener.stop() }
+
+        let json = try run(binary, ["status", "--json"], socket: path)
+        XCTAssertEqual(json.status, 2)
+        XCTAssertTrue(json.err.contains("no response"), json.err)
+        let decoded = try JSONDecoder().decode(ControlResponse.self, from: Data(json.out.utf8))
+        XCTAssertFalse(decoded.ok)
+        XCTAssertEqual(decoded.error?.code, "no_response")
+    }
+}
+
+/// An AF_UNIX listener that accepts each connection and closes it at once, never replying.
+private final class MuteListener: @unchecked Sendable {
+    private let fd: Int32
+    private let path: String
+
+    init(path: String) throws {
+        self.path = path
+        unlink(path)
+        fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw POSIXError(.EIO) }
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(path.utf8)
+        withUnsafeMutableBytes(of: &addr.sun_path) { raw in
+            for (i, b) in bytes.prefix(raw.count - 1).enumerated() { raw[i] = b }
+        }
+        let bound = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard bound == 0, listen(fd, 4) == 0 else { close(fd); throw POSIXError(.EADDRINUSE) }
+        let fd = self.fd
+        Thread.detachNewThread {
+            while true {
+                let client = accept(fd, nil, nil)
+                if client < 0 { return }
+                close(client)
+            }
+        }
+    }
+
+    func stop() {
+        shutdown(fd, SHUT_RDWR)
+        close(fd)
+        unlink(path)
     }
 }
 

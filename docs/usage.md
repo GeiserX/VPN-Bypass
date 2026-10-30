@@ -152,7 +152,7 @@ vpnb --json status
 ```
 
 ```json
-{"ok":true,"result":{"mode":"bypass","routes":[],"runtime":{"appVersion":"5.2.0","enforcedRouteCount":3,"enforcing":true,"helperReady":true,"helperState":"Helper Installed","vpnConnected":true,"vpnInterface":"utun4","vpnType":"WireGuard"},"schemaVersion":1,"supportedVersion":1},"v":1}
+{"ok":true,"result":{"defaultRouteId":"6F1C2E4A-8B3D-4F5E-9A7C-1D2E3F4A5B6C","mode":"bypass","routes":[{"egress":"vpnDefault","enabled":true,"hasPassword":false,"hasProxyUser":false,"id":"6F1C2E4A-8B3D-4F5E-9A7C-1D2E3F4A5B6C","name":"Corporate VPN"},{"egress":"direct","enabled":true,"hasPassword":false,"hasProxyUser":false,"id":"0A9B8C7D-6E5F-4A3B-8C2D-1E0F9A8B7C6D","name":"Direct"}],"runtime":{"appVersion":"5.2.0","enforcedRouteCount":3,"enforcing":true,"helperReady":true,"helperState":"Helper Installed","vpnConnected":true,"vpnInterface":"utun4","vpnType":"WireGuard"},"schemaVersion":1,"supportedVersion":1},"v":1}
 ```
 
 ```bash
@@ -163,7 +163,7 @@ vpnb routes.active --json | jq -r '.result.activeRoutes[] | "\(.destination) \(.
 {"ok":true,"result":{"activeRoutes":[{"destination":"93.184.216.34","gateway":"192.168.1.1","source":"example.com"},{"destination":"203.0.113.0/24","gateway":"192.168.1.1","source":"Example Service"}]},"v":1}
 ```
 
-- Keys are sorted, and a field that does not apply is left out rather than set to `null`. `status` lists Custom mode's routes under `routes`, so it is empty until you use Custom mode. `runtime.helperState` is display text in the app's language; test `helperReady` and `enforcing` instead. Every reply has `v` and `ok`, then `result` on success or `error` (`code` and `message`) on failure.
+- Keys are sorted, and a field that does not apply is left out rather than set to `null`. `status` lists under `routes` the route table that Custom mode's rules point at; it always holds at least the VPN and Direct routes, and `defaultRouteId` names the one unmatched traffic takes. `runtime.helperState` is display text in the app's language; test `helperReady` and `enforcing` instead. Every reply has `v` and `ok`, then `result` on success or `error` (`code` and `message`) on failure.
 - Exit codes stay the same: 0 ok, 1 the app answered with an error, 2 the app could not be reached. On exit 2 the message still goes to stderr, and stdout carries an error object too, with the code `app_unreachable`, `no_response` or `no_stdin`, so a script always gets one JSON object to read.
 - No password or proxy user name is ever in the reply. A route says `hasPassword` and `hasProxyUser` instead.
 - In `routes.active`, `source` is the list entry, service or rule the route was installed for, not an application: see [Which app uses a route](how-it-works.md#which-app-uses-a-route). [Routing priority](how-it-works.md#routing-priority) explains how these routes win over the VPN's and how to spot them in `netstat -rn`.
