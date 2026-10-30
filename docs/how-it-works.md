@@ -48,7 +48,7 @@ The detection also requires:
 
 ## Routing priority
 
-VPN Bypass never changes the VPN's own routes to win. It adds more specific ones, and macOS sends each packet by the route whose prefix matches the destination most closely (longest-prefix match).
+VPN Bypass wins over the VPN's routes by adding more specific ones, and macOS sends each packet by the route whose prefix matches the destination most closely (longest-prefix match). The one exception is a destination that already has a route of its own, which the helper rewrites in place (see below).
 
 - **Bypass**: each address a listed domain or service resolves to gets a host route (a /32) through your local gateway, and each service IP range gets a network route through it. A /32 matches more closely than anything a VPN installs to capture traffic: its default route (`0.0.0.0/0`), the full-tunnel pair `0.0.0.0/1` + `128.0.0.0/1`, or a split route such as `10.0.0.0/8` that contains the address.
 - **VPN Only**: the inverse. Listed addresses and ranges get routes through the VPN's gateway, and four catch-alls (`0.0.0.0/2`, `64.0.0.0/2`, `128.0.0.0/2`, `192.0.0.0/2`) send everything else through the local gateway. A /2 beats the VPN's default route and its /1 pair, and a listed /32 or range beats the /2. The app does not use the /1 pair itself, because WireGuard and OpenVPN install that exact pair to capture traffic, and claiming it would repoint the VPN's own routes. The catch-alls go in after the listed routes and come out first, so a listed destination never falls outside the tunnel during an apply. A listed range that covers a whole quarter (a /2) keeps that quarter in the tunnel: the app skips the catch-all inside it. The list refuses /0 and /1 because the VPN's own catch-alls use them.
@@ -61,7 +61,7 @@ All of these routes are IPv4. The helper writes no IPv6 route, so IPv6 traffic t
 ### When the VPN connects, drops or changes the table
 
 - **VPN drops**: in Bypass mode the routes through the local gateway stay, since they are still correct, and only routes through the gone VPN are removed. VPN Only removes all of its routes, catch-alls first, so traffic falls back to the normal default route rather than leaving through a stale catch-all.
-- **VPN reconnects**: the app applies the routes for the current mode again, after a short wait for the tunnel to settle. In Bypass mode, when the kept routes were applied more recently than the DNS refresh interval, a reconnect writes nothing.
+- **VPN reconnects**: the app applies the routes for the current mode again, after a short wait for the tunnel to settle. In Bypass mode, when the kept routes were applied more recently than the DNS refresh interval and the configuration was not saved while the VPN was down, a reconnect writes nothing.
 - **A route vanishes** (the VPN client or the system deleted it): every 30 seconds, and on every network change, the app reads the kernel table and puts back any of its routes that is missing. This check looks for missing destinations only: a route that is still there but points somewhere else is not changed by it.
 
 ### Telling VPN Bypass's routes apart in `netstat -rn`
@@ -82,7 +82,7 @@ A wildcard such as `*.example.com` cannot be a route, because routes are per add
 
 ## Which app uses a route
 
-A route belongs to a destination address, not to an application. Once VPN Bypass installs a route for `203.0.113.10`, every process on the Mac that sends to `203.0.113.10` uses it, whichever process caused the lookup and whether or not it is the app you listed. A wildcard route is created by a lookup, but the lookup reaches the forwarder through the macOS resolver, so it carries no process; every other route comes from your lists. The routing table has no field that could record an app either. VPN Bypass does not use a Network Extension, by design, so it cannot tell apps apart; `process` rules are accepted but install nothing.
+A route belongs to a destination address, not to an application. Once VPN Bypass installs a route for `203.0.113.10`, every process on the Mac that sends to `203.0.113.10` uses it, whichever process caused the lookup and whether or not it is the app you listed. A wildcard route is created by a lookup, but the lookup reaches the forwarder through the macOS resolver, so it carries no process; every other route comes from your lists, apart from VPN Only's catch-alls. The routing table has no field that could record an app either. VPN Bypass does not use a Network Extension, by design, so it cannot tell apps apart; `process` rules are accepted but install nothing.
 
 What a route does record is why it exists. `vpnb routes.active` gives each route a `source`:
 
@@ -92,7 +92,7 @@ What a route does record is why it exists. `vpnb routes.active` gives each route
 | a service name, e.g. `Example Service` | one of that service's addresses or IP ranges (a Custom `service` rule shows the service's id) |
 | a range, e.g. `10.0.0.0/8` | an entry on the VPN Only list, or a Custom `ip` or `cidr` rule |
 | `*.example.com` | an address learned by a wildcard lookup |
-| `VPN Only catch-all` | one of VPN Only's four /2 routes |
+| `VPN Only catch-all` | one of VPN Only's /2 routes (up to four: a quarter that a listed range covers gets none) |
 
 Several sources can share one destination when two names resolve to the same address. To find which process is talking to a routed address, for example to rule out a false leak alert, ask the system about live connections:
 

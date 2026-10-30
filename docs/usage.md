@@ -156,11 +156,20 @@ vpnb --json status
 ```
 
 ```bash
-vpnb routes.active --json | jq -r '.result.activeRoutes[] | "\(.destination) \(.source)"'
+vpnb routes.active --json
 ```
 
 ```json
 {"ok":true,"result":{"activeRoutes":[{"destination":"93.184.216.34","gateway":"192.168.1.1","source":"example.com"},{"destination":"203.0.113.0/24","gateway":"192.168.1.1","source":"Example Service"}]},"v":1}
+```
+
+```bash
+vpnb routes.active --json | jq -r '.result.activeRoutes[] | "\(.destination) \(.source)"'
+```
+
+```
+93.184.216.34 example.com
+203.0.113.0/24 Example Service
 ```
 
 - Keys are sorted, and a field that does not apply is left out rather than set to `null`. `status` lists under `routes` the route table that Custom mode's rules point at; normally it holds at least the VPN and Direct routes, which the app adds when the list is empty, but `route.rm` can remove either, so a script should not assume them. `defaultRouteId` names the route unmatched traffic takes. `runtime.helperState` is display text in the app's language; test `helperReady` and `enforcing` instead. Every reply has `v` and `ok`, then `result` on success or `error` (`code` and `message`) on failure.
