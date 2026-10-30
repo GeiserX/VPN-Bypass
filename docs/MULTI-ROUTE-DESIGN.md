@@ -2,9 +2,9 @@
 
 > **Status: P0 + P1 SHIPPED in 3.0.** The routes+rules model (P0) and the proxy local-listeners + `route-on`
 > hook + `vpnb` CLI (P1) landed in 3.0, along with Tailscale-peer & multi-VPN egress and the Custom-mode UX
-> (build Slices 1–4). **The remaining track is P2 — app-agnostic capture of proxy-ignoring apps — and it is
-> entitlement-free (PF + a local CA), NOT Network Extension** (see the NO-NE hard-constraint section near the
-> end; it supersedes every mention of `NETransparentProxy` in the body below).
+> (build Slices 1–4). **The remaining track is P2 — app-agnostic capture of proxy-ignoring apps.** The
+> 2026-07-03 "no Network Extension" rule near the end was **lifted on 2026-10-30**: P2 is now an opt-in
+> `NETransparentProxyProvider` engine, planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`.
 > This document is the handoff for turning VPN Bypass from a
 > two-way *"bypass the VPN for these domains"* tool into a general **multi-route router**: any
 > destination can take any of **N named routes** — the corporate VPN (default), one or more **proxies**
@@ -127,8 +127,9 @@ clarity. *(See open questions for which selector types ship in v1.)*
 
 ## macOS implementation
 
-**Decision (from research): the OS-level engine is `NETransparentProxyProvider`** *(superseded — see the
-NO-NE hard-constraint section below; the shipped path is entitlement-free, and NE is out)* (a Network System
+**Decision (from research): the OS-level engine is `NETransparentProxyProvider`** *(set aside from 2026-07-03
+by the NO-NE section below, restored on 2026-10-30 when that rule was lifted: see
+`docs/design/NETWORK-EXTENSION-DESIGN.md`)* (a Network System
 Extension). It is the *only* mechanism that reliably intercepts a workstation's **own** outbound flows
 per-destination — and it hands the handler the **hostname before DNS** (`flow.remoteHostname`), which is
 exactly what makes domain-based routing *and* the DNS fix possible. mitmproxy (local mode), ProxyBridge,
@@ -158,8 +159,8 @@ route-change watchdog to re-apply on VPN resets — they can't reach a proxy ups
 listeners + `route-on`) ships first with zero entitlements** (just local proxy listeners + the proxy env —
 today's `oxy-on`, generalized) and already delivers the proven 3-way; **P2 (the NE engine) is the
 app-agnostic upgrade** for traffic that ignores a proxy env (curl-without-`-x`, Go/Rust binaries, daemons).
-*(Superseded — the app-agnostic upgrade is now the entitlement-free PF/CA transparent path, NOT NE; see the
-NO-NE hard-constraint section below. P1 shipped in 3.0.)*
+*(P1 shipped in 3.0. The app-agnostic upgrade is the NE transparent proxy again since 2026-10-30:
+`docs/design/NETWORK-EXTENSION-DESIGN.md`.)*
 
 ## Hookability — how an app picks a route
 
@@ -197,9 +198,9 @@ Bypass. *(Listener-port assignment + the `route-on` CLI design come from the hoo
 ## Resolved by research / still open
 
 **Resolved:**
-- **Engine** → `NETransparentProxyProvider` *(superseded — NE is out; the engine is the entitlement-free
-  kernel-routes + local-listener path, with a PF/local-CA transparent track for app-agnostic capture. See the
-  NO-NE hard-constraint section below.)* (PF-`rdr` rejected as a redsocks-style redirect — it can't touch the
+- **Engine** → `NETransparentProxyProvider` *(the default engine stays kernel routes + local
+  listeners; since 2026-10-30 the transparent proxy is the planned opt-in engine for app-agnostic capture:
+  `docs/design/NETWORK-EXTENSION-DESIGN.md`.)* (PF-`rdr` rejected as a redsocks-style redirect — it can't touch the
   box's own traffic).
 - **Per-route DNS** → proxy routes: the proxy resolves remotely; direct: interface-bound resolve; else
   `/etc/resolver/<domain>` (`NEDNSSettings.matchDomains` is silently ignored).
@@ -220,7 +221,7 @@ Bypass. *(Listener-port assignment + the `route-on` CLI design come from the hoo
 - **P1 — proxy route + local listeners:** generalize the single `proxyConfig` into N proxy routes, each
   with a `127.0.0.1:PORT` forwarder (the `oxy-on` forwarder, made general + auth-injecting + VPN-escaping).
   Ship `route-on <name>`. This alone delivers the proven 3-way, generically.
-- **P2 — app-agnostic capture:** *(superseded — NE is out; see the NO-NE hard-constraint section below.)* the
+- **P2 — app-agnostic capture:** *(NE was out from 2026-07-03 to 2026-10-30; now planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`.)* the
   entitlement-free **PF + local-CA** transparent path (not `NETransparentProxy`) for app-agnostic
   per-destination routing + per-route DNS + health-check/failover selectors.
 - **P3 — providers:** WireGuard/OpenVPN/Tailscale route types; PAC for browsers; UI for routes+rules.
@@ -356,7 +357,13 @@ conflicts with the older text; the older sections are kept for history.
   localhost-HTTP+token (a TCP port every local process can reach + token lifecycle + CSRF/rebinding — bad
   look on a security tool; only if remote control is ever needed, and then Tailscale-bound, never localhost).
 
-### HARD CONSTRAINT (2026-07-03) — NO Network Extension entitlements, ever
+### LIFTED 2026-10-30 — was: HARD CONSTRAINT (2026-07-03), NO Network Extension entitlements, ever
+
+> **Lifted on 2026-10-30.** Network Extension entitlements are now allowed. The plan is an opt-in
+> transparent-proxy system extension, with kernel routes kept as the default engine and the fallback:
+> `docs/design/NETWORK-EXTENSION-DESIGN.md`. The text below is kept as history; where it conflicts with the
+> new design, the new design wins. Releases are already Developer ID signed and notarized since 5.1.0, so
+> the signing fork it objected to no longer exists.
 
 Owner directive: *"Continue using these quirks with pf, CA, etc… I don't want to be using NE entitlements
 or anything for this."* This **overrides** the "macOS implementation" section above where it names
@@ -395,8 +402,8 @@ Consequences for the roadmap:
    `RouteCompiler` kernel dispatch into a *specific* utun, flag-gated at `schemaVersion >= 2`, with the
    generalized GP catch-all guard + regression tests. The only new kernel step; riskiest, ships last.
 5. **Slice 5 — Health + fallback + system-PAC "transparent" toggle + final verification.**
-6. **P2/NETransparentProxy stays out of scope** (app-agnostic capture + true global fail-closed) — gated on
-   the signing-fork decision (`VPN-Bypass-3sc.11`).
+6. **P2/NETransparentProxy** (app-agnostic capture): unblocked on 2026-10-30, planned in
+   `docs/design/NETWORK-EXTENSION-DESIGN.md`.
 
 ## Tracking
 
