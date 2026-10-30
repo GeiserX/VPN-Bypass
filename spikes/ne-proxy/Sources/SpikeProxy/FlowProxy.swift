@@ -15,7 +15,7 @@ final class FlowProxy: NETransparentProxyProvider {
     private let lock = NSLock()
     private var state = PolicyState()
     private var leaseExpiryCounted = false
-    private var scope = IncludeScope.allTCP
+    private var scope = IncludeScope.narrow
     private var startedAt = 0
     private let counters = Counters()
     private lazy var egress = Egress(queue: queue)
@@ -23,8 +23,8 @@ final class FlowProxy: NETransparentProxyProvider {
 
     override func startProxy(options: [String: Any]? = nil, completionHandler: @escaping (Error?) -> Void) {
         // Options come only from a start the app makes. A start by the OS (boot, crash, wake) has
-        // none and gets the v1 include rule.
-        scope = IncludeScope(options?["scope"] as? String) ?? .allTCP
+        // none and gets the narrow scope (port 80), never `all`.
+        scope = IncludeScope.atStart(options?["scope"] as? String)
         startedAt = Int(Date().timeIntervalSince1970)
         _ = egress
 

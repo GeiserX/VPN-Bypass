@@ -29,6 +29,10 @@ How it behaves:
 - **Include scope** is chosen at start. `port:80` sends the extension only TCP to remote port 80, so a
   VPN client's own TLS connections (443) are not even offered to it. `all` is the v1 design: every
   outbound TCP flow except loopback, private, link-local, multicast and 100.64/10.
+- **A start by the OS is always `port:80`.** Only the app's **2. Start proxy** passes a scope. When macOS
+  starts the extension itself (boot, wake, a restart after a crash or `kill -9`) there are no options,
+  and the extension comes up on `port:80`, never `all`, whatever scope ran before. The status pane
+  shows the scope in force (`scope port:80` or `scope all`).
 - **No policy, no claims.** Until you press *Push policy*, and whenever the app has not refreshed the
   policy for 2 minutes (the lease; the app re-sends it every 30 s), the extension declines every flow.
 - **What it claims:** a TCP flow from an app in the *Apps* list (bundle id, exact or on a dot boundary,
@@ -66,6 +70,14 @@ crash does) to be answered first on the Mac mini, where a dropped tunnel costs n
 - **Part B, the MacBook with GlobalProtect connected:** scope `port:80` first. Scope `all` only if
   Part A showed that starting and stopping the proxy leaves unmatched connections alone.
 
+**Which steps run with scope `all`, and their gate.** Only three: the second pass of A2 (on the mini),
+B4, and B3 if you choose to run it under `all`. **Gate: no step with scope `all` runs on the MacBook
+until A2 with scope `all` has passed on the mini** (download, `ssh` session and Tailscale's
+connections all survived the start and the stop). That covers B4 and any B3 step under `all`,
+B3.4 `kill -9` included. Every other step runs with `port:80`. A `kill -9` under `all` does not
+stay under `all`: the OS restarts the extension on `port:80` (see above), so after B3.4 press
+**Turn off** and **2. Start proxy** with `all` again if the next step needs it.
+
 Rules for both parts: never restart, reconnect or reconfigure GlobalProtect or any VPN to make a test
 work. If GlobalProtect drops at any point: press **Turn off** in the spike, write down the time, then
 reconnect GlobalProtect yourself the way you always do.
@@ -76,14 +88,42 @@ reconnect GlobalProtect yourself the way you always do.
    `ditto "build/VPN Bypass NE Spike.app" "/Applications/VPN Bypass NE Spike.app"`
 2. Open it. A window appears; nothing is active yet.
 3. Click **1. Activate extension**. macOS says the system extension was blocked.
-4. System Settings > General > Login Items & Extensions > Network Extensions: switch on
-   **VPN Bypass NE Spike**, enter your password.
+4. Turn it on in System Settings and enter your password. *Expected; confirm during the test:* the
+   switch is under General > Login Items & Extensions > Network Extensions, named
+   **VPN Bypass NE Spike**. These menu paths were not seen live on macOS 26 or 27. If it is not
+   there, type `extension` in the System Settings search field, or open the alert's own
+   *Open System Settings* button; write down where it really was.
 5. Check: `systemextensionsctl list | grep spike` shows `[activated enabled]`.
-6. In the app pick the scope, click **2. Start proxy**. The first time macOS asks
-   "VPN Bypass NE Spike would like to add proxy configurations": **Allow**.
+6. In the app pick the scope, click **2. Start proxy**. The first time macOS asks to allow the proxy
+   configuration (*expected; confirm during the test:* "VPN Bypass NE Spike would like to add proxy
+   configurations"): **Allow**. Note the real wording.
 7. The status pane says `proxy: connected, configuration enabled` and shows the extension pid.
 
 ## Part A: the Mac mini (no GlobalProtect)
+
+**What Part A can and cannot answer.** The mini runs with SIP off and the boot argument
+`amfi_get_out_of_my_way=0x1`. AMFI there does not enforce signatures or provisioning profiles, so
+Part A tests how flows behave (matching, start, stop, kill) and says nothing about whether macOS
+accepts the signed bundle and its profiles. That question (L0) was answered on the MacBook, where
+SIP and AMFI are on: a copy without its embedded profile is killed at launch (exit 137), the signed
+copy runs.
+
+**Getting the signed app onto the mini.** Copy the notarized, stapled bundle from the MacBook's build
+directory with `ditto`, which keeps signatures, extended attributes and the staple intact; then
+check it on the mini before installing:
+
+```sh
+# on the MacBook, in spikes/ne-proxy
+ditto -c -k --keepParent "build/VPN Bypass NE Spike.app" /tmp/ne-spike.zip
+scp /tmp/ne-spike.zip <mini>:/tmp/ && rm /tmp/ne-spike.zip
+# on the mini
+sudo ditto -x -k /tmp/ne-spike.zip /Applications/ && rm /tmp/ne-spike.zip
+codesign --verify --deep --strict --verbose=2 "/Applications/VPN Bypass NE Spike.app"
+xcrun stapler validate "/Applications/VPN Bypass NE Spike.app"
+```
+
+Do not copy it with plain `cp -R`, `scp -r` or `rsync` without extended attributes: a bundle whose
+seal breaks on the way fails `codesign --verify`.
 
 ```sh
 F="/Applications/VPN Bypass NE Spike.app/Contents/MacOS/spike-fetch"
@@ -118,8 +158,15 @@ period once without touching the spike, as the control.
 **A3, L8: kill -9.** With the policy pushed and `"$F" --every 120 http://api4.ipify.org` running:
 
 ```sh
-sudo kill -9 "$(pgrep -f com.geiserx.vpn-bypass.spike.proxy)"
+# the extension's own process: its executable under /Library/SystemExtensions, nothing else
+# (pgrep -f also matches a `log stream` or `grep` naming the bundle id, and pgrep -x any process
+# with the same executable name anywhere on disk)
+pid=$(ps -axo pid=,comm= | awk '$2 ~ /^\/Library\/SystemExtensions\/[^ ]*\/com\.geiserx\.vpn-bypass\.spike\.proxy$/ {print $1}')
+echo "$pid"                     # exactly one number; stop here if it is empty or more than one
+sudo kill -9 "$pid"
 ```
+
+After the kill the OS restarts the extension on scope `port:80`, whatever scope it ran before.
 
 Watch the `spike-fetch` lines (do new requests fail, stall or go direct, and for how long), whether the
 pid in the status pane changes (the OS restarting it), and whether Tailscale's connections survive.
@@ -189,7 +236,9 @@ GlobalProtect's log and `lsof` list show no change against `/tmp/gp-before.txt`.
 3. **Stop session**: does the claimed download die, do new requests go to VPN_IP at once, does
    GlobalProtect log anything?
 4. **Kill -9** (only if Part A's A3 showed the restart left Tailscale's connections alone):
-   `sudo kill -9 "$(pgrep -f com.geiserx.vpn-bypass.spike.proxy)"`, then as in A3.
+   find `pid` and kill it with the commands in A3 (check it is exactly one number first), then watch
+   as in A3. Under scope `all` this step also needs A2 with `all` passed; the restart comes up on
+   `port:80`.
 
 **B4, scope `all`** (only if Part A's A2 showed unmatched connections survive a start and a stop with
 scope `all`): **Turn off**, choose `all`, **Start**, **Push policy**, then repeat B1 with `https://`
@@ -204,17 +253,19 @@ replace the IPs with HOME_IP/VPN_IP), the counters, and any GlobalProtect log li
 1. In the app: **Remove completely**. It removes the proxy configuration (stops the proxy) and asks
    macOS to deactivate the extension; macOS may ask for your password.
 2. Check: `systemextensionsctl list | grep spike` shows nothing, or
-   `[terminated waiting to uninstall on reboot]`; System Settings > Network > Filters & Proxies (VPN & Filters on older macOS) no
-   longer lists *VPN Bypass NE spike*.
+   `[terminated waiting to uninstall on reboot]`; System Settings no longer lists *VPN Bypass NE spike*
+   under Network > Filters & Proxies (*expected path; confirm during the test*; VPN & Filters on older
+   macOS; if it is not there, search System Settings for `Filters & Proxies` or `extension`).
 3. Drag `/Applications/VPN Bypass NE Spike.app` to the Trash.
 
 **If it misbehaves** (new connections hang, the app will not open), in this order, none of which touch
 GlobalProtect:
 
-1. System Settings > Network > Filters & Proxies (VPN & Filters on older macOS): switch **VPN Bypass NE spike** off. That stops the
-   proxy and keeps the OS from restarting it.
-2. System Settings > General > Login Items & Extensions > Network Extensions: switch
-   **VPN Bypass NE Spike** off.
+1. System Settings > Network > Filters & Proxies (*expected path; confirm during the test*; VPN &
+   Filters on older macOS; otherwise search System Settings for `Filters & Proxies`): switch
+   **VPN Bypass NE spike** off. That stops the proxy and keeps the OS from restarting it.
+2. System Settings > General > Login Items & Extensions > Network Extensions (*expected path*;
+   otherwise search System Settings for `extension`): switch **VPN Bypass NE Spike** off.
 3. Delete the app from `/Applications` in Finder; macOS removes its extension with it (after a reboot
    at the latest).
 4. On the mini only (SIP is off there): `systemextensionsctl uninstall 624WUVM8B4 com.geiserx.vpn-bypass.spike.proxy`.

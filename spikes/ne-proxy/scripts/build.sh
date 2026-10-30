@@ -33,6 +33,14 @@ for bin in "$app/Contents/MacOS/VPNBypassNESpike" "$app/Contents/MacOS/spike-fet
   archs=$(lipo -archs "$bin")
   [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || fail "$bin is not universal ($archs)"
 done
+# spike-fetch loads http:// test pages: App Transport Security reads its embedded Info.plist.
+for arch in arm64 x86_64; do
+  lipo -thin "$arch" "$app/Contents/MacOS/spike-fetch" -output "build/.fetch-$arch"
+  segedit "build/.fetch-$arch" -extract __TEXT __info_plist "build/.fetch-$arch.plist"
+  [ "$(plutil -extract NSAppTransportSecurity.NSAllowsArbitraryLoads raw -o - "build/.fetch-$arch.plist")" = true ] \
+    || fail "$arch: spike-fetch has no embedded Info.plist allowing http://"
+  rm -f "build/.fetch-$arch" "build/.fetch-$arch.plist"
+done
 # The extension must not link the app's resource bundle machinery or anything beyond the system.
 if otool -L "$ext/Contents/MacOS/$ext_id" | grep -E '^[[:space:]]' | grep -v -E '^[[:space:]]+(/System/Library/|/usr/lib/)'; then
   fail "extension links a non-system library"

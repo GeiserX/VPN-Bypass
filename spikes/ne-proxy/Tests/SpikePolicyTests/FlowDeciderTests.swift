@@ -122,6 +122,17 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(IncludeScope.tcpPort(80).token, "port:80")
     }
 
+    /// A start by the OS (boot, wake, restart after a crash or kill -9) has no options: it must come
+    /// up on the narrow scope, never on `all`. So must a start whose scope cannot be read.
+    func testStartWithoutScopeIsNarrow() {
+        XCTAssertEqual(IncludeScope.atStart(nil), .tcpPort(80))
+        XCTAssertEqual(IncludeScope.atStart(""), .tcpPort(80))
+        XCTAssertEqual(IncludeScope.atStart("everything"), .tcpPort(80))
+        XCTAssertEqual(IncludeScope.atStart("port:0"), .tcpPort(80))
+        XCTAssertEqual(IncludeScope.atStart("all"), .allTCP)
+        XCTAssertEqual(IncludeScope.atStart("port:443"), .tcpPort(443))
+    }
+
     func testRequestRoundTrip() throws {
         let r = SpikeRequest(policy: SpikePolicy(generation: 3, apps: ["a.b"], hostnames: ["c.d"], interfaceName: "en0"))
         XCTAssertEqual(try JSONDecoder().decode(SpikeRequest.self, from: JSONEncoder().encode(r)), r)

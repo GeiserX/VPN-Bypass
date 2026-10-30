@@ -85,4 +85,14 @@ public enum IncludeScope: Equatable {
         case .tcpPort(let p): return "port:\(p)"
         }
     }
+
+    /// The narrow scope: plain HTTP only.
+    public static let narrow = IncludeScope.tcpPort(80)
+
+    /// The scope a provider start uses. Only a start the app makes carries a scope; a start by the
+    /// OS (boot, wake, a restart after a crash or kill) has no options, or nothing we can read, and
+    /// gets the narrow scope, never `all`. Scope `all` exists only while someone asked for it.
+    public static func atStart(_ token: String?) -> IncludeScope {
+        IncludeScope(token) ?? .narrow
+    }
 }
