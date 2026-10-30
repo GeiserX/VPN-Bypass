@@ -37,7 +37,7 @@ The proposals below mostly remove things. They take away a colour from about thi
 
 Each image shows the dropdown while connected and the Services page as it will look after #185 (only the user's services, with "Browse catalogue…"). The data is the same in all three.
 
-#### 2A. Quiet native (recommended)
+#### 2A. Quiet native (decided)
 
 ![Direction A: quiet native](proposals/rework/01a-direction-quiet-native.png)
 
@@ -63,7 +63,7 @@ The Lanes navy and blue on every surface: a hero card for status, gradient prima
 
 **Recommendation: 2A (decided).** It is the only direction that removes more than it adds, it is the look the owner already picked on Lookups, and it follows the platform rather than competing with it. The rest of this doc is drawn in 2A.
 
-### The recommended system, as tokens and components
+### The system, as tokens and components
 
 ![The system: tokens and the seven shared components](proposals/rework/02-system.png)
 
@@ -112,7 +112,7 @@ Numbers use `monospacedDigit()` so columns line up. `design: .rounded` stays in 
 
 **Size.** M for tokens and components. Each page after that is S or M.
 
-## 3. Each surface under the recommended system
+## 3. Each surface under the system
 
 ### 3.1 The dropdown
 
@@ -151,7 +151,7 @@ Numbers use `monospacedDigit()` so columns line up. `design: .rounded` stays in 
 **Proposal.** Three options; B is decided:
 
 - **(A) Keep the toolbar, show every page in every mode.** The cheapest. But nine items do not fit at 580 pt, so the window gets wider and the toolbar is still a flat row with no grouping.
-- **(B) A sidebar (recommended).** Status at the top, then three groups. Routing holds Domains, Services, Rules and Routes. Insight holds Lookups and Logs. App holds General and About. The mode popup sits at the top of the sidebar. Pages for another mode stay listed, greyed, and open read-only with one line: "Rules apply in Custom mode. You are in Bypass. [Switch…]". The window gets a minimum size of about 720×480 and can grow. The last page reopens and the page name is the window title. Search is in the title bar on every list page. `NavigationSplitView` is available on macOS 13, which is the app's target (`Package.swift:8`).
+- **(B) A sidebar (decided).** Status at the top, then three groups. Routing holds Domains, Services, Rules and Routes. Insight holds Lookups and Logs. App holds General and About. The mode popup sits at the top of the sidebar. Pages for another mode stay listed, greyed, and open read-only with one line: "Rules apply in Custom mode. You are in Bypass. [Switch…]". The window gets a minimum size of about 720×480 and can grow. The last page reopens and the page name is the window title. Search is in the title bar on every list page. `NavigationSplitView` is available on macOS 13, which is the app's target (`Package.swift:8`).
 - **(C) A main window and a separate small Settings window**, the way the Tailscale app went. It is the most flexible but means two windows to explain, for an app that has one job.
 
 **Recommendation: B (decided).** The sidebar never changes shape, because a mode change only greys different items. It also delivers the unbuilt "later step" from the first round's proposal 2 (`UI-UX-PROPOSALS.md:43`): the inactive mode's list shown read-only. The nested scroll views go, because the page itself scrolls.
@@ -200,7 +200,7 @@ No image. Both keep their content and take the shared components.
 
 - **General as five native groups with no icons:** Startup, Routing, DNS outside the VPN, Notifications, Configuration. Notification kinds become checkboxes. "Auto DNS Refresh" and "Refresh Interval" merge into one popup, "Look up addresses again: Every hour / … / Never". "Verify Routes After Apply" becomes "Check the path after applying", which runs idea 1 in section 5 instead of ping.
 - **The global SOCKS5 proxy.** Two options; A is decided:
-  - **(A) Move it behind an Advanced disclosure and hide it in Custom mode (recommended).** One sentence points Custom users to Routes. Nothing changes for people who use it.
+  - **(A) Move it behind an Advanced disclosure and hide it in Custom mode (decided).** One sentence points Custom users to Routes. Nothing changes for people who use it.
   - **(B) Retire it in favour of Custom mode's SOCKS5 routes.** Simpler in the long run, but it breaks the setup of anyone using it in Bypass mode. That needs a migration and a release note.
 - **About replaces Info**: wordmark, version, licence, author, three buttons (Website, GitHub, Report a problem…), and one "Support the project" row with a popup holding the four ways to give. "Report a problem…" copies a diagnostics bundle (versions, VPN type, mode, counts, recent errors, no names) and opens a new issue. That is item 15 of the August improvement plan, which was never built.
 
@@ -308,6 +308,8 @@ Each step is one PR unless it says otherwise. Every new string goes in EN, ES an
 13. **Path check and "where does this site go?"** (ideas 1 and 2), which builds on #184's `--json`. M.
 14. **Bypass the site you are on, Learn a site, and stale entries** (ideas 3, 5 and 6). One PR each.
 15. Then ideas 7 and 9 to 12 (8 shipped as #189). The helper changes (7, and any others by then) are batched into one helper version.
+
+Where each flow fix from section 4 lands: 1 in step 4. 2 in step 12. 3 in step 3 ("Show" and Status > Problems) and step 11 (Retry on the row). 4 in step 11, with idea 3 in step 14. 5 in step 11. 6 in step 10. 7 goes with the surface it touches: the three status elements and the 24 pt footer buttons in step 3, ⌘F on every list page in step 4, one element per row and ⌘N in step 11, ⌘P in step 12. 8 in step 4, which also makes the Settings window the way back in when the menu bar icon is hidden.
 
 ## Summary
 
