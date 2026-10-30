@@ -76,17 +76,29 @@ public enum VPNKillSwitchReader {
 
     /// Every VPN configuration in the archive. Empty for data that is not a readable archive.
     public static func vpnConfigurations(from data: Data) -> [NEVPNConfigurationInfo] {
+        parseArchive(data)?.configurations ?? []
+    }
+
+    /// The archive's VPN configurations, and the ids (upper case) of the entries that failed to
+    /// decode. Nil for data that is not a readable archive.
+    static func parseArchive(_ data: Data) -> (configurations: [NEVPNConfigurationInfo], undecoded: Set<String>)? {
         guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let top = plist["$top"] as? [String: Any] else { return [] }
+              let top = plist["$top"] as? [String: Any] else { return nil }
         // The other top-level keys (Version, Generation, Index) are not configurations.
         let ids = top.keys.filter { UUID(uuidString: $0) != nil }.sorted()
         var result: [NEVPNConfigurationInfo] = []
+        var undecoded = Set<String>()
         var unarchiver = makeUnarchiver(data)
+        guard unarchiver != nil else { return nil }
         for id in ids {
-            guard let current = unarchiver else { break }
+            guard let current = unarchiver else {
+                undecoded.insert(id.uppercased())
+                continue
+            }
             let config = current.decodeObject(of: NEConfigurationStub.self, forKey: id)
             if current.error != nil {
                 // An error sticks to the unarchiver; start a fresh one for the next configuration.
+                undecoded.insert(id.uppercased())
                 unarchiver = makeUnarchiver(data)
                 continue
             }
@@ -97,7 +109,7 @@ public enum VPNKillSwitchReader {
                 includeAllNetworks: proto?.includeAllNetworks, enforceRoutes: proto?.enforceRoutes,
                 excludeLocalNetworks: proto?.excludeLocalNetworks))
         }
-        return result
+        return (result, undecoded)
     }
 
     /// The UUIDs `scutil --nc list` marks "(Connected)", upper case.
@@ -145,14 +157,17 @@ public enum VPNKillSwitchReader {
 
     /// The kill switch of a connected VPN, from the archive at `path` and the `connected` ids
     /// (`scutil --nc list`). `.some(nil)` is a successful read with no kill switch; nil means
-    /// the file could not be read, so the caller keeps what it knew. Blocking but cheap: one
+    /// the file could not be read or parsed, or a connected entry failed to decode, so the
+    /// caller keeps what it knew. Blocking but cheap: one
     /// file read, and a status call only for a connected configuration that has a flag on.
     /// Never call it on the main thread.
     static func read(connected: Set<String>, trackedInterface: String?,
                      path: String = configurationsPath) -> VPNKillSwitch?? {
         guard !connected.isEmpty else { return .some(nil) }
-        guard let data = FileManager.default.contents(atPath: path) else { return nil }
-        let configurations = vpnConfigurations(from: data)
+        guard let data = FileManager.default.contents(atPath: path),
+              let archive = parseArchive(data),
+              archive.undecoded.isDisjoint(with: connected) else { return nil }
+        let configurations = archive.configurations
         var interfaces: [String: String] = [:]
         for config in configurations where connected.contains(config.id) && config.defeatsRoutes {
             interfaces[config.id] = interfaceName(ofConfiguration: config.id)

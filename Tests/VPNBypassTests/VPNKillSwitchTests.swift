@@ -280,6 +280,28 @@ final class VPNKillSwitchReaderTests: XCTestCase {
         XCTAssertEqual(nothingConnected, .some(nil), "nothing connected is a real \"no\", file or not")
     }
 
+    /// A file that does not parse, or whose connected entry fails to decode, is "unknown" too.
+    /// An odd entry that is not connected does not stop a real "no".
+    func testAnUnparsableFileOrConnectedEntryIsUnknown() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ne-\(UUID().uuidString).plist")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let whole = archive([vpnEntry(idA, flags: killSwitchFlags)])
+        try whole.prefix(whole.count / 2).write(to: url)
+        let cut = VPNKillSwitchReader.read(connected: [idA], trackedInterface: nil, path: url.path)
+        if case .some = cut { XCTFail("a file that does not parse must not read as an answer") }
+
+        try archive([
+            FixtureEntry(id: idA, configuration: FixtureConfiguration(name: "Odd", application: nil,
+                                                                      vpn: FixtureVPN(proto: FixtureProtocol(flags: killSwitchFlags))),
+                         className: "NESomethingNew"),
+            vpnEntry(idB, flags: offFlags),
+        ]).write(to: url)
+        let oddConnected = VPNKillSwitchReader.read(connected: [idA], trackedInterface: nil, path: url.path)
+        if case .some = oddConnected { XCTFail("a connected entry that does not decode must not read as an answer") }
+        let oddNotConnected = VPNKillSwitchReader.read(connected: [idB], trackedInterface: nil, path: url.path)
+        XCTAssertEqual(oddNotConnected, .some(nil), "an odd entry that is not connected leaves a real \"no\"")
+    }
+
     /// Set VPNB_NE_PLIST to a copy of a real archive to see what the reader makes of it.
     /// Prints flags only, never names or ids.
     func testReadsARealArchiveWhenGivenOne() throws {
