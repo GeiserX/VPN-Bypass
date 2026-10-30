@@ -1,0 +1,58 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../ui/mock.css"><link rel="stylesheet" href="rework.css">
+<style>
+  .navy { background: radial-gradient(120% 80% at 0% 0%, #13235A 0%, #0B1230 55%, #080C1F 100%); }
+  .hero { border-radius:12px; padding:14px; background:linear-gradient(135deg, rgba(37,99,235,.35), rgba(56,189,248,.10)); border:.5px solid rgba(96,165,250,.35); }
+  .big { font:700 20px "SFRounded",system-ui; }
+  .tile { display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:10px; background:rgba(255,255,255,.05); border:.5px solid rgba(255,255,255,.08); }
+  .ic { width:28px; height:28px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#60A5FA,#2563EB); flex:none; }
+  .ic .g { color:#fff; }
+  .gbtn { display:flex; align-items:center; justify-content:center; gap:6px; font:600 13px -apple-system,system-ui; padding:9px; border-radius:10px; background:linear-gradient(90deg,#60A5FA,#2563EB,#1E40AF); }
+  .pills { display:flex; gap:6px; justify-content:center; padding:12px; }
+  .pills span { font:600 12px "SFRounded",system-ui; padding:6px 12px; border-radius:99px; color:var(--t2); background:rgba(255,255,255,.05); }
+  .pills span.sel { background:linear-gradient(90deg,#60A5FA,#2563EB); color:#fff; }
+  .card2 { border-radius:14px; padding:14px; background:rgba(255,255,255,.05); border:.5px solid rgba(255,255,255,.10); display:flex; flex-direction:column; gap:10px; }
+</style></head><body>
+<div class="head"><span class="num">C</span><span class="title">Brand-forward: the Lanes navy and blue carry every surface</span></div>
+<p class="caption">Push the identity (IDENTITY-PROPOSALS.md, #87/#88) into the app: navy ground, brand-blue gradients for the primary action and selection, a hero card for status, every service a tile with its own icon plate. Distinctive and warm; it also adds the most chrome, makes the list a third taller, and fights the system material and Liquid Glass that macOS 26 draws around it.</p>
+<div class="cols" style="gap:28px">
+  <div class="col">
+    <div class="label after">Dropdown, connected</div>
+    <div class="dd navy">
+      <div class="r"><span class="wm">VPN<b>Bypass</b></span><span class="fill"></span><span class="chip live"><i></i>On</span></div>
+      <div class="hero" style="margin-top:12px">
+        <div class="ty-detail" style="color:#BFDBFE">WireGuard connected · Bypass</div>
+        <div class="big" style="margin-top:2px">6 skip the VPN</div>
+        <div class="ty-detail tnum" style="margin-top:4px;color:#BFDBFE">62 addresses · 24 s ago</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+        <div class="tile"><span class="ic"><i data-g="send"></i></span><span class="fill" style="font:500 13px -apple-system,system-ui">Telegram</span><span class="ty-detail tnum">18</span></div>
+        <div class="tile"><span class="ic"><i data-g="chat"></i></span><span class="fill" style="font:500 13px -apple-system,system-ui">WhatsApp</span><span class="ty-detail tnum">12</span></div>
+        <div class="tile"><span class="ic"><i data-g="play"></i></span><span class="fill" style="font:500 13px -apple-system,system-ui">YouTube</span><span class="ty-detail tnum">16</span></div>
+        <div class="tile"><span class="ic"><i data-g="music"></i></span><span class="fill" style="font:500 13px -apple-system,system-ui">Spotify</span><span class="ty-detail tnum">8</span></div>
+        <div class="ty-detail" style="padding-left:4px">+ 2 domains</div>
+      </div>
+      <div class="gbtn" style="margin-top:10px"><i data-g="refresh" style="color:#fff"></i>Refresh Routes</div>
+      <div class="foot" style="margin-top:8px"><span class="ty-detail">Bypass ⌄</span><span class="fill"></span><span class="ib"><i data-g="gear"></i></span><span class="ib"><i data-g="more"></i></span></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="label after">Settings, Services page</div>
+    <div class="swin navy" style="width:780px;height:520px;flex-direction:column">
+      <div class="r" style="padding:12px 14px 0;gap:8px"><i style="width:12px;height:12px;border-radius:50%;background:#FF5F57;display:inline-block"></i><i style="width:12px;height:12px;border-radius:50%;background:#FEBC2E;display:inline-block"></i><i style="width:12px;height:12px;border-radius:50%;background:#28C840;display:inline-block"></i></div>
+      <div class="pills"><span>Status</span><span>Domains</span><span class="sel">Services</span><span>Lookups</span><span>General</span><span>Logs</span></div>
+      <div class="pane" style="padding-top:6px">
+        <div class="r" style="margin-bottom:14px"><span class="big">Your services</span><span class="fill"></span><span class="gbtn" style="padding:6px 14px;font-size:12px">Browse catalogue</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="card2"><div class="r gap8"><span class="ic"><i data-g="send"></i></span><span class="fill" style="font:600 14px -apple-system,system-ui">Telegram</span><span class="sw on"></span></div><div class="ty-detail">6 domains · 8 IP ranges · 18 addresses</div></div>
+          <div class="card2"><div class="r gap8"><span class="ic"><i data-g="chat"></i></span><span class="fill" style="font:600 14px -apple-system,system-ui">WhatsApp</span><span class="sw on"></span></div><div class="ty-detail">4 domains · 3 IP ranges · 12 addresses</div></div>
+          <div class="card2"><div class="r gap8"><span class="ic"><i data-g="play"></i></span><span class="fill" style="font:600 14px -apple-system,system-ui">YouTube</span><span class="sw on"></span></div><div class="ty-detail">8 domains · 16 addresses</div></div>
+          <div class="card2" style="border-color:rgba(245,158,11,.5)"><div class="r gap8"><span class="ic" style="background:linear-gradient(135deg,#FBBF24,#F59E0B)"><i data-g="warn"></i></span><span class="fill" style="font:600 14px -apple-system,system-ui">Zoom</span><span class="sw on"></span></div><div class="ty-detail">5 domains · none resolved</div></div>
+          <div class="card2" style="opacity:.55"><div class="r gap8"><span class="ic"><i data-g="music"></i></span><span class="fill" style="font:600 14px -apple-system,system-ui">Spotify</span><span class="sw"></span></div><div class="ty-detail">4 domains · off</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="glyphs.js"></script>
+</body></html>

@@ -1,0 +1,65 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../ui/mock.css"><link rel="stylesheet" href="rework.css">
+<style> .pg { border-radius:12px; border:1px solid #2C2C2C; background:linear-gradient(var(--win),var(--win2)); overflow:hidden; }
+ .nmenu2 { position:absolute; background:rgba(38,38,40,.98); border:.5px solid rgba(255,255,255,.18); border-radius:7px; padding:5px; box-shadow:0 10px 28px rgba(0,0,0,.55); font:400 13px -apple-system,system-ui; width:200px; }
+ .nmenu2 div { padding:3px 10px; border-radius:4px; } .nmenu2 div.hl { background:var(--accent); } .nmenu2 hr { border:0; height:1px; background:rgba(255,255,255,.12); margin:4px 8px; } </style>
+</head><body>
+<div class="head"><span class="num">7</span><span class="title">New ideas where they would live: the site you are on, Pause, and "where does this site go?"</span></div>
+<p class="caption">Three of the ideas in section 5, drawn in the recommended system. None needs a Network Extension. The suggestion row reads the front browser tab through Apple Events (one Automation prompt per browser). Pause removes the app's routes and puts them back on a timer. The path check opens a real connection and reads which interface it left from, instead of a ping.</p>
+<div class="cols" style="gap:24px">
+  <div class="col">
+    <div class="label after">Dropdown: bypass the site you are on, and Pause</div>
+    <div class="dd" style="position:relative">
+      <div class="r"><span class="wm">VPN<b>Bypass</b></span><span class="fill"></span><span class="chip live"><i></i>On</span></div>
+      <div style="margin-top:12px"><div class="ty-strong">WireGuard connected</div><div class="ty-body" style="margin-top:2px">4 services and 2 domains skip the VPN.</div><div class="r" style="margin-top:4px;min-height:22px"><span class="ty-detail tnum">62 addresses · applied 24 s ago · DNS again in 18 min</span></div></div>
+      <div class="r" style="margin-top:10px"><span class="ty-detail" style="font-size:12px">Mode</span><span class="fill"></span><span class="pop">Bypass</span></div>
+      <div class="ddsep"></div>
+      <div class="field"><i data-g="plus"></i><span class="fill">Add a site to bypass…</span><span class="kbd">⌘N</span></div>
+      <div class="ddrow" style="margin-top:6px"><span class="lead"><i data-g="compass"></i></span><span class="name fill ell">shop.example.com <span class="ty-detail">· open in Safari</span></span><span class="btn">Bypass</span></div>
+      <div class="r" style="margin:10px 0 4px"><span class="ty-section fill">Skipping the VPN</span><span class="ty-detail">addresses</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="send"></i></span><span class="name fill">Telegram</span><span class="val">18</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="chat"></i></span><span class="name fill">WhatsApp</span><span class="val">12</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="play"></i></span><span class="name fill">YouTube</span><span class="val">16</span></div>
+      <div class="ddsep"></div>
+      <div class="foot"><span class="btn"><i data-g="refresh"></i>Refresh</span><span class="btn" style="background:rgba(255,255,255,.18)"><i data-g="pause"></i>Pause</span><span class="fill"></span><span class="ib"><i data-g="gear"></i></span><span class="ib"><i data-g="more"></i></span></div>
+      <div class="nmenu2" style="left:96px;bottom:46px"><div>For 15 minutes</div><div class="hl">For 1 hour</div><div>Until the VPN reconnects</div><hr><div>Until I resume</div></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="label after">Dropdown while paused</div>
+    <div class="dd">
+      <div class="r"><span class="wm">VPN<b>Bypass</b></span><span class="fill"></span><span class="chip pause"><i></i>Paused</span></div>
+      <div style="margin-top:12px"><div class="ty-strong">WireGuard connected</div><div class="ty-body" style="margin-top:2px">Paused: everything goes through the VPN.</div><div class="r" style="margin-top:4px;min-height:22px"><span class="ty-detail fill">Resumes at 14:32, in 58 min</span><span class="btn pri">Resume</span></div></div>
+      <div class="r" style="margin-top:10px"><span class="ty-detail" style="font-size:12px">Mode</span><span class="fill"></span><span class="pop">Bypass</span></div>
+      <div class="ddsep"></div>
+      <div class="field"><i data-g="plus"></i><span class="fill">Add a site to bypass…</span><span class="kbd">⌘N</span></div>
+      <div class="r" style="margin:12px 0 4px"><span class="ty-section fill">Will skip the VPN again</span><span class="ty-detail">addresses</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="send"></i></span><span class="name fill" style="color:var(--t2)">Telegram</span><span class="val">–</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="chat"></i></span><span class="name fill" style="color:var(--t2)">WhatsApp</span><span class="val">–</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="play"></i></span><span class="name fill" style="color:var(--t2)">YouTube</span><span class="val">–</span></div>
+      <div class="ddsep"></div>
+      <div class="foot"><span class="btn dim"><i data-g="refresh"></i>Refresh</span><span class="fill"></span><span class="ib"><i data-g="gear"></i></span><span class="ib"><i data-g="more"></i></span></div>
+    </div>
+    <div class="note" style="margin-top:6px">The menu bar icon shows the paused glyph too. Quitting while paused leaves no routes behind; the timer dies with the app.</div>
+  </div>
+  <div class="col">
+    <div class="label after">Status page: where does this site go?</div>
+    <div class="pg" style="width:470px">
+      <div class="tbar"><span class="ty-title">Status</span></div>
+      <div class="pane">
+        <div class="sec ty-section">Check a site</div>
+        <div class="r gap8" style="margin-bottom:10px"><span class="field focus fill">cdn.example.net</span><span class="btn pri">Check</span></div>
+        <div class="box">
+          <div class="row2 two"><span class="lead"><i data-g="warn" class="attn"></i></span><div class="fill"><div class="name">Goes into the VPN (utun4)</div><div class="det">Not on any list, so it goes through the VPN.</div></div><span class="btn">Add</span></div>
+        </div>
+        <div class="r gap8" style="margin-top:12px"><span class="field fill" style="color:var(--t1)">en.wikipedia.org</span><span class="btn">Check</span></div>
+        <div class="box" style="margin-top:10px">
+          <div class="row2 two"><span class="lead"><i data-g="checkc" class="live"></i></span><div class="fill"><div class="name">Leaves through Wi-Fi (en0)</div><div class="det">Bypass list → 4 addresses, all 4 connected outside the VPN</div></div></div>
+        </div>
+        <div class="ty-detail" style="margin-top:10px;line-height:1.5">Same answer from the CLI: <span class="ty-mono" style="font-size:11px;color:var(--t1)">vpnb why cdn.example.net --json</span> (after #184). The check opens a TCP connection to port 443 and reads its source address with getsockname, so sites that block ping still get an answer.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="glyphs.js"></script>
+</body></html>

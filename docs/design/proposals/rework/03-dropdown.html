@@ -1,0 +1,78 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../ui/mock.css"><link rel="stylesheet" href="rework.css">
+<style> .shot { background-size: 340px auto; width: 340px; } .dd { align-self:flex-start; } </style>
+</head><body>
+<div class="head"><span class="num">3</span><span class="title">The dropdown: one status block that keeps its shape, one left edge, no word column</span></div>
+<p class="caption">Before: the same 340 pt menu stacks a green pill, a coloured headline, a facts grid, a segmented control, a green primary button and a result line that repeats the facts; with the helper down it adds a banner and six amber words, and the result line still says "none failed". After: three lines of status in every state (who, what, the numbers or the problem), a quiet mode popup, the add field always open, one number per row, and the failure reason in the line where the numbers were.</p>
+<div class="rows">
+  <div class="col">
+    <div class="label">Before · real renders at 4a45639 (connected, helper down, 7 failed)</div>
+    <div class="cols" style="gap:20px">
+      <div class="shot" style="height:477px;background-image:url(before/dd-bypass.png)"></div>
+      <div class="shot" style="height:524px;background-image:url(before/dd-helper-down.png)"></div>
+      <div class="shot" style="height:689px;background-image:url(before/dd-errors.png)"></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="label after">After · same three states</div>
+    <div class="cols" style="gap:20px">
+      <!-- connected -->
+      <div class="dd">
+        <div class="r"><span class="wm">VPN<b>Bypass</b></span><span class="fill"></span><span class="chip live"><i></i>On</span></div>
+        <div style="margin-top:12px"><div class="ty-strong">WireGuard connected</div><div class="ty-body" style="margin-top:2px">4 services and 2 domains skip the VPN.</div><div class="r" style="margin-top:4px;min-height:22px"><span class="ty-detail tnum">62 addresses · applied 24 s ago · DNS again in 18 min</span></div></div>
+        <div class="r" style="margin-top:10px"><span class="ty-detail" style="font-size:12px">Mode</span><span class="fill"></span><span class="pop">Bypass</span></div>
+        <div class="ddsep"></div>
+        <div class="field"><i data-g="plus"></i><span class="fill">Add a site to bypass…</span><span class="kbd">⌘N</span></div>
+        <div class="r" style="margin:12px 0 4px"><span class="ty-section fill">Skipping the VPN</span><span class="ty-detail">addresses</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="send"></i></span><span class="name fill ell">Telegram</span><span class="val">18</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="chat"></i></span><span class="name fill ell">WhatsApp</span><span class="val">12</span></div>
+        <div class="ddrow hov"><span class="lead"><i data-g="play"></i></span><span class="name fill ell">YouTube</span><span class="ty-detail" style="color:var(--accentText);margin-right:6px">Turn off</span><span class="val">16</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="music"></i></span><span class="name fill ell">Spotify</span><span class="val">8</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="globe"></i></span><span class="name fill ell">en.wikipedia.org</span><span class="val">4</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="globe"></i></span><span class="name fill ell">news.ycombinator.com</span><span class="val">4</span></div>
+        <div class="ddsep"></div>
+        <div class="foot"><span class="btn"><i data-g="refresh"></i>Refresh</span><span class="btn"><i data-g="pause"></i>Pause</span><span class="fill"></span><span class="ib"><i data-g="gear"></i></span><span class="ib"><i data-g="more"></i></span></div>
+      </div>
+      <!-- helper down -->
+      <div class="dd">
+        <div class="r"><span class="wm">VPN<b>Bypass</b></span><span class="fill"></span><span class="chip attn"><i></i>Not routing</span></div>
+        <div style="margin-top:12px"><div class="ty-strong">WireGuard connected</div><div class="ty-body" style="margin-top:2px">Nothing is routed: the helper is not running.</div>
+          <div class="r" style="margin-top:4px;gap:6px;min-height:22px"><i data-g="warn" class="attn"></i><span class="ty-detail fill" style="color:var(--t1)">It did not answer after install.</span><span class="btn pri">Fix…</span></div></div>
+        <div class="r" style="margin-top:10px"><span class="ty-detail" style="font-size:12px">Mode</span><span class="fill"></span><span class="pop">Bypass</span></div>
+        <div class="ddsep"></div>
+        <div class="field"><i data-g="plus"></i><span class="fill">Add a site to bypass…</span><span class="kbd">⌘N</span></div>
+        <div class="r" style="margin:12px 0 4px"><span class="ty-section fill">Would skip the VPN</span><span class="ty-detail">addresses</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="send"></i></span><span class="name fill ell" style="color:var(--t2)">Telegram</span><span class="val">–</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="chat"></i></span><span class="name fill ell" style="color:var(--t2)">WhatsApp</span><span class="val">–</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="play"></i></span><span class="name fill ell" style="color:var(--t2)">YouTube</span><span class="val">–</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="music"></i></span><span class="name fill ell" style="color:var(--t2)">Spotify</span><span class="val">–</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="globe"></i></span><span class="name fill ell" style="color:var(--t2)">en.wikipedia.org</span><span class="val">–</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="globe"></i></span><span class="name fill ell" style="color:var(--t2)">news.ycombinator.com</span><span class="val">–</span></div>
+        <div class="ddsep"></div>
+        <div class="foot"><span class="btn dim"><i data-g="refresh"></i>Refresh</span><span class="btn dim"><i data-g="pause"></i>Pause</span><span class="fill"></span><span class="ib"><i data-g="gear"></i></span><span class="ib"><i data-g="more"></i></span></div>
+      </div>
+      <!-- some failed -->
+      <div class="dd">
+        <div class="r"><span class="wm">VPN<b>Bypass</b></span><span class="fill"></span><span class="chip attn"><i></i>Partly routed</span></div>
+        <div style="margin-top:12px"><div class="ty-strong">WireGuard connected</div><div class="ty-body" style="margin-top:2px">5 services and 2 domains skip the VPN.</div>
+          <div class="r" style="margin-top:4px;gap:6px;min-height:22px"><i data-g="warn" class="attn"></i><span class="ty-detail fill tnum" style="color:var(--t1)">62 addresses, 7 failed · 1 min ago</span><span class="btn">Show</span></div></div>
+        <div class="r" style="margin-top:10px"><span class="ty-detail" style="font-size:12px">Mode</span><span class="fill"></span><span class="pop">Bypass</span></div>
+        <div class="ddsep"></div>
+        <div class="field"><i data-g="plus"></i><span class="fill">Add a site to bypass…</span><span class="kbd">⌘N</span></div>
+        <div class="r" style="margin:12px 0 4px"><span class="ty-section fill">Skipping the VPN</span><span class="ty-detail">addresses</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="send"></i></span><span class="name fill ell">Telegram</span><span class="val">18</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="chat"></i></span><span class="name fill ell">WhatsApp</span><span class="val">12</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="play"></i></span><span class="name fill ell">YouTube</span><span class="val">16</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="music"></i></span><span class="name fill ell">Spotify</span><span class="val">8</span></div>
+        <div class="ddrow hov"><span class="lead"><i data-g="warn" class="attn"></i></span><span class="name fill ell">Zoom <span class="ty-detail">· no answer from DNS</span></span><span class="ty-detail" style="color:var(--accentText);margin-right:6px">Retry</span><span class="val">0</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="globe"></i></span><span class="name fill ell">en.wikipedia.org</span><span class="val">4</span></div>
+        <div class="ddrow"><span class="lead"><i data-g="globe"></i></span><span class="name fill ell">news.ycombinator.com</span><span class="val">4</span></div>
+        <div class="ddsep"></div>
+        <div class="foot"><span class="btn"><i data-g="refresh"></i>Refresh</span><span class="btn"><i data-g="pause"></i>Pause</span><span class="fill"></span><span class="ib"><i data-g="gear"></i></span><span class="ib"><i data-g="more"></i></span></div>
+      </div>
+    </div>
+    <div class="note" style="max-width:1060px;margin-top:6px">Hovering a row shows one action at its end: Turn off for a working row, Retry for a problem row. "Show" opens Status with the 7 failed addresses and their reasons. The route-check card leaves the dropdown: Verify results live on the Status page. Quit and Remove All Routes… move into the ⋯ menu. The width grows with the language (340 to 400 pt) instead of wrapping.</div>
+  </div>
+</div>
+<script src="glyphs.js"></script>
+</body></html>
