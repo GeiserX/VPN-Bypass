@@ -37,8 +37,30 @@ Its established TCP connections (two, between its own processes on loopback) wer
 the test and after every step, and the tunnel interface kept its address. HTTPS kept working
 throughout. Nothing was restarted, reconnected or reconfigured on the VPN side.
 
+## B4, scope `all` (15:32 to 15:34)
+
+A guard ran beside it, checking HTTPS every 3 s, ready to turn the spike off after two failures; it
+never fired.
+
+| Command | Matched by | Got |
+|---|---|---|
+| `spike-fetch https://api4.ipify.org` | app | HOME_IP, 200 in 306 ms |
+| `curl -s https://api4.ipify.org` | nothing | VPN_IP |
+| `curl -s https://ipv4.icanhazip.com` | host name | HOME_IP |
+| `nscurl https://ipv4.icanhazip.com` | declined as `bound` | VPN_IP |
+| `spike-fetch http://api4.ipify.org` | app | HOME_IP |
+
+The VPN client's connections were unchanged right after the start and after two minutes of HTTPS
+traffic (16 requests to two sites, all 200 in about 0.6 s), the tunnel kept its address, and its log
+showed no error. `flowsSeen` 57 in that time, almost all declined.
+
+New finding: an NSURLSession HTTPS flow (`nscurl`) arrived already bound to an interface and was
+declined (`declined.bound`), so a host-name rule did not apply to it while it did to `curl`. The
+design must find out which clients bind their flows (and to what) before promising host-name rules
+for HTTPS.
+
+`kill -9` under `all` was not run on this Mac.
+
 ## Left
 
 - B2 (10 minutes of normal use) and B3.2 (lease expiry after quitting the app) were not run.
-- B4, scope `all`: not run. Expected risk from Part A: for about 5 s after a crash, every new
-  outbound TCP connection hangs, the VPN client's new ones included.

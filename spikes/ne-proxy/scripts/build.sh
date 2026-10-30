@@ -18,6 +18,10 @@ cp bundle/Proxy-Info.plist "$ext/Contents/Info.plist"
 cp "$products/VPNBypassNESpike" "$app/Contents/MacOS/"
 cp "$products/spike-fetch" "$app/Contents/MacOS/"
 cp "$products/$ext_id" "$ext/Contents/MacOS/"
+# The VPN Bypass icon on both bundles: macOS shows it in the approval alert and in System Settings.
+mkdir -p "$app/Contents/Resources" "$ext/Contents/Resources"
+cp bundle/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
+cp bundle/AppIcon.icns "$ext/Contents/Resources/AppIcon.icns"
 printf 'APPL????' > "$app/Contents/PkgInfo"
 
 # Checks that would otherwise only show at activation.

@@ -398,6 +398,9 @@ extension active until reboot, but nobody has tested it; live test L9 checks it.
   `Contents/Library/SystemExtensions/com.geiserx.vpn-bypass.proxy.systemextension/`. Stamp
   `CFBundleShortVersionString` and `CFBundleVersion` like the app's. macOS replaces the extension only
   when its version changes.
+- The extension bundle carries the app icon too (`Contents/Resources/AppIcon.icns`, `CFBundleIconFile`
+  `AppIcon` in `Proxy/Info.plist`). Without an icon, the approval alert and System Settings show a
+  blank white one; the spike did until 0.1.5.
 - `make run` opens the app from the repo, where activation fails ("must be in /Applications"). Only
   `make install` builds can activate. Dev builds are unsigned and report `unavailable`.
 
