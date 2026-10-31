@@ -294,6 +294,18 @@ final class StatusProblemsTests: XCTestCase {
                        "routes came back since, so the removal no longer stands")
     }
 
+    /// Retry after a failed Remove All Routes removes again; applying would put every route back.
+    func testRetryRemovesAgainAfterAFailedRemoval() {
+        let removed = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now, routeCount: 2, failedCount: 2,
+            failures: [.init(kind: .notRemoved, target: "192.0.2.1", entry: "Telegram", reason: "x")])
+        XCTAssertEqual(StatusPage.retryAction(lastChange: removed, installed: 2, helperReady: true), .remove)
+        XCTAssertEqual(StatusPage.retryAction(lastChange: removed, installed: 9, helperReady: true), .apply,
+                       "routes came back since, so the removal no longer stands")
+        let failed = applied(failed: 1, [.init(kind: .notRouted, target: "192.0.2.7", entry: "Telegram", reason: "x")])
+        XCTAssertEqual(StatusPage.retryAction(lastChange: failed, installed: 60, helperReady: true), .apply)
+        XCTAssertEqual(StatusPage.retryAction(lastChange: nil, installed: 60, helperReady: true), .apply)
+    }
+
     func testTheProblemsWordsAreTranslated() throws {
         let change = applied(failed: 3, [
             .init(kind: .notResolved, target: "zoom.us", entry: "Zoom", reason: "x"),

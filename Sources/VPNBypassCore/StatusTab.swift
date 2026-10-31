@@ -311,6 +311,16 @@ enum StatusPage {
         return out
     }
 
+    /// What Problems' Retry does: after a Remove All Routes that left routes behind it removes
+    /// them again, since applying would put back every route the user just took away.
+    enum RetryAction: Equatable { case apply, remove }
+
+    static func retryAction(lastChange: RouteManager.RouteChangeOutcome?, installed: Int,
+                            helperReady: Bool) -> RetryAction {
+        let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed, helperReady: helperReady)
+        return change?.kind == .removedAll && (change?.failedCount ?? 0) > 0 ? .remove : .apply
+    }
+
     // MARK: DNS
 
     static func resolverLine(_ detected: String?, bundle: Bundle = .main) -> Line {
@@ -533,12 +543,22 @@ struct StatusTab: View {
                                            helperReady: input.helperReady, withoutAddresses: missing)
         if !problems.isEmpty {
             StatusSection(String(localized: "Problems"), trailing: {
-                Button(String(localized: "Retry")) { routeManager.refreshRoutes() }
+                let retry = StatusPage.retryAction(lastChange: routeManager.lastRouteChange,
+                                                   installed: routeManager.routedAddressCount,
+                                                   helperReady: input.helperReady)
+                Button(String(localized: "Retry")) {
+                    switch retry {
+                    case .apply: routeManager.refreshRoutes()
+                    case .remove: Task { await routeManager.removeAllRoutes() }
+                    }
+                }
                     .controlSize(.small)
-                    .disabled(routeManager.isLoading || routeManager.isApplyingRoutes
-                              || !routeManager.isVPNConnected || !input.helperReady)
-                    .help(String(localized: "Apply the routes again"))
-                    .accessibilityLabel(String(localized: "Retry: apply the routes again"))
+                    .disabled(routeManager.isLoading || routeManager.isApplyingRoutes || !input.helperReady
+                              || (retry == .apply && !routeManager.isVPNConnected))
+                    .help(retry == .apply ? String(localized: "Apply the routes again")
+                                          : String(localized: "Remove the routes again"))
+                    .accessibilityLabel(retry == .apply ? String(localized: "Retry: apply the routes again")
+                                                        : String(localized: "Retry: remove the routes again"))
             }) {
                 ForEach(Array(problems.enumerated()), id: \.element.id) { index, problem in
                     if index > 0 { StatusDivider() }

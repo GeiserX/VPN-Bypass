@@ -883,3 +883,5 @@
 "Problems" = "Problèmes";
 "Apply the routes again" = "Appliquer à nouveau les routes";
 "Retry: apply the routes again" = "Réessayer : appliquer à nouveau les routes";
+"Remove the routes again" = "Retirer à nouveau les routes";
+"Retry: remove the routes again" = "Réessayer : retirer à nouveau les routes";
