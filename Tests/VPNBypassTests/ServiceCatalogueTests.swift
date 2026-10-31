@@ -48,10 +48,15 @@ final class ServiceCatalogueTests: XCTestCase {
         "steam", "epicgames", "playstation", "xbox",
         "github", "gitlab", "stackoverflow", "tailscale",
         "openai", "anthropic", "perplexity",
-        "fr_gov",
+        "fr_gov", "es_gov", "de_gov", "it_gov", "gb_gov", "us_gov",
         "fr_societegenerale", "fr_bnpparibas", "fr_creditagricole", "fr_banquepopulaire", "fr_caisseepargne",
         "fr_lcl", "fr_labanquepostale", "fr_boursobank", "fr_fortuneo", "fr_hellobank", "fr_monabanq",
         "fr_cic", "fr_creditmutuel",
+        "es_santander", "es_bbva", "es_caixabank", "es_sabadell",
+        "de_sparkasse", "de_deutschebank", "de_commerzbank", "de_postbank",
+        "it_intesasanpaolo", "it_unicredit", "it_posteitaliane",
+        "gb_barclays", "gb_hsbc", "gb_lloyds", "gb_natwest",
+        "us_chase", "us_bankofamerica", "us_wellsfargo", "us_citi",
     ]
 
     /// The French entries are wildcards only and each names its country, so search finds

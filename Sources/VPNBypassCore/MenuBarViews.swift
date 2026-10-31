@@ -341,6 +341,12 @@ struct MenuContent: View {
                         SettingsPageRequest.shared.openCatalogue = true
                         openSettings(page: .services)
                     },
+                    onOpenRegion: { region in
+                        // The same page and sheet, on the country's services.
+                        SettingsPageRequest.shared.catalogueRegion = region
+                        SettingsPageRequest.shared.openCatalogue = true
+                        openSettings(page: .services)
+                    },
                     onUseVPNOnly: {
                         // Through the run loop, for the reason given in DropdownModeRow.
                         RunLoop.main.perform(inModes: [.common]) {
@@ -2261,6 +2267,24 @@ enum FirstRunSetup {
     static func allServices(_ count: Int) -> String {
         String(localized: "All \(count) services…")
     }
+
+    /// The Mac's region (System Settings > General > Language & Region), read without asking
+    /// for anything. A render sets it so the image does not depend on the Mac that made it.
+    static var macRegion: String? = Locale.current.region?.identifier
+
+    /// The country whose services the question suggests: the Mac's region when the catalogue
+    /// has services of its own for it (its banks and public services), otherwise none.
+    static func suggestedRegion(_ region: String? = macRegion,
+                                catalogue: [ServiceCatalogue.Entry] = ServiceCatalogue.shipped) -> String? {
+        guard let region = region?.uppercased(), catalogue.contains(where: { $0.region == region }) else { return nil }
+        return region
+    }
+
+    /// The row that opens the catalogue on the suggested country.
+    static func regionServices(_ region: String, locale: Locale = .current) -> String {
+        let name = CatalogueSelection.regionName(region, locale: locale) ?? region
+        return String(localized: "Services for \(name)…")
+    }
 }
 
 /// The question a fresh install asks, as a grouped list: six common services with the Services
@@ -2269,6 +2293,8 @@ enum FirstRunSetup {
 struct FirstRunSetupView: View {
     @EnvironmentObject var routeManager: RouteManager
     let onOpenServices: () -> Void
+    /// Opens the catalogue on one country's services.
+    var onOpenRegion: (String) -> Void = { _ in }
     let onUseVPNOnly: () -> Void
     @State private var site: String
     /// What the last add did, shown under the field (proposal 5's line).
@@ -2278,10 +2304,12 @@ struct FirstRunSetupView: View {
 
     /// The arguments seed the field and the line under it, for a rendered screenshot.
     init(site: String = "", feedback: AddDomainFeedback? = nil,
-         onOpenServices: @escaping () -> Void, onUseVPNOnly: @escaping () -> Void) {
+         onOpenServices: @escaping () -> Void, onOpenRegion: @escaping (String) -> Void = { _ in },
+         onUseVPNOnly: @escaping () -> Void) {
         _site = State(initialValue: site)
         _feedback = State(initialValue: feedback)
         self.onOpenServices = onOpenServices
+        self.onOpenRegion = onOpenRegion
         self.onUseVPNOnly = onUseVPNOnly
     }
 
@@ -2305,22 +2333,14 @@ struct FirstRunSetupView: View {
                     serviceRow(service)
                     rowSeparator
                 }
-                Button(action: onOpenServices) {
-                    HStack(spacing: 9) {
-                        tile("magnifyingglass", Self.gray)
-                        Text(FirstRunSetup.allServices(Config.defaultServices.count))
-                            .font(.system(size: 12.5))
-                            .foregroundColor(Theme.textSecondary)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(Theme.textTertiary)
+                if let region = FirstRunSetup.suggestedRegion() {
+                    openRow(FirstRunSetup.regionServices(region), systemImage: "building.columns") {
+                        onOpenRegion(region)
                     }
-                    .frame(height: 34)
-                    .padding(.horizontal, 10)
-                    .contentShape(Rectangle())
+                    rowSeparator
                 }
-                .buttonStyle(.plain)
+                openRow(FirstRunSetup.allServices(Config.defaultServices.count), systemImage: "magnifyingglass",
+                        action: onOpenServices)
             }
 
             group {
@@ -2430,6 +2450,27 @@ struct FirstRunSetupView: View {
         }
         .frame(height: 34)
         .padding(.horizontal, 10)
+    }
+
+    /// A row that opens the Services page's catalogue: a grey tile, its words and a chevron.
+    private func openRow(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                tile(systemImage, Self.gray)
+                Text(title)
+                    .font(.system(size: 12.5))
+                    .foregroundColor(Theme.textSecondary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Theme.textTertiary)
+            }
+            .frame(height: 34)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 
     private var rowSeparator: some View {

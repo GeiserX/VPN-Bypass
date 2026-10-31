@@ -1,0 +1,24 @@
+name: Catalogue domains resolve
+
+# Flags catalogue domains that stopped resolving (scripts/check-catalogue-resolves.py).
+# On a schedule, not on pull requests: the catalogue is best effort, and DNS that changes
+# under a pull request must not block it. A red run is a reason to look at the listed
+# names, nothing more.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install dig
+        run: command -v dig || (sudo apt-get update && sudo apt-get install -y dnsutils)
+      - run: python3 scripts/check-catalogue-resolves.py

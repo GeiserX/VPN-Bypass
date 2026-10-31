@@ -34,9 +34,13 @@ The file name is its category: `video.json` holds `"category": "video"`.
 | `name` | yes | The service's proper name, not translated. It is also the name its routes are listed under, so it must differ from every other name, ignoring case and spaces. |
 | `domains` | yes | Plain names (`example.com`) or wildcards (`*.example.com`). |
 | `ipRanges` | no | IPv4 ranges such as `91.108.4.0/22`. |
-| `region` | no | An ISO 3166 country code (`FR`) for a service that belongs to one country. The sheet shows it and search matches it. |
+| `region` | no | An ISO 3166 country code (`FR`) for a service that belongs to one country. The sheet shows it, search matches it, and the sheet's country menu lists every country that has one. |
 
 A service needs at least one domain or range.
+
+## Regional packs
+
+A country's pack is every service with its `region`: its public services in `government.json` and its banks in `banks.json`. The sheet's country menu shows one pack, and the first run offers the pack of the Mac's region (Locale, no prompt) when there is one. A new pack is a pull request that adds a `<country> government` entry and the country's main banks, each with a `<code>_` id prefix (`es_bbva`), and the country to `testEveryShippedCountryHasItsGovernmentAndBanks`. Add only names you have checked resolve, and keep it to services people commonly find blocked from abroad.
 
 ## Adding a service
 
@@ -50,5 +54,7 @@ A service needs at least one domain or range.
 ## The check
 
 `swift test --filter ServiceCatalogueTests` reads every file with the app's own validators and fails on bad JSON, an unknown field or category, a repeated id or name, an invalid domain, wildcard, range or region, and a service with nothing in it. CI runs it in the `test` job.
+
+`scripts/check-catalogue-resolves.py` asks public DNS about every domain: a plain name must have an IPv4 address, a wildcard's suffix must exist. The `Catalogue domains resolve` workflow runs it every Monday and on demand, never on pull requests, since a site's DNS can change under a pull request that did not touch it. A red run lists the names to look at.
 
 A merged change ships in the next release: anything under `Sources/` starts one.

@@ -84,6 +84,53 @@ final class CatalogueSelectionTests: XCTestCase {
         XCTAssertEqual(CatalogueSelection.categories(rows), [.video, .work, .developer])
     }
 
+    // MARK: The country menu (regional packs)
+
+    private var regional: [CatalogueSelection.Row] {
+        let catalogue = [entry("netflix", "Netflix", .video, domains: ["netflix.com"]),
+                         entry("fr_gov", "French government", .government, region: "FR", domains: ["*.gouv.fr"]),
+                         entry("fr_lcl", "LCL", .banks, region: "FR", domains: ["*.lcl.fr"]),
+                         entry("es_bbva", "BBVA", .banks, region: "ES", domains: ["*.bbva.es"])]
+        return CatalogueSelection.rows(catalogue: catalogue, services: catalogue.map(\.service))
+    }
+
+    func testTheCountryFilterKeepsOnlyThatCountrysServices() {
+        let france = CatalogueSelection.groups(regional, category: nil, region: "FR", search: "")
+        XCTAssertEqual(france.map(\.category), [.government, .banks])
+        XCTAssertEqual(ids(france.flatMap(\.rows)), ["fr_gov", "fr_lcl"])
+        XCTAssertEqual(ids(CatalogueSelection.groups(regional, category: nil, region: nil, search: "").flatMap(\.rows)),
+                       ["netflix", "fr_gov", "fr_lcl", "es_bbva"], "control: no country shows every service")
+        XCTAssertEqual(ids(CatalogueSelection.groups(regional, category: .banks, region: "FR", search: "").flatMap(\.rows)), ["fr_lcl"])
+    }
+
+    func testTheCountryFilterAndSearchTogether() {
+        XCTAssertEqual(ids(CatalogueSelection.groups(regional, category: nil, region: "FR", search: "lcl").flatMap(\.rows)), ["fr_lcl"])
+        XCTAssertTrue(CatalogueSelection.groups(regional, category: nil, region: "FR", search: "bbva").isEmpty,
+                      "a Spanish bank is hidden while France is picked")
+        XCTAssertEqual(ids(CatalogueSelection.groups(regional, category: nil, region: nil, search: "bbva").flatMap(\.rows)), ["es_bbva"])
+    }
+
+    func testTheChipsFollowTheCountry() {
+        XCTAssertEqual(CatalogueSelection.categories(regional, region: "ES"), [.banks])
+        XCTAssertEqual(CatalogueSelection.categories(regional, region: "FR"), [.government, .banks])
+        XCTAssertEqual(CatalogueSelection.categories(regional), [.video, .government, .banks])
+    }
+
+    func testTheCountryMenuListsCountriesByNameInTheAppsLanguage() {
+        XCTAssertEqual(CatalogueSelection.regions(regional, locale: Locale(identifier: "en_US")), ["FR", "ES"], "France, Spain")
+        XCTAssertEqual(CatalogueSelection.regions(regional, locale: Locale(identifier: "es_ES")), ["ES", "FR"], "España, Francia")
+    }
+
+    /// Every country in the shipped catalogue is a pack: its public services and its banks.
+    func testEveryShippedCountryHasItsGovernmentAndBanks() {
+        let shipped = CatalogueSelection.rows(catalogue: ServiceCatalogue.shipped, services: Config().services)
+        let regions = CatalogueSelection.regions(shipped)
+        XCTAssertEqual(Set(regions), ["FR", "ES", "DE", "IT", "GB", "US"])
+        for region in regions {
+            XCTAssertEqual(CatalogueSelection.categories(shipped, region: region), [.government, .banks], region)
+        }
+    }
+
     func testTheShippedCatalogueGivesOneRowPerService() {
         let shipped = CatalogueSelection.rows(catalogue: ServiceCatalogue.shipped, services: Config().services)
         XCTAssertEqual(shipped.count, Config.defaultServices.count)
@@ -94,6 +141,16 @@ final class CatalogueSelectionTests: XCTestCase {
         XCTAssertEqual(CatalogueSelection.buttonTitle(count: 0), "Bypass services")
         XCTAssertEqual(CatalogueSelection.buttonTitle(count: 1), "Bypass 1 service")
         XCTAssertEqual(CatalogueSelection.buttonTitle(count: 3), "Bypass 3 services")
+    }
+
+    func testTheCountryMissLineNamesTheCountryAndIsTranslated() throws {
+        let english = Locale(identifier: "en_US")
+        XCTAssertEqual(CatalogueSelection.regionMiss("FR", search: "bbva", locale: english),
+                       "No service for France matches \u{201C}bbva\u{201D}. Choose All countries to see the matches elsewhere.")
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let es = try XCTUnwrap(Bundle(url: root.appendingPathComponent("Sources/VPNBypassCore/Resources/es.lproj")))
+        XCTAssertEqual(CatalogueSelection.regionMiss("FR", search: "bbva", locale: Locale(identifier: "es_ES"), in: es),
+                       "Ningún servicio de Francia coincide con \u{201C}bbva\u{201D}. Elige Todos los países para ver los que coinciden en otros.")
     }
 
     func testTheButtonIsTranslated() throws {

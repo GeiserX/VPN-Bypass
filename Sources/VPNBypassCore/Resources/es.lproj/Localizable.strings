@@ -314,6 +314,7 @@
 "What should skip the VPN?" = "¿Qué debe evitar la VPN?";
 "Switched-on services use your normal connection." = "Los servicios activados usan tu conexión normal.";
 "All %lld services…" = "Los %lld servicios…";
+"Services for %@…" = "Servicios de %@…";
 "Add a site, like example.com" = "Añade un sitio, como example.com";
 "Add Site" = "Añadir sitio";
 "Mode: Bypass. Want only a few sites on the VPN and everything else direct?" = "Modo: Bypass. ¿Quieres que solo unos pocos sitios usen la VPN y todo lo demás vaya directo?";
@@ -467,6 +468,8 @@
 "More actions" = "Más acciones";
 "Search services" = "Buscar servicios";
 "Clear search" = "Borrar búsqueda";
+"Country" = "País";
+"All countries" = "Todos los países";
 "Add Route" = "Añadir ruta";
 "Add Rule" = "Añadir regla";
 
@@ -714,6 +717,7 @@
 "No service in the catalogue matches “%@”. Make a custom service with the + button." = "Ningún servicio del catálogo coincide con “%@”. Crea un servicio personalizado con el botón +.";
 "Select all %@" = "Seleccionar todo: %@";
 "No service in %@ matches “%@”. Choose All to see the matches in other categories." = "Ningún servicio de %1$@ coincide con “%2$@”. Elige Todos para ver los que coinciden en otras categorías.";
+"No service for %@ matches “%@”. Choose All countries to see the matches elsewhere." = "Ningún servicio de %1$@ coincide con “%2$@”. Elige Todos los países para ver los que coinciden en otros.";
 "Deselect all %@" = "Deseleccionar todo: %@";
 "All selected" = "Todos seleccionados";
 "Some selected" = "Algunos seleccionados";
