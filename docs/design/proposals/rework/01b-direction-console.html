@@ -1,0 +1,67 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../ui/mock.css"><link rel="stylesheet" href="rework.css">
+<style>
+  .tb2 { display:flex; gap:0; padding:8px 12px; border-bottom:.5px solid rgba(255,255,255,.08); }
+  .tb2 span { width:84px; display:flex; flex-direction:column; align-items:center; gap:3px; padding:5px 0; border-radius:6px; font:400 11px -apple-system,system-ui; color:var(--t2); }
+  .tb2 span.sel { background:rgba(255,255,255,.08); color:#fff; }
+  .tb2 span.sel .g { color:var(--accentText); }
+  .tb2 span.dim { opacity:.4; }
+  .tbl { border:.5px solid var(--groupLine); border-radius:8px; overflow:hidden; }
+  .th, .tr { display:grid; align-items:center; padding:0 10px; column-gap:10px; }
+  .th { font:600 10px -apple-system,system-ui; letter-spacing:.6px; color:var(--t2); text-transform:uppercase; height:24px; border-bottom:.5px solid var(--groupLine); }
+  .tr { height:26px; font:400 12px ui-monospace,"SF Mono",Menlo,monospace; }
+  .tr:nth-child(odd) { background:rgba(255,255,255,.03); }
+  .tr .n { text-align:right; color:var(--t2); font-variant-numeric:tabular-nums; }
+  .tr.hov { background:var(--hover); }
+  .dot { width:7px; height:7px; border-radius:50%; display:inline-block; background:var(--live); }
+  .dot.off { background:transparent; border:1.3px solid var(--t3); width:6px; height:6px; }
+  .bar { display:flex; align-items:center; gap:8px; font:400 11px ui-monospace,"SF Mono",Menlo,monospace; color:var(--t2); background:rgba(255,255,255,.04); border-radius:6px; padding:6px 8px; }
+  .seg { display:inline-flex; background:var(--ctl); border-radius:6px; padding:1px; }
+  .seg span { font:400 11px -apple-system,system-ui; padding:2px 9px; border-radius:5px; color:var(--t2); }
+  .seg span.sel { background:#4A4A4D; color:#fff; }
+</style></head><body>
+<div class="head"><span class="num">B</span><span class="title">Console: every list is a table, like the Lookups page</span></div>
+<p class="caption">Take the Lookups table (#178, #181, #183) as the pattern for every surface: column headers, striped rows, monospaced names, a number column sized to its widest value. Dense and scannable for someone with fifty entries; colder and harder to read for a first-time user, and settings pages do not fit a table at all. Keeps the top toolbar, now with every page always present.</p>
+<div class="cols" style="gap:28px">
+  <div class="col">
+    <div class="label after">Dropdown, connected</div>
+    <div class="dd">
+      <div class="r"><span class="wm">VPN<b>Bypass</b></span><span class="fill"></span><span class="seg"><span class="sel">Bypass</span><span>VPN Only</span><span>Custom</span></span></div>
+      <div class="bar" style="margin-top:12px"><span class="dot"></span><span style="color:#fff">ON</span><span>wireguard utun4</span><span class="fill"></span><span>62 addr · 24 s</span></div>
+      <div class="field" style="margin-top:10px"><span style="font-family:ui-monospace,monospace">&gt;</span><span class="fill">add domain…</span><span class="kbd">⌘N</span></div>
+      <div class="tbl" style="margin-top:10px">
+        <div class="th" style="grid-template-columns:12px 1fr 40px"><span></span><span>Skipping the VPN</span><span style="text-align:right">Addr</span></div>
+        <div class="tr" style="grid-template-columns:12px 1fr 40px"><span class="dot"></span><span>telegram</span><span class="n">18</span></div>
+        <div class="tr" style="grid-template-columns:12px 1fr 40px"><span class="dot"></span><span>whatsapp</span><span class="n">12</span></div>
+        <div class="tr" style="grid-template-columns:12px 1fr 40px"><span class="dot"></span><span>youtube</span><span class="n">16</span></div>
+        <div class="tr" style="grid-template-columns:12px 1fr 40px"><span class="dot"></span><span>spotify</span><span class="n">8</span></div>
+        <div class="tr" style="grid-template-columns:12px 1fr 40px"><span class="dot"></span><span>en.wikipedia.org</span><span class="n">4</span></div>
+        <div class="tr" style="grid-template-columns:12px 1fr 40px"><span class="dot"></span><span>news.ycombinator.com</span><span class="n">4</span></div>
+      </div>
+      <div class="foot" style="margin-top:10px"><span class="btn"><i data-g="refresh"></i>Refresh</span><span class="btn"><i data-g="pause"></i>Pause</span><span class="fill"></span><span class="ib"><i data-g="gear"></i></span><span class="ib"><i data-g="more"></i></span></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="label after">Settings, Services page</div>
+    <div class="swin" style="width:780px;height:520px;flex-direction:column">
+      <div class="r" style="padding:12px 14px 0;gap:8px"><i style="width:12px;height:12px;border-radius:50%;background:#FF5F57;display:inline-block"></i><i style="width:12px;height:12px;border-radius:50%;background:#FEBC2E;display:inline-block"></i><i style="width:12px;height:12px;border-radius:50%;background:#28C840;display:inline-block"></i><span class="fill"></span><span class="ty-detail" style="font-size:12px">Mode</span><span class="pop">Bypass</span></div>
+      <div class="tb2" style="justify-content:center">
+        <span><i data-g="activity"></i>Status</span><span><i data-g="globe"></i>Domains</span><span class="sel"><i data-g="grid"></i>Services</span><span class="dim"><i data-g="list"></i>Rules</span><span class="dim"><i data-g="branch"></i>Routes</span><span><i data-g="search"></i>Lookups</span><span><i data-g="logs"></i>Logs</span><span><i data-g="sliders"></i>General</span><span><i data-g="info"></i>About</span>
+      </div>
+      <div class="pane" style="flex:1">
+        <div class="r gap8" style="margin-bottom:10px"><span class="field" style="width:260px"><i data-g="search"></i>Search</span><span class="ty-detail">4 of 5 on · 54 addresses</span><span class="fill"></span><span class="btn">Browse catalogue…</span><span class="btn icon"><i data-g="plus" style="color:#fff"></i></span></div>
+        <div class="tbl">
+          <div class="th" style="grid-template-columns:30px 1fr 80px 90px 70px"><span>On</span><span>Service</span><span style="text-align:right">Domains</span><span style="text-align:right">IP ranges</span><span style="text-align:right">Addresses</span></div>
+          <div class="tr" style="grid-template-columns:30px 1fr 80px 90px 70px"><span class="sw on" role="img" aria-label="On" style="transform:scale(.8)"></span><span>telegram</span><span class="n">6</span><span class="n">8</span><span class="n">18</span></div>
+          <div class="tr hov" style="grid-template-columns:30px 1fr 80px 90px 70px"><span class="sw on" role="img" aria-label="On" style="transform:scale(.8)"></span><span>whatsapp</span><span class="n">4</span><span class="n">3</span><span class="n">12</span></div>
+          <div class="tr" style="grid-template-columns:30px 1fr 80px 90px 70px"><span class="sw on" role="img" aria-label="On" style="transform:scale(.8)"></span><span>youtube</span><span class="n">8</span><span class="n">–</span><span class="n">16</span></div>
+          <div class="tr" style="grid-template-columns:30px 1fr 80px 90px 70px"><span class="sw on" role="img" aria-label="On" style="transform:scale(.8)"></span><span>spotify</span><span class="n">4</span><span class="n">–</span><span class="n">8</span></div>
+          <div class="tr" style="grid-template-columns:30px 1fr 80px 90px 70px"><span class="sw" role="img" aria-label="Off" style="transform:scale(.8)"></span><span style="color:var(--t2)">zoom</span><span class="n">5</span><span class="n">–</span><span class="n">–</span></div>
+        </div>
+        <div class="note" style="margin-top:14px;max-width:none">Rows are 26 pt, so a long list fits without scrolling. The same table shape would carry Domains, Rules, Routes and Logs. General and Status stay forms, so the window has two looks, not one.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="glyphs.js"></script>
+</body></html>

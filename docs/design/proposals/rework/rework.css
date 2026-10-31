@@ -1,0 +1,139 @@
+/* The proposed visual system for the app rework, as CSS. Every value here is a token in
+   APP-REWORK-PROPOSALS.md section 2 and maps onto Theme.swift. The frame styles (.head,
+   .caption, .label, .shot, .cols) come from ../ui/mock.css. Rendered with ./render.sh. */
+
+:root {
+  /* Colour roles */
+  --t1: #FFFFFF;                 /* Theme.textPrimary */
+  --t2: #9CA3AF;                 /* Theme.textSecondary: every secondary word */
+  --t3: #6B7280;                 /* Theme.textTertiary: disabled text and decoration only */
+  --live: #10B981;               /* Theme.success: live state, nothing else */
+  --attn: #F59E0B;               /* Theme.warning: needs attention, nothing else */
+  --fail: #EF4444;               /* Theme.error: failed, destructive confirm */
+  --accent: #2563EB;             /* Theme.Brand.blue: primary button, switch on, selection fill */
+  --accentText: #38BDF8;         /* Theme.Brand.sky: selected item glyph, links, focus ring */
+  --win: #0F0F14;                /* Theme.bgPrimary */
+  --win2: #1A1B26;               /* Theme.bgSecondary */
+  --side: #14151C;               /* sidebar ground, system material in the app */
+  --menu: #0F0F0F;               /* the popover ground */
+  --group: rgba(255,255,255,.05);   /* Theme.bgCard */
+  --groupLine: rgba(255,255,255,.10);/* Theme.border */
+  --sep: rgba(255,255,255,.08);  /* Theme.separator */
+  --hover: rgba(255,255,255,.06);
+  --sel: rgba(37,99,235,.28);
+  --ctl: rgba(255,255,255,.10);  /* native bordered control fill */
+  /* No egress colours: a route chip says where traffic goes with a glyph and a word, in grey,
+     so blue stays the accent (switch on, selection) and green stays live state. */
+}
+
+/* Type scale: five steps plus mono */
+.ty-title  { font: 600 17px -apple-system, system-ui, sans-serif; letter-spacing: -.2px; }
+.ty-body   { font: 400 13px -apple-system, system-ui, sans-serif; }
+.ty-strong { font: 500 13px -apple-system, system-ui, sans-serif; }
+.ty-detail { font: 400 11px -apple-system, system-ui, sans-serif; color: var(--t2); }
+.ty-section{ font: 600 11px -apple-system, system-ui, sans-serif; color: var(--t2); }
+.ty-mono   { font: 400 12px ui-monospace, "SF Mono", Menlo, monospace; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* Generic layout helpers */
+.r { display: flex; align-items: center; }
+.r.gap4 { gap: 4px; } .r.gap8 { gap: 8px; } .r.gap12 { gap: 12px; }
+.fill { flex: 1; min-width: 0; }
+.ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dim { opacity: .45; }
+
+/* Glyphs: 14 px line icons drawn as inline SVG; colour follows currentColor */
+.g { width: 14px; height: 14px; flex: none; color: var(--t2); }
+.g.live { color: var(--live); } .g.attn { color: var(--attn); } .g.fail { color: var(--fail); }
+.lead { width: 20px; display: inline-flex; justify-content: center; flex: none; }
+
+/* Status chip: shape + word, colour third */
+.chip { display: inline-flex; align-items: center; gap: 5px; font: 600 11px -apple-system, system-ui; padding: 2px 8px 2px 6px; border-radius: 6px; background: var(--ctl); color: var(--t1); white-space: nowrap; }
+.chip i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.chip.live i { background: var(--live); }
+.chip.attn i { width: 0; height: 0; border-radius: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 7px solid var(--attn); }
+.chip.off i { background: transparent; border: 1.4px solid var(--t2); width: 6px; height: 6px; }
+.chip.pause i { width: 6px; height: 7px; border-radius: 0; border-left: 2px solid var(--t2); border-right: 2px solid var(--t2); }
+
+/* Native-looking controls */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; font: 400 12px -apple-system, system-ui; padding: 3px 10px; border-radius: 6px; background: var(--ctl); color: var(--t1); box-shadow: inset 0 .5px 0 rgba(255,255,255,.18); white-space: nowrap; }
+.btn.pri { background: var(--accent); }
+.btn.icon { padding: 3px 6px; }
+.btn.plain { background: transparent; box-shadow: none; color: var(--t2); }
+.pop { display: inline-flex; align-items: center; gap: 6px; font: 400 12px -apple-system, system-ui; padding: 2px 6px 2px 9px; border-radius: 6px; background: var(--ctl); box-shadow: inset 0 .5px 0 rgba(255,255,255,.18); white-space: nowrap; }
+.pop::after { content: "\2303\A\2304"; white-space: pre; font-size: 6px; line-height: 5px; color: var(--t2); }
+.sw { width: 26px; height: 15px; border-radius: 99px; background: rgba(255,255,255,.18); position: relative; display: inline-block; flex: none; }
+.sw::after { content: ""; position: absolute; top: 1.5px; left: 1.5px; width: 12px; height: 12px; border-radius: 50%; background: #fff; }
+.sw.on { background: var(--accent); }
+.sw.on::after { left: 12.5px; }
+.field { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.06); border: .5px solid rgba(255,255,255,.16); border-radius: 6px; padding: 4px 8px; font: 400 12px -apple-system, system-ui; color: var(--t2); }
+.field.focus { border-color: var(--accentText); box-shadow: 0 0 0 2.5px rgba(56,189,248,.28); color: var(--t1); }
+.note { color: var(--t2); }   /* shared mock.css uses --text3, too faint for 11 px notes */
+.kbd { font: 500 10px -apple-system, system-ui; color: var(--t2); border: .5px solid rgba(255,255,255,.2); border-radius: 4px; padding: 0 4px; }
+
+/* Route chip: a grey glyph and a word; no egress colour */
+.rchip { display: inline-flex; align-items: center; gap: 5px; font: 400 12px -apple-system, system-ui; padding: 1px 6px 1px 7px; border-radius: 6px; background: var(--ctl); white-space: nowrap; }
+.rchip .g { width: 12px; height: 12px; color: var(--t2); }
+
+/* Group box: section title above, rows inside */
+.sec { margin: 0 0 6px 2px; }
+.box { background: var(--group); border: .5px solid var(--groupLine); border-radius: 10px; }
+.box + .sec { margin-top: 16px; }
+
+/* The shared row */
+.row2 { display: flex; align-items: center; gap: 8px; padding: 0 12px; min-height: 32px; position: relative; }
+.row2.two { min-height: 44px; }
+.row2 + .row2::before { content: ""; position: absolute; top: 0; left: 40px; right: 12px; height: .5px; background: var(--sep); }
+.row2.hov { background: var(--hover); }
+.row2.hov::before, .row2.hov + .row2::before { display: none; }
+.row2 .name { font: 400 13px -apple-system, system-ui; }
+.row2 .det { font: 400 11px -apple-system, system-ui; color: var(--t2); margin-top: 1px; }
+.row2 .val { font: 400 12px -apple-system, system-ui; color: var(--t2); font-variant-numeric: tabular-nums; text-align: right; flex: none; }
+.row2 .acts { display: inline-flex; gap: 2px; flex: none; }
+.row2 .acts span { width: 22px; height: 20px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; color: var(--t2); }
+.row2 .acts span:hover, .row2 .acts span.on { background: var(--ctl); }
+.row2.off .name { color: var(--t2); }
+
+/* Page header */
+.ph { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.ph .sub { font: 400 12px -apple-system, system-ui; color: var(--t2); margin-top: 2px; }
+
+/* Empty state */
+.empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 26px 24px; }
+.empty .g { width: 26px; height: 26px; color: var(--t3); margin-bottom: 4px; }
+
+/* Settings window with a sidebar */
+.swin { border-radius: 12px; border: 1px solid #2C2C2C; overflow: hidden; display: flex; background: var(--win); box-shadow: 0 20px 50px rgba(0,0,0,.45); }
+.side { width: 190px; background: var(--side); border-right: .5px solid rgba(255,255,255,.08); padding: 12px 10px; flex: none; }
+.side .tl { display: flex; gap: 8px; padding: 2px 4px 14px; }
+.side .tl i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.side .grp { font: 600 11px -apple-system, system-ui; color: var(--t2); margin: 12px 8px 4px; }
+.side .it { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; font: 400 13px -apple-system, system-ui; color: var(--t1); }
+.side .it .g { color: var(--t2); }
+.side .it.sel .g { color: var(--accentText); }
+.side .it.sel { background: var(--sel); }
+.side .it .n { margin-left: auto; font: 400 11px -apple-system, system-ui; color: var(--t2); font-variant-numeric: tabular-nums; }
+.side .it.dim { opacity: 1; }
+.side .it.dim, .side .it.dim span { color: var(--t2); font-style: italic; }
+.side .it.dim .g { color: var(--t3); }
+.side .it .badge { margin-left: auto; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid var(--attn); }
+.main { flex: 1; min-width: 0; background: linear-gradient(var(--win), var(--win2)); }
+.tbar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: .5px solid rgba(255,255,255,.08); }
+.pane { padding: 16px 20px 20px; }
+
+/* The dropdown */
+.dd { width: 340px; background: var(--menu); border: 1px solid #2C2C2C; border-radius: 12px; padding: 14px 16px 10px; box-shadow: 0 20px 50px rgba(0,0,0,.45); }
+.wm { font: 800 15px "SFRounded", system-ui; }
+.wm b { font-weight: 300; color: var(--accentText); margin-left: 2px; }
+.ddsep { height: .5px; background: rgba(255,255,255,.12); margin: 10px -16px; }
+.ddrow { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 0 6px; margin: 0 -6px; border-radius: 6px; }
+.ddrow.hov { background: var(--hover); }
+.ddrow .name { font: 400 13px -apple-system, system-ui; }
+.ddrow .val { font: 400 12px -apple-system, system-ui; color: var(--t2); font-variant-numeric: tabular-nums; text-align: right; flex: none; }
+.foot { display: flex; align-items: center; gap: 6px; }
+.foot .ib { width: 26px; height: 24px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--t2); }
+.callout { border-radius: 8px; padding: 8px 10px; background: rgba(245,158,11,.10); border: .5px solid rgba(245,158,11,.35); }
+.anno { font: 600 10.5px -apple-system, system-ui; color: var(--accentText); }
+.chip.wait i { width: 6px; height: 6px; border: 1.4px solid var(--t2); background: linear-gradient(90deg, var(--t2) 50%, transparent 50%); }
+.box > .row2:first-child { border-top-left-radius: 10px; border-top-right-radius: 10px; }
+.box > .row2:last-child { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
