@@ -369,6 +369,9 @@ struct Config: Codable {
             r.proxyPass = nil
             return r
         }
+        // Failed lookups are this Mac's own note; on another Mac they would mark live names.
+        for i in copy.domains.indices { copy.domains[i].resolveFailures = nil }
+        for i in copy.inverseDomains.indices { copy.inverseDomains[i].resolveFailures = nil }
         return copy
     }
 
@@ -399,6 +402,9 @@ struct DomainEntry: Codable, Identifiable, Equatable {
     var lastResolved: Date?
     var isCIDR: Bool
     var isWildcard: Bool
+    /// The refreshes in a row that found no address for the name while the VPN was up, and
+    /// the day the first of them ran; nil while it resolves (see StaleEntries).
+    var resolveFailures: ResolveFailures?
 
     init(domain: String, enabled: Bool = true, isCIDR: Bool = false, isWildcard: Bool = false) {
         self.id = UUID()
@@ -419,6 +425,7 @@ struct DomainEntry: Codable, Identifiable, Equatable {
         isCIDR = try container.decodeIfPresent(Bool.self, forKey: .isCIDR) ?? false
         isWildcard = try container.decodeIfPresent(Bool.self, forKey: .isWildcard) ?? false
             || WildcardDomain.isWildcard(domain)
+        resolveFailures = try container.decodeIfPresent(ResolveFailures.self, forKey: .resolveFailures)
     }
 }
 
