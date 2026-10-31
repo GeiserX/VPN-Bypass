@@ -74,7 +74,8 @@ struct ShortcutService: AppEntity {
     }
 }
 
-/// Lists the services the Services page lists, by name.
+/// Suggests the services the Services page lists, by name; a typed name finds any service,
+/// a catalogue one that is off too, as `vpnb service enable` takes any id.
 struct ShortcutServiceQuery: EntityStringQuery {
     init() {}
 
@@ -90,7 +91,14 @@ struct ShortcutServiceQuery: EntityStringQuery {
 
     @MainActor
     func suggestedEntities() async throws -> [ShortcutService] {
-        Self.services(RouteManager.shared.config.services)
+        Self.suggested(RouteManager.shared.config.services)
+    }
+
+    /// The services the Services page has a row for: those on, and custom or retired ones that
+    /// are off. A catalogue service that is off waits in the catalogue sheet, so it is not
+    /// suggested; there are hundreds.
+    static func suggested(_ entries: [ServiceEntry]) -> [ShortcutService] {
+        services(entries.filter { $0.enabled || ServiceSections.keepsRowWhenOff($0) })
     }
 
     /// Every service, sorted by name as the Services page sorts them.

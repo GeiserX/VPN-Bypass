@@ -70,6 +70,20 @@ final class ShortcutIntentMappingTests: XCTestCase {
         XCTAssertEqual(ShortcutServiceQuery.matching("  ", in: entries).count, 3)
     }
 
+    func testThePickerSuggestsWhatTheServicesPageLists() {
+        let shipped = ServiceCatalogue.shippedIds.sorted()
+        XCTAssertGreaterThanOrEqual(shipped.count, 2)
+        let entries = [
+            RouteManager.ServiceEntry(id: shipped[0], name: "B on", enabled: true, domains: [], ipRanges: []),
+            RouteManager.ServiceEntry(id: shipped[1], name: "C off", enabled: false, domains: [], ipRanges: []),
+            RouteManager.ServiceEntry(id: "custom_1", name: "A custom off", enabled: false, domains: [], ipRanges: [], isCustom: true),
+        ]
+        XCTAssertEqual(ShortcutServiceQuery.suggested(entries).map(\.name), ["A custom off", "B on"],
+                       "a catalogue service that is off waits in the sheet, so it is not suggested")
+        XCTAssertEqual(ShortcutServiceQuery.matching("c off", in: entries).map(\.id), [shipped[1]],
+                       "typing its name still finds it")
+    }
+
     // MARK: What it says back
 
     private func runtime(helper: Bool = true, vpn: Bool = true, routes: Int = 12,
