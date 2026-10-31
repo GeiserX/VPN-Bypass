@@ -251,6 +251,31 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size, Self.settingsSize)
     }
 
+    /// A Bypass entry that has not resolved for three refreshes with the VPN up: its row says
+    /// since when, the pointer is on it (Remove), and the header offers the filter.
+    func testSettingsOnDomainsWithAStaleEntry() throws {
+        seedStaleDomain()
+        DomainsTab.hoveredForScreenshots = "old-intranet.example.net"
+        defer { DomainsTab.hoveredForScreenshots = nil }
+        XCTAssertEqual(try renderSettings(page: .domains, to: "domains-stale.png"), Self.settingsSize)
+    }
+
+    /// The same page with the "Not resolving" filter on.
+    func testSettingsOnDomainsFilteredToStaleEntries() throws {
+        seedStaleDomain()
+        DomainsTab.staleOnlyForScreenshots = true
+        defer { DomainsTab.staleOnlyForScreenshots = false }
+        XCTAssertEqual(try renderSettings(page: .domains, to: "domains-stale-filter.png"), Self.settingsSize)
+    }
+
+    private func seedStaleDomain() {
+        seedDomains(mode: .bypass)
+        var dead = DomainEntry(domain: "old-intranet.example.net", enabled: true)
+        dead.resolveFailures = ResolveFailures(count: StaleEntries.threshold,
+                                               since: Date().addingTimeInterval(-9 * 86_400))
+        rm.config.domains.insert(dead, at: 1)
+    }
+
     private func seedDomains(mode: RoutingMode) {
         seedBypass()
         rm.config.domains.append(DomainEntry(domain: "*.example.com", enabled: true))

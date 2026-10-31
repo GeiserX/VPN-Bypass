@@ -891,6 +891,9 @@
 "learned as you browse" = "appris pendant la navigation";
 "IP range" = "Plage d'IP";
 "addresses" = "adresses";
+"Hasn't resolved since %@" = "Non résolu depuis le %@";
+"Not resolving · %lld" = "Non résolus · %lld";
+"Show only the domains that have stopped resolving" = "Afficher seulement les domaines qui ne se résolvent plus";
 
 /* Pause (flow fix 2) */
 "Pause or Resume" = "Mettre en pause ou reprendre";
