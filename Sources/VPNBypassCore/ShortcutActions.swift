@@ -51,6 +51,11 @@ enum ShortcutActions {
         guard RouteManager.shared.hasLoadedConfig else {
             throw ShortcutActionError(code: "starting", message: notReady())
         }
+        // An unreadable config.json blocks every save, so a change would only live in memory,
+        // on the default config, until the app quits. Get Status still answers.
+        if RouteManager.shared.isConfigLoadFailed, CommandRouter.isMutating(action.request.cmd) {
+            throw ShortcutActionError(code: "config_unreadable", message: configUnreadable())
+        }
         let response = await ControlOrigin.$channel.withValue(.shortcuts) {
             await ControlSurface.handle(action.request)
         }
@@ -62,6 +67,10 @@ enum ShortcutActions {
     }
 
     // MARK: - What the action says back
+
+    static func configUnreadable(in bundle: Bundle = .main) -> String {
+        String(localized: "VPN Bypass could not read its configuration file, so it saves no changes. Repair it or import a saved configuration in Settings.", bundle: bundle)
+    }
 
     static func notReady(in bundle: Bundle = .main) -> String {
         String(localized: "VPN Bypass is still starting. Run the shortcut again in a moment.", bundle: bundle)
@@ -91,8 +100,8 @@ enum ShortcutActions {
     }
 
     /// Get Status's answer: the mode, then whether anything is routed and, when not, the one
-    /// reason, in the order the dropdown checks them. The kill switch comes last because it
-    /// only matters once routes are in.
+    /// reason, in the order the dropdown checks them (MenuBarLabel.iconAccessibilityLabel): the
+    /// kill switch before "nothing routed", since it is why routes would have no effect.
     static func statusLine(mode: RoutingMode, runtime: RuntimeStatus?, in bundle: Bundle = .main) -> String {
         let name = DropdownModePicker.label(mode, in: bundle)
         guard let runtime else {
@@ -104,9 +113,6 @@ enum ShortcutActions {
         if !runtime.vpnConnected {
             return String(localized: "\(name) mode. The VPN is not connected.", bundle: bundle)
         }
-        if runtime.enforcedRouteCount == 0 {
-            return String(localized: "\(name) mode. Nothing is routed yet.", bundle: bundle)
-        }
         // The same three cases as the dropdown (MenuBarLabel.killSwitchAccessibilityLabel).
         if let flags = runtime.killSwitch {
             guard flags.contains("includeAllNetworks") else {
@@ -115,6 +121,9 @@ enum ShortcutActions {
             return flags.contains("excludeLocalNetworks")
                 ? String(localized: "\(name) mode. The VPN's kill switch sends all traffic through it except local-network addresses.", bundle: bundle)
                 : String(localized: "\(name) mode. The VPN's kill switch sends all traffic through it, so nothing skips it.", bundle: bundle)
+        }
+        if runtime.enforcedRouteCount == 0 {
+            return String(localized: "\(name) mode. Nothing is routed yet.", bundle: bundle)
         }
         return String(localized: "\(name) mode. Routed addresses: \(runtime.enforcedRouteCount)", bundle: bundle)
     }

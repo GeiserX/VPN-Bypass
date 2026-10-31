@@ -829,6 +829,7 @@
 "%@ mode. Nothing is routed yet." = "Mode %@. Rien n'est encore routé.";
 "%@ mode. The VPN's kill switch sends all traffic through it, so nothing skips it." = "Mode %@. Le kill switch du VPN fait passer tout le trafic par lui, donc rien ne le contourne.";
 "VPN Bypass is still starting. Run the shortcut again in a moment." = "VPN Bypass démarre encore. Relancez le raccourci dans un instant.";
+"VPN Bypass could not read its configuration file, so it saves no changes. Repair it or import a saved configuration in Settings." = "VPN Bypass n’a pas pu lire son fichier de configuration, donc il n’enregistre aucune modification. Réparez-le ou importez une configuration enregistrée dans les Réglages.";
 "%@ mode. The VPN's own routes win over this app's, so routes set here have no effect." = "Mode %@. Les routes du VPN passent avant celles de cette app, donc les routes définies ici sont sans effet.";
 "%@ mode. The VPN's kill switch sends all traffic through it except local-network addresses." = "Mode %@. Le kill switch du VPN fait passer tout le trafic par lui, sauf les adresses du réseau local.";
 "%@ mode. Routed addresses: %lld" = "Mode %1$@. Adresses routées : %2$lld";

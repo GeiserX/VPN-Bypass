@@ -110,6 +110,9 @@ final class ShortcutIntentMappingTests: XCTestCase {
         XCTAssertEqual(ShortcutActions.statusLine(mode: .bypass, runtime: runtime(killSwitch: ["enforceRoutes"]), in: en),
                        "Bypass mode. The VPN's own routes win over this app's, so routes set here have no effect.",
                        "enforceRoutes takes only what the VPN's routes cover, not all traffic")
+        XCTAssertEqual(ShortcutActions.statusLine(mode: .bypass, runtime: runtime(routes: 0, killSwitch: ["includeAllNetworks"]), in: en),
+                       "Bypass mode. The VPN's kill switch sends all traffic through it, so nothing skips it.",
+                       "the kill switch comes before nothing routed, as in the dropdown")
         XCTAssertEqual(ShortcutActions.statusLine(mode: .bypass, runtime: nil, in: en), "Bypass mode.")
     }
 
@@ -129,6 +132,7 @@ final class ShortcutIntentMappingTests: XCTestCase {
                 OutsideChange(kind: .addedDomain("x.org"), at: t0, via: .shortcuts).logsHelp(in: b),
                 LogFilter(onlySource: .shortcuts).sourceToken(in: b).title,
                 ShortcutActions.notReady(in: b),
+                ShortcutActions.configUnreadable(in: b),
                 LogFilter(onlySource: .shortcuts).emptyLine(shown: 0, in: b) ?? "",
                 LogFilter(level: .errors, onlySource: .shortcuts).emptyLine(shown: 0, in: b) ?? "",
             ]
@@ -260,6 +264,20 @@ final class ShortcutIntentRunTests: XCTestCase {
         }
         XCTAssertEqual(rm.config.routingMode, before)
         XCTAssertNil(rm.lastOutsideChange)
+    }
+
+    func testAChangeWhileTheConfigIsUnreadableIsRefusedButStatusAnswers() async throws {
+        rm.isConfigLoadFailed = true
+        defer { rm.isConfigLoadFailed = false }
+        do {
+            _ = try await ShortcutActions.run(.addDomain("example.org", list: .bypass))
+            XCTFail("a change must be refused while config.json is unreadable")
+        } catch let error as ShortcutActionError {
+            XCTAssertEqual(error.code, "config_unreadable")
+        }
+        XCTAssertEqual(rm.config.domains, [])
+        let status = try await ShortcutActions.run(.getStatus)
+        XCTAssertTrue(status.ok)
     }
 
     func testTheFooterOpensLogsAtItsOwnSource() {
