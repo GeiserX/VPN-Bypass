@@ -990,3 +990,6 @@
 "There is no Direct route to send these names to." = "There is no Direct route to send these names to.";
 "Added %lld of %lld. The others were not added; Logs says why." = "Added %lld of %lld. The others were not added; Logs says why.";
 "Added %lld of %lld." = "Added %lld of %lld.";
+"Routes are still being applied. Added %lld of %lld; press Add again when they finish." = "Routes are still being applied. Added %lld of %lld; press Add again when they finish.";
+"A name here is on the list but switched off. Turn it on from the Domains page." = "A name here is on the list but switched off. Turn it on from the Domains page.";
+"Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory." = "Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory.";

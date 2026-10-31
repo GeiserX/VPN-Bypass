@@ -20,6 +20,15 @@ struct LearnSiteSection: View {
     private var plan: [String] {
         SiteLearning.plan(groups, wildcards: wildcards, isListed: { routeManager.lookupListing($0) != nil })
     }
+    /// Routed by the mode: listed and on. A name whose own entry is switched off is not routed,
+    /// and adding it again is refused, so it is turned on from the Domains page instead.
+    private func isRouted(_ name: String) -> Bool {
+        guard let listing = routeManager.lookupListing(name) else { return false }
+        return listing != .listedOff
+    }
+    private var hasSwitchedOff: Bool {
+        learning.names.contains { routeManager.lookupListing($0) == .listedOff }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -90,7 +99,7 @@ struct LearnSiteSection: View {
     /// One site domain: its names in the detail line, how many in the number column, and the
     /// wildcard offer at the end when it has three names or more.
     private func row(_ group: SiteLearning.Group, numberWidth: CGFloat) -> some View {
-        let unlisted = group.names.filter { routeManager.lookupListing($0) == nil }
+        let unlisted = group.names.filter { !isRouted($0) }
         let wildcardListed = group.wildcard.map { routeManager.lookupListing($0) != nil } ?? false
         return ListRow(
             glyph: unlisted.isEmpty ? "checkmark.circle" : "globe",
@@ -126,9 +135,11 @@ struct LearnSiteSection: View {
     /// The one Add: how many entries it puts on the mode's list, and the button.
     private var addBar: some View {
         HStack(spacing: Theme.Space.m) {
-            Text(plan.isEmpty
-                 ? String(localized: "Every name here is routed already.")
-                 : String(localized: "Entries to add: \(plan.count)"))
+            Text(!plan.isEmpty
+                 ? String(localized: "Entries to add: \(plan.count)")
+                 : hasSwitchedOff
+                 ? String(localized: "A name here is on the list but switched off. Turn it on from the Domains page.")
+                 : String(localized: "Every name here is routed already."))
                 .font(Theme.Font.detail)
                 .foregroundColor(Theme.textSecondary)
             Spacer(minLength: Theme.Space.s)
@@ -144,10 +155,15 @@ struct LearnSiteSection: View {
 
     private func add() {
         let entries = plan
+        let chosenMode = mode
+        let session = learning.started
         isAdding = true
         Task { @MainActor in
-            feedback = await routeManager.addLearned(entries)
+            let result = await routeManager.addLearned(entries, mode: chosenMode)
             isAdding = false
+            // Done or a new window meanwhile: the line would describe names no longer shown.
+            guard monitor.learning?.started == session else { return }
+            feedback = result
         }
     }
 }

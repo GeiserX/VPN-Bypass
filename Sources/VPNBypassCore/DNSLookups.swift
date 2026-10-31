@@ -99,7 +99,8 @@ final class DNSLookupsMonitor: ObservableObject {
         generation += 1
         tally = DNSLookupTally()
         since = Date()
-        if isCapturing { Task { _ = await HelperManager.shared.drainDNSQueries() } }
+        // An open learning window still gets the names this drain takes out.
+        if isCapturing { Task { learnFrom(await HelperManager.shared.drainDNSQueries()) } }
     }
 
     /// Opens a learning window of `SiteLearning.duration`. When the page is not watching, the
@@ -108,6 +109,8 @@ final class DNSLookupsMonitor: ObservableObject {
     func startLearning() async {
         guard learning?.isOpen != true else { return }
         if isCapturing { await drainNow() }
+        // A second click that waited on the same drain finds the window already open.
+        guard learning?.isOpen != true else { return }
         learning = SiteLearning(started: Date())
         followConfig()
         learnTask?.cancel()
@@ -137,14 +140,23 @@ final class DNSLookupsMonitor: ObservableObject {
         followConfig()
     }
 
-    /// One drain now, after the one already on its way.
+    /// One drain now, after the one already on its way. The wait outlasts the helper call's
+    /// own 10 s deadline, so a slow drain is never cut off before its names are recorded.
     private func drainNow() async {
         var waits = 0
-        while tickInFlight && waits < 50 {
+        while tickInFlight && waits < 600 {
             try? await Task.sleep(nanoseconds: 20_000_000)
             waits += 1
         }
         await tick()
+    }
+
+    /// One drain's names into the open learning window. A drain that lands just after the
+    /// window's end holds names asked before it. An empty drain is recorded once, so the window
+    /// knows the capture ran.
+    private func learnFrom(_ names: [String]?) {
+        guard let names, let window = learning, window.isOpen, !names.isEmpty || !window.heard else { return }
+        learning?.record(names, at: min(Date(), window.ends))
     }
 
     private func clearCount() {
@@ -181,14 +193,11 @@ final class DNSLookupsMonitor: ObservableObject {
 
         let drainGeneration = generation
         if isCapturing, let names = await HelperManager.shared.drainDNSQueries() {
-            guard wanted, generation == drainGeneration else { return }
-            let now = Date()
-            if enabled, !names.isEmpty { tally.record(names, at: now) }
-            // A drain that lands just after the window's end holds names asked before it. An
-            // empty drain is recorded once, so the window knows the capture ran.
-            if let window = learning, window.isOpen, !names.isEmpty || !window.heard {
-                learning?.record(names, at: min(now, window.ends))
-            }
+            guard wanted else { return }
+            // Clear and Stop Watching start the count again; the learning window keeps the
+            // names, since the helper no longer has them.
+            if enabled, generation == drainGeneration, !names.isEmpty { tally.record(names, at: Date()) }
+            learnFrom(names)
             return
         }
         // At launch this runs before the helper check finishes: say so on the page, without a

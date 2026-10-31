@@ -990,3 +990,6 @@
 "There is no Direct route to send these names to." = "No hay una ruta Directa a la que enviar estos nombres.";
 "Added %lld of %lld. The others were not added; Logs says why." = "Añadidos %lld de %lld. Los demás no se añadieron; los Registros dicen por qué.";
 "Added %lld of %lld." = "Añadidos %lld de %lld.";
+"Routes are still being applied. Added %lld of %lld; press Add again when they finish." = "Las rutas todavía se están aplicando. Añadidos %lld de %lld; pulsa Añadir de nuevo cuando terminen.";
+"A name here is on the list but switched off. Turn it on from the Domains page." = "Un nombre de aquí está en la lista pero desactivado. Actívalo desde la página Dominios.";
+"Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory." = "Aprender un sitio ha activado la captura solo durante sus 60 segundos, y guarda los nombres en memoria.";

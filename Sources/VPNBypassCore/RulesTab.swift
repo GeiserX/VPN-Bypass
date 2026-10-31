@@ -408,9 +408,8 @@ extension RouteManager {
     /// route lock, and an add made while the lock is held is saved without its routes, so each
     /// one waits for the one before (up to 30 s). Stops when the mode changes meanwhile: a
     /// choice made for one mode is never added in another. The line to show.
-    func addLearned(_ entries: [String]) async -> AddDomainFeedback? {
+    func addLearned(_ entries: [String], mode: LookupMode) async -> AddDomainFeedback? {
         guard !entries.isEmpty else { return nil }
-        let mode = LookupMode(self)
         var added = 0
         var firstRefusal: AddDomainFeedback?
         for entry in entries {
@@ -420,6 +419,11 @@ extension RouteManager {
                 polls += 1
             }
             guard LookupMode(self) == mode else { break }
+            // Still applying after the wait: an add now would be saved without its routes.
+            if isApplyingRoutes {
+                return AddDomainFeedback(refusal: String(localized: "Routes are still being applied. Added \(added) of \(entries.count); press Add again when they finish."),
+                                         typed: entry)
+            }
             switch addForCurrentMode(entry) {
             case .success?:
                 added += 1
