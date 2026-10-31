@@ -208,6 +208,18 @@ final class RouteManager: ObservableObject {
     /// feeds back into routing.
     @Published private(set) var pendingReconnectApply: PendingReconnectApply?
 
+    /// The pause in progress, nil when not paused (see Pause.swift). Never saved: a quit
+    /// removes the routes as every quit does, and the next launch starts unpaused.
+    @Published private(set) var pauseState: PauseState?
+    var isPaused: Bool { pauseState != nil }
+    /// Ends a timed pause.
+    private var pauseTimerTask: Task<Void, Never>?
+    /// The apply Resume runs when no settle wait applies.
+    private var resumeApplyTask: Task<Void, Never>?
+    /// A pause's removal is running; Resume's apply waits for it, or its later batch could
+    /// delete what the apply just put back.
+    private var pauseRemovalRunning = false
+
     struct PendingReconnectApply: Equatable {
         enum Reason: Equatable {
             /// The normal settle wait (10 to 240 s, see `ReconnectSettle.delay`).
@@ -514,6 +526,7 @@ final class RouteManager: ObservableObject {
         }
         // A wildcard added, removed or switched, or the mode changed: the helper's list follows.
         wildcards.requestSync()
+        endPauseIfConfigForbidsIt()
     }
 
     /// - Parameter recoveringFromLoadFailure: set only by `importConfig`, which is replacing an
@@ -756,6 +769,9 @@ final class RouteManager: ObservableObject {
                 return false
             }
 
+            // An import replaces what a pause was taken on; the apply below is its own.
+            if isPaused { endPause(reason: "a configuration was imported", apply: false) }
+
             log(.success, "Config imported: \(exportData.config.domains.count) domains, \(exportData.config.services.filter { $0.enabled }.count) services enabled")
 
             // Reconcile live routes if VPN is connected
@@ -878,6 +894,9 @@ final class RouteManager: ObservableObject {
     }
 
     private func checkVPNStatusCore() async {
+        // A timed pause whose time passed while the Mac slept ends here, after this pass has
+        // read the VPN's state, so the Resume apply sees a fresh tunnel and waits as it should.
+        defer { endPauseIfExpired() }
         let wasVPNConnected = isVPNConnected
         let oldInterface = vpnInterface
         // Captured BEFORE re-detection below overwrites it, so a same-interface gateway change is
@@ -929,9 +948,19 @@ final class RouteManager: ObservableObject {
         
         if isVPNConnected && !wasVPNConnected { lastVPNConnectAt = Date() }
 
+        // "Until the VPN reconnects": this is the reconnect. The pause ends here and the apply
+        // below goes through the settle gate like any post-reconnect apply, even with
+        // auto-apply off, since resuming is what the user asked for.
+        var resumedByReconnect = false
+        if isVPNConnected && !wasVPNConnected, pauseState?.length == .untilReconnect {
+            endPause(reason: "the VPN reconnected", apply: false)
+            resumedByReconnect = true
+        }
+
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
-        // Also skip if helper is not ready — no point attempting routes that will all fail
-        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled && !isConfigLoadFailed {
+        // Also skip if helper is not ready — no point attempting routes that will all fail.
+        // Never while paused: Resume applies.
+        if isVPNConnected && !wasVPNConnected && (config.autoApplyOnVPN || resumedByReconnect) && !isPaused && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled && !isConfigLoadFailed {
             let now = Date()
             let vpnLabel = "\(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type"))"
             // Fresh routes = the newer of the last full apply and the last DNS refresh.
@@ -989,7 +1018,7 @@ final class RouteManager: ObservableObject {
                 reconnectSettleTask = Task { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     guard !Task.isCancelled, let self else { return }
-                    await self.runSettledApply()
+                    await self.runSettledApply(requireAutoApply: !resumedByReconnect)
                 }
                 pendingReconnectApply = PendingReconnectApply(reason: reason, connectedAt: now,
                                                               appliesAt: now.addingTimeInterval(delay))
@@ -1007,7 +1036,8 @@ final class RouteManager: ObservableObject {
         // needed? / run-now? / defer? decision. Guarded by isVPNConnected so a latched
         // re-route is never acted on after the VPN is gone (the disconnect block below
         // clears the latch on the transition).
-        if isVPNConnected {
+        // Paused, nothing is installed to re-point: Resume applies on whatever is current.
+        if isVPNConnected && !isPaused {
             let interfaceChanged = isVPNConnected && wasVPNConnected
                 && interface != oldInterface && oldInterface != nil && interface != nil
             let tailscaleChanged = isVPNConnected && wasVPNConnected
@@ -1290,6 +1320,8 @@ final class RouteManager: ObservableObject {
     /// Batch block, through the test override when set, else the helper. Stamped as a kernel
     /// burst like every other batch (see addRoutesBatchTracked).
     func addBlockRoutesBatchVia(_ destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
+        // Paused: nothing installs a route (VPN Only, which blocks, never pauses; belt and braces).
+        guard !isPaused else { return (0, destinations.count, destinations, "paused") }
         if let override = addBlockRoutesBatchOverrideForTests { return await override(destinations) }
         if !destinations.isEmpty { lastKernelBurstAt = Date() }
         return await HelperManager.shared.addBlockRoutesBatch(destinations: destinations)
@@ -1299,10 +1331,10 @@ final class RouteManager: ObservableObject {
     /// re-validated at fire time — the world may have moved during the wait. The cancellation
     /// re-check closes a supersede race: an old task that passed its post-sleep check right as
     /// a disconnect cancelled it must not run, and must not clear a newer task's reference.
-    private func runSettledApply() async {
+    private func runSettledApply(requireAutoApply: Bool = true) async {
         guard !Task.isCancelled else { return }
         reconnectSettleTask = nil
-        guard isVPNConnected, config.autoApplyOnVPN, !isLoading, !isApplyingRoutes,
+        guard isVPNConnected, config.autoApplyOnVPN || !requireAutoApply, !isPaused, !isLoading, !isApplyingRoutes,
               HelperManager.shared.isHelperInstalled else {
             log(.info, "Settle-gated apply skipped — preconditions changed during the wait")
             return
@@ -2282,6 +2314,10 @@ final class RouteManager: ObservableObject {
     private func applyAllRoutesInternal(sendNotification: Bool, forceReassert: Bool = false,
                                         orphanGrace: Bool = false) async {
         let epoch = routeEpoch
+        guard !isPaused else {
+            log(.info, "Apply skipped: paused")
+            return
+        }
 
         guard let gateway = localGateway else {
             log(.error, "No local gateway available")
@@ -2469,6 +2505,9 @@ final class RouteManager: ObservableObject {
             orphanFirstSeen.removeAll()
             log(.info, "Routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
             lastUpdate = Date()
+            // The routes are live (a skip needs a non-empty desired set), so wildcards learn
+            // again, as after a commit: a Resume whose pause could not remove them lands here.
+            wildcards.routesApplied()
             return
         }
 
@@ -2552,6 +2591,7 @@ final class RouteManager: ObservableObject {
     @discardableResult
     private func applyCustomRoutesInternal(useCacheOnly: Bool, sendNotification: Bool, forceReassert: Bool = false) async -> Bool {
         let epoch = routeEpoch
+        guard !isPaused else { return false }
 
         guard let gateway = localGateway else {
             log(.error, "Custom routing: no local gateway available")
@@ -2615,6 +2655,7 @@ final class RouteManager: ObservableObject {
             orphanFirstSeen.removeAll()
             log(.info, "Custom routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
             lastUpdate = Date()
+            wildcards.routesApplied()   // as the classic skip path
             return true
         }
 
@@ -2880,12 +2921,178 @@ final class RouteManager: ObservableObject {
         log(.info, activeRoutes.isEmpty ? "All routes removed" : "Routes removed (\(activeRoutes.count) entries retained from failed kernel removals)")
     }
     
+    // MARK: - Pause
+
+    /// Takes the app's routes out, so traffic follows the VPN's own routes, until `length` is
+    /// up or Resume. Refused when removing the routes is not safe in this config
+    /// (`PauseGate.blocker`). Pausing again while paused replaces the length. Returns how many
+    /// addresses are still routed: a removal that failed keeps them, and the dropdown then says
+    /// so with Retry instead of Paused.
+    @discardableResult
+    func pause(for length: PauseLength) async -> Result<Int, PauseRefusal> {
+        guard !isShuttingDown else { return .failure(.shuttingDown) }
+        guard !isConfigLoadFailed else { return .failure(.configUnreadable) }
+        if let blocker = PauseGate.blocker(config) {
+            log(.info, "Pause refused: \(PauseGate.message(blocker))")
+            return .failure(.blocked(blocker))
+        }
+        // The state first: from here every path that would install a route refuses.
+        pauseState = PauseState(length: length, since: Date(), mode: config.routingMode)
+        schedulePauseTimer()
+        // Drop whatever is queued to install routes: a settle-gated apply, a latched re-route,
+        // a deferred DNS refresh, a Resume apply, per-domain DNS retries (removeAllRoutes).
+        reconnectSettleTask?.cancel()
+        reconnectSettleTask = nil
+        resumeApplyTask?.cancel()
+        resumeApplyTask = nil
+        pendingReroute = false
+        pendingRerouteReason = nil
+        rerouteRetryTask?.cancel()
+        rerouteRetryTask = nil
+        dnsRefreshRetryTask?.cancel()
+        dnsRefreshRetryTask = nil
+        log(.info, "Paused \(length.logText): removing the app's routes")
+        pauseRemovalRunning = true
+        await removeAllRoutes()
+        pauseRemovalRunning = false
+        let left = Set(activeRoutes.map(\.destination)).count
+        if left > 0 {
+            log(.warning, "Paused, but \(left) route(s) could not be removed and are still in place")
+        }
+        return .success(left)
+    }
+
+    /// Tries again to remove what a pause could not. Nothing while not paused.
+    func retryPauseRemoval() async {
+        guard isPaused, !pauseRemovalRunning else { return }
+        pauseRemovalRunning = true
+        await removeAllRoutes()
+        pauseRemovalRunning = false
+    }
+
+    /// Ends the pause and puts the routes back with one apply through the settle gate.
+    func resume() {
+        guard isPaused else { return }
+        endPause(reason: "resumed", apply: true)
+    }
+
+    /// Clears the pause. With `apply`, runs the normal apply as Resume does; without it the
+    /// caller runs it (a mode switch, the reconnect handling).
+    func endPause(reason: String, apply: Bool) {
+        guard pauseState != nil else { return }
+        pauseState = nil
+        pauseTimerTask?.cancel()
+        pauseTimerTask = nil
+        log(.info, "Pause ended: \(reason)")
+        if apply { applyAfterResume() }
+    }
+
+    /// A save that leaves a config Pause is not allowed in ends the pause: a proxy route
+    /// turned on starts its listener at once, a rule pointed at the VPN must route, and
+    /// another mode runs its own apply.
+    private func endPauseIfConfigForbidsIt() {
+        guard let pause = pauseState else { return }
+        if config.routingMode != pause.mode {
+            // The mode switch that made this save runs the new mode's apply itself.
+            endPause(reason: "the mode changed", apply: false)
+        } else if let blocker = PauseGate.blocker(config) {
+            endPause(reason: PauseGate.message(blocker), apply: true)
+        }
+    }
+
+    private func schedulePauseTimer() {
+        pauseTimerTask?.cancel()
+        pauseTimerTask = nil
+        guard let until = pauseState?.until else { return }
+        pauseTimerTask = Task { [weak self] in
+            // The continuous clock counts while the Mac sleeps; Task.sleep(nanoseconds:) does
+            // not, so a 15-minute pause over a closed lid ran on for the whole nap. The status
+            // pass (`endPauseIfExpired`) catches what the timer still misses.
+            let wait = max(0, until.timeIntervalSinceNow)
+            let clock = ContinuousClock()
+            try? await Task.sleep(until: clock.now.advanced(by: .seconds(wait)), clock: clock)
+            guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
+            self.pauseTimerTask = nil
+            self.endPause(reason: "the pause time is up", apply: true)
+        }
+    }
+
+    /// Waits, up to 30 s, while an apply, a load or a pause's removal runs.
+    private func waitForRouteWorkToSettle() async {
+        var polls = 0
+        while (isApplyingRoutes || isLoading || pauseRemovalRunning) && polls < 120 && !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            polls += 1
+        }
+    }
+
+    /// Ends a timed pause whose time is up. Run on every VPN status pass (the 30 s timer, a
+    /// network change, a wake), so a pause never outlives its length when the timer is late.
+    func endPauseIfExpired(now: Date = Date()) {
+        guard let until = pauseState?.until, now >= until else { return }
+        endPause(reason: "the pause time is up", apply: true)
+    }
+
+    /// Resume's apply: one apply, the same burst as Refresh, held back as a post-reconnect
+    /// apply is when the tunnel just came up or keeps dropping (`PauseGate.resumeAction`).
+    private func applyAfterResume() {
+        let now = Date()
+        let action = PauseGate.resumeAction(
+            vpnConnected: isVPNConnected,
+            canApply: HelperManager.shared.isHelperInstalled && !isConfigLoadFailed && !isShuttingDown,
+            settlePending: reconnectSettleTask != nil,
+            killStrikes: applyKillStrikes, lastStrikeAt: lastApplyKillAt,
+            lastConnectAt: lastVPNConnectAt, now: now)
+        switch action {
+        case .nothing:
+            log(.info, "Resumed: routes come back when a VPN connects and the helper is ready")
+        case .waitForSettle:
+            log(.info, "Resumed: the scheduled post-reconnect apply puts the routes back")
+        case .apply(let delay, let heldBackStrikes) where delay > 0:
+            log(.info, "Resumed: applying routes in \(Int(delay.rounded(.up)))s once the tunnel settles")
+            reconnectSettleTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard !Task.isCancelled, let self else { return }
+                // The pause has already ended, so an apply that skips on a busy gate would
+                // leave the routes out with nothing to bring them back: wait the gate out.
+                await self.waitForRouteWorkToSettle()
+                guard !Task.isCancelled else { return }
+                await self.runSettledApply(requireAutoApply: false)
+            }
+            pendingReconnectApply = PendingReconnectApply(
+                reason: heldBackStrikes.map { .heldBack(strikes: $0) } ?? .settling,
+                connectedAt: lastVPNConnectAt ?? now, appliesAt: now.addingTimeInterval(delay))
+        case .apply:
+            let resumedAt = now
+            resumeApplyTask?.cancel()
+            resumeApplyTask = Task { [weak self] in
+                guard let self else { return }
+                // An edit that ended the pause may run its own apply right after; let it take
+                // the gate first, and wait out any operation already running.
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                await self.waitForRouteWorkToSettle()
+                guard !Task.isCancelled, !self.isPaused, !self.isShuttingDown else { return }
+                self.resumeApplyTask = nil
+                if let applied = self.lastUpdate, applied > resumedAt, !self.activeRoutes.isEmpty {
+                    return   // that apply already put the routes back
+                }
+                self.isLoading = true
+                await self.applyAllRoutes()
+                self.isLoading = false
+            }
+        }
+    }
+
     // MARK: - Instant Startup (Cache-based)
     
     /// Apply routes using cached IPs only (no DNS resolution) - used for instant startup
     /// Returns false if apply was skipped (no gateway, gate held, preempted, etc.)
     private func applyRoutesFromCache() async -> Bool {
         let epoch = routeEpoch
+        guard !isPaused else {
+            log(.info, "Cache apply skipped: paused")
+            return false
+        }
         guard acquireRouteOperation() else {
             log(.info, "Cache apply skipped: route operation in progress")
             return false
@@ -3266,6 +3473,7 @@ final class RouteManager: ObservableObject {
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
     private func backgroundDNSRefresh(sendNotification: Bool) async {
         let epoch = routeEpoch
+        guard !isPaused else { return }
         guard acquireRouteOperation() else {
             log(.info, "Background DNS refresh skipped: another route operation is in progress")
             return
@@ -3597,6 +3805,11 @@ final class RouteManager: ObservableObject {
     /// now gets it now. The periodic timer and its deferred retry go through the gate.
     private func performDNSRefresh(userInitiated: Bool = false) async {
         let epoch = routeEpoch
+        guard !isPaused else {
+            log(.info, "DNS refresh skipped: paused")
+            nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
+            return
+        }
         guard acquireRouteOperation() else {
             log(.info, "DNS refresh skipped: another route operation is in progress")
             return
@@ -4040,7 +4253,8 @@ final class RouteManager: ObservableObject {
     /// `restoreDomain`.
     private func routeNewBypassEntry(_ entry: DomainEntry) {
         let cleaned = entry.domain
-        if isVPNConnected && bypassListIsLive && acquireRouteOperation() {
+        // Paused: the entry is saved, and Resume applies it.
+        if isVPNConnected && bypassListIsLive && !isPaused && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 let epoch = routeEpoch
@@ -4066,6 +4280,7 @@ final class RouteManager: ObservableObject {
     }
 
     func scheduleRetry(for domain: String) {
+        guard !isPaused else { return }
         pendingRetryTasks[domain]?.cancel()
         pendingRetryTasks[domain] = Task { [weak self] in
             do {
@@ -4080,6 +4295,7 @@ final class RouteManager: ObservableObject {
     }
     
     private func retryFailedDomain(_ domain: String) async {
+        guard !isPaused else { return }
         // Custom mode: a rule-domain that failed DNS re-triggers a full custom re-apply
         // (re-resolving every rule against live DNS), reusing scheduleRetry's per-domain
         // timer/dedup machinery. applyCustomRoutesInternal is gate-free, so we take the
@@ -4159,6 +4375,12 @@ final class RouteManager: ObservableObject {
     /// Callers must already have decided (via RerouteDecider) that a re-route is warranted
     /// and runnable.
     func performReroute() async {
+        // Paused, nothing is installed to re-point; Resume applies on the current gateway.
+        guard !isPaused else {
+            pendingReroute = false
+            pendingRerouteReason = nil
+            return
+        }
         lastInterfaceReroute = Date()
         if localGateway != nil, acquireRouteOperation() {
             // Clear the latch HERE — at the START of the re-route, synchronously after
@@ -4276,6 +4498,11 @@ final class RouteManager: ObservableObject {
     /// the SAME pure RerouteDecider so the retry and the timer share one decision.
     private func attemptPendingReroute() async -> Bool {
         guard pendingReroute else { return true }   // already handled elsewhere
+        guard !isPaused else {                      // nothing to re-point while paused
+            pendingReroute = false
+            pendingRerouteReason = nil
+            return true
+        }
         guard isVPNConnected else {                 // disconnected during the wait — drop it
             pendingReroute = false
             pendingRerouteReason = nil
@@ -4539,7 +4766,7 @@ final class RouteManager: ObservableObject {
     /// or `restoreInverseDomain`.
     private func routeNewInverseEntry(_ inverseEntry: DomainEntry) {
         let cleaned = inverseEntry.domain, cidr = inverseEntry.isCIDR
-        if isVPNConnected && config.routingMode == .vpnOnly && acquireRouteOperation() {
+        if isVPNConnected && config.routingMode == .vpnOnly && !isPaused && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 let epoch = routeEpoch
@@ -4675,6 +4902,8 @@ final class RouteManager: ObservableObject {
     /// Switch routing mode and re-apply routes
     func setRoutingMode(_ mode: RoutingMode) {
         guard config.routingMode != mode else { return }
+        // Changing mode ends a pause: the switch below runs the new mode's normal apply.
+        if isPaused { endPause(reason: "the mode changed", apply: false) }
 
         // Entering Custom mode: ensure the routes/rules model exists so the user's
         // bypass/vpnOnly lists keep routing after the switch. This is a pure migration
@@ -5013,7 +5242,8 @@ final class RouteManager: ObservableObject {
     /// services from the catalogue writes the routing table once instead of ten times while
     /// a VPN is up. Each service still owns its own addresses (`ActiveRoute.source`).
     private func applyRoutesForServices(_ services: [ServiceEntry], gateway: String) async {
-        guard !services.isEmpty else { return }
+        // Paused: a service turned on is saved, and Resume applies it.
+        guard !services.isEmpty, !isPaused else { return }
         let epoch = routeEpoch
         var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool)] = []
@@ -5374,7 +5604,7 @@ final class RouteManager: ObservableObject {
     /// run on a timer next to a VPN client that reads its own gateway route. Zero missing routes
     /// means zero writes.
     func reconcileMissingRoutes() async {
-        guard !isShuttingDown, !activeRoutes.isEmpty, HelperManager.shared.isHelperInstalled else { return }
+        guard !isShuttingDown, !isPaused, !activeRoutes.isEmpty, HelperManager.shared.isHelperInstalled else { return }
         guard let table = RouteKernel.currentTable() else { return }
 
         // Deduplicate first: activeRoutes can hold several entries for one destination when
@@ -5453,6 +5683,11 @@ final class RouteManager: ObservableObject {
         guard !isShuttingDown else {
             log(.warning, "Refusing batch add of \(routes.count) route(s): shutdown in progress")
             return (0, routes.count, routes.map { $0.destination }, "shutdown in progress")
+        }
+        // Paused: nothing installs a route, whichever path asks (see Pause.swift).
+        guard !isPaused else {
+            log(.info, "Refusing batch add of \(routes.count) route(s): paused")
+            return (0, routes.count, routes.map { $0.destination }, "paused")
         }
         // Never touch the route to the VPN's own gateway. Its client keeps the tunnel alive by
         // reaching that address via the PHYSICAL interface; vendor documentation describes
@@ -5814,6 +6049,8 @@ final class RouteManager: ObservableObject {
     var routeEpochForTests: UInt64 { routeEpoch }
 
     private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil, persistCache: Bool = true) async -> [ActiveRoute]? {
+        // Paused: an entry turned on is saved and routed by Resume, not a failure to retry.
+        if isPaused { return [] }
         // A wildcard has nothing to resolve: its names are routed by the helper's forwarder as
         // they are looked up. An empty result is a success, so no DNS retry is scheduled.
         if WildcardDomain.isWildcard(domain) { return [] }
@@ -5855,6 +6092,8 @@ final class RouteManager: ObservableObject {
     }
     
     private func addRoute(_ destination: String, gateway: String, isNetwork: Bool = false) async -> Bool {
+        // Paused: nothing installs a route, whichever path asks (see Pause.swift).
+        guard !isPaused else { return false }
         if let override = addRouteOverrideForTests { return await override(destination, gateway, isNetwork) }
         guard HelperManager.shared.isHelperInstalled else {
             log(.error, "Cannot add route: helper not ready")
@@ -5984,6 +6223,11 @@ final class RouteManager: ObservableObject {
         isShuttingDown = false
     }
 
+    /// Sets the pause without touching any route, for renders of the paused dropdown.
+    func setPauseStateForTests(_ state: PauseState?) {
+        pauseState = state
+    }
+
     /// Test-only seams for the operation gate (it is private by design).
     func tryAcquireRouteOperationForTests() -> Bool { acquireRouteOperation() }
     func releaseRouteOperationForTests() { releaseRouteOperation() }
@@ -5992,6 +6236,11 @@ final class RouteManager: ObservableObject {
         guard !isShuttingDown else { return }
         isShuttingDown = true
         backgroundRefreshTask?.cancel()
+        // The pause dies with the app; its timer must not start an apply into the teardown.
+        pauseTimerTask?.cancel()
+        pauseTimerTask = nil
+        resumeApplyTask?.cancel()
+        resumeApplyTask = nil
         rerouteRetryTask?.cancel()
         rerouteRetryTask = nil
         cancelAllRetries()

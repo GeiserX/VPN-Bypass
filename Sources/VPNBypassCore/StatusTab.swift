@@ -49,7 +49,11 @@ enum StatusPage {
         let status = DropdownStatus.make(input, now: now)
         let title: String
         var sentence = status.sentence
-        if input.isStarting || !input.isVPNConnected {
+        if status.chip == .paused {
+            title = String(localized: "Paused", bundle: bundle)
+        } else if input.pause != nil && status.line3.action == .retryPause {
+            title = String(localized: "Pause incomplete", bundle: bundle)
+        } else if input.isStarting || !input.isVPNConnected {
             title = status.headline
         } else if !input.helperReady {
             title = String(localized: "Not working", bundle: bundle)
@@ -443,7 +447,8 @@ extension DropdownStatus.Input {
             // Only addresses still routed: one removed since the check is no longer a fault.
             lastCheckWrongWay: routeManager.lastRouteCheck?.leftWrongWay
                 .filter { routed.contains($0.destination) }.count ?? 0,
-            lastCheckBroken: routeManager.lastRouteCheck?.controlBroken ?? false
+            lastCheckBroken: routeManager.lastRouteCheck?.controlBroken ?? false,
+            pause: routeManager.pauseState
         )
     }
 }
@@ -665,7 +670,7 @@ struct StatusTab: View {
                                                          automatic: routeManager.config.autoDNSRefresh,
                                                          now: now)) {
                 Button(String(localized: "Refresh Now")) { routeManager.forceDNSRefresh() }
-                    .disabled(routeManager.isApplyingRoutes)
+                    .disabled(routeManager.isApplyingRoutes || routeManager.isPaused)
             }
         }
     }

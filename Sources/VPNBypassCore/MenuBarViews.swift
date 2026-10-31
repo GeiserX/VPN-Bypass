@@ -43,6 +43,10 @@ struct MenuBarLabel: View {
         if helperManager.helperState.isFailed {
             return String(localized: "VPN Bypass: helper error, nothing is being routed")
         }
+        // Only once every route is out, as the dropdown says Paused only then.
+        if routeManager.isPaused && routeManager.activeRoutes.isEmpty && routeManager.isVPNConnected {
+            return String(localized: "VPN Bypass: paused, traffic follows the VPN's own routes")
+        }
         guard routeManager.isVPNConnected else {
             return String(localized: "VPN Bypass: no VPN detected, nothing is being routed")
         }
@@ -77,7 +81,11 @@ struct MenuBarLabel: View {
 
     private var menuBarIcon: some View {
         Group {
-            if let nsImage = currentIcon ?? Self.iconDefault {
+            if routeManager.isPaused && routeManager.activeRoutes.isEmpty && !helperManager.helperState.isFailed {
+                // The paused glyph of the status chip (StatusChip.Kind.paused), as a template.
+                Image(systemName: "pause.circle")
+                    .font(.system(size: 15))
+            } else if let nsImage = currentIcon ?? Self.iconDefault {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -315,6 +323,8 @@ struct MenuContent: View {
                         // Problems with every failure behind the count.
                         switch action {
                         case .fix, .show: openSettings(page: .status)
+                        case .resume: resume()
+                        case .retryPause: Task { await routeManager.retryPauseRemoval() }
                         }
                     }
                 }
@@ -439,14 +449,16 @@ struct MenuContent: View {
 
             // What is routed, one row per entry the user added. The last route check is not
             // here: "Show" opens it on the Status page, with every failure behind the count.
+            // Paused, an entry with no addresses is what was asked for: no ▲, no Retry.
             if let routed = RoutedBySource.make(
                 mode: statusInput.mode, config: routeManager.config,
                 routes: routeManager.installedRoutes,
-                busy: RoutedBySource.emptyEntriesAreExpected(
+                busy: routeManager.isPaused || RoutedBySource.emptyEntriesAreExpected(
                     running: isBusy, pending: routeManager.pendingReconnectApply,
                     lastChange: routeManager.lastRouteChange,
                     currentRouteCount: routeManager.routedAddressCount,
-                    helperReady: helperManager.helperState.isReady)) {
+                    helperReady: helperManager.helperState.isReady),
+                title: routeManager.isPaused ? RoutedBySource.pausedTitle(statusInput.mode) : nil) {
                 routedList(routed)
             }
         }
@@ -470,7 +482,7 @@ struct MenuContent: View {
                 Button(String(localized: "Verify Routes")) { verify() }
                     .disabled(routeManager.isCheckingRoutes || routeManager.activeRoutes.isEmpty)
                 Button(String(localized: "Re-resolve DNS Now")) { routeManager.forceDNSRefresh() }
-                    .disabled(isBusy)
+                    .disabled(isBusy || routeManager.isPaused)
             }
             Button(String(localized: "Open Logs")) { openSettings(page: .logs) }
             Divider()
@@ -634,10 +646,17 @@ struct MenuContent: View {
                     }
                 }
                 .buttonStyle(.bordered)
-                .disabled(isBusy || !routeManager.isVPNConnected || !helperManager.helperState.isReady)
+                // Paused, nothing applies: Resume, on line 3, is the way back.
+                .disabled(isBusy || !routeManager.isVPNConnected || !helperManager.helperState.isReady
+                          || routeManager.isPaused)
                 .keyboardShortcut(.refreshRoutes)
                 .help(DropdownShortcut.refreshRoutes.help(String(localized: "Refresh Routes")))
                 .accessibilityLabel(isBusy ? String(localized: "Refreshing routes…") : String(localized: "Refresh Routes"))
+
+                // While paused, Resume is on line 3 of the status block instead.
+                if !routeManager.isPaused {
+                    pauseMenu
+                }
 
                 Spacer(minLength: 0)
 
@@ -648,12 +667,75 @@ struct MenuContent: View {
             }
         }
         // ⌘Q while the dropdown is open: the ⋯ menu's Quit item answers only while it is open.
+        // ⌘P likewise, since the Pause menu answers its items' keys only while open.
         .background {
-            Button("") { quit() }
-                .keyboardShortcut(.quit)
-                .opacity(0)
-                .frame(width: 0, height: 0)
-                .accessibilityHidden(true)
+            ZStack {
+                Button("") { quit() }
+                    .keyboardShortcut(.quit)
+                Button("") { pauseShortcut() }
+                    .keyboardShortcut(.pause)
+            }
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+        }
+    }
+
+    /// Pause, with its four lengths. Greyed when pausing is not safe in this config, with the
+    /// one line that says why as the menu's first item, its tooltip and its VoiceOver hint.
+    private var pauseMenu: some View {
+        let blocker = PauseGate.blocker(routeManager.config)
+        let why = blocker.map { PauseGate.message($0) }
+        return Menu {
+            if let why {
+                Text(why)
+                Divider()
+            }
+            ForEach(PauseLength.choices, id: \.self) { length in
+                if length == .oneHour {
+                    Button(length.title()) { pause(length) }
+                        .keyboardShortcut(.pause)
+                        .disabled(blocker != nil)
+                } else {
+                    Button(length.title()) { pause(length) }
+                        .disabled(blocker != nil)
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "pause")
+                    .font(.system(size: 11))
+                Text(String(localized: "Pause"))
+            }
+        }
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        // Greyed, yet it still opens: its first line says why it cannot pause, and the four
+        // lengths are disabled. A disabled control would hide that line.
+        .opacity(blocker == nil ? 1 : 0.45)
+        .help(why ?? DropdownShortcut.pause.help(String(localized: "Pause")))
+        .accessibilityLabel(String(localized: "Pause"))
+        .accessibilityHint(why ?? String(localized: "Takes the app's routes out for a while, so traffic follows the VPN's own routes."))
+    }
+
+    private func pause(_ length: PauseLength) {
+        Task { await routeManager.pause(for: length) }
+    }
+
+    private func resume() {
+        routeManager.resume()
+    }
+
+    /// ⌘P: Resume while paused, else pause for an hour when Pause is allowed.
+    private func pauseShortcut() {
+        guard !DropdownShortcut.isKeyRepeat(NSApp.currentEvent) else { return }
+        switch PauseShortcut.action(isPaused: routeManager.isPaused,
+                                    blocker: PauseGate.blocker(routeManager.config)) {
+        case .resume: resume()
+        case .pause(let length): pause(length)
+        case .nothing: break
         }
     }
 
@@ -1254,6 +1336,15 @@ enum RoutedBySource {
                                                  : String(localized: "Still routed", bundle: bundle)
     }
 
+    /// The list's title while paused: what Resume puts back.
+    static func pausedTitle(_ mode: DropdownCopy.Mode, in bundle: Bundle = .main) -> String {
+        switch mode {
+        case .bypass: return String(localized: "Will skip the VPN again", bundle: bundle)
+        case .vpnOnly: return String(localized: "Will go through the VPN again", bundle: bundle)
+        case .custom: return String(localized: "Will be routed by your rules again", bundle: bundle)
+        }
+    }
+
     static var leftoverName: String { String(localized: "Left from earlier") }
     static var everythingElse: String { String(localized: "Everything else") }
     static var direct: String { String(localized: "direct") }
@@ -1561,6 +1652,20 @@ struct StatusBlock: View {
                 .controlSize(.small)
                 .help(DropdownStatus.Line3.spokenName(.show))
                 .accessibilityLabel(DropdownStatus.Line3.spokenName(.show))
+        case .resume:
+            Button(String(localized: "Resume")) { onAction(.resume) }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .controlSize(.small)
+                .keyboardShortcut(.pause)
+                .help(DropdownShortcut.pause.help(DropdownStatus.Line3.spokenName(.resume)))
+                .accessibilityLabel(DropdownStatus.Line3.spokenName(.resume))
+        case .retryPause:
+            Button(String(localized: "Retry")) { onAction(.retryPause) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(DropdownStatus.Line3.spokenName(.retryPause))
+                .accessibilityLabel(DropdownStatus.Line3.spokenName(.retryPause))
         }
     }
 }
@@ -1610,6 +1715,10 @@ struct DropdownStatus: Equatable {
             case fix
             /// Open Status, where Problems lists every failure behind the count.
             case show
+            /// End the pause and put the routes back.
+            case resume
+            /// Try again to remove the routes a pause could not remove.
+            case retryPause
         }
 
         let text: String
@@ -1623,6 +1732,8 @@ struct DropdownStatus: Equatable {
             switch action {
             case .fix: return String(localized: "Fix the helper in Settings > Status", bundle: bundle)
             case .show: return String(localized: "Show the problems in Settings > Status", bundle: bundle)
+            case .resume: return String(localized: "Resume: put the routes back", bundle: bundle)
+            case .retryPause: return String(localized: "Retry removing the routes", bundle: bundle)
             }
         }
     }
@@ -1666,6 +1777,8 @@ struct DropdownStatus: Equatable {
         var lastCheckCount: Int = 0
         var lastCheckWrongWay: Int = 0
         var lastCheckBroken: Bool = false
+        /// The pause in progress (Pause.swift), nil when not paused.
+        var pause: PauseState? = nil
     }
 
     /// The chip right of the wordmark: the only coloured signal in the block.
@@ -1693,6 +1806,27 @@ struct DropdownStatus: Equatable {
                                   headline: String(localized: "Starting…"),
                                   sentence: String(localized: "Detecting the VPN and applying routes."),
                                   note: nil, line3: .blank)
+        }
+
+        // Paused, and every route is out: the state drawn. When some are still in, the block
+        // says how many with Retry, and never says Paused (flow fix 2).
+        if let pause = input.pause {
+            // A helper that is down with a VPN up is shown as the helper's state, with Fix.
+            if input.installedRoutes == 0 && !input.everythingElseDirect
+                && (input.helperReady || !input.isVPNConnected) {
+                return paused(pause, input: input, name: name, now: now)
+            }
+            if input.helperReady {
+                let left = input.installedRoutes == 1
+                    ? String(localized: "1 address is still routed.")
+                    : String(localized: "\(input.installedRoutes) addresses are still routed.")
+                return DropdownStatus(chip: .notRouting, tone: .warn,
+                                      headline: input.isVPNConnected ? String(localized: "\(name) connected")
+                                                                     : String(localized: "No VPN connected"),
+                                      sentence: String(localized: "Pausing could not remove every route."),
+                                      note: left, line3: Line3(text: left, isProblem: true, action: .retryPause))
+            }
+            // The helper is down: its own state below says so, with Fix.
         }
 
         guard input.isVPNConnected else {
@@ -1812,6 +1946,37 @@ struct DropdownStatus: Equatable {
                               headline: String(localized: "\(name) connected"),
                               sentence: whatIsRouted(input), note: scheduledNote,
                               line3: Line3(text: numbersLine(input, now: now)))
+    }
+
+    /// Paused with every route out. Bypass and Custom (where it is only offered when every rule
+    /// goes Direct) say the same: traffic follows the VPN's own routes, which never claims that
+    /// everything goes through the VPN, since a split-tunnel VPN sends some of it outside.
+    static func paused(_ pause: PauseState, input: Input, name: String, now: Date) -> DropdownStatus {
+        let headline = input.isVPNConnected ? String(localized: "\(name) connected")
+                                            : String(localized: "No VPN connected")
+        let sentence = input.isVPNConnected
+            ? String(localized: "Paused: traffic follows the VPN's own routes.")
+            : String(localized: "Paused: the app routes nothing.")
+        let when = resumesLine(pause, now: now)
+        return DropdownStatus(chip: .paused, tone: .idle, headline: headline, sentence: sentence,
+                              note: when, line3: Line3(text: when, action: .resume))
+    }
+
+    /// "Resumes at 14:32, in 58 min", "Resumes when the VPN reconnects", "Paused until you resume".
+    static func resumesLine(_ pause: PauseState, now: Date) -> String {
+        switch pause.length {
+        case .minutes:
+            guard let until = pause.until else { return "" }
+            let left = until.timeIntervalSince(now)
+            let when = until.formatted(date: .omitted, time: .shortened)
+            return left > 0
+                ? String(localized: "Resumes at \(when), in \(countdown(left))")
+                : String(localized: "Resuming now.")
+        case .untilReconnect:
+            return String(localized: "Resumes when the VPN reconnects.")
+        case .untilResume:
+            return String(localized: "Paused until you resume.")
+        }
     }
 
     /// Line 3 when all is well: "62 addresses · applied 24 s ago · DNS again in 18 min". The

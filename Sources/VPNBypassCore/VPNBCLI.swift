@@ -38,6 +38,11 @@ public enum VPNBCLI {
                 parsed.args["host"] = token
                 continue
             }
+            // `vpnb pause 15m`: the length may come bare too.
+            if parsed.cmd == "pause", !token.contains("="), parsed.args["for"] == nil, !token.hasPrefix("-") {
+                parsed.args["for"] = token
+                continue
+            }
             if token == "pass:-" || token == "--pass-stdin" {
                 parsed.readPassFromStdin = true
                 continue
@@ -182,6 +187,7 @@ public enum VPNBCLI {
             line += "  routes: \(runtime.enforcedRouteCount)  enforcing: \(runtime.enforcing)"
             if let version = runtime.appVersion { line += "  app: \(version)" }
             if let killSwitch = runtime.killSwitch { line += "  kill switch: \(killSwitch.joined(separator: ","))" }
+            if let paused = runtime.paused { line += "  paused: \(paused)" }
             out.append(line)
         }
 
