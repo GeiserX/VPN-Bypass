@@ -187,6 +187,8 @@ struct RoutesTab: View {
     }
 
     private func deleteRoute(_ route: Route) {
+        // A copy line about a route that is gone would sit over the Undo line that replaces it.
+        copiedLine = nil
         let index = routeManager.config.routes.firstIndex(where: { $0.id == route.id }) ?? routeManager.config.routes.count
         routeManager.removeRoute(route.id)
         settingsUndo.record(.route(route, index: index))
