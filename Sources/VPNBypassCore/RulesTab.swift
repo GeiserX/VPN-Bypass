@@ -708,7 +708,7 @@ struct RulesTab: View {
                 Image(systemName: "arrow.right")
                     .font(.system(size: 10))
                     .foregroundColor(Theme.textTertiary)
-                RouteChipMenu(
+                RulesRouteChipMenu(
                     selectedRouteId: routeManager.config.defaultRouteId,
                     onSelect: { newId in setDefaultRoute(newId) },
                     onNewRoute: {
@@ -906,7 +906,7 @@ struct RuleRow: View {
 
             Spacer()
 
-            RouteChipMenu(selectedRouteId: rule.routeId, onSelect: onReassign, onNewRoute: onNewRoute)
+            RulesRouteChipMenu(selectedRouteId: rule.routeId, onSelect: onReassign, onNewRoute: onNewRoute)
 
             Button(action: onDelete) {
                 Image(systemName: "trash")
@@ -925,7 +925,8 @@ struct RuleRow: View {
 
 // MARK: - Route chip + grouped picker (System / Your Routes / New Route…)
 
-struct RouteChipMenu: View {
+/// The Rules page's own chip until the page moves to the shared `RouteChipMenu` (rework step 8).
+struct RulesRouteChipMenu: View {
     @EnvironmentObject var routeManager: RouteManager
     let selectedRouteId: UUID?
     let onSelect: (UUID) -> Void
@@ -972,7 +973,7 @@ struct RouteChipMenu: View {
                 Label("New Route…", systemImage: "plus")
             }
         } label: {
-            RouteChip(route: selectedRoute, vpnName: routeManager.vpnType?.knownName)
+            RulesRouteChip(route: selectedRoute, vpnName: routeManager.vpnType?.knownName)
         }
         // The chip draws its own colour and chevron. A borderless-button menu redraws the label
         // as plain menu text, dropping the colour, and adds a second chevron (B1).
@@ -996,7 +997,8 @@ struct RouteChipMenu: View {
     }
 }
 
-struct RouteChip: View {
+/// The Rules page's own chip until the page moves to the shared `RouteChip` (rework step 8).
+struct RulesRouteChip: View {
     let route: Route?
     let vpnName: String?
 
@@ -1139,7 +1141,7 @@ struct RuleEditorSheet: View {
                     }
 
                     formField(label: "Route", required: true) {
-                        RouteChipMenu(
+                        RulesRouteChipMenu(
                             selectedRouteId: routeId,
                             onSelect: { routeId = $0 },
                             onNewRoute: { showingNewRouteSheet = true }

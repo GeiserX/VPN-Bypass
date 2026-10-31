@@ -1,22 +1,79 @@
 // Theme.swift
-// Centralized semantic color system for consistent dark mode contrast.
+// The app's design tokens: colour roles, type, spacing and radii (rework section 2,
+// docs/design/APP-REWORK-PROPOSALS.md). The shared views built on them are in Components.swift.
+// The older colour names below the roles stay until the last page moves over (rework step 11).
 
 import SwiftUI
 
 enum Theme {
+    // MARK: - Colour roles: each colour has one job
+
+    /// Names, values, headlines.
+    static let text = Color.white
+    /// Something is routed right now: the status chip's dot, a passed path check. Nothing else.
+    static let live = Color(hex: "10B981")
+    /// The user needs to look: the ▲ glyph and its line.
+    static let attention = Color(hex: "F59E0B")
+    /// A write that failed; destructive confirm buttons.
+    static let failure = Color(hex: "EF4444")
+    /// The one primary button, a switch that is on, the selected sidebar row.
+    static let accent = Brand.blue
+    /// Links, the focus ring, a selected glyph.
+    static let accentText = Brand.sky
+
+    // MARK: - Type: five steps and one monospaced style
+
+    enum Font {
+        /// Page and sheet titles: 17 semibold.
+        static let title = SwiftUI.Font.system(size: 17, weight: .semibold)
+        /// Names and sentences: 13 regular.
+        static let body = SwiftUI.Font.system(size: 13)
+        /// Headlines: 13 medium.
+        static let strong = SwiftUI.Font.system(size: 13, weight: .medium)
+        /// The label above a group of rows, in title case: 11 semibold, drawn in `textSecondary`.
+        static let section = SwiftUI.Font.system(size: 11, weight: .semibold)
+        /// Second lines, notes, counts: 11 regular, drawn in `textSecondary`.
+        static let detail = SwiftUI.Font.system(size: 11)
+        /// IP addresses, ports and CIDR only, never domain names: 12 monospaced.
+        static let mono = SwiftUI.Font.system(size: 12, design: .monospaced)
+    }
+
+    // MARK: - Spacing and radii
+
+    enum Space {
+        static let xs: CGFloat = 4
+        static let s: CGFloat = 8
+        static let m: CGFloat = 12
+        static let l: CGFloat = 16
+        /// Page margins.
+        static let page: CGFloat = 24
+    }
+
+    enum Radius {
+        /// Buttons, fields, chips.
+        static let control: CGFloat = 6
+        /// Group boxes.
+        static let group: CGFloat = 10
+        /// Sheets.
+        static let sheet: CGFloat = 14
+    }
+
     // MARK: - Text Colors (on dark backgrounds ~#0F0F14)
 
-    static let textPrimary = Color.white
+    /// Old name of `text`.
+    static let textPrimary = text
     static let textSecondary = Color(hex: "9CA3AF")     // ~7.2:1 contrast
     static let textTertiary = Color(hex: "6B7280")       // ~3.8:1 - decorative only
     static let textDisabled = Color(hex: "7D8491")       // ~4.6:1 WCAG AA compliant
 
     // MARK: - Semantic Status Colors
 
-    static let success = Color(hex: "10B981")
+    // Old names, kept until rework step 11: `success` is `live`, `error` is `failure`,
+    // `warning` is `attention`. New code uses the roles above.
+    static let success = live
     static let successDark = Color(hex: "059669")
-    static let error = Color(hex: "EF4444")
-    static let warning = Color(hex: "F59E0B")
+    static let error = failure
+    static let warning = attention
     static let warningLight = Color(hex: "FBBF24")
     static let purple = Color(hex: "8B5CF6")
     static let purpleLight = Color(hex: "A78BFA")
