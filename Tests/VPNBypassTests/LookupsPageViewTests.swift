@@ -69,14 +69,16 @@ final class LookupsPageViewTests: XCTestCase {
         var config = rm.config
         config.routingMode = .bypass
         config.dnsLookupsEnabled = true
+        config.domains = [DomainEntry(domain: "listed-probe.example")]
         rm.config = config
         var tally = DNSLookupTally()
-        tally.record(["unlisted-probe.example"], at: Date())
+        tally.record(["unlisted-probe.example", "listed-probe.example"], at: Date())
         DNSLookupsMonitor.shared.tally = tally
         DNSLookupsMonitor.shared.since = Date()
         let texts = texts(onLookups: open())
         XCTAssertTrue(texts.contains("Add to Bypass"), "VoiceOver cannot reach the add: \(texts.sorted())")
         XCTAssertTrue(texts.contains("More ways to add unlisted-probe.example"), "VoiceOver cannot reach the add panel")
+        XCTAssertTrue(texts.contains("Remove"), "VoiceOver cannot reach a listed name's remove: \(texts.sorted())")
     }
 
     // MARK: - Helpers
