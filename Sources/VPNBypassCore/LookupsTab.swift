@@ -52,7 +52,14 @@ struct LookupsTab: View {
         let content = Content.resolve(isOn: isOn, matching: ranked.count, query: query)
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             purposeLine
+            if let learning = monitor.learning {
+                // A new window starts with no wildcard chosen.
+                LearnSiteSection(learning: learning, feedback: $feedback)
+                    .id(learning.started)
+            }
             if content == .off {
+                // Learn a site adds from here too while the page is not watching.
+                if let feedback { AddDomainFeedbackLine(feedback: feedback) }
                 GroupSection {
                     EmptyState(systemImage: "magnifyingglass",
                                title: String(localized: "DNS lookups are not being watched"),
@@ -83,6 +90,14 @@ struct LookupsTab: View {
                 .foregroundColor(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Theme.Space.s)
+            Button(String(localized: "Learn a Site…")) {
+                feedback = nil
+                Task { await monitor.startLearning() }
+            }
+            .controlSize(.small)
+            .disabled(monitor.learning?.isOpen == true)
+            .help(String(localized: "Watch the lookups for 60 seconds while you reload a page, and see the names it needs"))
+            .accessibilityLabel(String(localized: "Learn a Site"))
             if isOn {
                 Button(String(localized: "Stop Watching")) { setWatching(false) }
                     .controlSize(.small)
@@ -100,6 +115,9 @@ struct LookupsTab: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text("Off until you turn it on. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit.")
+                if !isOn, monitor.learning?.isOpen == true {
+                    Text("Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory.")
+                }
                 Text("Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) never show here. To see them, turn Secure DNS off in the browser's settings.")
             }
             .font(Theme.Font.detail)

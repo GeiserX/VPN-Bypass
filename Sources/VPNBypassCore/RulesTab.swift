@@ -403,6 +403,44 @@ extension RouteManager {
         }
     }
 
+    /// Adds what Learn a site chose (`SiteLearning.plan`), one entry at a time through the
+    /// mode's own add, as the row's button does. Each add routes its entry while it holds the
+    /// route lock, and an add made while the lock is held is saved without its routes, so each
+    /// one waits for the one before (up to 30 s). Stops when the mode changes meanwhile: a
+    /// choice made for one mode is never added in another. The line to show.
+    func addLearned(_ entries: [String], mode: LookupMode) async -> AddDomainFeedback? {
+        guard !entries.isEmpty else { return nil }
+        var added = 0
+        var firstRefusal: AddDomainFeedback?
+        for entry in entries {
+            var polls = 0
+            while isApplyingRoutes && polls < LookupRow.applyWaitPolls {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                polls += 1
+            }
+            guard LookupMode(self) == mode else { break }
+            // Still applying after the wait: an add now would be saved without its routes.
+            if isApplyingRoutes {
+                return AddDomainFeedback(refusal: String(localized: "Routes are still being applied. Added \(added) of \(entries.count); press Add again when they finish."),
+                                         typed: entry)
+            }
+            switch addForCurrentMode(entry) {
+            case .success?:
+                added += 1
+            case .failure(let error)?:
+                if firstRefusal == nil { firstRefusal = AddDomainFeedback(.failure(error), typed: entry) }
+            case nil:
+                // Custom mode with no Direct route: every other entry would fail the same way.
+                return AddDomainFeedback(refusal: String(localized: "There is no Direct route to send these names to."), typed: entry)
+            }
+        }
+        if added == 0 { return firstRefusal }
+        if added < entries.count {
+            return AddDomainFeedback(success: String(localized: "Added \(added) of \(entries.count). The others were not added; Logs says why."))
+        }
+        return AddDomainFeedback(success: String(localized: "Added \(added) of \(entries.count)."))
+    }
+
     /// Saves and re-applies after a rule change (RulesTab's `persistAndReapply`).
     func saveRulesAndReapply() {
         saveConfig()
