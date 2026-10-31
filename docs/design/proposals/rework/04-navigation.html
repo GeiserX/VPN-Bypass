@@ -1,0 +1,85 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../ui/mock.css"><link rel="stylesheet" href="rework.css">
+<style> .shot { background-size: 580px auto; width: 580px; height: 98px; } .swin { height: 430px; } .dimtxt { color: var(--t2); } .box.ro .name, .box.ro .lead, .box.ro .rchip { opacity: .55; } </style>
+</head><body>
+<div class="head"><span class="num">4</span><span class="title">Settings navigation: a sidebar where every page stays in its place</span></div>
+<p class="caption">Before: the toolbar holds 6 or 7 items depending on the mode (SettingsView.swift:61-66), Custom swaps Domains and Services for Rules and Routes, and VPN Only drops Services, so Lookups, General, Logs and Info shift left (the pair below); the gap between items drops from 4 to 0 at seven (:145). The window is fixed at 580×680 (:88). After: a sidebar with three groups. Pages for another mode stay listed, greyed, and open read-only with one line saying which mode uses them. The mode popup sits at the top of the sidebar. The window resizes, so long lists use the height.</p>
+<div class="rows">
+  <div class="col">
+    <div class="label">Before · toolbar in Bypass, then in VPN Only (real renders at 4a45639)</div>
+    <div class="cols" style="gap:20px">
+      <div class="shot" style="background-image:url(before/services.png)"></div>
+      <div class="shot" style="background-image:url(before/vpnonly-domains.png)"></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="label after">After · Bypass mode with Rules open, and Custom mode with Rules open</div>
+    <div class="cols" style="gap:20px">
+      <div class="swin" style="width:600px">
+        <div class="side">
+          <div class="tl"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#28C840"></i></div>
+          <div class="ty-detail" style="margin:0 8px 4px">Mode</div>
+          <div style="margin:0 8px 8px"><span class="pop" style="width:100%;justify-content:space-between">Bypass</span></div>
+          <div class="it"><i data-g="activity"></i>Status</div>
+          <div class="grp">Routing</div>
+          <div class="it"><i data-g="globe"></i>Domains<span class="n">2</span></div>
+          <div class="it"><i data-g="grid"></i>Services<span class="n">4</span></div>
+          <div class="it dim sel"><i data-g="list"></i><span class="dimtxt">Rules</span><span class="n">3</span></div>
+          <div class="it dim"><i data-g="branch"></i><span class="dimtxt">Routes</span><span class="n">1</span></div>
+          <div class="grp">Insight</div>
+          <div class="it"><i data-g="search"></i>Lookups</div>
+          <div class="it"><i data-g="logs"></i>Logs</div>
+          <div class="grp">App</div>
+          <div class="it"><i data-g="sliders"></i>General</div>
+          <div class="it"><i data-g="info"></i>About</div>
+        </div>
+        <div class="main">
+          <div class="tbar"><span class="ty-title">Rules</span><span class="fill"></span><span class="field" style="width:120px"><i data-g="search"></i>Search</span></div>
+          <div class="pane">
+            <div class="r gap8" style="margin-bottom:12px"><i data-g="info"></i><span class="ty-body fill" style="color:var(--t2)">Rules apply in Custom mode. You are in Bypass.</span><span class="btn">Switch…</span></div>
+            <div class="box ro">
+              <div class="row2 two"><span class="lead"><i data-g="globe"></i></span><div class="fill"><div class="name">en.wikipedia.org</div><div class="det">Only apps set to use office-proxy. Other apps take the Mac's normal route, even if a rule below matches.</div></div><span class="rchip"><i data-g="branch"></i>office-proxy</span></div>
+              <div class="row2"><span class="lead"><i data-g="grid"></i></span><span class="name fill">Telegram</span><span class="rchip"><i data-g="out"></i>Direct</span></div>
+              <div class="row2"><span class="lead"><i data-g="branch"></i></span><span class="name fill ty-mono">203.0.113.0/24</span><span class="rchip"><i data-g="key"></i>WireGuard</span></div>
+            </div>
+            <div class="ty-detail" style="margin-top:8px">Read-only until Custom mode is on.</div>
+          </div>
+        </div>
+      </div>
+      <div class="swin" style="width:600px">
+        <div class="side">
+          <div class="tl"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#28C840"></i></div>
+          <div class="ty-detail" style="margin:0 8px 4px">Mode</div>
+          <div style="margin:0 8px 8px"><span class="pop" style="width:100%;justify-content:space-between">Custom</span></div>
+          <div class="it"><i data-g="activity"></i>Status</div>
+          <div class="grp">Routing</div>
+          <div class="it dim"><i data-g="globe"></i><span class="dimtxt">Domains</span><span class="n">2</span></div>
+          <div class="it dim"><i data-g="grid"></i><span class="dimtxt">Services</span><span class="n">4</span></div>
+          <div class="it sel"><i data-g="list"></i>Rules<span class="n">3</span></div>
+          <div class="it"><i data-g="branch"></i>Routes<span class="n">1</span></div>
+          <div class="grp">Insight</div>
+          <div class="it"><i data-g="search"></i>Lookups</div>
+          <div class="it"><i data-g="logs"></i>Logs</div>
+          <div class="grp">App</div>
+          <div class="it"><i data-g="sliders"></i>General</div>
+          <div class="it"><i data-g="info"></i>About</div>
+        </div>
+        <div class="main">
+          <div class="tbar"><span class="ty-title">Rules</span><span class="fill"></span><span class="field" style="width:120px"><i data-g="search"></i>Search</span><span class="btn icon"><i data-g="plus" style="color:#fff"></i></span></div>
+          <div class="pane">
+            <div class="ty-body" style="color:var(--t2);margin:-2px 0 12px">The first rule that matches wins. Drag to reorder.</div>
+            <div class="box">
+              <div class="row2 two"><span class="lead"><i data-g="globe"></i></span><div class="fill"><div class="name">en.wikipedia.org</div><div class="det">Only apps set to use office-proxy. Other apps take the Mac's normal route, even if a rule below matches.</div></div><span class="rchip"><i data-g="branch"></i>office-proxy</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+              <div class="row2"><span class="lead"><i data-g="grid"></i></span><span class="name fill">Telegram</span><span class="rchip"><i data-g="out"></i>Direct</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+              <div class="row2"><span class="lead"><i data-g="branch"></i></span><span class="name fill ty-mono">203.0.113.0/24</span><span class="rchip"><i data-g="key"></i>WireGuard</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+              <div class="row2" style="background:rgba(255,255,255,.025);border-radius:0 0 10px 10px"><span class="lead"></span><span class="name fill" style="color:var(--t2)">Everything else</span><span class="rchip"><i data-g="out"></i>Direct</span><span style="width:38px"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="max-width:1220px;margin-top:6px">The sidebar never changes shape: only which items are grey. Mode-dependent pages stay one click away, and proposal 2's "later step" (the inactive mode's list shown read-only) comes with it. The page name is the window title (HIG Settings), the last page reopens, and search sits at the trailing end of the title bar on every list page (⌘F). The "Everything else" route becomes the last row of the same list instead of a second card.</div>
+  </div>
+</div>
+<script src="glyphs.js"></script>
+</body></html>

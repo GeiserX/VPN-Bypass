@@ -1,0 +1,76 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../ui/mock.css"><link rel="stylesheet" href="rework.css">
+<style>
+  .sw2 { display:flex; align-items:center; gap:10px; font:400 12px -apple-system,system-ui; }
+  .sw2 b { width:28px; height:20px; border-radius:5px; flex:none; border:.5px solid rgba(255,255,255,.15); }
+  .sw2 .k { width:110px; flex:none; font-weight:600; }
+  .sw2 .m { color:var(--t2); }
+  .panel { background:linear-gradient(var(--win),var(--win2)); border:1px solid #2C2C2C; border-radius:12px; padding:16px 18px; }
+  .ts { display:flex; align-items:baseline; gap:14px; }
+  .ts .k { width:70px; font:400 11px ui-monospace,monospace; color:var(--t2); }
+  .sp { display:inline-block; background:rgba(56,189,248,.35); height:14px; vertical-align:middle; }
+</style></head><body>
+<div class="head"><span class="num">2</span><span class="title">The system: tokens and the seven shared components</span></div>
+<p class="caption">Everything a page needs, and nothing more. Each colour has one meaning; each component has one look on every page. The names on the left are the proposed Theme.swift names.</p>
+<div class="cols" style="gap:24px">
+  <div class="col" style="width:470px">
+    <div class="label after">Colour roles</div>
+    <div class="panel" style="display:flex;flex-direction:column;gap:9px">
+      <div class="sw2"><b style="background:#fff"></b><span class="k">text</span><span class="m">names, values, headlines</span></div>
+      <div class="sw2"><b style="background:#9CA3AF"></b><span class="k">textSecondary</span><span class="m">every secondary word, counts, labels, placeholders</span></div>
+      <div class="sw2"><b style="background:#6B7280"></b><span class="k">textTertiary</span><span class="m">disabled text and decoration only</span></div>
+      <div class="sw2"><b style="background:#10B981"></b><span class="k">live</span><span class="m">routed right now: the chip dot, nothing else</span></div>
+      <div class="sw2"><b style="background:#F59E0B"></b><span class="k">attention</span><span class="m">something needs the user: ▲ glyph and its line</span></div>
+      <div class="sw2"><b style="background:#EF4444"></b><span class="k">failure</span><span class="m">a failed write; destructive confirm buttons</span></div>
+      <div class="sw2"><b style="background:#2563EB"></b><span class="k">accent</span><span class="m">primary button, switch on, selected row (Brand.blue)</span></div>
+      <div class="sw2"><b style="background:#38BDF8"></b><span class="k">accentText</span><span class="m">links, focus ring, selected glyph (Brand.sky)</span></div>
+            <div class="ty-detail" style="margin-top:4px">Mode and egress have no colour: each is a word and a glyph. Gradients go, except in the brand art.</div>
+    </div>
+    <div class="label after" style="margin-top:14px">Type, spacing, radii</div>
+    <div class="panel" style="display:flex;flex-direction:column;gap:8px">
+      <div class="ts"><span class="k">title</span><span class="ty-title">Services</span><span class="ty-detail">17 semibold · page and sheet titles</span></div>
+      <div class="ts"><span class="k">body</span><span class="ty-body">en.wikipedia.org</span><span class="ty-detail">13 · names, sentences</span></div>
+      <div class="ts"><span class="k">strong</span><span class="ty-strong">WireGuard connected</span><span class="ty-detail">13 medium · headlines</span></div>
+      <div class="ts"><span class="k">section</span><span class="ty-section">Your services</span><span class="ty-detail">11 semibold, title case</span></div>
+      <div class="ts"><span class="k">detail</span><span class="ty-detail">6 domains · 8 IP ranges</span><span class="ty-detail">11 · second lines, notes</span></div>
+      <div class="ts"><span class="k">mono</span><span class="ty-mono">203.0.113.0/24</span><span class="ty-detail">12 · addresses, ports only</span></div>
+      <div class="ts" style="margin-top:6px"><span class="k">space</span><span><span class="sp" style="width:4px"></span> <span class="sp" style="width:8px"></span> <span class="sp" style="width:12px"></span> <span class="sp" style="width:16px"></span> <span class="sp" style="width:24px"></span></span><span class="ty-detail">4 · 8 · 12 · 16 · 24</span></div>
+      <div class="ts"><span class="k">radius</span><span class="r gap8"><span style="width:22px;height:16px;border:1px solid var(--t2);border-radius:6px"></span><span style="width:22px;height:16px;border:1px solid var(--t2);border-radius:10px"></span><span style="width:22px;height:16px;border:1px solid var(--t2);border-radius:14px"></span></span><span class="ty-detail">6 controls · 10 groups · 14 sheets</span></div>
+    </div>
+  </div>
+  <div class="col" style="width:560px">
+    <div class="label after">Row: the same on Domains, Services, Lookups, Rules, Routes</div>
+    <div class="panel">
+      <div class="r sec"><span class="ty-section fill">Section title</span><span class="ty-detail" style="margin-right:58px">addresses</span></div>
+      <div class="box">
+        <div class="row2 two"><span class="lead"><i data-g="globe"></i></span><div class="fill"><div class="name">At rest</div><div class="det">detail line, secondary</div></div><span class="val" style="width:34px">4</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+        <div class="row2 two hov"><span class="lead"><i data-g="globe"></i></span><div class="fill"><div class="name">Hovered: actions fade in</div><div class="det">also on right-click and keyboard</div></div><span class="acts"><span><i data-g="pencil"></i></span><span><i data-g="trash"></i></span><span><i data-g="more"></i></span></span><span class="val" style="width:34px">1,203</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+        <div class="row2 two"><span class="lead"><i data-g="warn" class="attn"></i></span><div class="fill"><div class="name">Needs attention</div><div class="det">the reason, in the detail line</div></div><span class="val" style="width:34px">0</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+        <div class="row2 two off"><span class="lead"><i data-g="globe"></i></span><div class="fill"><div class="name">Switched off</div><div class="det">off</div></div><span class="val" style="width:34px">–</span><span class="sw" role="img" aria-label="Off" style="margin-left:12px"></span></div>
+      </div>
+      <div class="ty-detail" style="margin-top:8px;line-height:1.5">Leading 20 pt glyph · name full width, truncated in the middle · one number, its column as wide as the widest number on screen (#183) · hover actions · switch always last. Two-line rows 44 pt, one-line 32 pt.</div>
+    </div>
+    <div class="cols" style="gap:16px;margin-top:14px">
+      <div class="col" style="width:272px">
+        <div class="label after">Page header: search, and + where adding opens a sheet</div>
+        <div class="panel" style="padding:0;overflow:hidden">
+          <div class="tbar"><span class="ty-title">Routes</span><span class="fill"></span><span class="field" style="width:80px"><i data-g="search"></i>Search</span><span class="btn icon"><i data-g="plus" style="color:#fff"></i></span></div>
+          <div class="ty-body" style="color:var(--t2);padding:10px 16px 12px">One line that says what the page is for.</div>
+        </div>
+        <div class="label after" style="margin-top:14px">Status chip: shape, word, then colour</div>
+        <div class="panel r gap8" style="flex-wrap:wrap"><span class="chip live"><i></i>On</span><span class="chip attn"><i></i>Not routing</span><span class="chip wait"><i></i>Waiting</span><span class="chip pause"><i></i>Paused</span><span class="chip off"><i></i>Off</span></div>
+        <div class="label after" style="margin-top:14px">Route chip: glyph and word, grey</div>
+        <div class="panel r gap8" style="flex-wrap:wrap"><span class="rchip"><i data-g="out"></i>Direct</span><span class="rchip"><i data-g="key"></i>WireGuard</span><span class="rchip"><i data-g="branch"></i>office-proxy</span></div>
+      </div>
+      <div class="col" style="width:272px">
+        <div class="label after">Empty state, inside the group box</div>
+        <div class="panel" style="padding:12px">
+          <div class="box empty"><i data-g="globe"></i><div class="ty-strong">No domains yet</div><div class="ty-detail" style="max-width:200px">Add a site that should skip the VPN, or see what this Mac looks up.</div><div class="r gap8" style="margin-top:6px"><span class="btn pri">Add Domain…</span><span class="btn plain" style="color:var(--accentText)">Open Lookups</span></div></div>
+        </div>
+        <div class="ty-detail" style="margin-top:8px;line-height:1.5">One symbol, one sentence, one primary button, at most one link. Replaces the five recipes in use today.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="glyphs.js"></script>
+</body></html>

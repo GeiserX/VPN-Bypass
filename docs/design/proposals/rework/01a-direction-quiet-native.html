@@ -1,0 +1,70 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../ui/mock.css"><link rel="stylesheet" href="rework.css">
+</head><body>
+<div class="head"><span class="num">A</span><span class="title">Quiet native: system controls, grey by default, colour only for state (recommended)</span></div>
+<p class="caption">Native buttons, popups and switches; one left edge; type from a five-step scale. Green appears only where something is live right now (the chip). The mode is a word in a popup, not a hue. Rows carry a name, a detail line and one number; actions appear on hover. Settings moves to a sidebar so no page vanishes when the mode changes.</p>
+<div class="cols" style="gap:28px">
+  <div class="col">
+    <div class="label after">Dropdown, connected</div>
+    <div class="dd">
+      <div class="r"><span class="wm">VPN<b>Bypass</b></span><span class="fill"></span><span class="chip live"><i></i>On</span></div>
+      <div style="margin-top:12px">
+        <div style="font:600 13px -apple-system,system-ui">WireGuard connected</div>
+        <div class="ty-body" style="margin-top:2px">4 services and 2 domains skip the VPN.</div>
+        <div class="ty-detail tnum" style="margin-top:3px">62 addresses · applied 24 s ago · DNS again in 18 min</div>
+      </div>
+      <div class="r" style="margin-top:10px"><span class="ty-detail" style="font-size:12px">Mode</span><span class="fill"></span><span class="pop">Bypass</span></div>
+      <div class="ddsep"></div>
+      <div class="field"><i data-g="plus"></i><span class="fill">Add a site to bypass…</span><span class="kbd">⌘N</span></div>
+      <div class="r" style="margin:12px 0 4px"><span class="ty-section fill">Skipping the VPN</span><span class="ty-detail">addresses</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="send"></i></span><span class="name fill ell">Telegram</span><span class="val">18</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="chat"></i></span><span class="name fill ell">WhatsApp</span><span class="val">12</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="play"></i></span><span class="name fill ell">YouTube</span><span class="val">16</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="music"></i></span><span class="name fill ell">Spotify</span><span class="val">8</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="globe"></i></span><span class="name fill ell">en.wikipedia.org</span><span class="val">4</span></div>
+      <div class="ddrow"><span class="lead"><i data-g="globe"></i></span><span class="name fill ell">news.ycombinator.com</span><span class="val">4</span></div>
+      <div class="ddsep"></div>
+      <div class="foot"><span class="btn"><i data-g="refresh"></i>Refresh</span><span class="btn"><i data-g="pause"></i>Pause</span><span class="fill"></span><span class="ib"><i data-g="gear"></i></span><span class="ib"><i data-g="more"></i></span></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="label after">Settings, Services page (only your services, after #185)</div>
+    <div class="swin" style="width:780px;height:520px">
+      <div class="side">
+        <div class="tl"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#28C840"></i></div>
+        <div class="ty-detail" style="margin:0 8px 4px">Mode</div>
+        <div style="margin:0 8px 8px"><span class="pop" style="width:100%;justify-content:space-between">Bypass</span></div>
+        <div class="it"><i data-g="activity"></i>Status</div>
+        <div class="grp">Routing</div>
+        <div class="it"><i data-g="globe"></i>Domains<span class="n">2</span></div>
+        <div class="it sel"><i data-g="grid"></i>Services<span class="n">4</span></div>
+        <div class="it dim"><i data-g="list"></i><span style="color:var(--t2)">Rules</span></div>
+        <div class="it dim"><i data-g="branch"></i><span style="color:var(--t2)">Routes</span></div>
+        <div class="grp">Insight</div>
+        <div class="it"><i data-g="search"></i>Lookups</div>
+        <div class="it"><i data-g="logs"></i>Logs</div>
+        <div class="grp">App</div>
+        <div class="it"><i data-g="sliders"></i>General</div>
+        <div class="it"><i data-g="info"></i>About</div>
+      </div>
+      <div class="main">
+        <div class="tbar"><span class="ty-title">Services</span><span class="fill"></span><span class="field" style="width:170px"><i data-g="search"></i>Search</span><span class="btn icon"><i data-g="plus" style="color:var(--t1)"></i></span></div>
+        <div class="pane">
+          <div class="ty-body" style="color:var(--t2);margin:-2px 0 14px">A service skips the VPN while its switch is on.</div>
+          <div class="r sec"><span class="ty-section fill">Your services</span><span class="ty-detail" style="margin-right:58px">addresses</span></div>
+          <div class="box">
+            <div class="row2 two"><span class="lead"><i data-g="send"></i></span><div class="fill"><div class="name">Telegram</div><div class="det">6 domains · 8 IP ranges</div></div><span class="val" style="width:24px">18</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+            <div class="row2 two hov"><span class="lead"><i data-g="chat"></i></span><div class="fill"><div class="name">WhatsApp</div><div class="det">4 domains · 3 IP ranges</div></div><span class="acts"><span><i data-g="pencil"></i></span><span><i data-g="more"></i></span></span><span class="val" style="width:24px">12</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+            <div class="row2 two"><span class="lead"><i data-g="play"></i></span><div class="fill"><div class="name">YouTube</div><div class="det">8 domains</div></div><span class="val" style="width:24px">16</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+            <div class="row2 two"><span class="lead"><i data-g="music"></i></span><div class="fill"><div class="name">Spotify</div><div class="det">4 domains</div></div><span class="val" style="width:24px">8</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+            <div class="row2 two off"><span class="lead"><i data-g="globe"></i></span><div class="fill"><div class="name">Zoom</div><div class="det">5 domains · off</div></div><span class="val" style="width:24px">–</span><span class="sw" role="img" aria-label="Off" style="margin-left:12px"></span></div>
+          </div>
+          <div class="r" style="margin-top:14px;gap:10px"><span class="btn">Browse catalogue…</span><span class="ty-detail">37 services, pick several at once</span></div>
+          <div class="anno" style="margin-top:18px">Hover shows edit and more on the row (WhatsApp). The same actions are in its right-click menu.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="glyphs.js"></script>
+</body></html>
