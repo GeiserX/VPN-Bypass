@@ -320,6 +320,34 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(try renderSettings(page: .domains, to: "domains-stale-filter.png"), Self.settingsSize)
     }
 
+    /// A listed name and a wildcard whose routes reach CDN addresses (Fastly, Cloudflare): each
+    /// row's detail line says other sites on the address take the same way.
+    func testSettingsOnDomainsWithSharedCDNAddresses() throws {
+        seedSharedDomains(mode: .bypass)
+        XCTAssertEqual(try renderSettings(page: .domains, to: "domains-shared.png"), Self.settingsSize)
+    }
+
+    /// The same in VPN Only mode, where the other sites use the VPN too.
+    func testSettingsOnDomainsWithASharedCDNAddressInVPNOnlyMode() throws {
+        seedSharedDomains(mode: .vpnOnly)
+        XCTAssertEqual(try renderSettings(page: .domains, to: "domains-shared-vpn-only.png"), Self.settingsSize)
+    }
+
+    /// CDN addresses from the published ranges the warning reads (SharedAddress), on top of
+    /// the usual Domains seed.
+    private func seedSharedDomains(mode: RoutingMode) {
+        seedDomains(mode: mode)
+        let cdn = ["151.101.1.140", "151.101.65.140", "151.101.129.140", "151.101.193.140"]
+        if mode == .vpnOnly {
+            rm.config.inverseDomains.insert(DomainEntry(domain: "status.example.org", enabled: true), at: 1)
+            rm.activeRoutes += cdn.prefix(2).map { route($0, via: "iface:utun4", for: "status.example.org") }
+        } else {
+            rm.config.domains.insert(DomainEntry(domain: "www.reddit.com", enabled: true), at: 1)
+            rm.activeRoutes += cdn.map { route($0, via: "192.168.1.1", for: "www.reddit.com") }
+            rm.activeRoutes += ["104.18.32.7", "172.64.155.9"].map { route($0, via: "192.168.1.1", for: "*.example.com") }
+        }
+    }
+
     private func seedStaleDomain() {
         seedDomains(mode: .bypass)
         var dead = DomainEntry(domain: "old-intranet.example.net", enabled: true)
@@ -778,6 +806,82 @@ final class DocScreenshotsTests: XCTestCase {
         defer { rm.clearRouteCheck() }
         _ = try renderSettings(page: .status, to: "status-problems.png")
     }
+
+    // MARK: - Status and Logs on the components (step 9), drawn for the pull request
+
+    // BEGIN STATUS LOGS SHOTS
+    /// "Where does this site go?" for a site no list has: it follows the VPN, with Add.
+    func testStatusPageSiteCheckUnlisted() throws {
+        seedBypass()
+        StatusTab.siteCheckForScreenshots = ("cdn.example.net", siteAnswer(
+            host: "cdn.example.net", found: SiteRoute.Found(match: .none, expected: .tunnel("utun4")), via: "utun4"))
+        defer { StatusTab.siteCheckForScreenshots = nil }
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-site-unlisted.png"), Self.settingsSize)
+    }
+
+    /// The same for a listed site whose route took it the wrong way.
+    func testStatusPageSiteCheckWrongWay() throws {
+        seedBypass()
+        StatusTab.siteCheckForScreenshots = ("en.wikipedia.org", siteAnswer(
+            host: "en.wikipedia.org",
+            found: SiteRoute.Found(match: .route, entry: "en.wikipedia.org", routedDestination: "198.51.100.4",
+                                   expected: .physical),
+            via: "utun4"))
+        defer { StatusTab.siteCheckForScreenshots = nil }
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-site-wrong-way.png"), Self.settingsSize)
+    }
+
+    /// The helper down with no VPN: the helper is the verdict and its section comes first.
+    func testStatusPageHelperDownWithNoVPN() throws {
+        seedBypass()
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        HelperManager.shared.helperState = .failed("Helper could not be started")
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-helper-down.png"), Self.settingsSize)
+    }
+
+    func testLogsPage() throws {
+        try renderLogs(search: nil, to: "logs.png")
+    }
+
+    /// The title bar search on Logs.
+    func testLogsPageSearched() throws {
+        try renderLogs(search: "wiki", to: "logs-search.png")
+    }
+
+    private func renderLogs(search: String?, to name: String) throws {
+        let savedLogs = rm.recentLogs
+        addTeardownBlock { @MainActor in RouteManager.shared.recentLogs = savedLogs }
+        seedBypass()
+        let now = Date()
+        func line(_ ago: TimeInterval, _ level: RouteManager.LogEntry.LogLevel, _ message: String) -> RouteManager.LogEntry {
+            RouteManager.LogEntry(timestamp: now.addingTimeInterval(-ago), level: level, message: message)
+        }
+        rm.recentLogs = [
+            line(20, .success, "Routes applied: 62"),
+            line(64, .warning, "Could not resolve zoom.us: no answer from DNS"),
+            line(65, .error, "Route add failed for 192.0.2.240: File exists"),
+            line(119, .success, "Added domain: en.wikipedia.org"),
+            line(119, .info, "Config saved"),
+            line(240, .success, "DNS refresh complete: 2 added, 1 removed"),
+            line(600, .info, "Detected VPN: WireGuard on utun4"),
+        ]
+        SettingsView.searchForScreenshots = search
+        defer { SettingsView.searchForScreenshots = nil }
+        XCTAssertEqual(try renderSettings(page: .logs, to: name), Self.settingsSize)
+    }
+
+    private func siteAnswer(host: String, found: SiteRoute.Found, via interface: String) -> SiteRouteAnswer {
+        let probes = ["203.0.113.7", "203.0.113.8"].map {
+            PathCheck.Probe(address: $0, routeInterface: interface, sourceAddress: "10.8.0.2",
+                            sourceInterface: interface, answer: .connected, latencyMs: 24)
+        }
+        let control = PathCheck.Probe(address: "192.0.2.1", routeInterface: "utun4", answer: .notTried)
+        return SiteRoute.answer(host: host, mode: .bypass, addresses: probes.map(\.address), found: found,
+                                probes: probes, control: (control, .passed), vpnConnected: true)
+    }
+    // END STATUS LOGS SHOTS
 
     // MARK: - Dropdown rows and the add field (step 11), drawn for the pull request
 

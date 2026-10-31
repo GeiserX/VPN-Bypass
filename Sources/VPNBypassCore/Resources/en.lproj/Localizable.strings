@@ -944,6 +944,18 @@
 "Paused, but 1 address is still routed: removing it failed. Retry from the dropdown." = "Paused, but 1 address is still routed: removing it failed. Retry from the dropdown.";
 "Paused, but %lld addresses are still routed: removing them failed. Retry from the dropdown." = "Paused, but %lld addresses are still routed: removing them failed. Retry from the dropdown.";
 "Routing was not paused." = "Routing was not paused.";
+"Where does this site go?" = "Where does this site go?";
+"A name, a link or an address" = "A name, a link or an address";
+"Site to check" = "Site to check";
+"Check" = "Check";
+"Check the site" = "Check the site";
+"Say which entry routes this site, and check the way it leaves" = "Say which entry routes this site, and check the way it leaves";
+"That is not a name, a link or an address." = "That is not a name, a link or an address.";
+"Read the tunnels again" = "Read the tunnels again";
+"Info" = "Info";
+"Success" = "Success";
+"Warning" = "Warning";
+"Error" = "Error";
 
 /* ===== Bypass the site you are on (idea 3) ===== */
 "open in %@" = "open in %@";
@@ -954,3 +966,6 @@
 "Add %@ to Bypass" = "Add %@ to Bypass";
 "Add %@ to VPN Only" = "Add %@ to VPN Only";
 "Send %@ Direct" = "Send %@ Direct";
+
+"Shared CDN address (%@): other sites on it bypass the VPN too" = "Shared CDN address (%@): other sites on it bypass the VPN too";
+"Shared CDN address (%@): other sites on it use the VPN too" = "Shared CDN address (%@): other sites on it use the VPN too";
