@@ -369,6 +369,9 @@ struct Config: Codable {
             r.proxyPass = nil
             return r
         }
+        // Failed lookups are this Mac's own note; on another Mac they would mark live names.
+        for i in copy.domains.indices { copy.domains[i].resolveFailures = nil }
+        for i in copy.inverseDomains.indices { copy.inverseDomains[i].resolveFailures = nil }
         return copy
     }
 

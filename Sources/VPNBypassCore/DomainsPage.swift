@@ -66,7 +66,7 @@ enum DomainsPage {
     /// header's filter: the list in use keeps only the entries that stopped resolving, and the
     /// other list is left out. It does nothing while no entry has stopped resolving.
     static func sections(mode: RoutingMode, config: Config, routeSources: [String], search: String,
-                         staleOnly: Bool = false, locale: Locale = .current,
+                         staleOnly: Bool = false, locale: Locale? = nil,
                          bundle: Bundle = .main) -> [Section] {
         var counts: [String: Int] = [:]
         for source in routeSources { counts[source, default: 0] += 1 }

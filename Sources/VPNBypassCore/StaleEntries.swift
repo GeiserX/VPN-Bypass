@@ -61,12 +61,21 @@ enum StaleEntries {
         return changed ? out : nil
     }
 
-    /// The row's detail line: "Hasn't resolved since 3 Oct".
-    static func detail(since: Date, locale: Locale = .current, bundle: Bundle = .main) -> String {
+    /// The row's detail line: "Hasn't resolved since 3 Oct". The month is in the language the
+    /// sentence comes in (the bundle's), not the system region's, unless `locale` is given.
+    static func detail(since: Date, locale: Locale? = nil, bundle: Bundle = .main) -> String {
         let formatter = DateFormatter()
-        formatter.locale = locale
+        formatter.locale = locale ?? Locale(identifier: language(of: bundle))
         formatter.setLocalizedDateFormatFromTemplate("dMMM")
         let day = formatter.string(from: since)
         return String(localized: "Hasn't resolved since \(day)", bundle: bundle)
+    }
+
+    /// The language a bundle's strings come in: an `xx.lproj` bundle's own, otherwise the one
+    /// the bundle picks from the user's languages.
+    private static func language(of bundle: Bundle) -> String {
+        let url = bundle.bundleURL
+        if url.pathExtension == "lproj" { return url.deletingPathExtension().lastPathComponent }
+        return bundle.preferredLocalizations.first ?? "en"
     }
 }

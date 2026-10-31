@@ -129,6 +129,31 @@ final class StaleEntriesTests: XCTestCase {
         let en = Locale(identifier: "en_GB")
         XCTAssertEqual(StaleEntries.detail(since: day1, locale: en), "Hasn't resolved since 3 Oct")
     }
+
+    /// The month comes in the sentence's language, the bundle's, whatever the system region is.
+    func testTheMonthIsInTheLanguageOfTheSentence() throws {
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while !FileManager.default.fileExists(atPath: dir.appendingPathComponent("Package.swift").path) {
+            dir = dir.deletingLastPathComponent()
+        }
+        let es = try XCTUnwrap(Bundle(url: dir.appendingPathComponent("Sources/VPNBypassCore/Resources/es.lproj")))
+        XCTAssertEqual(StaleEntries.detail(since: day1, bundle: es), "No se resuelve desde el 3 oct")
+    }
+
+    // MARK: Exported settings
+
+    /// A shared config must not carry this Mac's failed lookups to another Mac.
+    func testAnExportDropsTheFailureCounts() {
+        var counted = dead
+        counted.resolveFailures = ResolveFailures(count: 3, since: day1)
+        var cfg = RouteManager.Config()
+        cfg.domains = [counted, live]
+        cfg.inverseDomains = [counted]
+        let out = cfg.sanitizedForExport()
+        XCTAssertNil(out.domains[0].resolveFailures)
+        XCTAssertNil(out.inverseDomains[0].resolveFailures)
+        XCTAssertEqual(out.domains.map(\.domain), cfg.domains.map(\.domain))
+    }
 }
 
 /// The refresh's hook: it reads the VPN and the mode after the lookups, and touches only the
@@ -200,6 +225,28 @@ final class StaleEntriesRefreshHookTests: XCTestCase {
         XCTAssertEqual(rm.lastOutsideChange, change)
         let onDisk = try JSONDecoder().decode(RouteManager.Config.self, from: Data(contentsOf: rm.configURL))
         XCTAssertEqual(onDisk.domains.first { $0.domain == "gone.example.com" }?.resolveFailures?.count, 1)
+    }
+
+    /// The VPN dropped and came back while the names were asked: a failure may be the outage's,
+    /// so it counts for nothing, and an answer still clears a count.
+    func testAReconnectDuringTheLookupsCountsOnlyTheAnswers() {
+        rm.isVPNConnected = true
+        rm.config.domains[1].resolveFailures = ResolveFailures(count: 2, since: Date())
+        rm.recordResolveFailures(isInverse: false, attempted: ["gone.example.com", "en.wikipedia.org"],
+                                 resolved: ["en.wikipedia.org"], reconnected: true)
+        XCTAssertNil(rm.config.domains[0].resolveFailures)
+        XCTAssertNil(rm.config.domains[1].resolveFailures)
+    }
+
+    /// A save that fails leaves memory as the disk has it, so the next refresh tries again.
+    func testAFailedSaveKeepsTheCountUnchangedInMemory() throws {
+        let dir = rm.configURL.deletingLastPathComponent().path
+        let mode = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: dir)[.posixPermissions] as? NSNumber)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: dir) }
+        rm.isVPNConnected = true
+        refresh(isInverse: false)
+        XCTAssertNil(rm.config.domains[0].resolveFailures)
     }
 
     func testAVPNOnlyRefreshCountsOnTheVPNOnlyList() {
