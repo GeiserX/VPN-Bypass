@@ -104,8 +104,10 @@ enum DomainsPage {
         }
 
         var out = [section(active, readOnly: false)]
-        // An empty list of the other mode has nothing to show.
-        if !entries(other).isEmpty { out.append(section(other, readOnly: true)) }
+        // The other mode's list shows only rows: it is left out when it is empty, and when the
+        // search leaves none of it, so it never says "nothing matches" beside a list that does.
+        let readOnly = section(other, readOnly: true)
+        if !readOnly.rows.isEmpty { out.append(readOnly) }
         return out
     }
 }
@@ -156,7 +158,8 @@ struct DomainsTab: View {
                 if section.isReadOnly {
                     readOnlySection(section, numberWidth: numberWidth)
                 } else {
-                    activeSection(section, numberWidth: numberWidth)
+                    activeSection(section, numberWidth: numberWidth,
+                                  pageHasNoMatch: sections.allSatisfy { $0.rows.isEmpty })
                 }
             }
         }
@@ -176,7 +179,7 @@ struct DomainsTab: View {
     // MARK: - The list in use
 
     @ViewBuilder
-    private func activeSection(_ section: DomainsPage.Section, numberWidth: CGFloat) -> some View {
+    private func activeSection(_ section: DomainsPage.Section, numberWidth: CGFloat, pageHasNoMatch: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             GroupSection(section.title, trailing: { activeTrailing(numberWidth: numberWidth) }) {
                 addRow
@@ -197,7 +200,8 @@ struct DomainsTab: View {
                                 showsActions: Self.hoveredForScreenshots == row.entry.domain)
                             .disabled(routeManager.isApplyingRoutes)
                     }
-                    if section.rows.isEmpty {
+                    // Only when nothing on the page matches: the other list may hold the match.
+                    if pageHasNoMatch {
                         InsetDivider()
                         SettingsSearchMiss(search: searchText)
                     }
@@ -273,9 +277,6 @@ struct DomainsTab: View {
                 ListRow(glyph: glyph(for: row.entry), name: row.entry.domain, detail: row.detail,
                         number: nil, numberWidth: numberWidth)
                     .opacity(row.entry.enabled ? 1 : 0.6)
-            }
-            if section.rows.isEmpty {
-                SettingsSearchMiss(search: searchText)
             }
         }
     }

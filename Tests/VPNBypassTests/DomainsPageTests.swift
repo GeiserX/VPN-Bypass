@@ -108,6 +108,15 @@ final class DomainsPageTests: XCTestCase {
         XCTAssertEqual(s.map(\.total), [2, 2])
     }
 
+    /// A search that matches only the list in use leaves the other list out, so the page never
+    /// says "nothing matches" under a list that shows the match.
+    func testASearchThatMissesTheOtherListLeavesItOut() {
+        let s = DomainsPage.sections(mode: .bypass, config: config(bypass: [wiki, wild], vpnOnly: [intranet, parked]),
+                                     routeSources: [], search: "wikipedia")
+        XCTAssertEqual(s.count, 1)
+        XCTAssertEqual(s[0].rows.map(\.entry.domain), ["en.wikipedia.org"])
+    }
+
     // MARK: Translations
 
     func testNewStringsAreTranslated() throws {
