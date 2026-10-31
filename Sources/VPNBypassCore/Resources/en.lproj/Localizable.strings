@@ -641,14 +641,15 @@
 
 /* ===== DNS Lookups (#176) ===== */
 "Lookups" = "Lookups";
-"DNS Lookups" = "DNS Lookups";
-"Watch DNS Lookups" = "Watch DNS Lookups";
 "Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) never show here. To see them, turn Secure DNS off in the browser's settings." = "Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) never show here. To see them, turn Secure DNS off in the browser's settings.";
 "Start counting again from now" = "Start counting again from now";
 "Waiting for lookups…" = "Waiting for lookups…";
+"Start Watching" = "Start Watching";
+"Stop Watching" = "Stop Watching";
+"DNS lookups are not being watched" = "DNS lookups are not being watched";
+"Stop reading DNS lookups, and clear the list" = "Stop reading DNS lookups, and clear the list";
 "No name matches \"%@\"" = "No name matches \"%@\"";
 "Showing the top %lld. Search to find the rest." = "Showing the top %lld. Search to find the rest.";
-"Times looked up" = "Times looked up";
 "Add to the VPN Only list" = "Add to the VPN Only list";
 "Add a rule that sends it Direct" = "Add a rule that sends it Direct";
 "Add to the Bypass list" = "Add to the Bypass list";
@@ -657,11 +658,6 @@
 "See the names this Mac looks up, and add the ones you need." = "See the names this Mac looks up, and add the ones you need.";
 "Off until you turn it on. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit." = "Off until you turn it on. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit.";
 "%lld names since %@" = "%lld names since %@";
-"LOOKUPS" = "LOOKUPS";
-"NAME" = "NAME";
-"BYPASS" = "BYPASS";
-"VPN ONLY" = "VPN ONLY";
-"RULE" = "RULE";
 "Bypassed" = "Bypassed";
 "Via VPN" = "Via VPN";
 "On the Bypass list" = "On the Bypass list";
@@ -687,12 +683,10 @@
 
 /* ===== DNS Lookups add panel ===== */
 "%@ on the Services page lists this name and is off. Turn it on to bypass it." = "%@ on the Services page lists this name and is off. Turn it on to bypass it.";
-"Add a wildcard, or add it somewhere else" = "Add a wildcard, or add it somewhere else";
-"Add a wildcard instead" = "Add a wildcard instead";
 "More ways to add %@" = "More ways to add %@";
-"WHAT TO ADD" = "WHAT TO ADD";
-"A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off." = "A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off.";
-"WHERE" = "WHERE";
+"What to Add" = "What to Add";
+"A wildcard covers every name under it. The helper routes each one as it is looked up, so the Lookups page need not be watching." = "A wildcard covers every name under it. The helper routes each one as it is looked up, so the Lookups page need not be watching.";
+"Where" = "Where";
 "Matches every name under %@" = "Matches every name under %@";
 "Matches this name only" = "Matches this name only";
 "Add…" = "Add…";
