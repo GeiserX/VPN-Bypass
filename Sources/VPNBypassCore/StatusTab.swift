@@ -478,6 +478,7 @@ struct StatusTab: View {
             content(now: context.date)
         }
         .task { if readsTunnelsOnChange { await readTunnels() } }
+        .onAppear(perform: MenuBarIconHiddenNote.refreshOnAppear)
         .onChange(of: StatusPage.TunnelReadKey.current(routeManager)) { _ in
             if readsTunnelsOnChange { Task { await readTunnels() } }
         }

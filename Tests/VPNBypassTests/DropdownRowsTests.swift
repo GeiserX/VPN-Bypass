@@ -155,10 +155,11 @@ final class DropdownRowsTests: XCTestCase {
 
     private struct FieldHost: View {
         @ObservedObject var box: Box
+        var isApplying = false
         var body: some View {
             VStack {
                 Button("Other") {}
-                QuickAddField(text: $box.text, placeholder: "Add a site to bypass…", feedback: nil,
+                QuickAddField(text: $box.text, placeholder: "Add a site to bypass…", isApplying: isApplying, feedback: nil,
                               onAdd: { box.adds += 1 }, onCancel: { box.text = ""; box.cancels += 1 })
             }
             .frame(width: 340)
@@ -210,6 +211,29 @@ final class DropdownRowsTests: XCTestCase {
         XCTAssertEqual(box.cancels, 1, "Esc cancels")
         XCTAssertEqual(box.text, "")
         XCTAssertFalse(fieldHasFocus(window), "and gives the focus back")
+    }
+
+    /// During an apply the field waits, as the Domains page and the first-run field do: an add
+    /// then would save the entry without routing it.
+    func testTheFieldTakesNoAddWhileAnApplyRuns() throws {
+        let box = Box()
+        box.text = "shop.example.com"
+        let window = host(FieldHost(box: box, isApplying: true))
+        window.makeFirstResponder(nil)
+        settle()
+        key("n", keyCode: 45, modifiers: .command, in: window)
+        XCTAssertFalse(fieldHasFocus(window), "a disabled field takes no cursor")
+        key("\r", keyCode: 36, modifiers: [], in: window)
+        XCTAssertEqual(box.adds, 0)
+        let menu = try ReworkSource.body(of: "struct MenuContent: View", in: "MenuBarViews.swift")
+        XCTAssertTrue(menu.contains("guard !newDomain.isEmpty, !routeManager.isApplyingRoutes else { return }"))
+    }
+
+    /// The first-run dropdown has no add field; ⌘N goes to its site field instead.
+    func testCommandNReachesTheFirstRunSiteField() throws {
+        let firstRun = try ReworkSource.body(of: "struct FirstRunSetupView: View", in: "MenuBarViews.swift")
+        XCTAssertTrue(firstRun.contains(".keyboardShortcut(.addSite)"))
+        XCTAssertTrue(firstRun.contains(".focused($siteFocused)"))
     }
 
     /// With the field empty and unused, Esc is left alone, so it still closes the dropdown.
@@ -300,6 +324,26 @@ final class DropdownRowsTests: XCTestCase {
             page = next
         }
         XCTAssertEqual(seen, SettingsSidebar.pages)
+    }
+
+    /// After Remove All Routes the emptied rows are what the user asked for: no ▲ and no Retry,
+    /// as the status line and Status > Problems read them. A later apply ends that.
+    func testRowsEmptiedByRemoveAllAreNotProblems() throws {
+        let now = Date()
+        let removed = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now, routeCount: 0, failedCount: 0)
+        let held = RoutedBySource.emptyEntriesAreExpected(running: false, pending: nil, lastChange: removed,
+                                                          currentRouteCount: 0, helperReady: true)
+        XCTAssertTrue(held)
+        XCTAssertFalse(RoutedBySource.emptyEntriesAreExpected(running: false, pending: nil, lastChange: nil,
+                                                              currentRouteCount: 0, helperReady: true))
+        XCTAssertFalse(RoutedBySource.emptyEntriesAreExpected(running: false, pending: nil, lastChange: removed,
+                                                              currentRouteCount: 5, helperReady: true),
+                       "routes came back since, so the removal no longer stands")
+
+        let c = config { $0.domains = [DomainEntry(domain: "zoom.us", enabled: true)] }
+        let row = try XCTUnwrap(RoutedBySource.make(mode: .bypass, config: c, routes: [], busy: held)?.rows.first)
+        XCTAssertFalse(row.isProblem)
+        XCTAssertFalse(RoutedBySource.commands(for: row, mode: .bypass, config: c, canRetry: true).contains(.retry))
     }
 
     // MARK: - Reopen and the hidden icon (flow fix 8)

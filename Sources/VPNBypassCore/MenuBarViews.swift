@@ -211,6 +211,9 @@ struct QuickAddField: View {
     @Binding var text: String
     /// What the field adds in this mode: "Add a site to bypass…".
     let placeholder: String
+    /// An apply is running: as on the Domains page, an add now would save the entry without
+    /// routing it, so the field waits.
+    var isApplying = false
     let feedback: AddDomainFeedback?
     let onAdd: () -> Void
     let onCancel: () -> Void
@@ -229,6 +232,7 @@ struct QuickAddField: View {
                     .font(Theme.Font.body)
                     .focused($isFocused)
                     .onSubmit(onAdd)
+                    .disabled(isApplying)
                     .accessibilityLabel(placeholder)
                     .help(DropdownShortcut.addSite.help(placeholder))
                 if text.isEmpty {
@@ -247,6 +251,7 @@ struct QuickAddField: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .disabled(isApplying)
                     .help(String(localized: "Add"))
                     .accessibilityLabel(String(localized: "Add"))
                 }
@@ -341,6 +346,7 @@ struct MenuContent: View {
                 // Open in every state, the first detection and no VPN included: an add is
                 // saved either way, and applied when routes can be.
                 QuickAddField(text: $newDomain, placeholder: DropdownCopy.quickAddPlaceholder(statusInput.mode),
+                              isApplying: routeManager.isApplyingRoutes,
                               feedback: quickAddFeedback, onAdd: addDomain, onCancel: clearQuickAdd)
                     .onChange(of: newDomain) { text in
                         if text != quickAddFeedback?.fieldText { quickAddFeedback = nil }
@@ -436,7 +442,11 @@ struct MenuContent: View {
             if let routed = RoutedBySource.make(
                 mode: statusInput.mode, config: routeManager.config,
                 routes: routeManager.installedRoutes,
-                busy: RoutedBySource.mayStillAddRoutes(running: isBusy, pending: routeManager.pendingReconnectApply)) {
+                busy: RoutedBySource.emptyEntriesAreExpected(
+                    running: isBusy, pending: routeManager.pendingReconnectApply,
+                    lastChange: routeManager.lastRouteChange,
+                    currentRouteCount: routeManager.routedAddressCount,
+                    helperReady: helperManager.helperState.isReady)) {
                 routedList(routed)
             }
         }
@@ -651,7 +661,7 @@ struct MenuContent: View {
     // MARK: - Helpers
     
     private func addDomain() {
-        guard !newDomain.isEmpty else { return }
+        guard !newDomain.isEmpty, !routeManager.isApplyingRoutes else { return }
         let result = routeManager.addForCurrentMode(newDomain)
         let next = Self.quickAdd(after: result, typed: newDomain)
         newDomain = next.text
@@ -1221,6 +1231,17 @@ enum RoutedBySource {
     /// can still add the routes an entry is missing, so the missing routes are not a warning yet.
     static func mayStillAddRoutes(running: Bool, pending: RouteManager.PendingReconnectApply?) -> Bool {
         running || pending != nil
+    }
+
+    /// The connected dropdown's rows: an entry without routes is not a problem (no ▲, no
+    /// Retry) while an apply may still add them, or after a Remove All Routes that still stands,
+    /// where the empty entry is what the user asked for, as the status line and Status >
+    /// Problems read it.
+    static func emptyEntriesAreExpected(running: Bool, pending: RouteManager.PendingReconnectApply?,
+                                        lastChange: RouteManager.RouteChangeOutcome?,
+                                        currentRouteCount: Int, helperReady: Bool) -> Bool {
+        mayStillAddRoutes(running: running, pending: pending)
+            || DropdownCopy.removalStands(lastChange, currentRouteCount: currentRouteCount, helperReady: helperReady)
     }
 
     /// The list's title with no VPN connected: Bypass keeps its routes for the reconnect on
@@ -2064,6 +2085,8 @@ struct FirstRunSetupView: View {
     @State private var site: String
     /// What the last add did, shown under the field (proposal 5's line).
     @State private var feedback: AddDomainFeedback?
+    /// ⌘N puts the cursor in the site field, as in the add field it stands in for.
+    @FocusState private var siteFocused: Bool
 
     /// The arguments seed the field and the line under it, for a rendered screenshot.
     init(site: String = "", feedback: AddDomainFeedback? = nil,
@@ -2118,6 +2141,7 @@ struct FirstRunSetupView: View {
                     TextField(FirstRunSetup.sitePlaceholder, text: $site)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12.5))
+                        .focused($siteFocused)
                         .onSubmit(addSite)
                         // As on the Domains page: an add during an apply would save the site
                         // without routing it.
@@ -2134,6 +2158,13 @@ struct FirstRunSetupView: View {
                     .disabled(site.isEmpty || routeManager.isApplyingRoutes)
                     .help(FirstRunSetup.addSite)
                     .accessibilityLabel(FirstRunSetup.addSite)
+                }
+                .background {
+                    Button("") { siteFocused = true }
+                        .keyboardShortcut(.addSite)
+                        .opacity(0)
+                        .frame(width: 0, height: 0)
+                        .accessibilityHidden(true)
                 }
                 .frame(height: 34)
                 .padding(.horizontal, 10)

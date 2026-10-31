@@ -470,6 +470,9 @@ final class MenuBarIconVisibility: ObservableObject {
         return !statusWindowsVisible.contains(true)
     }
 
+    nonisolated static let isUnderTests = NSClassFromString("XCTestCase") != nil
+        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     func openSettings() {
         NSWorkspace.shared.open(Self.settingsURL)
     }
@@ -481,7 +484,17 @@ struct MenuBarIconHiddenNote: View {
     @ObservedObject private var visibility = MenuBarIconVisibility.shared
 
     var body: some View {
-        if visibility.isHidden {
+        if visibility.isHidden { note }
+    }
+
+    /// Status can open without a reopen (a notification, the dropdown's Show), so it reads the
+    /// icon when it appears too. Not under tests, which have no status item and set `isHidden`
+    /// themselves.
+    static func refreshOnAppear() {
+        if !MenuBarIconVisibility.isUnderTests { MenuBarIconVisibility.shared.refresh() }
+    }
+
+    private var note: some View {
             HStack(alignment: .center, spacing: Theme.Space.s) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(Theme.attention)
@@ -498,6 +511,5 @@ struct MenuBarIconHiddenNote: View {
             .background(RoundedRectangle(cornerRadius: Theme.Radius.group).fill(Theme.bgCard))
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.group).strokeBorder(Theme.border, lineWidth: 0.5))
             .accessibilityElement(children: .contain)
-        }
     }
 }
