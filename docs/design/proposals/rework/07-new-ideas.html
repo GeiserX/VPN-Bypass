@@ -50,11 +50,11 @@
         <div class="sec ty-section">Check a site</div>
         <div class="r gap8" style="margin-bottom:10px"><span class="field focus fill">cdn.example.net</span><span class="btn pri">Check</span></div>
         <div class="box">
-          <div class="row2 two"><span class="lead"><i data-g="warn" class="attn"></i></span><div class="fill"><div class="name">Goes into the VPN (utun4)</div><div class="det">Not on any list, so it goes through the VPN.</div></div><span class="btn">Add</span></div>
+          <div class="row2 two"><span class="lead"><i data-g="warn" class="attn"></i></span><div class="fill"><div class="name">Routed into the VPN (utun4)</div><div class="det">Not on any list, so it goes through the VPN.</div></div><span class="btn">Add</span></div>
         </div>
         <div class="r gap8" style="margin-top:12px"><span class="field fill" style="color:var(--t1)">en.wikipedia.org</span><span class="btn">Check</span></div>
         <div class="box" style="margin-top:10px">
-          <div class="row2 two"><span class="lead"><i data-g="checkc" class="live"></i></span><div class="fill"><div class="name">Leaves through Wi-Fi (en0)</div><div class="det">Bypass list → 4 addresses, all 4 connected outside the VPN</div></div></div>
+          <div class="row2 two"><span class="lead"><i data-g="checkc" class="live"></i></span><div class="fill"><div class="name">Routed through Wi-Fi (en0)</div><div class="det">Bypass list → 4 addresses, all 4 routed through Wi-Fi and answering on 443</div></div></div>
         </div>
         <div class="ty-detail" style="margin-top:10px;line-height:1.5">Same answer from the CLI: <span class="ty-mono" style="font-size:11px;color:var(--t1)">vpnb why cdn.example.net --json</span> (<span class="ty-mono" style="font-size:11px">vpnb why</span> from #193, <span class="ty-mono" style="font-size:11px">--json</span> from #184). The check opens a TCP connection to port 443 and reads its source address with getsockname, so sites that block ping still get an answer. A control address the app does not route must come back the other way, or the result says the check is broken.</div>
       </div>

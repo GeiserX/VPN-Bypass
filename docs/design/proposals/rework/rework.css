@@ -68,6 +68,7 @@
 .sw.on::after { left: 12.5px; }
 .field { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.06); border: .5px solid rgba(255,255,255,.16); border-radius: 6px; padding: 4px 8px; font: 400 12px -apple-system, system-ui; color: var(--t3); }
 .field.focus { border-color: var(--accentText); box-shadow: 0 0 0 2.5px rgba(56,189,248,.28); color: var(--t1); }
+.note { color: var(--t2); }   /* shared mock.css uses --text3, too faint for 11 px notes */
 .kbd { font: 500 10px -apple-system, system-ui; color: var(--t2); border: .5px solid rgba(255,255,255,.2); border-radius: 4px; padding: 0 4px; }
 
 /* Route chip: a grey glyph and a word; no egress colour */

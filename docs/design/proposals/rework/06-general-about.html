@@ -19,29 +19,29 @@
       <div class="pane">
         <div class="sec ty-section">Startup</div>
         <div class="box">
-          <div class="row2"><span class="name fill">Open at login</span><span class="sw on"></span></div>
+          <div class="row2"><span class="name fill">Open at login</span><span class="sw on" role="switch" aria-checked="true"></span></div>
           <div class="row2"><span class="name fill">Language</span><span class="pop">System</span></div>
         </div>
         <div class="sec ty-section">Routing</div>
         <div class="box">
-          <div class="row2"><span class="name fill">Apply when a VPN connects</span><span class="sw on"></span></div>
-          <div class="row2 two"><div class="fill"><div class="name">Pin listed names in /etc/hosts</div><div class="det">Needs the helper. Covers apps that use the system resolver.</div></div><span class="sw"></span></div>
+          <div class="row2"><span class="name fill">Apply when a VPN connects</span><span class="sw on" role="switch" aria-checked="true"></span></div>
+          <div class="row2 two"><div class="fill"><div class="name">Pin listed names in /etc/hosts</div><div class="det">Needs the helper. Covers apps that use the system resolver.</div></div><span class="sw" role="switch" aria-checked="false"></span></div>
           <div class="row2"><span class="name fill">Look up addresses again</span><span class="pop">Every hour</span></div>
-          <div class="row2"><span class="name fill">Check the path after applying</span><span class="sw"></span></div>
+          <div class="row2"><span class="name fill">Check the path after applying</span><span class="sw" role="switch" aria-checked="false"></span></div>
         </div>
         <div class="sec ty-section">DNS outside the VPN</div>
         <div class="box">
           <div class="row2"><span class="name fill">Detected</span><span class="ty-mono" style="color:var(--t2)">192.168.1.1</span></div>
-          <div class="row2"><span class="name fill" style="color:var(--t2)">Also asked, at the same time as the detected server; the first answer wins</span></div>
+          <div class="row2"><span class="name fill" style="color:var(--t2)">Also asked with the detected server, plus Cloudflare and Google DoH after 200 ms; first answer wins</span></div>
           <div class="row2 hov"><span class="name fill ty-mono">1.1.1.1</span><span class="acts"><span><i data-g="trash"></i></span></span></div>
           <div class="row2"><span class="name fill ty-mono">8.8.8.8</span></div>
           <div class="row2"><span class="name fill" style="color:var(--accentText)">Add Server…</span></div>
         </div>
         <div class="sec ty-section">Notifications</div>
         <div class="box">
-          <div class="row2"><span class="name fill">Send notifications</span><span class="sw on"></span></div>
+          <div class="row2"><span class="name fill">Send notifications</span><span class="sw on" role="switch" aria-checked="true"></span></div>
           <div class="row2 two"><div class="fill"><div class="name">Tell me when</div><div style="margin-top:4px"><span class="cb"><b>✓</b>VPN connects</span><span class="cb"><b>✓</b>VPN drops</span><span class="cb"><b class="no"></b>Addresses change</span><span class="cb"><b>✓</b>Something fails</span></div></div></div>
-          <div class="row2"><span class="name fill">Play a sound</span><span class="sw"></span></div>
+          <div class="row2"><span class="name fill">Play a sound</span><span class="sw" role="switch" aria-checked="false"></span></div>
         </div>
         <div class="sec ty-section">Configuration</div>
         <div class="box"><div class="row2"><span class="name fill">Domains, services, rules and routes</span><span class="btn">Export…</span><span class="btn">Import…</span></div></div>
