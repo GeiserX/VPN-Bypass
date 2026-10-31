@@ -98,6 +98,27 @@ final class StatusLogsPageModelTests: XCTestCase {
         XCTAssertEqual(seeded.answer?.host, "cdn.example.net")
     }
 
+    /// Add checks the site again only after the route apply it started is over; a check
+    /// before that would see the site listed but leaving the old way.
+    @MainActor
+    func testTheRecheckAfterAddWaitsForTheApply() async {
+        var polls = 0
+        await StatusPage.waitForRouteApply(start: .zero, poll: .milliseconds(1), limit: .seconds(5)) {
+            polls += 1
+            return polls < 4
+        }
+        XCTAssertEqual(polls, 4, "it polled until the apply was over")
+
+        var asked = 0
+        let clock = ContinuousClock(), began = clock.now
+        await StatusPage.waitForRouteApply(start: .zero, poll: .milliseconds(5), limit: .milliseconds(50)) {
+            asked += 1
+            return true
+        }
+        XCTAssertLessThan(clock.now - began, .seconds(2), "an apply that never ends does not hold the check forever")
+        XCTAssertGreaterThan(asked, 1)
+    }
+
     // MARK: Logs
 
     func testLogsTakeTheTitleBarSearch() {

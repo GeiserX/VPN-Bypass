@@ -131,6 +131,18 @@ enum StatusPage {
         answer.canAdd ? (mode.addTitle, mode.addHelp) : nil
     }
 
+    /// Waits for the routes an add started: a moment for an apply the add queued in a task
+    /// (Custom mode's reconcile) to begin, then until none runs, at most `limit` seconds.
+    @MainActor
+    static func waitForRouteApply(start: Duration = .milliseconds(300), poll: Duration = .milliseconds(200),
+                                  limit: Duration = .seconds(30), isApplying: () -> Bool) async {
+        try? await Task.sleep(for: start)
+        let clock = ContinuousClock(), deadline = clock.now + limit
+        while isApplying() && clock.now < deadline {
+            try? await Task.sleep(for: poll)
+        }
+    }
+
     /// What the field says after a check of text that holds no host.
     static func siteNoHost(bundle: Bundle = .main) -> String {
         String(localized: "That is not a name, a link or an address.", bundle: bundle)
@@ -914,7 +926,12 @@ struct StatusTab: View {
         siteAddFeedback = AddDomainFeedback(result, typed: host)
         if case .success = result {
             siteRoute.query = host
-            Task { await siteRoute.check(routeManager) }
+            Task {
+                // The add routes the entry in a task of its own: checking before it finishes
+                // would see the site listed but leaving the old way, and mark it wrong.
+                await StatusPage.waitForRouteApply { routeManager.isApplyingRoutes }
+                await siteRoute.check(routeManager)
+            }
         }
     }
 
