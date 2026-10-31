@@ -170,6 +170,7 @@ struct SettingsSidebarView: View {
                 .padding(.bottom, Theme.Space.m)
                 .focusable()
                 .focused($listFocused)
+                .sidebarFocusRingHidden()
                 .onMoveCommand { direction in
                     switch direction {
                     case .up: selection = SettingsSidebar.page(after: selection, movingUp: true)
@@ -320,6 +321,18 @@ struct WindowTitleSetter: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             window?.title = title
+        }
+    }
+}
+
+private extension View {
+    /// The focused list moves with ↑ and ↓; the selected row shows where it is, so the ring
+    /// macOS draws around a focusable view would only frame the whole sidebar.
+    @ViewBuilder func sidebarFocusRingHidden() -> some View {
+        if #available(macOS 14.0, *) {
+            focusEffectDisabled()
+        } else {
+            self
         }
     }
 }

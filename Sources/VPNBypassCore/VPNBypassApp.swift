@@ -447,11 +447,18 @@ final class MenuBarIconVisibility: ObservableObject {
     func refresh() {
         let windows = NSApp.windows.filter(Self.isStatusItemWindow)
         isHidden = Self.isHidden(statusWindowsVisible: windows.map { $0.occlusionState.contains(.visible) },
-                                 menuBarVisible: NSMenu.menuBarVisible())
+                                 menuBarVisible: NSMenu.menuBarVisible() && !Self.menuBarAutoHides())
+    }
+
+    /// System Settings > Menu Bar > "Automatically hide and show the menu bar" set to Always:
+    /// the bar, and every icon in it, is off screen until the pointer reaches the top edge, so
+    /// an occluded status window there says nothing about the icon.
+    static func menuBarAutoHides(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: "_HIHideMenuBar")
     }
 
     /// The window AppKit puts a status item's button in.
-    static func isStatusItemWindow(_ window: NSWindow) -> Bool {
+    nonisolated static func isStatusItemWindow(_ window: NSWindow) -> Bool {
         String(describing: type(of: window)) == "NSStatusBarWindow"
     }
 

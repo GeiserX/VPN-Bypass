@@ -315,6 +315,12 @@ final class DropdownRowsTests: XCTestCase {
         XCTAssertTrue(MenuBarIconVisibility.isHidden(statusWindowsVisible: [], menuBarVisible: true), "switched off")
         XCTAssertFalse(MenuBarIconVisibility.isHidden(statusWindowsVisible: [false], menuBarVisible: false),
                        "a menu bar that hides itself proves nothing")
+        let defaults = UserDefaults(suiteName: "vpnb-menubar-autohide-test")!
+        defaults.removePersistentDomain(forName: "vpnb-menubar-autohide-test")
+        XCTAssertFalse(MenuBarIconVisibility.menuBarAutoHides(defaults))
+        defaults.set(true, forKey: "_HIHideMenuBar")
+        XCTAssertTrue(MenuBarIconVisibility.menuBarAutoHides(defaults), "auto-hidden menu bar")
+        defaults.removePersistentDomain(forName: "vpnb-menubar-autohide-test")
         XCTAssertEqual(MenuBarIconVisibility.settingsURL.absoluteString,
                        "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension")
     }
