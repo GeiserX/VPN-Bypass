@@ -811,6 +811,13 @@ enum DropdownCopy {
         return outcome
     }
 
+    /// The last change shown is a Remove All Routes: the entries it left empty are what the
+    /// user asked for, not a problem for the dropdown's Show or for Status > Problems.
+    static func removalStands(_ outcome: RouteManager.RouteChangeOutcome?, currentRouteCount: Int,
+                              helperReady: Bool = true) -> Bool {
+        shownRouteChange(outcome, currentRouteCount: currentRouteCount, helperReady: helperReady)?.kind == .removedAll
+    }
+
     /// Line 3 while no VPN is connected: what connecting does in this mode (A6).
     static func disconnectedSentence(_ mode: Mode, in bundle: Bundle = .main) -> String {
         switch mode {

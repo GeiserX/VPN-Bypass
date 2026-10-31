@@ -309,7 +309,10 @@ enum StatusPage {
                                    detail: String(localized: "Settings > Logs has the details.", bundle: bundle)))
             }
         }
-        for row in withoutAddresses where row.isProblem {
+        // After Remove All Routes an empty entry is what the user asked for; what it could not
+        // remove is listed above.
+        let removed = DropdownCopy.removalStands(lastChange, currentRouteCount: installed, helperReady: helperReady)
+        for row in withoutAddresses where row.isProblem && !removed {
             out.append(Problem(kind: .noAddresses, title: row.name,
                                detail: String(localized: "No address is routed for it.", bundle: bundle)))
         }
@@ -430,7 +433,10 @@ extension DropdownStatus.Input {
             everythingElseDirect: routeManager.everythingElseDirect,
             killSwitch: routeManager.vpnKillSwitch,
             isStarting: routeManager.isLoading && routeManager.lastUpdate == nil,
-            entriesWithoutAddresses: RoutedBySource.make(
+            // After Remove All Routes an empty entry is what the user asked for.
+            entriesWithoutAddresses: DropdownCopy.removalStands(routeManager.lastRouteChange,
+                                                                currentRouteCount: routeManager.routedAddressCount,
+                                                                helperReady: helperReady) ? 0 : RoutedBySource.make(
                 mode: mode, config: config, routes: routeManager.installedRoutes,
                 busy: RoutedBySource.mayStillAddRoutes(running: routeManager.isLoading || routeManager.isApplyingRoutes,
                                                        pending: routeManager.pendingReconnectApply))?.problemCount ?? 0,

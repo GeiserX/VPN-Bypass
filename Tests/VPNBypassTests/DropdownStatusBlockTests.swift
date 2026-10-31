@@ -341,6 +341,21 @@ final class StatusProblemsTests: XCTestCase {
         XCTAssertEqual(problems.first?.detail, "No address is routed for it.")
     }
 
+    /// After Remove All Routes the entries it emptied are not problems, so Retry cannot put
+    /// back what the user removed; what it could not remove stays listed.
+    func testADeliberateRemovalIsNotAProblem() {
+        let zoom = RoutedBySource.Row(id: "Zoom", name: "Zoom", icon: .service(id: "zoom"), routeCount: 0, isProblem: true,
+                                      addresses: [], hiddenAddresses: 0)
+        let removed = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now, routeCount: 0, failedCount: 0)
+        XCTAssertEqual(StatusPage.problems(lastChange: removed, installed: 0, helperReady: true, withoutAddresses: [zoom]), [])
+        XCTAssertEqual(StatusPage.problems(lastChange: nil, installed: 0, helperReady: true, withoutAddresses: [zoom]).count, 1,
+                       "control: without the removal the empty entry is a problem")
+        let leftSome = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now, routeCount: 1, failedCount: 1,
+            failures: [.init(kind: .notRemoved, target: "192.0.2.1", entry: "Telegram", reason: "x")])
+        XCTAssertEqual(StatusPage.problems(lastChange: leftSome, installed: 1, helperReady: true, withoutAddresses: [zoom])
+                        .map(\.kind), [.notRemoved])
+    }
+
     /// After a Remove All that left routes, Bypass's disconnected list does not call them kept.
     func testAFailedRemovalIsNotKeptForTheReconnect() {
         let removed = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now, routeCount: 2, failedCount: 2)
