@@ -6,7 +6,7 @@
   /* Colour roles */
   --t1: #FFFFFF;                 /* Theme.textPrimary */
   --t2: #9CA3AF;                 /* Theme.textSecondary: every secondary word */
-  --t3: #6B7280;                 /* Theme.textTertiary: placeholders and disabled only */
+  --t3: #6B7280;                 /* Theme.textTertiary: disabled text and decoration only */
   --live: #10B981;               /* Theme.success: live state, nothing else */
   --attn: #F59E0B;               /* Theme.warning: needs attention, nothing else */
   --fail: #EF4444;               /* Theme.error: failed, destructive confirm */
@@ -66,7 +66,7 @@
 .sw::after { content: ""; position: absolute; top: 1.5px; left: 1.5px; width: 12px; height: 12px; border-radius: 50%; background: #fff; }
 .sw.on { background: var(--accent); }
 .sw.on::after { left: 12.5px; }
-.field { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.06); border: .5px solid rgba(255,255,255,.16); border-radius: 6px; padding: 4px 8px; font: 400 12px -apple-system, system-ui; color: var(--t3); }
+.field { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.06); border: .5px solid rgba(255,255,255,.16); border-radius: 6px; padding: 4px 8px; font: 400 12px -apple-system, system-ui; color: var(--t2); }
 .field.focus { border-color: var(--accentText); box-shadow: 0 0 0 2.5px rgba(56,189,248,.28); color: var(--t1); }
 .note { color: var(--t2); }   /* shared mock.css uses --text3, too faint for 11 px notes */
 .kbd { font: 500 10px -apple-system, system-ui; color: var(--t2); border: .5px solid rgba(255,255,255,.2); border-radius: 4px; padding: 0 4px; }

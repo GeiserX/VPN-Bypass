@@ -73,8 +73,8 @@ The Lanes navy and blue on every surface: a hero card for status, gradient prima
 | Role | Value | Used for | Replaces |
 |---|---|---|---|
 | `text` | `#FFFFFF` (`textPrimary`) | names, values, headlines | |
-| `textSecondary` | `#9CA3AF` | every secondary word, counts, labels | `textTertiary` wherever it carries information (`Theme.swift:11` says tertiary is decorative only; the dropdown uses it for fact labels and counts) |
-| `textTertiary` | `#6B7280` | placeholders and disabled text only | |
+| `textSecondary` | `#9CA3AF` | every secondary word, counts, labels, placeholders | `textTertiary` wherever it carries information (`Theme.swift:11` says tertiary is decorative only; the dropdown uses it for fact labels and counts) |
+| `textTertiary` | `#6B7280` | disabled text and decoration only (too faint for text a user must read) | |
 | `live` | `#10B981` (`success`) | something is routed right now: the status chip dot, a passed path check | every other green use: switches, dots, buttons, gradients, icons, links, spinners, mode identity, the Tailscale egress colour |
 | `attention` | `#F59E0B` (`warning`) | the user needs to look: ▲ glyph and its line | VPN Only identity, match-type pills, VPN egress colour, General card icons |
 | `failure` | `#EF4444` (`error`) | a write that failed; destructive confirm buttons | "No VPN connected" (an ordinary state, today red: `MenuBarViews.swift:1503`), always-red trash icons, the Patreon button |
@@ -199,7 +199,7 @@ No image. Both keep their content and take the shared components.
 
 **Proposal.**
 
-- **General as five native groups with no icons:** Startup, Routing, DNS outside the VPN (extra servers asked at the same time as the detected one, plus Cloudflare and Google DoH after 200 ms whatever the list says; first answer wins, and when all of them fail the system resolver is the last resort, which may use the VPN's DNS; `DNSResolver.resolveIPsParallel`), Notifications, Configuration. Notification kinds become checkboxes under the existing master switch, which stays and greys them when off. "Auto DNS Refresh" and "Refresh Interval" merge into one popup, "Look up addresses again: Every hour / … / Never". "Verify Routes After Apply" becomes "Check the path after applying", which runs idea 1 in section 5 instead of ping.
+- **General as five native groups with no icons:** Startup, Routing, DNS servers (extra servers asked at the same time as the detected one, plus Cloudflare and Google DoH after 200 ms whatever the list says; first answer wins, and when all of them fail the system resolver is the last resort, which may use the VPN's DNS; `DNSResolver.resolveIPsParallel`. The group is not called "DNS outside the VPN": the queries are not bound to the physical interface, so a VPN that routes a listed server takes its queries too), Notifications, Configuration. Notification kinds become checkboxes under the existing master switch, which stays and greys them when off. "Auto DNS Refresh" and "Refresh Interval" merge into one popup, "Look up addresses again: Every hour / … / Never". "Verify Routes After Apply" becomes "Check the path after applying", which runs idea 1 in section 5 instead of ping.
 - **The global SOCKS5 proxy.** Two options; A is decided:
   - **(A) Move it behind an Advanced disclosure and hide it in Custom mode (decided).** One sentence points Custom users to Routes. Nothing changes for people who use it.
   - **(B) Retire it in favour of Custom mode's SOCKS5 routes.** Simpler in the long run, but it breaks the setup of anyone using it in Bypass mode. That needs a migration and a release note.
