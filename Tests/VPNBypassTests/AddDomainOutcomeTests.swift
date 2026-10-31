@@ -213,7 +213,7 @@ final class AddDomainOutcomeTests: XCTestCase {
         let refused = MenuContent.quickAdd(after: .failure(.rangeOnBypassList(input: "10.0.0.0/24")), typed: "10.0.0.0/24")
         XCTAssertTrue(refused.isOpen, "closing would look like it worked")
         XCTAssertEqual(refused.text, "10.0.0.0/24")
-        XCTAssertEqual(refused.error?.message, AddDomainError.rangeOnBypassList(input: "10.0.0.0/24").message)
+        XCTAssertEqual(refused.feedback?.message, AddDomainError.rangeOnBypassList(input: "10.0.0.0/24").message)
 
         let saved = MenuContent.quickAdd(after: .success(AddedDomain(entry: DomainEntry(domain: "example.com"), list: .bypass,
                                                                     typed: "example.com")), typed: "example.com")
@@ -299,7 +299,7 @@ final class AddDomainOutcomeTests: XCTestCase {
         let state = MenuContent.quickAdd(after: .failure(error), typed: "10.0.0.0/33")
         XCTAssertTrue(state.isOpen)
         XCTAssertEqual(state.text, "10.0.0.0/33")
-        XCTAssertEqual(state.error?.message, AddDomainError.malformedRange(input: "10.0.0.0/33").message)
+        XCTAssertEqual(state.feedback?.message, AddDomainError.malformedRange(input: "10.0.0.0/33").message)
     }
 
     /// A repeat used to close the field as if it had saved.

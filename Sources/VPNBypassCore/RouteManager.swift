@@ -58,7 +58,6 @@ final class RouteManager: ObservableObject {
     @Published var lastUpdate: Date?
     @Published var config: Config = Config()
     @Published var recentLogs: [LogEntry] = []
-    @Published var currentNetworkSSID: String?
     /// The last Verify Routes, or nil before the first one and after routes are removed.
     @Published var lastRouteCheck: RouteCheck.Run?
     /// Bumped when a check starts and when routes are removed, so a check still pinging then
@@ -791,41 +790,6 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    // MARK: - Network Status
-
-    func detectCurrentNetwork() async {
-        // Get current WiFi SSID using helper with timeout
-        guard let result = await runProcessAsync(
-            "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport",
-            arguments: ["-I"],
-            timeout: 3.0
-        ) else {
-            return
-        }
-        
-        let output = result.output
-        
-        for line in output.components(separatedBy: "\n") {
-            if line.contains("SSID:") && !line.contains("BSSID") {
-                let ssid = line.components(separatedBy: ":").dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
-                if ssid != currentNetworkSSID {
-                    let oldSSID = currentNetworkSSID
-                    currentNetworkSSID = ssid
-                    if oldSSID != nil {
-                        log(.info, "Network changed: \(oldSSID ?? "none") → \(ssid)")
-                    }
-                }
-                return
-            }
-        }
-        
-        // No WiFi connected
-        if currentNetworkSSID != nil {
-            currentNetworkSSID = nil
-            log(.info, "WiFi disconnected")
-        }
-    }
-    
     /// Single-flight gate for `checkVPNStatusCore`. The core awaits freely (detection passes,
     /// a 1.5s flap recheck, route teardown), and it is triggered from several sources at once
     /// during churn — the path monitor, the process poller, refreshStatus. Overlapping runs
@@ -856,9 +820,6 @@ final class RouteManager: ObservableObject {
         // detectable at all — see `gatewayChanged` further down.
         let oldVPNGateway = vpnGateway
         let oldTailscaleFingerprint = lastTailscaleSelfFingerprint
-
-        // Detect current network first
-        await detectCurrentNetwork()
 
         // Use scutil to detect VPN interfaces with IPv4 addresses
         var (connected, interface, detectedType) = await detectVPNInterface()
@@ -2017,7 +1978,6 @@ final class RouteManager: ObservableObject {
     /// The detect sequence below mirrors the one in `detectAndApplyRoutesAsync()`;
     /// keep them in sync if VPN/gateway detection changes.
     func detectVPNStateOnly() async {
-        await detectCurrentNetwork()
         let (connected, interface, detectedType) = await detectVPNInterface()
         isVPNConnected = connected
         vpnInterface = connected ? interface : nil
@@ -2047,9 +2007,6 @@ final class RouteManager: ObservableObject {
         
         // Detect user's DNS server (respects pre-VPN DNS configuration)
         await detectUserDNSServer()
-        
-        // Detect current network
-        await detectCurrentNetwork()
         
         // Detect VPN interface
         let (connected, interface, detectedType) = await detectVPNInterface()
@@ -2476,6 +2433,9 @@ final class RouteManager: ObservableObject {
         let confirmedUniqueCount = uniqueRouteCount
         let totalFailures = failedCount + batchFailureCount
         lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: totalFailures)
+        // The last check described the routes before this apply; a stale wrong-way or broken
+        // result must not keep the pill amber over routes that were just put back.
+        clearRouteCheck()
 
         if failedCount > 0 {
             log(.warning, "Applied \(confirmedUniqueCount) unique routes (\(failedCount) domains failed DNS)")
@@ -2609,6 +2569,9 @@ final class RouteManager: ObservableObject {
 
         let confirmedUniqueCount = uniqueRouteCount
         lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount)
+        // The last check described the routes before this apply; a stale wrong-way or broken
+        // result must not keep the pill amber over routes that were just put back.
+        clearRouteCheck()
         if batchFailureCount > 0 {
             log(.warning, "Applied custom routes (\(batchFailureCount) kernel failures — counts approximate until verified)")
         } else {
@@ -2938,6 +2901,9 @@ final class RouteManager: ObservableObject {
         let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Cache ")
         guard committed else { return false }
         lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount)
+        // The last check described the routes before this apply; a stale wrong-way or broken
+        // result must not keep the pill amber over routes that were just put back.
+        clearRouteCheck()
 
         if batchFailureCount > 0 {
             log(.warning, "Applied routes from cache (\(batchFailureCount) kernel failures — counts approximate)")
@@ -5169,7 +5135,10 @@ final class RouteManager: ObservableObject {
             NotificationManager.shared.notifyRouteVerificationFailed(route: String(localized: "Route check"),
                                                                      reason: SiteRoute.checkSentence(.checkBroken, interface: interface, expected: nil) ?? "")
         }
-        lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: logsFrom, at: Date())
+        let broken: Bool
+        if case .broken = control { broken = !results.isEmpty } else { broken = false }
+        lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: logsFrom, at: Date(),
+                                        controlBroken: broken)
 
         let checked = results.count
         let failedCount = results.filter { !$0.isReachable }.count
@@ -6181,6 +6150,9 @@ enum AddDomainError: Error, Equatable {
     /// `route`. On another route it matches first, so a Direct rule after it would do nothing.
     /// `vpnName` names the primary-VPN route as the Rules page does.
     case ruleExists(value: String, route: Route, vpnName: String?)
+    /// Custom mode's quick-add: the Direct route is switched off, and the compiler skips rules
+    /// on a route that is off, so a rule there would route nothing.
+    case directRouteOff(value: String)
 
     /// One line for under the add field, in the user's words and the app's language.
     var message: String { message(in: .main) }
@@ -6208,6 +6180,8 @@ enum AddDomainError: Error, Equatable {
             return route.egress == .direct
                 ? String(localized: "\(value) already has a rule on the \(routeName) route.", bundle: bundle)
                 : String(localized: "\(value) already has a rule on the \(routeName) route, and the first matching rule wins. To send it direct, change that rule's route on the Rules page.", bundle: bundle)
+        case .directRouteOff(let value):
+            return String(localized: "The Direct route is off, so a rule for \(value) would route nothing. Turn it on in Routes first.", bundle: bundle)
         }
     }
 }
@@ -6219,17 +6193,29 @@ struct AddedDomain: Equatable {
     /// What the user typed, when cleaning changed more than letter case: a pasted link, a
     /// port, a user name. nil when the entry is what they typed.
     let rewrittenFrom: String?
+    /// Custom mode: where the Direct rule went, in place of a list.
+    let rulePlace: RulePlace?
 
     init(entry: DomainEntry, list: DomainList, typed: String) {
         self.entry = entry
         self.list = list
         rewrittenFrom = typed.lowercased() == entry.domain ? nil : typed
+        rulePlace = nil
+    }
+
+    /// Custom mode's add: a rule to the Direct route, at `place`.
+    init(rule: Rule, typed: String, place: RulePlace) {
+        entry = DomainEntry(domain: rule.pattern)
+        list = .bypass
+        rewrittenFrom = typed.lowercased() == rule.pattern ? nil : typed
+        rulePlace = place
     }
 
     /// One line for under the add field, in the app's language.
     var message: String { message(in: .main) }
 
     func message(in bundle: Bundle) -> String {
+        if let place = rulePlace { return place.message(in: bundle) }
         let listName = list.displayName(in: bundle)
         if entry.isCIDR {
             return String(localized: "Added the range \(entry.domain) to your \(listName) list.", bundle: bundle)
@@ -6244,5 +6230,74 @@ struct AddedDomain: Equatable {
             return String(localized: "Added \(entry.domain), from the link you pasted.", bundle: bundle)
         }
         return String(localized: "Added \(entry.domain), cleaned up from \u{201C}\(typed)\u{201D}.", bundle: bundle)
+    }
+}
+
+/// Where a rule sits among the rules, as the Rules page lists them (by order, from 1), and
+/// the first rule above it that already matches what it matches. The first matching rule
+/// wins, so a rule added last can do nothing for a name an earlier rule claims.
+struct RulePlace: Equatable {
+    let number: Int
+    /// The earlier rule that matches first, nil when none does.
+    let matchedFirstBy: Int?
+
+    init(number: Int, matchedFirstBy: Int?) {
+        self.number = number
+        self.matchedFirstBy = matchedFirstBy
+    }
+
+    /// `rule`'s place in `rules`. Only an earlier rule that routes counts: switched on, on a
+    /// route that is on, as the compiler reads them.
+    init(of rule: Rule, in rules: [Rule], routes: [Route], services: [ServiceEntry]) {
+        let sorted = rules.sorted { $0.order < $1.order }
+        let index = sorted.firstIndex { $0.id == rule.id } ?? sorted.count
+        number = index + 1
+        let routesOn = Set(routes.filter(\.enabled).map(\.id))
+        matchedFirstBy = sorted.prefix(index).firstIndex { earlier in
+            earlier.enabled && routesOn.contains(earlier.routeId)
+                && Self.covers(earlier, rule, services: services)
+        }.map { $0 + 1 }
+    }
+
+    /// `earlier` matches what `rule` matches, all of it, before `rule` is reached.
+    static func covers(_ earlier: Rule, _ rule: Rule, services: [ServiceEntry]) -> Bool {
+        switch (earlier.matchType, rule.matchType) {
+        case (.domain, .domain):
+            return earlier.pattern.caseInsensitiveCompare(rule.pattern) == .orderedSame
+        case (.suffix, .domain), (.suffix, .suffix):
+            return RuleResolver.domainMatchesSuffix(rule.pattern, suffix: earlier.pattern)
+        case (.service, .domain):
+            guard let service = services.first(where: { $0.id == earlier.pattern }) else { return false }
+            return service.domains.contains { RouteManager.entry($0, holds: rule.pattern) }
+        case (.ip, .domain):
+            return earlier.pattern == rule.pattern
+        case (.cidr, .domain):
+            return RuleResolver.ipv4(rule.pattern, inCIDR: earlier.pattern)
+        case (.ip, .cidr):
+            // Only a /32 of the same address: both compile to that one host route.
+            return contains("\(earlier.pattern)/32", rule.pattern)
+        case (.cidr, .cidr):
+            return contains(earlier.pattern, rule.pattern)
+        case (.service, .cidr):
+            // A service rule routes its ranges too, and a range inside one of them is claimed first.
+            guard let service = services.first(where: { $0.id == earlier.pattern }) else { return false }
+            return service.ipRanges.contains { contains($0, rule.pattern) }
+        default:
+            return false
+        }
+    }
+
+    /// Whether the range `outer` holds all of the range `inner`.
+    static func contains(_ outer: String, _ inner: String) -> Bool {
+        let mine = inner.split(separator: "/"), theirs = outer.split(separator: "/")
+        guard mine.count == 2, theirs.count == 2, let bits = Int(mine[1]), let theirBits = Int(theirs[1]) else { return false }
+        return theirBits <= bits && RuleResolver.ipv4(String(mine[0]), inCIDR: outer)
+    }
+
+    func message(in bundle: Bundle = .main) -> String {
+        guard let first = matchedFirstBy else {
+            return String(localized: "Added as rule \(number), to the Direct route.", bundle: bundle)
+        }
+        return String(localized: "Added as rule \(number); rule \(first) matches first.", bundle: bundle)
     }
 }

@@ -186,7 +186,10 @@ final class DocScreenshotsTests: XCTestCase {
             }
             return PathCheck.verificationResult(probe, expected: .physical, control: control)
         }
-        rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: Date(), at: Date())
+        var broken = false
+        if case .broken = control { broken = true }
+        rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: Date(), at: Date(),
+                                           controlBroken: broken)
         defer { rm.clearRouteCheck() }
         let size = try renderDropdown(to: name)
         XCTAssertEqual(size.width, 680)
@@ -305,6 +308,72 @@ final class DocScreenshotsTests: XCTestCase {
         settle(hosting)
         let size = try write(hosting, cornerRadius: 10, outline: NSColor(white: 1, alpha: 0.15), to: "lookups-add.png")
         XCTAssertEqual(size.width, LookupAddPanel.width * 2)
+    }
+
+    // MARK: - The rework's first fixes (A2 to A7, B1, B2), drawn for the pull request
+
+    /// A2: the helper is down, yet the line under Refresh said what an old apply routed.
+    func testReworkHelperDown() throws {
+        seedBypass()
+        HelperManager.shared.helperState = .missing
+        _ = try renderDropdown(to: "rework-a2-helper-down.png")
+    }
+
+    /// A3: the first detection is still running.
+    func testReworkStarting() throws {
+        seedConnected(mode: .bypass)
+        rm.activeRoutes = []
+        rm.lastRouteChange = nil
+        rm.config.domains = [DomainEntry(domain: "en.wikipedia.org", enabled: true)]
+        rm.isLoading = true
+        rm.lastUpdate = nil
+        _ = try renderDropdown(to: "rework-a3-starting.png")
+    }
+
+    /// A4: an apply with failures.
+    func testReworkPartlyRouted() throws {
+        seedBypass()
+        rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-23), routeCount: 62, failedCount: 7)
+        _ = try renderDropdown(to: "rework-a4-partly-routed.png")
+    }
+
+    /// A5: the quick add in Custom mode.
+    func testReworkCustomQuickAdd() throws {
+        seedCustom()
+        _ = try renderDropdown(to: "rework-a5-custom.png")
+    }
+
+    /// A6 and A7: Custom mode with no VPN, and a removal that left an address behind.
+    func testReworkDisconnectedCustom() throws {
+        seedCustom()
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        rm.activeRoutes = addresses(["Telegram": 1], gateway: "192.168.1.1")
+        rm.lastRouteChange = .init(kind: .removedAll, at: Date().addingTimeInterval(-40), routeCount: 1, failedCount: 1)
+        _ = try renderDropdown(to: "rework-a6-a7-disconnected-custom.png")
+    }
+
+    /// A7: Bypass mode keeps its routes for the reconnect.
+    func testReworkDisconnectedBypass() throws {
+        seedBypass()
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        _ = try renderDropdown(to: "rework-a7-disconnected-bypass.png")
+    }
+
+    /// B1: the route chips on the Rules page.
+    func testReworkRules() throws {
+        seedCustom()
+        _ = try renderSettings(page: .rules, to: "rework-b1-rules.png")
+    }
+
+    /// B2: the General page's switches, some off.
+    func testReworkGeneral() throws {
+        seedBypass()
+        rm.config.autoDNSRefresh = false
+        _ = try renderSettings(page: .general, to: "rework-b2-general.png")
     }
 
     /// Close to a popover's ground in dark mode.

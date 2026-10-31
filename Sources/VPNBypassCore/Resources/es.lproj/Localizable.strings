@@ -41,7 +41,6 @@
 "Add a domain above to bypass VPN" = "Añade un dominio arriba para evitar la VPN";
 
 /* ===== Ajustes — Pestaña Servicios ===== */
-"Services disabled in VPN Only mode" = "Servicios deshabilitados en modo Solo VPN";
 "Search services..." = "Buscar servicios...";
 "Create Custom Service" = "Crear servicio personalizado";
 "Custom" = "Personalizado";
@@ -160,9 +159,7 @@
 "Connected on %@" = "Conectada en %@";
 "%@, connected" = "%@, conectada";
 "Normal connection" = "Conexión normal";
-"Wi-Fi “%@”, gateway %@" = "Wi-Fi «%1$@», puerta de enlace %2$@";
 "Gateway %@" = "Puerta de enlace %@";
-"Wi-Fi “%@”, no gateway found" = "Wi-Fi «%@», sin puerta de enlace";
 "No gateway found" = "No se encuentra la puerta de enlace";
 "Default route" = "Ruta por defecto";
 "Reading…" = "Leyendo…";
@@ -651,7 +648,6 @@
 "e.g., example.com" = "ej.: example.com";
 "No entries configured" = "No hay entradas configuradas";
 "Add domains or IP ranges that should use VPN" = "Añade los dominios o rangos de IP que deben usar la VPN";
-"Switch to Bypass mode above to manage services." = "Cambia arriba al modo Bypass para gestionar los servicios.";
 "e.g. My Service" = "ej.: Mi servicio";
 "example.com" = "example.com";
 "DNS server" = "Servidor DNS";
@@ -779,6 +775,23 @@
 "Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it." = "%@ añadido a %@. El servicio está desactivado; añádelo desde Explorar el catálogo en la página Servicios para que haga bypass.";
 "catalogue.category.government" = "Administración pública";
 "catalogue.category.banks" = "Bancos";
+"Connect to a VPN to send\nyour listed sites through it." = "Conéctate a una VPN para enviar\npor ella los sitios de tu lista.";
+"Connect to a VPN to start\nrouting traffic by your rules." = "Conéctate a una VPN para empezar\na enrutar el tráfico según tus reglas.";
+"STARTING" = "INICIANDO";
+"Starting…" = "Iniciando…";
+"Detecting the VPN and applying routes." = "Detectando la VPN y aplicando las rutas.";
+"PARTLY ROUTED" = "ENRUTADO EN PARTE";
+"1 failed in the last apply." = "1 falló en la última aplicación.";
+"%lld failed in the last apply." = "%lld fallaron en la última aplicación.";
+"1 entry has no addresses." = "1 entrada no tiene direcciones.";
+"%lld entries have no addresses." = "%lld entradas no tienen direcciones.";
+"%lld of %lld checked addresses left the wrong way." = "%1$lld de %2$lld direcciones comprobadas salieron por el camino equivocado.";
+"The last route check is broken: it cannot tell the two ways apart." = "La última comprobación de rutas está rota: no distingue los dos caminos.";
+"Partly working" = "Funciona en parte";
+"Add a Direct rule…" = "Añadir una regla Directo…";
+"Added as rule %lld, to the Direct route." = "Añadida como regla %lld, a la ruta Directo.";
+"Added as rule %lld; rule %lld matches first." = "Añadida como regla %1$lld; la regla %2$lld coincide antes.";
+"The Direct route is off, so a rule for %@ would route nothing. Turn it on in Routes first." = "La ruta Directo está desactivada, así que una regla para %@ no enrutaría nada. Actívala antes en Rutas.";
 
 /* Path check and "where does this site go?" */
 "No interface" = "Sin interfaz";

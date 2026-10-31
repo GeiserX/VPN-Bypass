@@ -134,13 +134,10 @@ final class StatusPageTests: XCTestCase {
                        .init(text: "Not connected", tone: .bad))
     }
 
+    /// No Wi-Fi name: it came from `airport -I`, which current macOS does not have (B4).
     func testNormalConnectionLine() {
-        XCTAssertEqual(StatusPage.normalConnectionLine(ssid: "Home", gateway: "192.168.1.1").text,
-                       "Wi-Fi “Home”, gateway 192.168.1.1")
-        XCTAssertEqual(StatusPage.normalConnectionLine(ssid: nil, gateway: "192.168.1.1"), .init(text: "Gateway 192.168.1.1"))
-        XCTAssertEqual(StatusPage.normalConnectionLine(ssid: "Home", gateway: nil),
-                       .init(text: "Wi-Fi “Home”, no gateway found", tone: .warn))
-        XCTAssertEqual(StatusPage.normalConnectionLine(ssid: nil, gateway: nil), .init(text: "No gateway found", tone: .warn))
+        XCTAssertEqual(StatusPage.normalConnectionLine(gateway: "192.168.1.1"), .init(text: "Gateway 192.168.1.1"))
+        XCTAssertEqual(StatusPage.normalConnectionLine(gateway: nil), .init(text: "No gateway found", tone: .warn))
     }
 
     private let wireguard = RouteManager.VPNLink(interface: "utun4", addresses: ["10.0.0.2"], label: "WireGuard", isTailscale: false)
@@ -434,10 +431,8 @@ final class StatusPageTests: XCTestCase {
             StatusPage.vpnLine(isConnected: true, name: "WireGuard", interface: "utun4", bundle: bundle).text,
             StatusPage.vpnLine(isConnected: true, name: nil, interface: "utun4", bundle: bundle).text,
             StatusPage.vpnLine(isConnected: true, name: "WireGuard", interface: nil, bundle: bundle).text,
-            StatusPage.normalConnectionLine(ssid: "Home", gateway: "1.2.3.4", bundle: bundle).text,
-            StatusPage.normalConnectionLine(ssid: nil, gateway: "1.2.3.4", bundle: bundle).text,
-            StatusPage.normalConnectionLine(ssid: "Home", gateway: nil, bundle: bundle).text,
-            StatusPage.normalConnectionLine(ssid: nil, gateway: nil, bundle: bundle).text,
+            StatusPage.normalConnectionLine(gateway: "1.2.3.4", bundle: bundle).text,
+            StatusPage.normalConnectionLine(gateway: nil, bundle: bundle).text,
             StatusPage.defaultRouteLine(nil, bundle: bundle).text,
             StatusPage.defaultRouteLine(snapshot(default: nil), bundle: bundle).text,
             StatusPage.defaultRouteLine(s, bundle: bundle).text,
@@ -495,8 +490,8 @@ final class StatusPageTests: XCTestCase {
         }
         XCTAssertEqual(StatusPage.vpnLine(isConnected: true, name: "WireGuard", interface: "utun4", bundle: es).text,
                        "WireGuard, conectada en utun4")
-        XCTAssertEqual(StatusPage.normalConnectionLine(ssid: "Home", gateway: "192.168.1.1", bundle: fr).text,
-                       "Wi-Fi « Home », passerelle 192.168.1.1")
+        XCTAssertEqual(StatusPage.normalConnectionLine(gateway: "192.168.1.1", bundle: fr).text,
+                       "Passerelle 192.168.1.1")
         XCTAssertEqual(StatusPage.lastCheckLine([result("1.1.1.1", ok: false, ago: 5)], installed: 62, now: now, bundle: es).text
                         .hasPrefix("1 de 62 comprobadas, 1 sin respuesta"), true)
     }

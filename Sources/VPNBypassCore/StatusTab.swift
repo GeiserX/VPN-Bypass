@@ -49,7 +49,7 @@ enum StatusPage {
         let status = DropdownStatus.make(input, now: now)
         let title: String
         var sentence = status.sentence
-        if !input.isVPNConnected {
+        if input.isStarting || !input.isVPNConnected {
             title = status.headline
         } else if !input.helperReady {
             title = String(localized: "Not working", bundle: bundle)
@@ -63,7 +63,9 @@ enum StatusPage {
         } else if input.installedRoutes == 0 && !input.everythingElseDirect {
             title = String(localized: "Nothing routed", bundle: bundle)
         } else {
-            title = String(localized: "Working", bundle: bundle)
+            title = status.isPartial
+                ? String(localized: "Partly working", bundle: bundle)
+                : String(localized: "Working", bundle: bundle)
             if let change = DropdownCopy.shownRouteChange(input.lastRouteChange,
                                                           currentRouteCount: input.installedRoutes),
                change.kind == .applied {
@@ -130,14 +132,11 @@ enum StatusPage {
         }
     }
 
-    /// The connection traffic takes when it skips the VPN.
-    static func normalConnectionLine(ssid: String?, gateway: String?, bundle: Bundle = .main) -> Line {
-        switch (ssid, gateway) {
-        case let (ssid?, gateway?): return Line(text: String(localized: "Wi-Fi “\(ssid)”, gateway \(gateway)", bundle: bundle))
-        case let (nil, gateway?): return Line(text: String(localized: "Gateway \(gateway)", bundle: bundle))
-        case let (ssid?, nil): return Line(text: String(localized: "Wi-Fi “\(ssid)”, no gateway found", bundle: bundle), tone: .warn)
-        case (nil, nil): return Line(text: String(localized: "No gateway found", bundle: bundle), tone: .warn)
-        }
+    /// The connection traffic takes when it skips the VPN. No Wi-Fi name: the app read it from
+    /// `airport -I`, which current macOS no longer has, so it never showed.
+    static func normalConnectionLine(gateway: String?, bundle: Bundle = .main) -> Line {
+        guard let gateway else { return Line(text: String(localized: "No gateway found", bundle: bundle), tone: .warn) }
+        return Line(text: String(localized: "Gateway \(gateway)", bundle: bundle))
     }
 
     /// Which interface carries the default route, and what it is to this app. Nil
@@ -166,9 +165,11 @@ enum StatusPage {
 
     /// The Applied row: what the last apply or removal did, or what is installed.
     static func appliedLine(installed: Int, lastChange: RouteManager.RouteChangeOutcome?, now: Date,
-                            bundle: Bundle = .main) -> Line {
-        // Same rule as the dropdown: a removal stops being reported once routes are back.
-        guard let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed) else {
+                            helperReady: Bool = true, bundle: Bundle = .main) -> Line {
+        // Same rule as the dropdown: a removal stops being reported once routes are back, and
+        // with the helper not ready a past apply is not reported over a "Not working" title.
+        guard let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed,
+                                                         helperReady: helperReady) else {
             return installed > 0
                 ? Line(text: routes(installed, bundle: bundle))
                 : Line(text: String(localized: "None yet", bundle: bundle))
@@ -327,6 +328,7 @@ extension DropdownStatus.Input {
         let mode: DropdownCopy.Mode = RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
             ? .custom
             : (config.routingMode == .vpnOnly ? .vpnOnly : .bypass)
+        let routed = Set(routeManager.activeRoutes.map(\.destination))
         return DropdownStatus.Input(
             isVPNConnected: routeManager.isVPNConnected,
             vpnName: routeManager.vpnType.flatMap { $0 == .unknown ? nil : $0.rawValue },
@@ -348,7 +350,17 @@ extension DropdownStatus.Input {
                                                      services: config.services,
                                                      installedRoutes: routeManager.routedAddressCount),
             everythingElseDirect: routeManager.everythingElseDirect,
-            killSwitch: routeManager.vpnKillSwitch
+            killSwitch: routeManager.vpnKillSwitch,
+            isStarting: routeManager.isLoading && routeManager.lastUpdate == nil,
+            entriesWithoutAddresses: RoutedBySource.make(
+                mode: mode, config: config, routes: routeManager.installedRoutes,
+                busy: RoutedBySource.mayStillAddRoutes(running: routeManager.isLoading || routeManager.isApplyingRoutes,
+                                                       pending: routeManager.pendingReconnectApply))?.problemCount ?? 0,
+            lastCheckCount: routeManager.lastRouteCheck?.results.count ?? 0,
+            // Only addresses still routed: one removed since the check is no longer a fault.
+            lastCheckWrongWay: routeManager.lastRouteCheck?.leftWrongWay
+                .filter { routed.contains($0.destination) }.count ?? 0,
+            lastCheckBroken: routeManager.lastRouteCheck?.controlBroken ?? false
         )
     }
 }
@@ -469,8 +481,7 @@ struct StatusTab: View {
                                                    interface: routeManager.vpnInterface))
             StatusDivider()
             StatusLineRow(label: String(localized: "Normal connection"),
-                          line: StatusPage.normalConnectionLine(ssid: routeManager.currentNetworkSSID,
-                                                                gateway: routeManager.localGateway))
+                          line: StatusPage.normalConnectionLine(gateway: routeManager.localGateway))
             StatusDivider()
             StatusLineRow(label: String(localized: "Default route"), line: StatusPage.defaultRouteLine(snapshot))
         }
@@ -480,7 +491,8 @@ struct StatusTab: View {
         StatusSection(String(localized: "Addresses")) {
             StatusLineRow(label: String(localized: "Routed"),
                           line: StatusPage.appliedLine(installed: routeManager.routedAddressCount,
-                                                       lastChange: routeManager.lastRouteChange, now: now))
+                                                       lastChange: routeManager.lastRouteChange, now: now,
+                                                       helperReady: input.helperReady))
             StatusDivider()
             StatusLineRow(label: String(localized: "From"), line: StatusPage.fromLine(input))
             StatusDivider()

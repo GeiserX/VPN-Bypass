@@ -41,7 +41,6 @@
 "Add a domain above to bypass VPN" = "Add a domain above to bypass VPN";
 
 /* ===== Settings — Services Tab ===== */
-"Services disabled in VPN Only mode" = "Services disabled in VPN Only mode";
 "Search services..." = "Search services...";
 "Create Custom Service" = "Create Custom Service";
 "Custom" = "Custom";
@@ -160,9 +159,7 @@
 "Connected on %@" = "Connected on %@";
 "%@, connected" = "%@, connected";
 "Normal connection" = "Normal connection";
-"Wi-Fi “%@”, gateway %@" = "Wi-Fi “%1$@”, gateway %2$@";
 "Gateway %@" = "Gateway %@";
-"Wi-Fi “%@”, no gateway found" = "Wi-Fi “%@”, no gateway found";
 "No gateway found" = "No gateway found";
 "Default route" = "Default route";
 "Reading…" = "Reading…";
@@ -651,7 +648,6 @@
 "e.g., example.com" = "e.g., example.com";
 "No entries configured" = "No entries configured";
 "Add domains or IP ranges that should use VPN" = "Add domains or IP ranges that should use VPN";
-"Switch to Bypass mode above to manage services." = "Switch to Bypass mode above to manage services.";
 "e.g. My Service" = "e.g. My Service";
 "example.com" = "example.com";
 "DNS server" = "DNS server";
@@ -779,6 +775,23 @@
 "Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it." = "Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it.";
 "catalogue.category.government" = "Government";
 "catalogue.category.banks" = "Banks";
+"Connect to a VPN to send\nyour listed sites through it." = "Connect to a VPN to send\nyour listed sites through it.";
+"Connect to a VPN to start\nrouting traffic by your rules." = "Connect to a VPN to start\nrouting traffic by your rules.";
+"STARTING" = "STARTING";
+"Starting…" = "Starting…";
+"Detecting the VPN and applying routes." = "Detecting the VPN and applying routes.";
+"PARTLY ROUTED" = "PARTLY ROUTED";
+"1 failed in the last apply." = "1 failed in the last apply.";
+"%lld failed in the last apply." = "%lld failed in the last apply.";
+"1 entry has no addresses." = "1 entry has no addresses.";
+"%lld entries have no addresses." = "%lld entries have no addresses.";
+"%lld of %lld checked addresses left the wrong way." = "%1$lld of %2$lld checked addresses left the wrong way.";
+"The last route check is broken: it cannot tell the two ways apart." = "The last route check is broken: it cannot tell the two ways apart.";
+"Partly working" = "Partly working";
+"Add a Direct rule…" = "Add a Direct rule…";
+"Added as rule %lld, to the Direct route." = "Added as rule %lld, to the Direct route.";
+"Added as rule %lld; rule %lld matches first." = "Added as rule %1$lld; rule %2$lld matches first.";
+"The Direct route is off, so a rule for %@ would route nothing. Turn it on in Routes first." = "The Direct route is off, so a rule for %@ would route nothing. Turn it on in Routes first.";
 
 /* Path check and "where does this site go?" */
 "No interface" = "No interface";
