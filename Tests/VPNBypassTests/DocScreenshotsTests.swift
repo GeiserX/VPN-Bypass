@@ -765,6 +765,8 @@ final class DocScreenshotsTests: XCTestCase {
     private func renderSettings(page: SettingsView.SettingsTab, to name: String) throws -> NSSize {
         SettingsPageRequest.shared.page = page
         let window = SettingsWindowController.makeWindow()
+        // makeWindow brings back a size saved by an earlier run; the renders use the default.
+        window.setContentSize(SettingsWindowController.defaultContentSize)
         window.appearance = NSAppearance(named: .darkAqua)
         show(window)
         window.makeFirstResponder(nil)

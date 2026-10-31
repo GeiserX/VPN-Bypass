@@ -133,23 +133,38 @@ struct RoutesTab: View {
         (String(localized: "Direct", bundle: bundle), vpnType?.knownName ?? String(localized: "VPN", bundle: bundle))
     }
 
+    /// Which system rows the title bar search leaves, as the listener routes are filtered.
+    static func shownSystemRoutes(direct: String, vpn: String, search: String) -> (direct: Bool, vpn: Bool) {
+        (SettingsSidebar.matches(direct, search: search), SettingsSidebar.matches(vpn, search: search))
+    }
+
+    @ViewBuilder
     private var systemRoutesCard: some View {
+        let names = Self.systemRouteNames(vpnType: routeManager.vpnType, in: .main)
+        let shown = Self.shownSystemRoutes(direct: names.direct, vpn: names.vpn, search: searchText)
+        if shown.direct || shown.vpn {
         SettingsCard(title: "System Routes", icon: "shield.lefthalf.filled", iconColor: Theme.textSecondary) {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(spacing: 0) {
-                    SystemRouteRow(
-                        icon: "arrow.up.right",
-                        name: Self.systemRouteNames(vpnType: routeManager.vpnType, in: .main).direct,
-                        subtitle: "Your physical connection",
-                        color: Theme.textSecondary
-                    )
-                    Divider().background(Theme.divider).padding(.vertical, 4)
-                    SystemRouteRow(
-                        icon: routeManager.vpnType?.icon ?? "lock.shield",
-                        name: Self.systemRouteNames(vpnType: routeManager.vpnType, in: .main).vpn,
-                        subtitle: "Whatever tunnel is currently up",
-                        color: Theme.warning
-                    )
+                    if shown.direct {
+                        SystemRouteRow(
+                            icon: "arrow.up.right",
+                            name: names.direct,
+                            subtitle: "Your physical connection",
+                            color: Theme.textSecondary
+                        )
+                    }
+                    if shown.direct && shown.vpn {
+                        Divider().background(Theme.divider).padding(.vertical, 4)
+                    }
+                    if shown.vpn {
+                        SystemRouteRow(
+                            icon: routeManager.vpnType?.icon ?? "lock.shield",
+                            name: names.vpn,
+                            subtitle: "Whatever tunnel is currently up",
+                            color: Theme.warning
+                        )
+                    }
                 }
                 HStack(spacing: 6) {
                     Image(systemName: "info.circle")
@@ -160,6 +175,7 @@ struct RoutesTab: View {
                         .foregroundColor(Theme.textTertiary)
                 }
             }
+        }
         }
     }
 

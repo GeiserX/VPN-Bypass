@@ -108,6 +108,14 @@ final class SettingsShellTests: XCTestCase {
                        [.domains, .services, .rules, .routes, .lookups])
     }
 
+    /// The System Routes rows follow the Routes search like the listener routes do.
+    func testTheRoutesSearchFiltersTheSystemRoutes() {
+        XCTAssertTrue(RoutesTab.shownSystemRoutes(direct: "Direct", vpn: "GlobalProtect", search: "") == (true, true))
+        XCTAssertTrue(RoutesTab.shownSystemRoutes(direct: "Direct", vpn: "GlobalProtect", search: "dir") == (true, false))
+        XCTAssertTrue(RoutesTab.shownSystemRoutes(direct: "Direct", vpn: "GlobalProtect", search: "GLOBAL") == (false, true))
+        XCTAssertTrue(RoutesTab.shownSystemRoutes(direct: "Direct", vpn: "GlobalProtect", search: "office-proxy") == (false, false))
+    }
+
     // MARK: - The window
 
     func testTheWindowIsResizableDownTo720By480() {
