@@ -94,6 +94,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Pre-warm SettingsWindowController so first click is instant
         _ = SettingsWindowController.shared
 
+        // Follow which app is in front, so the dropdown can offer the site open in the
+        // browser the user just left.
+        FrontTabWatcher.shared.start()
+
         // Start the scripting control socket (a user-only UNIX socket; userspace,
         // so it's independent of the privileged helper and starts unconditionally).
         // Only the instance that won the single-instance lock reaches here, so it

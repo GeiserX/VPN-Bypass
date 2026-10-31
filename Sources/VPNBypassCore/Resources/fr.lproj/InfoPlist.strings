@@ -1,0 +1,2 @@
+/* InfoPlist.strings — Français. macOS l’affiche dans la demande d’automatisation. */
+"NSAppleEventsUsageDescription" = "VPN Bypass lit l’adresse de l’onglet actif de votre navigateur, pour vous proposer de contourner le VPN pour le site que vous consultez.";

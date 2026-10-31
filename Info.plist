@@ -32,6 +32,8 @@
 	<true/>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>VPN Bypass reads the address of your browser's front tab, so it can offer to bypass the site you are on.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

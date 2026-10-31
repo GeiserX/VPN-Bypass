@@ -88,6 +88,7 @@ final class DocScreenshotsTests: XCTestCase {
         rm.lastDNSRefresh = saved.dns
         HelperManager.shared.helperState = saved.helper
         SettingsPageRequest.shared.page = nil
+        FrontTabWatcher.shared.suggestion = nil
     }
 
     // MARK: - The screenshots
@@ -750,6 +751,61 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderDropdown(to: "pause-custom.png")
     }
     // END PAUSE SHOTS
+
+    // MARK: - Bypass the site you are on (idea 3), drawn for the pull request
+
+    // BEGIN FRONT TAB SHOTS
+    func testFrontTabBypass() throws {
+        seedBypass()
+        showFrontTab(host: "shop.example.com", browser: "Safari", id: "com.apple.Safari")
+        _ = try renderDropdown(to: "fronttab-bypass.png")
+    }
+
+    func testFrontTabAlreadyListed() throws {
+        seedBypass()
+        showFrontTab(host: "en.wikipedia.org", browser: "Google Chrome", id: "com.google.Chrome")
+        _ = try renderDropdown(to: "fronttab-listed.png")
+    }
+
+    func testFrontTabNotYetAllowed() throws {
+        seedBypass()
+        showFrontTab(host: nil, browser: "Safari", id: "com.apple.Safari")
+        _ = try renderDropdown(to: "fronttab-allow.png")
+    }
+
+    func testFrontTabVPNOnly() throws {
+        seedConnected(mode: .vpnOnly)
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.com", enabled: true)]
+        rm.activeRoutes = ClassicRouteCompiler.bypassAllCatchAlls.map {
+            route($0, via: "192.168.1.1", for: ClassicRouteCompiler.catchAllSource)
+        } + addresses(["intranet.example.com": 2], gateway: "10.0.0.1")
+        rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-19), routeCount: 2, failedCount: 0)
+        showFrontTab(host: "git.example.com", browser: "Brave Browser", id: "com.brave.Browser")
+        _ = try renderDropdown(to: "fronttab-vpn-only.png")
+    }
+
+    func testFrontTabCustom() throws {
+        seedCustom()
+        showFrontTab(host: "shop.example.com", browser: "Microsoft Edge", id: "com.microsoft.edgemac")
+        _ = try renderDropdown(to: "fronttab-custom.png")
+    }
+
+    func testFrontTabDisconnected() throws {
+        seedBypass()
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        rm.activeRoutes = []
+        showFrontTab(host: "shop.example.com", browser: "Safari", id: "com.apple.Safari")
+        _ = try renderDropdown(to: "fronttab-disconnected.png")
+    }
+    // END FRONT TAB SHOTS
+
+    /// What the front tab row shows; nil `host` is a browser macOS has not been asked about.
+    private func showFrontTab(host: String?, browser: String, id: String) {
+        let found = FrontTabBrowser.detect(bundleID: id, name: browser)!
+        FrontTabWatcher.shared.suggestion = host.map { .site(host: $0, browser: found) } ?? .needsConsent(browser: found)
+    }
 
     func testPausePausedForAnHour() throws {
         seedPaused(.oneHour)

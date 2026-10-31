@@ -310,6 +310,8 @@ struct MenuContent: View {
     @State private var quickAddFeedback: AddDomainFeedback?
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
+    /// The front browser tab's site, read on every open.
+    @ObservedObject private var frontTab = FrontTabWatcher.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -362,6 +364,17 @@ struct MenuContent: View {
                         if text != quickAddFeedback?.fieldText { quickAddFeedback = nil }
                     }
 
+                // The site open in the browser the user just left (idea 3), one click to add.
+                if let suggestion = frontTab.suggestion {
+                    let mode = LookupMode(routeManager)
+                    FrontTabRow(suggestion: suggestion, mode: mode,
+                                listing: suggestion.host.flatMap { routeManager.lookupListing($0) },
+                                isApplying: routeManager.isApplyingRoutes,
+                                onAdd: addFrontTabSite,
+                                onAllow: { frontTab.askAndRead($0) })
+                        .padding(.top, 8)
+                }
+
                 // Main content. Nothing while the first detection runs: the block says Starting.
                 if !isStarting {
                     Group {
@@ -395,7 +408,10 @@ struct MenuContent: View {
         }
         // Refresh the VPN status on every open. Not `.onAppear`: a MenuBarExtra(.window) keeps
         // one window and one view for the app's life, so `.onAppear` runs on the first open only.
-        .background(WindowBecameKeyObserver { routeManager.refreshStatus() })
+        .background(WindowBecameKeyObserver {
+            routeManager.refreshStatus()
+            frontTab.refresh()
+        })
     }
 
     /// The app's first detection is still running.
@@ -766,6 +782,13 @@ struct MenuContent: View {
         let feedback: AddDomainFeedback?
 
         static let empty = QuickAddState(text: "", feedback: nil)
+    }
+
+    /// The front tab row's add: the same add as the field's, with its line under the field.
+    private func addFrontTabSite(_ host: String) {
+        guard !routeManager.isApplyingRoutes,
+              let result = routeManager.addForCurrentMode(host) else { return }
+        quickAddFeedback = AddDomainFeedback(result, typed: newDomain)
     }
 
     private func clearQuickAdd() {
