@@ -369,6 +369,8 @@ final class StatusProblemsTests: XCTestCase {
     func testTheDropdownReadsTheOutstandingOutcome() throws {
         let status = try ReworkSource.read("StatusTab.swift")
         XCTAssertTrue(status.contains("lastRouteChange: routeManager.lastRouteChange?.outstanding(routedNow: routed)"))
+        XCTAssertTrue(status.contains("lastChange: input.lastRouteChange, now: now"),
+                      "the Status page's Routed row counts the same failures")
     }
 
     /// After Remove All Routes the entries it emptied are not problems, so Retry cannot put

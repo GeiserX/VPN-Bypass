@@ -632,7 +632,7 @@ struct StatusTab: View {
         StatusSection(String(localized: "Addresses")) {
             StatusLineRow(label: String(localized: "Routed"),
                           line: StatusPage.appliedLine(installed: routeManager.routedAddressCount,
-                                                       lastChange: routeManager.lastRouteChange, now: now,
+                                                       lastChange: input.lastRouteChange, now: now,
                                                        helperReady: input.helperReady))
             StatusDivider()
             StatusLineRow(label: String(localized: "From"), line: StatusPage.fromLine(input))
