@@ -21,7 +21,7 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 <p align="center">
   <img src="docs/images/screenshots/menu-bar.png" alt="The VPN Bypass dropdown in Bypass mode: WireGuard connected, ON, four services and two domains skip the VPN" width="300">
   &nbsp;&nbsp;
-  <img src="docs/images/screenshots/services.png" alt="The Settings window on the Services tab: Telegram, WhatsApp, YouTube and Spotify under On, with the Browse catalogue button at the top" width="400">
+  <img src="docs/images/screenshots/services.png" alt="The Settings window on the Services page: Telegram, WhatsApp, YouTube and Spotify under Your services, with Browse catalogue… under the list" width="400">
   <br>
   <sub>The dropdown in Bypass mode, and the Settings window on the Services tab</sub>
 </p>
