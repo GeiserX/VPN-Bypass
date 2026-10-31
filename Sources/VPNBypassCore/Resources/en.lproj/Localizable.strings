@@ -947,3 +947,7 @@
 "Say which entry routes this site, and check the way it leaves" = "Say which entry routes this site, and check the way it leaves";
 "That is not a name, a link or an address." = "That is not a name, a link or an address.";
 "Read the tunnels again" = "Read the tunnels again";
+"Info" = "Info";
+"Success" = "Success";
+"Warning" = "Warning";
+"Error" = "Error";

@@ -473,6 +473,13 @@ final class SiteRouteModel: ObservableObject {
     /// Bumped per check, so a slow answer never replaces a newer one.
     private var generation = 0
 
+    /// The answer belongs to the text in the field: an edit hides it, so Add never adds the
+    /// site that was asked before.
+    var answersQuery: Bool {
+        checkedQuery?.trimmingCharacters(in: .whitespacesAndNewlines)
+            == query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     init(query: String = "", answer: SiteRouteAnswer? = nil) {
         self.query = query
         self.answer = answer

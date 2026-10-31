@@ -119,6 +119,31 @@ final class StatusLogsPageModelTests: XCTestCase {
         XCTAssertGreaterThan(asked, 1)
     }
 
+    /// The first look for an apply waits out the start delay, so an apply the add queued in
+    /// a task has begun by then.
+    @MainActor
+    func testTheWaitHoldsTheFirstPollUntilTheStartDelayEnds() async {
+        var firstPoll: ContinuousClock.Instant?
+        let clock = ContinuousClock(), began = clock.now
+        await StatusPage.waitForRouteApply(start: .milliseconds(50), poll: .milliseconds(1), limit: .seconds(5)) {
+            firstPoll = firstPoll ?? clock.now
+            return false
+        }
+        guard let first = firstPoll else { return XCTFail("the wait never checked for an apply") }
+        XCTAssertGreaterThanOrEqual(first - began, .milliseconds(50), "the first check waits for the start delay")
+    }
+
+    /// An edit to the field hides the answer, so Add never adds the site asked before.
+    @MainActor
+    func testAnEditHidesTheAnswerForTheOldText() {
+        let model = SiteRouteModel(query: "cdn.example.net", answer: unlisted(via: "utun4"))
+        XCTAssertTrue(model.answersQuery)
+        model.query = " cdn.example.net "
+        XCTAssertTrue(model.answersQuery, "spaces around the same text change nothing")
+        model.query = "other.example.org"
+        XCTAssertFalse(model.answersQuery, "the answer is for the old text")
+    }
+
     // MARK: Logs
 
     func testLogsTakeTheTitleBarSearch() {
@@ -135,6 +160,12 @@ final class StatusLogsPageModelTests: XCTestCase {
         XCTAssertNotEqual(LogRow.levelColor(.success), Theme.live)
         XCTAssertEqual(LogRow.levelColor(.warning), Theme.attention)
         XCTAssertEqual(LogRow.levelColor(.error), Theme.failure)
+    }
+
+    /// VoiceOver says each line's level, so a warning does not sound like an info line.
+    func testEveryLogLevelHasASpokenName() {
+        let levels: [RouteManager.LogEntry.LogLevel] = [.info, .success, .warning, .error]
+        XCTAssertEqual(levels.map { LogRow.levelName($0) }, ["Info", "Success", "Warning", "Error"])
     }
 }
 

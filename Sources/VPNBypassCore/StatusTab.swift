@@ -132,7 +132,9 @@ enum StatusPage {
     }
 
     /// Waits for the routes an add started: a moment for an apply the add queued in a task
-    /// (Custom mode's reconcile) to begin, then until none runs, at most `limit` seconds.
+    /// (Custom mode's reconcile) to begin, then until none runs, at most `limit` seconds. The
+    /// caller counts detection as running (`isLoading`): Custom mode's reconcile detects the
+    /// VPN before it takes the route gate.
     @MainActor
     static func waitForRouteApply(start: Duration = .milliseconds(300), poll: Duration = .milliseconds(200),
                                   limit: Duration = .seconds(30), isApplying: () -> Bool) async {
@@ -697,7 +699,7 @@ struct StatusTab: View {
             }
             .padding(.horizontal, ListRow.inset)
             .padding(.vertical, Theme.Space.s)
-            if let answer = siteRoute.answer {
+            if let answer = siteRoute.answer, siteRoute.answersQuery {
                 InsetDivider()
                 let look = StatusPage.siteGlyph(answer.verdict)
                 ListRow(glyph: look.glyph, name: answer.host, detail: answer.summary,
@@ -710,7 +712,7 @@ struct StatusTab: View {
                                 .accessibilityLabel(add.help))
                         },
                         detailLineLimit: nil)
-            } else if siteRoute.checkedQuery != nil, !siteRoute.isChecking {
+            } else if siteRoute.checkedQuery != nil, siteRoute.answersQuery, !siteRoute.isChecking {
                 StatusNote(text: StatusPage.siteNoHost())
             }
             if let feedback = siteAddFeedback {
@@ -929,7 +931,7 @@ struct StatusTab: View {
             Task {
                 // The add routes the entry in a task of its own: checking before it finishes
                 // would see the site listed but leaving the old way, and mark it wrong.
-                await StatusPage.waitForRouteApply { routeManager.isApplyingRoutes }
+                await StatusPage.waitForRouteApply { routeManager.isApplyingRoutes || routeManager.isLoading }
                 await siteRoute.check(routeManager)
             }
         }

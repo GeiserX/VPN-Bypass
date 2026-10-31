@@ -947,3 +947,7 @@
 "Say which entry routes this site, and check the way it leaves" = "Indique quelle entrée route ce site et vérifie par où il sort";
 "That is not a name, a link or an address." = "Ce n’est ni un nom, ni un lien, ni une adresse.";
 "Read the tunnels again" = "Relire les tunnels";
+"Info" = "Info";
+"Success" = "Réussite";
+"Warning" = "Avertissement";
+"Error" = "Erreur";

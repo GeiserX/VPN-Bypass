@@ -2162,6 +2162,16 @@ struct LogRow: View {
         }
     }
 
+    /// The level as VoiceOver says it, so a warning or an error does not sound like an info line.
+    static func levelName(_ level: RouteManager.LogEntry.LogLevel, bundle: Bundle = .main) -> String {
+        switch level {
+        case .info: return String(localized: "Info", bundle: bundle)
+        case .success: return String(localized: "Success", bundle: bundle)
+        case .warning: return String(localized: "Warning", bundle: bundle)
+        case .error: return String(localized: "Error", bundle: bundle)
+        }
+    }
+
     static func levelIcon(_ level: RouteManager.LogEntry.LogLevel) -> String {
         switch level {
         case .info: return "info.circle"
@@ -2177,7 +2187,7 @@ struct LogRow: View {
                 .font(.system(size: 10))
                 .foregroundColor(Self.levelColor(entry.level))
                 .frame(width: ListRow.glyphColumn)
-                .accessibilityHidden(true)
+                .accessibilityLabel(Self.levelName(entry.level))
 
             Text(entry.timestamp, format: .dateTime.hour().minute().second())
                 .font(Theme.Font.mono)
