@@ -848,11 +848,15 @@ struct BlockedSitesLine: View {
                     .font(.system(size: 11, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
-                Button(String(localized: "Open them directly")) {
-                    routeManager.openBlockedSitesDirectly()
+                // Only while the VPN is down: with it up, a release sends the sites wherever the
+                // VPN's own routes point, not outside it, and the waiting apply restores them.
+                if !routeManager.isVPNConnected {
+                    Button(String(localized: "Open them directly")) {
+                        routeManager.openBlockedSitesDirectly()
+                    }
+                    .controlSize(.small)
+                    .accessibilityLabel(String(localized: "Open the blocked sites directly, outside the VPN"))
                 }
-                .controlSize(.small)
-                .accessibilityLabel(String(localized: "Open the blocked sites directly, outside the VPN"))
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 8).fill(Theme.warning.opacity(0.12)))

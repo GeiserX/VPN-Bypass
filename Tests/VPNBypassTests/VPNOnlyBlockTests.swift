@@ -392,6 +392,37 @@ final class VPNOnlyBlockLifecycleTests: XCTestCase {
         XCTAssertEqual(rm.blockedSiteCount, 1)
     }
 
+    /// An entry disabled (or imported away) while the VPN is down loses its blocks; a shared
+    /// address keeps the block another listed entry holds.
+    func testADisabledEntryLosesItsBlocks() async {
+        rm.activeRoutes.append(route("198.51.100.9", "10.0.0.1", "intranet.example.com"))
+        rm.isVPNConnected = false
+        await rm.tearDownAfterDrop()
+        rm.config.inverseDomains[0].enabled = false
+        await rm.releaseBlocksIfUnwanted()
+        XCTAssertEqual(kernel.blocks, ["198.51.100.9"], "git.example.com still holds the shared address")
+        XCTAssertEqual(rm.blockedRoutes.map(\.source), ["git.example.com"])
+        rm.config.inverseDomains = []
+        await rm.releaseBlocksIfUnwanted()
+        XCTAssertTrue(kernel.blocks.isEmpty)
+        XCTAssertTrue(rm.blockedRoutes.isEmpty)
+    }
+
+    /// The setting turned off while the block batch was out: its blocks do not outlive it.
+    func testTheSettingTurnedOffDuringTheBatchLeavesNoBlocks() async {
+        rm.isVPNConnected = false
+        let inner = rm.addBlockRoutesBatchOverrideForTests!
+        rm.addBlockRoutesBatchOverrideForTests = { [unowned self] dests in
+            let r = await inner(dests)
+            self.rm.config.blockListedWhenVPNDown = false
+            await self.rm.releaseBlocksIfUnwanted()
+            return r
+        }
+        await rm.tearDownAfterDrop()
+        XCTAssertTrue(kernel.blocks.isEmpty)
+        XCTAssertTrue(rm.blockedRoutes.isEmpty)
+    }
+
     // The flap recheck, through checkVPNStatus
 
     /// An interface that is back within the 1.5 s recheck is no drop: nothing is blocked and

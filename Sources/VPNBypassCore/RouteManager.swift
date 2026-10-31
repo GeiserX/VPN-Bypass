@@ -702,6 +702,8 @@ final class RouteManager: ObservableObject {
                     await removeAllRoutes()
                     await applyAllRoutesInternal(sendNotification: false)
                 }
+            } else if !isVPNConnected {
+                Task { await releaseBlocksIfUnwanted() }
             }
             DNSLookupsMonitor.shared.followConfig()
 
@@ -1189,6 +1191,13 @@ final class RouteManager: ObservableObject {
         } else {
             log(.warning, "VPN down: \(blocked.count) listed address(es) blocked, \(result.failedDestinations.count) could not be blocked and are removed instead (\(result.error ?? "no reason given"))")
         }
+        // A quit, the setting, the mode or the list can change during the batch above; a
+        // release that ran then found no records, so these would outlive it.
+        if isShuttingDown {
+            await releaseBlocks(reason: "quitting")
+        } else {
+            await releaseBlocksIfUnwanted()
+        }
     }
 
     /// Takes blocks out. Those in `replacedBy` are gone already: an install over a block
@@ -1217,12 +1226,26 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    /// Blocks are only for VPN Only with the setting on. Any change that leaves that state
-    /// (another mode, the setting off) releases them at once, VPN up or down.
+    /// Blocks are only for VPN Only with the setting on, and only for entries still listed
+    /// and enabled. Any change that leaves that state (another mode, the setting off, an entry
+    /// disabled or imported away) releases the blocks it no longer covers, VPN up or down. An
+    /// address another listed entry shares keeps its block.
     func releaseBlocksIfUnwanted() async {
-        guard !blockedRoutes.isEmpty,
-              config.routingMode != .vpnOnly || !config.blockListedWhenVPNDown else { return }
-        await releaseBlocks(reason: config.routingMode != .vpnOnly ? "the mode is no longer VPN Only" : "the block setting is off")
+        guard !blockedRoutes.isEmpty else { return }
+        guard config.routingMode == .vpnOnly, config.blockListedWhenVPNDown else {
+            await releaseBlocks(reason: config.routingMode != .vpnOnly ? "the mode is no longer VPN Only" : "the block setting is off")
+            return
+        }
+        // The bookkeeping sources (an in-flight or a failed-removal record) name no entry, so
+        // they never count as taken off the list.
+        let listed = Set(config.inverseDomains.filter(\.enabled).map(\.domain))
+            .union(["pending-block", "pending-sweep-retry", "#61 cleanup-retry"])
+        let stillHeld = Set(blockedRoutes.filter { listed.contains($0.source) }.map(\.destination))
+        blockedRoutes.removeAll { !listed.contains($0.source) && stillHeld.contains($0.destination) }
+        let unlisted = Set(blockedRoutes.filter { !listed.contains($0.source) }.map(\.destination))
+        if !unlisted.isEmpty {
+            await releaseBlocks(only: unlisted, reason: "their entries are no longer listed")
+        }
     }
 
     /// "Open them directly" in the dropdown: the listed sites go out over the normal connection
@@ -4283,6 +4306,8 @@ final class RouteManager: ObservableObject {
                     if config.manageHostsFile { await updateHostsFile() }
                 }
             }
+        } else if !isVPNConnected {
+            Task { await releaseBlocksIfUnwanted() }
         }
     }
 
@@ -4574,6 +4599,8 @@ final class RouteManager: ObservableObject {
                 await applyAllRoutesInternal(sendNotification: false)
                 if config.manageHostsFile { await updateHostsFile() }
             }
+        } else if !isVPNConnected {
+            Task { await releaseBlocksIfUnwanted() }
         }
         return changed
     }

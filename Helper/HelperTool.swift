@@ -399,9 +399,10 @@ class HelperTool: NSObject, HelperProtocol {
         var err = routeSocketPerform(type: RTM_ADD, spec: spec)
         if err == EEXIST {
             let key = snapshotKey(destination: destination, isNetwork: spec.isNetwork)
-            if let table = RouteKernel.currentTable(), !RouteKernel.blockMayReplace(table: table, key: key) {
-                helperLog.info("block \(destination, privacy: .public): refused, another program owns its route")
-                return (false, "another program owns the route")
+            // An unreadable table proves nothing about the owner, so it refuses too.
+            guard let table = RouteKernel.currentTable(), RouteKernel.blockMayReplace(table: table, key: key) else {
+                helperLog.info("block \(destination, privacy: .public): refused, its route is not ours or the table is unreadable")
+                return (false, "another program owns the route, or the table could not be read")
             }
             let removed = deleteRoute(destination: destination)
             guard removed.success else { return removed }
