@@ -85,6 +85,8 @@ bundle: build build-helper
 	@mkdir -p "$(APP_BUNDLE)/Contents/Resources/catalogue"
 	@cp Sources/VPNBypassCore/Resources/catalogue/*.json "$(APP_BUNDLE)/Contents/Resources/catalogue/"
 	@ls "$(APP_BUNDLE)"/Contents/Resources/catalogue/*.json >/dev/null
+	@# The Shortcuts actions: Shortcuts finds them only through Metadata.appintents
+	@scripts/appintents-metadata.sh "$(APP_BUNDLE)"
 	@echo "App bundle created: $(APP_BUNDLE)"
 
 clean:

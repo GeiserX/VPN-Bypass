@@ -276,31 +276,14 @@ class HelperTool: NSObject, HelperProtocol {
                                 isNetwork: isNetwork)
     }
 
-    /// Snapshot of the live table, indexed by destination string, restricted to entries that
-    /// could be "the route we would install": real static-kind entries, not kernel clones and
-    /// not reject/blackhole placeholders. One silent sysctl replaces a `route -n get` fork —
-    /// which also BROADCASTS a routing message to every listener — per destination.
+    /// Snapshot of the live table, indexed by destination string (`RouteKernel.installIndex`):
+    /// entries that could be "the route we would install", not kernel clones and not other
+    /// programs' reject/blackhole placeholders, plus our own VPN Only blocks, which an install
+    /// must replace. One silent sysctl replaces a `route -n get` fork — which also BROADCASTS a
+    /// routing message to every listener — per destination.
     private func kernelSnapshot() -> [String: RouteKernel.KernelRoute] {
         guard let table = RouteKernel.currentTable() else { return [:] }
-        var index: [String: RouteKernel.KernelRoute] = [:]
-        for route in table {
-            guard RouteKernel.isComparableEntry(route.flags) else { continue }
-            index[route.destinationString] = route
-        }
-        return index
-    }
-
-    /// Whether the kernel entry already IS the route we want — same kind, same egress.
-    /// Skipping the write on a match is what makes steady state cost zero kernel events.
-    private func kernelRouteMatches(_ kernel: RouteKernel.KernelRoute, spec: RouteKernel.Spec) -> Bool {
-        guard kernel.isHost == !spec.isNetwork else { return false }
-        switch spec.gateway {
-        case .address(let ip):
-            return kernel.gatewayAddress != nil
-                && RouteKernel.dotted(kernel.gatewayAddress!) == ip
-        case .interfaceIndex(let index):
-            return kernel.gatewayInterfaceIndex == index
-        }
+        return RouteKernel.installIndex(table)
     }
 
     /// The snapshot key a spec's destination corresponds to.
@@ -325,16 +308,22 @@ class HelperTool: NSObject, HelperProtocol {
             return (false, "cannot resolve gateway \(gateway)")
         }
         let key = snapshotKey(destination: destination, isNetwork: isNetwork)
-        if let current = snapshot[key] {
-            if kernelRouteMatches(current, spec: spec) {
-                helperLog.debug("install \(destination, privacy: .public): already correct, no mutation")
-                return (true, nil)
-            }
+        switch RouteKernel.installStep(current: snapshot[key], spec: spec) {
+        case .alreadyCorrect:
+            helperLog.debug("install \(destination, privacy: .public): already correct, no mutation")
+            return (true, nil)
+        case .change:
             // Route exists with a different egress — rewrite in place (one event, no gap).
             if routeSocketPerform(type: RTM_CHANGE, spec: spec) == nil {
                 helperLog.info("install \(destination, privacy: .public): changed in place")
                 return (true, nil)
             }
+        case .replaceBlock:
+            // Our VPN Only block. RTM_CHANGE keeps RTF_REJECT, so it goes, then the add below.
+            let removed = deleteRoute(destination: destination)
+            if !removed.success { return (false, removed.error) }
+        case .add:
+            break
         }
         var err = routeSocketPerform(type: RTM_ADD, spec: spec)
         if err == nil {
@@ -371,6 +360,60 @@ class HelperTool: NSObject, HelperProtocol {
         }
         let message = errnoString(err!)
         helperLog.error("delete \(destination, privacy: .public) failed: \(message, privacy: .public)")
+        return (false, message)
+    }
+
+    // MARK: - VPN Only blocks
+
+    func addBlockRoutesBatch(destinations: [String], withReply reply: @escaping (Int, Int, [String], String?) -> Void) {
+        Self.routeQueue.async {
+            var successCount = 0
+            var failedDestinations: [String] = []
+            var lastError: String?
+
+            for destination in destinations {
+                Self.priorityLane.drain()
+                guard self.allowsInstall(destination) else {
+                    failedDestinations.append(destination)
+                    continue
+                }
+                let result = self.installBlock(destination: destination)
+                if result.success {
+                    successCount += 1
+                } else {
+                    failedDestinations.append(destination)
+                    lastError = result.error
+                }
+            }
+
+            helperLog.info("addBlockRoutesBatch: \(destinations.count, privacy: .public) requested, \(successCount, privacy: .public) blocked, \(failedDestinations.count, privacy: .public) failed")
+            reply(successCount, failedDestinations.count, failedDestinations, lastError)
+        }
+    }
+
+    /// Puts a block in place of our route at the destination. An add that finds a route there
+    /// deletes it and adds again (RTM_CHANGE cannot set RTF_REJECT), unless that route is not
+    /// ours (`RouteKernel.blockMayReplace`): then the block is refused.
+    private func installBlock(destination: String) -> (success: Bool, error: String?) {
+        let spec = RouteKernel.blockSpec(destination: destination)
+        var err = routeSocketPerform(type: RTM_ADD, spec: spec)
+        if err == EEXIST {
+            let key = snapshotKey(destination: destination, isNetwork: spec.isNetwork)
+            // An unreadable table proves nothing about the owner, so it refuses too.
+            guard let table = RouteKernel.currentTable(), RouteKernel.blockMayReplace(table: table, key: key) else {
+                helperLog.info("block \(destination, privacy: .public): refused, its route is not ours or the table is unreadable")
+                return (false, "another program owns the route, or the table could not be read")
+            }
+            let removed = deleteRoute(destination: destination)
+            guard removed.success else { return removed }
+            err = routeSocketPerform(type: RTM_ADD, spec: spec)
+        }
+        if err == nil {
+            helperLog.info("block \(destination, privacy: .public): in place")
+            return (true, nil)
+        }
+        let message = errnoString(err ?? EINVAL)
+        helperLog.error("block \(destination, privacy: .public) failed: \(message, privacy: .public)")
         return (false, message)
     }
 

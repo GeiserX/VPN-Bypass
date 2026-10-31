@@ -120,6 +120,44 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size.width, 680)
     }
 
+    /// VPN Only with the VPN down, as a user without the block setting sees it.
+    func testDropdownInVPNOnlyWithTheVPNDown() throws {
+        seedVPNOnlyDown()
+        let size = try renderDropdown(to: "vpn-only-down.png")
+        XCTAssertEqual(size.width, 680)
+    }
+
+    /// The same with the block setting on: the listed addresses of two entries are blocked,
+    /// with the way out.
+    func testDropdownInVPNOnlyWithBlocks() throws {
+        seedVPNOnlyDown()
+        let saved = rm.blockedRoutes
+        addTeardownBlock { @MainActor in RouteManager.shared.blockedRoutes = saved }
+        rm.config.blockListedWhenVPNDown = true
+        rm.blockedRoutes = addresses(["intranet.example.com": 2, "git.example.com": 1], gateway: "")
+        let size = try renderDropdown(to: "vpn-only-blocked.png")
+        XCTAssertEqual(size.width, 680)
+    }
+
+    /// The General page, where the block setting is.
+    func testSettingsOnGeneral() throws {
+        seedVPNOnlyDown()
+        rm.config.blockListedWhenVPNDown = true
+        let size = try renderSettings(page: .general, to: "general.png")
+        XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
+    }
+
+    private func seedVPNOnlyDown() {
+        seedConnected(mode: .vpnOnly)
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.com", enabled: true),
+                                    DomainEntry(domain: "git.example.com", enabled: true)]
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        rm.activeRoutes = []
+        rm.lastRouteChange = nil
+    }
+
     /// The dropdown after Verify Routes, with the path check's three kinds of result: one address
     /// that went into the tunnel, one that left the right way without an answer on 443, and the
     /// rest the right way and answering.
@@ -204,6 +242,45 @@ final class DocScreenshotsTests: XCTestCase {
         defer { LookupsTab.hoveredForScreenshots = nil }
         let size = try renderSettings(page: .lookups, to: "lookups.png")
         XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
+    }
+
+    /// A change a Shortcuts action made, named in the dropdown footer as `vpnb` changes are,
+    /// and the Logs page that a click on the line opens.
+    func testDropdownWithAShortcutsChange() throws {
+        try renderOutsideChange(via: .shortcuts, dropdown: "shortcuts-change.png", logs: "logs-shortcuts.png")
+    }
+
+    /// The same for a `vpnb` change, which reads as it did before Shortcuts.
+    func testDropdownWithACommandLineChange() throws {
+        try renderOutsideChange(via: .controlSocket, dropdown: "command-line-change.png", logs: "logs-command-line.png")
+    }
+
+    private func renderOutsideChange(via: LogSource, dropdown: String, logs: String) throws {
+        let savedLogs = rm.recentLogs, savedChange = rm.lastOutsideChange
+        addTeardownBlock { @MainActor in
+            RouteManager.shared.recentLogs = savedLogs
+            RouteManager.shared.lastOutsideChange = savedChange
+        }
+        seedBypass()
+        let now = Date()
+        func line(_ ago: TimeInterval, _ level: RouteManager.LogEntry.LogLevel, _ message: String,
+                  _ source: LogSource = .app) -> RouteManager.LogEntry {
+            RouteManager.LogEntry(timestamp: now.addingTimeInterval(-ago), level: level, message: message, source: source)
+        }
+        rm.recentLogs = [
+            line(118, .info, "Control: 'domain.add' applied", via),
+            line(118, .info, "Config saved", via),
+            line(119, .success, "Added domain: example.org", via),
+            line(240, .success, "DNS refresh complete: 2 added, 1 removed"),
+            line(600, .info, "Control: 'service.disable' applied", .controlSocket),
+            line(600, .success, "Disabled service: Spotify", .controlSocket),
+            line(900, .success, "Routes applied: 62"),
+        ]
+        rm.lastOutsideChange = OutsideChange(kind: .addedDomain("example.org"), at: now.addingTimeInterval(-118), via: via)
+        _ = try renderDropdown(to: dropdown)
+        // Run alone: a Settings window an earlier render left open takes the page request.
+        SettingsPageRequest.shared.logFilter = LogFilter(onlySource: via)
+        _ = try renderSettings(page: .logs, to: logs)
     }
 
     /// The add panel a Lookups row's chevron opens. A popover does not draw in an offscreen

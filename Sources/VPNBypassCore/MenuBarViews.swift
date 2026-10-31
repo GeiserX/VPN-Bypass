@@ -424,6 +424,7 @@ struct MenuContent: View {
     
     private var connectedContent: some View {
         VStack(spacing: 12) {
+            BlockedSitesLine()
             // Quick add domain
             if isAddingDomain {
                 QuickAddField(text: $newDomain, feedback: quickAddFeedback, onAdd: addDomainAndClose, onCancel: closeQuickAdd)
@@ -663,6 +664,7 @@ struct MenuContent: View {
     private var disconnectedContent: some View {
         let mode = statusInput.mode
         return VStack(spacing: 16) {
+            BlockedSitesLine()
             Image(systemName: "wifi.slash")
                 .font(.system(size: 36))
                 .foregroundStyle(.secondary)
@@ -769,7 +771,7 @@ struct MenuContent: View {
                               everythingElseDirect: routeManager.everythingElseDirect) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     OutsideChangeLine(change: change, now: context.date) {
-                        SettingsPageRequest.shared.logFilter = LogFilter(onlyControlSocket: true)
+                        SettingsPageRequest.shared.logFilter = change.logFilter
                         openSettings(page: .logs)
                     }
                 }
@@ -844,6 +846,41 @@ struct MenuContent: View {
 
 // MARK: - Last outside change
 
+/// VPN Only's blocks while the VPN is down (or back, before its routes are): how many listed
+/// entries are held back, and the way out. It says "listed addresses" because that is all it
+/// holds: an IPv6 address or a lookup that skips the app still reaches a listed site.
+struct BlockedSitesLine: View {
+    @EnvironmentObject var routeManager: RouteManager
+
+    var body: some View {
+        if !routeManager.blockedRoutes.isEmpty {
+            let count = routeManager.blockedSiteCount
+            HStack(spacing: 8) {
+                Image(systemName: "hand.raised.fill")
+                    .foregroundColor(Theme.warning)
+                    .accessibilityHidden(true)
+                Text(routeManager.isVPNConnected
+                     ? String(localized: "Waiting for VPN routes: listed addresses blocked for \(count) site(s)")
+                     : String(localized: "VPN down: listed addresses blocked for \(count) site(s)"))
+                    .font(.system(size: 11, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                // Only while the VPN is down: with it up, a release sends the sites wherever the
+                // VPN's own routes point, not outside it, and the waiting apply restores them.
+                if !routeManager.isVPNConnected {
+                    Button(String(localized: "Open them directly")) {
+                        routeManager.openBlockedSitesDirectly()
+                    }
+                    .controlSize(.small)
+                    .accessibilityLabel(String(localized: "Open the blocked sites directly, outside the VPN"))
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.warning.opacity(0.12)))
+        }
+    }
+}
+
 /// The footer's "Last change: added en.wikipedia.org via the command line, 2 min ago". A click
 /// opens Logs at the lines that came through the control socket.
 struct OutsideChangeLine: View {
@@ -873,7 +910,7 @@ struct OutsideChangeLine: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(OutsideChange.help)
+        .help(change.logsHelp)
     }
 }
 

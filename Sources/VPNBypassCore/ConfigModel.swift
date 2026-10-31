@@ -105,6 +105,9 @@ struct Config: Codable {
     var proxyConfig: ProxyConfig = ProxyConfig()  // SOCKS5 proxy for aggressive bypass mode
     var routingMode: RoutingMode = .bypass  // Bypass = domains bypass VPN, VPN Only = only listed domains use VPN
     var inverseDomains: [DomainEntry] = []  // Domains that should use VPN in VPN Only mode
+    /// VPN Only: while the VPN is down, hold the listed addresses back with blocks (reject
+    /// routes) instead of letting them go out over the normal connection. Off by default.
+    var blockListedWhenVPNDown: Bool = false
 
     // Multi-route model (P0 / VPN-Bypass-3sc.7). Additive + dormant: while
     // schemaVersion == 1 the bypass/vpnOnly engine above stays authoritative;
@@ -151,6 +154,7 @@ struct Config: Codable {
         proxyConfig = try container.decodeIfPresent(ProxyConfig.self, forKey: .proxyConfig) ?? ProxyConfig()
         routingMode = try container.decodeIfPresent(RoutingMode.self, forKey: .routingMode) ?? .bypass
         inverseDomains = try container.decodeIfPresent([DomainEntry].self, forKey: .inverseDomains) ?? []
+        blockListedWhenVPNDown = try container.decodeIfPresent(Bool.self, forKey: .blockListedWhenVPNDown) ?? false
 
         routes = try container.decodeIfPresent([Route].self, forKey: .routes) ?? []
         rules = try container.decodeIfPresent([Rule].self, forKey: .rules) ?? []

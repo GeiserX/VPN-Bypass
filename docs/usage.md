@@ -88,6 +88,8 @@ Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) go out a
 
 General: settings only. Launch at login, auto-apply on connect, `/etc/hosts` management, route verification, the DNS refresh schedule, fallback DNS, notification preferences, the SOCKS5 proxy, and import/export.
 
+Block Listed Sites When the VPN Drops, under Behavior, is off by default and acts in VPN Only mode. Without it, a VPN drop takes the routes into the VPN away and the listed sites load over your normal connection. With it on, the helper puts a block (a reject route) on each listed address the app resolved, so a connection to it fails at once, and the dropdown says "VPN down: listed addresses blocked for N site(s)" with Open them directly, which takes the blocks away until the next drop. Disabling or removing an entry takes its blocks away too. When the VPN returns, the apply that puts the routes back replaces the blocks; while that apply waits for the tunnel to settle the line reads "Waiting for VPN routes". Leaving VPN Only, turning the setting off, removing all routes and quitting take the blocks away, and a block left by a crash goes at the next start. It blocks the IPv4 addresses the app resolved and the IPv4 ranges on the list, nothing else: an IPv6 address or a lookup that skips the system resolver (browser DoH) still reaches a listed site, and a launch with the VPN already down blocks nothing, since there was no drop.
+
 Logs: the last 200 log entries, newest first. The segmented control above the list shows All, Warnings (warnings and errors) or Errors, and the search field keeps the entries whose text contains what you type, ignoring case and accents, with the match marked. A line above the list says how many entries match, for example "3 of 200 entries". Copy copies only the entries shown. Clear removes every entry, including the ones the filter hides. A line written while the app served a request on the control socket, from `vpnb` or an MCP server, ends in "via the command line", and so do the lines of the work that request started. The dropdown's "Last change" line opens the page with a "From the command line" token that shows only those lines; click the token to show every line again.
 
 Info: version and helper status.
@@ -203,3 +205,18 @@ example.org is not on your list, so it follows the VPN. The check saw it leave t
 With `--json`, `result.why` holds `match` (`route`, `wildcard`, `rule`, `defaultRoute`, `listed`, `none`, `unresolved`), `entry`, `expected` (`physical` or `tunnel:<interface>`, absent for a proxy or exit node, which the routing table does not decide), `checks` (`interface`, `sourceAddress`, `answer`, `latencyMs`, and `verdict`, left out when the control is broken), `control` (the same fields without `verdict`, absent when no control ran), `verdict` (`ok`, `noAnswer`, `wrongWay`, `unknown`, `checkBroken`, `notChecked`, `noVPN`, `unresolved`), the `summary` sentence in the app's language, and `canAdd` when nothing lists it.
 
 The [MCP server](mcp-server.md) uses the same socket, so an AI agent can do all of this too.
+
+## Shortcuts actions
+
+The Shortcuts app lists four VPN Bypass actions:
+
+| Action | Does what `vpnb` does with |
+|---|---|
+| Set Routing Mode | `vpnb mode mode=<bypass\|vpnOnly\|custom>` |
+| Add Domain | `vpnb domain.add domain=<name>`, with `list=vpnOnly` for the VPN Only list |
+| Turn Service On or Off | `vpnb service.enable id=<id>` or `service.disable`, picking the service by name |
+| Get Status | `vpnb status`: returns a line such as "Bypass mode. Routed addresses: 62" |
+
+Each action runs in the app, through the same code as `vpnb`, so it gets the same checks and the same errors: a refused add stops the shortcut with the reason `vpnb` prints. A change shows in the dropdown footer as "Last change: … via Shortcuts", and its log lines carry "via Shortcuts"; a click on the footer line opens Logs showing only those lines.
+
+Shortcuts' own automations (a Focus turning on, a time of day, joining a Wi-Fi network) can run these actions; which of those triggers a Mac runs depends on the macOS version. Pause and Resume actions come with Pause.

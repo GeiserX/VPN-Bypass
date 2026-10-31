@@ -96,7 +96,7 @@ planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`, with kernel routes kept as
 | **DNS Leak Protection** | Ensure DNS queries don't leak through VPN |
 | **IPv6 Leak Protection** | Block IPv6 to prevent leaks |
 | **Connection Profiles** | Different configs for "Home", "Work", "Travel" |
-| **Scheduled Rules** | Auto-enable/disable bypasses based on time |
+| ~~**Scheduled Rules**~~ | ✅ Done in 6.0 through Shortcuts actions (Set Routing Mode, Add Domain, Turn Service On or Off, Get Status), which Shortcuts automations run at a time, on a Focus or on a network |
 | **Local DNS Proxy** | Run local DNS that uses ISP DNS for bypass domains |
 
 ### Phase 3: Power Features (v3.0+)
