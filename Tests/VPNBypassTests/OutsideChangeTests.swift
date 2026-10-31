@@ -174,21 +174,21 @@ final class OutsideChangeTests: XCTestCase {
     func testTheSocketFilterShowsOnlySocketLines() {
         let log = [entry("Config saved", .controlSocket), entry("Added domain: en.wikipedia.org", .controlSocket),
                    entry("DNS refresh complete: 2 added, 1 removed", .app)]
-        let filter = LogFilter(onlyControlSocket: true)
+        let filter = LogFilter(onlySource: .controlSocket)
         XCTAssertTrue(filter.isActive)
         XCTAssertEqual(filter.apply(log).map(\.message), ["Config saved", "Added domain: en.wikipedia.org"])
-        XCTAssertEqual(LogFilter(query: "domain", onlyControlSocket: true).apply(log).count, 1)
+        XCTAssertEqual(LogFilter(query: "domain", onlySource: .controlSocket).apply(log).count, 1)
         XCTAssertEqual(LogFilter().apply(log).count, 3)
         XCTAssertEqual(filter.countLine(shown: 2, total: 3), "2 of 3 entries")
     }
 
     func testTheSocketFilterSaysWhenNothingCameThrough() {
-        XCTAssertEqual(LogFilter(onlyControlSocket: true).emptyLine(shown: 0), "Nothing came through the command line.")
-        XCTAssertEqual(LogFilter(level: .errors, onlyControlSocket: true).emptyLine(shown: 0),
+        XCTAssertEqual(LogFilter(onlySource: .controlSocket).emptyLine(shown: 0), "Nothing came through the command line.")
+        XCTAssertEqual(LogFilter(level: .errors, onlySource: .controlSocket).emptyLine(shown: 0),
                        "Nothing from the command line matches this filter.")
-        XCTAssertEqual(LogFilter(query: "zoom", onlyControlSocket: true).emptyLine(shown: 0),
+        XCTAssertEqual(LogFilter(query: "zoom", onlySource: .controlSocket).emptyLine(shown: 0),
                        "Nothing from the command line matches this filter.")
-        XCTAssertNil(LogFilter(onlyControlSocket: true).emptyLine(shown: 1))
+        XCTAssertNil(LogFilter(onlySource: .controlSocket).emptyLine(shown: 1))
     }
 
     // MARK: Spanish and French
@@ -219,7 +219,7 @@ final class OutsideChangeTests: XCTestCase {
             pairs.append((OutsideChange.help(in: en), OutsideChange.help(in: bundle)))
             pairs.append((LogFilter.sourceTokenTitle(in: en), LogFilter.sourceTokenTitle(in: bundle)))
             pairs.append((LogFilter.sourceTokenHelp(in: en), LogFilter.sourceTokenHelp(in: bundle)))
-            for f in [LogFilter(onlyControlSocket: true), LogFilter(level: .errors, onlyControlSocket: true)] {
+            for f in [LogFilter(onlySource: .controlSocket), LogFilter(level: .errors, onlySource: .controlSocket)] {
                 pairs.append((f.emptyLine(shown: 0, in: en) ?? "", f.emptyLine(shown: 0, in: bundle) ?? ""))
             }
             for (english, translated) in pairs {

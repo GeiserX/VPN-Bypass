@@ -5921,7 +5921,7 @@ final class RouteManager: ObservableObject {
     private var logFileHandle: FileHandle?
 
     func log(_ level: LogEntry.LogLevel, _ message: String) {
-        let source: LogSource = ControlOrigin.isControlSocket ? .controlSocket : .app
+        let source: LogSource = ControlOrigin.logSource
         let entry = LogEntry(timestamp: Date(), level: level, message: message, source: source)
         recentLogs.insert(entry, at: 0)
         if recentLogs.count > 200 {

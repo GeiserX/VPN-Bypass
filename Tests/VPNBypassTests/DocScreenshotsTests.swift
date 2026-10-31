@@ -203,6 +203,45 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
     }
 
+    /// A change a Shortcuts action made, named in the dropdown footer as `vpnb` changes are,
+    /// and the Logs page that a click on the line opens.
+    func testDropdownWithAShortcutsChange() throws {
+        try renderOutsideChange(via: .shortcuts, dropdown: "shortcuts-change.png", logs: "logs-shortcuts.png")
+    }
+
+    /// The same for a `vpnb` change, which reads as it did before Shortcuts.
+    func testDropdownWithACommandLineChange() throws {
+        try renderOutsideChange(via: .controlSocket, dropdown: "command-line-change.png", logs: "logs-command-line.png")
+    }
+
+    private func renderOutsideChange(via: LogSource, dropdown: String, logs: String) throws {
+        let savedLogs = rm.recentLogs, savedChange = rm.lastOutsideChange
+        addTeardownBlock { @MainActor in
+            RouteManager.shared.recentLogs = savedLogs
+            RouteManager.shared.lastOutsideChange = savedChange
+        }
+        seedBypass()
+        let now = Date()
+        func line(_ ago: TimeInterval, _ level: RouteManager.LogEntry.LogLevel, _ message: String,
+                  _ source: LogSource = .app) -> RouteManager.LogEntry {
+            RouteManager.LogEntry(timestamp: now.addingTimeInterval(-ago), level: level, message: message, source: source)
+        }
+        rm.recentLogs = [
+            line(118, .info, "Control: 'domain.add' applied", via),
+            line(118, .info, "Config saved", via),
+            line(119, .success, "Added domain: example.org", via),
+            line(240, .success, "DNS refresh complete: 2 added, 1 removed"),
+            line(600, .info, "Control: 'service.disable' applied", .controlSocket),
+            line(600, .success, "Disabled service: Spotify", .controlSocket),
+            line(900, .success, "Routes applied: 62"),
+        ]
+        rm.lastOutsideChange = OutsideChange(kind: .addedDomain("example.org"), at: now.addingTimeInterval(-118), via: via)
+        _ = try renderDropdown(to: dropdown)
+        // Run alone: a Settings window an earlier render left open takes the page request.
+        SettingsPageRequest.shared.logFilter = LogFilter(onlySource: via)
+        _ = try renderSettings(page: .logs, to: logs)
+    }
+
     /// The add panel a Lookups row's chevron opens. A popover does not draw in an offscreen
     /// window, so the panel is drawn on its own, on the popover's dark ground, with a wildcard
     /// and a service chosen so both halves show what they do.

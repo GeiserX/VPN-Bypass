@@ -1,0 +1,100 @@
+// ShortcutActions.swift
+// What the Shortcuts actions (ShortcutIntents.swift) do, kept apart from the App Intents types
+// so it is unit-tested. Each action is one control-socket request, run through
+// `ControlSurface.handle`, the entry point `vpnb` and the MCP server use. So a Shortcut gets the
+// same checks, the same save and re-apply, the same log lines and the same footer line as
+// `vpnb`, marked as coming from Shortcuts instead of the command line.
+//
+// Pause and Resume are not here yet: the app has no pause to call. They come with Pause
+// (step 12 of docs/design/APP-REWORK-PROPOSALS.md).
+
+import Foundation
+
+/// One thing a Shortcut can ask the app to do.
+enum ShortcutAction: Equatable {
+    case setMode(RoutingMode)
+    case addDomain(String, list: DomainList)
+    case setService(id: String, on: Bool)
+    case getStatus
+
+    /// The control-socket request that does it.
+    var request: ControlRequest {
+        switch self {
+        case .setMode(let mode):
+            return ControlRequest(cmd: "mode", args: ["mode": mode.rawValue])
+        case .addDomain(let domain, let list):
+            return ControlRequest(cmd: "domain.add", args: ["domain": domain, "list": list.rawValue])
+        case .setService(let id, let on):
+            return ControlRequest(cmd: on ? "service.enable" : "service.disable", args: ["id": id])
+        case .getStatus:
+            return ControlRequest(cmd: "status")
+        }
+    }
+}
+
+/// A refused action. Shortcuts shows the message, which is the one `vpnb` prints.
+struct ShortcutActionError: Error, Equatable, CustomLocalizedStringResourceConvertible {
+    let code: String
+    let message: String
+
+    var localizedStringResource: LocalizedStringResource { "\(message)" }
+}
+
+enum ShortcutActions {
+
+    /// Runs one action through the control surface, marked as coming from Shortcuts. Throws
+    /// what the socket would answer with `ok: false`.
+    @MainActor
+    static func run(_ action: ShortcutAction) async throws -> ControlResponse {
+        let response = await ControlOrigin.$channel.withValue(.shortcuts) {
+            await ControlSurface.handle(action.request)
+        }
+        guard response.ok else {
+            throw ShortcutActionError(code: response.error?.code ?? "unknown",
+                                      message: response.error?.message ?? "The action failed.")
+        }
+        return response
+    }
+
+    // MARK: - What the action says back
+
+    static func modeDone(_ mode: RoutingMode, in bundle: Bundle = .main) -> String {
+        let name = DropdownModePicker.label(mode, in: bundle)
+        return String(localized: "The mode is now \(name).", bundle: bundle)
+    }
+
+    static func domainAdded(_ domain: String, list: DomainList, in bundle: Bundle = .main) -> String {
+        switch list {
+        case .bypass: return String(localized: "Added \(domain) to the Bypass list.", bundle: bundle)
+        case .vpnOnly: return String(localized: "Added \(domain) to the VPN Only list.", bundle: bundle)
+        }
+    }
+
+    static func serviceDone(_ name: String, on: Bool, in bundle: Bundle = .main) -> String {
+        on ? String(localized: "\(name) is on.", bundle: bundle)
+           : String(localized: "\(name) is off.", bundle: bundle)
+    }
+
+    /// Get Status's answer: the mode, then whether anything is routed and, when not, the one
+    /// reason, in the order the dropdown checks them. The kill switch comes last because it
+    /// only matters once routes are in.
+    static func statusLine(mode: RoutingMode, runtime: RuntimeStatus?, in bundle: Bundle = .main) -> String {
+        let name = DropdownModePicker.label(mode, in: bundle)
+        guard let runtime else {
+            return String(localized: "\(name) mode.", bundle: bundle)
+        }
+        if !runtime.helperReady {
+            return String(localized: "\(name) mode. The helper is not ready, so nothing is routed.", bundle: bundle)
+        }
+        if !runtime.vpnConnected {
+            return String(localized: "\(name) mode. The VPN is not connected.", bundle: bundle)
+        }
+        if runtime.enforcedRouteCount == 0 {
+            return String(localized: "\(name) mode. Nothing is routed yet.", bundle: bundle)
+        }
+        if runtime.killSwitch != nil {
+            return String(localized: "\(name) mode. The VPN's kill switch sends all traffic through it, so nothing skips it.", bundle: bundle)
+        }
+        return String(localized: "\(name) mode. Routed addresses: \(runtime.enforcedRouteCount)", bundle: bundle)
+    }
+}
