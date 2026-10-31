@@ -59,6 +59,14 @@ final class SharedAddressTests: XCTestCase {
                        ["example.com": "Fastly", "*.example.org": "Cloudflare"])
     }
 
+    /// A name on two CDNs names the same one whichever route came first.
+    func testANameOnTwoCDNsNamesTheSameOneInAnyOrder() {
+        let routes = [(source: "example.com", destination: "151.101.1.1"),
+                      (source: "example.com", destination: "104.17.2.3")]
+        XCTAssertEqual(SharedAddress.cdnBySource(routes, in: sample), ["example.com": "Cloudflare"])
+        XCTAssertEqual(SharedAddress.cdnBySource(routes.reversed(), in: sample), ["example.com": "Cloudflare"])
+    }
+
     // MARK: The bundled list
 
     /// The script writes the list; every line must parse, the list must be sorted with no
@@ -146,6 +154,10 @@ final class SharedAddressTests: XCTestCase {
                        "Dirección de CDN compartida (Cloudflare): los demás sitios en ella también evitan la VPN")
         XCTAssertEqual(SharedAddress.detail(cdn: "Fastly", isInverse: true, bundle: fr),
                        "Adresse CDN partagée (Fastly) : les autres sites qui y sont hébergés passent aussi par le VPN")
+        XCTAssertEqual(SharedAddress.detail(cdn: "Fastly", isInverse: true, bundle: es),
+                       "Dirección de CDN compartida (Fastly): los demás sitios en ella también usan la VPN")
+        XCTAssertEqual(SharedAddress.detail(cdn: "Cloudflare", isInverse: false, bundle: fr),
+                       "Adresse CDN partagée (Cloudflare) : les autres sites qui y sont hébergés contournent aussi le VPN")
     }
 
     private static func lproj(_ language: String) -> Bundle? {

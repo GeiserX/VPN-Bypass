@@ -46,12 +46,15 @@ enum SharedAddress {
     }
 
     /// For each route source (a listed name, or `*.suffix` for a wildcard's learned routes) whose
-    /// routes reach a CDN address, that CDN's name; the first such route decides.
+    /// routes reach a CDN address, that CDN's name. A name whose routes reach two CDNs gets the
+    /// first by name, so the line does not change with the order the routes were added in.
     static func cdnBySource(_ routes: [(source: String, destination: String)],
                             in ranges: [Range] = ranges) -> [String: String] {
         var out: [String: String] = [:]
-        for route in routes where out[route.source] == nil {
-            if let cdn = cdn(for: route.destination, in: ranges) { out[route.source] = cdn }
+        for route in routes {
+            guard let cdn = cdn(for: route.destination, in: ranges) else { continue }
+            if let known = out[route.source], known <= cdn { continue }
+            out[route.source] = cdn
         }
         return out
     }
