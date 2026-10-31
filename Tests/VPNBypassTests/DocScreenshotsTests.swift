@@ -495,6 +495,102 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderSettings(page: .general, to: "rework-b2-general.png")
     }
 
+    // MARK: - The dropdown's status block and Status > Problems (rework step 3)
+
+    func testStatusBlockOn() throws {
+        seedBypass()
+        _ = try renderDropdown(to: "dropdown-on.png")
+    }
+
+    func testStatusBlockHelperDown() throws {
+        seedBypass()
+        HelperManager.shared.helperState = .missing
+        _ = try renderDropdown(to: "dropdown-helper-down.png")
+    }
+
+    func testStatusBlockPartlyRouted() throws {
+        seedPartlyRouted()
+        _ = try renderDropdown(to: "dropdown-partly.png")
+    }
+
+    func testStatusBlockDisconnected() throws {
+        seedBypass()
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        _ = try renderDropdown(to: "dropdown-disconnected.png")
+    }
+
+    func testStatusBlockStarting() throws {
+        seedConnected(mode: .bypass)
+        rm.activeRoutes = []
+        rm.lastRouteChange = nil
+        rm.config.domains = [DomainEntry(domain: "en.wikipedia.org", enabled: true)]
+        rm.isLoading = true
+        rm.lastUpdate = nil
+        _ = try renderDropdown(to: "dropdown-starting.png")
+    }
+
+    func testStatusBlockVPNOnly() throws {
+        seedConnected(mode: .vpnOnly)
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.com", enabled: true),
+                                    DomainEntry(domain: "git.example.com", enabled: true)]
+        var routes = ClassicRouteCompiler.bypassAllCatchAlls.map {
+            route($0, via: "192.168.1.1", for: ClassicRouteCompiler.catchAllSource)
+        }
+        routes += addresses(["intranet.example.com": 2, "git.example.com": 1], gateway: "10.0.0.1")
+        rm.activeRoutes = routes
+        rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-19), routeCount: 3, failedCount: 0)
+        _ = try renderDropdown(to: "dropdown-vpn-only.png")
+    }
+
+    /// Custom mode with no VPN and a removal that left an address behind: "Still routed".
+    func testStatusBlockDisconnectedCustom() throws {
+        seedCustom()
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        rm.activeRoutes = addresses(["Telegram": 1], gateway: "192.168.1.1")
+        rm.lastRouteChange = .init(kind: .removedAll, at: Date().addingTimeInterval(-40), routeCount: 1, failedCount: 1)
+        _ = try renderDropdown(to: "dropdown-disconnected-custom.png")
+    }
+
+    /// Where "Show" lands: the seven failures with their entry and reason, Zoom with no address,
+    /// and the last route check, which left the dropdown.
+    func testStatusPageProblems() throws {
+        seedPartlyRouted()
+        let plan = RouteCheck.plan(routes: rm.activeRoutes.map { .init(destination: $0.destination, source: $0.source) },
+                                   vpnOnly: false, isSingleAddress: { !$0.contains("/") })
+        let results = plan.destinations.enumerated().map { index, address -> RouteVerificationResult in
+            let probe = PathCheck.Probe(address: address, routeInterface: "en0", sourceAddress: "192.168.1.20",
+                                        sourceInterface: "en0", answer: index == 1 ? .noAnswer : .connected,
+                                        latencyMs: Double(18 + index * 7))
+            return PathCheck.verificationResult(probe, expected: .physical, control: .passed)
+        }
+        rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: Date(), at: Date().addingTimeInterval(-51))
+        defer { rm.clearRouteCheck() }
+        _ = try renderSettings(page: .status, to: "status-problems.png")
+    }
+
+    /// Bypass with Zoom on and no address for it, and an apply 64 s ago with seven failures:
+    /// two names that did not resolve and five addresses the helper refused.
+    private func seedPartlyRouted() {
+        seedBypass()
+        if let i = rm.config.services.firstIndex(where: { $0.id == "zoom" }) {
+            rm.config.services[i].enabled = true
+        } else {
+            rm.config.services.append(ServiceEntry(id: "zoom", name: "Zoom", enabled: true,
+                                                   domains: ["zoom.us"], ipRanges: [], isCustom: false))
+        }
+        let refused = ["192.0.2.240", "192.0.2.241", "192.0.2.242", "198.51.100.17", "198.51.100.18"]
+        rm.lastRouteChange = .init(
+            kind: .applied, at: Date().addingTimeInterval(-64), routeCount: 62, failedCount: 7,
+            failures: RouteManager.RouteFailure.unresolved([("zoom.us", "Zoom"), ("zoomgov.com", "Zoom")])
+                + RouteManager.RouteFailure.batch(.notRouted, failed: refused,
+                                                  sources: refused.map { ($0, $0.hasPrefix("192") ? "Telegram" : "WhatsApp") },
+                                                  error: "File exists"))
+    }
+
     /// Close to a popover's ground in dark mode.
     private static let popoverGround = Color(red: 40 / 255, green: 40 / 255, blue: 42 / 255)
 

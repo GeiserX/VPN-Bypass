@@ -27,7 +27,7 @@ final class LocalizationCoverageTests: XCTestCase {
     func testTheHelperRepairNotificationsAreTranslated() throws {
         for language in ["es", "fr"] {
             let bundle = try lproj(language)
-            for key in helperRepair + ["Helper not running — nothing is being routed", "Fix…",
+            for key in helperRepair + ["Fix…",
                                        "The privileged helper isn't ready, so no routes could be applied."] {
                 XCTAssertNotEqual(text(key, bundle), key, "\(language) leaves \"\(key)\" in English")
             }

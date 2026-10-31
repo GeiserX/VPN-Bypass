@@ -92,33 +92,24 @@ final class FirstRunSetupTests: XCTestCase {
 
     func testAFreshInstallIsNotSetUpNotNoRoutes() {
         let s = DropdownStatus.make(input(), now: now)
-        XCTAssertEqual(s.pill, "NOT SET UP")
+        XCTAssertEqual(s.chip, .off)
         XCTAssertEqual(s.tone, .idle, "grey, not the amber of a fault")
-        XCTAssertEqual(s.headerTone, .ok, "the VPN itself is connected and fine")
         XCTAssertEqual(s.headline, "WireGuard connected")
         XCTAssertEqual(s.sentence, "Nothing skips the VPN yet.")
-        XCTAssertEqual(s.facts, [], "no Routes or DNS facts about routes nobody asked for")
+        XCTAssertEqual(s.line3, .blank, "no numbers about routes nobody asked for")
     }
 
     func testOnceSomethingIsOnTheNormalStatesReturn() {
-        XCTAssertEqual(DropdownStatus.make(input { $0.nothingConfigured = false; $0.enabledServices = 1 }, now: now).pill,
-                       "NOTHING ROUTED", "a service is on but its routes are not in yet")
-        XCTAssertEqual(DropdownStatus.make(input { $0.nothingConfigured = false; $0.enabledServices = 1; $0.installedRoutes = 6 }, now: now).pill,
-                       "ON")
+        XCTAssertEqual(DropdownStatus.make(input { $0.nothingConfigured = false; $0.enabledServices = 1 }, now: now).chip,
+                       .notRouting, "a service is on but its routes are not in yet")
+        XCTAssertEqual(DropdownStatus.make(input { $0.nothingConfigured = false; $0.enabledServices = 1; $0.installedRoutes = 6 }, now: now).chip,
+                       .on)
     }
 
     /// No VPN and a dead helper are bigger facts than an empty list.
     func testNotSetUpNeverHidesAProblem() {
-        XCTAssertEqual(DropdownStatus.make(input { $0.isVPNConnected = false }, now: now).pill, "OFF")
-        XCTAssertEqual(DropdownStatus.make(input { $0.helperReady = false }, now: now).pill, "NOT ENFORCING")
-        XCTAssertEqual(DropdownStatus.make(input { $0.isVPNConnected = false }, now: now).headerTone, .bad)
-    }
-
-    func testOtherTonesKeepTheirHeaderColour() {
-        for tone: DropdownStatus.Tone in [.ok, .warn, .bad] {
-            let s = DropdownStatus(pill: "", tone: tone, headline: "", sentence: "", note: nil, facts: [])
-            XCTAssertEqual(s.headerTone, tone)
-        }
+        XCTAssertEqual(DropdownStatus.make(input { $0.isVPNConnected = false }, now: now).chip, .off)
+        XCTAssertEqual(DropdownStatus.make(input { $0.helperReady = false }, now: now).chip, .notRouting)
     }
 
     // MARK: Translations
@@ -129,7 +120,7 @@ final class FirstRunSetupTests: XCTestCase {
             guard dir.pathComponents.count > 1 else { throw XCTSkip("repo root not found from \(#filePath)") }
             dir = dir.deletingLastPathComponent()
         }
-        let keys = ["NOT SET UP", "What should skip the VPN?", "Switched-on services use your normal connection.",
+        let keys = ["What should skip the VPN?", "Switched-on services use your normal connection.",
                     "All %lld services…", "Add a site, like example.com", "Add Site",
                     "Mode: Bypass. Want only a few sites on the VPN and everything else direct?",
                     "Use VPN Only instead…", "Nothing skips the VPN yet.", "1 domain", "%lld domains"]

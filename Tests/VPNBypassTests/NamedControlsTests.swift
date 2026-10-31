@@ -208,23 +208,23 @@ final class NamedControlsTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(switches, 6, "the scan found too few switches; the style moved")
     }
 
-    /// The dropdown puts each shortcut on the visible button and lists it in the "…" menu.
+    /// The dropdown puts each shortcut on a control that is always there, since a closed menu
+    /// answers no key: ⌘R on Refresh, ⌘, on the gear, ⌘Q on a hidden button. The "…" menu does
+    /// not repeat Refresh or Settings, which the footer shows; it lists ⌘Q on its Quit item.
     func testTheDropdownCarriesEveryShortcut() throws {
         let menu = try XCTUnwrap(try sources().first { $0.name == "MenuBarViews.swift" }?.text)
-        XCTAssertEqual(menu.components(separatedBy: ".keyboardShortcut(.refreshRoutes)").count - 1, 2,
-                       "Refresh Routes and its menu item")
-        // Both Refresh Routes controls go through refresh(), which drops a held key's repeats.
+        XCTAssertEqual(menu.components(separatedBy: ".keyboardShortcut(.refreshRoutes)").count - 1, 1,
+                       "Refresh in the footer")
         XCTAssertEqual(menu.components(separatedBy: "routeManager.refreshRoutes()").count - 1, 1,
                        "Refresh Routes runs from one place")
         XCTAssertTrue(menu.contains("""
                 guard !DropdownShortcut.isKeyRepeat(NSApp.currentEvent) else { return }
                 routeManager.refreshRoutes()
         """), "refresh() drops a held ⌘R's repeats")
-        XCTAssertEqual(menu.components(separatedBy: "refresh()\n").count - 1 + menu.components(separatedBy: "{ refresh() }").count - 1, 2,
-                       "the button and the menu item both call refresh()")
-        for shortcut in ["settings", "quit"] {
-            XCTAssertTrue(menu.contains("shortcut: .\(shortcut))"), "the footer button for \(shortcut)")
-            XCTAssertTrue(menu.contains(".keyboardShortcut(.\(shortcut))"), "the menu item for \(shortcut)")
-        }
+        XCTAssertTrue(menu.contains("shortcut: .settings)"), "the gear carries ⌘,")
+        XCTAssertFalse(menu.contains(".keyboardShortcut(.settings)"), "the … menu does not repeat Settings")
+        XCTAssertEqual(menu.components(separatedBy: ".keyboardShortcut(.quit)").count - 1, 2,
+                       "the hidden ⌘Q button and the menu's Quit item")
+        XCTAssertFalse(menu.contains("systemImage: \"power\""), "the power button is gone")
     }
 }

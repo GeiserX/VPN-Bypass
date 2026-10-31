@@ -339,14 +339,15 @@ final class KillSwitchStatusTests: XCTestCase {
     }
 
     func testTheKillSwitchReplacesOn() {
-        XCTAssertEqual(DropdownStatus.make(input(), now: now).pill, "ON", "control: the same state without it is ON")
+        XCTAssertEqual(DropdownStatus.make(input(), now: now).chip, .on, "control: the same state without it is ON")
         let s = DropdownStatus.make(input { $0.killSwitch = self.proton }, now: now)
-        XCTAssertEqual(s.pill, "NO EFFECT")
+        XCTAssertEqual(s.chip, .notRouting)
         XCTAssertEqual(s.tone, .warn)
         XCTAssertEqual(s.headline, "Proton VPN connected")
         XCTAssertEqual(s.sentence, "Proton VPN's kill switch sends all traffic through the VPN. Sites set to skip it still go through it.")
         XCTAssertEqual(s.note, "Turn off its kill switch, or use its own split tunnelling.")
-        XCTAssertEqual(s.facts, [], "no route count that reads as success")
+        XCTAssertEqual(s.line3, .init(text: "Turn off its kill switch, or use its own split tunnelling.", isProblem: true),
+                       "no route count that reads as success")
     }
 
     func testTheKillSwitchReplacesWorking() {
@@ -361,7 +362,7 @@ final class KillSwitchStatusTests: XCTestCase {
         let pending = RouteManager.PendingReconnectApply(reason: .settling, connectedAt: now.addingTimeInterval(-5),
                                                          appliesAt: now.addingTimeInterval(10))
         let s = DropdownStatus.make(input { $0.pending = pending; $0.killSwitch = self.proton }, now: now)
-        XCTAssertEqual(s.pill, "NO EFFECT")
+        XCTAssertEqual(s.chip, .notRouting)
     }
 
     func testAllowLANSaysLocalAddressesStillSkipIt() {
@@ -410,8 +411,8 @@ final class KillSwitchStatusTests: XCTestCase {
     }
 
     func testNoVPNAndHelperDownStillComeFirst() {
-        XCTAssertEqual(DropdownStatus.make(input { $0.isVPNConnected = false; $0.killSwitch = self.proton }, now: now).pill, "OFF")
-        XCTAssertEqual(DropdownStatus.make(input { $0.helperReady = false; $0.killSwitch = self.proton }, now: now).pill, "NOT ENFORCING")
+        XCTAssertEqual(DropdownStatus.make(input { $0.isVPNConnected = false; $0.killSwitch = self.proton }, now: now).chip, .off)
+        XCTAssertEqual(DropdownStatus.make(input { $0.helperReady = false; $0.killSwitch = self.proton }, now: now).chip, .notRouting)
     }
 
     func testSpanishAndFrench() throws {

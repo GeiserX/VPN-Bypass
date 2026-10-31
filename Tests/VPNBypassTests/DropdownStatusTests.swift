@@ -34,37 +34,20 @@ final class DropdownStatusTests: XCTestCase {
 
     func testNormalBypassMatchesTheMockup() {
         let s = status()
-        XCTAssertEqual(s.pill, "ON")
+        XCTAssertEqual(s.chip, .on)
         XCTAssertEqual(s.tone, .ok)
         XCTAssertEqual(s.headline, "WireGuard connected")
         XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN.")
         XCTAssertNil(s.note)
-        XCTAssertEqual(s.facts, [
-            .init(label: "Addresses", value: "62 routed 23 s ago, none failed"),
-            .init(label: "DNS", value: "checked 12 min ago, next in 18 min"),
-        ])
+        XCTAssertEqual(s.line3, .init(text: "62 addresses · applied 23 s ago · DNS again in 18 min"))
     }
 
-    func testFailedRoutesShowInTheFacts() {
-        let s = status { $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-5), routeCount: 60, failedCount: 2) }
-        XCTAssertEqual(s.facts.first { $0.label == "Addresses" }?.value, "60 routed 5 s ago, 2 failed")
-    }
-
-    /// The Mode control sits right under the header with all three modes, so no state repeats
-    /// the mode as a fact.
-    func testNoStateListsTheModeAsAFact() {
-        let states: [(String, (inout DropdownStatus.Input) -> Void)] = [
-            ("on", { _ in }),
-            ("no routes", { $0.installedRoutes = 0 }),
-            ("no VPN", { $0.isVPNConnected = false }),
-            ("helper down", { $0.helperReady = false }),
-        ]
-        for mode in [DropdownCopy.Mode.bypass, .vpnOnly, .custom] {
-            for (name, edit) in states {
-                let s = status { $0.mode = mode; edit(&$0) }
-                XCTAssertFalse(s.facts.contains { $0.label == "Mode" }, "\(name), \(mode)")
-            }
+    func testFailedRoutesShowOnLineThree() {
+        let s = status {
+            $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-5), routeCount: 60, failedCount: 2)
+            $0.installedRoutes = 60
         }
+        XCTAssertEqual(s.line3, .init(text: "60 addresses, 2 failed · 5 s ago", isProblem: true, action: .show))
     }
 
     func testUnknownVPNNameReadsVPN() {
@@ -79,7 +62,7 @@ final class DropdownStatusTests: XCTestCase {
             $0.pending = .init(reason: .settling, connectedAt: self.now.addingTimeInterval(-12),
                                appliesAt: self.now.addingTimeInterval(38))
         }
-        XCTAssertEqual(s.pill, "WAITING")
+        XCTAssertEqual(s.chip, .waiting)
         XCTAssertEqual(s.tone, .warn)
         XCTAssertEqual(s.headline, "WireGuard reconnected 12 s ago")
         XCTAssertEqual(s.sentence, "Waiting for the tunnel to hold before re-applying routes, in 38 s.")
@@ -117,7 +100,7 @@ final class DropdownStatusTests: XCTestCase {
             $0.pending = .init(reason: .heldBack(strikes: 3), connectedAt: self.now,
                                appliesAt: self.now.addingTimeInterval(5 * 60 + 30))
         }
-        XCTAssertEqual(s.pill, "HELD BACK")
+        XCTAssertEqual(s.chip, .waiting)
         XCTAssertEqual(s.tone, .warn)
         XCTAssertEqual(s.headline, "WireGuard keeps dropping")
         XCTAssertEqual(s.sentence, "It dropped 3 times right after routes were applied, so the app is not applying again until the tunnel has held for 6 more minutes.")
@@ -139,8 +122,8 @@ final class DropdownStatusTests: XCTestCase {
             $0.isVPNConnected = false
             $0.pending = .init(reason: .settling, connectedAt: self.now, appliesAt: self.now.addingTimeInterval(10))
         }
-        XCTAssertEqual(s.pill, "OFF")
-        XCTAssertEqual(s.tone, .bad)
+        XCTAssertEqual(s.chip, .off)
+        XCTAssertEqual(s.tone, .idle, "no VPN is an ordinary state, grey, not red")
         XCTAssertEqual(s.headline, "No VPN connected")
         XCTAssertEqual(s.sentence, "62 addresses stay routed for when it reconnects.")
         XCTAssertEqual(status { $0.isVPNConnected = false; $0.installedRoutes = 0 }.sentence,
@@ -152,7 +135,7 @@ final class DropdownStatusTests: XCTestCase {
     func testDisconnectedOutsideBypassReportsLeftoversAsFailedRemovals() {
         for mode in [DropdownCopy.Mode.vpnOnly, .custom] {
             let s = status { $0.isVPNConnected = false; $0.mode = mode; $0.installedRoutes = 3 }
-            XCTAssertEqual(s.pill, "OFF")
+            XCTAssertEqual(s.chip, .off)
             XCTAssertEqual(s.sentence, "3 addresses are still routed: removing them failed.", "\(mode)")
             XCTAssertEqual(status { $0.isVPNConnected = false; $0.mode = mode; $0.installedRoutes = 0 }.sentence,
                            "Nothing is routed until a VPN connects.", "\(mode)")
@@ -168,8 +151,8 @@ final class DropdownStatusTests: XCTestCase {
                                    appliesAt: self.now.addingTimeInterval(90))
                 $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-4), routeCount: 62, failedCount: 0)
             }
-            XCTAssertEqual(s.pill, "ON", "\(reason)")
-            XCTAssertEqual(s.facts.first { $0.label == "Addresses" }?.value, "62 routed just now, none failed", "\(reason)")
+            XCTAssertEqual(s.chip, .on, "\(reason)")
+            XCTAssertEqual(s.line3.text, "62 addresses · applied just now · DNS again in 18 min", "\(reason)")
             XCTAssertEqual(s.note, "The scheduled re-apply still runs in 2 min.", "\(reason)")
         }
         // A change from BEFORE the reconnect does not end the wait.
@@ -177,20 +160,20 @@ final class DropdownStatusTests: XCTestCase {
             $0.pending = .init(reason: .settling, connectedAt: self.now.addingTimeInterval(-12),
                                appliesAt: self.now.addingTimeInterval(38))
         }
-        XCTAssertEqual(waiting.pill, "WAITING")
+        XCTAssertEqual(waiting.chip, .waiting)
     }
 
     func testHelperDownIsNotEnforcing() {
         let s = status { $0.helperReady = false }
-        XCTAssertEqual(s.pill, "NOT ENFORCING")
-        XCTAssertEqual(s.sentence, "Nothing is routed while the privileged helper is not running.")
+        XCTAssertEqual(s.chip, .notRouting)
+        XCTAssertEqual(s.sentence, "The helper is not running, so no route can change.")
     }
 
     /// VPN Only's catch-alls are not counted, but they are routed: with only them in place the
     /// app is working (everything goes direct), and a failed removal of them is still reported.
     func testCatchAllsAloneAreRoutedThoughNotCounted() {
         let on = status { $0.mode = .vpnOnly; $0.enabledDomains = 0; $0.installedRoutes = 0; $0.everythingElseDirect = true }
-        XCTAssertEqual(on.pill, "ON")
+        XCTAssertEqual(on.chip, .on)
         XCTAssertEqual(on.sentence, "Nothing is sent through the VPN yet.")
         let off = status { $0.isVPNConnected = false; $0.mode = .vpnOnly; $0.installedRoutes = 0; $0.everythingElseDirect = true }
         XCTAssertEqual(off.sentence, "Everything else still goes direct: removing that failed.")
@@ -198,13 +181,13 @@ final class DropdownStatusTests: XCTestCase {
             $0.mode = .vpnOnly; $0.installedRoutes = 0; $0.everythingElseDirect = true
             $0.pending = .init(reason: .settling, connectedAt: self.now, appliesAt: self.now.addingTimeInterval(10))
         }
-        XCTAssertEqual(waiting.pill, "WAITING")
+        XCTAssertEqual(waiting.chip, .waiting)
         XCTAssertEqual(waiting.note, "Everything else still goes direct, as before the drop.")
     }
 
     func testNoRoutesIsAWarning() {
         let s = status { $0.installedRoutes = 0 }
-        XCTAssertEqual(s.pill, "NOTHING ROUTED")
+        XCTAssertEqual(s.chip, .notRouting)
         XCTAssertEqual(s.tone, .warn)
         XCTAssertEqual(s.sentence, "Nothing is routed right now.")
     }
@@ -229,30 +212,23 @@ final class DropdownStatusTests: XCTestCase {
         XCTAssertEqual(DropdownStatus.modeDescription(.custom), "Custom: the first matching rule decides")
     }
 
-    func testRoutesFactAfterRemovalAndBeforeAnyApply() {
-        XCTAssertEqual(DropdownStatus.routesFact(input {
+    /// Line 3's numbers: the age only while an apply or removal is shown (a removal stops being
+    /// reported once routes are back), and the DNS part only while the automatic check is on.
+    func testNumbersLineVariants() {
+        XCTAssertEqual(DropdownStatus.numbersLine(input {
             $0.lastRouteChange = .init(kind: .removedAll, at: self.now.addingTimeInterval(-4), routeCount: 0, failedCount: 0)
             $0.installedRoutes = 0
-        }, now: now), "all removed just now")
-        // Routes came back without a full apply (a DNS refresh, a new domain): the removal is
-        // no longer true, the same rule the line under Refresh Routes follows.
-        XCTAssertEqual(DropdownStatus.routesFact(input {
+        }, now: now), "0 addresses · removed just now · DNS again in 18 min")
+        XCTAssertEqual(DropdownStatus.numbersLine(input {
             $0.lastRouteChange = .init(kind: .removedAll, at: self.now.addingTimeInterval(-4), routeCount: 0, failedCount: 0)
             $0.installedRoutes = 62
-        }, now: now), "62 routed")
-        XCTAssertEqual(DropdownStatus.routesFact(input { $0.lastRouteChange = nil }, now: now), "62 routed")
-        XCTAssertEqual(DropdownStatus.routesFact(input { $0.lastRouteChange = nil; $0.installedRoutes = 0 }, now: now),
-                       "none routed yet")
-    }
-
-    /// With the automatic refresh off there is no "next", and the fact must say so.
-    func testDNSFactVariants() {
-        XCTAssertEqual(DropdownStatus.dnsFact(input { $0.autoDNSRefresh = false }, now: now),
-                       "checked 12 min ago, automatic check off")
-        XCTAssertEqual(DropdownStatus.dnsFact(input { $0.lastDNSRefresh = nil }, now: now),
-                       "not checked yet, next in 18 min")
-        XCTAssertEqual(DropdownStatus.dnsFact(input { $0.nextDNSRefresh = self.now.addingTimeInterval(-5) }, now: now),
-                       "checked 12 min ago, next one due now")
+        }, now: now), "62 addresses · DNS again in 18 min")
+        XCTAssertEqual(DropdownStatus.numbersLine(input { $0.lastRouteChange = nil; $0.installedRoutes = 1 }, now: now),
+                       "1 address · DNS again in 18 min")
+        XCTAssertEqual(DropdownStatus.numbersLine(input { $0.autoDNSRefresh = false }, now: now),
+                       "62 addresses · applied 23 s ago")
+        XCTAssertEqual(DropdownStatus.numbersLine(input { $0.nextDNSRefresh = self.now.addingTimeInterval(-5) }, now: now),
+                       "62 addresses · applied 23 s ago · DNS again now")
     }
 
     // MARK: Translations
@@ -278,7 +254,7 @@ final class DropdownStatusTests: XCTestCase {
         // String(localized: "…") literals, turned into their lookup keys: an interpolated String
         // becomes %@ and an Int %lld. The String-typed interpolations are the named locals
         // below and every call except max(…); a wrong guess fails here, never silently.
-        let stringLocals: Set<String> = ["name", "services", "domains", "when", "checked"]
+        let stringLocals: Set<String> = ["name", "services", "domains", "when", "checked", "routes"]
         // `, bundle: bundle` is the form a function with an `in bundle:` variant uses.
         let literal = try NSRegularExpression(pattern: #"String\(localized: "((?:[^"\\]|\\.)*)"(?:, bundle: bundle)?\)"#)
         let interpolation = try NSRegularExpression(pattern: #"\\\((.*?)\)(?=[^)]|$)"#)

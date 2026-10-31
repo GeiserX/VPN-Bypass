@@ -13,17 +13,11 @@
 "Mode" = "Mode";
 "Bypass" = "Bypass";
 "VPN Only" = "VPN Only";
-"Setting Up..." = "Setting Up...";
-"Detecting VPN and applying routes" = "Detecting VPN and applying routes";
-"No VPN Connection" = "No VPN Connection";
-"Connect to a VPN to start bypassing\ntraffic for configured services." = "Connect to a VPN to start bypassing\ntraffic for configured services.";
 "Services" = "Services";
 "Domains" = "Domains";
 "Settings" = "Settings";
 "Settings…" = "Settings…";
 "Quit VPN Bypass" = "Quit VPN Bypass";
-"ON" = "ON";
-"OFF" = "OFF";
 
 /* ===== Settings — Tabs ===== */
 "General" = "General";
@@ -268,10 +262,7 @@
 "Everything else still goes direct: removing that failed." = "Everything else still goes direct: removing that failed.";
 "%lld addresses stay routed for when it reconnects." = "%lld addresses stay routed for when it reconnects.";
 "%lld addresses are still routed: removing them failed." = "%lld addresses are still routed: removing them failed.";
-"NOT ENFORCING" = "NOT ENFORCING";
 "%@ connected" = "%@ connected";
-"Nothing is routed while the privileged helper is not running." = "Nothing is routed while the privileged helper is not running.";
-"NO EFFECT" = "NO EFFECT";
 "No effect" = "No effect";
 "%@'s kill switch sends all traffic through the VPN." = "%@'s kill switch sends all traffic through the VPN.";
 "%@ makes its own routes win over this app's." = "%@ makes its own routes win over this app's.";
@@ -288,7 +279,6 @@
 "VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it" = "VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it";
 "The scheduled re-apply still runs in %@." = "The scheduled re-apply still runs in %@.";
 "The scheduled re-apply runs now." = "The scheduled re-apply runs now.";
-"HELD BACK" = "HELD BACK";
 "%@ keeps dropping" = "%@ keeps dropping";
 "It dropped %lld times right after routes were applied, so the app is not applying again until the tunnel has held for %@." = "It dropped %lld times right after routes were applied, so the app is not applying again until the tunnel has held for %@.";
 "Refresh Routes applies now anyway." = "Refresh Routes applies now anyway.";
@@ -297,9 +287,7 @@
 "The %lld addresses routed before the drop stay routed." = "The %lld addresses routed before the drop stay routed.";
 "Nothing is routed until then." = "Nothing is routed until then.";
 "Everything else still goes direct, as before the drop." = "Everything else still goes direct, as before the drop.";
-"WAITING" = "WAITING";
 "%@ reconnected %@" = "%@ reconnected %@";
-"NOTHING ROUTED" = "NOTHING ROUTED";
 "Nothing is routed right now." = "Nothing is routed right now.";
 "Bypass: everything else uses the VPN" = "Bypass: everything else uses the VPN";
 "VPN Only: everything else goes direct" = "VPN Only: everything else goes direct";
@@ -318,15 +306,6 @@
 "No rules yet." = "No rules yet.";
 "1 rule decides where traffic goes." = "1 rule decides where traffic goes.";
 "%lld rules decide where traffic goes." = "%lld rules decide where traffic goes.";
-"%lld routed" = "%lld routed";
-"none routed yet" = "none routed yet";
-"%lld routed %@, none failed" = "%lld routed %@, none failed";
-"%lld routed %@, %lld failed" = "%lld routed %@, %lld failed";
-"all removed %@" = "all removed %@";
-"removed %@, %lld could not be" = "removed %@, %lld could not be";
-"checked %@" = "checked %@";
-"not checked yet" = "not checked yet";
-"%@, automatic check off" = "%@, automatic check off";
 "%@, next in %@" = "%@, next in %@";
 "%@, next one due now" = "%@, next one due now";
 "1 address" = "1 address";
@@ -340,7 +319,6 @@
 "%lld more minutes" = "%lld more minutes";
 
 /* ===== Menu bar: the first-run question ===== */
-"NOT SET UP" = "NOT SET UP";
 "What should skip the VPN?" = "What should skip the VPN?";
 "Switched-on services use your normal connection." = "Switched-on services use your normal connection.";
 "All %lld services…" = "All %lld services…";
@@ -519,7 +497,6 @@
 "%@ routed %@, %lld failed." = "%1$@ routed %2$@, %3$lld failed.";
 "Removed all routed addresses %@." = "Removed all routed addresses %@.";
 "Removed routed addresses %@, %lld could not be removed." = "Removed routed addresses %1$@, %2$lld could not be removed.";
-"Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details." = "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details.";
 "Stop routing the 1 address?" = "Stop routing the 1 address?";
 "Stop routing all %lld addresses?" = "Stop routing all %lld addresses?";
 "Stop sending everything else direct?" = "Stop sending everything else direct?";
@@ -528,7 +505,6 @@
 "The privileged helper is not running — no routes are being enforced. Open Settings → Status to repair it." = "The privileged helper is not running — no routes are being enforced. Open Settings → Status to repair it.";
 "Can't refresh: the privileged helper is not running. Open Settings → Status to repair it." = "Can't refresh: the privileged helper is not running. Open Settings → Status to repair it.";
 "The privileged helper isn't ready, so no routes could be applied." = "The privileged helper isn't ready, so no routes could be applied.";
-"Helper not running — nothing is being routed" = "Helper not running — nothing is being routed";
 "Fix…" = "Fix…";
 "Not running from app bundle" = "Not running from app bundle";
 "Helper binary not found in app bundle" = "Helper binary not found in app bundle";
@@ -553,7 +529,6 @@
 "Re-resolve DNS Now" = "Re-resolve DNS Now";
 "Remove All Routes…" = "Remove All Routes…";
 "Remove Routes" = "Remove Routes";
-"VPN Entries" = "VPN Entries";
 "Routes In Use" = "Routes In Use";
 "No rules configured" = "No rules configured";
 "until you refresh routes, the VPN reconnects, or DNS is next refreshed" = "until you refresh routes, the VPN reconnects, or DNS is next refreshed";
@@ -775,12 +750,8 @@
 "Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it." = "Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it.";
 "catalogue.category.government" = "Government";
 "catalogue.category.banks" = "Banks";
-"Connect to a VPN to send\nyour listed sites through it." = "Connect to a VPN to send\nyour listed sites through it.";
-"Connect to a VPN to start\nrouting traffic by your rules." = "Connect to a VPN to start\nrouting traffic by your rules.";
-"STARTING" = "STARTING";
 "Starting…" = "Starting…";
 "Detecting the VPN and applying routes." = "Detecting the VPN and applying routes.";
-"PARTLY ROUTED" = "PARTLY ROUTED";
 "1 failed in the last apply." = "1 failed in the last apply.";
 "%lld failed in the last apply." = "%lld failed in the last apply.";
 "1 entry has no addresses." = "1 entry has no addresses.";
@@ -874,3 +845,44 @@
 "Waiting" = "Waiting";
 "Paused" = "Paused";
 "Route: %@" = "Route: %@";
+
+/* Dropdown status block, footer and Status > Problems */
+"Problem: %@" = "Problem: %@";
+"Show" = "Show";
+"Fix the helper in Settings > Status" = "Fix the helper in Settings > Status";
+"Show the problems in Settings > Status" = "Show the problems in Settings > Status";
+"No address is routed." = "No address is routed.";
+"1 address from before is still routed." = "1 address from before is still routed.";
+"%lld addresses from before are still routed." = "%lld addresses from before are still routed.";
+"The helper is not running, so no route can change." = "The helper is not running, so no route can change.";
+"applied %@" = "applied %@";
+"removed %@" = "removed %@";
+"DNS again in %@" = "DNS again in %@";
+"DNS again now" = "DNS again now";
+"%@, %lld failed" = "%@, %lld failed";
+"Your list skips the VPN once one connects." = "Your list skips the VPN once one connects.";
+"Your list goes through the VPN once one connects." = "Your list goes through the VPN once one connects.";
+"Your rules apply once a VPN connects." = "Your rules apply once a VPN connects.";
+"Kept for when it reconnects" = "Kept for when it reconnects";
+"Still routed" = "Still routed";
+"Dismiss" = "Dismiss";
+"Dismiss the route check" = "Dismiss the route check";
+"the system did not remove it" = "the system did not remove it";
+"the system refused the route" = "the system refused the route";
+"no answer from DNS" = "no answer from DNS";
+"the helper is not running" = "the helper is not running";
+"Not routed" = "Not routed";
+"Did not resolve" = "Did not resolve";
+"Not removed" = "Not removed";
+"%@: %@" = "%@: %@";
+"%@, for %@: %@" = "%@, for %@: %@";
+"1 more failure" = "1 more failure";
+"%lld more failures" = "%lld more failures";
+"Settings > Logs has the details." = "Settings > Logs has the details.";
+"Problems" = "Problems";
+"Apply the routes again" = "Apply the routes again";
+"Retry: apply the routes again" = "Retry: apply the routes again";
+"Remove the routes again" = "Remove the routes again";
+"Retry: remove the routes again" = "Retry: remove the routes again";
+"No address is routed for it." = "No address is routed for it.";
+"it is the VPN's own gateway, which is never rerouted" = "it is the VPN's own gateway, which is never rerouted";

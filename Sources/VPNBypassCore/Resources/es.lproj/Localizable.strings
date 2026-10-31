@@ -13,17 +13,11 @@
 "Mode" = "Modo";
 "Bypass" = "Bypass";
 "VPN Only" = "Solo VPN";
-"Setting Up..." = "Configurando...";
-"Detecting VPN and applying routes" = "Detectando VPN y aplicando rutas";
-"No VPN Connection" = "Sin conexión VPN";
-"Connect to a VPN to start bypassing\ntraffic for configured services." = "Conéctate a una VPN para empezar a desviar\nel tráfico de los servicios configurados.";
 "Services" = "Servicios";
 "Domains" = "Dominios";
 "Settings" = "Ajustes";
 "Settings…" = "Ajustes…";
 "Quit VPN Bypass" = "Salir de VPN Bypass";
-"ON" = "ON";
-"OFF" = "OFF";
 
 /* ===== Ajustes — Pestañas ===== */
 "General" = "General";
@@ -268,10 +262,7 @@
 "Everything else still goes direct: removing that failed." = "Todo lo demás sigue yendo directo: no se pudo quitar.";
 "%lld addresses stay routed for when it reconnects." = "%lld direcciones siguen enrutadas para cuando se reconecte.";
 "%lld addresses are still routed: removing them failed." = "%lld direcciones siguen enrutadas: no se pudieron quitar.";
-"NOT ENFORCING" = "SIN APLICAR";
 "%@ connected" = "%@ conectada";
-"Nothing is routed while the privileged helper is not running." = "No se enruta nada mientras el asistente privilegiado no esté en marcha.";
-"NO EFFECT" = "SIN EFECTO";
 "No effect" = "Sin efecto";
 "%@'s kill switch sends all traffic through the VPN." = "El kill switch de %@ envía todo el tráfico por la VPN.";
 "%@ makes its own routes win over this app's." = "%@ hace que sus rutas manden sobre las de esta app.";
@@ -288,7 +279,6 @@
 "VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it" = "VPN Bypass: el kill switch de la VPN envía todo el tráfico por ella, así que nada la evita";
 "The scheduled re-apply still runs in %@." = "La reaplicación programada se ejecuta igualmente en %@.";
 "The scheduled re-apply runs now." = "La reaplicación programada se ejecuta ahora.";
-"HELD BACK" = "EN PAUSA";
 "%@ keeps dropping" = "%@ se cae una y otra vez";
 "It dropped %lld times right after routes were applied, so the app is not applying again until the tunnel has held for %@." = "Se cayó %lld veces justo después de aplicar las rutas, así que la app no vuelve a aplicarlas hasta que el túnel aguante %@.";
 "Refresh Routes applies now anyway." = "Actualizar rutas las aplica ahora de todos modos.";
@@ -297,9 +287,7 @@
 "The %lld addresses routed before the drop stay routed." = "Las %lld direcciones enrutadas antes de la caída siguen enrutadas.";
 "Nothing is routed until then." = "Nada se enruta hasta entonces.";
 "Everything else still goes direct, as before the drop." = "Todo lo demás sigue yendo directo, como antes de la caída.";
-"WAITING" = "ESPERANDO";
 "%@ reconnected %@" = "%@ reconectada %@";
-"NOTHING ROUTED" = "NADA ENRUTADO";
 "Nothing is routed right now." = "Ahora mismo no se enruta nada.";
 "Bypass: everything else uses the VPN" = "Bypass: todo lo demás usa la VPN";
 "VPN Only: everything else goes direct" = "Solo VPN: todo lo demás va directo";
@@ -318,15 +306,6 @@
 "No rules yet." = "Aún no hay reglas.";
 "1 rule decides where traffic goes." = "1 regla decide adónde va el tráfico.";
 "%lld rules decide where traffic goes." = "%lld reglas deciden adónde va el tráfico.";
-"%lld routed" = "%lld enrutadas";
-"none routed yet" = "ninguna enrutada aún";
-"%lld routed %@, none failed" = "%lld enrutadas %@, ninguna falló";
-"%lld routed %@, %lld failed" = "%lld enrutadas %@, %lld fallaron";
-"all removed %@" = "todas eliminadas %@";
-"removed %@, %lld could not be" = "eliminadas %@, %lld no se pudieron eliminar";
-"checked %@" = "comprobado %@";
-"not checked yet" = "sin comprobar aún";
-"%@, automatic check off" = "%@, comprobación automática desactivada";
 "%@, next in %@" = "%@, la próxima en %@";
 "%@, next one due now" = "%@, la próxima toca ahora";
 "1 address" = "1 dirección";
@@ -340,7 +319,6 @@
 "%lld more minutes" = "%lld minutos más";
 
 /* ===== Barra de menú: la pregunta del primer arranque ===== */
-"NOT SET UP" = "SIN CONFIGURAR";
 "What should skip the VPN?" = "¿Qué debe evitar la VPN?";
 "Switched-on services use your normal connection." = "Los servicios activados usan tu conexión normal.";
 "All %lld services…" = "Los %lld servicios…";
@@ -519,7 +497,6 @@
 "%@ routed %@, %lld failed." = "Enrutado %2$@: %1$@, %3$lld fallaron.";
 "Removed all routed addresses %@." = "Se quitaron todas las direcciones enrutadas %@.";
 "Removed routed addresses %@, %lld could not be removed." = "Se quitaron las direcciones enrutadas %1$@; %2$lld no se pudieron quitar.";
-"Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details." = "Los errores son direcciones que el sistema rechazó y, en una aplicación que resolvió el DNS, dominios que no se resolvieron. Ajustes > Registros tiene los detalles.";
 "Stop routing the 1 address?" = "¿Dejar de enrutar la única dirección?";
 "Stop routing all %lld addresses?" = "¿Dejar de enrutar las %lld direcciones?";
 "Stop sending everything else direct?" = "¿Dejar de enviar todo lo demás directo?";
@@ -528,7 +505,6 @@
 "The privileged helper is not running — no routes are being enforced. Open Settings → Status to repair it." = "El asistente privilegiado no está en marcha: no se aplica ninguna ruta. Abre Ajustes → Estado para repararlo.";
 "Can't refresh: the privileged helper is not running. Open Settings → Status to repair it." = "No se puede actualizar: el asistente privilegiado no está en marcha. Abre Ajustes → Estado para repararlo.";
 "The privileged helper isn't ready, so no routes could be applied." = "El asistente privilegiado no está listo, así que no se pudo aplicar ninguna ruta.";
-"Helper not running — nothing is being routed" = "El asistente no está en marcha: no se enruta nada";
 "Fix…" = "Reparar…";
 "Not running from app bundle" = "La app no se está ejecutando desde su paquete";
 "Helper binary not found in app bundle" = "No se encuentra el asistente en el paquete de la app";
@@ -553,7 +529,6 @@
 "Re-resolve DNS Now" = "Volver a resolver el DNS ahora";
 "Remove All Routes…" = "Quitar todas las rutas…";
 "Remove Routes" = "Quitar rutas";
-"VPN Entries" = "Entradas VPN";
 "Routes In Use" = "Rutas en uso";
 "No rules configured" = "No hay reglas configuradas";
 "until you refresh routes, the VPN reconnects, or DNS is next refreshed" = "hasta que actualices las rutas, la VPN se reconecte o se vuelva a actualizar el DNS";
@@ -775,12 +750,8 @@
 "Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it." = "%@ añadido a %@. El servicio está desactivado; añádelo desde Explorar el catálogo en la página Servicios para que haga bypass.";
 "catalogue.category.government" = "Administración pública";
 "catalogue.category.banks" = "Bancos";
-"Connect to a VPN to send\nyour listed sites through it." = "Conéctate a una VPN para enviar\npor ella los sitios de tu lista.";
-"Connect to a VPN to start\nrouting traffic by your rules." = "Conéctate a una VPN para empezar\na enrutar el tráfico según tus reglas.";
-"STARTING" = "INICIANDO";
 "Starting…" = "Iniciando…";
 "Detecting the VPN and applying routes." = "Detectando la VPN y aplicando las rutas.";
-"PARTLY ROUTED" = "ENRUTADO EN PARTE";
 "1 failed in the last apply." = "1 falló en la última aplicación.";
 "%lld failed in the last apply." = "%lld fallaron en la última aplicación.";
 "1 entry has no addresses." = "1 entrada no tiene direcciones.";
@@ -874,3 +845,44 @@
 "Waiting" = "En espera";
 "Paused" = "En pausa";
 "Route: %@" = "Ruta: %@";
+
+/* Dropdown status block, footer and Status > Problems */
+"Problem: %@" = "Problema: %@";
+"Show" = "Ver";
+"Fix the helper in Settings > Status" = "Reparar el asistente en Ajustes > Estado";
+"Show the problems in Settings > Status" = "Ver los problemas en Ajustes > Estado";
+"No address is routed." = "No hay ninguna dirección enrutada.";
+"1 address from before is still routed." = "Sigue enrutada 1 dirección de antes.";
+"%lld addresses from before are still routed." = "Siguen enrutadas %lld direcciones de antes.";
+"The helper is not running, so no route can change." = "El asistente no está en marcha, así que ninguna ruta puede cambiar.";
+"applied %@" = "aplicado %@";
+"removed %@" = "quitado %@";
+"DNS again in %@" = "DNS de nuevo en %@";
+"DNS again now" = "DNS de nuevo ahora";
+"%@, %lld failed" = "%@, %lld fallidas";
+"Your list skips the VPN once one connects." = "Tu lista evita la VPN en cuanto se conecte una.";
+"Your list goes through the VPN once one connects." = "Tu lista pasa por la VPN en cuanto se conecte una.";
+"Your rules apply once a VPN connects." = "Tus reglas se aplican en cuanto se conecte una VPN.";
+"Kept for when it reconnects" = "Guardado para cuando se reconecte";
+"Still routed" = "Aún enrutado";
+"Dismiss" = "Descartar";
+"Dismiss the route check" = "Descartar la comprobación de rutas";
+"the system did not remove it" = "el sistema no la quitó";
+"the system refused the route" = "el sistema rechazó la ruta";
+"no answer from DNS" = "sin respuesta del DNS";
+"the helper is not running" = "el asistente no está en marcha";
+"Not routed" = "Sin enrutar";
+"Did not resolve" = "No se resolvió";
+"Not removed" = "Sin quitar";
+"%@: %@" = "%1$@: %2$@";
+"%@, for %@: %@" = "%1$@, para %2$@: %3$@";
+"1 more failure" = "1 fallo más";
+"%lld more failures" = "%lld fallos más";
+"Settings > Logs has the details." = "Los detalles están en Ajustes > Registros.";
+"Problems" = "Problemas";
+"Apply the routes again" = "Aplicar las rutas de nuevo";
+"Retry: apply the routes again" = "Reintentar: aplicar las rutas de nuevo";
+"Remove the routes again" = "Quitar las rutas de nuevo";
+"Retry: remove the routes again" = "Reintentar: quitar las rutas de nuevo";
+"No address is routed for it." = "No hay ninguna dirección enrutada para esta entrada.";
+"it is the VPN's own gateway, which is never rerouted" = "es la puerta de enlace de la propia VPN, que nunca se desvía";

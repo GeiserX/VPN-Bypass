@@ -116,7 +116,7 @@ is how they are meant to work.
 
 The app warns when a connected VPN has `includeAllNetworks` on, whichever tunnel it acts on, or
 when the VPN it acts on has `enforceRoutes` on. A split VPN with `enforceRoutes` next to it leaves
-the routes working, so it gives no warning. Then the dropdown's pill reads NO EFFECT and its
+the routes working, so it gives no warning. Then the dropdown's status chip reads Not routing and its
 sentence says why, for example "Proton VPN's kill switch sends all traffic through the VPN. Sites
 set to skip it still go through it." With `enforceRoutes` it says instead that anything the VPN's
 own routes cover goes through it, since the app does not read those routes. Settings > Status says "No effect", the menu bar mark loses
@@ -126,7 +126,7 @@ still go direct. The routes stay installed, so they work again as soon as the se
 
 There are two ways out:
 
-1. **Turn the kill switch off** in the VPN app. The routes take effect at once. The pill catches
+1. **Turn the kill switch off** in the VPN app. The routes take effect at once. The chip catches
    up on the app's next VPN check: within 30 seconds, or when you open the menu.
 2. **Use the VPN's own split tunnelling**, if it has one. Proton VPN's excludes apps from inside
    the tunnel, so it works where routes cannot. Proton turns its kill switch off when
