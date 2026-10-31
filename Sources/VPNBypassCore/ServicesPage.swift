@@ -131,6 +131,13 @@ enum ServicesPage {
         String(localized: "\(count) services, pick several at once", bundle: bundle)
     }
 
+    /// The button that opens the catalogue: with a search typed, the same search there, since
+    /// most services live there; otherwise a plain browse.
+    static func catalogueButton(search: String, in bundle: Bundle = .main) -> String {
+        search.isEmpty ? String(localized: "Browse catalogue…", bundle: bundle)
+            : String(localized: "Search the catalogue", bundle: bundle)
+    }
+
     /// What a service holds, on one line: "Custom · 2 domains · 1 IP range · Added: x.example".
     static func detail(_ service: ServiceEntry, added: [String], in bundle: Bundle = .main) -> String {
         var parts: [String] = []
@@ -260,7 +267,9 @@ struct ServicesTab: View {
                         EmptyState(systemImage: "square.grid.2x2",
                                    title: String(localized: "No services yet"),
                                    message: String(localized: "Pick the ones you use from the catalogue, or make your own with the + button."),
-                                   primary: .init(title: String(localized: "Browse catalogue…")) { openCatalogue() })
+                                   primary: .init(title: ServicesPage.catalogueButton(search: searchText)) {
+                                       openCatalogue(seed: searchText)
+                                   })
                     } else if rows.isEmpty {
                         SettingsSearchMiss(search: searchText)
                     } else {
@@ -363,7 +372,7 @@ struct ServicesTab: View {
 
     private func catalogueLine(searchMissed: Bool) -> some View {
         HStack(spacing: Theme.Space.m) {
-            Button(searchMissed ? String(localized: "Search the catalogue") : String(localized: "Browse catalogue…")) {
+            Button(ServicesPage.catalogueButton(search: searchMissed ? searchText : "")) {
                 openCatalogue(seed: searchMissed ? searchText : "")
             }
             .controlSize(.regular)

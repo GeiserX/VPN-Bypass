@@ -79,6 +79,16 @@ final class ServicesPageTests: XCTestCase {
         XCTAssertEqual(menu.map(\.kind), [.more])
         XCTAssertEqual(RowAction.flattened(menu).map(\.name),
                        ["Remove a.example from Telegram", "Remove b.example from Telegram"])
+        let items = RowAction.flattened(menu)
+        items[1].perform()
+        items[0].perform()
+        XCTAssertEqual(removed, ["t.example", "b.example", "a.example"], "each menu item removes its own name")
+    }
+
+    /// A fresh install with a search typed keeps the search on its way to the catalogue.
+    func testTheCatalogueButtonCarriesTheSearch() {
+        XCTAssertEqual(ServicesPage.catalogueButton(search: ""), "Browse catalogue…")
+        XCTAssertEqual(ServicesPage.catalogueButton(search: "netflix"), "Search the catalogue")
     }
 
     // MARK: - Spanish and French

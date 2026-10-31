@@ -34,7 +34,6 @@
 "Create Custom Service" = "Créer un service personnalisé";
 "Custom" = "Personnalisé";
 "%lld domains" = "%lld domaines";
-/* Services page section headers; the On header is not the dropdown's ON pill */
 
 /* ===== Réglages — Éditeur de service ===== */
 "Edit Service" = "Modifier le service";
