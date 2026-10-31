@@ -337,16 +337,16 @@ struct GeneralTab: View {
                 Text("Tell me when")
                     .font(Theme.Font.body)
                     .foregroundColor(Theme.text)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)],
-                          alignment: .leading, spacing: Theme.Space.s) {
-                    ForEach(GeneralPage.NotificationKind.allCases, id: \.self) { kind in
-                        Toggle(kind.title(), isOn: Binding(
-                            get: { notificationManager[keyPath: kind.keyPath] },
-                            set: { notificationManager[keyPath: kind.keyPath] = $0; notificationManager.savePreferences() }
-                        ))
-                        .toggleStyle(.checkbox)
-                        .font(Theme.Font.body)
-                        .help(kind == .addresses ? String(localized: "Addresses: services, domains, DNS refresh") : "")
+                // A plain two-column grid, not a lazy one: four checkboxes need no laziness, and a
+                // lazy grid may leave a cell unbuilt, so VoiceOver would not find it.
+                let kinds = GeneralPage.NotificationKind.allCases
+                Grid(alignment: .leading, horizontalSpacing: Theme.Space.l, verticalSpacing: Theme.Space.s) {
+                    ForEach(Array(stride(from: 0, to: kinds.count, by: 2)), id: \.self) { start in
+                        GridRow {
+                            ForEach(kinds[start..<min(start + 2, kinds.count)], id: \.self) { kind in
+                                notificationCheckbox(kind)
+                            }
+                        }
                     }
                 }
             }
@@ -364,6 +364,16 @@ struct GeneralTab: View {
             .disabled(!notificationManager.notificationsEnabled)
             .opacity(notificationManager.notificationsEnabled ? 1 : 0.55)
         }
+    }
+
+    private func notificationCheckbox(_ kind: GeneralPage.NotificationKind) -> some View {
+        Toggle(kind.title(), isOn: Binding(
+            get: { notificationManager[keyPath: kind.keyPath] },
+            set: { notificationManager[keyPath: kind.keyPath] = $0; notificationManager.savePreferences() }
+        ))
+        .toggleStyle(.checkbox)
+        .font(Theme.Font.body)
+        .help(kind == .addresses ? String(localized: "Addresses: services, domains, DNS refresh") : "")
     }
 
     private var configuration: some View {
