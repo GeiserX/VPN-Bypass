@@ -117,6 +117,57 @@ final class DomainsPageTests: XCTestCase {
         XCTAssertEqual(s[0].rows.map(\.entry.domain), ["en.wikipedia.org"])
     }
 
+    // MARK: Entries that stopped resolving (idea 6)
+
+    private let since = Date(timeIntervalSince1970: 1_791_036_000)   // 3 Oct 2026, 14:00 UTC
+
+    private func failing(_ entry: DomainEntry, count: Int) -> DomainEntry {
+        var e = entry
+        e.resolveFailures = ResolveFailures(count: count, since: since)
+        return e
+    }
+
+    /// Three failed refreshes: the row says since when and needs attention. Fewer: nothing yet.
+    func testAStaleRowSaysSinceWhen() {
+        let dead = failing(DomainEntry(domain: "gone.example.com"), count: 3)
+        let flaky = failing(DomainEntry(domain: "flaky.example.com"), count: 2)
+        let s = DomainsPage.sections(mode: .bypass, config: config(bypass: [wiki, dead, flaky], vpnOnly: []),
+                                     routeSources: [], search: "", locale: Locale(identifier: "en_GB"))
+        XCTAssertEqual(s[0].rows.map(\.isStale), [false, true, false])
+        XCTAssertEqual(s[0].rows.map(\.detail), [nil, "Hasn't resolved since 3 Oct", nil])
+        XCTAssertEqual(s[0].staleCount, 1)
+    }
+
+    /// The other mode's list is not refreshed in this mode and has no Remove: no stale state.
+    func testTheReadOnlyListShowsNoStaleState() throws {
+        let dead = failing(DomainEntry(domain: "gone.example.org"), count: 3)
+        let s = DomainsPage.sections(mode: .bypass, config: config(bypass: [wiki], vpnOnly: [dead]),
+                                     routeSources: [], search: "")
+        let other = try XCTUnwrap(s.last)
+        XCTAssertEqual(other.rows.map(\.isStale), [false])
+        XCTAssertEqual(other.rows.map(\.detail), [nil])
+        XCTAssertEqual(other.staleCount, 0)
+    }
+
+    /// The header's filter keeps only the stale rows of the list in use and leaves the other
+    /// list out; the section still counts every entry.
+    func testTheFilterShowsOnlyStaleRows() {
+        let dead = failing(DomainEntry(domain: "gone.example.com"), count: 3)
+        let s = DomainsPage.sections(mode: .bypass, config: config(bypass: [wiki, dead], vpnOnly: [intranet]),
+                                     routeSources: [], search: "", staleOnly: true)
+        XCTAssertEqual(s.map(\.list), [.bypass])
+        XCTAssertEqual(s[0].rows.map(\.entry.domain), ["gone.example.com"])
+        XCTAssertEqual(s[0].total, 2)
+    }
+
+    /// With nothing stale the filter does nothing, so the page is never left empty by it.
+    func testTheFilterDoesNothingWithoutStaleRows() {
+        let s = DomainsPage.sections(mode: .bypass, config: config(bypass: [wiki], vpnOnly: [intranet]),
+                                     routeSources: [], search: "", staleOnly: true)
+        XCTAssertEqual(s.map(\.list), [.bypass, .vpnOnly])
+        XCTAssertEqual(s[0].rows.map(\.entry.domain), ["en.wikipedia.org"])
+    }
+
     // MARK: Translations
 
     func testNewStringsAreTranslated() throws {
@@ -136,6 +187,11 @@ final class DomainsPageTests: XCTestCase {
             let s = DomainsPage.sections(mode: .bypass, config: config(bypass: [wild], vpnOnly: []),
                                          routeSources: [], search: "", bundle: bundle)
             XCTAssertEqual(s.first?.rows.first?.detail, learned)
+        }
+        for (lang, stale) in [("es", "No se resuelve desde el 3 oct"), ("fr", "Non résolu depuis le 3 oct.")] {
+            let bundle = try XCTUnwrap(Bundle(url: dir.appendingPathComponent("Sources/VPNBypassCore/Resources/\(lang).lproj")), lang)
+            let detail = StaleEntries.detail(since: since, locale: Locale(identifier: lang), bundle: bundle)
+            XCTAssertEqual(detail, stale)
         }
     }
 }

@@ -533,7 +533,9 @@ final class RouteManager: ObservableObject {
     ///   unreadable config.json. It bypasses the save block WITHOUT clearing the latch, so the
     ///   daily backup — which copies FROM the on-disk config.json — still skips itself and does
     ///   not overwrite the last known-good `config.json.bak` with the corruption being escaped.
-    func saveConfigThrowing(recoveringFromLoadFailure: Bool = false) throws {
+    /// - Parameter isBookkeeping: the app noting what it saw (a name's failed refreshes), not a
+    ///   settings change: it leaves the outside-change footer and the reconnect re-apply alone.
+    func saveConfigThrowing(recoveringFromLoadFailure: Bool = false, isBookkeeping: Bool = false) throws {
         guard recoveringFromLoadFailure || !isConfigLoadFailed else {
             log(.warning, "Config save blocked: config.json failed to load and is preserved on disk")
             throw NSError(domain: "VPNBypass", code: 1001, userInfo: [NSLocalizedDescriptionKey: "Configuration save blocked due to load failure"])
@@ -574,6 +576,10 @@ final class RouteManager: ObservableObject {
             try FileManager.default.moveItem(at: tempURL, to: configURL)
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
+        if isBookkeeping {
+            log(.info, "Config saved")
+            return
+        }
         if !isVPNConnected { configChangedAt = Date() }
         if !ControlOrigin.isControlSocket {
             lastOutsideChange = nil
@@ -3799,12 +3805,36 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Counts this refresh's failures on the list it resolved (StaleEntries), so a listed name
+    /// that stopped resolving says so on its Domains row. Read after the lookups: the VPN may
+    /// have dropped, or the mode changed, while they ran. `reconnected`: the VPN dropped and came
+    /// back during the lookups, so a failure may be the outage's; only the answers count then.
+    func recordResolveFailures(isInverse: Bool, attempted: Set<String>, resolved: Set<String>,
+                               reconnected: Bool = false) {
+        guard (config.routingMode == .vpnOnly) == isInverse, config.routingMode != .custom else { return }
+        let entries = isInverse ? config.inverseDomains : config.domains
+        guard let updated = StaleEntries.record(entries, attempted: reconnected ? resolved : attempted,
+                                                resolved: resolved, vpnUp: isVPNConnected, now: Date())
+        else { return }
+        if isInverse { config.inverseDomains = updated } else { config.domains = updated }
+        guard !isConfigLoadFailed else { return }
+        do {
+            try saveConfigThrowing(isBookkeeping: true)
+        } catch {
+            // Keep memory as the disk has it, so the next refresh counts again and retries the
+            // save; a count stuck at the threshold in memory would never be written.
+            if isInverse { config.inverseDomains = entries } else { config.domains = entries }
+            log(.error, "Failed to save configuration: \(error.localizedDescription)")
+        }
+    }
+
     /// Perform DNS refresh - re-resolve all domains and update routes
     ///
     /// `userInitiated` (the Refresh action) skips the calm-tunnel gate: a person asking for it
     /// now gets it now. The periodic timer and its deferred retry go through the gate.
     private func performDNSRefresh(userInitiated: Bool = false) async {
         let epoch = routeEpoch
+        let connectStamp = lastVPNConnectAt
         guard !isPaused else {
             log(.info, "DNS refresh skipped: paused")
             nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
@@ -3952,6 +3982,11 @@ final class RouteManager: ObservableObject {
         var resolvedDomainIPs: [String: [String]] = [:]
         for (domain, ips) in domainResults {
             if let ips = ips { resolvedDomainIPs[domain] = ips }
+        }
+        if routeEpoch == epoch {
+            recordResolveFailures(isInverse: isInverse, attempted: Set(uniqueDomains),
+                                  resolved: Set(resolvedDomainIPs.keys),
+                                  reconnected: lastVPNConnectAt != connectStamp)
         }
 
         // Plan the route delta purely (see DNSRefreshPlanner): which new kernel routes to add,
