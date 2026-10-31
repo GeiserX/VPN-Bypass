@@ -83,6 +83,20 @@ final class VPNOnlyBlockKernelTests: XCTestCase {
         XCTAssertEqual(RouteKernel.installStep(current: nil, spec: toVPN), .add)
     }
 
+    /// A block replaces only our own route. A host route another program wrote (a VPN client
+    /// pinning its server to the physical interface) is refused: blocking it would keep the
+    /// VPN from coming back. Scoped and cloned entries do not collide with the block's add.
+    func testABlockNeverReplacesAnotherProgramsRoute() {
+        let ours = entry(0xCB007107, gw: 0x0A000001, flags: RTF_UP | RTF_GATEWAY | RTF_HOST | RTF_STATIC | RTF_PROTO1)
+        let pin = entry(0xCB007107, gw: 0xC0A80101, flags: RTF_UP | RTF_GATEWAY | RTF_HOST | RTF_STATIC)
+        let scoped = entry(0xCB007107, gw: 0xC0A80101, flags: RTF_UP | RTF_GATEWAY | RTF_HOST | RTF_STATIC | RTF_IFSCOPE)
+        XCTAssertTrue(RouteKernel.blockMayReplace(table: [], key: "203.0.113.7"))
+        XCTAssertTrue(RouteKernel.blockMayReplace(table: [ours], key: "203.0.113.7"))
+        XCTAssertFalse(RouteKernel.blockMayReplace(table: [pin], key: "203.0.113.7"))
+        XCTAssertTrue(RouteKernel.blockMayReplace(table: [scoped, ours], key: "203.0.113.7"))
+        XCTAssertTrue(RouteKernel.blockMayReplace(table: [pin], key: "203.0.113.8"))
+    }
+
     /// #67: a block left by a killed run is swept at the next start like any route of ours.
     func testStartupSweepTakesLeftoverBlocks() {
         let block = entry(0xCB007107, gw: 0x7F000001, flags: RTF_UP | RTF_GATEWAY | RTF_HOST | RTF_STATIC | RTF_REJECT | RTF_PROTO1)
@@ -320,6 +334,24 @@ final class VPNOnlyBlockLifecycleTests: XCTestCase {
         await rm.cleanupOnQuit()
         XCTAssertTrue(kernel.everything.isEmpty)
         XCTAssertTrue(rm.blockedRoutes.isEmpty)
+    }
+
+    /// A time-capped quit spends its first write on the catch-alls, not on the blocks.
+    func testTeardownRemovesTheCatchAllsBeforeTheBlocks() async {
+        rm.isVPNConnected = false
+        await rm.tearDownAfterDrop()
+        kernel.base.installed.formUnion(catchAlls)
+        rm.activeRoutes = catchAlls.map { route($0, "192.168.1.1", "VPN Only catch-all") }
+        var order: [[String]] = []
+        let inner = rm.removeRoutesBatchOverrideForTests
+        rm.removeRoutesBatchOverrideForTests = { dests in
+            order.append(dests.sorted())
+            return await inner!(dests)
+        }
+        await rm.removeAllRoutes()
+        XCTAssertEqual(order.first, catchAlls, "the catch-alls go first")
+        XCTAssertEqual(order.last, listed.sorted(), "the blocks go after them")
+        XCTAssertTrue(kernel.everything.isEmpty)
     }
 
     func testOpenThemDirectlyRemovesTheBlocks() async {

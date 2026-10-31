@@ -2713,7 +2713,6 @@ final class RouteManager: ObservableObject {
     ///   takes them out too.
     func removeAllRoutes(keepingBlocked: Bool = false) async {
         routeEpoch &+= 1
-        if !keepingBlocked { await releaseBlocks(reason: "all routes removed") }
         // Sweep the union of what the model tracks AND what was pushed to the kernel but
         // never committed (pendingKernelAdds) — the latter is invisible to the model by
         // design of the epoch guard, and was the strand mechanism on 2026-08-07. A block is
@@ -2758,6 +2757,8 @@ final class RouteManager: ObservableObject {
                 failedDests.formUnion(destinations)
             }
         }
+        // After the catch-alls: a time-capped quit must spend its first write on them.
+        if !keepingBlocked { await releaseBlocks(reason: "all routes removed") }
 
         cancelAllRetries()
         // A failed removal must keep its record. The retention filter below only keeps entries

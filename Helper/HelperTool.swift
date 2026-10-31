@@ -391,13 +391,18 @@ class HelperTool: NSObject, HelperProtocol {
         }
     }
 
-    /// Puts a block in place of whatever route the destination has. The app asks only for
-    /// destinations it routed itself, the same trust `removeRoutesBatch` gives it. An add that
-    /// finds a route there deletes it and adds again: RTM_CHANGE cannot set RTF_REJECT.
+    /// Puts a block in place of our route at the destination. An add that finds a route there
+    /// deletes it and adds again (RTM_CHANGE cannot set RTF_REJECT), unless that route is not
+    /// ours (`RouteKernel.blockMayReplace`): then the block is refused.
     private func installBlock(destination: String) -> (success: Bool, error: String?) {
         let spec = RouteKernel.blockSpec(destination: destination)
         var err = routeSocketPerform(type: RTM_ADD, spec: spec)
         if err == EEXIST {
+            let key = snapshotKey(destination: destination, isNetwork: spec.isNetwork)
+            if let table = RouteKernel.currentTable(), !RouteKernel.blockMayReplace(table: table, key: key) {
+                helperLog.info("block \(destination, privacy: .public): refused, another program owns its route")
+                return (false, "another program owns the route")
+            }
             let removed = deleteRoute(destination: destination)
             guard removed.success else { return removed }
             err = routeSocketPerform(type: RTM_ADD, spec: spec)

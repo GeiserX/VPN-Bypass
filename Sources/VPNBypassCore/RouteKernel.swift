@@ -287,6 +287,17 @@ public enum RouteKernel {
         return index
     }
 
+    /// The unscoped, uncloned entry a block at `key` would collide with (an RTM_ADD that got
+    /// EEXIST), and whether the block may take its place: only when the entry is ours. A host
+    /// route someone else wrote is how a VPN client pins its own server to the physical
+    /// interface; replacing that with a block would stop the VPN from ever coming back.
+    public static func blockMayReplace(table: [KernelRoute], key: String) -> Bool {
+        guard let current = table.first(where: {
+            $0.destinationString == key && $0.flags & RTF_WASCLONED == 0 && $0.flags & RTF_IFSCOPE == 0
+        }) else { return true }
+        return current.isOurs
+    }
+
     /// What one install has to write, given the index entry for its destination.
     public enum InstallStep: Equatable, Sendable {
         /// The kernel already has exactly this route: write nothing.

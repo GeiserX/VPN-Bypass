@@ -829,8 +829,6 @@ struct MenuContent: View {
 
 // MARK: - Last outside change
 
-/// The footer's "Last change: added en.wikipedia.org via the command line, 2 min ago". A click
-/// opens Logs at the lines that came through the control socket.
 /// VPN Only's blocks while the VPN is down (or back, before its routes are): how many listed
 /// entries are held back, and the way out. It says "listed addresses" because that is all it
 /// holds: an IPv6 address or a lookup that skips the app still reaches a listed site.
@@ -862,6 +860,8 @@ struct BlockedSitesLine: View {
     }
 }
 
+/// The footer's "Last change: added en.wikipedia.org via the command line, 2 min ago". A click
+/// opens Logs at the lines that came through the control socket.
 struct OutsideChangeLine: View {
     let change: OutsideChange
     let now: Date
