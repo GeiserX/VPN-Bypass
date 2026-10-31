@@ -325,11 +325,18 @@ final class DocScreenshotsTests: XCTestCase {
     func testSettingsOnLookups() throws {
         seedBypass()
         seedLookups()
-        // The pointer on an unlisted row shows its add action; every other row stays quiet.
+        // The pointer on an unlisted row shows its add and ⋯ actions; every other row stays quiet.
         LookupsTab.hoveredForScreenshots = "api.openai.com"
         defer { LookupsTab.hoveredForScreenshots = nil }
         let size = try renderSettings(page: .lookups, to: "lookups.png")
         XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// The Lookups page before it watches: the empty state with Start Watching, and the privacy note.
+    func testSettingsOnLookupsOff() throws {
+        seedBypass()
+        rm.config.dnsLookupsEnabled = false
+        XCTAssertEqual(try renderSettings(page: .lookups, to: "lookups-off.png"), Self.settingsSize)
     }
 
     /// A change a Shortcuts action made, named in the dropdown footer as `vpnb` changes are,
