@@ -142,9 +142,12 @@ final class ReworkStatusTests: XCTestCase {
         live = DropdownStatus.Input.current(rm, helperReady: true)
         XCTAssertEqual(live.lastCheckCount, 3)
         XCTAssertEqual(live.lastCheckWrongWay, 1)
+        let wrongToo = PathCheck.verificationResult(probe("192.0.2.12", via: "utun4"), expected: .physical, control: .passed)
+        rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: [silent, wrong, wrongToo], logsFrom: Date(), at: Date())
+        XCTAssertEqual(DropdownStatus.Input.current(rm, helperReady: true).lastCheckWrongWay, 2)
         rm.activeRoutes.removeAll { $0.destination == "192.0.2.11" }
-        XCTAssertEqual(DropdownStatus.Input.current(rm, helperReady: true).lastCheckWrongWay, 0,
-                       "an address removed since the check is no longer a fault")
+        XCTAssertEqual(DropdownStatus.Input.current(rm, helperReady: true).lastCheckWrongWay, 1,
+                       "an address removed since the check is no longer a fault; one still routed is")
 
         rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: [underBroken], logsFrom: Date(), at: Date(),
                                            controlBroken: true)
@@ -408,6 +411,12 @@ final class ReworkDropdownTests: RouteManagerTestCase {
         XCTAssertTrue(body.contains("RoutedBySourceCard"), "no list while disconnected")
         let menu = try ReworkSource.body(of: "private var moreActionsMenu: some View", in: "MenuBarViews.swift")
         XCTAssertTrue(menu.contains("Remove All Routes…"))
+        let shared = try ReworkSource.body(of: "struct MenuContent: View", in: "MenuBarViews.swift")
+        let bodyStart = try XCTUnwrap(shared.range(of: "var body: some View")).lowerBound
+        let alert = try XCTUnwrap(shared.range(of: ".alert(removeAllCopy.title"), "no Remove All confirmation").lowerBound
+        let disconnected = try XCTUnwrap(shared.range(of: "disconnectedContent")).lowerBound
+        XCTAssertTrue(bodyStart < disconnected && disconnected < alert,
+                      "the confirmation hangs on the view that holds both states")
         let connected = try ReworkSource.body(of: "private var connectedContent: some View", in: "MenuBarViews.swift")
         XCTAssertFalse(connected.contains(".alert(removeAllCopy.title"),
                        "the Remove All confirmation sits on the shared parent, so it shows while disconnected too")
