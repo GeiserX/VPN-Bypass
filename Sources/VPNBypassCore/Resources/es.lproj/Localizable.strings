@@ -28,7 +28,6 @@
 "Bypass list" = "Lista Bypass";
 "Only these domains will use the VPN. Everything else bypasses it." = "Solo estos dominios usarán la VPN. Todo lo demás la evita.";
 "Add domains that should bypass VPN and use your regular connection." = "Añade dominios que deben evitar la VPN y usar tu conexión habitual.";
-"CONFIGURED DOMAINS" = "DOMINIOS CONFIGURADOS";
 "Applying..." = "Aplicando...";
 "All" = "Todos";
 "Add a domain above to bypass VPN" = "Añade un dominio arriba para evitar la VPN";
@@ -613,8 +612,6 @@
 "Choose Route" = "Elegir ruta";
 
 /* ===== Ajustes: Dominios, Servicios, General e Información ===== */
-"e.g., example.com or 10.0.0.0/24" = "ej.: example.com o 10.0.0.0/24";
-"e.g., example.com" = "ej.: example.com";
 "No entries configured" = "No hay entradas configuradas";
 "Add domains or IP ranges that should use VPN" = "Añade los dominios o rangos de IP que deben usar la VPN";
 "e.g. My Service" = "ej.: Mi servicio";
@@ -891,3 +888,12 @@
 "Switch…" = "Cambiar…";
 "Switch to %@…" = "Cambiar a %@…";
 "Read-only in this mode" = "Solo lectura en este modo";
+
+/* Domains page on the shared components */
+"VPN Only list · used in VPN Only mode" = "Lista Solo VPN · se usa en el modo Solo VPN";
+"Bypass list · used in Bypass mode" = "Lista Bypass · se usa en el modo Bypass";
+"Add a domain, *.wildcard or IP range…" = "Añade un dominio, un *.comodín o un rango de IP…";
+"Add a domain or *.wildcard…" = "Añade un dominio o un *.comodín…";
+"learned as you browse" = "se aprende mientras navegas";
+"IP range" = "Rango de IP";
+"addresses" = "direcciones";
