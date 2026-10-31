@@ -275,12 +275,10 @@ enum StatusPage {
                          withoutAddresses: [RoutedBySource.Row], routes: [RoutedBySource.InstalledRoute] = [],
                          bundle: Bundle = .main) -> [Problem] {
         var out: [Problem] = []
+        let lastChange = lastChange?.outstanding(routedNow: Set(routes.map(\.destination)))
         if let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed, helperReady: helperReady),
            change.failedCount > 0 {
-            // The kernel route is per address, so one in place now serves its entry too.
-            let routedNow = Set(routes.map(\.destination))
             for failure in change.failures {
-                if failure.kind == .notRouted, routedNow.contains(failure.target) { continue }
                 let kind: Problem.Kind
                 let what: String
                 switch failure.kind {
@@ -422,7 +420,8 @@ extension DropdownStatus.Input {
             enabledRules: config.rules.filter { $0.enabled }.count,
             installedRoutes: routeManager.routedAddressCount,
             pending: routeManager.pendingReconnectApply,
-            lastRouteChange: routeManager.lastRouteChange,
+            // Without the failed addresses routed since, as Problems lists them.
+            lastRouteChange: routeManager.lastRouteChange?.outstanding(routedNow: routed),
             lastDNSRefresh: routeManager.lastDNSRefresh,
             nextDNSRefresh: routeManager.nextDNSRefresh,
             autoDNSRefresh: config.autoDNSRefresh,

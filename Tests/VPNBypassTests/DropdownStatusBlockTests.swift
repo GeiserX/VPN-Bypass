@@ -327,6 +327,30 @@ final class StatusProblemsTests: XCTestCase {
         XCTAssertEqual(problems.map(\.title), ["192.0.2.8"], "and no \"1 more failure\" for the one routed since")
     }
 
+    /// The dropdown counts what Problems lists: once every failed address is routed, no count
+    /// and no Show are left that would open an empty page.
+    func testTheCountDropsWhatIsRoutedSince() {
+        let change = applied(failed: 2, [
+            .init(kind: .notRouted, target: "192.0.2.7", entry: "Telegram", reason: "x"),
+            .init(kind: .notResolved, target: "zoom.us", entry: "Zoom", reason: "x"),
+        ])
+        let partly = change.outstanding(routedNow: ["192.0.2.7"])
+        XCTAssertEqual(partly.failedCount, 1)
+        XCTAssertEqual(partly.failures.map(\.target), ["zoom.us"], "a name that did not resolve stays")
+        let all = applied(failed: 1, [.init(kind: .notRouted, target: "192.0.2.7", entry: "Telegram", reason: "x")])
+        func block(_ change: RouteManager.RouteChangeOutcome) -> DropdownStatus {
+            DropdownStatus.make(DropdownStatus.Input(
+                isVPNConnected: true, vpnName: "WireGuard", helperReady: true, mode: .bypass,
+                enabledServices: 4, enabledDomains: 2, enabledRules: 0, installedRoutes: 60,
+                pending: nil, lastRouteChange: change, lastDNSRefresh: nil, nextDNSRefresh: nil,
+                autoDNSRefresh: false), now: now)
+        }
+        let s = block(all.outstanding(routedNow: ["192.0.2.7"]))
+        XCTAssertEqual(s.chip, .on)
+        XCTAssertNil(s.line3.action, "no Show onto an empty Problems")
+        XCTAssertEqual(block(all).line3.action, .show, "control: the raw outcome still shows the failure")
+    }
+
     /// Problems lists every entry with no addresses, past the dropdown's eight rows too.
     func testEveryEntryWithNoAddressesReachesProblems() throws {
         var config = RouteManager.Config()
@@ -339,6 +363,12 @@ final class StatusProblemsTests: XCTestCase {
                                            withoutAddresses: summary.problemRows)
         XCTAssertEqual(problems.count, 10)
         XCTAssertEqual(problems.first?.detail, "No address is routed for it.")
+    }
+
+    /// The dropdown's input reads the outcome without what is routed since, as Problems does.
+    func testTheDropdownReadsTheOutstandingOutcome() throws {
+        let status = try ReworkSource.read("StatusTab.swift")
+        XCTAssertTrue(status.contains("lastRouteChange: routeManager.lastRouteChange?.outstanding(routedNow: routed)"))
     }
 
     /// After Remove All Routes the entries it emptied are not problems, so Retry cannot put

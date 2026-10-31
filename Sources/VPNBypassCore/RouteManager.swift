@@ -136,10 +136,22 @@ final class RouteManager: ObservableObject {
         /// apply resolved live (an apply from the DNS cache skips uncached domains uncounted);
         /// the same number the "routes applied" notification reports. `.removedAll`: routes
         /// that could not be removed.
-        let failedCount: Int
+        var failedCount: Int
         /// The failures behind `failedCount`, each with its entry and reason, for Status >
         /// Problems. It can hold fewer than `failedCount`: the page counts the rest.
         var failures: [RouteFailure] = []
+
+        /// This outcome without the addresses it failed to route that are routed now (a DNS
+        /// retry or a later add put them in), so the dropdown's count, its Show and Problems
+        /// all leave them out. The kernel route is per address, so any entry's route counts.
+        func outstanding(routedNow: Set<String>) -> RouteChangeOutcome {
+            let fixed = failures.filter { $0.kind == .notRouted && routedNow.contains($0.target) }
+            guard !fixed.isEmpty else { return self }
+            var out = self
+            out.failures = failures.filter { !($0.kind == .notRouted && routedNow.contains($0.target)) }
+            out.failedCount = max(0, failedCount - fixed.count)
+            return out
+        }
     }
 
     /// One failure an apply or a removal counted: an address the helper did not route or did
