@@ -888,6 +888,9 @@ final class RouteManager: ObservableObject {
     }
 
     private func checkVPNStatusCore() async {
+        // A timed pause whose time passed while the Mac slept ends here, after this pass has
+        // read the VPN's state, so the Resume apply sees a fresh tunnel and waits as it should.
+        defer { endPauseIfExpired() }
         let wasVPNConnected = isVPNConnected
         let oldInterface = vpnInterface
         // Captured BEFORE re-detection below overwrites it, so a same-interface gateway change is
@@ -2988,12 +2991,23 @@ final class RouteManager: ObservableObject {
         pauseTimerTask = nil
         guard let until = pauseState?.until else { return }
         pauseTimerTask = Task { [weak self] in
+            // The continuous clock counts while the Mac sleeps; Task.sleep(nanoseconds:) does
+            // not, so a 15-minute pause over a closed lid ran on for the whole nap. The status
+            // pass (`endPauseIfExpired`) catches what the timer still misses.
             let wait = max(0, until.timeIntervalSinceNow)
-            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            let clock = ContinuousClock()
+            try? await Task.sleep(until: clock.now.advanced(by: .seconds(wait)), clock: clock)
             guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
             self.pauseTimerTask = nil
             self.endPause(reason: "the pause time is up", apply: true)
         }
+    }
+
+    /// Ends a timed pause whose time is up. Run on every VPN status pass (the 30 s timer, a
+    /// network change, a wake), so a pause never outlives its length when the timer is late.
+    func endPauseIfExpired(now: Date = Date()) {
+        guard let until = pauseState?.until, now >= until else { return }
+        endPause(reason: "the pause time is up", apply: true)
     }
 
     /// Resume's apply: one apply, the same burst as Refresh, held back as a post-reconnect

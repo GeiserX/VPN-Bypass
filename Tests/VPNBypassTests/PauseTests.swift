@@ -581,6 +581,24 @@ final class PauseLifecycleTests: XCTestCase {
         XCTAssertFalse(rm.isPaused)
     }
 
+    func testAPauseWhoseTimePassedEndsOnTheNextStatusPass() async {
+        await rm.pause(for: .fifteenMinutes)
+        rm.endPauseIfExpired(now: Date().addingTimeInterval(14 * 60))
+        XCTAssertTrue(rm.isPaused, "not yet up")
+        // The Mac slept through the timer: the next status pass ends the pause.
+        rm.endPauseIfExpired(now: Date().addingTimeInterval(16 * 60))
+        XCTAssertFalse(rm.isPaused)
+    }
+
+    func testUntimedPausesNeverExpire() async {
+        for length in [PauseLength.untilReconnect, .untilResume] {
+            await rm.pause(for: length)
+            rm.endPauseIfExpired(now: Date().addingTimeInterval(30 * 24 * 3600))
+            XCTAssertTrue(rm.isPaused, "\(length)")
+            rm.endPause(reason: "next", apply: false)
+        }
+    }
+
     func testTheControlSocketPausesAndResumes() async {
         let paused = await ControlSurface.handle(ControlRequest(cmd: "pause", args: ["for": "15m"]))
         XCTAssertTrue(paused.ok, "\(String(describing: paused.error))")
