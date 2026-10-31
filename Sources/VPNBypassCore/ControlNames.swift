@@ -24,27 +24,48 @@ enum ControlNames {
         String(localized: "Edit \(name)", bundle: bundle)
     }
 
+    // The dropdown rows' actions (flow fix 5): the hover button's spoken name, the right-click
+    // menu's item and the VoiceOver rotor's action are the same words.
+
+    static func turnOff(_ name: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Turn Off \(name)", bundle: bundle)
+    }
+
+    static func retry(_ name: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Retry \(name)", bundle: bundle)
+    }
+
+    static func showInSettings(_ name: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Show \(name) in Settings", bundle: bundle)
+    }
+
+    static func copyAddresses(_ name: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Copy the Addresses of \(name)", bundle: bundle)
+    }
+
     /// A tooltip with the control's shortcut after its name, as macOS writes it: "Settings (⌘,)".
     static func help(_ name: String, shortcut: String) -> String { "\(name) (\(shortcut))" }
 }
 
-/// The dropdown's keyboard shortcuts. Each one sits on a control that is always there (⌘R on
-/// Refresh, ⌘, on the gear, ⌘Q on a hidden button), because a SwiftUI `Menu` only answers its
-/// items' keys while it is open; the "…" menu lists ⌘Q on its Quit item.
+/// The dropdown's keyboard shortcuts. Each one sits on a control that is always there (⌘N on
+/// the add field, ⌘R on Refresh, ⌘, on the gear, ⌘P and ⌘Q on hidden buttons), because a SwiftUI `Menu` only answers its
+/// items' keys while it is open; the "…" menu lists ⌘Q on its Quit item, the Pause menu ⌘P on For 1 Hour.
 enum DropdownShortcut: CaseIterable {
-    case refreshRoutes, settings, quit
+    case addSite, refreshRoutes, settings, quit, pause
 
     var key: KeyEquivalent {
         switch self {
+        case .addSite: return "n"
         case .refreshRoutes: return "r"
         case .settings: return ","
         case .quit: return "q"
+        case .pause: return "p"
         }
     }
 
     var modifiers: EventModifiers { .command }
 
-    /// The key as a menu writes it: ⌘R, ⌘, and ⌘Q.
+    /// The key as a menu writes it: ⌘N, ⌘R, ⌘, ⌘Q and ⌘P.
     var symbol: String { "⌘" + String(key.character).uppercased() }
 
     /// The menu item's title.
@@ -52,9 +73,12 @@ enum DropdownShortcut: CaseIterable {
 
     func title(in bundle: Bundle) -> String {
         switch self {
+        case .addSite: return String(localized: "Add a Site", bundle: bundle)
         case .refreshRoutes: return String(localized: "Refresh Routes", bundle: bundle)
         case .settings: return String(localized: "Settings…", bundle: bundle)
         case .quit: return String(localized: "Quit VPN Bypass", bundle: bundle)
+        // Pauses for an hour, or resumes when paused (`PauseShortcut`).
+        case .pause: return String(localized: "Pause or Resume", bundle: bundle)
         }
     }
 

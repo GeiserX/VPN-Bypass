@@ -18,6 +18,8 @@ struct SettingsView: View {
     @State private var selectedTab = SettingsSidebar.restoredPage(UserDefaults.standard.string(forKey: SettingsSidebar.lastPageKey))
     /// The title bar search on a list page; emptied when the page changes.
     @State private var searchText = SettingsView.searchForScreenshots ?? ""
+    /// The search a page asked for from outside opens with, set once the page has changed.
+    @State private var pendingSearch: String?
     /// The doc screenshots open each page with this in the search.
     static var searchForScreenshots: String?
     /// What the Logs page shows when it opens: All, or Warnings after the Status page's Show in Log.
@@ -90,7 +92,8 @@ struct SettingsView: View {
         // The line belongs to the page that made the change.
         .onChange(of: selectedTab) { tab in
             settingsUndo.clear()
-            searchText = Self.searchForScreenshots ?? ""
+            searchText = pendingSearch ?? Self.searchForScreenshots ?? ""
+            pendingSearch = nil
             UserDefaults.standard.set(tab.rawValue, forKey: SettingsSidebar.lastPageKey)
             // The Logs filter resets when the page is left, as it always has.
             if tab != .logs { logsFilter = LogFilter() }
@@ -104,6 +107,14 @@ struct SettingsView: View {
                 SettingsPageRequest.shared.logFilter = nil
                 logsFilter = filter
                 logsFilterRequest += 1
+            }
+            let search = SettingsPageRequest.shared.search
+            SettingsPageRequest.shared.search = nil
+            // Changing page clears the search, so a search for another page waits for it.
+            if page == selectedTab {
+                if let search { searchText = search }
+            } else {
+                pendingSearch = search
             }
             selectedTab = page
         }
@@ -2265,6 +2276,9 @@ final class SettingsPageRequest: ObservableObject {
     var logFilter: LogFilter?
     /// The Services page opens its catalogue sheet; the page takes it and clears it.
     @Published var openCatalogue = false
+    /// The title bar search the page opens with, read together with `page`: the dropdown's
+    /// Show in Settings opens the page filtered to the row's entry.
+    var search: String?
 }
 
 @MainActor
@@ -2274,6 +2288,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     /// The open window's undo line, dropped when the window closes.
     private var settingsUndo: SettingsUndo?
+
+    /// The window is open on screen (not closed, not minimized).
+    var isShown: Bool { window?.isVisible == true && window?.isMiniaturized == false }
 
     /// Shows the window, on `page` when one is given.
     func show(page: SettingsView.SettingsTab? = nil) {

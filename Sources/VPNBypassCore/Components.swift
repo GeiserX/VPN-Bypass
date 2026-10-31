@@ -117,8 +117,15 @@ struct RowAction: Identifiable {
     let name: String
     let systemImage: String
     let perform: () -> Void
+    /// Set, the action is a ⋯ button that opens these actions as a menu, and `perform` is unused.
+    var menu: [RowAction]? = nil
 
     var id: String { name }
+
+    /// The actions VoiceOver and a right-click menu offer: a menu action's items in its place.
+    static func flattened(_ actions: [RowAction]) -> [RowAction] {
+        actions.flatMap { $0.menu ?? [$0] }
+    }
 
     /// The row's keyboard shortcut for this action, when it has one.
     var shortcut: KeyboardShortcut? {
@@ -170,11 +177,19 @@ struct ListRow: View {
     /// From `numberColumnWidth(for:)`, the same on every row of the page.
     var numberWidth: CGFloat = 0
     var actions: [RowAction] = []
+    /// The right-click menu, when it offers more than the hover actions; nil lists `actions`.
+    var menuActions: [RowAction]?
     var isOn: Binding<Bool>?
     /// A selected row answers Return, ⌘⌫ and Space.
     var isSelected = false
     /// Draws the actions as if the pointer were over the row, for the doc screenshots.
     var showsActions = false
+    /// A view between the actions and the number, such as a route chip.
+    var accessory: AnyView?
+    /// The detail line's most lines; nil lets a sentence wrap as far as it needs.
+    var detailLineLimit: Int? = 1
+    /// The detail line is an address (`Theme.Font.mono`), cut in the middle when too long.
+    var monoDetail = false
 
     @State private var isHovered = false
 
@@ -197,10 +212,11 @@ struct ListRow: View {
                     .truncationMode(.middle)
                 if let detail {
                     Text(detail)
-                        .font(Theme.Font.detail)
+                        .font(monoDetail ? Theme.Font.mono : Theme.Font.detail)
                         .foregroundColor(Theme.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                        .lineLimit(detailLineLimit)
+                        .truncationMode(monoDetail ? .middle : .tail)
+                        .fixedSize(horizontal: false, vertical: detailLineLimit == nil)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -209,20 +225,36 @@ struct ListRow: View {
             if !actions.isEmpty {
                 HStack(spacing: 2) {
                     ForEach(actions) { action in
-                        Button(action: action.perform) {
-                            Image(systemName: action.systemImage)
-                                .font(.system(size: 12))
-                                .foregroundColor(Theme.textSecondary)
-                                .frame(width: 22, height: 20)
-                                .contentShape(Rectangle())
+                        if let menu = action.menu {
+                            Menu {
+                                ForEach(menu) { item in
+                                    Button(item.name, action: item.perform)
+                                }
+                            } label: {
+                                actionGlyph(action)
+                            }
+                            .menuStyle(.button)
+                            .buttonStyle(.plain)
+                            .menuIndicator(.hidden)
+                            .fixedSize()
+                            .help(action.name)
+                            .accessibilityLabel(action.name)
+                        } else {
+                            Button(action: action.perform) {
+                                actionGlyph(action)
+                            }
+                            .buttonStyle(.plain)
+                            .help(action.name)
+                            .accessibilityLabel(action.name)
                         }
-                        .buttonStyle(.plain)
-                        .help(action.name)
-                        .accessibilityLabel(action.name)
                     }
                 }
                 .opacity(actionsVisible ? 1 : 0)
                 .animation(.easeOut(duration: 0.15), value: actionsVisible)
+            }
+
+            if let accessory {
+                accessory
             }
 
             if numberWidth > 0 {
@@ -242,12 +274,14 @@ struct ListRow: View {
             }
         }
         .padding(.horizontal, Self.inset)
+        // A detail that wraps grows the row past 44 pt; keep its text off the hairlines.
+        .padding(.vertical, detail != nil && detailLineLimit == nil ? Theme.Space.xs + 2 : 0)
         .frame(minHeight: detail == nil ? Self.singleLineHeight : Self.twoLineHeight)
         .background(actionsVisible ? Theme.bgHover : Color.clear)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .contextMenu {
-            ForEach(actions) { action in
+            ForEach(menuActions ?? RowAction.flattened(actions)) { action in
                 if let shortcut = action.shortcut {
                     Button(action.name, action: action.perform).keyboardShortcut(shortcut)
                 } else {
@@ -258,6 +292,14 @@ struct ListRow: View {
         .background {
             if isSelected { selectedRowKeys }
         }
+    }
+
+    private func actionGlyph(_ action: RowAction) -> some View {
+        Image(systemName: action.systemImage)
+            .font(.system(size: 12))
+            .foregroundColor(Theme.textSecondary)
+            .frame(width: 22, height: 20)
+            .contentShape(Rectangle())
     }
 
     /// Hidden buttons that give a selected row its keys, the way the dropdown's footer does.
@@ -278,7 +320,7 @@ struct ListRow: View {
 
 // MARK: - 3. Page header
 
-/// A page's title, its search field (⌘F) at the trailing end, one + when the page adds
+/// A page's title, its search field (⌘F) at the trailing end, one + (⌘N) when the page adds
 /// through a sheet, and one secondary line under the title that says what the page is for.
 struct PageHeader: View {
     let title: String
@@ -337,16 +379,7 @@ struct PageHeader: View {
                     }
                 }
                 if let onAdd {
-                    Button(action: onAdd) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(Theme.textSecondary)
-                            .frame(width: 24, height: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(Self.addButtonName(addName))
-                    .accessibilityLabel(Self.addButtonName(addName))
+                    PageAddButton(name: Self.addButtonName(addName), action: onAdd)
                 }
             }
             if let subtitle {
@@ -356,6 +389,26 @@ struct PageHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+/// The page's one + (⌘N), named for VoiceOver and in its tooltip: "Add Rule".
+struct PageAddButton: View {
+    let name: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(Theme.textSecondary)
+                .frame(width: 24, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut("n", modifiers: .command)
+        .help(ControlNames.help(name, shortcut: "⌘N"))
+        .accessibilityLabel(name)
     }
 }
 
@@ -550,10 +603,14 @@ struct RouteChip: View {
 /// chevron and keeps the chip's look (the B1 fix, kept in one place).
 struct RouteChipMenu<Content: View>: View {
     let chip: RouteChip
+    /// What VoiceOver says for the menu: "Route: Direct" unless the row names its own,
+    /// such as "Route for en.wikipedia.org: Direct".
+    let spokenName: String
     let content: Content
 
-    init(_ chip: RouteChip, @ViewBuilder content: () -> Content) {
+    init(_ chip: RouteChip, spokenName: String? = nil, @ViewBuilder content: () -> Content) {
         self.chip = RouteChip(systemImage: chip.systemImage, name: chip.name, showsChevron: true)
+        self.spokenName = spokenName ?? RouteChip.spokenName(chip.name)
         self.content = content()
     }
 
@@ -567,7 +624,7 @@ struct RouteChipMenu<Content: View>: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize(horizontal: false, vertical: true)
-        .accessibilityLabel(RouteChip.spokenName(chip.name))
+        .accessibilityLabel(spokenName)
     }
 }
 

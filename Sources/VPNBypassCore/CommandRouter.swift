@@ -121,11 +121,14 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
     /// names (`includeAllNetworks`, `enforceRoutes`, plus `excludeLocalNetworks` when it lets
     /// local addresses out). Nil (omitted) when none is on; then `enforcing` can be true.
     public var killSwitch: [String]? = nil
+    /// How long routing is paused: "until 2026-10-31T14:32:00Z", "until the VPN reconnects"
+    /// or "until resumed". Nil (omitted) when not paused.
+    public var paused: String? = nil
 
     public init(helperReady: Bool, helperState: String, vpnConnected: Bool,
                 vpnInterface: String? = nil, vpnType: String? = nil,
                 enforcedRouteCount: Int, enforcing: Bool, appVersion: String? = nil,
-                killSwitch: [String]? = nil) {
+                killSwitch: [String]? = nil, paused: String? = nil) {
         self.helperReady = helperReady
         self.helperState = helperState
         self.vpnConnected = vpnConnected
@@ -135,6 +138,7 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
         self.enforcing = enforcing
         self.appVersion = appVersion
         self.killSwitch = killSwitch
+        self.paused = paused
     }
 }
 

@@ -71,6 +71,12 @@ func printUsage() {
                                                  then a path check (the interface its connection to
                                                  port 443 leaves through, and whether it answers),
                                                  with a control address that must leave the other way
+      pause [15m|1h|<n>m|<n>h|reconnect]        Take the app's routes out until the time is up,
+                                                 the VPN reconnects, or resume (no length: until
+                                                 resume); refused in VPN Only, and in Custom
+                                                 unless every enabled rule goes Direct
+      resume                                    Put the routes back (one apply, after the
+                                                 tunnel settles)
 
       help | --help | -h                        Show this help
 

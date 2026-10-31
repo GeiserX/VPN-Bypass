@@ -302,6 +302,41 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size, Self.settingsSize)
     }
 
+    /// The pointer on the proxy rule: its edit and delete show beside the route chip.
+    func testSettingsOnRulesHovered() throws {
+        seedCustom()
+        RulesTab.hoveredForScreenshots = "en.wikipedia.org"
+        defer { RulesTab.hoveredForScreenshots = nil }
+        XCTAssertEqual(try renderSettings(page: .rules, to: "rules-hover.png"), Self.settingsSize)
+    }
+
+    /// No rules yet: the empty state, then Everything else.
+    func testSettingsOnRulesEmpty() throws {
+        seedCustom()
+        rm.config.rules = []
+        XCTAssertEqual(try renderSettings(page: .rules, to: "rules-empty.png"), Self.settingsSize)
+    }
+
+    /// The pointer on office-proxy: Copy Proxy URL, edit and ⋯ show beside the type chip,
+    /// and the line under the list is the one a proxy URL copy leaves, with the sign-in hint.
+    func testSettingsOnRoutesHovered() throws {
+        seedCustom()
+        RoutesTab.hoveredForScreenshots = "office-proxy"
+        RoutesTab.copiedLineForScreenshots = RouteRow.CopyKind.proxyURL.confirmation(routeName: "office-proxy")
+        defer {
+            RoutesTab.hoveredForScreenshots = nil
+            RoutesTab.copiedLineForScreenshots = nil
+        }
+        XCTAssertEqual(try renderSettings(page: .routes, to: "routes-hover.png"), Self.settingsSize)
+    }
+
+    /// No routes of your own: Always there, then the empty state.
+    func testSettingsOnRoutesEmpty() throws {
+        seedCustom()
+        rm.config.routes.removeAll { ProxyListenerManager.usesLocalListener($0.egress) }
+        XCTAssertEqual(try renderSettings(page: .routes, to: "routes-empty.png"), Self.settingsSize)
+    }
+
     /// The Settings window at its default size, at 2x.
     private static let settingsSize = NSSize(width: 1720, height: 1240)
 
@@ -350,11 +385,18 @@ final class DocScreenshotsTests: XCTestCase {
     func testSettingsOnLookups() throws {
         seedBypass()
         seedLookups()
-        // The pointer on an unlisted row shows its add action; every other row stays quiet.
+        // The pointer on an unlisted row shows its add and ⋯ actions; every other row stays quiet.
         LookupsTab.hoveredForScreenshots = "api.openai.com"
         defer { LookupsTab.hoveredForScreenshots = nil }
         let size = try renderSettings(page: .lookups, to: "lookups.png")
         XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// The Lookups page before it watches: the empty state with Start Watching, and the privacy note.
+    func testSettingsOnLookupsOff() throws {
+        seedBypass()
+        rm.config.dnsLookupsEnabled = false
+        XCTAssertEqual(try renderSettings(page: .lookups, to: "lookups-off.png"), Self.settingsSize)
     }
 
     /// A change a Shortcuts action made, named in the dropdown footer as `vpnb` changes are,
@@ -683,6 +725,140 @@ final class DocScreenshotsTests: XCTestCase {
         rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: Date(), at: Date().addingTimeInterval(-51))
         defer { rm.clearRouteCheck() }
         _ = try renderSettings(page: .status, to: "status-problems.png")
+    }
+
+    // MARK: - Dropdown rows and the add field (step 11), drawn for the pull request
+
+    // BEGIN ROWS SHOTS
+    func testRowsOn() throws {
+        seedBypass()
+        hoverRow("YouTube")
+        _ = try renderDropdown(to: "rows-on.png")
+    }
+
+    func testRowsPartlyRouted() throws {
+        seedPartlyRouted()
+        hoverRow("Zoom")
+        _ = try renderDropdown(to: "rows-partly.png")
+    }
+
+    func testRowsDisconnected() throws {
+        seedBypass()
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        _ = try renderDropdown(to: "rows-disconnected.png")
+    }
+
+    func testRowsStarting() throws {
+        seedConnected(mode: .bypass)
+        rm.activeRoutes = []
+        rm.lastRouteChange = nil
+        rm.config.domains = [DomainEntry(domain: "en.wikipedia.org", enabled: true)]
+        rm.isLoading = true
+        rm.lastUpdate = nil
+        _ = try renderDropdown(to: "rows-starting.png")
+    }
+
+    func testRowsLongList() throws {
+        seedBypass()
+        let more = ["github.com", "docs.example.com", "status.example.com", "registry.npmjs.org"]
+        rm.config.domains += more.map { DomainEntry(domain: $0, enabled: true) }
+        rm.activeRoutes += addresses(["github.com": 3, "docs.example.com": 2, "status.example.com": 1,
+                                      "registry.npmjs.org": 2], gateway: "192.168.1.1")
+        _ = try renderDropdown(to: "rows-long.png")
+    }
+
+    func testRowsVPNOnly() throws {
+        seedConnected(mode: .vpnOnly)
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.com", enabled: true),
+                                    DomainEntry(domain: "git.example.com", enabled: true)]
+        rm.activeRoutes = ClassicRouteCompiler.bypassAllCatchAlls.map {
+            route($0, via: "192.168.1.1", for: ClassicRouteCompiler.catchAllSource)
+        } + addresses(["intranet.example.com": 2, "git.example.com": 1], gateway: "10.0.0.1")
+        rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-19), routeCount: 3, failedCount: 0)
+        _ = try renderDropdown(to: "rows-vpn-only.png")
+    }
+
+    func testRowsCustom() throws {
+        seedCustom()
+        _ = try renderDropdown(to: "rows-custom.png")
+    }
+    // END ROWS SHOTS
+
+    // MARK: - Pause (step 12), drawn for the pull request
+
+    // BEGIN PAUSE SHOTS
+    func testPauseBypassOn() throws {
+        seedBypass()
+        _ = try renderDropdown(to: "pause-bypass-on.png")
+    }
+
+    func testPauseVPNOnly() throws {
+        seedConnected(mode: .vpnOnly)
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.com", enabled: true),
+                                    DomainEntry(domain: "git.example.com", enabled: true)]
+        rm.activeRoutes = ClassicRouteCompiler.bypassAllCatchAlls.map {
+            route($0, via: "192.168.1.1", for: ClassicRouteCompiler.catchAllSource)
+        } + addresses(["intranet.example.com": 2, "git.example.com": 1], gateway: "10.0.0.1")
+        rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-19), routeCount: 3, failedCount: 0)
+        _ = try renderDropdown(to: "pause-vpn-only.png")
+    }
+
+    func testPauseCustomWithAProxyRule() throws {
+        seedCustom()
+        _ = try renderDropdown(to: "pause-custom.png")
+    }
+    // END PAUSE SHOTS
+
+    func testPausePausedForAnHour() throws {
+        seedPaused(.oneHour)
+        _ = try renderDropdown(to: "pause-paused-hour.png")
+    }
+
+    func testPausePausedUntilReconnect() throws {
+        seedPaused(.untilReconnect)
+        _ = try renderDropdown(to: "pause-paused-reconnect.png")
+    }
+
+    func testPausePausedUntilResume() throws {
+        seedPaused(.untilResume)
+        _ = try renderDropdown(to: "pause-paused-resume.png")
+    }
+
+    /// The removal failed for five addresses: Retry, never Paused.
+    func testPausePausedWithRoutesLeft() throws {
+        seedPaused(.oneHour)
+        rm.activeRoutes = addresses(["Telegram": 5], gateway: "192.168.1.1")
+        rm.lastRouteChange = .init(kind: .removedAll, at: Date().addingTimeInterval(-60), routeCount: 5, failedCount: 5)
+        _ = try renderDropdown(to: "pause-paused-left.png")
+    }
+
+    func testPausePausedStatusPage() throws {
+        seedPaused(.oneHour)
+        _ = try renderSettings(page: .status, to: "pause-paused-status.png")
+    }
+
+    /// Bypass paused two minutes ago: every route out, the lists kept for Resume.
+    private func seedPaused(_ length: PauseLength) {
+        seedBypass()
+        rm.activeRoutes = []
+        rm.lastRouteChange = .init(kind: .removedAll, at: Date().addingTimeInterval(-120), routeCount: 0, failedCount: 0)
+        rm.setPauseStateForTests(PauseState(length: length, since: Date().addingTimeInterval(-120), mode: .bypass))
+        addTeardownBlock { @MainActor in RouteManager.shared.setPauseStateForTests(nil) }
+    }
+
+    /// The Status page when the app is opened again with its menu bar icon hidden.
+    func testRowsStatusWithTheIconHidden() throws {
+        seedBypass()
+        MenuBarIconVisibility.shared.isHidden = true
+        defer { MenuBarIconVisibility.shared.isHidden = false }
+        _ = try renderSettings(page: .status, to: "rows-status-icon-hidden.png")
+    }
+
+    private func hoverRow(_ name: String) {
+        RoutedBySourceCard.hoveredRowForScreenshots = name
+        addTeardownBlock { @MainActor in RoutedBySourceCard.hoveredRowForScreenshots = nil }
     }
 
     /// Bypass with Zoom on and no address for it, and an apply 64 s ago with seven failures:

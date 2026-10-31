@@ -239,11 +239,12 @@ final class ReworkDropdownTests: RouteManagerTestCase {
         return (direct, proxy)
     }
 
-    /// A5: in Custom the button said "Add Domain to Bypass".
+    /// A5: in Custom the button said "Add Domain to Bypass". The field's placeholder follows
+    /// the mode (flow fix 4).
     func testTheQuickAddSaysWhatItAddsInEachMode() {
-        XCTAssertEqual(DropdownCopy.quickAddLabel(.bypass), "Add Domain to Bypass")
-        XCTAssertEqual(DropdownCopy.quickAddLabel(.vpnOnly), "Add Domain to VPN")
-        XCTAssertEqual(DropdownCopy.quickAddLabel(.custom), "Add a Direct rule…")
+        XCTAssertEqual(DropdownCopy.quickAddPlaceholder(.bypass), "Add a site to bypass…")
+        XCTAssertEqual(DropdownCopy.quickAddPlaceholder(.vpnOnly), "Add a site for the VPN…")
+        XCTAssertEqual(DropdownCopy.quickAddPlaceholder(.custom), "Add a Direct rule…")
     }
 
     /// A5: the rule went last and the field closed without a word, even when an earlier rule
@@ -259,7 +260,6 @@ final class ReworkDropdownTests: RouteManagerTestCase {
         XCTAssertEqual(shadowed.message, "Added as rule 4; rule 2 matches first.")
 
         let state = MenuContent.quickAdd(after: .success(shadowed), typed: "shop.example.com")
-        XCTAssertTrue(state.isOpen, "the field stays open to say where the rule went")
         XCTAssertEqual(state.text, "")
         XCTAssertEqual(state.feedback?.isError, false)
         XCTAssertEqual(state.feedback?.message, "Added as rule 4; rule 2 matches first.")
@@ -363,7 +363,6 @@ final class ReworkDropdownTests: RouteManagerTestCase {
         XCTAssertEqual(result, .failure(.directRouteOff(value: "news.ycombinator.com")))
         XCTAssertTrue(rm.config.rules.isEmpty, "no rule saved on a route that is off")
         let state = MenuContent.quickAdd(after: result, typed: "news.ycombinator.com")
-        XCTAssertTrue(state.isOpen, "the field stays open to say why")
         XCTAssertEqual(state.text, "news.ycombinator.com")
         XCTAssertEqual(state.feedback?.message,
                        "The Direct route is off, so a rule for news.ycombinator.com would route nothing. Turn it on in Routes first.")
@@ -410,7 +409,7 @@ final class ReworkDropdownTests: RouteManagerTestCase {
     /// menu sits in the footer, which every state shows.
     func testTheDisconnectedDropdownKeepsTheMoreMenu() throws {
         let body = try ReworkSource.body(of: "private var disconnectedContent: some View", in: "MenuBarViews.swift")
-        XCTAssertTrue(body.contains("RoutedBySourceCard"), "no list while disconnected")
+        XCTAssertTrue(body.contains("routedList("), "no list while disconnected")
         let footer = try ReworkSource.body(of: "private var footerActions: some View", in: "MenuBarViews.swift")
         XCTAssertTrue(footer.contains("moreActionsMenu"), "no … menu in the footer")
         let menu = try ReworkSource.body(of: "private var moreActionsMenu: some View", in: "MenuBarViews.swift")
@@ -463,11 +462,15 @@ final class ReworkViewTests: XCTestCase {
         XCTAssertTrue(body.contains("Text(verbatim: \"Bypass\")"))
     }
 
-    /// B1: the Rules route menu drew two chevrons and lost the chip's colour.
+    /// B1: the Rules route menu drew two chevrons and lost the chip's colour. The Rules page
+    /// now draws the shared `RouteChipMenu`, which hides the system indicator.
     func testTheRouteMenuDrawsOnlyTheChip() throws {
-        let body = try ReworkSource.body(of: "struct RulesRouteChipMenu: View", in: "RulesTab.swift")
-        XCTAssertFalse(body.contains(".menuStyle(.borderlessButton)"))
-        XCTAssertTrue(body.contains(".menuIndicator(.hidden)"))
+        let rules = try ReworkSource.body(of: "struct RulesRouteChipMenu: View", in: "RulesTab.swift")
+        XCTAssertTrue(rules.contains("RouteChipMenu(chip"), "the Rules page has its own menu again:\n\(rules)")
+        XCTAssertFalse(rules.contains("Menu {"))
+        let shared = try ReworkSource.body(of: "struct RouteChipMenu<Content: View>: View", in: "Components.swift")
+        XCTAssertFalse(shared.contains(".menuStyle(.borderlessButton)"))
+        XCTAssertTrue(shared.contains(".menuIndicator(.hidden)"))
     }
 
     /// B2: every General icon was green, on or off.
