@@ -6273,6 +6273,9 @@ struct RulePlace: Equatable {
             return earlier.pattern == rule.pattern
         case (.cidr, .domain):
             return RuleResolver.ipv4(rule.pattern, inCIDR: earlier.pattern)
+        case (.ip, .cidr):
+            // Only a /32 of the same address: both compile to that one host route.
+            return contains("\(earlier.pattern)/32", rule.pattern)
         case (.cidr, .cidr):
             return contains(earlier.pattern, rule.pattern)
         case (.service, .cidr):

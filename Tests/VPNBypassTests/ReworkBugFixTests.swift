@@ -389,6 +389,11 @@ final class ReworkDropdownTests: RouteManagerTestCase {
                                         services: [service]), "a wider range is only partly claimed")
         XCTAssertFalse(RulePlace.covers(rules[0], Rule(matchType: .cidr, pattern: "203.0.113.0/24", routeId: UUID(), order: 1),
                                         services: [service]))
+        let host = Rule(matchType: .ip, pattern: "198.51.100.5", routeId: UUID(), order: 0)
+        XCTAssertTrue(RulePlace.covers(host, Rule(matchType: .cidr, pattern: "198.51.100.5/32", routeId: UUID(), order: 1),
+                                       services: []), "an IP rule matches its own /32 first")
+        XCTAssertFalse(RulePlace.covers(host, Rule(matchType: .cidr, pattern: "198.51.100.0/24", routeId: UUID(), order: 1),
+                                        services: []))
     }
 
     /// An apply replaces the routes the last check looked at, so every apply path drops it:
