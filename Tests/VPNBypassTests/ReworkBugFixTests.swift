@@ -478,7 +478,7 @@ final class ReworkViewTests: XCTestCase {
 
     /// B3: the Services page had a VPN Only banner it could never show.
     func testTheServicesPageHasNoVPNOnlyBanner() throws {
-        XCTAssertFalse(SettingsView.tabs(for: .vpnOnly).contains(.services))
+        XCTAssertTrue(SettingsSidebar.isReadOnly(.services, in: .vpnOnly))
         let source = try ReworkSource.read("SettingsView.swift")
         XCTAssertFalse(source.contains("Services disabled in VPN Only mode"))
     }

@@ -22,7 +22,6 @@
 /* ===== Settings — Tabs ===== */
 "General" = "General";
 "Logs" = "Logs";
-"Info" = "Info";
 
 /* ===== Settings — Domains Tab ===== */
 "VPN Only list" = "VPN Only list";
@@ -35,7 +34,6 @@
 "Add a domain above to bypass VPN" = "Add a domain above to bypass VPN";
 
 /* ===== Settings — Services Tab ===== */
-"Search services..." = "Search services...";
 "Create Custom Service" = "Create Custom Service";
 "Custom" = "Custom";
 "%lld domains" = "%lld domains";
@@ -362,11 +360,7 @@
 "Custom Routes" = "Custom Routes";
 "Rules" = "Rules";
 "Routing mode" = "Routing mode";
-"Routing mode: %@" = "Routing mode: %@";
 "Switch" = "Switch";
-"Everything uses the VPN except what you list" = "Everything uses the VPN except what you list";
-"Only what you list uses the VPN" = "Only what you list uses the VPN";
-"Pick a route for each destination" = "Pick a route for each destination";
 "Everything uses the VPN except what you list." = "Everything uses the VPN except what you list.";
 "Only what you list uses the VPN; everything else goes direct." = "Only what you list uses the VPN; everything else goes direct.";
 "Send each destination through a route you pick: direct, a VPN, a proxy or a Tailscale peer." = "Send each destination through a route you pick: direct, a VPN, a proxy or a Tailscale peer.";
@@ -886,3 +880,14 @@
 "Retry: remove the routes again" = "Retry: remove the routes again";
 "No address is routed for it." = "No address is routed for it.";
 "it is the VPN's own gateway, which is never rerouted" = "it is the VPN's own gateway, which is never rerouted";
+"About" = "About";
+"Routing" = "Routing";
+"Insight" = "Insight";
+"App" = "App";
+"Domains apply in Bypass and VPN Only modes. You are in %@." = "Domains apply in Bypass and VPN Only modes. You are in %@.";
+"Services apply in Bypass mode. You are in %@." = "Services apply in Bypass mode. You are in %@.";
+"Rules apply in Custom mode. You are in %@." = "Rules apply in Custom mode. You are in %@.";
+"Routes apply in Custom mode. You are in %@." = "Routes apply in Custom mode. You are in %@.";
+"Switch…" = "Switch…";
+"Switch to %@…" = "Switch to %@…";
+"Read-only in this mode" = "Read-only in this mode";

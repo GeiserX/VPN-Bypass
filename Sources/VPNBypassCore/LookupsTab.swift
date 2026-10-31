@@ -7,7 +7,8 @@ import SwiftUI
 struct LookupsTab: View {
     @EnvironmentObject var routeManager: RouteManager
     @ObservedObject private var monitor = DNSLookupsMonitor.shared
-    @State private var query = ""
+    /// The title bar search (⌘F), which the window owns.
+    @Environment(\.settingsSearch) private var query
     @State private var feedback: AddDomainFeedback?
     /// The name the New Service sheet is open for.
     @State private var newServiceFor: NewServiceRequest?
@@ -109,8 +110,6 @@ struct LookupsTab: View {
             }
 
             HStack(spacing: 10) {
-                LogSearchField(text: $query, placeholder: String(localized: "Search"))
-                    .frame(minWidth: 110, maxWidth: 240)
                 if let since = monitor.since {
                     Text("\(monitor.tally.entries.count) names since \(since.formatted(date: .omitted, time: .shortened))")
                         .font(.system(size: 11))

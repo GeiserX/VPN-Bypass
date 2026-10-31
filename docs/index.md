@@ -40,7 +40,7 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 
     ---
 
-    The dropdown, the Settings tabs, the `vpnb` command line and the [MCP server](mcp-server.md) for AI agents.
+    The dropdown, the Settings pages, the `vpnb` command line and the [MCP server](mcp-server.md) for AI agents.
 
 -   :material-source-branch: **[Routing modes](routing.md)**
 
@@ -71,7 +71,7 @@ Everything lives in the dropdown: the VPN it found, a status chip that says whet
 
 ## Settings
 
-Status comes first and says whether it is working right now: the helper, the VPN and gateway, the routes, DNS, the tunnels and recent warnings. Bypass and VPN Only use the Domains and Services tabs. Custom mode swaps them for Rules and Routes. General holds launch at login, `/etc/hosts` and notifications; Logs and Info are for debugging. See [Settings](usage.md#settings).
+Status comes first and says whether it is working right now: the helper, the VPN and gateway, the routes, DNS, the tunnels and recent warnings. Every page is in the sidebar in every mode. Bypass and VPN Only use Domains and Services, Custom mode uses Rules and Routes, and a page of another mode opens read-only. General holds launch at login, `/etc/hosts` and notifications; Logs and About are for debugging. See [Settings](usage.md#settings).
 
 ![The Services tab: the four services that are on, Telegram, WhatsApp, YouTube and Spotify, under On, each with a switch, and the Browse catalogue button at the top](images/screenshots/services.png){ width="580" }
 

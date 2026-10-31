@@ -539,6 +539,16 @@ struct RulesTab: View {
     private var sortedRules: [Rule] {
         routeManager.config.rules.sorted { $0.order < $1.order }
     }
+    /// The title bar search (⌘F), which the window owns.
+    @Environment(\.settingsSearch) private var searchText
+    /// False on the read-only page the shell shows in another mode.
+    @Environment(\.isEnabled) private var isEnabled
+    /// The rules the search leaves, in order; every rule with no search. Dragging still moves by
+    /// id, so a filtered list reorders the full one.
+    private var shownRules: [Rule] {
+        let services = routeManager.config.services
+        return sortedRules.filter { SettingsSidebar.matches(RuleRow.patternDisplay($0, services: services), search: searchText) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -667,7 +677,10 @@ struct RulesTab: View {
     private var ruleList: some View {
         SettingsCard(title: "Rules", icon: "list.bullet.indent", iconColor: Theme.blue) {
             VStack(spacing: 0) {
-                ForEach(Array(sortedRules.enumerated()), id: \.element.id) { idx, rule in
+                if shownRules.isEmpty {
+                    SettingsSearchMiss(search: searchText)
+                }
+                ForEach(Array(shownRules.enumerated()), id: \.element.id) { idx, rule in
                     RuleRow(
                         rule: rule,
                         listenerPort: listenerManager.port(for: rule.routeId),
@@ -683,11 +696,13 @@ struct RulesTab: View {
                     )
                     .draggable(rule.id.uuidString)
                     .dropDestination(for: String.self) { items, _ in
+                        // A read-only page (another mode) takes no drop: `.disabled` does not stop one.
+                        guard isEnabled else { return false }
                         guard let draggedIdString = items.first, let draggedId = UUID(uuidString: draggedIdString) else { return false }
                         moveRule(draggedId: draggedId, to: rule.id)
                         return true
                     }
-                    if idx < sortedRules.count - 1 {
+                    if idx < shownRules.count - 1 {
                         Divider()
                             .background(Theme.divider)
                             .padding(.vertical, 4)

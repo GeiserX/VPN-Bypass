@@ -1,5 +1,6 @@
 // SettingsView.swift
-// Settings window with tabs for Status, Domains, Services, Rules, Routes, Lookups, General, Logs, and Info.
+// The Settings window: a sidebar (SettingsSidebar.swift) with Status, Domains, Services, Rules,
+// Routes, Lookups, Logs, General and About, and the page picked in it.
 
 import SwiftUI
 import UniformTypeIdentifiers
@@ -8,33 +9,41 @@ struct SettingsView: View {
     @EnvironmentObject var routeManager: RouteManager
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
-    /// The mode picked in the title bar's Mode menu; set, it opens the sheet.
+    /// The mode picked in the sidebar's mode popup or a read-only page's Switch…; set, it opens the sheet.
     @EnvironmentObject var modeSwitch: ModeSwitchRequest
     /// The last delete or bulk switch, which the page that made it offers to undo.
     @EnvironmentObject var settingsUndo: SettingsUndo
     @Environment(\.undoManager) private var undoManager
-    @State private var selectedTab: SettingsTab = .status
+    /// Opens on the page shown last time the window was open.
+    @State private var selectedTab = SettingsSidebar.restoredPage(UserDefaults.standard.string(forKey: SettingsSidebar.lastPageKey))
+    /// The title bar search on a list page; emptied when the page changes.
+    @State private var searchText = SettingsView.searchForScreenshots ?? ""
+    /// The doc screenshots open each page with this in the search.
+    static var searchForScreenshots: String?
     /// What the Logs page shows when it opens: All, or Warnings after the Status page's Show in Log.
     @State private var logsFilter = LogFilter()
     /// Bumped when a filter is asked for from outside, so a Logs page already open takes it.
     @State private var logsFilterRequest = 0
 
-    // MARK: - Tab model
+    // MARK: - Page model
 
-    enum SettingsTab: Hashable {
-        case status, domains, services, rules, routes, lookups, general, logs, info
+    enum SettingsTab: String, Hashable, CaseIterable {
+        case status, domains, services, rules, routes, lookups, general, logs, about
 
-        var title: LocalizedStringKey {
+        /// The page's name, also the window's title.
+        var name: String { name(in: .main) }
+
+        func name(in bundle: Bundle) -> String {
             switch self {
-            case .status:   return "Status"
-            case .domains:  return "Domains"
-            case .services: return "Services"
-            case .rules:    return "Rules"
-            case .routes:   return "Routes"
-            case .lookups:  return "Lookups"
-            case .general:  return "General"
-            case .logs:     return "Logs"
-            case .info:     return "Info"
+            case .status:   return String(localized: "Status", bundle: bundle)
+            case .domains:  return String(localized: "Domains", bundle: bundle)
+            case .services: return String(localized: "Services", bundle: bundle)
+            case .rules:    return String(localized: "Rules", bundle: bundle)
+            case .routes:   return String(localized: "Routes", bundle: bundle)
+            case .lookups:  return String(localized: "Lookups", bundle: bundle)
+            case .general:  return String(localized: "General", bundle: bundle)
+            case .logs:     return String(localized: "Logs", bundle: bundle)
+            case .about:    return String(localized: "About", bundle: bundle)
             }
         }
 
@@ -42,69 +51,47 @@ struct SettingsView: View {
             switch self {
             case .status:   return "waveform.path.ecg.rectangle"
             case .domains:  return "globe"
-            case .services: return "square.grid.2x2.fill"
-            case .rules:    return "list.bullet.indent"
+            case .services: return "square.grid.2x2"
+            case .rules:    return "list.bullet"
             case .routes:   return "arrow.triangle.branch"
             case .lookups:  return "magnifyingglass"
-            case .general:  return "gearshape.fill"
+            case .general:  return "slider.horizontal.3"
             case .logs:     return "list.bullet.rectangle"
-            case .info:     return "info.circle.fill"
+            case .about:    return "info.circle"
             }
         }
     }
 
-    /// Ordered tabs to display, driven by the routing mode (chosen from the Mode menu in the
-    /// title bar): Status comes first in every mode; Bypass/VPN Only keep the classic tabs;
-    /// Custom Routes swaps Domains/Services for Rules + Routes.
-    private var visibleTabs: [SettingsTab] { Self.tabs(for: routeManager.config.routingMode) }
-
-    static func tabs(for mode: RouteManager.RoutingMode) -> [SettingsTab] {
-        switch mode {
-        case .bypass:  return [.status, .domains, .services, .lookups, .general, .logs, .info]
-        case .vpnOnly: return [.status, .domains, .lookups, .general, .logs, .info]
-        case .custom:  return [.status, .rules, .routes, .lookups, .general, .logs, .info]
-        }
-    }
-
-    /// If the selected tab isn't visible under the current mode (e.g. a fresh
-    /// window opened while already in Custom mode, or a mode switch while the
-    /// window is open), fall back to the first visible tab so the view is never
-    /// left showing hidden-tab content with no pill selected in the tab bar.
-    private func clampSelectedTabIfNeeded() {
-        if !visibleTabs.contains(selectedTab) {
-            selectedTab = visibleTabs.first ?? .general
-        }
-    }
+    private var mode: RoutingMode { routeManager.config.routingMode }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Beautiful gradient header
-            headerView
-
-            // Tab content with animation
-            tabContent
-                .animation(.easeInOut(duration: 0.2), value: selectedTab)
+        // The title bar's height is the top safe area (28 pt, 32 on macOS 26). The sidebar and
+        // the page header both start in it, level with the traffic lights.
+        GeometryReader { proxy in
+            let titleBar = max(proxy.safeAreaInsets.top, 28)
+            HStack(spacing: 0) {
+                SettingsSidebarView(selection: $selectedTab, topInset: titleBar)
+                Rectangle()
+                    .fill(Theme.separator)
+                    .frame(width: 1)
+                detail(titleBar: titleBar)
+            }
+            .ignoresSafeArea(.container, edges: .top)
         }
-        .frame(width: 580, height: 680)
-        .background(
-            LinearGradient(
-                colors: [Theme.bgPrimary, Theme.bgSecondary],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .background(WindowTitleSetter(title: selectedTab.name))
         .onAppear {
-            clampSelectedTabIfNeeded()
             settingsUndo.undoManager = undoManager
         }
+        // The page stays where it is; a page of the old mode turns read-only.
         .onChange(of: routeManager.config.routingMode) { _ in
-            clampSelectedTabIfNeeded()
-            // The change was made to another mode's list, which this page no longer shows.
+            // The change was made to another mode's list, which this page no longer edits.
             settingsUndo.clear()
         }
         // The line belongs to the page that made the change.
         .onChange(of: selectedTab) { tab in
             settingsUndo.clear()
+            searchText = Self.searchForScreenshots ?? ""
+            UserDefaults.standard.set(tab.rawValue, forKey: SettingsSidebar.lastPageKey)
             // The Logs filter resets when the page is left, as it always has.
             if tab != .logs { logsFilter = LogFilter() }
         }
@@ -119,7 +106,6 @@ struct SettingsView: View {
                 logsFilterRequest += 1
             }
             selectedTab = page
-            clampSelectedTabIfNeeded()
         }
         .sheet(isPresented: Binding(
             get: { modeSwitch.pickedMode != nil },
@@ -137,103 +123,65 @@ struct SettingsView: View {
         }
     }
 
-    /// The page toolbar: icon above label, a plain highlight on the page shown. The routing
-    /// mode is not here; it is the Mode menu in the title bar, so no page button changes it.
-    private var headerView: some View {
+    /// The page: its name and, on a list page, the search field, both in the title bar row
+    /// level with the traffic lights, then the page itself in the one scroll view of the window.
+    private func detail(titleBar: CGFloat) -> some View {
         VStack(spacing: 0) {
-            // Each item is at least 80 pt wide, so seven with 4 pt gaps need 584 pt of a 580 pt
-            // window; seven sit edge to edge instead.
-            HStack(spacing: visibleTabs.count > 6 ? 0 : 4) {
-                ForEach(visibleTabs, id: \.self) { tab in
-                    SettingsToolbarItem(
-                        title: tab.title,
-                        icon: tab.icon,
-                        isSelected: selectedTab == tab
-                    ) {
-                        selectedTab = tab
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            // The hosting view's safe area already starts below the title bar row (traffic
-            // lights, app name, Mode menu), so only a small gap is added here.
-            .padding(.top, 6)
-            .padding(.bottom, 8)
+            PageHeader(
+                title: selectedTab.name,
+                subtitle: nil,
+                search: SettingsSidebar.isSearchable(selectedTab) ? $searchText : nil
+            )
+            .padding(.horizontal, Theme.Space.page)
+            .frame(height: titleBar)
+            .padding(.bottom, Theme.Space.m)
 
             Rectangle()
-                .fill(Theme.divider)
+                .fill(Theme.separator)
                 .frame(height: 1)
-        }
-        .background(Theme.bgPrimary.opacity(0.8))
-    }
 
-    private var tabContent: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                switch selectedTab {
-                case .status:
-                    StatusTab(onShowWarnings: {
-                        logsFilter = LogFilter(level: .warnings)
-                        selectedTab = .logs
-                    }, onShowLogs: {
-                        logsFilter = LogFilter()
-                        selectedTab = .logs
-                    })
-                case .domains:  DomainsTab()
-                case .services: ServicesTab()
-                case .rules:    RulesTab()
-                case .routes:   RoutesTab()
-                case .lookups:  LookupsTab()
-                case .general:  GeneralTab()
-                case .logs:     LogsTab(filter: logsFilter).id(logsFilterRequest)
-                case .info:     InfoTab()
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.l) {
+                    if let line = SettingsSidebar.readOnlyLine(selectedTab, in: mode),
+                       let target = SettingsSidebar.switchTarget(for: selectedTab) {
+                        ReadOnlyPageLine(text: line, target: target) {
+                            modeSwitch.pickedMode = RoutingModeCopy.sheetSelection(forPick: target, current: mode)
+                        }
+                    }
+                    // Dimmed as well as disabled: the page's own toggles keep their colours
+                    // when disabled, so they would still look live.
+                    page
+                        .disabled(SettingsSidebar.isReadOnly(selectedTab, in: mode))
+                        .opacity(SettingsSidebar.isReadOnly(selectedTab, in: mode) ? 0.55 : 1)
+                        .environment(\.settingsSearch, searchText)
                 }
+                .padding(Theme.Space.page)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(24)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.bgPrimary)
     }
-}
 
-// MARK: - Toolbar Item
-
-/// One page button in the Settings toolbar, laid out like macOS System Settings: icon above
-/// label, and a plain highlight on the page shown rather than the green pill the mode used to wear.
-struct SettingsToolbarItem: View {
-    let title: LocalizedStringKey
-    let icon: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 17, weight: .regular))
-                    .frame(height: 20)
-                    .foregroundColor(isSelected ? Theme.Brand.sky : Theme.textSecondary)
-                Text(title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(isSelected ? Theme.textPrimary : Theme.textSecondary)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .frame(minWidth: 64)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isSelected ? Color.white.opacity(0.10) : (isHovered ? Theme.bgCard : Color.clear))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.15)) {
-                isHovered = hovering
-            }
+    @ViewBuilder
+    private var page: some View {
+        switch selectedTab {
+        case .status:
+            StatusTab(onShowWarnings: {
+                logsFilter = LogFilter(level: .warnings)
+                selectedTab = .logs
+            }, onShowLogs: {
+                logsFilter = LogFilter()
+                selectedTab = .logs
+            })
+        case .domains:  DomainsTab()
+        case .services: ServicesTab()
+        case .rules:    RulesTab()
+        case .routes:   RoutesTab()
+        case .lookups:  LookupsTab()
+        case .general:  GeneralTab()
+        case .logs:     LogsTab(filter: logsFilter).id(logsFilterRequest)
+        case .about:    InfoTab()
         }
     }
 }
@@ -274,6 +222,12 @@ struct DomainsTab: View {
         isInverse ? routeManager.config.inverseDomains : routeManager.config.domains
     }
     private var enabledCount: Int { activeDomains.filter { $0.enabled }.count }
+    /// The title bar search (⌘F), which the window owns.
+    @Environment(\.settingsSearch) private var searchText
+    /// The rows the search leaves; every row with no search.
+    private var shownDomains: [RouteManager.DomainEntry] {
+        activeDomains.filter { SettingsSidebar.matches($0.domain, search: searchText) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -411,8 +365,11 @@ struct DomainsTab: View {
                     emptyState
                 } else {
                     VStack(spacing: 6) {
-                        ForEach(activeDomains) { domain in
+                        ForEach(shownDomains) { domain in
                             DomainRow(domain: domain, isInverse: isInverse) { removeDomain(domain) }
+                        }
+                        if shownDomains.isEmpty {
+                            SettingsSearchMiss(search: searchText)
                         }
                     }
                 }
@@ -709,9 +666,8 @@ struct ServiceSections {
 struct ServicesTab: View {
     @EnvironmentObject var routeManager: RouteManager
     @EnvironmentObject var settingsUndo: SettingsUndo
-    @State private var searchText = ""
-    /// ⌘F puts the cursor in the search field.
-    @FocusState private var isSearchFocused: Bool
+    /// The title bar search (⌘F), which the window owns.
+    @Environment(\.settingsSearch) private var searchText
     /// Set, Turn All On asks this before it runs.
     @State private var turnOnQuestion: ServiceBulkSwitch.Question?
     @State private var showingCustomServiceEditor = false
@@ -785,46 +741,10 @@ struct ServicesTab: View {
                 }
             }
 
-            // Search and bulk actions. No VPN Only banner: this page is not offered in VPN
-            // Only (`SettingsView.tabs(for:)`), so it could never show (B3).
+            // Bulk actions; the search is in the title bar. No VPN Only banner: in VPN Only this
+            // page is read-only under the shell's line, so the page itself never says it (B3).
             HStack(spacing: 10) {
-                // Search box
-                HStack(spacing: 8) {
-                    // The magnifier carries ⌘F, so the shortcut has a control to belong to.
-                    Button {
-                        isSearchFocused = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.textSecondary)
-                    }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut("f", modifiers: .command)
-                    .help(ControlNames.help(String(localized: "Search services"), shortcut: "⌘F"))
-                    .accessibilityLabel(String(localized: "Search services"))
-
-                    TextField("Search services...", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .focused($isSearchFocused)
-                        .disabled(routeManager.isApplyingRoutes)
-
-                    if !searchText.isEmpty {
-                        Button {
-                            searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundColor(Theme.textSecondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(String(localized: "Clear search"))
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Theme.bgInput)
-                .cornerRadius(8)
+                Spacer(minLength: 0)
 
                 // Loading indicator
                 if routeManager.isApplyingRoutes {
@@ -852,8 +772,9 @@ struct ServicesTab: View {
                 UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
             }
 
-            // Services list: the services that were on when the page opened, then the rest
-            ScrollView {
+            // Services list: the services that were on when the page opened, then the rest. The
+            // window's scroll view scrolls it; the page has none of its own.
+            Group {
                 if !sections.nonEmpty.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(Array(sections.nonEmpty.enumerated()), id: \.element.kind) { index, section in
@@ -2210,14 +2131,13 @@ struct LogsTab: View {
                                         .fill(Theme.bgElevated)
                                 )
                         } else {
-                            ScrollView {
-                                LazyVStack(alignment: .leading, spacing: 1) {
-                                    ForEach(shown) { log in
-                                        LogRow(entry: log, highlight: filter.term)
-                                    }
+                            // The window's scroll view scrolls the lines; the page has none of its own.
+                            LazyVStack(alignment: .leading, spacing: 1) {
+                                ForEach(shown) { log in
+                                    LogRow(entry: log, highlight: filter.term)
                                 }
-                                .padding(4)
                             }
+                            .padding(4)
                             .background(
                                 RoundedRectangle(cornerRadius: 12)
                                     .fill(Theme.bgElevated)
@@ -2639,6 +2559,21 @@ struct LogSearchField: NSViewRepresentable {
     }
 }
 
+// MARK: - Search
+
+/// What a list page shows when the title bar search leaves none of its rows.
+struct SettingsSearchMiss: View {
+    let search: String
+
+    var body: some View {
+        Text(String(localized: "Nothing on this page matches \u{201C}\(search)\u{201D}."))
+            .font(Theme.Font.body)
+            .foregroundColor(Theme.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, Theme.Space.l)
+    }
+}
+
 // MARK: - Settings Window Controller
 
 /// The page the Settings window should show next. Set before the window opens or while it is
@@ -2694,7 +2629,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.window = window
     }
 
-    /// The Settings window, built without showing it. The title bar's Mode menu and the
+    /// The window's size when it first opens, and the smallest it can be made.
+    static let defaultContentSize = NSSize(width: 860, height: 620)
+    static let minimumContentSize = NSSize(width: 720, height: 480)
+
+    /// The Settings window, built without showing it. The sidebar's mode popup and the
     /// content's mode sheet share one `ModeSwitchRequest`.
     static func makeWindow(settingsUndo: SettingsUndo? = nil) -> NSWindow {
         let modeSwitch = ModeSwitchRequest()
@@ -2707,8 +2646,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let hostingView = NSHostingView(rootView: settingsView)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 580, height: 680),
-            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+            contentRect: NSRect(origin: .zero, size: defaultContentSize),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -2716,15 +2655,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.contentView = hostingView
         window.title = "VPN Bypass"
         window.titlebarAppearsTransparent = true
+        // The page header draws the page name; the window keeps it as its title for the
+        // Window menu, Mission Control and VoiceOver (`WindowTitleSetter`).
         window.titleVisibility = .hidden
+        // No toolbar: a toolbar's title view would take the clicks meant for the search field
+        // drawn under it. The page header sits in the transparent title bar instead.
         window.backgroundColor = NSColor(Theme.bgPrimary)
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 580, height: 680)
-        window.contentMaxSize = NSSize(width: 580, height: 680)
+        window.contentMinSize = minimumContentSize
         window.center()
-
-        // Branded title bar, with the Mode menu at its right end
-        addBrandedTitlebar(to: window, modeSwitch: modeSwitch)
+        // A size the user gave the window comes back next time.
+        window.setFrameAutosaveName("VPNBypassSettings")
         return window
     }
 
@@ -2735,66 +2676,5 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // Hide Dock icon when settings window closes
         NSApp.setActivationPolicy(.accessory)
     }
-
-    private static func addBrandedTitlebar(to window: NSWindow, modeSwitch: ModeSwitchRequest) {
-        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: window.frame.width, height: 28))
-
-        let titleView = NSHostingView(rootView: BrandedTitlebarView()
-            .environmentObject(RouteManager.shared)
-            .environmentObject(modeSwitch))
-        titleView.frame = containerView.bounds
-        titleView.autoresizingMask = [.width, .height]
-        containerView.addSubview(titleView)
-
-        let accessory = NSTitlebarAccessoryViewController()
-        accessory.view = containerView
-        accessory.layoutAttribute = .right
-
-        window.addTitlebarAccessoryViewController(accessory)
-    }
 }
 
-// MARK: - Branded Titlebar View
-
-struct BrandedTitlebarView: View {
-    var body: some View {
-        ZStack {
-            brand
-            HStack {
-                Spacer()
-                RoutingModeTitlebarButton()
-                    .padding(.trailing, 10)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var brand: some View {
-        HStack {
-            Spacer()
-
-            // The FLAT mark, tinted — not the squircle app icon scaled to 18px, which turns to
-            // mud at that size because its gradient ground and rounded shape carry no detail
-            // there. The title bar is exactly what the template glyph is drawn for.
-            HStack(spacing: 7) {
-                if let mark = Bundle.main.image(forResource: "menubar-icon-active") {
-                    Image(nsImage: mark)
-                        .renderingMode(.template)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 15, height: 15)
-                        .foregroundColor(Theme.Brand.sky)
-                } else {
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(Theme.Brand.sky)
-                }
-
-                BrandedAppName(fontSize: 13)
-            }
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}

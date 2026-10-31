@@ -344,9 +344,10 @@ final class StatusPageTests: XCTestCase {
     // MARK: Pages
 
     func testStatusIsTheFirstPageInEveryMode() {
-        XCTAssertEqual(SettingsView.tabs(for: .bypass), [.status, .domains, .services, .lookups, .general, .logs, .info])
-        XCTAssertEqual(SettingsView.tabs(for: .vpnOnly), [.status, .domains, .lookups, .general, .logs, .info])
-        XCTAssertEqual(SettingsView.tabs(for: .custom), [.status, .rules, .routes, .lookups, .general, .logs, .info])
+        XCTAssertEqual(SettingsSidebar.pages.first, .status)
+        for mode in [RoutingMode.bypass, .vpnOnly, .custom] {
+            XCTAssertFalse(SettingsSidebar.isReadOnly(.status, in: mode))
+        }
     }
 
     // MARK: Tunnel reads

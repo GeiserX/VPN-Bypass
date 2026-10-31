@@ -1,16 +1,16 @@
 // RoutingModeSwitcher.swift
-// The routing mode in the Settings window: a Mode menu at the right end of the title bar, and
-// the sheet that explains each mode before anything changes. The page buttons sit in their own
-// toolbar row, so a click meant to change the page can no longer change the routing mode.
+// The routing mode in the Settings window: the sheet that explains each mode before anything
+// changes. It opens from the mode popup at the top of the sidebar (`SettingsModePopup`) and from
+// a read-only page's Switch…, so a click meant to change the page never changes the mode.
 
 import AppKit
 import SwiftUI
 
 // MARK: - Wording
 
-/// The words the Mode menu and the sheet use, kept pure so they are unit-tested.
+/// The words the mode sheet uses, kept pure so they are unit-tested.
 enum RoutingModeCopy {
-    /// Menu and sheet order.
+    /// Sheet order.
     static let order: [RoutingMode] = [.bypass, .vpnOnly, .custom]
 
     /// What the user's own lists hold, read from the config by `lists(from:)`.
@@ -46,28 +46,6 @@ enum RoutingModeCopy {
         case .vpnOnly: return String(localized: "VPN Only")
         case .custom: return String(localized: "Custom Routes")
         }
-    }
-
-    static func icon(_ mode: RoutingMode) -> String {
-        switch mode {
-        case .bypass: return "globe"
-        case .vpnOnly: return "lock.shield"
-        case .custom: return "arrow.triangle.branch"
-        }
-    }
-
-    /// The short line under each name in the Mode menu (macOS 14.4 and later).
-    static func menuLine(_ mode: RoutingMode) -> String {
-        switch mode {
-        case .bypass: return String(localized: "Everything uses the VPN except what you list")
-        case .vpnOnly: return String(localized: "Only what you list uses the VPN")
-        case .custom: return String(localized: "Pick a route for each destination")
-        }
-    }
-
-    /// The title bar button's spoken label.
-    static func accessibilityLabel(_ mode: RoutingMode) -> String {
-        String(localized: "Routing mode: \(name(mode))")
     }
 
     /// The sheet's text for one mode: what it does, then what the user's lists hold for it.
@@ -111,7 +89,7 @@ enum RoutingModeCopy {
         }
     }
 
-    /// A pick in the Mode menu opens the sheet with that mode selected. Picking the mode
+    /// A pick in the mode popup opens the sheet with that mode selected. Picking the mode
     /// already in use opens nothing.
     static func sheetSelection(forPick picked: RoutingMode, current: RoutingMode) -> RoutingMode? {
         picked == current ? nil : picked
@@ -125,121 +103,16 @@ enum RoutingModeCopy {
 
 // MARK: - Shared state
 
-/// The mode picked in the title bar's Mode menu, waiting in the sheet for Switch or Cancel.
-/// The menu lives in a title bar accessory and the sheet in the window's content, two
-/// separate hosting views, so both read this one object.
+/// The mode picked in the sidebar's mode popup or a read-only page's Switch…, waiting in the
+/// sheet for Switch or Cancel.
 @MainActor
 final class ModeSwitchRequest: ObservableObject {
     @Published var pickedMode: RoutingMode?
 }
 
-// MARK: - Mode menu
-
-/// The Mode menu as a real NSMenu: the current mode checked, a short line under each name
-/// (`NSMenuItem.subtitle`, macOS 14.4 and later; earlier versions show the names only).
-@MainActor
-final class RoutingModeMenu: NSObject {
-    let menu: NSMenu
-    private let onPick: (RoutingMode) -> Void
-
-    init(current: RoutingMode, onPick: @escaping (RoutingMode) -> Void) {
-        self.onPick = onPick
-        self.menu = NSMenu()
-        super.init()
-        menu.autoenablesItems = false
-        for mode in RoutingModeCopy.order {
-            let item = NSMenuItem(title: RoutingModeCopy.name(mode), action: #selector(pick(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = mode.rawValue
-            item.state = mode == current ? .on : .off
-            item.image = NSImage(systemSymbolName: RoutingModeCopy.icon(mode), accessibilityDescription: nil)
-            if #available(macOS 14.4, *) {
-                item.subtitle = RoutingModeCopy.menuLine(mode)
-            }
-            menu.addItem(item)
-        }
-    }
-
-    @objc func pick(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let mode = RoutingMode(rawValue: raw) else { return }
-        onPick(mode)
-    }
-}
-
-/// Holds the NSView under the title bar button so the menu can drop down from it.
-private final class MenuAnchorRef {
-    weak var view: NSView?
-}
-
-private struct MenuAnchor: NSViewRepresentable {
-    let ref: MenuAnchorRef
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        ref.view = view
-        return view
-    }
-    func updateNSView(_ nsView: NSView, context: Context) {
-        ref.view = nsView
-    }
-}
-
-/// "Mode  Bypass ⌄" at the right end of the title bar. It always shows the mode in use: a
-/// pick only opens the sheet, and the mode changes on Switch.
-struct RoutingModeTitlebarButton: View {
-    @EnvironmentObject var routeManager: RouteManager
-    @EnvironmentObject var request: ModeSwitchRequest
-    @State private var anchor = MenuAnchorRef()
-    @State private var isHovered = false
-
-    var body: some View {
-        let mode = routeManager.config.routingMode
-        Button(action: showMenu) {
-            HStack(spacing: 5) {
-                Text("Mode")
-                    .foregroundColor(Theme.textSecondary)
-                Image(systemName: RoutingModeCopy.icon(mode))
-                    .foregroundColor(Theme.Brand.sky)
-                Text(RoutingModeCopy.name(mode))
-                    .foregroundColor(Theme.textPrimary)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundColor(Theme.textSecondary)
-            }
-            .font(.system(size: 12, weight: .medium))
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, 9)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isHovered ? Theme.bgHover : Theme.bgCard)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Theme.bgCardBorder, lineWidth: 1)
-            )
-            .background(MenuAnchor(ref: anchor))
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .accessibilityLabel(RoutingModeCopy.accessibilityLabel(mode))
-    }
-
-    private func showMenu() {
-        guard let view = anchor.view else { return }
-        let current = routeManager.config.routingMode
-        let menu = RoutingModeMenu(current: current) { picked in
-            request.pickedMode = RoutingModeCopy.sheetSelection(forPick: picked, current: current)
-        }
-        // popUp runs the menu to completion, so `menu` (the items' target) lives until a pick.
-        menu.menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.isFlipped ? view.bounds.height + 4 : -4), in: view)
-    }
-}
-
 // MARK: - Mode sheet
 
-/// Opens with the mode picked in the menu selected. Nothing changes until Switch, which goes
+/// Opens with the mode picked in the popup selected. Nothing changes until Switch, which goes
 /// through the same `RouteManager.setRoutingMode` the old confirmation alert used.
 struct RoutingModeSheet: View {
     let lists: RoutingModeCopy.Lists

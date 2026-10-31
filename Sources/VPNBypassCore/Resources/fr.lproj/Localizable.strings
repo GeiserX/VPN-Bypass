@@ -22,7 +22,6 @@
 /* ===== Réglages — Onglets ===== */
 "General" = "Général";
 "Logs" = "Journaux";
-"Info" = "Infos";
 
 /* ===== Réglages — Onglet Domaines ===== */
 "VPN Only list" = "Liste VPN uniquement";
@@ -35,7 +34,6 @@
 "Add a domain above to bypass VPN" = "Ajoutez un domaine ci-dessus pour contourner le VPN";
 
 /* ===== Réglages — Onglet Services ===== */
-"Search services..." = "Rechercher des services...";
 "Create Custom Service" = "Créer un service personnalisé";
 "Custom" = "Personnalisé";
 "%lld domains" = "%lld domaines";
@@ -362,11 +360,7 @@
 "Custom Routes" = "Routes personnalisées";
 "Rules" = "Règles";
 "Routing mode" = "Mode de routage";
-"Routing mode: %@" = "Mode de routage : %@";
 "Switch" = "Changer";
-"Everything uses the VPN except what you list" = "Tout passe par le VPN sauf ce que vous listez";
-"Only what you list uses the VPN" = "Seul ce que vous listez passe par le VPN";
-"Pick a route for each destination" = "Choisissez une route pour chaque destination";
 "Everything uses the VPN except what you list." = "Tout passe par le VPN sauf ce que vous listez.";
 "Only what you list uses the VPN; everything else goes direct." = "Seul ce que vous listez passe par le VPN ; tout le reste passe en direct.";
 "Send each destination through a route you pick: direct, a VPN, a proxy or a Tailscale peer." = "Envoyez chaque destination par la route de votre choix : directe, un VPN, un proxy ou un pair Tailscale.";
@@ -886,3 +880,14 @@
 "Retry: remove the routes again" = "Réessayer : retirer à nouveau les routes";
 "No address is routed for it." = "Aucune adresse n'est routée pour cette entrée.";
 "it is the VPN's own gateway, which is never rerouted" = "c'est la passerelle du VPN lui-même, qui n'est jamais détournée";
+"About" = "À propos";
+"Routing" = "Routage";
+"Insight" = "Analyse";
+"App" = "Application";
+"Domains apply in Bypass and VPN Only modes. You are in %@." = "Les domaines s’appliquent en mode Contournement et VPN uniquement. Vous êtes en mode %@.";
+"Services apply in Bypass mode. You are in %@." = "Les services s’appliquent en mode Contournement. Vous êtes en mode %@.";
+"Rules apply in Custom mode. You are in %@." = "Les règles s’appliquent en mode Personnalisé. Vous êtes en mode %@.";
+"Routes apply in Custom mode. You are in %@." = "Les routes s’appliquent en mode Personnalisé. Vous êtes en mode %@.";
+"Switch…" = "Changer…";
+"Switch to %@…" = "Passer en mode %@…";
+"Read-only in this mode" = "Lecture seule dans ce mode";

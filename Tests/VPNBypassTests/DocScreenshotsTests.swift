@@ -144,7 +144,7 @@ final class DocScreenshotsTests: XCTestCase {
         seedVPNOnlyDown()
         rm.config.blockListedWhenVPNDown = true
         let size = try renderSettings(page: .general, to: "general.png")
-        XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
+        XCTAssertEqual(size, Self.settingsSize)
     }
 
     private func seedVPNOnlyDown() {
@@ -198,7 +198,7 @@ final class DocScreenshotsTests: XCTestCase {
     func testSettingsOnServices() throws {
         seedBypass()
         let size = try renderSettings(page: .services, to: "services.png")
-        XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
+        XCTAssertEqual(size, Self.settingsSize)
     }
 
     /// The catalogue sheet on the Banks chip, two banks picked: "Bypass 2 services".
@@ -219,19 +219,64 @@ final class DocScreenshotsTests: XCTestCase {
     func testSettingsOnDomains() throws {
         seedBypass()
         let size = try renderSettings(page: .domains, to: "domains.png")
-        XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
+        XCTAssertEqual(size, Self.settingsSize)
     }
 
     func testSettingsOnRules() throws {
         seedCustom()
         let size = try renderSettings(page: .rules, to: "rules.png")
-        XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
+        XCTAssertEqual(size, Self.settingsSize)
     }
 
     func testSettingsOnRoutes() throws {
         seedCustom()
         let size = try renderSettings(page: .routes, to: "routes.png")
-        XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// The Settings window at its default size, at 2x.
+    private static let settingsSize = NSSize(width: 1720, height: 1240)
+
+    /// The sidebar in each mode: Bypass on Rules (another mode's page, read-only), VPN Only on
+    /// Services (read-only too), Custom on Rules (its own page).
+    func testSidebarInBypassModeOnAReadOnlyPage() throws {
+        seedBypass()
+        seedCustomRules()
+        XCTAssertEqual(try renderSettings(page: .rules, to: "sidebar-bypass.png"), Self.settingsSize)
+    }
+
+    func testSidebarInVPNOnlyModeOnAReadOnlyPage() throws {
+        seedBypass()
+        rm.config.routingMode = .vpnOnly
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.com", enabled: true),
+                                    DomainEntry(domain: "10.20.0.0/16", enabled: true)]
+        XCTAssertEqual(try renderSettings(page: .services, to: "sidebar-vpn-only.png"), Self.settingsSize)
+    }
+
+    func testSidebarInCustomMode() throws {
+        seedCustom()
+        XCTAssertEqual(try renderSettings(page: .rules, to: "sidebar-custom.png"), Self.settingsSize)
+    }
+
+    /// The title bar search on Domains, with one of the two domains left.
+    func testSettingsSearchInTheTitleBar() throws {
+        seedBypass()
+        SettingsView.searchForScreenshots = "wiki"
+        defer { SettingsView.searchForScreenshots = nil }
+        XCTAssertEqual(try renderSettings(page: .domains, to: "search.png"), Self.settingsSize)
+    }
+
+    /// Custom mode's rules on a Bypass config, so the read-only Rules page has rows to show.
+    private func seedCustomRules() {
+        let direct = Route(name: "Direct", egress: .direct)
+        let vpn = Route(name: "Primary VPN", egress: .vpnDefault, vpnSelector: VPNSelector(kind: .primary))
+        rm.config.routes = [direct, vpn]
+        rm.config.rules = [
+            Rule(matchType: .domain, pattern: "en.wikipedia.org", routeId: direct.id, order: 0),
+            Rule(matchType: .cidr, pattern: "203.0.113.0/24", routeId: vpn.id, order: 1),
+        ]
+        rm.config.defaultRouteId = direct.id
+        rm.config.schemaVersion = 2
     }
 
     func testSettingsOnLookups() throws {
@@ -241,7 +286,7 @@ final class DocScreenshotsTests: XCTestCase {
         LookupsTab.hoveredForScreenshots = "api.openai.com"
         defer { LookupsTab.hoveredForScreenshots = nil }
         let size = try renderSettings(page: .lookups, to: "lookups.png")
-        XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
+        XCTAssertEqual(size, Self.settingsSize)
     }
 
     /// A change a Shortcuts action made, named in the dropdown footer as `vpnb` changes are,
@@ -720,6 +765,8 @@ final class DocScreenshotsTests: XCTestCase {
     private func renderSettings(page: SettingsView.SettingsTab, to name: String) throws -> NSSize {
         SettingsPageRequest.shared.page = page
         let window = SettingsWindowController.makeWindow()
+        // makeWindow brings back a size saved by an earlier run; the renders use the default.
+        window.setContentSize(SettingsWindowController.defaultContentSize)
         window.appearance = NSAppearance(named: .darkAqua)
         show(window)
         window.makeFirstResponder(nil)
