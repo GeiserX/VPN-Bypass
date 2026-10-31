@@ -940,3 +940,13 @@
 "Paused, but 1 address is still routed: removing it failed. Retry from the dropdown." = "En pausa, pero 1 dirección sigue enrutada: no se pudo quitar. Reinténtalo desde el menú.";
 "Paused, but %lld addresses are still routed: removing them failed. Retry from the dropdown." = "En pausa, pero %lld direcciones siguen enrutadas: no se pudieron quitar. Reinténtalo desde el menú.";
 "Routing was not paused." = "El enrutamiento no estaba en pausa.";
+
+/* ===== Saltar la VPN en el sitio que estás viendo (idea 3) ===== */
+"open in %@" = "abierto en %@";
+"The site open in %@" = "El sitio abierto en %@";
+"Allow…" = "Permitir…";
+"macOS asks once whether VPN Bypass may read the address of the front tab in %@." = "macOS pregunta una sola vez si VPN Bypass puede leer la dirección de la pestaña activa de %@.";
+"Allow Reading the Front Tab in %@" = "Permitir leer la pestaña activa de %@";
+"Add %@ to Bypass" = "Añadir %@ a Bypass";
+"Add %@ to VPN Only" = "Añadir %@ a Solo VPN";
+"Send %@ Direct" = "Enviar %@ en Directo";

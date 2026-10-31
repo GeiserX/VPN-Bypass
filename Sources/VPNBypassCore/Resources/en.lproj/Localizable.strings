@@ -940,3 +940,13 @@
 "Paused, but 1 address is still routed: removing it failed. Retry from the dropdown." = "Paused, but 1 address is still routed: removing it failed. Retry from the dropdown.";
 "Paused, but %lld addresses are still routed: removing them failed. Retry from the dropdown." = "Paused, but %lld addresses are still routed: removing them failed. Retry from the dropdown.";
 "Routing was not paused." = "Routing was not paused.";
+
+/* ===== Bypass the site you are on (idea 3) ===== */
+"open in %@" = "open in %@";
+"The site open in %@" = "The site open in %@";
+"Allow…" = "Allow…";
+"macOS asks once whether VPN Bypass may read the address of the front tab in %@." = "macOS asks once whether VPN Bypass may read the address of the front tab in %@.";
+"Allow Reading the Front Tab in %@" = "Allow Reading the Front Tab in %@";
+"Add %@ to Bypass" = "Add %@ to Bypass";
+"Add %@ to VPN Only" = "Add %@ to VPN Only";
+"Send %@ Direct" = "Send %@ Direct";
