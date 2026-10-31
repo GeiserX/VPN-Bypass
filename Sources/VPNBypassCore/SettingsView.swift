@@ -2204,7 +2204,7 @@ struct LogsTab: View {
                                 .font(.system(size: 11))
                                 .foregroundColor(Theme.textTertiary)
                                 .padding(.leading, 2)
-                            if filter.onlyControlSocket {
+                            if filter.onlySource != nil {
                                 sourceToken
                             }
                         }
@@ -2243,11 +2243,11 @@ struct LogsTab: View {
     /// every line again.
     private var sourceToken: some View {
         Button {
-            filter.onlyControlSocket = false
+            filter.onlySource = nil
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: "terminal")
-                Text(LogFilter.sourceTokenTitle)
+                Image(systemName: filter.sourceToken.symbol)
+                Text(filter.sourceToken.title)
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(Theme.textTertiary)
             }
@@ -2605,7 +2605,7 @@ struct LogRow: View {
                     .foregroundColor(Theme.textSecondary)
                     .lineLimit(1)
                     .fixedSize()
-                    .help(LogSource.tagHelp)
+                    .help(entry.source.helpText)
             }
         }
         .padding(.horizontal, 10)

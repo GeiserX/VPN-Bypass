@@ -757,7 +757,7 @@ struct MenuContent: View {
                               everythingElseDirect: routeManager.everythingElseDirect) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     OutsideChangeLine(change: change, now: context.date) {
-                        SettingsPageRequest.shared.logFilter = LogFilter(onlyControlSocket: true)
+                        SettingsPageRequest.shared.logFilter = change.logFilter
                         openSettings(page: .logs)
                     }
                 }
@@ -856,7 +856,7 @@ struct OutsideChangeLine: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(OutsideChange.help)
+        .help(change.logsHelp)
     }
 }
 

@@ -57,7 +57,8 @@ public enum ControlSurface {
             } else if let change = OutsideChange.make(cmd: request.cmd, result: response.result,
                                                       before: before, after: rm.config,
                                                       routesBefore: routesBefore, routesLeft: rm.routedAddressCount,
-                                                      everythingElseDirect: rm.everythingElseDirect, at: Date()) {
+                                                      everythingElseDirect: rm.everythingElseDirect, at: Date(),
+                                                      via: ControlOrigin.channel) {
                 rm.lastOutsideChange = change
             }
             return response
