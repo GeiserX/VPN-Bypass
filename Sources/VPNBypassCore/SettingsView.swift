@@ -1770,6 +1770,8 @@ final class SettingsPageRequest: ObservableObject {
     var logFilter: LogFilter?
     /// The Services page opens its catalogue sheet; the page takes it and clears it.
     @Published var openCatalogue = false
+    /// The country the catalogue sheet opens on, read together with `openCatalogue`.
+    var catalogueRegion: String?
     /// The title bar search the page opens with, read together with `page`: the dropdown's
     /// Show in Settings opens the page filtered to the row's entry.
     var search: String?

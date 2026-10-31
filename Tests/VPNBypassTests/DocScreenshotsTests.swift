@@ -103,6 +103,9 @@ final class DocScreenshotsTests: XCTestCase {
         seedConnected(mode: .bypass)
         rm.activeRoutes = []
         rm.lastRouteChange = nil
+        // A Mac set to Spain, whatever the region of the Mac that renders it.
+        FirstRunSetup.regionOverride = "ES"
+        defer { FirstRunSetup.regionOverride = nil }
         let size = try renderDropdown(to: "first-run.png")
         XCTAssertEqual(size.width, 680)
     }
@@ -247,6 +250,21 @@ final class DocScreenshotsTests: XCTestCase {
         show(window)
         settle(hosting)
         let size = try write(hosting, cornerRadius: 12, outline: NSColor(white: 1, alpha: 0.2), to: "catalogue.png")
+        XCTAssertEqual(size.width, 1040)
+    }
+
+    /// The catalogue sheet on one country, as the first run's "Services for Spain…" opens it.
+    func testCatalogueSheetOnACountry() throws {
+        seedBypass()
+        let hosting = NSHostingView(rootView: CatalogueSheet(region: "ES") { _ in }
+            .environmentObject(rm))
+        let window = DocScreenshotKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
+                                            styleMask: [.borderless], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = hosting
+        show(window)
+        settle(hosting)
+        let size = try write(hosting, cornerRadius: 12, outline: NSColor(white: 1, alpha: 0.2), to: "catalogue-region.png")
         XCTAssertEqual(size.width, 1040)
     }
 

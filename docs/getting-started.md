@@ -48,7 +48,7 @@ A fresh install routes nothing. The status chip in the dropdown reads Off, in gr
 
 ![The dropdown right after install: WireGuard connected, the status chip reads Off, and the question What should skip the VPN? over six services with switches and a field to add a site](images/screenshots/first-run.png){ width="340" }
 
-Switch on a service there, or type a site into the field and press Return. "All 51 services…" opens Settings on the Services page with the service catalogue open. If you want the opposite, only a few sites on the VPN, click "Use VPN Only instead…". It worked when:
+Switch on a service there, or type a site into the field and press Return. "All 75 services…" opens Settings on the Services page with the service catalogue open. When the Mac's region (System Settings > General > Language & Region) is a country the catalogue has services for, a row above it, such as "Services for Spain…", opens the catalogue on that country's government sites and banks. The region is read as it is; nothing is asked. If you want the opposite, only a few sites on the VPN, click "Use VPN Only instead…". It worked when:
 
 - the status chip reads On;
 - the menu bar mark shows its arrow head (it is two plain lines and a bar while nothing is routed);
