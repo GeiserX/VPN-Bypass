@@ -18,6 +18,8 @@ struct SettingsView: View {
     @State private var selectedTab = SettingsSidebar.restoredPage(UserDefaults.standard.string(forKey: SettingsSidebar.lastPageKey))
     /// The title bar search on a list page; emptied when the page changes.
     @State private var searchText = SettingsView.searchForScreenshots ?? ""
+    /// The search a page asked for from outside opens with, set once the page has changed.
+    @State private var pendingSearch: String?
     /// The doc screenshots open each page with this in the search.
     static var searchForScreenshots: String?
     /// What the Logs page shows when it opens: All, or Warnings after the Status page's Show in Log.
@@ -90,7 +92,8 @@ struct SettingsView: View {
         // The line belongs to the page that made the change.
         .onChange(of: selectedTab) { tab in
             settingsUndo.clear()
-            searchText = Self.searchForScreenshots ?? ""
+            searchText = pendingSearch ?? Self.searchForScreenshots ?? ""
+            pendingSearch = nil
             UserDefaults.standard.set(tab.rawValue, forKey: SettingsSidebar.lastPageKey)
             // The Logs filter resets when the page is left, as it always has.
             if tab != .logs { logsFilter = LogFilter() }
@@ -104,6 +107,14 @@ struct SettingsView: View {
                 SettingsPageRequest.shared.logFilter = nil
                 logsFilter = filter
                 logsFilterRequest += 1
+            }
+            let search = SettingsPageRequest.shared.search
+            SettingsPageRequest.shared.search = nil
+            // Changing page clears the search, so a search for another page waits for it.
+            if page == selectedTab {
+                if let search { searchText = search }
+            } else {
+                pendingSearch = search
             }
             selectedTab = page
         }
@@ -186,256 +197,9 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - Domains Tab
+// MARK: - Add feedback (Domains page in DomainsPage.swift)
 
-/// The Domains page's title names the list after its mode. It said "Custom Domains", which
-/// read as Custom mode's list (proposal 16 of #119).
-enum DomainListCopy {
-    static func title(isInverse: Bool, bundle: Bundle = .main) -> String {
-        isInverse
-            ? String(localized: "VPN Only list", bundle: bundle)
-            : String(localized: "Bypass list", bundle: bundle)
-    }
-}
-
-struct DomainsTab: View {
-    @EnvironmentObject var routeManager: RouteManager
-    @EnvironmentObject var settingsUndo: SettingsUndo
-    @State private var newDomain: String
-    /// What the last add did, shown under the field.
-    @State private var feedback: AddDomainFeedback?
-    @FocusState private var isInputFocused: Bool
-
-    /// The arguments seed the field and the line under it, for a rendered screenshot.
-    init(newDomain: String = "", feedback: AddDomainFeedback? = nil) {
-        _newDomain = State(initialValue: newDomain)
-        _feedback = State(initialValue: feedback)
-    }
-
-    private var fieldOutline: Color {
-        if feedback?.isError == true { return Theme.error.opacity(0.8) }
-        return isInputFocused ? Theme.success.opacity(0.5) : Color.clear
-    }
-
-    private var isInverse: Bool { routeManager.config.routingMode == .vpnOnly }
-    private var activeDomains: [RouteManager.DomainEntry] {
-        isInverse ? routeManager.config.inverseDomains : routeManager.config.domains
-    }
-    private var enabledCount: Int { activeDomains.filter { $0.enabled }.count }
-    /// The title bar search (⌘F), which the window owns.
-    @Environment(\.settingsSearch) private var searchText
-    /// The rows the search leaves; every row with no search.
-    private var shownDomains: [RouteManager.DomainEntry] {
-        activeDomains.filter { SettingsSidebar.matches($0.domain, search: searchText) }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Header
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Image(systemName: isInverse ? "lock.shield.fill" : "globe.americas.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(isInverse ? Theme.warningGradient : Theme.successGradient)
-                    Text(DomainListCopy.title(isInverse: isInverse))
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
-                Text(isInverse
-                    ? "Only these domains will use the VPN. Everything else bypasses it."
-                    : "Add domains that should bypass VPN and use your regular connection.")
-                    .font(.system(size: 13))
-                    .foregroundColor(Theme.textSecondary)
-            }
-
-            // Add domain input, and what the last add did
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    HStack {
-                        Image(systemName: "link")
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.textSecondary)
-
-                        TextField(isInverse ? "e.g., example.com or 10.0.0.0/24" : "e.g., example.com", text: $newDomain)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .focused($isInputFocused)
-                            .onSubmit { addDomain() }
-                            .disabled(routeManager.isApplyingRoutes)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Theme.bgInput)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(fieldOutline, lineWidth: 1)
-                            )
-                    )
-
-                    // Loading indicator or add button
-                    if routeManager.isApplyingRoutes {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
-                            .frame(width: 42, height: 42)
-                            .background(Theme.bgDisabled)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    } else {
-                        Button(action: addDomain) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 42, height: 42)
-                                .background(
-                                    LinearGradient(
-                                        colors: newDomain.isEmpty ? [Theme.textDisabled, Theme.textDisabled] : [Theme.success, Theme.successDark],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                                .shadow(color: newDomain.isEmpty ? .clear : Theme.success.opacity(0.3), radius: 6, y: 2)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(newDomain.isEmpty)
-                        .accessibilityLabel(String(localized: "Add"))
-                    }
-                }
-
-                if let feedback {
-                    AddDomainFeedbackLine(feedback: feedback)
-                }
-            }
-            // Editing the text the line talks about, or switching lists, makes it stale.
-            .onChange(of: newDomain) { text in
-                if text != feedback?.fieldText { feedback = nil }
-            }
-            .onChange(of: routeManager.config.routingMode) { _ in feedback = nil }
-            // A refusal such as "already on your list" stops being true once the list
-            // changes (the trash button below, `vpnb domain.rm`). A saved add changes the
-            // list itself, so its line stays.
-            .onChange(of: activeDomains.map(\.domain)) { _ in
-                if feedback?.isError == true { feedback = nil }
-            }
-
-            // Domain list
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("CONFIGURED DOMAINS")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundColor(Theme.textSecondary)
-                        .tracking(1)
-
-                    Spacer()
-
-                    // Loading indicator, or the Turn All On/Off menu after the count
-                    if routeManager.isApplyingRoutes {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .scaleEffect(0.5)
-                                .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
-                            Text("Applying...")
-                                .font(.system(size: 9))
-                                .foregroundColor(Theme.textSecondary)
-                        }
-                    }
-
-                    Text("\(enabledCount)/\(activeDomains.count)")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundColor(isInverse ? Theme.warning : Theme.success)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background((isInverse ? Theme.warning : Theme.success).opacity(0.15))
-                        .clipShape(Capsule())
-
-                    if !routeManager.isApplyingRoutes && !activeDomains.isEmpty {
-                        BulkSwitchMenu(
-                            turnAllOnTitle: String(localized: "Turn All On"),
-                            canTurnOn: enabledCount < activeDomains.count,
-                            canTurnOff: enabledCount > 0,
-                            onTurnAllOn: { switchAll(true) },
-                            onTurnAllOff: { switchAll(false) }
-                        )
-                    }
-                }
-
-                if activeDomains.isEmpty {
-                    emptyState
-                } else {
-                    VStack(spacing: 6) {
-                        ForEach(shownDomains) { domain in
-                            DomainRow(domain: domain, isInverse: isInverse) { removeDomain(domain) }
-                        }
-                        if shownDomains.isEmpty {
-                            SettingsSearchMiss(search: searchText)
-                        }
-                    }
-                }
-
-                if let change = settingsUndo.last, change.page == .domains {
-                    UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
-                }
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Theme.bgCard)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Theme.bgCardBorder, lineWidth: 1)
-                    )
-            )
-
-            Spacer()
-        }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: isInverse ? "lock.shield" : "globe")
-                .font(.system(size: 28))
-                .foregroundColor(Theme.textDisabled)
-            Text("No entries configured")
-                .font(.system(size: 13))
-                .foregroundColor(Theme.textSecondary)
-            Text(isInverse ? "Add domains or IP ranges that should use VPN" : "Add a domain above to bypass VPN")
-                .font(.system(size: 11))
-                .foregroundColor(Theme.textDisabled)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 30)
-    }
-
-    /// Turn All On / Turn All Off. Neither asks: the list is the user's own, and the undo
-    /// line switches back exactly the entries this switched.
-    private func switchAll(_ on: Bool) {
-        let list: DomainList = isInverse ? .vpnOnly : .bypass
-        let changed = isInverse ? routeManager.setAllInverseDomainsEnabled(on) : routeManager.setAllDomainsEnabled(on)
-        if !changed.isEmpty { settingsUndo.record(.domainsSwitched(ids: changed, on: on, list: list)) }
-    }
-
-    private func removeDomain(_ domain: RouteManager.DomainEntry) {
-        let list: DomainList = isInverse ? .vpnOnly : .bypass
-        let index = activeDomains.firstIndex(where: { $0.id == domain.id }) ?? activeDomains.count
-        withAnimation(.easeOut(duration: 0.2)) {
-            if isInverse { routeManager.removeInverseDomain(domain) }
-            else { routeManager.removeDomain(domain) }
-        }
-        settingsUndo.record(.domain(domain, index: index, list: list))
-    }
-
-    private func addDomain() {
-        guard !newDomain.isEmpty else { return }
-        let result = isInverse ? routeManager.addInverseDomain(newDomain) : routeManager.addDomain(newDomain)
-        let shown = AddDomainFeedback(result, typed: newDomain)
-        feedback = shown
-        newDomain = shown.fieldText
-    }
-}
-
-/// The line under the Domains tab's add field: what the last add saved, or why it saved
+/// The line under the Domains page's add row: what the last add saved, or why it saved
 /// nothing. A failed add keeps the text so it can be fixed; a saved one empties the field.
 struct AddDomainFeedback: Equatable {
     let isError: Bool
@@ -484,80 +248,6 @@ struct AddDomainFeedbackLine: View {
         .foregroundColor(feedback.isError ? Theme.error : Theme.success)
         .padding(.horizontal, 4)
         .accessibilityElement(children: .combine)
-    }
-}
-
-struct DomainRow: View {
-    @EnvironmentObject var routeManager: RouteManager
-    let domain: RouteManager.DomainEntry
-    var isInverse: Bool = false
-    /// The trash button. DomainsTab removes the entry and leaves the undo line.
-    let onDelete: () -> Void
-    @State private var isHovered = false
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            // Status dot
-            Circle()
-                .fill(domain.enabled ? Theme.success : Theme.textDisabled)
-                .frame(width: 8, height: 8)
-                .shadow(color: domain.enabled ? Theme.success.opacity(0.5) : .clear, radius: 4)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(domain.domain)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(domain.enabled ? .white : Theme.textSecondary)
-                    if domain.isCIDR {
-                        Text("CIDR")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(Theme.warning)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Theme.warning.opacity(0.15))
-                            .cornerRadius(4)
-                    }
-                }
-            }
-
-            Spacer()
-
-            // Toggle - disabled during route operations
-            Toggle(domain.domain, isOn: Binding(
-                get: { domain.enabled },
-                set: { _ in
-                    if !routeManager.isApplyingRoutes {
-                        if isInverse { routeManager.toggleInverseDomain(domain.id) }
-                        else { routeManager.toggleDomain(domain.id) }
-                    }
-                }
-            ))
-            .toggleStyle(.switch)
-            .tint(isInverse ? Theme.warning : Theme.success)
-            .labelsHidden()
-            .controlSize(.small)
-            .disabled(routeManager.isApplyingRoutes)
-            .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
-
-            // Delete button - disabled during route operations
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.error.opacity(isHovered ? 1 : 0.6))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(ControlNames.delete(domain.domain))
-            .disabled(routeManager.isApplyingRoutes)
-            .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(isHovered ? Theme.bgHover : Color.clear)
-        )
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
     }
 }
 
@@ -2586,6 +2276,9 @@ final class SettingsPageRequest: ObservableObject {
     var logFilter: LogFilter?
     /// The Services page opens its catalogue sheet; the page takes it and clears it.
     @Published var openCatalogue = false
+    /// The title bar search the page opens with, read together with `page`: the dropdown's
+    /// Show in Settings opens the page filtered to the row's entry.
+    var search: String?
 }
 
 @MainActor
@@ -2595,6 +2288,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     /// The open window's undo line, dropped when the window closes.
     private var settingsUndo: SettingsUndo?
+
+    /// The window is open on screen (not closed, not minimized).
+    var isShown: Bool { window?.isVisible == true && window?.isMiniaturized == false }
 
     /// Shows the window, on `page` when one is given.
     func show(page: SettingsView.SettingsTab? = nil) {

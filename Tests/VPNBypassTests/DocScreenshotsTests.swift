@@ -216,10 +216,53 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size.width, 1040)
     }
 
+    /// The Bypass list with a wildcard that has learned 11 routes, the pointer on the first
+    /// row, and the VPN Only list read-only under it.
     func testSettingsOnDomains() throws {
-        seedBypass()
+        seedDomains(mode: .bypass)
+        DomainsTab.hoveredForScreenshots = "en.wikipedia.org"
+        defer { DomainsTab.hoveredForScreenshots = nil }
         let size = try renderSettings(page: .domains, to: "domains.png")
         XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// VPN Only mode: its list, an IP range in it, and the Bypass list read-only under it.
+    func testSettingsOnDomainsInVPNOnlyMode() throws {
+        seedDomains(mode: .vpnOnly)
+        let size = try renderSettings(page: .domains, to: "domains-vpn-only.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// An empty Bypass list: the add row, then the empty state under it.
+    func testSettingsOnDomainsWhenEmpty() throws {
+        seedBypass()
+        rm.config.domains = []
+        rm.config.inverseDomains = []
+        let size = try renderSettings(page: .domains, to: "domains-empty.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// Custom mode: the page opens read-only with both lists, the Bypass list first.
+    func testSettingsOnDomainsInCustomMode() throws {
+        seedDomains(mode: .bypass)
+        seedCustomRules()
+        rm.config.routingMode = .custom
+        let size = try renderSettings(page: .domains, to: "domains-custom.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    private func seedDomains(mode: RoutingMode) {
+        seedBypass()
+        rm.config.domains.append(DomainEntry(domain: "*.example.com", enabled: true))
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.org", enabled: true),
+                                    DomainEntry(domain: "10.20.0.0/16", enabled: true, isCIDR: true),
+                                    DomainEntry(domain: "wiki.example.org", enabled: false)]
+        if mode == .vpnOnly {
+            rm.config.routingMode = .vpnOnly
+            rm.activeRoutes = addresses(["intranet.example.org": 3, "10.20.0.0/16": 1], gateway: "iface:utun4")
+        } else {
+            rm.activeRoutes += addresses(["*.example.com": 11], gateway: "192.168.1.1")
+        }
     }
 
     func testSettingsOnRules() throws {
@@ -622,6 +665,78 @@ final class DocScreenshotsTests: XCTestCase {
         rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: Date(), at: Date().addingTimeInterval(-51))
         defer { rm.clearRouteCheck() }
         _ = try renderSettings(page: .status, to: "status-problems.png")
+    }
+
+    // MARK: - Dropdown rows and the add field (step 11), drawn for the pull request
+
+    // BEGIN ROWS SHOTS
+    func testRowsOn() throws {
+        seedBypass()
+        hoverRow("YouTube")
+        _ = try renderDropdown(to: "rows-on.png")
+    }
+
+    func testRowsPartlyRouted() throws {
+        seedPartlyRouted()
+        hoverRow("Zoom")
+        _ = try renderDropdown(to: "rows-partly.png")
+    }
+
+    func testRowsDisconnected() throws {
+        seedBypass()
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        _ = try renderDropdown(to: "rows-disconnected.png")
+    }
+
+    func testRowsStarting() throws {
+        seedConnected(mode: .bypass)
+        rm.activeRoutes = []
+        rm.lastRouteChange = nil
+        rm.config.domains = [DomainEntry(domain: "en.wikipedia.org", enabled: true)]
+        rm.isLoading = true
+        rm.lastUpdate = nil
+        _ = try renderDropdown(to: "rows-starting.png")
+    }
+
+    func testRowsLongList() throws {
+        seedBypass()
+        let more = ["github.com", "docs.example.com", "status.example.com", "registry.npmjs.org"]
+        rm.config.domains += more.map { DomainEntry(domain: $0, enabled: true) }
+        rm.activeRoutes += addresses(["github.com": 3, "docs.example.com": 2, "status.example.com": 1,
+                                      "registry.npmjs.org": 2], gateway: "192.168.1.1")
+        _ = try renderDropdown(to: "rows-long.png")
+    }
+
+    func testRowsVPNOnly() throws {
+        seedConnected(mode: .vpnOnly)
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.com", enabled: true),
+                                    DomainEntry(domain: "git.example.com", enabled: true)]
+        rm.activeRoutes = ClassicRouteCompiler.bypassAllCatchAlls.map {
+            route($0, via: "192.168.1.1", for: ClassicRouteCompiler.catchAllSource)
+        } + addresses(["intranet.example.com": 2, "git.example.com": 1], gateway: "10.0.0.1")
+        rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-19), routeCount: 3, failedCount: 0)
+        _ = try renderDropdown(to: "rows-vpn-only.png")
+    }
+
+    func testRowsCustom() throws {
+        seedCustom()
+        _ = try renderDropdown(to: "rows-custom.png")
+    }
+    // END ROWS SHOTS
+
+    /// The Status page when the app is opened again with its menu bar icon hidden.
+    func testRowsStatusWithTheIconHidden() throws {
+        seedBypass()
+        MenuBarIconVisibility.shared.isHidden = true
+        defer { MenuBarIconVisibility.shared.isHidden = false }
+        _ = try renderSettings(page: .status, to: "rows-status-icon-hidden.png")
+    }
+
+    private func hoverRow(_ name: String) {
+        RoutedBySourceCard.hoveredRowForScreenshots = name
+        addTeardownBlock { @MainActor in RoutedBySourceCard.hoveredRowForScreenshots = nil }
     }
 
     /// Bypass with Zoom on and no address for it, and an apply 64 s ago with seven failures:

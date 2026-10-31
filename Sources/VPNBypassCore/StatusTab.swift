@@ -478,6 +478,7 @@ struct StatusTab: View {
             content(now: context.date)
         }
         .task { if readsTunnelsOnChange { await readTunnels() } }
+        .onAppear(perform: MenuBarIconHiddenNote.refreshOnAppear)
         .onChange(of: StatusPage.TunnelReadKey.current(routeManager)) { _ in
             if readsTunnelsOnChange { Task { await readTunnels() } }
         }
@@ -486,6 +487,7 @@ struct StatusTab: View {
     private func content(now: Date) -> some View {
         let input = DropdownStatus.Input.current(routeManager, helperReady: helperManager.helperState.isReady)
         return VStack(alignment: .leading, spacing: 18) {
+            MenuBarIconHiddenNote()
             summaryView(StatusPage.summary(input, now: now))
             problemsSection(input)
             routeCheckSection

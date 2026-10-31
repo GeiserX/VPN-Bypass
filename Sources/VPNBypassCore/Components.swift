@@ -170,6 +170,8 @@ struct ListRow: View {
     /// From `numberColumnWidth(for:)`, the same on every row of the page.
     var numberWidth: CGFloat = 0
     var actions: [RowAction] = []
+    /// The right-click menu, when it offers more than the hover actions; nil lists `actions`.
+    var menuActions: [RowAction]?
     var isOn: Binding<Bool>?
     /// A selected row answers Return, ⌘⌫ and Space.
     var isSelected = false
@@ -247,7 +249,7 @@ struct ListRow: View {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .contextMenu {
-            ForEach(actions) { action in
+            ForEach(menuActions ?? actions) { action in
                 if let shortcut = action.shortcut {
                     Button(action.name, action: action.perform).keyboardShortcut(shortcut)
                 } else {
@@ -278,7 +280,7 @@ struct ListRow: View {
 
 // MARK: - 3. Page header
 
-/// A page's title, its search field (⌘F) at the trailing end, one + when the page adds
+/// A page's title, its search field (⌘F) at the trailing end, one + (⌘N) when the page adds
 /// through a sheet, and one secondary line under the title that says what the page is for.
 struct PageHeader: View {
     let title: String
@@ -345,7 +347,8 @@ struct PageHeader: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help(Self.addButtonName(addName))
+                    .keyboardShortcut("n", modifiers: .command)
+                    .help(ControlNames.help(Self.addButtonName(addName), shortcut: "⌘N"))
                     .accessibilityLabel(Self.addButtonName(addName))
                 }
             }

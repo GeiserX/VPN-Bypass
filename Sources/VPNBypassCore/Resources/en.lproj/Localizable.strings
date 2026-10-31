@@ -3,8 +3,6 @@
 /* ===== Menu Bar ===== */
 "VPN Connected" = "VPN Connected";
 "VPN Disconnected" = "VPN Disconnected";
-"Add Domain to VPN" = "Add Domain to VPN";
-"Add Domain to Bypass" = "Add Domain to Bypass";
 "Refresh Routes" = "Refresh Routes";
 "Clear" = "Clear";
 "Verify Routes" = "Verify Routes";
@@ -28,7 +26,6 @@
 "Bypass list" = "Bypass list";
 "Only these domains will use the VPN. Everything else bypasses it." = "Only these domains will use the VPN. Everything else bypasses it.";
 "Add domains that should bypass VPN and use your regular connection." = "Add domains that should bypass VPN and use your regular connection.";
-"CONFIGURED DOMAINS" = "CONFIGURED DOMAINS";
 "Applying..." = "Applying...";
 "All" = "All";
 "Add a domain above to bypass VPN" = "Add a domain above to bypass VPN";
@@ -518,7 +515,6 @@
 "VPN Bypass — VPN Only: %lld destinations use the VPN, everything else is direct" = "VPN Bypass — VPN Only: %lld destinations use the VPN, everything else is direct";
 "VPN Bypass — Custom: %lld destinations routed by your rules" = "VPN Bypass — Custom: %lld destinations routed by your rules";
 "VPN Bypass — Bypass: %lld destinations skip the VPN, everything else is tunnelled" = "VPN Bypass — Bypass: %lld destinations skip the VPN, everything else is tunnelled";
-"domain.com" = "domain.com";
 "Refreshing routes…" = "Refreshing routes…";
 "Re-resolve DNS Now" = "Re-resolve DNS Now";
 "Remove All Routes…" = "Remove All Routes…";
@@ -613,8 +609,6 @@
 "Choose Route" = "Choose Route";
 
 /* ===== Settings: Domains, Services, General and About ===== */
-"e.g., example.com or 10.0.0.0/24" = "e.g., example.com or 10.0.0.0/24";
-"e.g., example.com" = "e.g., example.com";
 "No entries configured" = "No entries configured";
 "Add domains or IP ranges that should use VPN" = "Add domains or IP ranges that should use VPN";
 "e.g. My Service" = "e.g. My Service";
@@ -885,3 +879,23 @@
 "Switch…" = "Switch…";
 "Switch to %@…" = "Switch to %@…";
 "Read-only in this mode" = "Read-only in this mode";
+
+/* Dropdown rows, add field, hidden menu bar icon */
+"Turn Off %@" = "Turn Off %@";
+"Retry %@" = "Retry %@";
+"Show %@ in Settings" = "Show %@ in Settings";
+"Copy the Addresses of %@" = "Copy the Addresses of %@";
+"Add a Site" = "Add a Site";
+"Add a site to bypass…" = "Add a site to bypass…";
+"Add a site for the VPN…" = "Add a site for the VPN…";
+"The menu bar icon is not visible. It may be switched off in System Settings, or hidden by the notch." = "The menu bar icon is not visible. It may be switched off in System Settings, or hidden by the notch.";
+"Open Menu Bar Settings…" = "Open Menu Bar Settings…";
+
+/* Domains page on the shared components */
+"VPN Only list · used in VPN Only mode" = "VPN Only list · used in VPN Only mode";
+"Bypass list · used in Bypass mode" = "Bypass list · used in Bypass mode";
+"Add a domain, *.wildcard or IP range…" = "Add a domain, *.wildcard or IP range…";
+"Add a domain or *.wildcard…" = "Add a domain or *.wildcard…";
+"learned as you browse" = "learned as you browse";
+"IP range" = "IP range";
+"addresses" = "addresses";

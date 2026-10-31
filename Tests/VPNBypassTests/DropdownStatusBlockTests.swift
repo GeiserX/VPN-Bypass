@@ -357,7 +357,7 @@ final class StatusProblemsTests: XCTestCase {
         config.services = []
         config.domains = (1...10).map { RouteManager.DomainEntry(domain: "site\($0).example") }
         let summary = try XCTUnwrap(RoutedBySource.make(mode: .bypass, config: config, routes: [], busy: false))
-        XCTAssertEqual(summary.rows.count, RoutedBySource.visibleRows)
+        XCTAssertEqual(summary.rows.count, 10)
         XCTAssertEqual(summary.problemCount, 10)
         let problems = StatusPage.problems(lastChange: nil, installed: 0, helperReady: true,
                                            withoutAddresses: summary.problemRows)
