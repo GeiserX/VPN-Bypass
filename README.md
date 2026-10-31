@@ -48,7 +48,7 @@ brew trust --cask geiserx/vpn-bypass/vpn-bypass
 brew install --cask vpn-bypass
 ```
 
-Then open VPN Bypass from Applications, approve the one admin prompt that installs the root helper, connect your VPN, and turn on a service in Settings > Services or type a domain into the dropdown. It worked when the pill in the dropdown reads ON and the menu bar mark shows its arrow. Needs macOS 13 or later; the DMG, building from source and the fix for "the app is damaged" are in [Getting started](https://geiserx.github.io/VPN-Bypass/getting-started/).
+Then open VPN Bypass from Applications, approve the one admin prompt that installs the root helper, connect your VPN, and turn on a service in Settings > Services or type a domain into the dropdown. It worked when the status chip in the dropdown reads On and the menu bar mark shows its arrow. Needs macOS 13 or later; the DMG, building from source and the fix for "the app is damaged" are in [Getting started](https://geiserx.github.io/VPN-Bypass/getting-started/).
 
 ## Documentation
 
