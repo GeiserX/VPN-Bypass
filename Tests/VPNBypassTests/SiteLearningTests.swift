@@ -97,10 +97,11 @@ final class SiteLearningTests: XCTestCase {
     // MARK: - The one Add
 
     func testPlanAddsTheUnlistedNamesOrTheChosenWildcard() {
-        let groups = SiteLearning.groups(["a.shop.test", "b.shop.test", "c.shop.test", "img.cdn.test", "api.cdn.test"])
+        let groups = SiteLearning.groups(["a.shop.test", "b.shop.test", "c.shop.test", "shop.test", "img.cdn.test", "api.cdn.test"])
         let listed: Set<String> = ["b.shop.test", "api.cdn.test"]
         XCTAssertEqual(SiteLearning.plan(groups, wildcards: [], isListed: listed.contains),
-                       ["a.shop.test", "c.shop.test", "img.cdn.test"])
+                       ["a.shop.test", "c.shop.test", "shop.test", "img.cdn.test"])
+        // The wildcard covers the apex too, so the apex is not added beside it.
         XCTAssertEqual(SiteLearning.plan(groups, wildcards: ["*.shop.test"], isListed: listed.contains),
                        ["*.shop.test", "img.cdn.test"])
     }
