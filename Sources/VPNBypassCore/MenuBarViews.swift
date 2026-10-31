@@ -337,7 +337,9 @@ struct MenuContent: View {
                 // and the route list, which have nothing to show yet.
                 FirstRunSetupView(
                     onOpenServices: {
-                        // A fresh install has no service on, so the page opens on its catalogue.
+                        // A fresh install has no service on, so the page opens on its catalogue,
+                        // on every country even when the country row was used before.
+                        SettingsPageRequest.shared.catalogueRegion = nil
                         SettingsPageRequest.shared.openCatalogue = true
                         openSettings(page: .services)
                     },
@@ -2269,8 +2271,12 @@ enum FirstRunSetup {
     }
 
     /// The Mac's region (System Settings > General > Language & Region), read without asking
-    /// for anything. A render sets it so the image does not depend on the Mac that made it.
-    static var macRegion: String? = Locale.current.region?.identifier
+    /// for anything, each time, so a change in System Settings shows without a relaunch.
+    static var macRegion: String? { regionOverride ?? Locale.current.region?.identifier }
+
+    /// The region a render or a test uses in place of the Mac's, so the image does not depend
+    /// on the Mac that made it; nil reads the Mac's.
+    static var regionOverride: String?
 
     /// The country whose services the question suggests: the Mac's region when the catalogue
     /// has services of its own for it (its banks and public services), otherwise none.

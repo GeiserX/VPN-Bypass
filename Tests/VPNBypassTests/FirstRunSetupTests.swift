@@ -80,6 +80,14 @@ final class FirstRunSetupTests: XCTestCase {
         XCTAssertNil(FirstRunSetup.suggestedRegion("FR", catalogue: []))
     }
 
+    func testTheMacsRegionIsReadEachTime() {
+        defer { FirstRunSetup.regionOverride = nil }
+        FirstRunSetup.regionOverride = "JP"
+        XCTAssertEqual(FirstRunSetup.macRegion, "JP")
+        FirstRunSetup.regionOverride = nil
+        XCTAssertEqual(FirstRunSetup.macRegion, Locale.current.region?.identifier, "nil reads the Mac's region")
+    }
+
     func testEveryShippedPackIsSuggestedOnItsCountry() {
         for region in ["FR", "ES", "DE", "IT", "GB", "US"] {
             XCTAssertEqual(FirstRunSetup.suggestedRegion(region), region)

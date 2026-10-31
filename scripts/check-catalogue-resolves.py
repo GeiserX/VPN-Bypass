@@ -48,7 +48,8 @@ def ask(name: str, resolver: str) -> tuple[str, list[str]] | None:
             parts = line.split()
             if len(parts) >= 5 and parts[3] == "A":
                 addresses.append(parts[4])
-    if status in (None, "SERVFAIL", "REFUSED"):
+    # Only NOERROR and NXDOMAIN are answers; SERVFAIL, REFUSED, FORMERR and the rest are not.
+    if status not in ("NOERROR", "NXDOMAIN"):
         return None
     return status, addresses
 

@@ -104,9 +104,8 @@ final class DocScreenshotsTests: XCTestCase {
         rm.activeRoutes = []
         rm.lastRouteChange = nil
         // A Mac set to Spain, whatever the region of the Mac that renders it.
-        let savedRegion = FirstRunSetup.macRegion
-        FirstRunSetup.macRegion = "ES"
-        defer { FirstRunSetup.macRegion = savedRegion }
+        FirstRunSetup.regionOverride = "ES"
+        defer { FirstRunSetup.regionOverride = nil }
         let size = try renderDropdown(to: "first-run.png")
         XCTAssertEqual(size.width, 680)
     }
