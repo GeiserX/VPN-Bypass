@@ -93,6 +93,7 @@ enum ClassicControl {
         "domain.list", "domain.add", "domain.rm", "domain.enable", "domain.disable",
         "service.list", "service.enable", "service.disable",
         "routes.active", "routes.clear", "refresh", "dns.refresh", "logs",
+        "pause", "resume",
     ]
 
     /// How long a domain/service mutation waits for a running route operation to finish.
@@ -125,6 +126,8 @@ enum ClassicControl {
         case "refresh": response = refresh()
         case "dns.refresh": response = dnsRefresh()
         case "logs": response = logs(args)
+        case "pause": response = await pause(args)
+        case "resume": response = resume()
         default: return nil
         }
         if response.ok, CommandRouter.isMutating(request.cmd) {
@@ -312,6 +315,7 @@ enum ClassicControl {
     private static func refresh() -> ControlResponse {
         let rm = RouteManager.shared
         let helper = HelperManager.shared
+        if rm.isPaused { return pausedRefusal() }
         guard helper.isHelperInstalled else {
             return fail("helper_not_ready",
                         "the privileged helper is not ready (\(helper.helperState.statusText)); repair it in Settings > Status")
@@ -320,8 +324,48 @@ enum ClassicControl {
         return ok(ControlResult(message: "refresh started"))
     }
 
+    private static func pausedRefusal() -> ControlResponse {
+        fail("paused", "routing is paused; run vpnb resume to put the routes back")
+    }
+
+    // MARK: - pause / resume
+
+    /// `pause [15m|1h|reconnect|resume]` (or `for=<length>`): RouteManager.pause, the same call
+    /// as the dropdown's Pause menu. No length means until resumed.
+    private static func pause(_ args: [String: String]) async -> ControlResponse {
+        let rm = RouteManager.shared
+        guard let length = PauseLength.parse(args["for"]) else {
+            return fail("invalid_args", "pause takes 15m, 1h, any length up to 24h, reconnect, or nothing for until resumed")
+        }
+        switch await rm.pause(for: length) {
+        case .failure(.blocked(let blocker)):
+            return fail("pause_refused", PauseGate.message(blocker))
+        case .failure(.shuttingDown):
+            return fail("shutting_down", "the app is quitting")
+        case .failure(.configUnreadable):
+            return fail("config_unreadable", "config.json could not be read; repair it or import a saved configuration in Settings")
+        case .success(let left):
+            var message = "paused \(length.logText)"
+            if left > 0 {
+                message += "; \(left) route\(left == 1 ? "" : "s") could not be removed and \(left == 1 ? "is" : "are") still installed"
+            }
+            return ok(ControlResult(message: message))
+        }
+    }
+
+    /// `resume`: RouteManager.resume, the dropdown's Resume button.
+    private static func resume() -> ControlResponse {
+        let rm = RouteManager.shared
+        guard rm.isPaused else { return ok(ControlResult(message: "not paused")) }
+        rm.resume()
+        return ok(ControlResult(message: rm.isVPNConnected
+            ? "resumed; routes are being applied"
+            : "resumed; routes come back when a VPN connects"))
+    }
+
     /// Settings > Refresh DNS now.
     private static func dnsRefresh() -> ControlResponse {
+        if RouteManager.shared.isPaused { return pausedRefusal() }
         RouteManager.shared.forceDNSRefresh()
         return ok(ControlResult(message: "DNS refresh started"))
     }
