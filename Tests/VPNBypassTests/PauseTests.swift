@@ -64,6 +64,13 @@ final class PauseGateTests: XCTestCase {
         XCTAssertNil(PauseGate.blocker(cfg))
     }
 
+    /// RouteCompiler skips a rule whose route is off, so it routes nothing and does not block.
+    func testARuleOnARouteTurnedOffDoesNotBlock() {
+        var cfg = customConfig([(.direct, .domain, "en.wikipedia.org"), (.vpnDefault, .cidr, "203.0.113.0/24")])
+        cfg.routes[1].enabled = false
+        XCTAssertNil(PauseGate.blocker(cfg))
+    }
+
     func testAServiceRuleIsNamedByItsService() {
         var cfg = customConfig([(.vpnDefault, .service, "telegram")])
         cfg.services = [ServiceEntry(id: "telegram", name: "Telegram", enabled: false, domains: ["t.me"], ipRanges: [], isCustom: false)]
@@ -173,6 +180,25 @@ final class PauseLengthTests: XCTestCase {
         XCTAssertTrue(VPNBCLI.textLines(ControlResponse(ok: true, result: ControlResult(runtime: runtime)))
             .contains { $0.contains("paused: until resumed") })
     }
+
+    /// Get Status says Paused only when the dropdown would: a VPN up and every route out.
+    func testStatusSaysPausedOnlyWithAVPNAndNoRoutesLeft() {
+        let noVPN = RuntimeStatus(helperReady: true, helperState: "ready", vpnConnected: false,
+                                  enforcedRouteCount: 0, enforcing: false, paused: "until resumed")
+        XCTAssertEqual(ShortcutActions.statusLine(mode: .bypass, runtime: noVPN),
+                       "Bypass mode. The VPN is not connected.")
+        let left = RuntimeStatus(helperReady: true, helperState: "ready", vpnConnected: true,
+                                 enforcedRouteCount: 4, enforcing: true, paused: "until resumed")
+        XCTAssertFalse(ShortcutActions.statusLine(mode: .bypass, runtime: left).contains("Paused"))
+    }
+
+    func testTheShortcutsDialogsSayWhatHappened() {
+        XCTAssertEqual(ShortcutActions.pausePartial(left: 3),
+                       "Paused, but 3 addresses are still routed: removing them failed. Retry from the dropdown.")
+        XCTAssertEqual(ShortcutActions.pausePartial(left: 1),
+                       "Paused, but 1 address is still routed: removing it failed. Retry from the dropdown.")
+        XCTAssertEqual(ShortcutActions.notPaused(), "Routing was not paused.")
+    }
 }
 
 final class PauseResumeTimingTests: XCTestCase {
@@ -271,6 +297,20 @@ final class PauseStatusTests: XCTestCase {
         let status = DropdownStatus.make(input(paused: .oneHour, routes: 5, helperReady: false), now: now)
         XCTAssertEqual(status.line3.action, .fix)
         XCTAssertNotEqual(status.chip, .paused)
+    }
+
+    /// The helper down with a VPN up: its state shows, with Fix, instead of Paused.
+    func testAHelperDownWithAVPNUpIsShownOverPaused() {
+        let status = DropdownStatus.make(input(paused: .oneHour, helperReady: false), now: now)
+        XCTAssertNotEqual(status.chip, .paused)
+        XCTAssertEqual(status.line3.action, .fix)
+        // With no VPN there is nothing to fix for routing yet: still Paused.
+        XCTAssertEqual(DropdownStatus.make(input(paused: .oneHour, connected: false, helperReady: false), now: now).chip,
+                       .paused)
+    }
+
+    func testTheStatusPageNamesAnIncompletePause() {
+        XCTAssertEqual(StatusPage.summary(input(paused: .oneHour, routes: 5), now: now).title, "Pause incomplete")
     }
 
     func testTheStatusPageSaysPaused() {
@@ -597,6 +637,24 @@ final class PauseLifecycleTests: XCTestCase {
             XCTAssertTrue(rm.isPaused, "\(length)")
             rm.endPause(reason: "next", apply: false)
         }
+    }
+
+    /// A Resume whose pause removed nothing skips its apply (the routes are current), and
+    /// wildcard learning must still start again.
+    func testResumeAfterAFailedRemovalRestartsWildcardLearning() async throws {
+        rm.removeRoutesBatchOverrideForTests = { dests in (0, dests.count, dests, "test: refused") }
+        rm.config.domains = [DomainEntry(domain: "*.example.org", enabled: true)]
+        // Exactly what an apply wants, so the Resume apply finds the routes current and skips.
+        rm.activeRoutes = [.init(destination: "203.0.113.0/24", gateway: "192.168.1.1", source: "Lab", timestamp: Date())]
+        await pauseWithHelperReady()
+        XCTAssertFalse(rm.activeRoutes.isEmpty)
+        XCTAssertTrue(rm.wildcards.suspended)
+        rm.resume()
+        // At once on a calm tunnel; after the settle wait when an earlier test's reconnect is recent.
+        let deadline = Date().addingTimeInterval(20)
+        while rm.wildcards.suspended && Date() < deadline { try await Task.sleep(nanoseconds: 100_000_000) }
+        XCTAssertFalse(rm.wildcards.suspended)
+        XCTAssertEqual(addCalls, [], "the apply skipped: the routes were current")
     }
 
     func testTheControlSocketPausesAndResumes() async {

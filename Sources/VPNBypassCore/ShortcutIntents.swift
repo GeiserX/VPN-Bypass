@@ -256,7 +256,9 @@ struct PauseIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         _ = try await ShortcutActions.run(action)
-        return .result(dialog: "\(ShortcutActions.pauseDone(length.length))")
+        let left = RouteManager.shared.uniqueRouteCount
+        let line = left > 0 ? ShortcutActions.pausePartial(left: left) : ShortcutActions.pauseDone(length.length)
+        return .result(dialog: "\(line)")
     }
 }
 
@@ -270,7 +272,8 @@ struct ResumeIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        let wasPaused = RouteManager.shared.isPaused
         _ = try await ShortcutActions.run(action)
-        return .result(dialog: "\(ShortcutActions.resumeDone())")
+        return .result(dialog: "\(wasPaused ? ShortcutActions.resumeDone() : ShortcutActions.notPaused())")
     }
 }

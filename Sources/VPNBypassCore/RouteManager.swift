@@ -216,6 +216,9 @@ final class RouteManager: ObservableObject {
     private var pauseTimerTask: Task<Void, Never>?
     /// The apply Resume runs when no settle wait applies.
     private var resumeApplyTask: Task<Void, Never>?
+    /// A pause's removal is running; Resume's apply waits for it, or its later batch could
+    /// delete what the apply just put back.
+    private var pauseRemovalRunning = false
 
     struct PendingReconnectApply: Equatable {
         enum Reason: Equatable {
@@ -765,6 +768,9 @@ final class RouteManager: ObservableObject {
                 log(.error, "Failed to persist imported config: \(error.localizedDescription)")
                 return false
             }
+
+            // An import replaces what a pause was taken on; the apply below is its own.
+            if isPaused { endPause(reason: "a configuration was imported", apply: false) }
 
             log(.success, "Config imported: \(exportData.config.domains.count) domains, \(exportData.config.services.filter { $0.enabled }.count) services enabled")
 
@@ -2499,6 +2505,9 @@ final class RouteManager: ObservableObject {
             orphanFirstSeen.removeAll()
             log(.info, "Routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
             lastUpdate = Date()
+            // The routes are live (a skip needs a non-empty desired set), so wildcards learn
+            // again, as after a commit: a Resume whose pause could not remove them lands here.
+            wildcards.routesApplied()
             return
         }
 
@@ -2646,6 +2655,7 @@ final class RouteManager: ObservableObject {
             orphanFirstSeen.removeAll()
             log(.info, "Custom routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
             lastUpdate = Date()
+            wildcards.routesApplied()   // as the classic skip path
             return true
         }
 
@@ -2942,7 +2952,9 @@ final class RouteManager: ObservableObject {
         dnsRefreshRetryTask?.cancel()
         dnsRefreshRetryTask = nil
         log(.info, "Paused \(length.logText): removing the app's routes")
+        pauseRemovalRunning = true
         await removeAllRoutes()
+        pauseRemovalRunning = false
         let left = Set(activeRoutes.map(\.destination)).count
         if left > 0 {
             log(.warning, "Paused, but \(left) route(s) could not be removed and are still in place")
@@ -2952,8 +2964,10 @@ final class RouteManager: ObservableObject {
 
     /// Tries again to remove what a pause could not. Nothing while not paused.
     func retryPauseRemoval() async {
-        guard isPaused else { return }
+        guard isPaused, !pauseRemovalRunning else { return }
+        pauseRemovalRunning = true
         await removeAllRoutes()
+        pauseRemovalRunning = false
     }
 
     /// Ends the pause and puts the routes back with one apply through the settle gate.
@@ -3003,6 +3017,15 @@ final class RouteManager: ObservableObject {
         }
     }
 
+    /// Waits, up to 30 s, while an apply, a load or a pause's removal runs.
+    private func waitForRouteWorkToSettle() async {
+        var polls = 0
+        while (isApplyingRoutes || isLoading || pauseRemovalRunning) && polls < 120 && !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            polls += 1
+        }
+    }
+
     /// Ends a timed pause whose time is up. Run on every VPN status pass (the 30 s timer, a
     /// network change, a wake), so a pause never outlives its length when the timer is late.
     func endPauseIfExpired(now: Date = Date()) {
@@ -3030,6 +3053,10 @@ final class RouteManager: ObservableObject {
             reconnectSettleTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 guard !Task.isCancelled, let self else { return }
+                // The pause has already ended, so an apply that skips on a busy gate would
+                // leave the routes out with nothing to bring them back: wait the gate out.
+                await self.waitForRouteWorkToSettle()
+                guard !Task.isCancelled else { return }
                 await self.runSettledApply(requireAutoApply: false)
             }
             pendingReconnectApply = PendingReconnectApply(
@@ -3043,11 +3070,7 @@ final class RouteManager: ObservableObject {
                 // An edit that ended the pause may run its own apply right after; let it take
                 // the gate first, and wait out any operation already running.
                 try? await Task.sleep(nanoseconds: 300_000_000)
-                var polls = 0
-                while (self.isApplyingRoutes || self.isLoading) && polls < 120 && !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 250_000_000)
-                    polls += 1
-                }
+                await self.waitForRouteWorkToSettle()
                 guard !Task.isCancelled, !self.isPaused, !self.isShuttingDown else { return }
                 self.resumeApplyTask = nil
                 if let applied = self.lastUpdate, applied > resumedAt, !self.activeRoutes.isEmpty {

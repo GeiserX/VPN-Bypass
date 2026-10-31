@@ -44,7 +44,7 @@ struct MenuBarLabel: View {
             return String(localized: "VPN Bypass: helper error, nothing is being routed")
         }
         // Only once every route is out, as the dropdown says Paused only then.
-        if routeManager.isPaused && routeManager.activeRoutes.isEmpty {
+        if routeManager.isPaused && routeManager.activeRoutes.isEmpty && routeManager.isVPNConnected {
             return String(localized: "VPN Bypass: paused, traffic follows the VPN's own routes")
         }
         guard routeManager.isVPNConnected else {
@@ -1811,7 +1811,9 @@ struct DropdownStatus: Equatable {
         // Paused, and every route is out: the state drawn. When some are still in, the block
         // says how many with Retry, and never says Paused (flow fix 2).
         if let pause = input.pause {
-            if input.installedRoutes == 0 && !input.everythingElseDirect {
+            // A helper that is down with a VPN up is shown as the helper's state, with Fix.
+            if input.installedRoutes == 0 && !input.everythingElseDirect
+                && (input.helperReady || !input.isVPNConnected) {
                 return paused(pause, input: input, name: name, now: now)
             }
             if input.helperReady {

@@ -51,6 +51,8 @@ enum StatusPage {
         var sentence = status.sentence
         if status.chip == .paused {
             title = String(localized: "Paused", bundle: bundle)
+        } else if input.pause != nil && status.line3.action == .retryPause {
+            title = String(localized: "Pause incomplete", bundle: bundle)
         } else if input.isStarting || !input.isVPNConnected {
             title = status.headline
         } else if !input.helperReady {

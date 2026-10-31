@@ -135,8 +135,9 @@ enum PauseGate {
         if custom {
             for rule in config.rules.filter(\.enabled).sorted(by: { $0.order < $1.order }) {
                 // A rule pointing at no route matches nothing (RuleResolver), so it routes nothing.
+                // Nor one on a route turned off: RouteCompiler skips it.
                 guard let route = config.routes.first(where: { $0.id == rule.routeId }),
-                      route.egress != .direct else { continue }
+                      route.enabled, route.egress != .direct else { continue }
                 return .rule(ruleName(rule, services: config.services),
                              usesProxy: ProxyListenerManager.usesLocalListener(route.egress))
             }

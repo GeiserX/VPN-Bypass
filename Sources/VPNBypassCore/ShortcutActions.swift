@@ -117,6 +117,17 @@ enum ShortcutActions {
         String(localized: "Resumed: the routes are coming back.", bundle: bundle)
     }
 
+    /// Pause Routing when some routes could not be removed: never the clean paused line.
+    static func pausePartial(left: Int, in bundle: Bundle = .main) -> String {
+        left == 1
+            ? String(localized: "Paused, but 1 address is still routed: removing it failed. Retry from the dropdown.", bundle: bundle)
+            : String(localized: "Paused, but \(left) addresses are still routed: removing them failed. Retry from the dropdown.", bundle: bundle)
+    }
+
+    static func notPaused(in bundle: Bundle = .main) -> String {
+        String(localized: "Routing was not paused.", bundle: bundle)
+    }
+
     /// Get Status's answer: the mode, then whether anything is routed and, when not, the one
     /// reason, in the order the dropdown checks them (MenuBarLabel.iconAccessibilityLabel): the
     /// kill switch before "nothing routed", since it is why routes would have no effect.
@@ -128,7 +139,8 @@ enum ShortcutActions {
         if !runtime.helperReady {
             return String(localized: "\(name) mode. The helper is not ready, so nothing is routed.", bundle: bundle)
         }
-        if runtime.paused != nil {
+        // Only once every route is out and a VPN is up, as the dropdown says Paused only then.
+        if runtime.paused != nil && runtime.vpnConnected && runtime.enforcedRouteCount == 0 {
             return String(localized: "\(name) mode. Paused: traffic follows the VPN's own routes.", bundle: bundle)
         }
         if !runtime.vpnConnected {

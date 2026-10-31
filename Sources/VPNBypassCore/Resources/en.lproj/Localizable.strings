@@ -946,3 +946,7 @@
 "Resume Routing" = "Resume Routing";
 "Ends a pause and puts the routes back, as vpnb resume does." = "Ends a pause and puts the routes back, as vpnb resume does.";
 "Pause length" = "Pause length";
+"Pause incomplete" = "Pause incomplete";
+"Paused, but 1 address is still routed: removing it failed. Retry from the dropdown." = "Paused, but 1 address is still routed: removing it failed. Retry from the dropdown.";
+"Paused, but %lld addresses are still routed: removing them failed. Retry from the dropdown." = "Paused, but %lld addresses are still routed: removing them failed. Retry from the dropdown.";
+"Routing was not paused." = "Routing was not paused.";

@@ -946,3 +946,7 @@
 "Resume Routing" = "Reanudar el enrutamiento";
 "Ends a pause and puts the routes back, as vpnb resume does." = "Termina una pausa y vuelve a poner las rutas, como hace vpnb resume.";
 "Pause length" = "Duración de la pausa";
+"Pause incomplete" = "Pausa incompleta";
+"Paused, but 1 address is still routed: removing it failed. Retry from the dropdown." = "En pausa, pero 1 dirección sigue enrutada: no se pudo quitar. Reinténtalo desde el menú.";
+"Paused, but %lld addresses are still routed: removing them failed. Retry from the dropdown." = "En pausa, pero %lld direcciones siguen enrutadas: no se pudieron quitar. Reinténtalo desde el menú.";
+"Routing was not paused." = "El enrutamiento no estaba en pausa.";
