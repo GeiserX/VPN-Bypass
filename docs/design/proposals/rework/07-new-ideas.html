@@ -54,7 +54,7 @@
         </div>
         <div class="r gap8" style="margin-top:12px"><span class="field fill" style="color:var(--t1)">en.wikipedia.org</span><span class="btn">Check</span></div>
         <div class="box" style="margin-top:10px">
-          <div class="row2 two"><span class="lead"><i data-g="checkc" class="live"></i></span><div class="fill"><div class="name">Routed through Wi-Fi (en0)</div><div class="det">Bypass list → 4 addresses, all 4 routed through Wi-Fi and answering on 443</div></div></div>
+          <div class="row2 two"><span class="lead"><i data-g="checkc" class="live"></i></span><div class="fill"><div class="name">Routed through Wi-Fi (en0)</div><div class="det">Bypass list → 4 IPv4 addresses, all 4 routed through Wi-Fi and answering on 443</div></div></div>
         </div>
         <div class="ty-detail" style="margin-top:10px;line-height:1.5">Same answer from the CLI: <span class="ty-mono" style="font-size:11px;color:var(--t1)">vpnb why cdn.example.net --json</span> (<span class="ty-mono" style="font-size:11px">vpnb why</span> from #193, <span class="ty-mono" style="font-size:11px">--json</span> from #184). The check opens a TCP connection to port 443 and reads its source address with getsockname, so sites that block ping still get an answer. A control address the app does not route must come back the way an unlisted address should go (through the VPN in Bypass, around it in VPN Only), or the result says the check is broken. When app routes cover every control candidate, the control is skipped and the result says it ran without one.</div>
       </div>
