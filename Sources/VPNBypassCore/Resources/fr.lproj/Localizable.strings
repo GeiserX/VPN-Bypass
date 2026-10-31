@@ -34,9 +34,6 @@
 "Create Custom Service" = "Créer un service personnalisé";
 "Custom" = "Personnalisé";
 "%lld domains" = "%lld domaines";
-/* Services page section headers; the On header is not the dropdown's ON pill */
-"services.section.on" = "ACTIVÉS";
-"CUSTOM SERVICES" = "SERVICES PERSONNALISÉS";
 
 /* ===== Réglages — Éditeur de service ===== */
 "Edit Service" = "Modifier le service";
@@ -705,7 +702,11 @@
 "catalogue.category.developer" = "Développement";
 "catalogue.category.ai" = "IA";
 "Browse catalogue…" = "Parcourir le catalogue…";
-"No services yet. Pick the ones you use from the catalogue." = "Aucun service pour l'instant. Choisissez ceux que vous utilisez dans le catalogue.";
+"A service skips the VPN while its switch is on." = "Un service contourne le VPN tant que son interrupteur est activé.";
+"Your services" = "Vos services";
+"%lld services, pick several at once" = "%lld services, choisissez-en plusieurs à la fois";
+"No services yet" = "Aucun service pour l'instant";
+"Pick the ones you use from the catalogue, or make your own with the + button." = "Choisissez ceux que vous utilisez dans le catalogue, ou créez le vôtre avec le bouton +.";
 "Nothing on this page matches “%@”." = "Rien sur cette page ne correspond à « %@ ».";
 "Search the catalogue" = "Rechercher dans le catalogue";
 "Service catalogue" = "Catalogue de services";

@@ -202,6 +202,39 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size, Self.settingsSize)
     }
 
+    /// A name added to Telegram from the Lookups page, a custom service that is off, and the
+    /// pointer on Telegram, whose row offers the added name's remove.
+    func testSettingsOnServicesHovered() throws {
+        seedBypass()
+        rm.config.builtInServiceExtras["telegram"] = ["telegram-cdn.example"]
+        if let i = rm.config.services.firstIndex(where: { $0.id == "telegram" }) {
+            rm.config.services[i].domains.append("telegram-cdn.example")
+        }
+        rm.config.services.append(ServiceEntry(id: "custom_work_tools", name: "Work Tools", enabled: false,
+                                               domains: ["jira.example.com", "wiki.example.com"],
+                                               ipRanges: ["203.0.113.0/24"], isCustom: true))
+        ServicesTab.hoveredForScreenshots = "Telegram"
+        defer { ServicesTab.hoveredForScreenshots = nil }
+        let size = try renderSettings(page: .services, to: "services-hover.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// A fresh install: no service of the user's yet, so the page offers the catalogue.
+    func testSettingsOnServicesWhenEmpty() throws {
+        seedConnected(mode: .bypass)
+        let size = try renderSettings(page: .services, to: "services-empty.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// A search that none of the user's services matches offers the same search in the catalogue.
+    func testSettingsOnServicesWithASearchThatMisses() throws {
+        seedBypass()
+        SettingsView.searchForScreenshots = "netflix"
+        defer { SettingsView.searchForScreenshots = nil }
+        let size = try renderSettings(page: .services, to: "services-search.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
     /// The catalogue sheet on the Banks chip, two banks picked: "Bypass 2 services".
     func testCatalogueSheet() throws {
         seedBypass()
