@@ -149,6 +149,15 @@ final class GeneralAboutModelTests: XCTestCase {
         XCTAssertTrue(Diagnostics.bundle(input(recent: [])).hasSuffix("Recent warnings and errors:\n(none)"))
     }
 
+    func testTheHelperStateIsRedactedToo() {
+        var failed = input(recent: [])
+        failed.helperState = #"failed("Cannot copy /Users/alice/Downloads/helper to intranet.example.org")"#
+        let text = Diagnostics.bundle(failed)
+        XCTAssertFalse(text.contains("alice"), text)
+        XCTAssertFalse(text.contains("intranet"), text)
+        XCTAssertTrue(text.contains("Helper: 1.5.0, failed(\"Cannot copy /Users/<user>"), text)
+    }
+
     func testTheIssueLinkFillsTheBugForm() throws {
         let url = Diagnostics.issueURL(version: "6.0.0", bundle: "a+b = c")
         let parts = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))

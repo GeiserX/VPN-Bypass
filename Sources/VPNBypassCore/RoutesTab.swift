@@ -578,10 +578,12 @@ struct RouteEditorSheet: View {
             SheetField(String(localized: "Username")) {
                 TextField("Optional", text: $proxyUser)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel(String(localized: "Username"))
             }
             SheetField(String(localized: "Password")) {
                 SecureField("Optional", text: $proxyPass)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel(String(localized: "Password"))
             }
         }
 

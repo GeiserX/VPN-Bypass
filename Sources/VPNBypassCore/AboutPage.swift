@@ -80,7 +80,8 @@ enum Diagnostics {
         var lines = [
             "VPN Bypass diagnostics (no names: domains, addresses, services and routes are replaced)",
             "App: \(i.appVersion)",
-            "Helper: \(i.helperVersion ?? "unknown"), \(i.helperState)",
+            // A failed state carries the install error, which may name a folder or a host.
+            "Helper: \(i.helperVersion ?? "unknown"), \(redact(i.helperState, names: i.names))",
             "macOS: \(i.macOS), \(i.architecture)",
             "VPN: \(i.vpnConnected ? "connected" : "not connected")\(i.vpnType.map { ", \($0)" } ?? "")",
             "Mode: \(i.mode.rawValue)",
