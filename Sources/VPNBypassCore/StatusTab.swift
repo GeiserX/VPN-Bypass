@@ -328,6 +328,7 @@ extension DropdownStatus.Input {
         let mode: DropdownCopy.Mode = RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
             ? .custom
             : (config.routingMode == .vpnOnly ? .vpnOnly : .bypass)
+        let routed = Set(routeManager.activeRoutes.map(\.destination))
         return DropdownStatus.Input(
             isVPNConnected: routeManager.isVPNConnected,
             vpnName: routeManager.vpnType.flatMap { $0 == .unknown ? nil : $0.rawValue },
@@ -356,7 +357,9 @@ extension DropdownStatus.Input {
                 busy: RoutedBySource.mayStillAddRoutes(running: routeManager.isLoading || routeManager.isApplyingRoutes,
                                                        pending: routeManager.pendingReconnectApply))?.problemCount ?? 0,
             lastCheckCount: routeManager.lastRouteCheck?.results.count ?? 0,
-            lastCheckWrongWay: routeManager.lastRouteCheck?.leftWrongWay.count ?? 0,
+            // Only addresses still routed: one removed since the check is no longer a fault.
+            lastCheckWrongWay: routeManager.lastRouteCheck?.leftWrongWay
+                .filter { routed.contains($0.destination) }.count ?? 0,
             lastCheckBroken: routeManager.lastRouteCheck?.controlBroken ?? false
         )
     }

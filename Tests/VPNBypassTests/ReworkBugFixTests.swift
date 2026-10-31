@@ -125,8 +125,11 @@ final class ReworkStatusTests: XCTestCase {
         XCTAssertFalse(underBroken.leftWrongWay, "a broken control is reported once, not per address")
 
         let rm = RouteManager.shared
-        let saved = rm.lastRouteCheck
-        defer { rm.lastRouteCheck = saved }
+        let saved = (rm.lastRouteCheck, rm.activeRoutes)
+        defer { rm.lastRouteCheck = saved.0; rm.activeRoutes = saved.1 }
+        rm.activeRoutes = ["192.0.2.10", "192.0.2.11", "192.0.2.12"].map {
+            .init(destination: $0, gateway: "192.168.1.1", source: "a.example.com", timestamp: Date())
+        }
         let plan = RouteCheck.Plan(destinations: ["192.0.2.10", "192.0.2.11", "192.0.2.12"], sources: [:],
                                    singleAddresses: 3, routeCount: 3)
         rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: [silent, fine], logsFrom: Date(), at: Date())
@@ -139,6 +142,9 @@ final class ReworkStatusTests: XCTestCase {
         live = DropdownStatus.Input.current(rm, helperReady: true)
         XCTAssertEqual(live.lastCheckCount, 3)
         XCTAssertEqual(live.lastCheckWrongWay, 1)
+        rm.activeRoutes.removeAll { $0.destination == "192.0.2.11" }
+        XCTAssertEqual(DropdownStatus.Input.current(rm, helperReady: true).lastCheckWrongWay, 0,
+                       "an address removed since the check is no longer a fault")
 
         rm.lastRouteCheck = RouteCheck.Run(plan: plan, results: [underBroken], logsFrom: Date(), at: Date(),
                                            controlBroken: true)
