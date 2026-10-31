@@ -348,9 +348,6 @@
 /* ===== Settings — Routes and Rules (Custom mode) ===== */
 "Copy Proxy URL" = "Copier l'URL du proxy";
 "Copy Shell Exports" = "Copier les exports shell";
-"Copied" = "Copié";
-"Only apps set to use %@ (%@) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Seules les apps configurées pour utiliser %@ (%@) passent par ici. Les autres apps joignent ces hôtes par la route habituelle du Mac, même si une règle plus bas les couvre aussi.";
-"Only apps set to use %@ go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Seules les apps configurées pour utiliser %@ passent par ici. Les autres apps joignent ces hôtes par la route habituelle du Mac, même si une règle plus bas les couvre aussi.";
 "%@ is off, so this rule does nothing." = "La route %@ est désactivée, cette règle n'a donc aucun effet.";
 
 /* ===== Réglages — Mode de routage (menu de la barre de titre et feuille) ===== */
@@ -533,18 +530,9 @@
 "Traffic your rules send direct or to a specific VPN will follow your VPN's own routing %@. Rules that use a proxy keep working." = "Le trafic que vos règles envoient en direct ou vers un VPN précis suivra le routage de votre VPN %@. Les règles qui passent par un proxy continuent de fonctionner.";
 
 /* ===== Réglages : page Routes (mode Personnalisé) ===== */
-"%lld/%lld active" = "%1$lld/%2$lld actives";
-"Point an app at a route: paste the copied shell exports into a shell, or the copied proxy URL into an app's proxy setting. A browser set to 127.0.0.1 and the port asks you to sign in: the user is vpnb, the password is the part between vpnb: and @ in the proxy URL." = "Pour faire passer une app par une route : collez les exports shell copiés dans un shell, ou l'URL du proxy copiée dans le réglage proxy de l'app. Un navigateur réglé sur 127.0.0.1 et le port demande de se connecter : l'utilisateur est vpnb, le mot de passe est la partie entre vpnb: et @ dans l'URL du proxy.";
-"System Routes" = "Routes système";
 "Your physical connection" = "Votre connexion physique";
-"Whatever tunnel is currently up" = "Le tunnel actuellement actif";
-"Detected automatically." = "Détecté automatiquement.";
 "No proxy routes yet" = "Aucune route proxy pour l'instant";
 "Add one to route specific traffic through a proxy, a Tailscale peer, or a specific VPN." = "Ajoutez-en une pour faire passer un trafic précis par un proxy, un pair Tailscale ou un VPN précis.";
-"Edit route" = "Modifier la route";
-"Delete route" = "Supprimer la route";
-"Upstream" = "Proxy amont";
-"Listening on" = "À l'écoute sur";
 "Listener starting…" = "Démarrage de l'écoute…";
 "Listener off" = "Écoute désactivée";
 "Edit Route" = "Modifier la route";
@@ -578,14 +566,22 @@
 "primary VPN" = "VPN principal";
 
 /* ===== Réglages : page Règles (mode Personnalisé) ===== */
-"Routing Rules" = "Règles de routage";
-"Send specific destinations through specific routes. Rules are checked in order — the first match wins." = "Envoyez des destinations précises par des routes précises. Les règles sont vérifiées dans l'ordre : la première correspondance l'emporte.";
-"Drag to reorder — earlier rules win." = "Faites glisser pour réordonner : les règles placées plus haut l'emportent.";
 "No rules yet" = "Aucune règle pour l'instant";
+"The first rule that matches wins." = "La première règle qui correspond l'emporte.";
+"The first rule that matches wins. Drag to reorder." = "La première règle qui correspond l'emporte. Faites glisser pour réordonner.";
+"Only apps set to use %@. Other apps take the Mac's normal route, even if a rule below matches." = "Seulement les apps réglées pour utiliser %@. Les autres apps prennent la route normale du Mac, même si une règle plus bas correspond.";
+"Route for %@: %@" = "Route de %@ : %@";
+"The ways out a rule can pick." = "Les sorties qu'une règle peut choisir.";
+"Always there" = "Toujours là";
+"Whatever tunnel is up, detected automatically" = "Le tunnel actif, détecté automatiquement";
+"Your routes" = "Vos routes";
+"%@ copy" = "Copie de %@";
+"Duplicate %@" = "Dupliquer %@";
+"More actions for %@" = "Autres actions pour %@";
+"Copied the proxy URL for %@. Paste it into an app's proxy setting. A browser asks you to sign in: the user is vpnb, the password is the part between vpnb: and @ in the URL." = "URL du proxy de %@ copiée. Collez-la dans le réglage proxy d'une app. Un navigateur demande de se connecter : l'utilisateur est vpnb, le mot de passe est la partie entre vpnb: et @ dans l'URL.";
+"Copied the shell exports for %@. Paste them into a shell, and the apps you start from it use this route." = "Exports shell de %@ copiés. Collez-les dans un shell, et les apps lancées depuis ce shell passent par cette route.";
 "Add a rule to send a domain, service, or IP range through a specific route." = "Ajoutez une règle pour envoyer un domaine, un service ou une plage d'IP par une route précise.";
 "Destinations that don't match any rule above use this route." = "Les destinations qui ne correspondent à aucune règle ci-dessus utilisent cette route.";
-"Edit rule" = "Modifier la règle";
-"Delete rule" = "Supprimer la règle";
 "Your Routes" = "Vos routes";
 "New Route…" = "Nouvelle route…";
 "Edit Rule" = "Modifier la règle";
@@ -602,10 +598,6 @@
 "Enter a valid IPv4 address (e.g. 10.0.0.5)." = "Saisissez une adresse IPv4 valide (ex. : 10.0.0.5).";
 "Enter a valid IPv4 CIDR range (e.g. 10.0.0.0/8)." = "Saisissez une plage CIDR IPv4 valide (ex. : 10.0.0.0/8).";
 "Select a route." = "Choisissez une route.";
-"DOMAIN" = "DOMAINE";
-"SUFFIX" = "SUFFIXE";
-"SERVICE" = "SERVICE";
-"PROCESS" = "PROCESSUS";
 "Choose Route" = "Choisir une route";
 
 /* ===== Réglages : Domaines, Services, Général et À propos ===== */

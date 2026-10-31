@@ -77,11 +77,11 @@ Status comes first and says whether it is working right now: the helper, the VPN
 
 <div class="vb-gallery vb-gallery--2" markdown>
 <figure markdown>
-![The Rules tab in Custom mode: a domain sent to a SOCKS5 proxy, a service sent direct, a subnet sent to the VPN, and the pinned default rule](images/screenshots/rules.png)
+![The Rules page in Custom mode: a domain sent to a SOCKS5 proxy, a service sent direct, a subnet sent to the VPN, and Everything else as the last row](images/screenshots/rules.png)
 <figcaption>Rules, first match wins</figcaption>
 </figure>
 <figure markdown>
-![The Routes tab in Custom mode: Direct, the detected VPN, and a SOCKS5 proxy route with its local address and copy buttons](images/screenshots/routes.png)
+![The Routes page in Custom mode: Direct and the detected VPN under Always there, and a SOCKS5 proxy route with its local address and upstream on one line](images/screenshots/routes.png)
 <figcaption>Routes: where traffic can exit</figcaption>
 </figure>
 </div>

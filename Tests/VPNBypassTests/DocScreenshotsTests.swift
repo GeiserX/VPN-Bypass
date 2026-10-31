@@ -277,6 +277,41 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size, Self.settingsSize)
     }
 
+    /// The pointer on the proxy rule: its edit and delete show beside the route chip.
+    func testSettingsOnRulesHovered() throws {
+        seedCustom()
+        RulesTab.hoveredForScreenshots = "en.wikipedia.org"
+        defer { RulesTab.hoveredForScreenshots = nil }
+        XCTAssertEqual(try renderSettings(page: .rules, to: "rules-hover.png"), Self.settingsSize)
+    }
+
+    /// No rules yet: the empty state, then Everything else.
+    func testSettingsOnRulesEmpty() throws {
+        seedCustom()
+        rm.config.rules = []
+        XCTAssertEqual(try renderSettings(page: .rules, to: "rules-empty.png"), Self.settingsSize)
+    }
+
+    /// The pointer on office-proxy: Copy Proxy URL, edit and ⋯ show beside the type chip,
+    /// and the line under the list is the one a proxy URL copy leaves, with the sign-in hint.
+    func testSettingsOnRoutesHovered() throws {
+        seedCustom()
+        RoutesTab.hoveredForScreenshots = "office-proxy"
+        RoutesTab.copiedLineForScreenshots = RouteRow.CopyKind.proxyURL.confirmation(routeName: "office-proxy")
+        defer {
+            RoutesTab.hoveredForScreenshots = nil
+            RoutesTab.copiedLineForScreenshots = nil
+        }
+        XCTAssertEqual(try renderSettings(page: .routes, to: "routes-hover.png"), Self.settingsSize)
+    }
+
+    /// No routes of your own: Always there, then the empty state.
+    func testSettingsOnRoutesEmpty() throws {
+        seedCustom()
+        rm.config.routes.removeAll { ProxyListenerManager.usesLocalListener($0.egress) }
+        XCTAssertEqual(try renderSettings(page: .routes, to: "routes-empty.png"), Self.settingsSize)
+    }
+
     /// The Settings window at its default size, at 2x.
     private static let settingsSize = NSSize(width: 1720, height: 1240)
 

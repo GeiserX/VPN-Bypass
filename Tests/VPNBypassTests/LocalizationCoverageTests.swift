@@ -50,9 +50,9 @@ final class LocalizationCoverageTests: XCTestCase {
 
     func testTheRoutesAndRulesPagesAreTranslated() throws {
         // Form labels and the name hint went through a String, which nothing looked up; they are now keys.
-        let keys = ["System Routes", "Your physical connection", "Upstream Host", "Upstream Port", "Proxy port on peer",
+        let keys = ["Always there", "Your routes", "Your physical connection", "Upstream Host", "Upstream Port", "Proxy port on peer",
                     "e.g. Residential Proxy", "e.g. Work VPN",
-                    "Tailscale Peer", "Routing Rules", "Match", "Pattern", "Edit Rule", "No rules yet",
+                    "Tailscale Peer", "Everything else", "Match", "Pattern", "Edit Rule", "No rules yet",
                     "Primary VPN (automatic)"]
         for language in ["es", "fr"] {
             let bundle = try lproj(language)
@@ -90,21 +90,17 @@ final class LocalizationCoverageTests: XCTestCase {
         let primaryVPN = Route(name: "VPN", egress: .vpnDefault, vpnSelector: VPNSelector(kind: .primary))
 
         XCTAssertEqual(RouteRow.typeLabel(.direct, in: es), "Directo")
-        XCTAssertEqual(RouteRow.nonListenerStatusLabel(direct, in: es), "directo")
-        XCTAssertEqual(RouteRow.nonListenerStatusLabel(primaryVPN, in: es), "VPN principal")
-        XCTAssertEqual(RouteRow.nonListenerStatusLabel(primaryVPN, in: fr), "VPN principal")
-        XCTAssertEqual(RouteRow.nonListenerStatusLabel(direct, in: fr), "en direct")
+        XCTAssertEqual(RouteRow.vpnTarget(primaryVPN, in: es), "VPN principal")
+        XCTAssertEqual(RouteRow.vpnTarget(primaryVPN, in: fr), "VPN principal")
+        XCTAssertEqual(RouteRow.detail(Route(name: "p", egress: .proxySOCKS5, enabled: false, proxyHost: "198.51.100.7", proxyPort: 1080),
+                                       listenerPort: nil, in: es),
+                       "\(text("Listener off", es)) → 198.51.100.7:1080")
 
-        XCTAssertEqual(RuleRow.matchLabel(.domain, in: es), "DOMINIO")
-        XCTAssertEqual(RuleRow.matchLabel(.service, in: es), "SERVICIO")
-        XCTAssertEqual(RuleRow.matchLabel(.domain, in: fr), "DOMAINE")
-        XCTAssertEqual(RuleRow.matchLabel(.suffix, in: fr), "SUFFIXE")
-        XCTAssertEqual(RuleRow.matchLabel(.process, in: fr), "PROCESSUS")
-        XCTAssertEqual(RuleRow.matchLabel(.suffix, in: es), "SUFIJO")
-
-        XCTAssertEqual(RulesRouteChip.displayName(nil, vpnName: nil, in: es), "Elegir ruta")
-        XCTAssertEqual(RulesRouteChip.displayName(nil, vpnName: nil, in: fr), "Choisir une route")
-        XCTAssertEqual(RulesRouteChip.displayName(direct, vpnName: nil, in: es), "Directo")
+        XCTAssertEqual(RulesRouteChipMenu.chip(for: nil, vpnName: nil, in: es).name, "Elegir ruta")
+        XCTAssertEqual(RulesRouteChipMenu.chip(for: nil, vpnName: nil, in: fr).name, "Choisir une route")
+        XCTAssertEqual(RulesRouteChipMenu.chip(for: direct, vpnName: nil, in: es).name, "Directo")
+        XCTAssertEqual(RulesRouteChipMenu.spokenName(row: "en.wikipedia.org", route: "Directo", in: es),
+                       "Ruta de en.wikipedia.org: Directo")
     }
 
     /// `.unknown`'s raw value is the English placeholder "Unknown VPN"; the Routes page, the
@@ -142,7 +138,6 @@ final class LocalizationCoverageTests: XCTestCase {
         let whatFR = String(format: text("Your %@", fr), "2 services")
         XCTAssertEqual(String(format: text("%@ will go through the VPN %@.", fr), whatFR, text("until you refresh routes", fr)),
                        "Ce que vous avez listé (2 services) passera par le VPN jusqu'à ce que vous actualisiez les routes.")
-        XCTAssertEqual(String(format: text("%lld/%lld active", es), 1, 3), "1/3 activas")
         XCTAssertEqual(String(format: text("%@ · %@ — not connected", fr), "Cisco", "utun4"), "Cisco · utun4 — non connecté")
     }
 }

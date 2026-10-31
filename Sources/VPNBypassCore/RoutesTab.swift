@@ -1,5 +1,7 @@
 // RoutesTab.swift
-// Settings tab for managing proxy routes (HTTP CONNECT / SOCKS5).
+// The Routes page in Custom mode, on the shared components (section 3.3 of
+// docs/design/APP-REWORK-PROPOSALS.md): Direct and the detected VPN under "Always there", then
+// the user's proxy, Tailscale-peer and pinned VPN routes. The window's title bar names the page.
 
 import SwiftUI
 import AppKit
@@ -42,6 +44,13 @@ struct RoutesTab: View {
     @EnvironmentObject var settingsUndo: SettingsUndo
     @ObservedObject private var listenerManager = ProxyListenerManager.shared
     @State private var sheetState: RouteSheetState?
+    /// What the last copy put on the clipboard, with the sign-in hint after a proxy URL.
+    @State private var copiedLine = RoutesTab.copiedLineForScreenshots
+
+    /// The doc screenshots draw this route's row as if the pointer were on it.
+    static var hoveredForScreenshots: String?
+    /// The doc screenshots open the page with this line under the list, as after a copy.
+    static var copiedLineForScreenshots: String?
 
     private var listenerRoutes: [Route] {
         routeManager.config.routes.filter {
@@ -58,61 +67,28 @@ struct RoutesTab: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header
-            HStack {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Theme.blueGradient)
-                    Text("Routes")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
-
-                Spacer()
-
-                if !listenerRoutes.isEmpty {
-                    Text("\(listenerRoutes.filter { $0.enabled }.count)/\(listenerRoutes.count) active")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textSecondary)
-                }
-
-                Button {
-                    sheetState = .add
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(Theme.blueLight)
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .help("Add Route")
-                .accessibilityLabel("Add Route")
-            }
-
-            // Helper hint
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textTertiary)
-                    .padding(.top, 1)
-                Text("Point an app at a route: paste the copied shell exports into a shell, or the copied proxy URL into an app's proxy setting. A browser set to 127.0.0.1 and the port asks you to sign in: the user is vpnb, the password is the part between vpnb: and @ in the proxy URL.")
-                    .font(.system(size: 11))
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            HStack(alignment: .center, spacing: Theme.Space.m) {
+                Text("The ways out a rule can pick.")
+                    .font(Theme.Font.detail)
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Theme.Space.s)
+                PageAddButton(name: String(localized: "Add Route")) { sheetState = .add }
             }
 
-            systemRoutesCard
+            systemRoutesSection
 
-            if listenerRoutes.isEmpty {
-                emptyState
-            } else {
-                routeList
-            }
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                userRoutesSection
 
-            if let change = settingsUndo.last, change.page == .routes {
-                UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
+                if let copiedLine {
+                    AddDomainFeedbackLine(feedback: AddDomainFeedback(success: copiedLine))
+                }
+
+                if let change = settingsUndo.last, change.page == .routes {
+                    UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
+                }
             }
         }
         .sheet(item: $sheetState) { state in
@@ -125,10 +101,9 @@ struct RoutesTab: View {
         }
     }
 
-    // MARK: - System routes (the auto-created Direct / VPN-default routes)
+    // MARK: - Always there (the auto-created Direct / VPN-default routes)
 
-    /// The two system rows' names. SystemRouteRow takes a String, which Text shows as it is,
-    /// so both are looked up here.
+    /// The two system rows' names. Looked up here, so each is a String a row and a chip share.
     static func systemRouteNames(vpnType: VPNType?, in bundle: Bundle) -> (direct: String, vpn: String) {
         (String(localized: "Direct", bundle: bundle), vpnType?.knownName ?? String(localized: "VPN", bundle: bundle))
     }
@@ -139,102 +114,57 @@ struct RoutesTab: View {
     }
 
     @ViewBuilder
-    private var systemRoutesCard: some View {
+    private var systemRoutesSection: some View {
         let names = Self.systemRouteNames(vpnType: routeManager.vpnType, in: .main)
         let shown = Self.shownSystemRoutes(direct: names.direct, vpn: names.vpn, search: searchText)
         if shown.direct || shown.vpn {
-        SettingsCard(title: "System Routes", icon: "shield.lefthalf.filled", iconColor: Theme.textSecondary) {
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(spacing: 0) {
-                    if shown.direct {
-                        SystemRouteRow(
-                            icon: "arrow.up.right",
-                            name: names.direct,
-                            subtitle: "Your physical connection",
-                            color: Theme.textSecondary
-                        )
-                    }
-                    if shown.direct && shown.vpn {
-                        Divider().background(Theme.divider).padding(.vertical, 4)
-                    }
-                    if shown.vpn {
-                        SystemRouteRow(
-                            icon: routeManager.vpnType?.icon ?? "lock.shield",
-                            name: names.vpn,
-                            subtitle: "Whatever tunnel is currently up",
-                            color: Theme.warning
-                        )
-                    }
+            GroupSection(String(localized: "Always there")) {
+                if shown.direct {
+                    systemRow(egress: .direct, name: names.direct,
+                              detail: String(localized: "Your physical connection"))
                 }
-                HStack(spacing: 6) {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 10))
-                        .foregroundColor(Theme.textTertiary)
-                    Text("Detected automatically.")
-                        .font(.system(size: 10))
-                        .foregroundColor(Theme.textTertiary)
+                if shown.direct && shown.vpn {
+                    InsetDivider()
+                }
+                if shown.vpn {
+                    systemRow(egress: .vpnDefault, name: names.vpn,
+                              detail: String(localized: "Whatever tunnel is up, detected automatically"))
                 }
             }
         }
-        }
     }
 
-    // MARK: - Empty state
-
-    private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 44))
-                .foregroundColor(Theme.textDisabled)
-            Text("No proxy routes yet")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(Theme.textSecondary)
-            Text("Add one to route specific traffic through a proxy, a Tailscale peer, or a specific VPN.")
-                .font(.system(size: 12))
-                .foregroundColor(Theme.textTertiary)
-                .multilineTextAlignment(.center)
-            Button {
-                sheetState = .add
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 13))
-                    Text("Add Route")
-                        .font(.system(size: 13, weight: .medium))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 9)
-                .background(Theme.blueGradient)
-                .cornerRadius(8)
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 44)
+    /// A read-only row with the same chip the route gets on the Rules page, in the chip column
+    /// of the rows below: past it come their small switch (44 pt) and the row's spacing.
+    private func systemRow(egress: Egress, name: String, detail: String) -> some View {
+        let glyph = RouteChip.systemImage(for: egress)
+        return ListRow(glyph: glyph, name: name, detail: detail,
+                       accessory: AnyView(RouteChip(systemImage: glyph, name: name).padding(.trailing, 44 + Theme.Space.s)))
     }
 
-    // MARK: - Route list
+    // MARK: - Your routes
 
-    private var routeList: some View {
-        SettingsCard(title: "Routes", icon: "arrow.triangle.branch", iconColor: Theme.blue) {
-            VStack(spacing: 0) {
+    @ViewBuilder
+    private var userRoutesSection: some View {
+        GroupSection(String(localized: "Your routes")) {
+            if listenerRoutes.isEmpty {
+                EmptyState(systemImage: "arrow.triangle.branch",
+                           title: String(localized: "No proxy routes yet"),
+                           message: String(localized: "Add one to route specific traffic through a proxy, a Tailscale peer, or a specific VPN."),
+                           primary: .init(title: String(localized: "Add Route")) { sheetState = .add })
+            } else {
                 if shownRoutes.isEmpty {
                     SettingsSearchMiss(search: searchText)
                 }
                 ForEach(Array(shownRoutes.enumerated()), id: \.element.id) { idx, route in
-                    RouteRow(route: route, listenerPort: listenerManager.port(for: route.id)) {
-                        sheetState = .edit(route)
-                    } onDelete: {
-                        deleteRoute(route)
-                    } onToggle: { enabled in
-                        toggleRoute(route.id, enabled: enabled)
-                    }
-                    if idx < shownRoutes.count - 1 {
-                        Divider()
-                            .background(Theme.divider)
-                            .padding(.vertical, 4)
-                    }
+                    if idx > 0 { InsetDivider() }
+                    RouteRow(route: route, listenerPort: listenerManager.port(for: route.id),
+                             onEdit: { sheetState = .edit(route) },
+                             onDelete: { deleteRoute(route) },
+                             onDuplicate: { duplicateRoute(route) },
+                             onToggle: { enabled in toggleRoute(route.id, enabled: enabled) },
+                             onCopied: { kind in copiedLine = kind.confirmation(routeName: route.name) },
+                             showsActions: Self.hoveredForScreenshots == route.name)
                 }
             }
         }
@@ -260,6 +190,11 @@ struct RoutesTab: View {
         let index = routeManager.config.routes.firstIndex(where: { $0.id == route.id }) ?? routeManager.config.routes.count
         routeManager.removeRoute(route.id)
         settingsUndo.record(.route(route, index: index))
+    }
+
+    private func duplicateRoute(_ route: Route) {
+        copiedLine = nil
+        routeManager.duplicateRoute(route.id)
     }
 
     private func toggleRoute(_ id: UUID, enabled: Bool) {
@@ -294,6 +229,27 @@ extension RouteManager {
         return true
     }
 
+    /// Adds a copy of the route `id` right after it, named "<name> copy", with its own id and
+    /// so its own listener port. No rule points at the copy. Returns it, or nil when `id` is gone.
+    @discardableResult
+    func duplicateRoute(_ id: UUID) -> Route? {
+        guard let index = config.routes.firstIndex(where: { $0.id == id }) else { return nil }
+        let copy = Self.duplicate(of: config.routes[index])
+        config.routes.insert(copy, at: index + 1)
+        saveRouteChange()
+        log(.success, "Duplicated route: \(config.routes[index].name)")
+        return copy
+    }
+
+    /// The route Duplicate adds: everything kept but the id, the name and the assigned port.
+    nonisolated static func duplicate(of route: Route, in bundle: Bundle = .main) -> Route {
+        var copy = route
+        copy.id = UUID()
+        copy.name = String(localized: "\(route.name) copy", bundle: bundle)
+        copy.localListenPort = nil
+        return copy
+    }
+
     private func saveRouteChange() {
         saveConfig()
         // Custom mode: this route may compile to a KERNEL route (a `.vpnDefault`
@@ -304,56 +260,32 @@ extension RouteManager {
     }
 }
 
-// MARK: - SystemRouteRow
-
-/// Read-only row for the auto-created Direct / VPN-default routes shown in
-/// "System Routes" — no edit/delete, these aren't user-configurable.
-struct SystemRouteRow: View {
-    let icon: String
-    let name: String
-    let subtitle: LocalizedStringKey
-    let color: Color
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 13))
-                .foregroundColor(color)
-                .frame(width: 20)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
-                Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textSecondary)
-            }
-
-            Spacer()
-        }
-        .padding(.vertical, 6)
-    }
-}
-
 // MARK: - RouteRow
 
+/// One of the user's routes as a `ListRow`: its glyph and name, where the app listens and where
+/// the route goes on one mono line, Copy Proxy URL, edit and ⋯ under the pointer, the type chip,
+/// and the switch last.
 struct RouteRow: View {
     let route: Route
     let listenerPort: UInt16?
     let onEdit: () -> Void
     let onDelete: () -> Void
+    let onDuplicate: () -> Void
     let onToggle: (Bool) -> Void
+    /// Told what was copied, so the page can say so under the list.
+    var onCopied: (CopyKind) -> Void = { _ in }
+    /// Draws the actions as if the pointer were over the row, for the doc screenshots.
+    var showsActions = false
 
     /// The two things a user copies from a listener route. Both carry the local
     /// secret: the listener answers a bare `127.0.0.1:<port>` with 407.
     enum CopyKind {
         case proxyURL, exports
 
-        var title: LocalizedStringKey {
+        func title(in bundle: Bundle = .main) -> String {
             switch self {
-            case .proxyURL: return "Copy Proxy URL"
-            case .exports:  return "Copy Shell Exports"
+            case .proxyURL: return String(localized: "Copy Proxy URL", bundle: bundle)
+            case .exports:  return String(localized: "Copy Shell Exports", bundle: bundle)
             }
         }
 
@@ -363,14 +295,20 @@ struct RouteRow: View {
             case .exports:  return HookGenerator.shellExports(port: port, secret: secret)
             }
         }
+
+        /// The line under the list after a copy. The sign-in hint shows here, once, instead
+        /// of as a paragraph at the top of the page.
+        func confirmation(routeName: String, in bundle: Bundle = .main) -> String {
+            switch self {
+            case .proxyURL:
+                return String(localized: "Copied the proxy URL for \(routeName). Paste it into an app's proxy setting. A browser asks you to sign in: the user is vpnb, the password is the part between vpnb: and @ in the URL.", bundle: bundle)
+            case .exports:
+                return String(localized: "Copied the shell exports for \(routeName). Paste them into a shell, and the apps you start from it use this route.", bundle: bundle)
+            }
+        }
     }
-    /// Which Copy button last copied, so only that one flips to "Copied".
-    @State private var copied: CopyKind?
 
-    private var typeLabel: String { Self.typeLabel(route.egress, in: .main) }
-
-    /// The badge beside the route's name. Text(String) shows a String as it is, so each
-    /// label is looked up here; the protocol and product names read the same in every language.
+    /// The chip's word. The protocol and product names read the same in every language.
     static func typeLabel(_ egress: Egress, in bundle: Bundle) -> String {
         switch egress {
         case .proxyHTTP: return String(localized: "HTTP CONNECT", bundle: bundle)
@@ -381,41 +319,18 @@ struct RouteRow: View {
         }
     }
 
-    private var typeAccent: Color {
-        switch route.egress {
-        case .proxyHTTP: return Theme.blue
-        case .proxySOCKS5: return Theme.purple
-        case .tailscaleExit: return Theme.success
-        case .vpnDefault: return Theme.warning
-        case .direct: return Theme.textSecondary
-        }
-    }
-
-    private var upstreamDisplay: String {
+    /// Where the route goes: the upstream proxy, the Tailscale peer, or the pinned tunnel.
+    static func upstream(_ route: Route, in bundle: Bundle) -> String {
         switch route.egress {
         case .tailscaleExit:
             let peerName = route.tailscaleExitNode ?? route.proxyHost ?? "—"
-            if let port = route.proxyPort {
-                return "\(peerName) · :\(port)"
-            }
-            return peerName
+            return route.proxyPort.map { "\(peerName) · :\($0)" } ?? peerName
         case .vpnDefault:
-            return Self.vpnTarget(route, in: .main)
+            return vpnTarget(route, in: bundle)
         case .proxyHTTP, .proxySOCKS5, .direct:
             let host = route.proxyHost ?? "—"
-            if let port = route.proxyPort {
-                return "\(host):\(port)"
-            }
-            return host
+            return route.proxyPort.map { "\(host):\($0)" } ?? host
         }
-    }
-
-    /// Status text for `.vpnDefault` / `.direct` routes, which have no loopback listener.
-    private var nonListenerStatusLabel: String { Self.nonListenerStatusLabel(route, in: .main) }
-
-    static func nonListenerStatusLabel(_ route: Route, in bundle: Bundle) -> String {
-        guard route.egress == .vpnDefault else { return String(localized: "direct", bundle: bundle) }
-        return vpnTarget(route, in: bundle)
     }
 
     /// Where a VPN route goes: a specific-VPN route shows its pinned tunnel; the primary VPN has none.
@@ -424,167 +339,74 @@ struct RouteRow: View {
         return iface.map { "→ \($0)" } ?? String(localized: "primary VPN", bundle: bundle)
     }
 
+    /// The row's one mono line: the local address an app points at, then where it goes
+    /// ("127.0.0.1:18168 → 198.51.100.7:1080"). A pinned VPN route has no listener, only a target.
+    static func detail(_ route: Route, listenerPort: UInt16?, in bundle: Bundle = .main) -> String {
+        let target = upstream(route, in: bundle)
+        guard ProxyListenerManager.usesLocalListener(route.egress) else { return target }
+        let listener = listenerPort.map(LocalListenerAddress.string)
+            ?? (route.enabled ? String(localized: "Listener starting…", bundle: bundle)
+                              : String(localized: "Listener off", bundle: bundle))
+        return "\(listener) → \(target)"
+    }
+
+    /// Copy Proxy URL, edit, and ⋯ holding Copy Shell Exports, Duplicate and Delete. The copies
+    /// need the listener's port, so a route whose listener is not up offers neither.
+    static func actions(for route: Route, canCopy: Bool, in bundle: Bundle = .main,
+                        copy: @escaping (CopyKind) -> Void, edit: @escaping () -> Void,
+                        duplicate: @escaping () -> Void, delete: @escaping () -> Void) -> [RowAction] {
+        var more: [RowAction] = []
+        if canCopy {
+            more.append(RowAction(kind: .other, name: CopyKind.exports.title(in: bundle), systemImage: "terminal") { copy(.exports) })
+        }
+        more.append(RowAction(kind: .other, name: String(localized: "Duplicate \(route.name)", bundle: bundle),
+                              systemImage: "plus.square.on.square", perform: duplicate))
+        more.append(.delete(route.name, in: bundle, perform: delete))
+        var actions: [RowAction] = []
+        if canCopy {
+            actions.append(RowAction(kind: .other, name: CopyKind.proxyURL.title(in: bundle), systemImage: "doc.on.doc") { copy(.proxyURL) })
+        }
+        actions.append(.edit(route.name, in: bundle, perform: edit))
+        actions.append(RowAction(kind: .more, name: String(localized: "More actions for \(route.name)", bundle: bundle),
+                                 systemImage: "ellipsis", perform: {}, menu: more))
+        return actions
+    }
+
+    private var actions: [RowAction] {
+        Self.actions(for: route, canCopy: listenerPort != nil, copy: copy, edit: onEdit,
+                     duplicate: onDuplicate, delete: onDelete)
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            // Enabled toggle
-            Toggle(route.name, isOn: Binding(
-                get: { route.enabled },
-                set: { onToggle($0) }
-            ))
-            .toggleStyle(.switch)
-            .tint(Theme.success)
-            .labelsHidden()
-            .controlSize(.small)
-            .frame(width: 38)
-
-            // Info column
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(route.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-
-                    Text(typeLabel)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(typeAccent)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(typeAccent.opacity(0.15))
-                        .cornerRadius(4)
-                }
-
-                if ProxyListenerManager.usesLocalListener(route.egress) {
-                    listenerDetails
-                } else {
-                    nonListenerDetails
-                }
-            }
-
-            Spacer()
-
-            // Edit
-            Button(action: onEdit) {
-                Image(systemName: "pencil")
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.textSecondary)
-                    .frame(width: 28, height: 28)
-                    .background(Theme.bgHover)
-                    .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-            .help("Edit route")
-            .accessibilityLabel(ControlNames.edit(route.name))
-
-            // Delete
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.error)
-                    .frame(width: 28, height: 28)
-                    .background(Theme.error.opacity(0.1))
-                    .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-            .help("Delete route")
-            .accessibilityLabel(ControlNames.delete(route.name))
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-    }
-
-    /// Proxy and Tailscale-peer routes: where the route goes, the local address an
-    /// app points at, and one button per thing a user copies.
-    /// The upstream and the listener sit on two lines: side by side, an upstream
-    /// longer than about 17 characters wrapped mid-address. An upstream too long
-    /// even for its own line is cut in the middle, and its tooltip shows all of it.
-    @ViewBuilder
-    private var listenerDetails: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                Text("Upstream")
-                    .foregroundColor(Theme.textTertiary)
-                    .fixedSize()
-                Text(verbatim: upstreamDisplay)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Theme.textSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(Text(verbatim: upstreamDisplay))
-            }
-            HStack(spacing: 4) {
-                if let port = listenerPort {
-                    Text("Listening on")
-                        .foregroundColor(Theme.textTertiary)
-                    LocalListenerAddress.text(port: port)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(route.enabled ? Theme.success : Theme.textSecondary)
-                        .textSelection(.enabled)
-                } else {
-                    Text(route.enabled ? "Listener starting…" : "Listener off")
-                        .foregroundColor(Theme.textTertiary)
-                }
-            }
-        }
-        .font(.system(size: 11))
-
-        if let port = listenerPort {
-            HStack(spacing: 6) {
-                copyButton(.proxyURL, port: port)
-                copyButton(.exports, port: port)
-            }
-            .padding(.top, 4)
-        }
-    }
-
-    /// `.vpnDefault` / `.direct` routes have no loopback listener: show what they target.
-    private var nonListenerDetails: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 4) {
-                Image(systemName: "server.rack")
-                    .font(.system(size: 10))
-                    .foregroundColor(Theme.textTertiary)
-                Text(verbatim: upstreamDisplay)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Theme.textSecondary)
-            }
-            HStack(spacing: 4) {
-                Image(systemName: route.egress == .vpnDefault ? "lock.shield" : "arrow.up.right")
-                    .font(.system(size: 10))
-                    .foregroundColor(route.enabled ? Theme.success : Theme.textTertiary)
-                Text(verbatim: nonListenerStatusLabel)
-                    .font(.system(size: 11))
-                    .foregroundColor(route.enabled ? Theme.success : Theme.textTertiary)
+        let glyph = RouteChip.systemImage(for: route.egress)
+        ListRow(
+            glyph: glyph,
+            name: route.name,
+            detail: Self.detail(route, listenerPort: listenerPort),
+            actions: actions,
+            isOn: Binding(get: { route.enabled }, set: onToggle),
+            showsActions: showsActions,
+            accessory: AnyView(RouteChip(systemImage: glyph, name: Self.typeLabel(route.egress, in: .main))),
+            monoDetail: true
+        )
+        .help(Text(verbatim: Self.detail(route, listenerPort: listenerPort)))
+        // The buttons show only under the pointer, and a hidden button is hidden from
+        // VoiceOver too, so the row itself carries every action, the ⋯ menu's included.
+        .accessibilityActions {
+            ForEach(RowAction.flattened(actions)) { action in
+                Button(action.name, action: action.perform)
             }
         }
     }
 
-    private func copyButton(_ kind: CopyKind, port: UInt16) -> some View {
-        let done = copied == kind
-        return Button {
-            // RouteRow has no routeManager in scope; the singleton is what
-            // ProxyListenerManager.shared above already uses from this file.
-            let text = kind.text(port: port, secret: RouteManager.shared.ensureLocalProxySecret())
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
-            withAnimation { copied = kind }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                withAnimation { if copied == kind { copied = nil } }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: done ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 10))
-                Text(done ? "Copied" : kind.title)
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .foregroundColor(done ? Theme.success : Theme.blue)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background((done ? Theme.success : Theme.blue).opacity(0.15))
-            .cornerRadius(6)
-        }
-        .buttonStyle(.plain)
+    private func copy(_ kind: CopyKind) {
+        guard let port = listenerPort else { return }
+        // RouteRow has no routeManager in scope; the singleton is what
+        // ProxyListenerManager.shared above already uses from this file.
+        let text = kind.text(port: port, secret: RouteManager.shared.ensureLocalProxySecret())
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        onCopied(kind)
     }
 }
 
