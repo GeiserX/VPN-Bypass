@@ -303,6 +303,14 @@ struct LookupRow: View {
             showsActions: showingPanel || LookupsTab.hoveredForScreenshots == entry.name
         )
         .help(tooltip)
+        // The buttons show only under the pointer, and a hidden button is hidden from VoiceOver
+        // too, so the row itself carries every action, as it did before ListRow.
+        .accessibilityElement(children: .combine)
+        .accessibilityActions {
+            ForEach(actions) { action in
+                Button(action.name, action: action.perform)
+            }
+        }
         .popover(isPresented: $showingPanel, arrowEdge: .bottom) {
             LookupAddPanel(
                 choices: LookupAddChoices(name: entry.name, mode: mode,

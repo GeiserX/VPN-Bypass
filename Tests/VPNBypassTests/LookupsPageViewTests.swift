@@ -63,6 +63,22 @@ final class LookupsPageViewTests: XCTestCase {
         }
     }
 
+    /// The actions show only under the pointer, so VoiceOver must still reach each one on a
+    /// row nobody hovers: the add, the panel, and a listed name's remove.
+    func testEveryRowActionIsReachableWithoutThePointer() {
+        var config = rm.config
+        config.routingMode = .bypass
+        config.dnsLookupsEnabled = true
+        rm.config = config
+        var tally = DNSLookupTally()
+        tally.record(["unlisted-probe.example"], at: Date())
+        DNSLookupsMonitor.shared.tally = tally
+        DNSLookupsMonitor.shared.since = Date()
+        let texts = texts(onLookups: open())
+        XCTAssertTrue(texts.contains("Add to Bypass"), "VoiceOver cannot reach the add: \(texts.sorted())")
+        XCTAssertTrue(texts.contains("More ways to add unlisted-probe.example"), "VoiceOver cannot reach the add panel")
+    }
+
     // MARK: - Helpers
 
     private func open() -> NSWindow {
@@ -100,6 +116,10 @@ final class LookupsPageViewTests: XCTestCase {
             }
             for name in ["accessibilityLabel", "accessibilityTitle", "accessibilityValue"] {
                 if let text = get(name) as? String, !text.isEmpty { found.insert(text) }
+            }
+            // VoiceOver's Actions menu (VO-Command-Space) names each custom action.
+            for action in get("accessibilityCustomActions") as? [NSAccessibilityCustomAction] ?? [] {
+                found.insert(action.name)
             }
             (get("accessibilityChildren") as? [Any] ?? []).forEach { walk($0, depth: depth + 1) }
         }
