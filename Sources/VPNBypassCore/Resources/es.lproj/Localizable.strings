@@ -950,3 +950,6 @@
 "Add %@ to Bypass" = "Añadir %@ a Bypass";
 "Add %@ to VPN Only" = "Añadir %@ a Solo VPN";
 "Send %@ Direct" = "Enviar %@ en Directo";
+
+"Shared CDN address (%@): other sites on it bypass the VPN too" = "Dirección de CDN compartida (%@): los demás sitios en ella también evitan la VPN";
+"Shared CDN address (%@): other sites on it use the VPN too" = "Dirección de CDN compartida (%@): los demás sitios en ella también usan la VPN";

@@ -302,6 +302,34 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(try renderSettings(page: .domains, to: "domains-stale-filter.png"), Self.settingsSize)
     }
 
+    /// A listed name and a wildcard whose routes reach CDN addresses (Fastly, Cloudflare): each
+    /// row's detail line says other sites on the address take the same way.
+    func testSettingsOnDomainsWithSharedCDNAddresses() throws {
+        seedSharedDomains(mode: .bypass)
+        XCTAssertEqual(try renderSettings(page: .domains, to: "domains-shared.png"), Self.settingsSize)
+    }
+
+    /// The same in VPN Only mode, where the other sites use the VPN too.
+    func testSettingsOnDomainsWithASharedCDNAddressInVPNOnlyMode() throws {
+        seedSharedDomains(mode: .vpnOnly)
+        XCTAssertEqual(try renderSettings(page: .domains, to: "domains-shared-vpn-only.png"), Self.settingsSize)
+    }
+
+    /// CDN addresses from the published ranges the warning reads (SharedAddress), on top of
+    /// the usual Domains seed.
+    private func seedSharedDomains(mode: RoutingMode) {
+        seedDomains(mode: mode)
+        let cdn = ["151.101.1.140", "151.101.65.140", "151.101.129.140", "151.101.193.140"]
+        if mode == .vpnOnly {
+            rm.config.inverseDomains.insert(DomainEntry(domain: "status.example.org", enabled: true), at: 1)
+            rm.activeRoutes += cdn.prefix(2).map { route($0, via: "iface:utun4", for: "status.example.org") }
+        } else {
+            rm.config.domains.insert(DomainEntry(domain: "www.reddit.com", enabled: true), at: 1)
+            rm.activeRoutes += cdn.map { route($0, via: "192.168.1.1", for: "www.reddit.com") }
+            rm.activeRoutes += ["104.18.32.7", "172.64.155.9"].map { route($0, via: "192.168.1.1", for: "*.example.com") }
+        }
+    }
+
     private func seedStaleDomain() {
         seedDomains(mode: .bypass)
         var dead = DomainEntry(domain: "old-intranet.example.net", enabled: true)

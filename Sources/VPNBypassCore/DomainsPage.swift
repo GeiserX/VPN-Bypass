@@ -46,7 +46,8 @@ enum DomainsPage {
     struct Row: Equatable, Identifiable {
         let entry: DomainEntry
         /// "learned as you browse" for a wildcard, "IP range" for a CIDR, "Off" on a read-only
-        /// row that is switched off (it has no switch to show it).
+        /// row that is switched off (it has no switch to show it). A row whose routes reach a
+        /// shared CDN address says so (SharedAddress), after a wildcard's words.
         let detail: String?
         /// The addresses routed for the entry; none on a read-only row or in Custom, where the
         /// list routes nothing, or on a row that is off. A wildcard's are the routes it has learned.
@@ -65,9 +66,11 @@ enum DomainsPage {
     /// name, a wildcard's learned routes carry `*.suffix`, as the entry does. `staleOnly` is the
     /// header's filter: the list in use keeps only the entries that stopped resolving, and the
     /// other list is left out. It does nothing while no entry has stopped resolving.
+    /// `sharedCDNs` names, per route source, the CDN one of its routes reaches
+    /// (`SharedAddress.cdnBySource`).
     static func sections(mode: RoutingMode, config: Config, routeSources: [String], search: String,
-                         staleOnly: Bool = false, locale: Locale? = nil,
-                         bundle: Bundle = .main) -> [Section] {
+                         staleOnly: Bool = false, sharedCDNs: [String: String] = [:],
+                         locale: Locale? = nil, bundle: Bundle = .main) -> [Section] {
         var counts: [String: Int] = [:]
         for source in routeSources { counts[source, default: 0] += 1 }
 
@@ -81,7 +84,7 @@ enum DomainsPage {
         func row(_ entry: DomainEntry, readOnly: Bool) -> Row {
             // Only the list in use is refreshed, and only its rows can be removed.
             let stale = !readOnly && StaleEntries.isStale(entry)
-            let detail: String?
+            var detail: String?
             if stale, let since = entry.resolveFailures?.since {
                 detail = StaleEntries.detail(since: since, locale: locale, bundle: bundle)
             } else if readOnly && !entry.enabled {
@@ -96,6 +99,13 @@ enum DomainsPage {
             // Custom routes by rules, whose routes may carry the same name; neither list
             // routes anything there.
             let routes = !readOnly && entry.enabled && mode != .custom
+            // A range or an address the user typed is theirs to know; a name's or a
+            // wildcard's addresses came from a lookup.
+            if routes, !stale, !entry.isCIDR, RouteKernel.ipv4ToUInt32(entry.domain) == nil,
+               let cdn = sharedCDNs[entry.domain] {
+                let shared = SharedAddress.detail(cdn: cdn, isInverse: mode == .vpnOnly, bundle: bundle)
+                detail = detail.map { "\($0) · \(shared)" } ?? shared
+            }
             let number = routes ? String(counts[entry.domain] ?? 0) : nil
             return Row(entry: entry, detail: detail, number: number, isStale: stale)
         }
@@ -160,7 +170,10 @@ struct DomainsTab: View {
     private var sections: [DomainsPage.Section] {
         DomainsPage.sections(mode: routeManager.config.routingMode, config: routeManager.config,
                              routeSources: routeManager.activeRoutes.map(\.source), search: searchText,
-                             staleOnly: staleOnly)
+                             staleOnly: staleOnly,
+                             sharedCDNs: SharedAddress.cdnBySource(routeManager.activeRoutes.map {
+                                 (source: $0.source, destination: $0.destination)
+                             }))
     }
 
     var body: some View {
@@ -227,7 +240,10 @@ struct DomainsTab: View {
                                 needsAttention: row.isStale, number: row.number, numberWidth: numberWidth,
                                 actions: [RowAction.delete(row.entry.domain) { removeDomain(row.entry) }],
                                 isOn: switchBinding(for: row.entry),
-                                showsActions: Self.hoveredForScreenshots == row.entry.domain)
+                                showsActions: Self.hoveredForScreenshots == row.entry.domain,
+                                // A wildcard's words and the shared address line together
+                                // need more than one line in a narrow window.
+                                detailLineLimit: nil)
                             .disabled(routeManager.isApplyingRoutes)
                     }
                     // Only when nothing on the page matches: the other list may hold the match.
