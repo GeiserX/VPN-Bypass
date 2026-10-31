@@ -944,11 +944,15 @@ enum DropdownCopy {
     /// would otherwise keep saying "All routes removed" under a list of live routes.
     ///
     /// With the helper not ready nothing is enforced, so a past apply's "62 addresses routed"
-    /// would contradict the banner above it saying nothing is routed (A2).
+    /// would contradict the banner above it saying nothing is routed (A2). A failed removal is
+    /// still shown: those routes did stay.
     static func shownRouteChange(_ outcome: RouteManager.RouteChangeOutcome?,
                                  currentRouteCount: Int,
                                  helperReady: Bool = true) -> RouteManager.RouteChangeOutcome? {
-        guard let outcome, helperReady else { return nil }
+        guard let outcome else { return nil }
+        // A removal that failed stays: it says the routes are still in the kernel, which is
+        // true with the helper down, and is why Remove All did nothing.
+        if !helperReady && !(outcome.kind == .removedAll && outcome.failedCount > 0) { return nil }
         if outcome.kind == .removedAll && outcome.routeCount != currentRouteCount { return nil }
         return outcome
     }

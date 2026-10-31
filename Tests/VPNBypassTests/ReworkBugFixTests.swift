@@ -38,6 +38,9 @@ final class ReworkStatusTests: XCTestCase {
         XCTAssertNil(DropdownCopy.shownRouteChange(applied, currentRouteCount: 62, helperReady: false))
         let removed = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now, routeCount: 0, failedCount: 0)
         XCTAssertNil(DropdownCopy.shownRouteChange(removed, currentRouteCount: 0, helperReady: false))
+        let stuck = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now, routeCount: 62, failedCount: 62)
+        XCTAssertEqual(DropdownCopy.shownRouteChange(stuck, currentRouteCount: 62, helperReady: false), stuck,
+                       "a removal that failed says the routes stayed, helper or not")
     }
 
     /// A3: at launch the header said "WireGuard connected" and NOTHING ROUTED over the
@@ -399,6 +402,9 @@ final class ReworkDropdownTests: RouteManagerTestCase {
         XCTAssertTrue(body.contains("RoutedBySourceCard"), "no list while disconnected")
         let menu = try ReworkSource.body(of: "private var moreActionsMenu: some View", in: "MenuBarViews.swift")
         XCTAssertTrue(menu.contains("Remove All Routes…"))
+        let connected = try ReworkSource.body(of: "private var connectedContent: some View", in: "MenuBarViews.swift")
+        XCTAssertFalse(connected.contains(".alert(removeAllCopy.title"),
+                       "the Remove All confirmation sits on the shared parent, so it shows while disconnected too")
     }
 }
 
