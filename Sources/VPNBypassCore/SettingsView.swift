@@ -148,8 +148,11 @@ struct SettingsView: View {
                             modeSwitch.pickedMode = RoutingModeCopy.sheetSelection(forPick: target, current: mode)
                         }
                     }
+                    // Dimmed as well as disabled: the page's own toggles keep their colours
+                    // when disabled, so they would still look live.
                     page
                         .disabled(SettingsSidebar.isReadOnly(selectedTab, in: mode))
+                        .opacity(SettingsSidebar.isReadOnly(selectedTab, in: mode) ? 0.55 : 1)
                         .environment(\.settingsSearch, searchText)
                 }
                 .padding(Theme.Space.page)

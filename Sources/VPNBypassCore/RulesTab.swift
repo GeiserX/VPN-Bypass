@@ -541,6 +541,8 @@ struct RulesTab: View {
     }
     /// The title bar search (⌘F), which the window owns.
     @Environment(\.settingsSearch) private var searchText
+    /// False on the read-only page the shell shows in another mode.
+    @Environment(\.isEnabled) private var isEnabled
     /// The rules the search leaves, in order; every rule with no search. Dragging still moves by
     /// id, so a filtered list reorders the full one.
     private var shownRules: [Rule] {
@@ -694,6 +696,8 @@ struct RulesTab: View {
                     )
                     .draggable(rule.id.uuidString)
                     .dropDestination(for: String.self) { items, _ in
+                        // A read-only page (another mode) takes no drop: `.disabled` does not stop one.
+                        guard isEnabled else { return false }
                         guard let draggedIdString = items.first, let draggedId = UUID(uuidString: draggedIdString) else { return false }
                         moveRule(draggedId: draggedId, to: rule.id)
                         return true
