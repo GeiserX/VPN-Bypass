@@ -1571,6 +1571,18 @@ struct GeneralTab: View {
                         set: { routeManager.config.verifyRoutesAfterApply = $0; routeManager.saveConfig() }
                     )
                 )
+
+                Divider().background(Theme.divider)
+
+                SettingsToggleRow(
+                    icon: "hand.raised.fill",
+                    title: "Block Listed Sites When the VPN Drops",
+                    subtitle: "VPN Only: hold the listed addresses back until the VPN returns",
+                    isOn: Binding(
+                        get: { routeManager.config.blockListedWhenVPNDown },
+                        set: { routeManager.setBlockListedWhenVPNDown($0) }
+                    )
+                )
             }
             
             // DNS Refresh section
