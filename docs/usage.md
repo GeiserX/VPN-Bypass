@@ -18,7 +18,7 @@ Click the VPN Bypass mark in the menu bar: two lines and a bar, with an arrow he
 
 Each time you open the dropdown, the app checks the VPN again and puts back any route macOS dropped, so the dropdown shows the state as it is now. It also runs the same check every 30 seconds, whether the dropdown is open or not, and while an alert such as the mode switch question waits for an answer.
 
-While the dropdown is open, ⌘, opens Settings and ⌘Q quits. ⌘R refreshes routes only while the Refresh button is enabled, which is when a VPN is connected and the helper is ready; otherwise it does nothing. Holding ⌘R refreshes once. The "…" menu lists ⌘Q next to Quit, and the Refresh button's and the gear's tooltips name their shortcuts.
+While the dropdown is open, ⌘, opens Settings and ⌘Q quits. ⌘R refreshes routes only while the Refresh button is enabled, which is when a VPN is connected, the helper is ready and no route or DNS work is running; otherwise it does nothing. Holding ⌘R refreshes once. The "…" menu lists ⌘Q next to Quit, and the Refresh button's and the gear's tooltips name their shortcuts.
 
 ![The dropdown in Bypass mode: WireGuard connected, the status chip reads On, and four services and two domains skip the VPN, each with how many addresses it routes](images/screenshots/menu-bar.png){ width="340" }
 
