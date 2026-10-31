@@ -462,11 +462,15 @@ final class ReworkViewTests: XCTestCase {
         XCTAssertTrue(body.contains("Text(verbatim: \"Bypass\")"))
     }
 
-    /// B1: the Rules route menu drew two chevrons and lost the chip's colour.
+    /// B1: the Rules route menu drew two chevrons and lost the chip's colour. The Rules page
+    /// now draws the shared `RouteChipMenu`, which hides the system indicator.
     func testTheRouteMenuDrawsOnlyTheChip() throws {
-        let body = try ReworkSource.body(of: "struct RulesRouteChipMenu: View", in: "RulesTab.swift")
-        XCTAssertFalse(body.contains(".menuStyle(.borderlessButton)"))
-        XCTAssertTrue(body.contains(".menuIndicator(.hidden)"))
+        let rules = try ReworkSource.body(of: "struct RulesRouteChipMenu: View", in: "RulesTab.swift")
+        XCTAssertTrue(rules.contains("RouteChipMenu(chip"), "the Rules page has its own menu again:\n\(rules)")
+        XCTAssertFalse(rules.contains("Menu {"))
+        let shared = try ReworkSource.body(of: "struct RouteChipMenu<Content: View>: View", in: "Components.swift")
+        XCTAssertFalse(shared.contains(".menuStyle(.borderlessButton)"))
+        XCTAssertTrue(shared.contains(".menuIndicator(.hidden)"))
     }
 
     /// B2: every General icon was green, on or off.
