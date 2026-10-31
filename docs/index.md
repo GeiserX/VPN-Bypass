@@ -56,7 +56,7 @@ Everything lives in the dropdown: the VPN it found, a pill that says whether rou
 
 <div class="vb-gallery" markdown>
 <figure markdown>
-![The dropdown in Bypass mode: WireGuard connected, the pill reads ON, and four services and two domains skip the VPN, each with how many addresses it routes](images/screenshots/menu-bar.png)
+![The dropdown in Bypass mode: WireGuard connected, the status chip reads On, and four services and two domains skip the VPN, each with how many addresses it routes](images/screenshots/menu-bar.png)
 <figcaption>Bypass mode</figcaption>
 </figure>
 <figure markdown>

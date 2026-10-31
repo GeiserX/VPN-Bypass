@@ -50,11 +50,12 @@ final class StatusPageTests: XCTestCase {
         XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 60 addresses routed 5 s ago, 2 failed.")
     }
 
-    /// The caption of image 13: with the helper down, the summary says why nothing is routed.
+    /// With the helper down, the summary says why no route can change, and what is still in place.
     func testHelperDownSaysWhyNothingIsRouted() {
         let s = summary { $0.helperReady = false }
         XCTAssertEqual(s.title, "Not working")
-        XCTAssertEqual(s.sentence, "Nothing is routed while the privileged helper is not running.")
+        XCTAssertEqual(s.sentence, "The helper is not running, so no route can change.")
+        XCTAssertEqual(s.note, "62 addresses from before are still routed.")
         XCTAssertEqual(s.tone, .warn)
     }
 
@@ -62,7 +63,7 @@ final class StatusPageTests: XCTestCase {
         let s = summary { $0.isVPNConnected = false; $0.installedRoutes = 0 }
         XCTAssertEqual(s.title, "No VPN connected")
         XCTAssertEqual(s.sentence, "Nothing is routed until a VPN connects.")
-        XCTAssertEqual(s.tone, .bad)
+        XCTAssertEqual(s.tone, .idle, "no VPN is an ordinary state, grey, not red")
     }
 
     func testWaitingAfterAReconnectUsesTheDropdownHeadline() {
@@ -86,7 +87,7 @@ final class StatusPageTests: XCTestCase {
         XCTAssertEqual(s.title, "Working")
         XCTAssertEqual(s.note, "The scheduled re-apply still runs in 10 min.")
         XCTAssertFalse(StatusPage.isWaiting(input { $0.pending = pending }))
-        XCTAssertEqual(DropdownStatus.make(input { $0.pending = pending }, now: now).pill, "ON",
+        XCTAssertEqual(DropdownStatus.make(input { $0.pending = pending }, now: now).chip, .on,
                        "the page's verdict follows the dropdown's own decision")
     }
 

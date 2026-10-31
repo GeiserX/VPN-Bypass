@@ -22,7 +22,7 @@ Each time you open the dropdown, the app checks the VPN again and puts back any 
 
 While the dropdown is open, ⌘, opens Settings and ⌘Q quits. ⌘R refreshes routes only while the Refresh Routes button shows, which is when a VPN is connected; with no VPN, on first run and during the first check it does nothing. Holding ⌘R refreshes once. The "…" menu lists each shortcut next to its item, and the gear's and power button's tooltips name theirs.
 
-![The dropdown in Bypass mode: WireGuard connected, the pill reads ON, and four services and two domains skip the VPN, each with how many addresses it routes](images/screenshots/menu-bar.png){ width="340" }
+![The dropdown in Bypass mode: WireGuard connected, the status chip reads On, and four services and two domains skip the VPN, each with how many addresses it routes](images/screenshots/menu-bar.png){ width="340" }
 
 ## Settings
 

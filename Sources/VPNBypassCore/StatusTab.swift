@@ -248,6 +248,69 @@ enum StatusPage {
             : Line(text: String(localized: "\(checked) of \(total) checked, \(failed) not reachable, \(when)", bundle: bundle), tone: .warn)
     }
 
+    // MARK: Problems
+
+    /// One row of Problems: what failed, and why.
+    struct Problem: Equatable, Identifiable {
+        enum Kind: Equatable {
+            case notRouted, notResolved, notRemoved, noAddresses, unlisted
+        }
+        let kind: Kind
+        /// The address, the name, or the entry.
+        let title: String
+        /// What it was for and the reason.
+        let detail: String
+
+        var id: String { "\(kind)|\(title)|\(detail)" }
+    }
+
+    /// Every failure the dropdown's count includes, in the order the apply met them: the
+    /// addresses the helper did not route (or remove), with their entry and the reason it gave,
+    /// and the names that did not resolve, with their entry and the DNS error. Then the
+    /// entries left with no address, and a last row for failures counted but not itemised.
+    /// Empty when nothing failed. Shown on the same rule as the dropdown (`shownRouteChange`),
+    /// so the page never lists failures the dropdown no longer counts.
+    static func problems(lastChange: RouteManager.RouteChangeOutcome?, installed: Int, helperReady: Bool,
+                         withoutAddresses: [RoutedBySource.Row], bundle: Bundle = .main) -> [Problem] {
+        var out: [Problem] = []
+        if let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed, helperReady: helperReady),
+           change.failedCount > 0 {
+            for failure in change.failures {
+                let kind: Problem.Kind
+                let what: String
+                switch failure.kind {
+                case .notRouted:
+                    kind = .notRouted
+                    what = String(localized: "Not routed", bundle: bundle)
+                case .notResolved:
+                    kind = .notResolved
+                    what = String(localized: "Did not resolve", bundle: bundle)
+                case .notRemoved:
+                    kind = .notRemoved
+                    what = String(localized: "Not removed", bundle: bundle)
+                }
+                // A domain listed on its own is its own entry: say it once.
+                let detail = failure.entry.isEmpty || failure.entry == failure.target
+                    ? String(localized: "\(what): \(failure.reason)", bundle: bundle)
+                    : String(localized: "\(what), for \(failure.entry): \(failure.reason)", bundle: bundle)
+                out.append(Problem(kind: kind, title: failure.target, detail: detail))
+            }
+            let unlisted = change.failedCount - change.failures.count
+            if unlisted > 0 {
+                out.append(Problem(kind: .unlisted,
+                                   title: unlisted == 1
+                                       ? String(localized: "1 more failure", bundle: bundle)
+                                       : String(localized: "\(unlisted) more failures", bundle: bundle),
+                                   detail: String(localized: "Settings > Logs has the details.", bundle: bundle)))
+            }
+        }
+        for row in withoutAddresses where row.isProblem {
+            out.append(Problem(kind: .noAddresses, title: row.name,
+                               detail: String(localized: "Has no addresses: none of its names resolved", bundle: bundle)))
+        }
+        return out
+    }
+
     // MARK: DNS
 
     static func resolverLine(_ detected: String?, bundle: Bundle = .main) -> Line {
@@ -372,6 +435,8 @@ struct StatusTab: View {
     @ObservedObject private var helperManager = HelperManager.shared
     /// Opens the Logs page with Warnings selected.
     private let onShowWarnings: () -> Void
+    /// Opens the Logs page on every line, for the route check's results.
+    private let onShowLogs: () -> Void
     /// False when a snapshot was handed in: the page shows it as given, so a test or a render
     /// can show any tunnel state, until Refresh reads the real one.
     private let readsTunnelsOnChange: Bool
@@ -379,8 +444,10 @@ struct StatusTab: View {
     @State private var snapshot: RouteManager.CoexistenceSnapshot?
     @State private var isReadingTunnels = false
 
-    init(onShowWarnings: @escaping () -> Void = {}, snapshot: RouteManager.CoexistenceSnapshot? = nil) {
+    init(onShowWarnings: @escaping () -> Void = {}, onShowLogs: @escaping () -> Void = {},
+         snapshot: RouteManager.CoexistenceSnapshot? = nil) {
         self.onShowWarnings = onShowWarnings
+        self.onShowLogs = onShowLogs
         _snapshot = State(initialValue: snapshot)
         readsTunnelsOnChange = snapshot == nil
     }
@@ -400,6 +467,8 @@ struct StatusTab: View {
         let input = DropdownStatus.Input.current(routeManager, helperReady: helperManager.helperState.isReady)
         return VStack(alignment: .leading, spacing: 18) {
             summaryView(StatusPage.summary(input, now: now))
+            problemsSection(input)
+            routeCheckSection
             helperSection
             connectionSection
             routesSection(input, now: now)
@@ -451,6 +520,46 @@ struct StatusTab: View {
     }
 
     // MARK: Sections
+
+    /// Where the dropdown's "Show" lands: every failure behind its count, with Retry.
+    @ViewBuilder
+    private func problemsSection(_ input: DropdownStatus.Input) -> some View {
+        let missing = RoutedBySource.make(
+            mode: input.mode, config: routeManager.config, routes: routeManager.installedRoutes,
+            busy: RoutedBySource.mayStillAddRoutes(running: routeManager.isLoading || routeManager.isApplyingRoutes,
+                                                   pending: routeManager.pendingReconnectApply))?.rows ?? []
+        let problems = StatusPage.problems(lastChange: routeManager.lastRouteChange,
+                                           installed: routeManager.routedAddressCount,
+                                           helperReady: input.helperReady, withoutAddresses: missing)
+        if !problems.isEmpty {
+            StatusSection(String(localized: "Problems"), trailing: {
+                Button(String(localized: "Retry")) { routeManager.refreshRoutes() }
+                    .controlSize(.small)
+                    .disabled(routeManager.isLoading || routeManager.isApplyingRoutes
+                              || !routeManager.isVPNConnected || !input.helperReady)
+                    .help(String(localized: "Apply the routes again"))
+                    .accessibilityLabel(String(localized: "Retry: apply the routes again"))
+            }) {
+                ForEach(Array(problems.enumerated()), id: \.element.id) { index, problem in
+                    if index > 0 { StatusDivider() }
+                    ListRow(glyph: "exclamationmark.triangle.fill", name: problem.title,
+                            detail: problem.detail, needsAttention: true)
+                        .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+
+    /// The last Verify Routes, moved here from the dropdown; Dismiss takes it away.
+    @ViewBuilder
+    private var routeCheckSection: some View {
+        if let run = routeManager.lastRouteCheck {
+            RouteCheckCard(run: run,
+                           logsHoldResults: run.logsHoldResults(oldestLogAt: routeManager.recentLogs.last?.timestamp),
+                           onShowLogs: onShowLogs,
+                           onDismiss: { routeManager.clearRouteCheck() })
+        }
+    }
 
     private var helperSection: some View {
         let state = helperManager.helperState

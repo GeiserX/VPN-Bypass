@@ -1,11 +1,11 @@
 // DropdownModePickerTests.swift
-// The dropdown's Mode control (proposal 12): one segmented control with Bypass, VPN Only and
+// The dropdown's Mode control (proposal 12): one popup with Bypass, VPN Only and
 // Custom in every mode, behind a confirmation.
 //
 // The problems it locks down: the old control showed only Bypass and VPN Only, and in Custom
 // mode a capsule plus a "Switch to Bypass" link, so Custom could not be picked from the
 // dropdown and VPN Only was out of reach from Custom. A pick must not switch anything until the
-// user confirms, and the segment must not move on Cancel.
+// user confirms, and the popup must not change on Cancel. (A segmented control until rework step 3.)
 
 import AppKit
 import SwiftUI
@@ -116,8 +116,8 @@ final class DropdownModePickerTests: XCTestCase {
     }
 }
 
-/// The real DropdownModeRow in a window, and the real question: a click on a segment opens it
-/// and switches nothing while it is open; Cancel leaves the segment where it was; Switch runs
+/// The real DropdownModeRow in a window, and the real question: a pick in the popup opens it
+/// and switches nothing while it is open; Cancel leaves the popup where it was; Switch runs
 /// RouteManager.setRoutingMode, the call the Settings switch makes, so entering Custom migrates
 /// the lists into rules. The question runs app-modal, so a timer in the modal run loop reads it
 /// and presses one of its buttons. The VPN is never connected here, so no route is touched, and
@@ -177,9 +177,9 @@ final class DropdownModeRowViewTests: XCTestCase {
         ((view as? T).map { [$0] } ?? []) + view.subviews.flatMap { all(type, in: $0) }
     }
 
-    private func segmented(in view: NSView) throws -> NSSegmentedControl {
-        let found = Self.all(NSSegmentedControl.self, in: view)
-        XCTAssertEqual(found.count, 1, "one segmented control")
+    private func popup(in view: NSView) throws -> NSPopUpButton {
+        let found = Self.all(NSPopUpButton.self, in: view)
+        XCTAssertEqual(found.count, 1, "one popup")
         return try XCTUnwrap(found.first)
     }
 
@@ -188,17 +188,17 @@ final class DropdownModeRowViewTests: XCTestCase {
         var title = "", message = "", buttons: [String] = []
         var iconName: String?, iconHidden = true
         var isSheet = true
-        var segmentWhileOpen: Int?
+        var itemWhileOpen: Int?
         /// Whether a DispatchQueue.main block and a main-actor task queued after the click had
         /// run by the time the open question was read.
         var mainQueueRanWhileOpen = false, mainActorRanWhileOpen = false
     }
 
-    /// Clicks a segment the way AppKit delivers it (the control selects the segment, then fires
-    /// its action), then answers the question with `answer`, a button title. Returns nil when no
+    /// Picks an item the way AppKit delivers it (the popup selects the item, then fires its
+    /// action), then answers the question with `answer`, a button title. Returns nil when no
     /// question opened.
-    private func pick(segment: Int, answer: String, in view: NSView) throws -> Question? {
-        let control = try segmented(in: view)
+    private func pick(item: Int, answer: String, in view: NSView) throws -> Question? {
+        let control = try popup(in: view)
         final class Seen: @unchecked Sendable { var question: Question?; var queueRan = false; var taskRan = false }
         let seen = Seen()
         let all = { (type: NSView.Type, root: NSView) in Self.all(NSView.self, in: root).filter { $0.isKind(of: type) } }
@@ -216,7 +216,7 @@ final class DropdownModeRowViewTests: XCTestCase {
                     q.iconHidden = icon.isHiddenOrHasHiddenAncestor
                 }
                 q.isSheet = panel.sheetParent != nil
-                q.segmentWhileOpen = (all(NSSegmentedControl.self, view).first as? NSSegmentedControl)?.selectedSegment
+                q.itemWhileOpen = (all(NSPopUpButton.self, view).first as? NSPopUpButton)?.indexOfSelectedItem
                 q.mainQueueRanWhileOpen = seen.queueRan
                 q.mainActorRanWhileOpen = seen.taskRan
                 seen.question = q
@@ -232,8 +232,10 @@ final class DropdownModeRowViewTests: XCTestCase {
         RunLoop.main.add(guardTimer, forMode: .modalPanel)
         defer { reader.invalidate(); guardTimer.invalidate() }
 
-        control.selectedSegment = segment
-        XCTAssertTrue(control.sendAction(control.action, to: control.target), "the control has an action")
+        // As a click in the open menu delivers it: the item's own action runs.
+        let menu = try XCTUnwrap(control.menu, "the popup has a menu")
+        XCTAssertLessThan(item, menu.numberOfItems, "the popup lists the item")
+        menu.performActionForItem(at: item)
         // Queued behind whatever the click queued, the way RouteManager's and the control
         // socket's work reaches the main thread.
         DispatchQueue.main.async { seen.queueRan = true }
@@ -247,41 +249,41 @@ final class DropdownModeRowViewTests: XCTestCase {
             var cfg = rm.config
             cfg.routingMode = mode
             rm.config = cfg
-            let control = try segmented(in: host())
-            XCTAssertEqual(control.segmentCount, 3, "\(mode)")
-            XCTAssertEqual((0..<3).map { control.label(forSegment: $0) }, ["Bypass", "VPN Only", "Custom"], "\(mode)")
-            XCTAssertEqual(control.selectedSegment, DropdownModePicker.modes.firstIndex(of: mode), "\(mode)")
+            let control = try popup(in: host())
+            XCTAssertEqual(control.numberOfItems, 3, "\(mode)")
+            XCTAssertEqual(control.itemTitles, ["Bypass", "VPN Only", "Custom"], "\(mode)")
+            XCTAssertEqual(control.indexOfSelectedItem, DropdownModePicker.modes.firstIndex(of: mode), "\(mode)")
             window?.orderOut(nil)
         }
     }
 
     func testCancelLeavesTheModeAndTheSegment() throws {
         let view = host()
-        let q = try XCTUnwrap(try pick(segment: 1, answer: "Cancel", in: view), "the question opened")
+        let q = try XCTUnwrap(try pick(item: 1, answer: "Cancel", in: view), "the question opened")
         XCTAssertEqual(q.title, "Switch routing mode?")
         XCTAssertEqual(q.message, "Only the sites you list will use your VPN; everything else goes direct.")
         XCTAssertEqual(q.buttons, ["Switch to VPN Only", "Cancel"])
-        XCTAssertEqual(q.segmentWhileOpen, 0, "the segment waits for the answer")
+        XCTAssertEqual(q.itemWhileOpen, 0, "the popup waits for the answer")
         XCTAssertEqual(rm.config.routingMode, .bypass, "Cancel switches nothing")
-        XCTAssertEqual(try segmented(in: view).selectedSegment, 0, "Cancel leaves Bypass selected")
+        XCTAssertEqual(try popup(in: view).indexOfSelectedItem, 0, "Cancel leaves Bypass selected")
     }
 
     /// Entering Custom from the dropdown runs the migration the Settings switch runs.
     func testSwitchToCustomMigratesTheListsAndMovesTheSegment() throws {
         let view = host()
-        let q = try XCTUnwrap(try pick(segment: 2, answer: "Switch to Custom Routes", in: view))
-        XCTAssertEqual(q.segmentWhileOpen, 0)
+        let q = try XCTUnwrap(try pick(item: 2, answer: "Switch to Custom Routes", in: view))
+        XCTAssertEqual(q.itemWhileOpen, 0)
         XCTAssertEqual(rm.config.routingMode, .custom)
         XCTAssertEqual(rm.config.schemaVersion, 2, "the Custom migration ran")
         XCTAssertTrue(rm.config.rules.contains { $0.pattern == "a.com" }, "the Bypass domain became a rule")
-        XCTAssertEqual(try segmented(in: view).selectedSegment, 2)
+        XCTAssertEqual(try popup(in: view).indexOfSelectedItem, 2)
     }
 
     /// The question shows the app's own icon: the image named NSApplicationIcon, which in the
     /// app bundle is AppIcon.icns (the Lanes mark), not an image set in code. It must not be a
     /// sheet, because macOS 26 hides the icon of an alert shown as a sheet.
     func testTheQuestionShowsTheAppIcon() throws {
-        let q = try XCTUnwrap(try pick(segment: 1, answer: "Cancel", in: host()))
+        let q = try XCTUnwrap(try pick(item: 1, answer: "Cancel", in: host()))
         XCTAssertFalse(q.isSheet, "a standalone alert, not a sheet")
         XCTAssertEqual(q.iconName, NSImage.applicationIconName, "the icon is the app icon")
         XCTAssertFalse(q.iconHidden, "the icon is shown")
@@ -290,7 +292,7 @@ final class DropdownModeRowViewTests: XCTestCase {
     /// The open question must not hold the main queue: RouteManager, network-change handling
     /// and the control socket all run there, and `vpnb status` times out if it stops.
     func testTheAppKeepsRunningWhileTheQuestionIsOpen() throws {
-        let q = try XCTUnwrap(try pick(segment: 1, answer: "Cancel", in: host()))
+        let q = try XCTUnwrap(try pick(item: 1, answer: "Cancel", in: host()))
         XCTAssertTrue(q.mainQueueRanWhileOpen, "a main-queue block runs while the question is open")
         XCTAssertTrue(q.mainActorRanWhileOpen, "a main-actor task runs while the question is open")
     }
@@ -303,7 +305,7 @@ final class DropdownModeRowViewTests: XCTestCase {
         cfg.schemaVersion = 2
         rm.config = cfg
         let view = host()
-        let q = try XCTUnwrap(try pick(segment: 2, answer: "Cancel", in: view), "the question opened")
+        let q = try XCTUnwrap(try pick(item: 2, answer: "Cancel", in: view), "the question opened")
         XCTAssertEqual(q.message, DropdownModePickerTests.becomeRules)
         XCTAssertEqual(rm.config.routingMode, .bypass, "Cancel switches nothing")
         window?.orderOut(nil)
@@ -313,12 +315,12 @@ final class DropdownModeRowViewTests: XCTestCase {
         cfg.schemaVersion = 1
         cfg.domains = []
         rm.config = cfg
-        let empty = try XCTUnwrap(try pick(segment: 2, answer: "Cancel", in: host()), "the question opened")
+        let empty = try XCTUnwrap(try pick(item: 2, answer: "Cancel", in: host()), "the question opened")
         XCTAssertEqual(empty.message, DropdownModePickerTests.perRule)
     }
 
     func testPickingTheModeInUseAsksNothing() throws {
-        XCTAssertNil(try pick(segment: 0, answer: "Cancel", in: host()))
+        XCTAssertNil(try pick(item: 0, answer: "Cancel", in: host()))
         XCTAssertEqual(rm.config.routingMode, .bypass)
     }
 }

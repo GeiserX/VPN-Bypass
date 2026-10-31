@@ -52,13 +52,13 @@ final class ReworkStatusTests: XCTestCase {
             { $0.isStarting = true; $0.helperReady = false },
         ] {
             let s = status(edit)
-            XCTAssertEqual(s.pill, "STARTING")
+            XCTAssertEqual(s.chip, .waiting)
             XCTAssertEqual(s.tone, .idle)
             XCTAssertEqual(s.headline, "Starting…")
             XCTAssertEqual(s.sentence, "Detecting the VPN and applying routes.")
-            XCTAssertEqual(s.facts, [])
+            XCTAssertEqual(s.line3, .blank)
         }
-        XCTAssertEqual(status { $0.isStarting = false }.pill, "ON")
+        XCTAssertEqual(status { $0.isStarting = false }.chip, .on)
         XCTAssertEqual(StatusPage.summary(input { $0.isStarting = true }, now: now).title, "Starting…")
     }
 
@@ -69,23 +69,24 @@ final class ReworkStatusTests: XCTestCase {
             $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-5), routeCount: 60, failedCount: 7)
             $0.installedRoutes = 60
         }
-        XCTAssertEqual(failed.pill, "PARTLY ROUTED")
+        XCTAssertEqual(failed.chip, .partlyRouted)
         XCTAssertEqual(failed.tone, .warn)
         XCTAssertTrue(failed.isPartial)
         XCTAssertEqual(failed.note, "7 failed in the last apply.")
-        XCTAssertEqual(failed.facts.first?.value, "60 routed 5 s ago, 7 failed", "the facts stay")
+        XCTAssertEqual(failed.line3, .init(text: "60 addresses, 7 failed · 5 s ago", isProblem: true, action: .show),
+                       "line 3 names the count and offers Show")
 
         let empty = status { $0.entriesWithoutAddresses = 1 }
-        XCTAssertEqual(empty.pill, "PARTLY ROUTED")
+        XCTAssertEqual(empty.chip, .partlyRouted)
         XCTAssertEqual(empty.note, "1 entry has no addresses.")
         XCTAssertEqual(status { $0.entriesWithoutAddresses = 3 }.note, "3 entries have no addresses.")
 
         let checked = status { $0.lastCheckCount = 5; $0.lastCheckWrongWay = 4 }
-        XCTAssertEqual(checked.pill, "PARTLY ROUTED")
+        XCTAssertEqual(checked.chip, .partlyRouted)
         XCTAssertEqual(checked.note, "4 of 5 checked addresses left the wrong way.")
 
         let broken = status { $0.lastCheckCount = 5; $0.lastCheckBroken = true; $0.lastCheckWrongWay = 2 }
-        XCTAssertEqual(broken.pill, "PARTLY ROUTED")
+        XCTAssertEqual(broken.chip, .partlyRouted)
         XCTAssertEqual(broken.note, "The last route check is broken: it cannot tell the two ways apart.",
                        "a broken control says why, not a wrong-way count it cannot trust")
 
@@ -99,7 +100,7 @@ final class ReworkStatusTests: XCTestCase {
 
     func testNothingWrongStaysOn() {
         let s = status { $0.lastCheckCount = 5; $0.lastCheckWrongWay = 0 }
-        XCTAssertEqual(s.pill, "ON")
+        XCTAssertEqual(s.chip, .on)
         XCTAssertEqual(s.tone, .ok)
         XCTAssertFalse(s.isPartial)
         XCTAssertNil(s.note)
@@ -202,14 +203,14 @@ final class ReworkStatusTests: XCTestCase {
 
     /// The pill's strings exist in Spanish and French.
     func testTheNewStatusWordsAreTranslated() throws {
-        let keys = ["STARTING", "Starting…", "Detecting the VPN and applying routes.", "PARTLY ROUTED",
+        let keys = ["Starting…", "Detecting the VPN and applying routes.",
                     "1 failed in the last apply.", "%lld failed in the last apply.", "1 entry has no addresses.",
                     "%lld entries have no addresses.", "%lld of %lld checked addresses left the wrong way.",
                     "The last route check is broken: it cannot tell the two ways apart.", "Partly working",
                     "Add a Direct rule…", "Added as rule %lld, to the Direct route.",
                     "Added as rule %lld; rule %lld matches first.",
-                    "Connect to a VPN to send\nyour listed sites through it.",
-                    "Connect to a VPN to start\nrouting traffic by your rules."]
+                    "Your list goes through the VPN once one connects.",
+                    "Your rules apply once a VPN connects."]
         for language in ["es", "fr"] {
             let bundle = try ReworkSource.lproj(language)
             for key in keys {
@@ -300,22 +301,18 @@ final class ReworkDropdownTests: RouteManagerTestCase {
         XCTAssertFalse(sentences[1].contains("bypassing"), sentences[1])
         XCTAssertTrue(sentences[2].contains("rules"), sentences[2])
 
-        let (direct, _) = custom { direct, _ in
-            [Rule(matchType: .domain, pattern: "a.example", routeId: direct.id, order: 0),
-             Rule(matchType: .domain, pattern: "b.example", routeId: direct.id, order: 1)]
-        }
-        var off = Rule(matchType: .domain, pattern: "c.example", routeId: direct.id, order: 2)
-        off.enabled = false
-        rm.config.rules.append(off)
-        rm.config.domains = [DomainEntry(domain: "d.example", enabled: true)]
-        let custom = DropdownCopy.disconnectedBadges(.custom, config: rm.config)
-        XCTAssertEqual(custom.map(\.value), [2])
-        XCTAssertEqual(custom.map(\.label), ["Rules"])
-        XCTAssertEqual(DropdownCopy.disconnectedBadges(.bypass, config: rm.config).map(\.label), ["Services", "Domains"])
-        XCTAssertEqual(DropdownCopy.disconnectedBadges(.vpnOnly, config: rm.config).map(\.label), ["VPN Entries"])
+        // Line 3 of the status block carries it, in every mode.
+        let input = DropdownStatus.Input(isVPNConnected: false, vpnName: nil, helperReady: true, mode: .custom,
+                                         enabledServices: 0, enabledDomains: 0, enabledRules: 2, installedRoutes: 0,
+                                         pending: nil, lastRouteChange: nil, lastDNSRefresh: nil, nextDNSRefresh: nil,
+                                         autoDNSRefresh: true)
+        XCTAssertEqual(DropdownStatus.make(input, now: Date()).line3.text, sentences[2])
         for language in ["es", "fr"] {
             let bundle = try! ReworkSource.lproj(language)
-            XCTAssertNotEqual(DropdownCopy.disconnectedBadges(.custom, config: rm.config, in: bundle).first?.label, "Rules")
+            for mode in [DropdownCopy.Mode.bypass, .vpnOnly, .custom] {
+                XCTAssertNotEqual(DropdownCopy.disconnectedSentence(mode, in: bundle),
+                                  DropdownCopy.disconnectedSentence(mode), "\(language) \(mode)")
+            }
         }
     }
 
@@ -409,11 +406,13 @@ final class ReworkDropdownTests: RouteManagerTestCase {
         }
     }
 
-    /// A7: the disconnected dropdown keeps the "…" menu, and Remove All Routes… in it.
+    /// A7: the disconnected dropdown keeps the "…" menu, and Remove All Routes… in it. The
+    /// menu sits in the footer, which every state shows.
     func testTheDisconnectedDropdownKeepsTheMoreMenu() throws {
         let body = try ReworkSource.body(of: "private var disconnectedContent: some View", in: "MenuBarViews.swift")
-        XCTAssertTrue(body.contains("moreActionsMenu"), "no … menu while disconnected")
         XCTAssertTrue(body.contains("RoutedBySourceCard"), "no list while disconnected")
+        let footer = try ReworkSource.body(of: "private var footerActions: some View", in: "MenuBarViews.swift")
+        XCTAssertTrue(footer.contains("moreActionsMenu"), "no … menu in the footer")
         let menu = try ReworkSource.body(of: "private var moreActionsMenu: some View", in: "MenuBarViews.swift")
         XCTAssertTrue(menu.contains("Remove All Routes…"))
         let shared = try ReworkSource.body(of: "struct MenuContent: View", in: "MenuBarViews.swift")
