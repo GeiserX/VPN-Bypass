@@ -26,7 +26,6 @@
 "Bypass list" = "Liste Contournement";
 "Only these domains will use the VPN. Everything else bypasses it." = "Seuls ces domaines utiliseront le VPN. Tout le reste le contourne.";
 "Add domains that should bypass VPN and use your regular connection." = "Ajoutez les domaines qui doivent contourner le VPN et utiliser votre connexion habituelle.";
-"CONFIGURED DOMAINS" = "DOMAINES CONFIGURÉS";
 "Applying..." = "Application...";
 "All" = "Tous";
 "Add a domain above to bypass VPN" = "Ajoutez un domaine ci-dessus pour contourner le VPN";
@@ -610,8 +609,6 @@
 "Choose Route" = "Choisir une route";
 
 /* ===== Réglages : Domaines, Services, Général et À propos ===== */
-"e.g., example.com or 10.0.0.0/24" = "ex. : example.com ou 10.0.0.0/24";
-"e.g., example.com" = "ex. : example.com";
 "No entries configured" = "Aucune entrée configurée";
 "Add domains or IP ranges that should use VPN" = "Ajoutez les domaines ou plages d'IP qui doivent passer par le VPN";
 "e.g. My Service" = "ex. : Mon service";
@@ -899,3 +896,12 @@
 "Add a site for the VPN…" = "Ajouter un site pour le VPN…";
 "The menu bar icon is not visible. It may be switched off in System Settings, or hidden by the notch." = "L’icône de la barre des menus n’est pas visible. Elle est peut-être désactivée dans Réglages Système, ou cachée par l’encoche.";
 "Open Menu Bar Settings…" = "Ouvrir les réglages de la barre des menus…";
+
+/* Domains page on the shared components */
+"VPN Only list · used in VPN Only mode" = "Liste VPN uniquement · utilisée en mode VPN uniquement";
+"Bypass list · used in Bypass mode" = "Liste Contournement · utilisée en mode Contournement";
+"Add a domain, *.wildcard or IP range…" = "Ajoutez un domaine, un *.joker ou une plage d'IP…";
+"Add a domain or *.wildcard…" = "Ajoutez un domaine ou un *.joker…";
+"learned as you browse" = "appris pendant la navigation";
+"IP range" = "Plage d'IP";
+"addresses" = "adresses";

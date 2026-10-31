@@ -216,10 +216,53 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size.width, 1040)
     }
 
+    /// The Bypass list with a wildcard that has learned 11 routes, the pointer on the first
+    /// row, and the VPN Only list read-only under it.
     func testSettingsOnDomains() throws {
-        seedBypass()
+        seedDomains(mode: .bypass)
+        DomainsTab.hoveredForScreenshots = "en.wikipedia.org"
+        defer { DomainsTab.hoveredForScreenshots = nil }
         let size = try renderSettings(page: .domains, to: "domains.png")
         XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// VPN Only mode: its list, an IP range in it, and the Bypass list read-only under it.
+    func testSettingsOnDomainsInVPNOnlyMode() throws {
+        seedDomains(mode: .vpnOnly)
+        let size = try renderSettings(page: .domains, to: "domains-vpn-only.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// An empty Bypass list: the add row, then the empty state under it.
+    func testSettingsOnDomainsWhenEmpty() throws {
+        seedBypass()
+        rm.config.domains = []
+        rm.config.inverseDomains = []
+        let size = try renderSettings(page: .domains, to: "domains-empty.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// Custom mode: the page opens read-only with both lists, the Bypass list first.
+    func testSettingsOnDomainsInCustomMode() throws {
+        seedDomains(mode: .bypass)
+        seedCustomRules()
+        rm.config.routingMode = .custom
+        let size = try renderSettings(page: .domains, to: "domains-custom.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    private func seedDomains(mode: RoutingMode) {
+        seedBypass()
+        rm.config.domains.append(DomainEntry(domain: "*.example.com", enabled: true))
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.org", enabled: true),
+                                    DomainEntry(domain: "10.20.0.0/16", enabled: true, isCIDR: true),
+                                    DomainEntry(domain: "wiki.example.org", enabled: false)]
+        if mode == .vpnOnly {
+            rm.config.routingMode = .vpnOnly
+            rm.activeRoutes = addresses(["intranet.example.org": 3, "10.20.0.0/16": 1], gateway: "iface:utun4")
+        } else {
+            rm.activeRoutes += addresses(["*.example.com": 11], gateway: "192.168.1.1")
+        }
     }
 
     func testSettingsOnRules() throws {
