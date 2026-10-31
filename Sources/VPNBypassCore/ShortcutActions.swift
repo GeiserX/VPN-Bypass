@@ -46,6 +46,11 @@ enum ShortcutActions {
     /// what the socket would answer with `ok: false`.
     @MainActor
     static func run(_ action: ShortcutAction) async throws -> ControlResponse {
+        // Shortcuts can launch the app to run an action. Until the saved config is loaded the
+        // app holds the default one, and a change saved now would replace the user's file.
+        guard RouteManager.shared.hasLoadedConfig else {
+            throw ShortcutActionError(code: "starting", message: notReady())
+        }
         let response = await ControlOrigin.$channel.withValue(.shortcuts) {
             await ControlSurface.handle(action.request)
         }
@@ -57,6 +62,16 @@ enum ShortcutActions {
     }
 
     // MARK: - What the action says back
+
+    static func notReady(in bundle: Bundle = .main) -> String {
+        String(localized: "VPN Bypass is still starting. Run the shortcut again in a moment.", bundle: bundle)
+    }
+
+    /// The domain Add Domain names: the entry as the app saved it, cleaned (a pasted link
+    /// becomes its host), or what was typed when the answer has none.
+    static func savedDomain(_ response: ControlResponse, typed: String) -> String {
+        response.result?.domains?.first?.domain ?? typed
+    }
 
     static func modeDone(_ mode: RoutingMode, in bundle: Bundle = .main) -> String {
         let name = DropdownModePicker.label(mode, in: bundle)
@@ -92,8 +107,14 @@ enum ShortcutActions {
         if runtime.enforcedRouteCount == 0 {
             return String(localized: "\(name) mode. Nothing is routed yet.", bundle: bundle)
         }
-        if runtime.killSwitch != nil {
-            return String(localized: "\(name) mode. The VPN's kill switch sends all traffic through it, so nothing skips it.", bundle: bundle)
+        // The same three cases as the dropdown (MenuBarLabel.killSwitchAccessibilityLabel).
+        if let flags = runtime.killSwitch {
+            guard flags.contains("includeAllNetworks") else {
+                return String(localized: "\(name) mode. The VPN's own routes win over this app's, so routes set here have no effect.", bundle: bundle)
+            }
+            return flags.contains("excludeLocalNetworks")
+                ? String(localized: "\(name) mode. The VPN's kill switch sends all traffic through it except local-network addresses.", bundle: bundle)
+                : String(localized: "\(name) mode. The VPN's kill switch sends all traffic through it, so nothing skips it.", bundle: bundle)
         }
         return String(localized: "\(name) mode. Routed addresses: \(runtime.enforcedRouteCount)", bundle: bundle)
     }

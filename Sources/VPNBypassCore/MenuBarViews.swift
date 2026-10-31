@@ -757,7 +757,7 @@ struct MenuContent: View {
                               everythingElseDirect: routeManager.everythingElseDirect) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     OutsideChangeLine(change: change, now: context.date) {
-                        SettingsPageRequest.shared.logFilter = LogFilter(onlySource: change.via)
+                        SettingsPageRequest.shared.logFilter = change.logFilter
                         openSettings(page: .logs)
                     }
                 }

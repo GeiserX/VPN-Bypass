@@ -828,6 +828,9 @@
 "%@ mode. The VPN is not connected." = "%@ mode. The VPN is not connected.";
 "%@ mode. Nothing is routed yet." = "%@ mode. Nothing is routed yet.";
 "%@ mode. The VPN's kill switch sends all traffic through it, so nothing skips it." = "%@ mode. The VPN's kill switch sends all traffic through it, so nothing skips it.";
+"VPN Bypass is still starting. Run the shortcut again in a moment." = "VPN Bypass is still starting. Run the shortcut again in a moment.";
+"%@ mode. The VPN's own routes win over this app's, so routes set here have no effect." = "%@ mode. The VPN's own routes win over this app's, so routes set here have no effect.";
+"%@ mode. The VPN's kill switch sends all traffic through it except local-network addresses." = "%@ mode. The VPN's kill switch sends all traffic through it except local-network addresses.";
 "%@ mode. Routed addresses: %lld" = "%@ mode. Routed addresses: %lld";
 "Set Routing Mode" = "Set Routing Mode";
 "Switches VPN Bypass to Bypass, VPN Only or Custom, as vpnb mode does." = "Switches VPN Bypass to Bypass, VPN Only or Custom, as vpnb mode does.";

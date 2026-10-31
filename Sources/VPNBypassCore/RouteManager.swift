@@ -67,6 +67,9 @@ final class RouteManager: ObservableObject {
     @Published var isLoading = true
     @Published private(set) var isApplyingRoutes = false
     @Published var isConfigLoadFailed = false
+    /// True once `loadConfig` has run. Before that `config` is the default, so a Shortcuts
+    /// action that saved it would overwrite the user's config.json (ShortcutActions.run).
+    var hasLoadedConfig = false
 
     /// Which process owns each `utun`, as the helper last reported it. Cosmetic only: it names
     /// tunnels, and must never decide which one gets routed. Empty when the helper cannot be
@@ -305,6 +308,7 @@ final class RouteManager: ObservableObject {
     // MARK: - Public API
     
     func loadConfig() {
+        hasLoadedConfig = true
         // Load DNS cache for faster startup / fallback
         loadDNSCache()
         // A catalogue file CI should have refused; its other services still load.

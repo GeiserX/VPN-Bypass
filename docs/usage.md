@@ -210,9 +210,9 @@ The Shortcuts app lists four VPN Bypass actions:
 
 | Action | Does what `vpnb` does with |
 |---|---|
-| Set Routing Mode | `vpnb mode <bypass\|vpnOnly\|custom>` |
-| Add Domain | `vpnb domain add <name>`, on the Bypass list or the VPN Only list |
-| Turn Service On or Off | `vpnb service enable` or `disable`, picking the service by name |
+| Set Routing Mode | `vpnb mode mode=<bypass\|vpnOnly\|custom>` |
+| Add Domain | `vpnb domain.add domain=<name>`, with `list=vpnOnly` for the VPN Only list |
+| Turn Service On or Off | `vpnb service.enable id=<id>` or `service.disable`, picking the service by name |
 | Get Status | `vpnb status`: returns a line such as "Bypass mode. Routed addresses: 62" |
 
 Each action runs in the app, through the same code as `vpnb`, so it gets the same checks and the same errors: a refused add stops the shortcut with the reason `vpnb` prints. A change shows in the dropdown footer as "Last change: … via Shortcuts", and its log lines carry "via Shortcuts"; a click on the footer line opens Logs showing only those lines.

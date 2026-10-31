@@ -105,6 +105,11 @@ final class ShortcutIntentMappingTests: XCTestCase {
                        "Custom mode. Nothing is routed yet.")
         XCTAssertEqual(ShortcutActions.statusLine(mode: .bypass, runtime: runtime(killSwitch: ["includeAllNetworks"]), in: en),
                        "Bypass mode. The VPN's kill switch sends all traffic through it, so nothing skips it.")
+        XCTAssertEqual(ShortcutActions.statusLine(mode: .bypass, runtime: runtime(killSwitch: ["includeAllNetworks", "excludeLocalNetworks"]), in: en),
+                       "Bypass mode. The VPN's kill switch sends all traffic through it except local-network addresses.")
+        XCTAssertEqual(ShortcutActions.statusLine(mode: .bypass, runtime: runtime(killSwitch: ["enforceRoutes"]), in: en),
+                       "Bypass mode. The VPN's own routes win over this app's, so routes set here have no effect.",
+                       "enforceRoutes takes only what the VPN's routes cover, not all traffic")
         XCTAssertEqual(ShortcutActions.statusLine(mode: .bypass, runtime: nil, in: en), "Bypass mode.")
     }
 
@@ -123,11 +128,13 @@ final class ShortcutIntentMappingTests: XCTestCase {
                 LogSource.shortcuts.helpText(in: b),
                 OutsideChange(kind: .addedDomain("x.org"), at: t0, via: .shortcuts).logsHelp(in: b),
                 LogFilter(onlySource: .shortcuts).sourceToken(in: b).title,
+                ShortcutActions.notReady(in: b),
                 LogFilter(onlySource: .shortcuts).emptyLine(shown: 0, in: b) ?? "",
                 LogFilter(level: .errors, onlySource: .shortcuts).emptyLine(shown: 0, in: b) ?? "",
             ]
             for r in [runtime(), runtime(helper: false), runtime(vpn: false), runtime(routes: 0),
-                      runtime(killSwitch: ["enforceRoutes"])] as [RuntimeStatus?] + [nil] {
+                      runtime(killSwitch: ["enforceRoutes"]), runtime(killSwitch: ["includeAllNetworks"]),
+                      runtime(killSwitch: ["includeAllNetworks", "excludeLocalNetworks"])] as [RuntimeStatus?] + [nil] {
                 all.append(ShortcutActions.statusLine(mode: .bypass, runtime: r, in: b))
             }
             for kind in [OutsideChange.Kind.addedDomain("x.org"), .turnedOn("Zoom"), .turnedOff("Zoom"), .switchedMode(.vpnOnly)] {
@@ -187,6 +194,7 @@ final class ShortcutIntentRunTests: XCTestCase {
     private var savedLogs: [RouteManager.LogEntry] = []
     private var savedVPNConnected = false
     private var savedChange: OutsideChange?
+    private var savedLoaded = false
 
     private var rm: RouteManager { RouteManager.shared }
 
@@ -209,6 +217,8 @@ final class ShortcutIntentRunTests: XCTestCase {
         rm.activeRoutes = []
         rm.recentLogs = []
         rm.lastOutsideChange = nil
+        savedLoaded = rm.hasLoadedConfig
+        rm.hasLoadedConfig = true
     }
 
     override func tearDown() async throws {
@@ -217,12 +227,16 @@ final class ShortcutIntentRunTests: XCTestCase {
         rm.recentLogs = savedLogs
         rm.isVPNConnected = savedVPNConnected
         rm.lastOutsideChange = savedChange
+        rm.hasLoadedConfig = savedLoaded
         rm.cancelAllRetries()
     }
 
     func testAddDomainSavesItAndTheFooterSaysShortcuts() async throws {
-        let response = try await ShortcutActions.run(.addDomain("https://En.Wikipedia.org/wiki/Main", list: .bypass))
+        let typed = "https://En.Wikipedia.org/wiki/Main"
+        let response = try await ShortcutActions.run(.addDomain(typed, list: .bypass))
         XCTAssertEqual(response.result?.domains?.first?.domain, "en.wikipedia.org")
+        XCTAssertEqual(ShortcutActions.savedDomain(response, typed: typed), "en.wikipedia.org",
+                       "the dialog names the entry as saved, not the typed link")
         XCTAssertEqual(rm.config.domains.map(\.domain), ["en.wikipedia.org"])
         XCTAssertEqual(rm.lastOutsideChange?.kind, .addedDomain("en.wikipedia.org"))
         XCTAssertEqual(rm.lastOutsideChange?.via, .shortcuts)
@@ -233,6 +247,27 @@ final class ShortcutIntentRunTests: XCTestCase {
         // The mark ends with the action.
         rm.log(.info, "A line from the app")
         XCTAssertEqual(rm.recentLogs.first?.source, .app)
+    }
+
+    func testAnActionBeforeTheConfigLoadsIsRefusedAndSavesNothing() async throws {
+        rm.hasLoadedConfig = false
+        let before = rm.config.routingMode
+        do {
+            _ = try await ShortcutActions.run(.setMode(before == .vpnOnly ? .bypass : .vpnOnly))
+            XCTFail("an action before loadConfig must be refused")
+        } catch let error as ShortcutActionError {
+            XCTAssertEqual(error.code, "starting")
+        }
+        XCTAssertEqual(rm.config.routingMode, before)
+        XCTAssertNil(rm.lastOutsideChange)
+    }
+
+    func testTheFooterOpensLogsAtItsOwnSource() {
+        let t0 = Date(timeIntervalSince1970: 1_790_000_000)
+        XCTAssertEqual(OutsideChange(kind: .addedDomain("x.org"), at: t0, via: .shortcuts).logFilter,
+                       LogFilter(onlySource: .shortcuts))
+        XCTAssertEqual(OutsideChange(kind: .addedDomain("x.org"), at: t0).logFilter,
+                       LogFilter(onlySource: .controlSocket))
     }
 
     func testSetModeSwitchesAndTheFooterSaysShortcuts() async throws {

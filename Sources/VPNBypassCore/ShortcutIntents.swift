@@ -164,7 +164,7 @@ struct AddDomainIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let response = try await ShortcutActions.run(action)
         // The answer names the entry as the app saved it, cleaned (a pasted link becomes its host).
-        let saved = response.result?.domains?.first?.domain ?? domain
+        let saved = ShortcutActions.savedDomain(response, typed: domain)
         return .result(dialog: "\(ShortcutActions.domainAdded(saved, list: list.list))")
     }
 }

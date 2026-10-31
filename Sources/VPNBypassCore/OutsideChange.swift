@@ -219,6 +219,9 @@ struct OutsideChange: Equatable {
         }
     }
 
+    /// What Logs shows when the footer line is clicked: only the lines from where it came.
+    var logFilter: LogFilter { LogFilter(onlySource: via) }
+
     /// This change's footer tooltip, which names where it came from.
     var logsHelp: String { logsHelp(in: .main) }
 

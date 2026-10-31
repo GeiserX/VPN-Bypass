@@ -828,6 +828,9 @@
 "%@ mode. The VPN is not connected." = "Modo %@. La VPN no está conectada.";
 "%@ mode. Nothing is routed yet." = "Modo %@. Todavía no se enruta nada.";
 "%@ mode. The VPN's kill switch sends all traffic through it, so nothing skips it." = "Modo %@. El kill switch de la VPN envía todo el tráfico por ella, así que nada la evita.";
+"VPN Bypass is still starting. Run the shortcut again in a moment." = "VPN Bypass todavía se está iniciando. Vuelve a ejecutar el atajo en un momento.";
+"%@ mode. The VPN's own routes win over this app's, so routes set here have no effect." = "Modo %@. Las rutas de la VPN mandan sobre las de esta app, así que las rutas de aquí no tienen efecto.";
+"%@ mode. The VPN's kill switch sends all traffic through it except local-network addresses." = "Modo %@. El kill switch de la VPN envía todo el tráfico por ella salvo las direcciones de la red local.";
 "%@ mode. Routed addresses: %lld" = "Modo %1$@. Direcciones enrutadas: %2$lld";
 "Set Routing Mode" = "Cambiar el modo de enrutamiento";
 "Switches VPN Bypass to Bypass, VPN Only or Custom, as vpnb mode does." = "Cambia VPN Bypass a Bypass, Solo VPN o Personalizado, como vpnb mode.";
