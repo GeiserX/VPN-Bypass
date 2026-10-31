@@ -486,6 +486,7 @@ struct StatusTab: View {
     private func content(now: Date) -> some View {
         let input = DropdownStatus.Input.current(routeManager, helperReady: helperManager.helperState.isReady)
         return VStack(alignment: .leading, spacing: 18) {
+            MenuBarIconHiddenNote()
             summaryView(StatusPage.summary(input, now: now))
             problemsSection(input)
             routeCheckSection

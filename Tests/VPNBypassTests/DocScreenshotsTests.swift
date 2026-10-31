@@ -617,6 +617,78 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderSettings(page: .status, to: "status-problems.png")
     }
 
+    // MARK: - Dropdown rows and the add field (step 11), drawn for the pull request
+
+    // BEGIN ROWS SHOTS
+    func testRowsOn() throws {
+        seedBypass()
+        hoverRow("YouTube")
+        _ = try renderDropdown(to: "rows-on.png")
+    }
+
+    func testRowsPartlyRouted() throws {
+        seedPartlyRouted()
+        hoverRow("Zoom")
+        _ = try renderDropdown(to: "rows-partly.png")
+    }
+
+    func testRowsDisconnected() throws {
+        seedBypass()
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        _ = try renderDropdown(to: "rows-disconnected.png")
+    }
+
+    func testRowsStarting() throws {
+        seedConnected(mode: .bypass)
+        rm.activeRoutes = []
+        rm.lastRouteChange = nil
+        rm.config.domains = [DomainEntry(domain: "en.wikipedia.org", enabled: true)]
+        rm.isLoading = true
+        rm.lastUpdate = nil
+        _ = try renderDropdown(to: "rows-starting.png")
+    }
+
+    func testRowsLongList() throws {
+        seedBypass()
+        let more = ["github.com", "docs.example.com", "status.example.com", "registry.npmjs.org"]
+        rm.config.domains += more.map { DomainEntry(domain: $0, enabled: true) }
+        rm.activeRoutes += addresses(["github.com": 3, "docs.example.com": 2, "status.example.com": 1,
+                                      "registry.npmjs.org": 2], gateway: "192.168.1.1")
+        _ = try renderDropdown(to: "rows-long.png")
+    }
+
+    func testRowsVPNOnly() throws {
+        seedConnected(mode: .vpnOnly)
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.com", enabled: true),
+                                    DomainEntry(domain: "git.example.com", enabled: true)]
+        rm.activeRoutes = ClassicRouteCompiler.bypassAllCatchAlls.map {
+            route($0, via: "192.168.1.1", for: ClassicRouteCompiler.catchAllSource)
+        } + addresses(["intranet.example.com": 2, "git.example.com": 1], gateway: "10.0.0.1")
+        rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-19), routeCount: 3, failedCount: 0)
+        _ = try renderDropdown(to: "rows-vpn-only.png")
+    }
+
+    func testRowsCustom() throws {
+        seedCustom()
+        _ = try renderDropdown(to: "rows-custom.png")
+    }
+    // END ROWS SHOTS
+
+    /// The Status page when the app is opened again with its menu bar icon hidden.
+    func testRowsStatusWithTheIconHidden() throws {
+        seedBypass()
+        MenuBarIconVisibility.shared.isHidden = true
+        defer { MenuBarIconVisibility.shared.isHidden = false }
+        _ = try renderSettings(page: .status, to: "rows-status-icon-hidden.png")
+    }
+
+    private func hoverRow(_ name: String) {
+        RoutedBySourceCard.hoveredRowForScreenshots = name
+        addTeardownBlock { @MainActor in RoutedBySourceCard.hoveredRowForScreenshots = nil }
+    }
+
     /// Bypass with Zoom on and no address for it, and an apply 64 s ago with seven failures:
     /// two names that did not resolve and five addresses the helper refused.
     private func seedPartlyRouted() {

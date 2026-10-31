@@ -3,8 +3,6 @@
 /* ===== Barra de menú ===== */
 "VPN Connected" = "VPN conectada";
 "VPN Disconnected" = "VPN desconectada";
-"Add Domain to VPN" = "Añadir dominio a la VPN";
-"Add Domain to Bypass" = "Añadir dominio al bypass";
 "Refresh Routes" = "Actualizar rutas";
 "Clear" = "Limpiar";
 "Verify Routes" = "Verificar rutas";
@@ -518,7 +516,6 @@
 "VPN Bypass — VPN Only: %lld destinations use the VPN, everything else is direct" = "VPN Bypass — Solo VPN: %lld destinos usan la VPN, todo lo demás va directo";
 "VPN Bypass — Custom: %lld destinations routed by your rules" = "VPN Bypass — Personalizado: %lld destinos enrutados por tus reglas";
 "VPN Bypass — Bypass: %lld destinations skip the VPN, everything else is tunnelled" = "VPN Bypass — Bypass: %lld destinos evitan la VPN, todo lo demás va por el túnel";
-"domain.com" = "domain.com";
 "Refreshing routes…" = "Actualizando rutas…";
 "Re-resolve DNS Now" = "Volver a resolver el DNS ahora";
 "Remove All Routes…" = "Quitar todas las rutas…";
@@ -891,3 +888,14 @@
 "Switch…" = "Cambiar…";
 "Switch to %@…" = "Cambiar a %@…";
 "Read-only in this mode" = "Solo lectura en este modo";
+
+/* Dropdown rows, add field, hidden menu bar icon */
+"Turn Off %@" = "Desactivar %@";
+"Retry %@" = "Reintentar %@";
+"Show %@ in Settings" = "Ver %@ en Ajustes";
+"Copy the Addresses of %@" = "Copiar las direcciones de %@";
+"Add a Site" = "Añadir un sitio";
+"Add a site to bypass…" = "Añadir un sitio que evite la VPN…";
+"Add a site for the VPN…" = "Añadir un sitio para la VPN…";
+"The menu bar icon is not visible. It may be switched off in System Settings, or hidden by the notch." = "El icono de la barra de menús no se ve. Puede estar desactivado en Ajustes del Sistema u oculto tras la muesca.";
+"Open Menu Bar Settings…" = "Abrir los ajustes de la barra de menús…";

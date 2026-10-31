@@ -3,8 +3,6 @@
 /* ===== Menu Bar ===== */
 "VPN Connected" = "VPN Connected";
 "VPN Disconnected" = "VPN Disconnected";
-"Add Domain to VPN" = "Add Domain to VPN";
-"Add Domain to Bypass" = "Add Domain to Bypass";
 "Refresh Routes" = "Refresh Routes";
 "Clear" = "Clear";
 "Verify Routes" = "Verify Routes";
@@ -518,7 +516,6 @@
 "VPN Bypass — VPN Only: %lld destinations use the VPN, everything else is direct" = "VPN Bypass — VPN Only: %lld destinations use the VPN, everything else is direct";
 "VPN Bypass — Custom: %lld destinations routed by your rules" = "VPN Bypass — Custom: %lld destinations routed by your rules";
 "VPN Bypass — Bypass: %lld destinations skip the VPN, everything else is tunnelled" = "VPN Bypass — Bypass: %lld destinations skip the VPN, everything else is tunnelled";
-"domain.com" = "domain.com";
 "Refreshing routes…" = "Refreshing routes…";
 "Re-resolve DNS Now" = "Re-resolve DNS Now";
 "Remove All Routes…" = "Remove All Routes…";
@@ -891,3 +888,14 @@
 "Switch…" = "Switch…";
 "Switch to %@…" = "Switch to %@…";
 "Read-only in this mode" = "Read-only in this mode";
+
+/* Dropdown rows, add field, hidden menu bar icon */
+"Turn Off %@" = "Turn Off %@";
+"Retry %@" = "Retry %@";
+"Show %@ in Settings" = "Show %@ in Settings";
+"Copy the Addresses of %@" = "Copy the Addresses of %@";
+"Add a Site" = "Add a Site";
+"Add a site to bypass…" = "Add a site to bypass…";
+"Add a site for the VPN…" = "Add a site for the VPN…";
+"The menu bar icon is not visible. It may be switched off in System Settings, or hidden by the notch." = "The menu bar icon is not visible. It may be switched off in System Settings, or hidden by the notch.";
+"Open Menu Bar Settings…" = "Open Menu Bar Settings…";

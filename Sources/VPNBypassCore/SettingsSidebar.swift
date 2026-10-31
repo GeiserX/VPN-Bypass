@@ -82,6 +82,14 @@ enum SettingsSidebar {
         }
     }
 
+    /// The page ↑ or ↓ moves to from `page`, in the order the sidebar lists them, read-only
+    /// pages included (they open read-only). It stops at the first and the last page.
+    static func page(after page: Page, movingUp: Bool) -> Page {
+        guard let index = pages.firstIndex(of: page) else { return page }
+        let next = movingUp ? index - 1 : index + 1
+        return pages.indices.contains(next) ? pages[next] : page
+    }
+
     /// Where the last page is kept, so the window reopens on it.
     static let lastPageKey = "settingsLastPage"
 
@@ -125,6 +133,9 @@ struct SettingsSidebarView: View {
     @Binding var selection: SettingsView.SettingsTab
     /// The title bar's height: the popup starts under the traffic lights.
     let topInset: CGFloat
+    /// The list has the keyboard focus, so ↑ and ↓ change page, as in a native sidebar. A click
+    /// on a row gives it the focus; Tab reaches it with full keyboard access.
+    @FocusState private var listFocused: Bool
 
     var body: some View {
         let mode = routeManager.config.routingMode
@@ -150,12 +161,22 @@ struct SettingsSidebarView: View {
                                                isSelected: page == selection,
                                                isReadOnly: SettingsSidebar.isReadOnly(page, in: mode)) {
                                 selection = page
+                                listFocused = true
                             }
                         }
                     }
                 }
                 .padding(.horizontal, Theme.Space.s)
                 .padding(.bottom, Theme.Space.m)
+                .focusable()
+                .focused($listFocused)
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .up: selection = SettingsSidebar.page(after: selection, movingUp: true)
+                    case .down: selection = SettingsSidebar.page(after: selection, movingUp: false)
+                    default: break
+                    }
+                }
             }
         }
         .frame(width: Self.width)
