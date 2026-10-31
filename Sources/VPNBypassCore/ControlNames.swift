@@ -48,10 +48,10 @@ enum ControlNames {
 }
 
 /// The dropdown's keyboard shortcuts. Each one sits on a control that is always there (⌘N on
-/// the add field, ⌘R on Refresh, ⌘, on the gear, ⌘Q on a hidden button), because a SwiftUI `Menu` only answers its
-/// items' keys while it is open; the "…" menu lists ⌘Q on its Quit item.
+/// the add field, ⌘R on Refresh, ⌘, on the gear, ⌘P and ⌘Q on hidden buttons), because a SwiftUI `Menu` only answers its
+/// items' keys while it is open; the "…" menu lists ⌘Q on its Quit item, the Pause menu ⌘P on For 1 Hour.
 enum DropdownShortcut: CaseIterable {
-    case addSite, refreshRoutes, settings, quit
+    case addSite, refreshRoutes, settings, quit, pause
 
     var key: KeyEquivalent {
         switch self {
@@ -59,12 +59,13 @@ enum DropdownShortcut: CaseIterable {
         case .refreshRoutes: return "r"
         case .settings: return ","
         case .quit: return "q"
+        case .pause: return "p"
         }
     }
 
     var modifiers: EventModifiers { .command }
 
-    /// The key as a menu writes it: ⌘N, ⌘R, ⌘, and ⌘Q.
+    /// The key as a menu writes it: ⌘N, ⌘R, ⌘, ⌘Q and ⌘P.
     var symbol: String { "⌘" + String(key.character).uppercased() }
 
     /// The menu item's title.
@@ -76,6 +77,8 @@ enum DropdownShortcut: CaseIterable {
         case .refreshRoutes: return String(localized: "Refresh Routes", bundle: bundle)
         case .settings: return String(localized: "Settings…", bundle: bundle)
         case .quit: return String(localized: "Quit VPN Bypass", bundle: bundle)
+        // Pauses for an hour, or resumes when paused (`PauseShortcut`).
+        case .pause: return String(localized: "Pause or Resume", bundle: bundle)
         }
     }
 

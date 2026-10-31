@@ -719,6 +719,68 @@ final class DocScreenshotsTests: XCTestCase {
     }
     // END ROWS SHOTS
 
+    // MARK: - Pause (step 12), drawn for the pull request
+
+    // BEGIN PAUSE SHOTS
+    func testPauseBypassOn() throws {
+        seedBypass()
+        _ = try renderDropdown(to: "pause-bypass-on.png")
+    }
+
+    func testPauseVPNOnly() throws {
+        seedConnected(mode: .vpnOnly)
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.com", enabled: true),
+                                    DomainEntry(domain: "git.example.com", enabled: true)]
+        rm.activeRoutes = ClassicRouteCompiler.bypassAllCatchAlls.map {
+            route($0, via: "192.168.1.1", for: ClassicRouteCompiler.catchAllSource)
+        } + addresses(["intranet.example.com": 2, "git.example.com": 1], gateway: "10.0.0.1")
+        rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-19), routeCount: 3, failedCount: 0)
+        _ = try renderDropdown(to: "pause-vpn-only.png")
+    }
+
+    func testPauseCustomWithAProxyRule() throws {
+        seedCustom()
+        _ = try renderDropdown(to: "pause-custom.png")
+    }
+    // END PAUSE SHOTS
+
+    func testPausePausedForAnHour() throws {
+        seedPaused(.oneHour)
+        _ = try renderDropdown(to: "pause-paused-hour.png")
+    }
+
+    func testPausePausedUntilReconnect() throws {
+        seedPaused(.untilReconnect)
+        _ = try renderDropdown(to: "pause-paused-reconnect.png")
+    }
+
+    func testPausePausedUntilResume() throws {
+        seedPaused(.untilResume)
+        _ = try renderDropdown(to: "pause-paused-resume.png")
+    }
+
+    /// The removal failed for five addresses: Retry, never Paused.
+    func testPausePausedWithRoutesLeft() throws {
+        seedPaused(.oneHour)
+        rm.activeRoutes = addresses(["Telegram": 5], gateway: "192.168.1.1")
+        rm.lastRouteChange = .init(kind: .removedAll, at: Date().addingTimeInterval(-60), routeCount: 5, failedCount: 5)
+        _ = try renderDropdown(to: "pause-paused-left.png")
+    }
+
+    func testPausePausedStatusPage() throws {
+        seedPaused(.oneHour)
+        _ = try renderSettings(page: .status, to: "pause-paused-status.png")
+    }
+
+    /// Bypass paused two minutes ago: every route out, the lists kept for Resume.
+    private func seedPaused(_ length: PauseLength) {
+        seedBypass()
+        rm.activeRoutes = []
+        rm.lastRouteChange = .init(kind: .removedAll, at: Date().addingTimeInterval(-120), routeCount: 0, failedCount: 0)
+        rm.setPauseStateForTests(PauseState(length: length, since: Date().addingTimeInterval(-120), mode: .bypass))
+        addTeardownBlock { @MainActor in RouteManager.shared.setPauseStateForTests(nil) }
+    }
+
     /// The Status page when the app is opened again with its menu bar icon hidden.
     func testRowsStatusWithTheIconHidden() throws {
         seedBypass()

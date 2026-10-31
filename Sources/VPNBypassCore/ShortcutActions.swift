@@ -4,9 +4,6 @@
 // `ControlSurface.handle`, the entry point `vpnb` and the MCP server use. So a Shortcut gets the
 // same checks, the same save and re-apply, the same log lines and the same footer line as
 // `vpnb`, marked as coming from Shortcuts instead of the command line.
-//
-// Pause and Resume are not here yet: the app has no pause to call. They come with Pause
-// (step 12 of docs/design/APP-REWORK-PROPOSALS.md).
 
 import Foundation
 
@@ -16,6 +13,8 @@ enum ShortcutAction: Equatable {
     case addDomain(String, list: DomainList)
     case setService(id: String, on: Bool)
     case getStatus
+    case pause(PauseLength)
+    case resume
 
     /// The control-socket request that does it.
     var request: ControlRequest {
@@ -28,6 +27,10 @@ enum ShortcutAction: Equatable {
             return ControlRequest(cmd: on ? "service.enable" : "service.disable", args: ["id": id])
         case .getStatus:
             return ControlRequest(cmd: "status")
+        case .pause(let length):
+            return ControlRequest(cmd: "pause", args: ["for": length.wireValue])
+        case .resume:
+            return ControlRequest(cmd: "resume")
         }
     }
 }
@@ -99,6 +102,21 @@ enum ShortcutActions {
            : String(localized: "\(name) is off.", bundle: bundle)
     }
 
+    static func pauseDone(_ length: PauseLength, in bundle: Bundle = .main) -> String {
+        switch length {
+        case .minutes(let m):
+            return String(localized: "Paused for \(DropdownStatus.countdown(TimeInterval(m * 60))): traffic follows the VPN's own routes.", bundle: bundle)
+        case .untilReconnect:
+            return String(localized: "Paused until the VPN reconnects: traffic follows the VPN's own routes.", bundle: bundle)
+        case .untilResume:
+            return String(localized: "Paused until you resume: traffic follows the VPN's own routes.", bundle: bundle)
+        }
+    }
+
+    static func resumeDone(in bundle: Bundle = .main) -> String {
+        String(localized: "Resumed: the routes are coming back.", bundle: bundle)
+    }
+
     /// Get Status's answer: the mode, then whether anything is routed and, when not, the one
     /// reason, in the order the dropdown checks them (MenuBarLabel.iconAccessibilityLabel): the
     /// kill switch before "nothing routed", since it is why routes would have no effect.
@@ -109,6 +127,9 @@ enum ShortcutActions {
         }
         if !runtime.helperReady {
             return String(localized: "\(name) mode. The helper is not ready, so nothing is routed.", bundle: bundle)
+        }
+        if runtime.paused != nil {
+            return String(localized: "\(name) mode. Paused: traffic follows the VPN's own routes.", bundle: bundle)
         }
         if !runtime.vpnConnected {
             return String(localized: "\(name) mode. The VPN is not connected.", bundle: bundle)

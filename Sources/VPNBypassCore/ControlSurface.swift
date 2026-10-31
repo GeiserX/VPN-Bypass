@@ -94,9 +94,10 @@ public enum ControlSurface {
                 vpnType: rm.vpnType?.rawValue,
                 enforcedRouteCount: rm.uniqueRouteCount,
                 enforcing: rm.isVPNConnected && helper.helperState.isReady && !rm.activeRoutes.isEmpty
-                    && rm.vpnKillSwitch == nil,
+                    && rm.vpnKillSwitch == nil && !rm.isPaused,
                 appVersion: appVersion(from: Bundle.main.infoDictionary),
-                killSwitch: rm.vpnKillSwitch?.flagNames
+                killSwitch: rm.vpnKillSwitch?.flagNames,
+                paused: rm.pauseState?.wireDescription
             )
         }
 

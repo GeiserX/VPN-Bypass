@@ -1,6 +1,6 @@
 // ShortcutIntents.swift
 // The Shortcuts actions (idea 10 of docs/design/APP-REWORK-PROPOSALS.md): Set Mode, Add Domain,
-// Turn Service On or Off and Get Status. Each one only turns its parameters into a
+// Turn Service On or Off, Get Status, Pause and Resume. Each one only turns its parameters into a
 // ShortcutAction and runs it (ShortcutActions.swift), so what it does is what `vpnb` does.
 //
 // Shortcuts finds these through Contents/Resources/Metadata.appintents, which the Makefile's
@@ -50,6 +50,31 @@ enum ShortcutDomainList: String, AppEnum {
         switch self {
         case .bypass: return .bypass
         case .vpnOnly: return .vpnOnly
+        }
+    }
+}
+
+/// How long Pause lasts, as Shortcuts offers it: the dropdown's four choices.
+enum ShortcutPauseLength: String, AppEnum {
+    case fifteenMinutes
+    case oneHour
+    case untilReconnect
+    case untilResume
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Pause length"
+    static var caseDisplayRepresentations: [ShortcutPauseLength: DisplayRepresentation] = [
+        .fifteenMinutes: "For 15 Minutes",
+        .oneHour: "For 1 Hour",
+        .untilReconnect: "Until the VPN Reconnects",
+        .untilResume: "Until I Resume",
+    ]
+
+    var length: PauseLength {
+        switch self {
+        case .fifteenMinutes: return .fifteenMinutes
+        case .oneHour: return .oneHour
+        case .untilReconnect: return .untilReconnect
+        case .untilResume: return .untilResume
         }
     }
 }
@@ -210,5 +235,42 @@ struct GetStatusIntent: AppIntent {
         let mode = response.result?.mode.flatMap(RoutingMode.init(rawValue:)) ?? RouteManager.shared.config.routingMode
         let line = ShortcutActions.statusLine(mode: mode, runtime: response.result?.runtime)
         return .result(value: line, dialog: "\(line)")
+    }
+}
+
+struct PauseIntent: AppIntent {
+    static var title: LocalizedStringResource = "Pause Routing"
+    static var description = IntentDescription("Takes the app's routes out for a while, so traffic follows the VPN's own routes, as vpnb pause does. Not offered in VPN Only.")
+
+    @Parameter(title: "Length", default: .oneHour)
+    var length: ShortcutPauseLength
+
+    init() {}
+
+    init(length: ShortcutPauseLength) {
+        self.length = length
+    }
+
+    var action: ShortcutAction { .pause(length.length) }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        _ = try await ShortcutActions.run(action)
+        return .result(dialog: "\(ShortcutActions.pauseDone(length.length))")
+    }
+}
+
+struct ResumeIntent: AppIntent {
+    static var title: LocalizedStringResource = "Resume Routing"
+    static var description = IntentDescription("Ends a pause and puts the routes back, as vpnb resume does.")
+
+    init() {}
+
+    var action: ShortcutAction { .resume }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        _ = try await ShortcutActions.run(action)
+        return .result(dialog: "\(ShortcutActions.resumeDone())")
     }
 }
