@@ -2281,6 +2281,9 @@ final class RouteManager: ObservableObject {
         let confirmedUniqueCount = uniqueRouteCount
         let totalFailures = failedCount + batchFailureCount
         lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: totalFailures)
+        // The last check described the routes before this apply; a stale wrong-way or broken
+        // result must not keep the pill amber over routes that were just put back.
+        clearRouteCheck()
 
         if failedCount > 0 {
             log(.warning, "Applied \(confirmedUniqueCount) unique routes (\(failedCount) domains failed DNS)")
@@ -2414,6 +2417,9 @@ final class RouteManager: ObservableObject {
 
         let confirmedUniqueCount = uniqueRouteCount
         lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount)
+        // The last check described the routes before this apply; a stale wrong-way or broken
+        // result must not keep the pill amber over routes that were just put back.
+        clearRouteCheck()
         if batchFailureCount > 0 {
             log(.warning, "Applied custom routes (\(batchFailureCount) kernel failures — counts approximate until verified)")
         } else {
@@ -2736,6 +2742,9 @@ final class RouteManager: ObservableObject {
         let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Cache ")
         guard committed else { return false }
         lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount)
+        // The last check described the routes before this apply; a stale wrong-way or broken
+        // result must not keep the pill amber over routes that were just put back.
+        clearRouteCheck()
 
         if batchFailureCount > 0 {
             log(.warning, "Applied routes from cache (\(batchFailureCount) kernel failures — counts approximate)")

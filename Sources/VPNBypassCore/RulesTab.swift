@@ -86,7 +86,8 @@ extension RouteManager {
     /// A rule with the same pattern refuses the add, naming its route: on Direct it is a
     /// repeat, and on another route it matches first, so a second rule would do nothing. A
     /// rule whose route is gone matches nothing, so it does not count. Returns the rule
-    /// saved, why the input was refused, or nil when there is no Direct route (logged).
+    /// saved, why the input was refused, or nil when no Direct route is switched on (logged): the
+    /// compiler skips rules on a route that is off, so a rule there would route nothing.
     func addDirectRule(_ input: String) -> Result<Rule, AddDomainError>? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let checked: CheckedDomainInput
@@ -100,8 +101,8 @@ extension RouteManager {
         let suffix = WildcardDomain.suffix(of: checked.value)
         let matchType: MatchType = checked.isCIDR ? .cidr : (suffix == nil ? .domain : .suffix)
         let pattern = suffix ?? checked.value
-        guard let directRouteId = config.routes.first(where: { $0.egress == .direct })?.id else {
-            log(.error, "Cannot add rule for \(checked.value): no Direct route found")
+        guard let directRouteId = config.routes.first(where: { $0.egress == .direct && $0.enabled })?.id else {
+            log(.error, "Cannot add rule for \(checked.value): no Direct route is switched on")
             return nil
         }
         // Only a rule that routes counts: one switched off, or on a route that is off, does not.

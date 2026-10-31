@@ -150,6 +150,16 @@ final class ReworkStatusTests: XCTestCase {
         XCTAssertEqual(StatusPage.summary(input(), now: now).title, "Working")
     }
 
+    /// A2 on the Status page: with the helper not ready, the Routed row does not report a past
+    /// apply under a "Not working" title; it says what is still installed.
+    func testTheStatusRoutedRowHidesThePastApplyWhileTheHelperIsDown() {
+        let applied = RouteManager.RouteChangeOutcome(kind: .applied, at: now.addingTimeInterval(-23), routeCount: 62, failedCount: 0)
+        XCTAssertEqual(StatusPage.appliedLine(installed: 62, lastChange: applied, now: now).text, "62 addresses, 23 s ago, none failed")
+        XCTAssertEqual(StatusPage.appliedLine(installed: 62, lastChange: applied, now: now, helperReady: false).text, "62 addresses")
+        let source = (try? ReworkSource.body(of: "private func routesSection", in: "StatusTab.swift")) ?? ""
+        XCTAssertTrue(source.contains("helperReady: input.helperReady"), "the page passes the helper state to the row")
+    }
+
     /// The live input counts an entry with no addresses, as the routes card marks it.
     @MainActor
     func testTheLiveInputCountsEntriesWithoutAddresses() {
@@ -313,6 +323,48 @@ final class ReworkDropdownTests: RouteManagerTestCase {
         let connected = try XCTUnwrap(RoutedBySource.make(mode: .bypass, config: cfg, routes: routes, busy: false))
         XCTAssertEqual(connected.rows.map(\.id), ["a.example.com", "b.example.com"])
         XCTAssertEqual(connected.problemCount, 1)
+    }
+
+    /// A4: a wildcard gets routes only when a lookup under it learns one, so one with none yet
+    /// is listed but is not "an entry with no addresses", in Bypass and in VPN Only.
+    func testAnIdleWildcardIsNotAProblem() throws {
+        var cfg = RouteManager.Config()
+        cfg.routingMode = .bypass
+        cfg.domains = [DomainEntry(domain: "*.shop.example", enabled: true), DomainEntry(domain: "b.example.com", enabled: true)]
+        for i in cfg.services.indices { cfg.services[i].enabled = false }
+        cfg.services.append(ServiceEntry(id: "wild", name: "Wild Only", enabled: true,
+                                         domains: ["*.wild.example"], ipRanges: [], isCustom: true))
+        let bypass = try XCTUnwrap(RoutedBySource.make(mode: .bypass, config: cfg, routes: [], busy: false))
+        XCTAssertEqual(Set(bypass.rows.map(\.id)), ["*.shop.example", "b.example.com", "Wild Only"], "the idle wildcard stays listed")
+        XCTAssertEqual(bypass.rows.filter(\.isProblem).map(\.id), ["b.example.com"])
+        XCTAssertEqual(bypass.problemCount, 1)
+
+        cfg.inverseDomains = [DomainEntry(domain: "*.corp.example", enabled: true), DomainEntry(domain: "intra.example", enabled: true)]
+        let vpnOnly = try XCTUnwrap(RoutedBySource.make(mode: .vpnOnly, config: cfg, routes: [], busy: false))
+        XCTAssertEqual(vpnOnly.rows.filter(\.isProblem).map(\.id), ["intra.example"])
+    }
+
+    /// A5: a Direct route switched off routes nothing, so the quick-add refuses to put a rule
+    /// there rather than say it was added to the Direct route.
+    func testACustomAddRefusesADirectRouteThatIsOff() throws {
+        var (direct, _) = custom { _, _ in [] }
+        direct.enabled = false
+        rm.config.routes[0] = direct
+        XCTAssertNil(rm.addForCurrentMode("news.ycombinator.com"))
+        XCTAssertTrue(rm.config.rules.isEmpty, "no rule saved on a route that is off")
+    }
+
+    /// An apply replaces the routes the last check looked at, so every apply path drops it:
+    /// a stale wrong-way or broken result would keep the pill amber over repaired routes.
+    func testEveryApplyDropsTheLastRouteCheck() throws {
+        let source = try ReworkSource.read("RouteManager.swift")
+        let lines = source.components(separatedBy: "\n")
+        let applies = lines.indices.filter { lines[$0].contains("lastRouteChange = RouteChangeOutcome(kind: .applied") }
+        XCTAssertEqual(applies.count, 3, "the full apply, the Custom apply and the cache apply")
+        for index in applies {
+            let next = lines[(index + 1)...].prefix(4).joined(separator: "\n")
+            XCTAssertTrue(next.contains("clearRouteCheck()"), "apply at line \(index + 1) keeps a stale check")
+        }
     }
 
     /// A7: the disconnected dropdown keeps the "…" menu, and Remove All Routes… in it.

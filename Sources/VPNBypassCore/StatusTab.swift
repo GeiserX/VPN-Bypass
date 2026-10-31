@@ -165,9 +165,11 @@ enum StatusPage {
 
     /// The Applied row: what the last apply or removal did, or what is installed.
     static func appliedLine(installed: Int, lastChange: RouteManager.RouteChangeOutcome?, now: Date,
-                            bundle: Bundle = .main) -> Line {
-        // Same rule as the dropdown: a removal stops being reported once routes are back.
-        guard let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed) else {
+                            helperReady: Bool = true, bundle: Bundle = .main) -> Line {
+        // Same rule as the dropdown: a removal stops being reported once routes are back, and
+        // with the helper not ready a past apply is not reported over a "Not working" title.
+        guard let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed,
+                                                         helperReady: helperReady) else {
             return installed > 0
                 ? Line(text: routes(installed, bundle: bundle))
                 : Line(text: String(localized: "None yet", bundle: bundle))
@@ -486,7 +488,8 @@ struct StatusTab: View {
         StatusSection(String(localized: "Addresses")) {
             StatusLineRow(label: String(localized: "Routed"),
                           line: StatusPage.appliedLine(installed: routeManager.routedAddressCount,
-                                                       lastChange: routeManager.lastRouteChange, now: now))
+                                                       lastChange: routeManager.lastRouteChange, now: now,
+                                                       helperReady: input.helperReady))
             StatusDivider()
             StatusLineRow(label: String(localized: "From"), line: StatusPage.fromLine(input))
             StatusDivider()

@@ -1296,6 +1296,22 @@ enum RoutedBySource {
             }
         }
 
+        // A wildcard gets routes only when a lookup under it learns one, so with none yet it is
+        // idle, not broken: listed, never a problem. Learned routes are recorded under
+        // `*.suffix`, not under a service, so a service of wildcards only is the same.
+        var idleAllowed: Set<String> = []
+        switch mode {
+        case .bypass:
+            idleAllowed.formUnion(config.domains.filter { $0.enabled && $0.isWildcard }.map(\.domain))
+            idleAllowed.formUnion(config.services.filter {
+                $0.enabled && $0.ipRanges.isEmpty && !$0.domains.isEmpty && $0.domains.allSatisfy(WildcardDomain.isWildcard)
+            }.map(\.name))
+        case .vpnOnly:
+            idleAllowed.formUnion(config.inverseDomains.filter { $0.enabled && $0.isWildcard }.map(\.domain))
+        case .custom:
+            break
+        }
+
         // Only VPN Only shows its catch-alls, as the "Everything else" line.
         let counted = Self.counted(routes, vpnOnly: mode == .vpnOnly)
         // A destination can be recorded more than once for a source; count it once.
@@ -1307,7 +1323,7 @@ enum RoutedBySource {
 
         func row(id: String, name: String, icon: Icon, destinations: [String], expectsRoutes: Bool) -> Row {
             Row(id: id, name: name, icon: icon, routeCount: destinations.count,
-                isProblem: expectsRoutes && destinations.isEmpty && !busy,
+                isProblem: expectsRoutes && destinations.isEmpty && !busy && !idleAllowed.contains(id),
                 addresses: Array(destinations.prefix(tooltipAddresses)),
                 hiddenAddresses: max(0, destinations.count - tooltipAddresses))
         }
