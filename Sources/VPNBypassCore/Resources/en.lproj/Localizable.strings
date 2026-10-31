@@ -845,3 +845,10 @@
 "on" = "on";
 "Get Status" = "Get Status";
 "Tells the routing mode and whether anything is routed now, as vpnb status does." = "Tells the routing mode and whether anything is routed now, as vpnb status does.";
+"Block Listed Sites When the VPN Drops" = "Block Listed Sites When the VPN Drops";
+"VPN Only: hold the listed addresses back until the VPN returns" = "VPN Only: hold the listed addresses back until the VPN returns";
+"VPN down: listed addresses blocked for %lld site(s)" = "VPN down: listed addresses blocked for %lld site(s)";
+"Waiting for VPN routes: listed addresses blocked for %lld site(s)" = "Waiting for VPN routes: listed addresses blocked for %lld site(s)";
+"Open them directly" = "Open them directly";
+"Open the blocked sites directly, outside the VPN" = "Open the blocked sites directly, outside the VPN";
+"%lld listed address(es) are blocked until the VPN returns." = "%lld listed address(es) are blocked until the VPN returns.";

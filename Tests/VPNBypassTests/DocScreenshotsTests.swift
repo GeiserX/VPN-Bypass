@@ -120,6 +120,44 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size.width, 680)
     }
 
+    /// VPN Only with the VPN down, as a user without the block setting sees it.
+    func testDropdownInVPNOnlyWithTheVPNDown() throws {
+        seedVPNOnlyDown()
+        let size = try renderDropdown(to: "vpn-only-down.png")
+        XCTAssertEqual(size.width, 680)
+    }
+
+    /// The same with the block setting on: the listed addresses of two entries are blocked,
+    /// with the way out.
+    func testDropdownInVPNOnlyWithBlocks() throws {
+        seedVPNOnlyDown()
+        let saved = rm.blockedRoutes
+        addTeardownBlock { @MainActor in RouteManager.shared.blockedRoutes = saved }
+        rm.config.blockListedWhenVPNDown = true
+        rm.blockedRoutes = addresses(["intranet.example.com": 2, "git.example.com": 1], gateway: "")
+        let size = try renderDropdown(to: "vpn-only-blocked.png")
+        XCTAssertEqual(size.width, 680)
+    }
+
+    /// The General page, where the block setting is.
+    func testSettingsOnGeneral() throws {
+        seedVPNOnlyDown()
+        rm.config.blockListedWhenVPNDown = true
+        let size = try renderSettings(page: .general, to: "general.png")
+        XCTAssertEqual(size, NSSize(width: 1160, height: 1424))
+    }
+
+    private func seedVPNOnlyDown() {
+        seedConnected(mode: .vpnOnly)
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.com", enabled: true),
+                                    DomainEntry(domain: "git.example.com", enabled: true)]
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        rm.activeRoutes = []
+        rm.lastRouteChange = nil
+    }
+
     /// The dropdown after Verify Routes, with the path check's three kinds of result: one address
     /// that went into the tunnel, one that left the right way without an answer on 443, and the
     /// rest the right way and answering.

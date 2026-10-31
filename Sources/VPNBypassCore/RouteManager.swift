@@ -32,6 +32,13 @@ final class RouteManager: ObservableObject {
             }
         }
     }
+    /// VPN Only's listed addresses held back by blocks (reject routes) while the VPN is down,
+    /// with the entry each came from. Kept apart from `activeRoutes`: nothing routes through
+    /// them, and every apply, count and check reads `activeRoutes` as "what is routed".
+    @Published var blockedRoutes: [ActiveRoute] = []
+    var blockedDestinations: Set<String> { Set(blockedRoutes.map(\.destination)) }
+    /// How many VPN Only entries have addresses blocked, for the dropdown line.
+    var blockedSiteCount: Int { Set(blockedRoutes.map(\.source)).count }
     /// Unique kernel route count (activeRoutes may have multiple entries per destination for multi-source tracking)
     var uniqueRouteCount: Int { Set(activeRoutes.map { $0.destination }).count }
     /// The installed routes as the dropdown's card reads them.
@@ -695,6 +702,8 @@ final class RouteManager: ObservableObject {
                     await removeAllRoutes()
                     await applyAllRoutesInternal(sendNotification: false)
                 }
+            } else if !isVPNConnected {
+                Task { await releaseBlocksIfUnwanted() }
             }
             DNSLookupsMonitor.shared.followConfig()
 
@@ -1108,7 +1117,7 @@ final class RouteManager: ObservableObject {
                     keptCount = activeRoutes.count - failedCount
                 }
             } else {
-                await removeAllRoutes()
+                await tearDownAfterDrop()
                 // Whatever teardown retained is a genuine failed removal (see removeAllRoutes).
                 failedCount = activeRoutes.count
             }
@@ -1119,8 +1128,146 @@ final class RouteManager: ObservableObject {
             // kept-by-design separately from failed-removal.
             NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface,
                                                              routesKept: keptCount,
-                                                             routesFailed: failedCount)
+                                                             routesFailed: failedCount,
+                                                             addressesBlocked: blockedDestinations.count)
         }
+
+        // Blocks wait for the apply that replaces them. When none is coming (auto-apply off, the
+        // apply skipped or refused, or it ran and left some out), they go now: the VPN is up, so
+        // holding them back only keeps the sites unreachable.
+        await releaseBlocksIfNoApplyComing(applyPending: reconnectSettleTask != nil)
+    }
+
+    /// The release above, apart so a test can say whether a settle-gated apply is pending.
+    /// While one is (the settle wait, or an apply held back by apply-kill strikes, #106), the
+    /// blocks stay: releasing them is a write burst into the fragile window the gate protects,
+    /// and the apply replaces them anyway.
+    func releaseBlocksIfNoApplyComing(applyPending: Bool) async {
+        guard isVPNConnected, !blockedRoutes.isEmpty, !applyPending, !isApplyingRoutes, !isLoading else { return }
+        await releaseBlocks(replacedBy: Set(activeRoutes.map(\.destination)),
+                            reason: "the VPN is back and no apply is pending")
+    }
+
+    /// Teardown after a committed VPN drop in VPN Only and Custom. With the block setting on in
+    /// VPN Only, the listed addresses get their blocks FIRST, then everything else goes: the
+    /// catch-alls, and any listed address the helper could not block.
+    func tearDownAfterDrop() async {
+        await blockListedAddresses()
+        await removeAllRoutes(keepingBlocked: true)
+    }
+
+    /// Swaps VPN Only's listed routes for blocks through the helper (idea 7). The listed routes
+    /// point at a tunnel that is gone, so without this their sites load over the normal
+    /// connection, which is what a VPN Only user picked the mode to avoid.
+    ///
+    /// What gets blocked: every tracked address that is not a catch-all, plus anything an
+    /// in-flight apply pushed but has not committed (`pendingKernelAdds`), which teardown would
+    /// otherwise delete by destination. That includes a block an in-flight reconnect apply
+    /// already replaced, so it is blocked again. Learned wildcard routes are left to the
+    /// wildcard engine, which stops with the routes. IPv4 only, and only addresses the app
+    /// resolved: a site reached over IPv6 or through a lookup that skips the app is not held.
+    func blockListedAddresses() async {
+        guard config.routingMode == .vpnOnly, config.blockListedWhenVPNDown, !isShuttingDown,
+              HelperManager.shared.isHelperInstalled || addBlockRoutesBatchOverrideForTests != nil else { return }
+        let catchAlls = RouteCompiler.catchAllDestinations
+        var wanted: [ActiveRoute] = activeRoutes.filter {
+            !catchAlls.contains($0.destination) && !Self.isLearnedWildcardRoute($0)
+        }
+        let tracked = Set(wanted.map(\.destination))
+        for dest in pendingKernelAdds.sorted() where !catchAlls.contains(dest) && !tracked.contains(dest) {
+            let source = blockedRoutes.first { $0.destination == dest }?.source ?? "pending-block"
+            wanted.append(ActiveRoute(destination: dest, gateway: "", source: source, timestamp: Date()))
+        }
+        let destinations = Array(Set(wanted.map(\.destination))).sorted()
+        guard !destinations.isEmpty else { return }
+        let result = await addBlockRoutesBatchVia(destinations)
+        let blocked = Set(destinations).subtracting(result.failedDestinations)
+        let already = blockedDestinations
+        blockedRoutes += wanted.filter { blocked.contains($0.destination) && !already.contains($0.destination) }
+        activeRoutes.removeAll { blocked.contains($0.destination) }
+        pendingKernelAdds.subtract(blocked)
+        if result.failedDestinations.isEmpty {
+            log(.warning, "VPN down: \(blocked.count) listed address(es) blocked until the VPN returns")
+        } else {
+            log(.warning, "VPN down: \(blocked.count) listed address(es) blocked, \(result.failedDestinations.count) could not be blocked and are removed instead (\(result.error ?? "no reason given"))")
+        }
+        // A quit, the setting, the mode or the list can change during the batch above; a
+        // release that ran then found no records, so these would outlive it.
+        if isShuttingDown {
+            await releaseBlocks(reason: "quitting")
+        } else {
+            await releaseBlocksIfUnwanted()
+        }
+    }
+
+    /// Takes blocks out. Those in `replacedBy` are gone already: an install over a block
+    /// replaces it (`RouteKernel.installStep`). The rest are removed; a failed removal keeps
+    /// its record so a later pass, teardown or the startup sweep can still remove it.
+    func releaseBlocks(replacedBy replaced: Set<String> = [], only: Set<String>? = nil, reason: String) async {
+        let candidates = blockedRoutes.filter { only?.contains($0.destination) ?? true }
+        guard !candidates.isEmpty else { return }
+        let toRemove = Array(Set(candidates.map(\.destination)).subtracting(replaced)).sorted()
+        var failed: Set<String> = []
+        if !toRemove.isEmpty {
+            if HelperManager.shared.isHelperInstalled || removeRoutesBatchOverrideForTests != nil {
+                let result = await removeRoutesBatchVia(toRemove)
+                failed = (result.error != nil && result.failedDestinations.isEmpty)
+                    ? Set(toRemove) : Set(result.failedDestinations)
+            } else {
+                failed = Set(toRemove)
+            }
+        }
+        let released = Set(candidates.map(\.destination)).subtracting(failed)
+        blockedRoutes.removeAll { released.contains($0.destination) }
+        if failed.isEmpty {
+            log(.info, "Released \(released.count) block(s): \(reason)")
+        } else {
+            log(.warning, "Released \(released.count) block(s) (\(reason)); \(failed.count) could not be removed and stay listed for the next try")
+        }
+    }
+
+    /// Blocks are only for VPN Only with the setting on, and only for entries still listed
+    /// and enabled. Any change that leaves that state (another mode, the setting off, an entry
+    /// disabled or imported away) releases the blocks it no longer covers, VPN up or down. An
+    /// address another listed entry shares keeps its block.
+    func releaseBlocksIfUnwanted() async {
+        guard !blockedRoutes.isEmpty else { return }
+        guard config.routingMode == .vpnOnly, config.blockListedWhenVPNDown else {
+            await releaseBlocks(reason: config.routingMode != .vpnOnly ? "the mode is no longer VPN Only" : "the block setting is off")
+            return
+        }
+        // The bookkeeping sources (an in-flight or a failed-removal record) name no entry, so
+        // they never count as taken off the list.
+        let listed = Set(config.inverseDomains.filter(\.enabled).map(\.domain))
+            .union(["pending-block", "pending-sweep-retry", "#61 cleanup-retry"])
+        let stillHeld = Set(blockedRoutes.filter { listed.contains($0.source) }.map(\.destination))
+        blockedRoutes.removeAll { !listed.contains($0.source) && stillHeld.contains($0.destination) }
+        let unlisted = Set(blockedRoutes.filter { !listed.contains($0.source) }.map(\.destination))
+        if !unlisted.isEmpty {
+            await releaseBlocks(only: unlisted, reason: "their entries are no longer listed")
+        }
+    }
+
+    /// "Open them directly" in the dropdown: the listed sites go out over the normal connection
+    /// until the VPN returns.
+    func openBlockedSitesDirectly() {
+        Task { await releaseBlocks(reason: "Open them directly") }
+    }
+
+    /// The Settings switch. Turning it off releases any block in place now.
+    func setBlockListedWhenVPNDown(_ on: Bool) {
+        config.blockListedWhenVPNDown = on
+        saveConfig()
+        log(.info, "Block listed sites when the VPN drops: \(on ? "on" : "off")")
+        Task { await releaseBlocksIfUnwanted() }
+    }
+
+    /// Batch block, through the test override when set, else the helper. Stamped as a kernel
+    /// burst like every other batch (see addRoutesBatchTracked).
+    func addBlockRoutesBatchVia(_ destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
+        if let override = addBlockRoutesBatchOverrideForTests { return await override(destinations) }
+        if !destinations.isEmpty { lastKernelBurstAt = Date() }
+        return await HelperManager.shared.addBlockRoutesBatch(destinations: destinations)
     }
     
     /// The settle-gated apply scheduled by checkVPNStatusCore. Every precondition is
@@ -1142,6 +1289,7 @@ final class RouteManager: ObservableObject {
     }
 
     private func detectVPNInterface() async -> (connected: Bool, interface: String?, type: VPNType?) {
+        if let override = detectVPNInterfaceOverrideForTests { return await override() }
         // Before anything derives a type or a label from the map. This is the one funnel every
         // detection path goes through — the status timer, the startup apply, and the
         // display-only pass — so refreshing here means the first labels after launch are the
@@ -2583,16 +2731,21 @@ final class RouteManager: ObservableObject {
     /// Remove all routes — always proceeds (critical teardown for disconnect/quit/clear).
     /// Does NOT acquire the route operation gate so it cannot be blocked by a running operation.
     /// Increments routeEpoch so in-flight applies detect preemption and abort before committing.
-    func removeAllRoutes() async {
+    /// - Parameter keepingBlocked: leave VPN Only's blocks in place (the drop teardown, which
+    ///   has just put them there). Every other caller (quit, a mode switch, Remove All Routes)
+    ///   takes them out too.
+    func removeAllRoutes(keepingBlocked: Bool = false) async {
         routeEpoch &+= 1
         // Sweep the union of what the model tracks AND what was pushed to the kernel but
         // never committed (pendingKernelAdds) — the latter is invisible to the model by
-        // design of the epoch guard, and was the strand mechanism on 2026-08-07.
-        let destinations = Array(Set(activeRoutes.map { $0.destination }).union(pendingKernelAdds))
+        // design of the epoch guard, and was the strand mechanism on 2026-08-07. A block is
+        // never in it: removal is by destination, so a block's address would lose its block.
+        let destinations = Array(Set(activeRoutes.map { $0.destination }).union(pendingKernelAdds)
+            .subtracting(blockedDestinations))
 
         var failedDests: Set<String> = []
         if !destinations.isEmpty {
-            if HelperManager.shared.isHelperInstalled {
+            if HelperManager.shared.isHelperInstalled || removeRoutesBatchOverrideForTests != nil {
                 // Remove the catch-all routes (the bypass-all set, or a custom 0.0.0.0/0)
                 // FIRST, in their own fast batch. If a time-capped quit cuts teardown short,
                 // the full-tunnel-defeating catch-alls are already gone rather than stranded
@@ -2627,6 +2780,8 @@ final class RouteManager: ObservableObject {
                 failedDests.formUnion(destinations)
             }
         }
+        // After the catch-alls: a time-capped quit must spend its first write on them.
+        if !keepingBlocked { await releaseBlocks(reason: "all routes removed") }
 
         cancelAllRetries()
         // A failed removal must keep its record. The retention filter below only keeps entries
@@ -2840,7 +2995,11 @@ final class RouteManager: ObservableObject {
     /// timeout with no explicit failed list is treated conservatively as "all failed" (over-retaining
     /// is a harmless no-op next teardown; under-retaining would strand).
     private func unstrandRoutes(attempted: Set<String>, addFailed: Set<String>) async {
-        let split = RouteManager.destinationsToUnstrand(attempted: attempted, addFailed: addFailed)
+        // A destination blocked since this apply pushed it holds a block now, not this apply's
+        // route; removing it by destination would open the site (the drop teardown re-blocked it).
+        let blocked = blockedDestinations
+        let split = RouteManager.destinationsToUnstrand(attempted: attempted.subtracting(blocked),
+                                                        addFailed: addFailed)
         if split.catchAlls.isEmpty && split.rest.isEmpty { return }
         guard HelperManager.shared.isHelperInstalled || removeRoutesBatchOverrideForTests != nil else { return }
         log(.warning, "🔧 Apply preempted — removing \(split.catchAlls.count + split.rest.count) route(s) added before preemption to avoid a strand (#61)")
@@ -3022,6 +3181,12 @@ final class RouteManager: ObservableObject {
         pendingKernelAdds.subtract(newRoutes.map { $0.destination })
         lastUpdate = Date()
         wildcards.routesApplied()
+
+        // The VPN is back and this apply put the listed routes in: each block it installed
+        // over is replaced already, and any block for an address no longer listed goes.
+        if !blockedRoutes.isEmpty && isVPNConnected {
+            await releaseBlocks(replacedBy: newDestinations, reason: "VPN Only routes are back")
+        }
 
         // Manage hosts file if enabled
         if config.manageHostsFile {
@@ -4141,6 +4306,8 @@ final class RouteManager: ObservableObject {
                     if config.manageHostsFile { await updateHostsFile() }
                 }
             }
+        } else if !isVPNConnected {
+            Task { await releaseBlocksIfUnwanted() }
         }
     }
 
@@ -4209,6 +4376,14 @@ final class RouteManager: ObservableObject {
     /// Remove all routes matching a source (domain name or service name)
     /// Only removes kernel routes if no other source shares the same destination
     private func removeRoutesForSource(_ source: String) async {
+        // An entry taken off the list while its addresses are blocked loses its blocks, except
+        // an address another blocked entry shares.
+        let otherBlocked = Set(blockedRoutes.filter { $0.source != source }.map(\.destination))
+        let ownBlocked = Set(blockedRoutes.filter { $0.source == source }.map(\.destination))
+        if !ownBlocked.isEmpty {
+            blockedRoutes.removeAll { $0.source == source && otherBlocked.contains($0.destination) }
+            await releaseBlocks(only: ownBlocked.subtracting(otherBlocked), reason: "\(source) is off the list")
+        }
         let routesToRemove = activeRoutes.filter { $0.source == source }
         let destinationsStillNeeded = Set(activeRoutes.filter { $0.source != source }.map { $0.destination })
 
@@ -4424,6 +4599,8 @@ final class RouteManager: ObservableObject {
                 await applyAllRoutesInternal(sendNotification: false)
                 if config.manageHostsFile { await updateHostsFile() }
             }
+        } else if !isVPNConnected {
+            Task { await releaseBlocksIfUnwanted() }
         }
         return changed
     }
@@ -4445,6 +4622,8 @@ final class RouteManager: ObservableObject {
         config.routingMode = mode
         saveConfig()
         log(.info, "Routing mode changed to \(mode.displayName)")
+        // With the VPN down the switch below does nothing, so blocks would outlive the mode.
+        if !isVPNConnected { Task { await releaseBlocksIfUnwanted() } }
         applyRoutingModeChange()
     }
 
@@ -5313,6 +5492,7 @@ final class RouteManager: ObservableObject {
     /// and mutates config BEFORE calling this. Strictly a plumbing dedup of the tail that was
     /// copied across the mutation surfaces — every per-site policy is an explicit argument.
     func reconcileAfterConfigChange(reconcileListeners: Bool, reapplyRoutes: Bool, sendNotification: Bool = false) async {
+        await releaseBlocksIfUnwanted()
         if reconcileListeners { await reconcileProxyListeners() }
         if reapplyRoutes { await detectAndApplyRoutesAsync(sendNotification: sendNotification) }
     }
@@ -5556,6 +5736,11 @@ final class RouteManager: ObservableObject {
     var addRouteOverrideForTests: ((_ destination: String, _ gateway: String, _ isNetwork: Bool) async -> Bool)?
     var removeRouteOverrideForTests: ((_ destination: String) async -> Bool)?
     var resolveIPsOverrideForTests: ((_ domain: String) async -> [String]?)?
+    /// The helper's block batch, for the VPN Only block tests.
+    var addBlockRoutesBatchOverrideForTests: (([String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?))?
+    /// What `detectVPNInterface` answers, so a test can drive `checkVPNStatus` through a drop
+    /// or a flap with no real tunnel.
+    var detectVPNInterfaceOverrideForTests: (() async -> (connected: Bool, interface: String?, type: VPNType?))?
     var routeEpochForTests: UInt64 { routeEpoch }
 
     private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil, persistCache: Bool = true) async -> [ActiveRoute]? {

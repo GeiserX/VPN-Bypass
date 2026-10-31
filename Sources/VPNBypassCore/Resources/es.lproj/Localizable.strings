@@ -845,3 +845,10 @@
 "on" = "activado";
 "Get Status" = "Obtener el estado";
 "Tells the routing mode and whether anything is routed now, as vpnb status does." = "Dice el modo de enrutamiento y si ahora se enruta algo, como vpnb status.";
+"Block Listed Sites When the VPN Drops" = "Bloquear los sitios de la lista si la VPN se cae";
+"VPN Only: hold the listed addresses back until the VPN returns" = "Solo VPN: retiene las direcciones de la lista hasta que vuelva la VPN";
+"VPN down: listed addresses blocked for %lld site(s)" = "VPN caída: direcciones de la lista bloqueadas para %lld sitio(s)";
+"Waiting for VPN routes: listed addresses blocked for %lld site(s)" = "Esperando las rutas de la VPN: direcciones de la lista bloqueadas para %lld sitio(s)";
+"Open them directly" = "Abrirlos directamente";
+"Open the blocked sites directly, outside the VPN" = "Abrir los sitios bloqueados directamente, fuera de la VPN";
+"%lld listed address(es) are blocked until the VPN returns." = "%lld dirección(es) de la lista quedan bloqueadas hasta que vuelva la VPN.";
