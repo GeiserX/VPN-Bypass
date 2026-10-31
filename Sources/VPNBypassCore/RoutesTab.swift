@@ -50,6 +50,13 @@ struct RoutesTab: View {
         }
     }
 
+    /// The title bar search (⌘F), which the window owns.
+    @Environment(\.settingsSearch) private var searchText
+    /// The routes the search leaves; every route with no search.
+    private var shownRoutes: [Route] {
+        listenerRoutes.filter { SettingsSidebar.matches($0.name, search: searchText) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Header
@@ -196,7 +203,10 @@ struct RoutesTab: View {
     private var routeList: some View {
         SettingsCard(title: "Routes", icon: "arrow.triangle.branch", iconColor: Theme.blue) {
             VStack(spacing: 0) {
-                ForEach(Array(listenerRoutes.enumerated()), id: \.element.id) { idx, route in
+                if shownRoutes.isEmpty {
+                    SettingsSearchMiss(search: searchText)
+                }
+                ForEach(Array(shownRoutes.enumerated()), id: \.element.id) { idx, route in
                     RouteRow(route: route, listenerPort: listenerManager.port(for: route.id)) {
                         sheetState = .edit(route)
                     } onDelete: {
@@ -204,7 +214,7 @@ struct RoutesTab: View {
                     } onToggle: { enabled in
                         toggleRoute(route.id, enabled: enabled)
                     }
-                    if idx < listenerRoutes.count - 1 {
+                    if idx < shownRoutes.count - 1 {
                         Divider()
                             .background(Theme.divider)
                             .padding(.vertical, 4)

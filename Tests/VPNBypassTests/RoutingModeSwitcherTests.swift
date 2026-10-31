@@ -121,35 +121,6 @@ final class RoutingModeSwitcherTests: XCTestCase {
         XCTAssertTrue(RoutingModeCopy.canSwitch(to: .bypass, from: .vpnOnly))
     }
 
-    func testMenuChecksTheCurrentModeAndListsAllThree() {
-        let menu = RoutingModeMenu(current: .vpnOnly) { _ in }
-        XCTAssertEqual(menu.menu.items.map(\.title), ["Bypass", "VPN Only", "Custom Routes"])
-        XCTAssertEqual(menu.menu.items.map(\.state), [.off, .on, .off])
-        XCTAssertTrue(menu.menu.items.allSatisfy { $0.image != nil && $0.isEnabled })
-        if #available(macOS 14.4, *) {
-            XCTAssertEqual(menu.menu.items.map(\.subtitle), [
-                "Everything uses the VPN except what you list",
-                "Only what you list uses the VPN",
-                "Pick a route for each destination",
-            ])
-        }
-    }
-
-    func testMenuPickReportsTheModeAndChangesNothingElse() {
-        var picked: [RoutingMode] = []
-        let menu = RoutingModeMenu(current: .bypass) { picked.append($0) }
-        // Each item fires `pick(_:)` on the menu object, which reads the mode off the item.
-        for item in menu.menu.items {
-            XCTAssertEqual(item.action, #selector(RoutingModeMenu.pick(_:)))
-            XCTAssertTrue(item.target === menu)
-        }
-        menu.pick(menu.menu.items[2])
-        menu.pick(menu.menu.items[0])
-        XCTAssertEqual(picked, [.custom, .bypass])
-        // The menu does not move its own check: the title bar keeps the mode in use until Switch.
-        XCTAssertEqual(menu.menu.items.map(\.state), [.on, .off, .off])
-    }
-
     // MARK: Translations
 
     func testEveryModeSwitcherStringIsTranslated() throws {
@@ -181,7 +152,6 @@ final class RoutingModeSwitcherTests: XCTestCase {
         XCTAssertGreaterThan(keys.count, 20, "the scan found too few strings")
         XCTAssertTrue(keys.contains("%@ and %@."))
         XCTAssertTrue(keys.contains("%lld rules."))
-        XCTAssertTrue(keys.contains("Routing mode: %@"))
 
         for lang in ["en", "es", "fr"] {
             let url = core.appendingPathComponent("Resources/\(lang).lproj/Localizable.strings")

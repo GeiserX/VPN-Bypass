@@ -56,7 +56,7 @@ Everything is at [geiserx.github.io/VPN-Bypass](https://geiserx.github.io/VPN-By
 
 - [Getting started](https://geiserx.github.io/VPN-Bypass/getting-started/): Homebrew, DMG, source, and the first run
 - [Routing modes](https://geiserx.github.io/VPN-Bypass/routing/): Bypass, VPN Only and Custom; routes and rules
-- [Usage](https://geiserx.github.io/VPN-Bypass/usage/): the dropdown, the Settings tabs and the `vpnb` CLI
+- [Usage](https://geiserx.github.io/VPN-Bypass/usage/): the dropdown, the Settings pages and the `vpnb` CLI
 - [MCP server](https://geiserx.github.io/VPN-Bypass/mcp-server/): let an AI agent read and change VPN Bypass
 - [How it works](https://geiserx.github.io/VPN-Bypass/how-it-works/): supported VPN clients and how they are detected
 - [Other VPNs and proxies](https://geiserx.github.io/VPN-Bypass/coexistence/): what it touches when several tunnels or proxies run

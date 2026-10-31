@@ -143,25 +143,6 @@ final class NamedControlsTests: XCTestCase {
         XCTAssertFalse(DropdownShortcut.isKeyRepeat(nil))
     }
 
-    func testCommandFPutsTheCursorInTheServicesSearch() {
-        let rm = RouteManager.shared
-        let saved = rm.config
-        defer { rm.config = saved }
-        var cfg = RouteManager.Config()
-        cfg.routingMode = .bypass
-        // The page lists the services that are on; the rest wait in the catalogue.
-        for i in cfg.services.indices.prefix(8) { cfg.services[i].enabled = true }
-        rm.config = cfg
-
-        let window = host(ServicesTab().environmentObject(rm).environmentObject(SettingsUndo()).frame(width: 640, height: 720))
-        window.makeFirstResponder(nil)
-        XCTAssertFalse(window.firstResponder is NSTextView, "the field had the cursor before ⌘F")
-        XCTAssertTrue(press("f", in: window))
-        let editor = window.firstResponder as? NSTextView
-        XCTAssertNotNil(editor, "⌘F left the cursor in \(String(describing: window.firstResponder))")
-        XCTAssertEqual((editor?.delegate as? NSTextField)?.placeholderString, "Search services...")
-    }
-
     /// SwiftUI draws a `.switch` Toggle as an AppKit NSSwitch, so the size it got is readable.
     /// `scaleEffect` left it at the regular size and shrank only the drawing.
     func testTheServicesSwitchesAreTheSmallNativeSwitch() {

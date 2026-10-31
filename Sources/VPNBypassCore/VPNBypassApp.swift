@@ -37,8 +37,8 @@ public struct VPNBypassApp: App {
                 .environmentObject(settingsUndo)
         }
         // The app menu's Settings… (shown while the Settings window makes the app a regular
-        // app) opens the same window as the gear, which carries the Mode menu in its title bar.
-        // This scene's own window has no title bar accessory, so it could not change the mode.
+        // app) opens the same window as the gear, with its sidebar and resizable frame, instead
+        // of this scene's own window.
         .commands {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { SettingsWindowController.shared.show() }

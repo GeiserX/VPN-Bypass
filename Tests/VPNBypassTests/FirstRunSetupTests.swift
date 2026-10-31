@@ -277,9 +277,12 @@ final class FirstRunSetupViewTests: XCTestCase {
     }
 
     /// The "All N services…" row opens Settings on the Services page, and the request is used
-    /// once. The Domains page, the default, has no switch with an empty list; the Services page
+    /// once. The Status page, the default with no page saved, has no switch; the Services page
     /// has one per service that is on (here Telegram only; the rest are in the catalogue).
     func testTheSettingsWindowOpensOnTheRequestedPage() throws {
+        let savedPage = UserDefaults.standard.string(forKey: SettingsSidebar.lastPageKey)
+        UserDefaults.standard.removeObject(forKey: SettingsSidebar.lastPageKey)
+        defer { UserDefaults.standard.set(savedPage, forKey: SettingsSidebar.lastPageKey) }
         rm.config.services[try XCTUnwrap(rm.config.services.firstIndex { $0.id == "telegram" })].enabled = true
         func settings() -> some View {
             SettingsView()
@@ -290,7 +293,7 @@ final class FirstRunSetupViewTests: XCTestCase {
                 .environmentObject(SettingsUndo(routeManager: rm))
         }
         let plain = host(settings(), size: NSSize(width: 580, height: 680))
-        XCTAssertEqual(switches(in: plain).count, 0, "control: with no request the window opens on Domains")
+        XCTAssertEqual(switches(in: plain).count, 0, "control: with no request and no saved page the window opens on Status")
         window?.orderOut(nil)
 
         SettingsPageRequest.shared.page = .services

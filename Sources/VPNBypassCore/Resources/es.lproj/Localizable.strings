@@ -22,7 +22,6 @@
 /* ===== Ajustes — Pestañas ===== */
 "General" = "General";
 "Logs" = "Registros";
-"Info" = "Información";
 
 /* ===== Ajustes — Pestaña Dominios ===== */
 "VPN Only list" = "Lista Solo VPN";
@@ -35,7 +34,6 @@
 "Add a domain above to bypass VPN" = "Añade un dominio arriba para evitar la VPN";
 
 /* ===== Ajustes — Pestaña Servicios ===== */
-"Search services..." = "Buscar servicios...";
 "Create Custom Service" = "Crear servicio personalizado";
 "Custom" = "Personalizado";
 "%lld domains" = "%lld dominios";
@@ -362,11 +360,7 @@
 "Custom Routes" = "Rutas personalizadas";
 "Rules" = "Reglas";
 "Routing mode" = "Modo de enrutamiento";
-"Routing mode: %@" = "Modo de enrutamiento: %@";
 "Switch" = "Cambiar";
-"Everything uses the VPN except what you list" = "Todo usa la VPN salvo lo que pongas en la lista";
-"Only what you list uses the VPN" = "Solo lo que pongas en la lista usa la VPN";
-"Pick a route for each destination" = "Elige una ruta para cada destino";
 "Everything uses the VPN except what you list." = "Todo usa la VPN salvo lo que pongas en la lista.";
 "Only what you list uses the VPN; everything else goes direct." = "Solo lo que pongas en la lista usa la VPN; todo lo demás va directo.";
 "Send each destination through a route you pick: direct, a VPN, a proxy or a Tailscale peer." = "Envía cada destino por la ruta que elijas: directa, una VPN, un proxy o un nodo de Tailscale.";
@@ -886,3 +880,14 @@
 "Retry: remove the routes again" = "Reintentar: quitar las rutas de nuevo";
 "No address is routed for it." = "No hay ninguna dirección enrutada para esta entrada.";
 "it is the VPN's own gateway, which is never rerouted" = "es la puerta de enlace de la propia VPN, que nunca se desvía";
+"About" = "Acerca de";
+"Routing" = "Enrutamiento";
+"Insight" = "Análisis";
+"App" = "Aplicación";
+"Domains apply in Bypass and VPN Only modes. You are in %@." = "Los dominios se aplican en los modos Bypass y Solo VPN. Estás en %@.";
+"Services apply in Bypass mode. You are in %@." = "Los servicios se aplican en el modo Bypass. Estás en %@.";
+"Rules apply in Custom mode. You are in %@." = "Las reglas se aplican en el modo Personalizado. Estás en %@.";
+"Routes apply in Custom mode. You are in %@." = "Las rutas se aplican en el modo Personalizado. Estás en %@.";
+"Switch…" = "Cambiar…";
+"Switch to %@…" = "Cambiar a %@…";
+"Read-only in this mode" = "Solo lectura en este modo";
