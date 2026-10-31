@@ -156,20 +156,6 @@ final class ThemeColorTests: XCTestCase {
         XCTAssertNotEqual(Theme.separator, Theme.bgPrimary)
     }
 
-    // MARK: - Brand (fundraising)
-
-    func testGithubSponsors() {
-        XCTAssertNotEqual(Theme.githubSponsors, Theme.patreon)
-    }
-
-    func testBuyMeACoffee() {
-        XCTAssertNotEqual(Theme.buyMeACoffee, Theme.patreon)
-    }
-
-    func testPatreon() {
-        XCTAssertNotEqual(Theme.patreon, Theme.githubSponsors)
-    }
-
     // MARK: - Brand Identity
 
     func testBrandBlue() {

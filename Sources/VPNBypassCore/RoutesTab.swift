@@ -483,212 +483,35 @@ struct RouteEditorSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Sheet header
-            HStack {
-                Text(isEditing ? "Edit Route" : "Add Route")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white)
-                Spacer()
-                Button(action: onCancel) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(Theme.textSecondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(String(localized: "Cancel"))
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
-
-            Divider().background(Theme.divider)
-
-            // Form fields
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    formField(label: "Name", required: true) {
-                        TextField(namePlaceholder, text: $name)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(Theme.bgInput)
-                            .cornerRadius(8)
-                    }
-
-                    formField(label: "Type", required: true) {
-                        Picker(String(localized: "Type"), selection: $egress) {
-                            Text("HTTP CONNECT").tag(Egress.proxyHTTP)
-                            Text("SOCKS5").tag(Egress.proxySOCKS5)
-                            Text("Tailscale Peer").tag(Egress.tailscaleExit)
-                            Text("VPN").tag(Egress.vpnDefault)
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                    }
-
-                    if egress == .vpnDefault {
-                        vpnPickerField
-                    } else {
-                    if egress == .tailscaleExit {
-                        formField(label: "Tailscale Peer", required: true) {
-                            if peers.isEmpty {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    TextField("100.x.x.x", text: $selectedPeerIP)
-                                        .textFieldStyle(.plain)
-                                        .font(.system(size: 13, design: .monospaced))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 8)
-                                        .background(Theme.bgInput)
-                                        .cornerRadius(8)
-                                    HStack(alignment: .top, spacing: 6) {
-                                        Image(systemName: "info.circle")
-                                            .font(.system(size: 10))
-                                            .foregroundColor(Theme.textTertiary)
-                                        Text("No Tailscale peers detected — enter the peer's 100.x IP manually.")
-                                            .font(.system(size: 11))
-                                            .foregroundColor(Theme.textSecondary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                }
-                            } else {
-                                Picker(String(localized: "Tailscale Peer"), selection: Binding(
-                                    get: { selectedPeerIP },
-                                    set: { newIP in
-                                        selectedPeerIP = newIP
-                                        if let match = peers.first(where: { $0.ip == newIP }) {
-                                            tailscaleNodeName = match.name
-                                        }
-                                    }
-                                )) {
-                                    ForEach(peers) { peer in
-                                        HStack(spacing: 6) {
-                                            Circle()
-                                                .fill(peer.online ? Theme.success : Theme.textTertiary)
-                                                .frame(width: 6, height: 6)
-                                            // An exit-capable peer is usually a small minority
-                                            // of a tailnet, and it is the only kind that can
-                                            // carry general internet traffic without extra
-                                            // setup — so say which ones they are.
-                                            Text(peer.exitNodeCapable ? String(localized: "\(peer.name) · exit node") : peer.name)
-                                        }
-                                        .tag(peer.ip)
-                                    }
-                                }
-                                .pickerStyle(.menu)
-                                .labelsHidden()
-                            }
-                        }
-                    } else {
-                        formField(label: "Upstream Host", required: true) {
-                            TextField("proxy.example.com", text: $proxyHost)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13, design: .monospaced))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(Theme.bgInput)
-                                .cornerRadius(8)
-                        }
-                    }
-
-                    formField(label: egress == .tailscaleExit ? "Proxy port on peer" : "Upstream Port", required: true) {
-                        TextField(egress == .tailscaleExit ? "8888" : "8080", text: $proxyPortText)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(Theme.bgInput)
-                            .cornerRadius(8)
-                    }
-
-                    formField(label: "Username", required: false) {
-                        TextField("Optional", text: $proxyUser)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(Theme.bgInput)
-                            .cornerRadius(8)
-                    }
-
-                    formField(label: "Password", required: false) {
-                        SecureField("Optional", text: $proxyPass)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(Theme.bgInput)
-                            .cornerRadius(8)
-                    }
-
-                    if egress == .tailscaleExit {
-                        HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: "info.circle")
-                                .font(.system(size: 11))
-                                .foregroundColor(Theme.textTertiary)
-                                .padding(.top, 1)
-                            Text("Runs a small forward proxy (e.g. tinyproxy) on a Tailscale peer; traffic on this route exits through that peer's internet connection. Set up the proxy on the peer first, listening on its Tailscale IP.")
-                                .font(.system(size: 11))
-                                .foregroundColor(Theme.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    }  // end else: proxy/Tailscale fields (hidden for VPN routes)
-
-                    if let error = validationError {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 11))
-                                .foregroundColor(Theme.error)
-                            Text(error)
-                                .font(.system(size: 12))
-                                .foregroundColor(Theme.error)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Theme.error.opacity(0.1))
-                        .cornerRadius(8)
-                    }
-                }
-                .padding(20)
+        SheetScaffold(isEditing ? String(localized: "Edit Route") : String(localized: "Add Route"),
+                      confirmTitle: isEditing ? String(localized: "Save Changes") : String(localized: "Add Route"),
+                      onCancel: onCancel, onConfirm: attemptSave) {
+            SheetField(String(localized: "Name"), required: true) {
+                TextField(namePlaceholder, text: $name)
+                    .textFieldStyle(.roundedBorder)
             }
 
-            Divider().background(Theme.divider)
-
-            // Action buttons
-            HStack {
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.plain)
-                    .foregroundColor(Theme.textSecondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Theme.bgInput)
-                    .cornerRadius(8)
-
-                Spacer()
-
-                Button(isEditing ? "Save Changes" : "Add Route") {
-                    attemptSave()
+            SheetField(String(localized: "Type"), required: true) {
+                Picker(String(localized: "Type"), selection: $egress) {
+                    Text("HTTP CONNECT").tag(Egress.proxyHTTP)
+                    Text("SOCKS5").tag(Egress.proxySOCKS5)
+                    Text("Tailscale Peer").tag(Egress.tailscaleExit)
+                    Text("VPN").tag(Egress.vpnDefault)
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Theme.blueGradient)
-                .cornerRadius(8)
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+
+            if egress == .vpnDefault {
+                vpnPickerField
+            } else {
+                proxyFields
+            }
+
+            if let error = validationError {
+                SheetError(message: error)
+            }
         }
-        .frame(width: 400)
-        .background(Theme.bgSecondary)
         .task {
             guard readsTunnels else { return }
             peers = await RouteManager.shared.listTailscalePeers()
@@ -697,22 +520,92 @@ struct RouteEditorSheet: View {
         }
     }
 
+    /// A proxy or Tailscale peer route's fields; a VPN route has none of them.
+    @ViewBuilder
+    private var proxyFields: some View {
+        if egress == .tailscaleExit {
+            SheetField(String(localized: "Tailscale Peer"), required: true) {
+                if peers.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("100.x.x.x", text: $selectedPeerIP)
+                            .textFieldStyle(.roundedBorder)
+                            .font(Theme.Font.mono)
+                        note("No Tailscale peers detected — enter the peer's 100.x IP manually.")
+                    }
+                } else {
+                    Picker(String(localized: "Tailscale Peer"), selection: Binding(
+                        get: { selectedPeerIP },
+                        set: { newIP in
+                            selectedPeerIP = newIP
+                            if let match = peers.first(where: { $0.ip == newIP }) {
+                                tailscaleNodeName = match.name
+                            }
+                        }
+                    )) {
+                        ForEach(peers) { peer in
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(peer.online ? Theme.success : Theme.textTertiary)
+                                    .frame(width: 6, height: 6)
+                                // An exit-capable peer is usually a small minority
+                                // of a tailnet, and it is the only kind that can
+                                // carry general internet traffic without extra
+                                // setup — so say which ones they are.
+                                Text(peer.exitNodeCapable ? String(localized: "\(peer.name) · exit node") : peer.name)
+                            }
+                            .tag(peer.ip)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                }
+            }
+        } else {
+            SheetField(String(localized: "Upstream Host"), required: true) {
+                TextField("proxy.example.com", text: $proxyHost)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+
+        SheetField(egress == .tailscaleExit ? String(localized: "Proxy port on peer") : String(localized: "Upstream Port"),
+                   required: true) {
+            TextField(egress == .tailscaleExit ? "8888" : "8080", text: $proxyPortText)
+                .textFieldStyle(.roundedBorder)
+                .font(Theme.Font.mono)
+        }
+
+        HStack(spacing: Theme.Space.s) {
+            SheetField(String(localized: "Username")) {
+                TextField("Optional", text: $proxyUser)
+                    .textFieldStyle(.roundedBorder)
+            }
+            SheetField(String(localized: "Password")) {
+                SecureField("Optional", text: $proxyPass)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+
+        if egress == .tailscaleExit {
+            note("Runs a small forward proxy (e.g. tinyproxy) on a Tailscale peer; traffic on this route exits through that peer's internet connection. Set up the proxy on the peer first, listening on its Tailscale IP.")
+        }
+    }
+
+    /// A secondary sentence under a field.
+    private func note(_ text: LocalizedStringKey) -> some View {
+        Text(text)
+            .font(Theme.Font.detail)
+            .foregroundColor(Theme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     /// VPN egress: "Primary VPN (automatic)" plus one entry per detected non-Tailscale
     /// tunnel. Selecting a specific one pins the route to that interface.
     @ViewBuilder
     private var vpnPickerField: some View {
         let selectable = selectableLinks
-        formField(label: "VPN", required: false) {
+        SheetField(String(localized: "VPN")) {
             if selectable.isEmpty {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 10))
-                        .foregroundColor(Theme.textTertiary)
-                    Text("Uses whichever VPN is active. Connect a second VPN to pin this route to a specific one.")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                note("Uses whichever VPN is active. Connect a second VPN to pin this route to a specific one.")
             } else {
                 Picker(String(localized: "VPN"), selection: Binding(
                     get: { selectedVPNInterface },
@@ -732,27 +625,6 @@ struct RouteEditorSheet: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
             }
-        }
-    }
-
-    @ViewBuilder
-    private func formField<F: View>(
-        label: LocalizedStringKey,
-        required: Bool,
-        @ViewBuilder field: () -> F
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 3) {
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(Theme.textSecondary)
-                if required {
-                    Text("*")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(Theme.error)
-                }
-            }
-            field()
         }
     }
 

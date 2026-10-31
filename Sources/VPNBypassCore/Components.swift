@@ -685,5 +685,55 @@ struct SheetScaffold<Content: View>: View {
         .padding(Theme.Space.page - 4)
         .frame(width: Self.width, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
+        .background(Theme.bgSecondary)
+    }
+}
+
+/// A labelled field inside a `SheetScaffold`: the label in `section` type, a * when the field
+/// is required, then the control. Every editor sheet lays its fields out with it.
+struct SheetField<Field: View>: View {
+    let label: String
+    var required = false
+    let field: Field
+
+    init(_ label: String, required: Bool = false, @ViewBuilder field: () -> Field) {
+        self.label = label
+        self.required = required
+        self.field = field()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs + 2) {
+            HStack(spacing: 3) {
+                Text(label)
+                    .font(Theme.Font.section)
+                    .foregroundColor(Theme.textSecondary)
+                if required {
+                    Text(verbatim: "*")
+                        .font(Theme.Font.section)
+                        .foregroundColor(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                }
+            }
+            field
+        }
+    }
+}
+
+/// Why a sheet's confirm did not save, said in one line above the buttons.
+struct SheetError: View {
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Theme.Space.xs + 2) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(Theme.Font.detail)
+                .foregroundColor(Theme.failure)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(Theme.Font.detail)
+                .foregroundColor(Theme.failure)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

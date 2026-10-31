@@ -932,124 +932,56 @@ struct RuleEditorSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Sheet header
-            HStack {
-                Text(isEditing ? "Edit Rule" : "Add Rule")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white)
-                Spacer()
-                Button(action: onCancel) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(Theme.textSecondary)
+        SheetScaffold(isEditing ? String(localized: "Edit Rule") : String(localized: "Add Rule"),
+                      confirmTitle: isEditing ? String(localized: "Save Changes") : String(localized: "Add Rule"),
+                      onCancel: onCancel, onConfirm: attemptSave) {
+            SheetField(String(localized: "Match"), required: true) {
+                Picker(String(localized: "Match"), selection: $matchType) {
+                    Text("Domain").tag(MatchType.domain)
+                    Text("Service").tag(MatchType.service)
+                    Text("IP").tag(MatchType.ip)
+                    Text("CIDR").tag(MatchType.cidr)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(String(localized: "Cancel"))
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
 
-            Divider().background(Theme.divider)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    formField(label: "Match", required: true) {
-                        Picker(String(localized: "Match"), selection: $matchType) {
-                            Text("Domain").tag(MatchType.domain)
-                            Text("Service").tag(MatchType.service)
-                            Text("IP").tag(MatchType.ip)
-                            Text("CIDR").tag(MatchType.cidr)
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                    }
-
-                    if matchType == .service {
-                        formField(label: "Service", required: true) {
-                            if services.isEmpty {
-                                Text("No services configured. Add one in the Services tab first.")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(Theme.textTertiary)
-                            } else {
-                                Picker(String(localized: "Service"), selection: $selectedServiceId) {
-                                    ForEach(services) { service in
-                                        Text(service.name).tag(service.id)
-                                    }
-                                }
-                                .pickerStyle(.menu)
-                                .labelsHidden()
+            if matchType == .service {
+                SheetField(String(localized: "Service"), required: true) {
+                    if services.isEmpty {
+                        Text("No services configured. Add one in the Services tab first.")
+                            .font(Theme.Font.detail)
+                            .foregroundColor(Theme.textSecondary)
+                    } else {
+                        Picker(String(localized: "Service"), selection: $selectedServiceId) {
+                            ForEach(services) { service in
+                                Text(service.name).tag(service.id)
                             }
                         }
-                    } else {
-                        formField(label: "Pattern", required: true) {
-                            TextField(patternPlaceholder, text: $pattern)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13, design: .monospaced))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(Theme.bgInput)
-                                .cornerRadius(8)
-                        }
-                    }
-
-                    formField(label: "Route", required: true) {
-                        RulesRouteChipMenu(
-                            selectedRouteId: routeId,
-                            onSelect: { routeId = $0 },
-                            onNewRoute: { showingNewRouteSheet = true }
-                        )
-                    }
-
-                    if let error = validationError {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 11))
-                                .foregroundColor(Theme.error)
-                            Text(error)
-                                .font(.system(size: 12))
-                                .foregroundColor(Theme.error)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Theme.error.opacity(0.1))
-                        .cornerRadius(8)
+                        .pickerStyle(.menu)
+                        .labelsHidden()
                     }
                 }
-                .padding(20)
-            }
-
-            Divider().background(Theme.divider)
-
-            // Action buttons
-            HStack {
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.plain)
-                    .foregroundColor(Theme.textSecondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Theme.bgInput)
-                    .cornerRadius(8)
-
-                Spacer()
-
-                Button(isEditing ? "Save Changes" : "Add Rule") {
-                    attemptSave()
+            } else {
+                SheetField(String(localized: "Pattern"), required: true) {
+                    TextField(patternPlaceholder, text: $pattern)
+                        .textFieldStyle(.roundedBorder)
+                        .font(matchType == .ip || matchType == .cidr ? Theme.Font.mono : Theme.Font.body)
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Theme.blueGradient)
-                .cornerRadius(8)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+
+            SheetField(String(localized: "Route"), required: true) {
+                RulesRouteChipMenu(
+                    selectedRouteId: routeId,
+                    onSelect: { routeId = $0 },
+                    onNewRoute: { showingNewRouteSheet = true }
+                )
+            }
+
+            if let error = validationError {
+                SheetError(message: error)
+            }
         }
-        .frame(width: 400)
-        .background(Theme.bgSecondary)
         .sheet(isPresented: $showingNewRouteSheet) {
             RouteEditorSheet(editingRoute: nil) { newRoute in
                 routeManager.addRoute(newRoute)
@@ -1058,27 +990,6 @@ struct RuleEditorSheet: View {
             } onCancel: {
                 showingNewRouteSheet = false
             }
-        }
-    }
-
-    @ViewBuilder
-    private func formField<F: View>(
-        label: LocalizedStringKey,
-        required: Bool,
-        @ViewBuilder field: () -> F
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 3) {
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(Theme.textSecondary)
-                if required {
-                    Text("*")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(Theme.error)
-                }
-            }
-            field()
         }
     }
 

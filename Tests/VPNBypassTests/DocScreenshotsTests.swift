@@ -248,9 +248,10 @@ final class DocScreenshotsTests: XCTestCase {
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = hosting
         show(window)
+        window.setContentSize(hosting.fittingSize)
         settle(hosting)
         let size = try write(hosting, cornerRadius: 12, outline: NSColor(white: 1, alpha: 0.2), to: "catalogue.png")
-        XCTAssertEqual(size.width, 1040)
+        XCTAssertEqual(size.width, SheetScaffold<EmptyView>.width * 2)
     }
 
     /// The catalogue sheet on one country, as the first run's "Services for Spain…" opens it.
@@ -263,9 +264,10 @@ final class DocScreenshotsTests: XCTestCase {
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = hosting
         show(window)
+        window.setContentSize(hosting.fittingSize)
         settle(hosting)
         let size = try write(hosting, cornerRadius: 12, outline: NSColor(white: 1, alpha: 0.2), to: "catalogue-region.png")
-        XCTAssertEqual(size.width, 1040)
+        XCTAssertEqual(size.width, SheetScaffold<EmptyView>.width * 2)
     }
 
     /// The Bypass list with a wildcard that has learned 11 routes, the pointer on the first
@@ -728,6 +730,101 @@ final class DocScreenshotsTests: XCTestCase {
         seedBypass()
         rm.config.autoDNSRefresh = false
         _ = try renderSettings(page: .general, to: "rework-b2-general.png")
+    }
+
+    // MARK: - General, About and the sheets (rework step 10)
+
+    /// General, the whole page: five groups, then Advanced closed.
+    func testGeneralPage() throws {
+        seedBypass()
+        GeneralTab.detectedDNSForScreenshots = "192.0.2.53"
+        defer { GeneralTab.detectedDNSForScreenshots = nil }
+        NotificationManager.shared.notifyOnRoutesApplied = false
+        _ = try renderSettings(page: .general, height: 1180, to: "general-page.png")
+    }
+
+    /// General with the global SOCKS5 proxy on: Advanced opens by itself.
+    func testGeneralPageWithTheProxyOn() throws {
+        seedBypass()
+        GeneralTab.detectedDNSForScreenshots = "192.0.2.53"
+        defer { GeneralTab.detectedDNSForScreenshots = nil }
+        rm.config.proxyConfig.enabled = true
+        rm.config.proxyConfig.server = "198.51.100.9"
+        rm.config.proxyConfig.port = 1080
+        // The page alone, in a borderless window that may be taller than the screen.
+        try renderComponent(GeneralTab()
+                                .environmentObject(rm)
+                                .environmentObject(NotificationManager.shared)
+                                .environmentObject(LaunchAtLoginManager.shared),
+                            width: 620, to: "general-page-proxy.png")
+    }
+
+    /// General in Custom mode: no Advanced, one sentence that points at Routes.
+    func testGeneralPageInCustomMode() throws {
+        seedCustom()
+        GeneralTab.detectedDNSForScreenshots = "192.0.2.53"
+        defer { GeneralTab.detectedDNSForScreenshots = nil }
+        _ = try renderSettings(page: .general, height: 1180, to: "general-page-custom.png")
+    }
+
+    /// About: the wordmark, one line, three buttons and the Support row.
+    func testAboutPage() throws {
+        seedBypass()
+        _ = try renderSettings(page: .about, to: "about-page.png")
+    }
+
+    func testSheetNewService() throws {
+        try renderSheet(NewServiceSheet(domain: "http-intake.logs.us5.datadoghq.com", onCreate: { _ in }, onCancel: {}),
+                        to: "sheet-new-service.png")
+    }
+
+    func testSheetRoutingMode() throws {
+        seedBypass()
+        try renderSheet(RoutingModeSheet(selected: .vpnOnly, lists: RoutingModeCopy.lists(from: rm.config),
+                                         onCancel: {}, onSwitch: { _ in }),
+                        to: "sheet-routing-mode.png")
+    }
+
+    func testSheetRouteEditor() throws {
+        seedBypass()
+        let proxy = Route(name: "office-proxy", egress: .proxySOCKS5, proxyHost: "198.51.100.7", proxyPort: 1080)
+        try renderSheet(RouteEditorSheet(editingRoute: proxy, selectableLinks: [], onSave: { _ in }, onCancel: {}),
+                        to: "sheet-route-editor.png")
+    }
+
+    func testSheetRuleEditor() throws {
+        seedCustom()
+        let rule = rm.config.rules[0]
+        try renderSheet(RuleEditorSheet(editingRule: rule, services: rm.config.services, onSave: { _ in }, onCancel: {})
+                            .environmentObject(rm),
+                        to: "sheet-rule-editor.png")
+    }
+
+    func testSheetCustomService() throws {
+        seedBypass()
+        try renderSheet(CustomServiceEditor(service: nil, name: "Work Tools").environmentObject(rm),
+                        to: "sheet-custom-service.png")
+    }
+
+    func testSheetCatalogue() throws {
+        seedBypass()
+        try renderSheet(CatalogueSheet(category: .banks, picked: ["fr_lcl", "fr_boursobank"]) { _ in }
+                            .environmentObject(rm),
+                        to: "sheet-catalogue.png")
+    }
+
+    /// One sheet on its own, at the size it asks for.
+    private func renderSheet<V: View>(_ view: V, to name: String) throws {
+        let hosting = NSHostingView(rootView: view)
+        let window = DocScreenshotKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 600),
+                                            styleMask: [.borderless], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = hosting
+        show(window)
+        window.setContentSize(hosting.fittingSize)
+        window.makeFirstResponder(nil)
+        settle(hosting)
+        _ = try write(hosting, cornerRadius: Theme.Radius.sheet, outline: NSColor(white: 1, alpha: 0.2), to: name)
     }
 
     // MARK: - The dropdown's status block and Status > Problems (rework step 3)
@@ -1217,11 +1314,14 @@ final class DocScreenshotsTests: XCTestCase {
         return try write(hosting, cornerRadius: 15, outline: NSColor(white: 0.2, alpha: 1), to: name)
     }
 
-    private func renderSettings(page: SettingsView.SettingsTab, to name: String) throws -> NSSize {
+    private func renderSettings(page: SettingsView.SettingsTab, height: CGFloat? = nil, to name: String) throws -> NSSize {
         SettingsPageRequest.shared.page = page
         let window = SettingsWindowController.makeWindow()
-        // makeWindow brings back a size saved by an earlier run; the renders use the default.
-        window.setContentSize(SettingsWindowController.defaultContentSize)
+        // makeWindow brings back a size saved by an earlier run; the renders use the default,
+        // or a taller window to show a whole page.
+        var windowSize = SettingsWindowController.defaultContentSize
+        if let height { windowSize.height = height }
+        window.setContentSize(windowSize)
         window.appearance = NSAppearance(named: .darkAqua)
         show(window)
         window.makeFirstResponder(nil)

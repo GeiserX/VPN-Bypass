@@ -129,46 +129,18 @@ struct RoutingModeSheet: View {
     }
 
     var body: some View {
-        let canSwitch = RoutingModeCopy.canSwitch(to: selected, from: lists.current)
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Routing mode")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Theme.textPrimary)
-                .padding(.bottom, 14)
-
-            ForEach(Array(RoutingModeCopy.order.enumerated()), id: \.element) { index, mode in
-                if index > 0 {
-                    Rectangle().fill(Theme.divider).frame(height: 1)
+        SheetScaffold(String(localized: "Routing mode"), confirmTitle: String(localized: "Switch"),
+                      canConfirm: RoutingModeCopy.canSwitch(to: selected, from: lists.current),
+                      onCancel: onCancel, onConfirm: { onSwitch(selected) }) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(RoutingModeCopy.order.enumerated()), id: \.element) { index, mode in
+                    if index > 0 {
+                        Rectangle().fill(Theme.separator).frame(height: 0.5)
+                    }
+                    row(mode)
                 }
-                row(mode)
             }
-
-            HStack(spacing: 10) {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.plain)
-                    .foregroundColor(Theme.textPrimary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(Theme.bgInput)
-                    .cornerRadius(7)
-                    .keyboardShortcut(.cancelAction)
-                Button("Switch") { onSwitch(selected) }
-                    .buttonStyle(.plain)
-                    .foregroundColor(canSwitch ? .white : Theme.textDisabled)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(canSwitch ? AnyShapeStyle(Theme.blueGradient) : AnyShapeStyle(Theme.bgDisabled))
-                    .cornerRadius(7)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canSwitch)
-            }
-            .font(.system(size: 13, weight: .medium))
-            .padding(.top, 18)
         }
-        .padding(20)
-        .frame(width: 400)
-        .background(Theme.bgSecondary)
     }
 
     private func row(_ mode: RoutingMode) -> some View {
@@ -177,14 +149,14 @@ struct RoutingModeSheet: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 15))
-                    .foregroundColor(isSelected ? Theme.Brand.blueLight : Theme.textTertiary)
+                    .foregroundColor(isSelected ? Theme.accentText : Theme.textSecondary)
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(RoutingModeCopy.name(mode))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Theme.textPrimary)
+                        .font(Theme.Font.strong)
+                        .foregroundColor(Theme.text)
                     Text(RoutingModeCopy.sheetLine(mode, lists: lists))
-                        .font(.system(size: 12))
+                        .font(Theme.Font.detail)
                         .foregroundColor(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

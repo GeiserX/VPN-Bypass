@@ -48,8 +48,6 @@
 
 /* ===== Ajustes — Pestaña General ===== */
 "Startup" = "Inicio";
-"Launch at Login" = "Iniciar con el sistema";
-"Automatically start VPN Bypass when you log in" = "Iniciar VPN Bypass automáticamente al acceder";
 "Not Installed" = "No instalado";
 "Checking..." = "Comprobando...";
 "Update Required (v%@ → v%@)" = "Actualización requerida (v%@ → v%@)";
@@ -71,44 +69,12 @@
 "Retry" = "Reintentar";
 "Install" = "Instalar";
 "The helper runs as root and handles route/hosts changes without prompting." = "El asistente se ejecuta como root y gestiona los cambios de rutas y hosts sin solicitar contraseña.";
-"Behavior" = "Comportamiento";
-"Auto-apply on VPN Connect" = "Aplicar automáticamente al conectar VPN";
-"Automatically apply routes when VPN connects" = "Aplicar rutas automáticamente cuando la VPN se conecta";
-"Manage /etc/hosts" = "Gestionar /etc/hosts";
-"Add DNS bypass entries (requires admin)" = "Añadir entradas DNS de bypass (requiere admin)";
-"Verify Routes After Apply" = "Verificar rutas tras aplicar";
-"Check that routes leave the right way and answer on port 443" = "Comprobar que las rutas salen por el camino correcto y responden en el puerto 443";
-"DNS Refresh" = "Actualización DNS";
-"Auto DNS Refresh" = "Actualización DNS automática";
-"Periodically re-resolve domains and update routes" = "Re-resolver dominios periódicamente y actualizar rutas";
-"Refresh Interval" = "Intervalo de actualización";
-"How often to re-check DNS for changes" = "Frecuencia de comprobación de cambios DNS";
-"15 min" = "15 min";
-"30 min" = "30 min";
-"1 hour" = "1 hora";
-"2 hours" = "2 horas";
-"6 hours" = "6 horas";
 "Refresh Now" = "Actualizar ahora";
-"Re-resolves all domains to catch IP changes and ensure routes stay up to date." = "Re-resuelve todos los dominios para detectar cambios de IP y mantener las rutas actualizadas.";
-"Fallback DNS" = "DNS de respaldo";
-"Detected Non-VPN DNS" = "DNS no-VPN detectado";
-"Fallback DNS servers when detected DNS is unavailable.\nSupported formats: IP (1.1.1.1), DoH (https://...), DoT (tls://... or IP:853)" = "Servidores DNS de respaldo cuando el DNS detectado no está disponible.\nFormatos admitidos: IP (1.1.1.1), DoH (https://...), DoT (tls://... o IP:853)";
-"Add DNS Server" = "Añadir servidor DNS";
 "Notifications" = "Notificaciones";
-"Enable Notifications" = "Activar notificaciones";
-"Show alerts for VPN events" = "Mostrar alertas para eventos de la VPN";
-"Silent" = "Silencioso";
-"No sound" = "Sin sonido";
-"Connect" = "Conexión";
-"Disconnect" = "Desconexión";
 "Routes" = "Rutas";
-"Failures" = "Errores";
 "Addresses: services, domains, DNS refresh" = "Direcciones: servicios, dominios, actualización DNS";
-"SOCKS5 Proxy" = "Proxy SOCKS5";
-"Aggressive Bypass Mode" = "Modo bypass agresivo";
 "For corporate VPNs (Cisco, Zscaler) that block UDP. Requires external SOCKS5 proxy server with UDP support." = "Para VPNs corporativas (Cisco, Zscaler) que bloquean UDP. Requiere servidor proxy SOCKS5 externo con soporte UDP.";
 "Enable SOCKS5 Proxy" = "Activar proxy SOCKS5";
-"Route traffic through proxy to bypass UDP blocking" = "Enrutar tráfico a través del proxy para evitar el bloqueo UDP";
 "Proxy Server" = "Servidor proxy";
 "Authentication (optional)" = "Autenticación (opcional)";
 "Test Connection" = "Probar conexión";
@@ -118,11 +84,7 @@
 "Connected to %@" = "Conectado a %@";
 "Cannot connect to %@" = "No se puede conectar a %@";
 "Testing..." = "Probando...";
-"Proxy will be used for services that need UDP (Discord voice, gaming, etc.) when corporate VPN blocks direct UDP traffic." = "El proxy se usará para servicios que necesitan UDP (voz de Discord, juegos, etc.) cuando la VPN corporativa bloquea el tráfico UDP directo.";
 "Configuration" = "Configuración";
-"Export" = "Exportar";
-"Import" = "Importar";
-"Export your domains and services configuration to a file, or import from a backup." = "Exporta la configuración de dominios y servicios a un archivo, o importa desde una copia de seguridad.";
 "Import Error" = "Error de importación";
 "OK" = "OK";
 "Failed to import configuration file." = "No se pudo importar el archivo de configuración.";
@@ -204,20 +166,6 @@
 "Logs will appear here when routes are applied" = "Los registros aparecerán aquí cuando se apliquen rutas";
 
 /* ===== Ajustes — Pestaña Información ===== */
-"Route specific traffic around your corporate VPN" = "Enruta tráfico específico fuera de tu VPN corporativa";
-"Author" = "Autor";
-"Your 100x Engineer, with ❤️" = "Tu ingeniero 100x, con ❤️";
-"Support the Project" = "Apoya el proyecto";
-"If you find VPN Bypass useful, consider supporting its development!" = "Si VPN Bypass te resulta útil, ¡considera apoyar su desarrollo!";
-"GitHub Sponsors" = "GitHub Sponsors";
-"Buy Me a Coffee" = "Buy Me a Coffee";
-"Links" = "Enlaces";
-"Blog" = "Blog";
-"Source Code" = "Código fuente";
-"Report Issue" = "Reportar problema";
-"License" = "Licencia";
-"GPL-3.0 License" = "Licencia GPL-3.0";
-"This software is free and open source under the GNU General Public License v3.0. You are free to use, modify, and distribute it under the same license terms." = "Este software es libre y de código abierto bajo la Licencia Pública General de GNU v3.0. Puedes usarlo, modificarlo y distribuirlo bajo los mismos términos de licencia.";
 
 /* ===== Notificaciones ===== */
 "Connected via %@. Routes will be applied automatically." = "Conectado vía %@. Las rutas se aplicarán automáticamente.";
@@ -229,7 +177,6 @@
 "%lld address(es) routed." = "%lld dirección(es) enrutada(s).";
 "%lld failed." = "%lld fallida(s).";
 "Route Verification Failed" = "Verificación de ruta fallida";
-"VPN Bypass" = "VPN Bypass";
 "DNS Refresh Complete" = "Actualización DNS completada";
 "%lld address(es) updated" = "%lld dirección(es) actualizada(s)";
 
@@ -605,25 +552,15 @@
 "Add domains or IP ranges that should use VPN" = "Añade los dominios o rangos de IP que deben usar la VPN";
 "e.g. My Service" = "ej.: Mi servicio";
 "example.com" = "example.com";
-"DNS server" = "Servidor DNS";
 "Server address" = "Dirección del servidor";
 "Port" = "Puerto";
 "Username" = "Usuario";
 "Password" = "Contraseña";
-"GitHub Issues" = "Incidencias en GitHub";
 
 /* ===== Nombres y ejemplos que se escriben igual en todos los idiomas ===== */
 "English" = "English";
 "Español" = "Español";
 "Français" = "Français";
-"v%@" = "v%@";
-"SF" = "SF";
-"Sergio Fernández" = "Sergio Fernández";
-"Patreon" = "Patreon";
-"Thanks.dev" = "Thanks.dev";
-"geiser.cloud" = "geiser.cloud";
-"github.com/GeiserX" = "github.com/GeiserX";
-"© 2026 Sergio Fernández (GeiserX)" = "© 2026 Sergio Fernández (GeiserX)";
 
 /* ===== DNS Lookups (#176) ===== */
 "Lookups" = "Consultas";
@@ -808,7 +745,6 @@
 "on" = "activado";
 "Get Status" = "Obtener el estado";
 "Tells the routing mode and whether anything is routed now, as vpnb status does." = "Dice el modo de enrutamiento y si ahora se enruta algo, como vpnb status.";
-"Block Listed Sites When the VPN Drops" = "Bloquear los sitios de la lista si la VPN se cae";
 "VPN Only: hold the listed addresses back until the VPN returns" = "Solo VPN: retiene las direcciones de la lista hasta que vuelva la VPN";
 "VPN down: listed addresses blocked for %lld site(s)" = "VPN caída: direcciones de la lista bloqueadas para %lld sitio(s)";
 "Waiting for VPN routes: listed addresses blocked for %lld site(s)" = "Esperando las rutas de la VPN: direcciones de la lista bloqueadas para %lld sitio(s)";
@@ -969,3 +905,43 @@
 
 "Shared CDN address (%@): other sites on it bypass the VPN too" = "Dirección de CDN compartida (%@): los demás sitios en ella también evitan la VPN";
 "Shared CDN address (%@): other sites on it use the VPN too" = "Dirección de CDN compartida (%@): los demás sitios en ella también usan la VPN";
+
+/* ===== General and About (6.0) ===== */
+"Website" = "Sitio web";
+"Report a problem…" = "Informar de un problema…";
+"Copies a diagnostics bundle with no names in it and opens a new issue" = "Copia un informe de diagnóstico sin nombres y abre una incidencia nueva";
+"Diagnostics copied, with no names in them. If the issue's Logs field is empty, paste them there." = "Diagnóstico copiado, sin nombres. Si el campo Logs de la incidencia está vacío, pégalo ahí.";
+"Support the project" = "Apoyar el proyecto";
+"Four ways to give, in one menu" = "Cuatro formas de aportar, en un menú";
+"Choose…" = "Elegir…";
+"Version %@ · GPL-3.0 · by GeiserX" = "Versión %@ · GPL-3.0 · por GeiserX";
+"Open at login" = "Abrir al iniciar sesión";
+"Apply when a VPN connects" = "Aplicar cuando se conecte una VPN";
+"Pin listed names in /etc/hosts" = "Fijar los nombres de la lista en /etc/hosts";
+"Needs the helper. Covers apps that use the system resolver." = "Necesita el asistente. Cubre las apps que usan el resolvedor del sistema.";
+"DNS servers" = "Servidores DNS";
+"Look up addresses again" = "Volver a buscar direcciones";
+"Check the path after applying" = "Comprobar el camino tras aplicar";
+"Checks which way up to 10 routed addresses leave, and that they answer on port 443." = "Comprueba por dónde salen hasta 10 direcciones enrutadas y que respondan en el puerto 443.";
+"Block listed sites when the VPN drops" = "Bloquear los sitios de la lista si cae la VPN";
+"Detected" = "Detectado";
+"Asked at the same time as the detected server. Cloudflare and Google DoH join after 200 ms, and the first answer with addresses wins. When all of them fail, the system resolver answers, which may use the VPN's DNS." = "Se consultan a la vez que el servidor detectado. Cloudflare y Google DoH se suman a los 200 ms, y gana la primera respuesta con direcciones. Si todos fallan, responde el resolvedor del sistema, que puede usar el DNS de la VPN.";
+"1.1.1.1, https://… or tls://…" = "1.1.1.1, https://… o tls://…";
+"DNS server %lld" = "Servidor DNS %lld";
+"Add Server" = "Añadir servidor";
+"Send notifications" = "Enviar notificaciones";
+"Tell me when" = "Avisarme cuando";
+"Play a sound" = "Reproducir un sonido";
+"Domains, services, rules and routes" = "Dominios, servicios, reglas y rutas";
+"Export…" = "Exportar…";
+"Import…" = "Importar…";
+"Advanced: SOCKS5 for VPNs that block UDP" = "Avanzado: SOCKS5 para VPN que bloquean UDP";
+"Never" = "Nunca";
+"Every hour" = "Cada hora";
+"Every %lld hours" = "Cada %lld horas";
+"Every %lld minutes" = "Cada %lld minutos";
+"In Custom mode, send traffic through a proxy with a route on the Routes page." = "En el modo Personalizado, envía tráfico por un proxy con una ruta en la página Rutas.";
+"VPN connects" = "La VPN se conecta";
+"VPN drops" = "La VPN cae";
+"Addresses change" = "Cambian las direcciones";
+"Something fails" = "Algo falla";

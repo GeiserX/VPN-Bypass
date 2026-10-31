@@ -390,27 +390,17 @@ struct NewServiceSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("New Service")
-                .font(.system(size: 15, weight: .bold, design: .rounded))
+        SheetScaffold(String(localized: "New Service"), confirmTitle: String(localized: "Create"),
+                      canConfirm: !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      onCancel: onCancel, onConfirm: create) {
             Text("This adds a custom service to the Services page, with \(domain) as its first domain. You can add more domains to it later.")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
+                .font(Theme.Font.body)
+                .foregroundColor(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextField(String(localized: "Service name"), text: $name)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(create)
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel, action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                Button("Create", action: create)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
         }
-        .padding(20)
-        .frame(width: 380)
     }
 
     private func create() {
