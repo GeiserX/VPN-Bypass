@@ -105,7 +105,7 @@ final class SettingsShellTests: XCTestCase {
         XCTAssertTrue(SettingsSidebar.matches("Télégram", search: "telegram"))
         XCTAssertFalse(SettingsSidebar.matches("Telegram", search: "zoom"))
         XCTAssertEqual(SettingsView.SettingsTab.allCases.filter(SettingsSidebar.isSearchable),
-                       [.domains, .services, .rules, .routes, .lookups])
+                       [.domains, .services, .rules, .routes, .lookups, .logs])
     }
 
     /// The System Routes rows follow the Routes search like the listener routes do.

@@ -74,11 +74,11 @@ enum SettingsSidebar {
         }
     }
 
-    /// The list pages, which get the search field in the title bar (⌘F).
+    /// The list pages and Logs, which get the search field in the title bar (⌘F).
     static func isSearchable(_ page: Page) -> Bool {
         switch page {
-        case .domains, .services, .rules, .routes, .lookups: return true
-        case .status, .logs, .general, .about: return false
+        case .domains, .services, .rules, .routes, .lookups, .logs: return true
+        case .status, .general, .about: return false
         }
     }
 
