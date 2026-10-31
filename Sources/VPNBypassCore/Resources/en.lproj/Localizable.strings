@@ -865,3 +865,12 @@
 "Open them directly" = "Open them directly";
 "Open the blocked sites directly, outside the VPN" = "Open the blocked sites directly, outside the VPN";
 "%lld listed address(es) are blocked until the VPN returns." = "%lld listed address(es) are blocked until the VPN returns.";
+
+/* Shared components (Components.swift) */
+"Needs attention" = "Needs attention";
+"On" = "On";
+"Not routing" = "Not routing";
+"Partly routed" = "Partly routed";
+"Waiting" = "Waiting";
+"Paused" = "Paused";
+"Route: %@" = "Route: %@";

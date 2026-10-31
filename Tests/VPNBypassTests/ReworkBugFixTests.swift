@@ -466,7 +466,7 @@ final class ReworkViewTests: XCTestCase {
 
     /// B1: the Rules route menu drew two chevrons and lost the chip's colour.
     func testTheRouteMenuDrawsOnlyTheChip() throws {
-        let body = try ReworkSource.body(of: "struct RouteChipMenu: View", in: "RulesTab.swift")
+        let body = try ReworkSource.body(of: "struct RulesRouteChipMenu: View", in: "RulesTab.swift")
         XCTAssertFalse(body.contains(".menuStyle(.borderlessButton)"))
         XCTAssertTrue(body.contains(".menuIndicator(.hidden)"))
     }

@@ -102,9 +102,9 @@ final class LocalizationCoverageTests: XCTestCase {
         XCTAssertEqual(RuleRow.matchLabel(.process, in: fr), "PROCESSUS")
         XCTAssertEqual(RuleRow.matchLabel(.suffix, in: es), "SUFIJO")
 
-        XCTAssertEqual(RouteChip.displayName(nil, vpnName: nil, in: es), "Elegir ruta")
-        XCTAssertEqual(RouteChip.displayName(nil, vpnName: nil, in: fr), "Choisir une route")
-        XCTAssertEqual(RouteChip.displayName(direct, vpnName: nil, in: es), "Directo")
+        XCTAssertEqual(RulesRouteChip.displayName(nil, vpnName: nil, in: es), "Elegir ruta")
+        XCTAssertEqual(RulesRouteChip.displayName(nil, vpnName: nil, in: fr), "Choisir une route")
+        XCTAssertEqual(RulesRouteChip.displayName(direct, vpnName: nil, in: es), "Directo")
     }
 
     /// `.unknown`'s raw value is the English placeholder "Unknown VPN"; the Routes page, the

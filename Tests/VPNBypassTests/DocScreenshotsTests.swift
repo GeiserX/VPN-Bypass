@@ -310,6 +310,125 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size.width, LookupAddPanel.width * 2)
     }
 
+    // MARK: - The rework's shared components (step 2), one snapshot each
+
+    /// 1. The group section: a section label, rows divided by an inset hairline.
+    func testComponentGroupSection() throws {
+        struct Item: Identifiable { let id: String; let detail: String }
+        let items = [Item(id: "en.wikipedia.org", detail: "4 addresses"), Item(id: "github.com", detail: "12 addresses"),
+                     Item(id: "example.com", detail: "1 address")]
+        let view = GroupSection("Your domains", rows: items, trailing: { Text(verbatim: "addresses") }) { item in
+            ListRow(glyph: "globe", name: item.id, detail: item.detail)
+        }
+        try renderComponent(view, to: "components-1-group-section.png")
+    }
+
+    /// 2. The list row: at rest, hovered with its actions, needing attention, switched off.
+    func testComponentListRow() throws {
+        let numbers = ["4", "1,203", "0", "–"]
+        let width = ListRow.numberColumnWidth(for: numbers)
+        let actions: (String) -> [RowAction] = { name in
+            [.edit(name) {}, .delete(name) {}, RowAction(kind: .more, name: "More actions", systemImage: "ellipsis") {}]
+        }
+        let view = GroupSection("Section title", trailing: { Text(verbatim: "addresses") }) {
+            ListRow(glyph: "globe", name: "At rest", detail: "detail line, secondary", number: numbers[0],
+                    numberWidth: width, actions: actions("At rest"), isOn: .constant(true))
+            InsetDivider()
+            ListRow(glyph: "globe", name: "Hovered: actions fade in", detail: "also on right-click and keyboard",
+                    number: numbers[1], numberWidth: width, actions: actions("Hovered"), isOn: .constant(true),
+                    showsActions: true)
+            InsetDivider()
+            ListRow(glyph: "globe", name: "Needs attention", detail: "the reason, in the detail line",
+                    needsAttention: true, number: numbers[2], numberWidth: width, actions: actions("Needs attention"),
+                    isOn: .constant(true))
+            InsetDivider()
+            ListRow(glyph: "globe", name: "Switched off", detail: "off", number: numbers[3], numberWidth: width,
+                    actions: actions("Switched off"), isOn: .constant(false))
+            InsetDivider()
+            ListRow(glyph: "network", name: "a-very-long-name-that-truncates-in-the-middle.cdn.example.com",
+                    number: "12", numberWidth: width, isOn: .constant(true))
+        }
+        try renderComponent(view, to: "components-2-list-row.png")
+    }
+
+    /// 3. The page header: title, search, one +, and the line that says what the page is for.
+    func testComponentPageHeader() throws {
+        let view = PageHeader(title: "Routes", subtitle: "Where traffic can go: direct, a VPN, or a proxy.",
+                              search: .constant(""), addName: "Add Route", onAdd: {})
+        try renderComponent(view, to: "components-3-page-header.png")
+    }
+
+    /// 4. The empty state, inside its group box.
+    func testComponentEmptyState() throws {
+        let view = GroupSection {
+            EmptyState(systemImage: "globe", title: "No domains yet",
+                       message: "Add a site that should skip the VPN, or see what this Mac looks up.",
+                       primary: .init(title: "Add Domain…") {}, link: .init(title: "Open Lookups") {})
+        }
+        try renderComponent(view, to: "components-4-empty-state.png")
+    }
+
+    /// 5. The status chip, every state.
+    func testComponentStatusChip() throws {
+        let view = HStack(spacing: Theme.Space.s) {
+            ForEach(StatusChip.Kind.allCases, id: \.self) { StatusChip(state: $0) }
+        }
+        try renderComponent(view, to: "components-5-status-chip.png")
+    }
+
+    /// 6. The route chip: Direct, the VPN by name, a proxy, and one as a menu's label.
+    func testComponentRouteChip() throws {
+        let proxy = Route(name: "office-proxy", egress: .proxySOCKS5)
+        let view = HStack(spacing: Theme.Space.s) {
+            RouteChip(route: Route(name: "", egress: .direct), vpnName: "WireGuard")
+            RouteChip(route: Route(name: "", egress: .vpnDefault), vpnName: "WireGuard")
+            RouteChip(route: proxy, vpnName: "WireGuard")
+            RouteChipMenu(RouteChip(route: proxy, vpnName: "WireGuard")) { Button("Direct") {} }
+        }
+        try renderComponent(view, to: "components-6-route-chip.png")
+    }
+
+    /// 7. The sheet scaffold, as a sheet and as a destructive confirm.
+    func testComponentSheetScaffold() throws {
+        let view = VStack(spacing: Theme.Space.l) {
+            SheetScaffold("New Rule", confirmTitle: "Add Rule", onCancel: {}, onConfirm: {}) {
+                GroupSection {
+                    ListRow(glyph: "globe", name: "en.wikipedia.org", detail: "Domain")
+                    InsetDivider()
+                    ListRow(glyph: "arrow.up.right", name: "Direct", detail: "Route")
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.sheet).fill(Theme.bgSecondary))
+            SheetScaffold("Remove all routes?", confirmTitle: "Remove All", isDestructive: true,
+                          onCancel: {}, onConfirm: {}) {
+                Text("Every address this app routed goes back to the VPN.")
+                    .font(Theme.Font.body)
+                    .foregroundColor(Theme.textSecondary)
+            }
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.sheet).fill(Theme.bgSecondary))
+        }
+        try renderComponent(view, width: SheetScaffold<EmptyView>.width + 48, to: "components-7-sheet-scaffold.png")
+    }
+
+    /// Draws one component on the window's ground, 24 pt around it, at the given width.
+    private func renderComponent<V: View>(_ view: V, width: CGFloat = 520, to name: String) throws {
+        let hosting = NSHostingView(rootView: view
+            .padding(Theme.Space.page)
+            .frame(width: width, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(Theme.bgPrimary))
+        let window = DocScreenshotKeyWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 400),
+                                            styleMask: [.borderless], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = hosting
+        show(window)
+        window.setContentSize(hosting.fittingSize)
+        window.makeFirstResponder(nil)
+        settle(hosting)
+        let size = try write(hosting, cornerRadius: 12, outline: NSColor(white: 1, alpha: 0.15), to: name)
+        XCTAssertEqual(size.width, width * 2, name)
+    }
+
     // MARK: - The rework's first fixes (A2 to A7, B1, B2), drawn for the pull request
 
     /// A2: the helper is down, yet the line under Refresh said what an old apply routed.
