@@ -158,6 +158,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         installTerminationSignalHandler()
     }
 
+    /// The app is opened again while it runs (Finder, Spotlight, Launchpad, `open`). It has no
+    /// Dock icon, and the menu bar icon can be hidden by the notch or switched off in System
+    /// Settings, so this is the way back in (flow fix 8): Settings opens on Status, which says
+    /// when the icon cannot be seen. A Settings window already open only comes to the front.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        MainActor.assumeIsolated {
+            MenuBarIconVisibility.shared.refresh()
+            let controller = SettingsWindowController.shared
+            NSApp.activate(ignoringOtherApps: true)
+            controller.show(page: AppReopen.page(settingsShown: controller.isShown))
+        }
+        return false
+    }
+
     /// Run the same teardown on SIGTERM that a normal Quit runs.
     ///
     /// `applicationShouldTerminate` is only invoked for the Quit AppleEvent / `NSApp.terminate`.
@@ -393,5 +407,109 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.startNetworkMonitoring()
         }
+    }
+}
+
+// MARK: - Reopen and the hidden menu bar icon
+
+/// What reopening the running app shows.
+enum AppReopen {
+    /// Status, unless the Settings window is already open, which keeps its page.
+    static func page(settingsShown: Bool) -> SettingsView.SettingsTab? {
+        settingsShown ? nil : .status
+    }
+}
+
+/// Whether the menu bar icon can be seen. macOS lets users switch third-party menu bar items
+/// off (System Settings > Menu Bar), and the notch hides items that do not fit, and the app
+/// has no other way in. Read from the status item's window: its occlusion state says whether
+/// any of it is on screen. Read on reopen and whenever that window's occlusion changes.
+@MainActor
+final class MenuBarIconVisibility: ObservableObject {
+    static let shared = MenuBarIconVisibility()
+
+    /// The System Settings pane that lists menu bar items (Menu Bar on macOS 26 and later,
+    /// Control Center before).
+    static let settingsURL = URL(string: "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension")!
+
+    /// Set from `refresh()`; the doc screenshots set it directly.
+    @Published var isHidden = false
+    private var observer: NSObjectProtocol?
+
+    private init() {
+        observer = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification, object: nil, queue: .main) { note in
+            guard let window = note.object as? NSWindow, Self.isStatusItemWindow(window) else { return }
+            MainActor.assumeIsolated { MenuBarIconVisibility.shared.refresh() }
+        }
+    }
+
+    func refresh() {
+        let windows = NSApp.windows.filter(Self.isStatusItemWindow)
+        isHidden = Self.isHidden(statusWindowsVisible: windows.map { $0.occlusionState.contains(.visible) },
+                                 menuBarVisible: NSMenu.menuBarVisible() && !Self.menuBarAutoHides())
+    }
+
+    /// System Settings > Menu Bar > "Automatically hide and show the menu bar" set to Always:
+    /// the bar, and every icon in it, is off screen until the pointer reaches the top edge, so
+    /// an occluded status window there says nothing about the icon.
+    static func menuBarAutoHides(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: "_HIHideMenuBar")
+    }
+
+    /// The window AppKit puts a status item's button in.
+    nonisolated static func isStatusItemWindow(_ window: NSWindow) -> Bool {
+        String(describing: type(of: window)) == "NSStatusBarWindow"
+    }
+
+    /// Hidden when no part of the icon is on screen while the menu bar itself is: no status
+    /// window at all (the item is switched off), or none of them visible (behind the notch).
+    /// A menu bar that hides itself (full screen, or set to hide) proves nothing either way.
+    static func isHidden(statusWindowsVisible: [Bool], menuBarVisible: Bool) -> Bool {
+        guard menuBarVisible else { return false }
+        return !statusWindowsVisible.contains(true)
+    }
+
+    nonisolated static let isUnderTests = NSClassFromString("XCTestCase") != nil
+        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
+    func openSettings() {
+        NSWorkspace.shared.open(Self.settingsURL)
+    }
+}
+
+/// The line at the top of Status while the menu bar icon cannot be seen, with the System
+/// Settings pane that turns it back on.
+struct MenuBarIconHiddenNote: View {
+    @ObservedObject private var visibility = MenuBarIconVisibility.shared
+
+    var body: some View {
+        if visibility.isHidden { note }
+    }
+
+    /// Status can open without a reopen (a notification, the dropdown's Show), so it reads the
+    /// icon when it appears too. Not under tests, which have no status item and set `isHidden`
+    /// themselves.
+    static func refreshOnAppear() {
+        if !MenuBarIconVisibility.isUnderTests { MenuBarIconVisibility.shared.refresh() }
+    }
+
+    private var note: some View {
+            HStack(alignment: .center, spacing: Theme.Space.s) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(Theme.attention)
+                    .accessibilityHidden(true)
+                Text("The menu bar icon is not visible. It may be switched off in System Settings, or hidden by the notch.")
+                    .font(Theme.Font.body)
+                    .foregroundColor(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Theme.Space.s)
+                Button(String(localized: "Open Menu Bar Settings…")) { visibility.openSettings() }
+                    .accessibilityLabel(String(localized: "Open Menu Bar Settings…"))
+            }
+            .padding(Theme.Space.m)
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.group).fill(Theme.bgCard))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.group).strokeBorder(Theme.border, lineWidth: 0.5))
+            .accessibilityElement(children: .contain)
     }
 }
