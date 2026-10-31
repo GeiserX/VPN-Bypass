@@ -99,9 +99,10 @@ enum DomainsPage {
             // Custom routes by rules, whose routes may carry the same name; neither list
             // routes anything there.
             let routes = !readOnly && entry.enabled && mode != .custom
-            // A range the user typed is theirs to know; a name's or a wildcard's addresses
-            // came from a lookup.
-            if routes, !stale, !entry.isCIDR, let cdn = sharedCDNs[entry.domain] {
+            // A range or an address the user typed is theirs to know; a name's or a
+            // wildcard's addresses came from a lookup.
+            if routes, !stale, !entry.isCIDR, RouteKernel.ipv4ToUInt32(entry.domain) == nil,
+               let cdn = sharedCDNs[entry.domain] {
                 let shared = SharedAddress.detail(cdn: cdn, isInverse: mode == .vpnOnly, bundle: bundle)
                 detail = detail.map { "\($0) · \(shared)" } ?? shared
             }

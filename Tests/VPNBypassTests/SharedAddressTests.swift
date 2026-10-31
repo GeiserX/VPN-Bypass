@@ -129,6 +129,11 @@ final class SharedAddressTests: XCTestCase {
         let vpnOnly = DomainsPage.sections(mode: .vpnOnly, config: config(bypass: [], vpnOnly: [range]),
                                            routeSources: ["104.16.0.0/13"], search: "", sharedCDNs: all)
         XCTAssertEqual(vpnOnly[0].rows.map(\.detail), ["IP range"])
+        // An address typed on the Bypass list routes under its own text: no lookup, no line.
+        let typed = DomainsPage.sections(mode: .bypass, config: config(bypass: [DomainEntry(domain: "104.16.1.1")]),
+                                         routeSources: ["104.16.1.1"], search: "",
+                                         sharedCDNs: ["104.16.1.1": "Cloudflare"])
+        XCTAssertEqual(typed[0].rows.map(\.detail), [nil])
         let custom = DomainsPage.sections(mode: .custom, config: config(bypass: [DomainEntry(domain: "intranet.example.org")]),
                                           routeSources: ["intranet.example.org"], search: "", sharedCDNs: all)
         XCTAssertEqual(custom[0].rows.map(\.detail), [nil])
