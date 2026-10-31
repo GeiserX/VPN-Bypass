@@ -53,19 +53,42 @@ enum CatalogueSelection {
     }
 
     /// The rows to show, by category in catalogue order: only `category` when one is picked,
-    /// and only the rows search matches. A category with no row left is left out.
-    static func groups(_ rows: [Row], category: ServiceCatalogue.Category?, search: String,
-                       locale: Locale = .current) -> [(category: ServiceCatalogue.Category, rows: [Row])] {
-        ServiceCatalogue.Category.allCases.compactMap { cat in
+    /// only the services of `region` when one is picked, and only the rows search matches. A
+    /// category with no row left is left out.
+    static func groups(_ rows: [Row], category: ServiceCatalogue.Category?, region: String? = nil,
+                       search: String, locale: Locale = .current) -> [(category: ServiceCatalogue.Category, rows: [Row])] {
+        let inRegion = self.rows(rows, in: region)
+        return ServiceCatalogue.Category.allCases.compactMap { cat in
             guard category == nil || category == cat else { return nil }
-            let shown = rows.filter { $0.entry.category == cat && matches($0, search: search, locale: locale) }
+            let shown = inRegion.filter { $0.entry.category == cat && matches($0, search: search, locale: locale) }
             return shown.isEmpty ? nil : (cat, shown)
         }
     }
 
-    /// The categories that have at least one service: the filter's chips after "All".
-    static func categories(_ rows: [Row]) -> [ServiceCatalogue.Category] {
-        ServiceCatalogue.Category.allCases.filter { cat in rows.contains { $0.entry.category == cat } }
+    /// The services of `region` (an ISO 3166 code), or every row when none is picked.
+    static func rows(_ rows: [Row], in region: String?) -> [Row] {
+        guard let region else { return rows }
+        return rows.filter { $0.entry.region == region }
+    }
+
+    /// The categories that have at least one service in `region`: the filter's chips after "All".
+    static func categories(_ rows: [Row], region: String? = nil) -> [ServiceCatalogue.Category] {
+        let inRegion = self.rows(rows, in: region)
+        return ServiceCatalogue.Category.allCases.filter { cat in inRegion.contains { $0.entry.category == cat } }
+    }
+
+    /// The countries that have a service of their own, by name in the app's language: the
+    /// country menu's items after "All countries".
+    static func regions(_ rows: [Row], locale: Locale = .current) -> [String] {
+        Set(rows.compactMap(\.entry.region)).sorted {
+            (regionName($0, locale: locale) ?? $0).localizedStandardCompare(regionName($1, locale: locale) ?? $1) == .orderedAscending
+        }
+    }
+
+    /// The list's line when the country menu hides every match.
+    static func regionMiss(_ region: String, search: String, locale: Locale = .current, in bundle: Bundle = .main) -> String {
+        let country = regionName(region, locale: locale) ?? region
+        return String(localized: "No service for \(country) matches \u{201C}\(search)\u{201D}. Choose All countries to see the matches elsewhere.", bundle: bundle)
     }
 
     enum GroupState: Equatable { case none, some, all, unavailable }
@@ -101,16 +124,19 @@ struct CatalogueSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var search: String
     @State private var category: ServiceCatalogue.Category?
+    /// The country menu's pick, an ISO 3166 code; nil shows every country.
+    @State private var region: String?
     @State private var picked: Set<String>
     @FocusState private var isSearchFocused: Bool
     let onBypass: (Set<String>) -> Void
 
-    /// The arguments seed the sheet, for the empty page's "Search the catalogue" and for a
-    /// rendered screenshot.
-    init(search: String = "", category: ServiceCatalogue.Category? = nil, picked: Set<String> = [],
-         onBypass: @escaping (Set<String>) -> Void) {
+    /// The arguments seed the sheet, for the empty page's "Search the catalogue", the first
+    /// run's country row and a rendered screenshot.
+    init(search: String = "", category: ServiceCatalogue.Category? = nil, region: String? = nil,
+         picked: Set<String> = [], onBypass: @escaping (Set<String>) -> Void) {
         _search = State(initialValue: search)
         _category = State(initialValue: category)
+        _region = State(initialValue: region)
         _picked = State(initialValue: picked)
         self.onBypass = onBypass
     }
@@ -126,43 +152,47 @@ struct CatalogueSheet: View {
 
     var body: some View {
         let rows = self.rows
-        let groups = CatalogueSelection.groups(rows, category: category, search: search)
+        let groups = CatalogueSelection.groups(rows, category: category, region: region, search: search)
         VStack(alignment: .leading, spacing: 12) {
             Text("Service catalogue")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(Theme.textPrimary)
 
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.textSecondary)
-                    .accessibilityHidden(true)
-                TextField(String(localized: "Search by name, domain or country"), text: $search)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .focused($isSearchFocused)
-                if !search.isEmpty {
-                    Button {
-                        search = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.textSecondary)
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                    TextField(String(localized: "Search by name, domain or country"), text: $search)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .focused($isSearchFocused)
+                    if !search.isEmpty {
+                        Button {
+                            search = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(Theme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(String(localized: "Clear search"))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(String(localized: "Clear search"))
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Theme.bgInput)
+                .cornerRadius(8)
+
+                regionMenu(rows)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Theme.bgInput)
-            .cornerRadius(8)
 
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         chip(String(localized: "All"), selected: category == nil) { category = nil }
-                        ForEach(CatalogueSelection.categories(rows), id: \.self) { cat in
+                        ForEach(CatalogueSelection.categories(rows, region: region), id: \.self) { cat in
                             chip(cat.displayName(), selected: category == cat) { category = cat }
                                 .id(cat)
                         }
@@ -173,8 +203,17 @@ struct CatalogueSheet: View {
             }
 
             ScrollView {
-                if groups.isEmpty, let category,
-                   !CatalogueSelection.groups(rows, category: nil, search: search).isEmpty {
+                if groups.isEmpty, let region,
+                   !CatalogueSelection.groups(rows, category: category, search: search).isEmpty {
+                    // The matches are in other countries, hidden by the country menu.
+                    Text(CatalogueSelection.regionMiss(region, search: search))
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 30)
+                } else if groups.isEmpty, let category,
+                   !CatalogueSelection.groups(rows, category: nil, region: region, search: search).isEmpty {
                     // The matches are in other categories, hidden by the chip.
                     Text(String(localized: "No service in \(category.displayName()) matches \u{201C}\(search)\u{201D}. Choose All to see the matches in other categories."))
                         .font(.system(size: 12))
@@ -230,6 +269,30 @@ struct CatalogueSheet: View {
         .frame(width: 520, height: 600)
         .background(Theme.bgSecondary)
         .onAppear { isSearchFocused = true }
+    }
+
+    /// The country menu: every country with a service of its own, and All countries.
+    private func regionMenu(_ rows: [CatalogueSelection.Row]) -> some View {
+        Picker(String(localized: "Country"), selection: Binding(
+            get: { region },
+            set: { new in
+                region = new
+                // A chip the new country has no service in would leave the list empty.
+                if let category, !CatalogueSelection.categories(rows, region: new).contains(category) {
+                    self.category = nil
+                }
+            }
+        )) {
+            Text(String(localized: "All countries")).tag(String?.none)
+            Divider()
+            ForEach(CatalogueSelection.regions(rows), id: \.self) { code in
+                Text(verbatim: CatalogueSelection.regionName(code) ?? code).tag(String?.some(code))
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .fixedSize()
+        .accessibilityLabel(String(localized: "Country"))
     }
 
     private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {

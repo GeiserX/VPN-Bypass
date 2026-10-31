@@ -207,6 +207,8 @@ struct ServicesTab: View {
     /// The catalogue sheet is open, with `catalogueSeed` in its search field.
     @State private var showingCatalogue = false
     @State private var catalogueSeed = ""
+    /// The country the sheet opens on: the first run's country row sets it.
+    @State private var catalogueRegion: String?
 
     /// The doc screenshots draw this service's row as if the pointer were on it.
     static var hoveredForScreenshots: String?
@@ -321,7 +323,7 @@ struct ServicesTab: View {
                 .environmentObject(routeManager)
         }
         .sheet(isPresented: $showingCatalogue) {
-            CatalogueSheet(search: catalogueSeed) { picked in
+            CatalogueSheet(search: catalogueSeed, region: catalogueRegion) { picked in
                 addFromCatalogue(picked)
             }
             .environmentObject(routeManager)
@@ -330,7 +332,9 @@ struct ServicesTab: View {
         .onReceive(SettingsPageRequest.shared.$openCatalogue) { open in
             guard open, !isVPNOnly else { return }
             SettingsPageRequest.shared.openCatalogue = false
-            openCatalogue()
+            let region = SettingsPageRequest.shared.catalogueRegion
+            SettingsPageRequest.shared.catalogueRegion = nil
+            openCatalogue(region: region)
         }
         .alert(turnOnQuestion?.title ?? "", isPresented: Binding(
             get: { turnOnQuestion != nil },
@@ -395,8 +399,9 @@ struct ServicesTab: View {
         return ServiceSections.turnAllOn(services: services, pinned: pinned ?? ServiceSections.pin(services))
     }
 
-    private func openCatalogue(seed: String = "") {
+    private func openCatalogue(seed: String = "", region: String? = nil) {
         catalogueSeed = seed
+        catalogueRegion = region
         showingCatalogue = true
     }
 

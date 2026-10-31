@@ -314,6 +314,7 @@
 "What should skip the VPN?" = "What should skip the VPN?";
 "Switched-on services use your normal connection." = "Switched-on services use your normal connection.";
 "All %lld services…" = "All %lld services…";
+"Services for %@…" = "Services for %@…";
 "Add a site, like example.com" = "Add a site, like example.com";
 "Add Site" = "Add Site";
 "Mode: Bypass. Want only a few sites on the VPN and everything else direct?" = "Mode: Bypass. Want only a few sites on the VPN and everything else direct?";
@@ -467,6 +468,8 @@
 "More actions" = "More actions";
 "Search services" = "Search services";
 "Clear search" = "Clear search";
+"Country" = "Country";
+"All countries" = "All countries";
 "Add Route" = "Add Route";
 "Add Rule" = "Add Rule";
 
@@ -714,6 +717,7 @@
 "No service in the catalogue matches “%@”. Make a custom service with the + button." = "No service in the catalogue matches “%@”. Make a custom service with the + button.";
 "Select all %@" = "Select all %@";
 "No service in %@ matches “%@”. Choose All to see the matches in other categories." = "No service in %1$@ matches “%2$@”. Choose All to see the matches in other categories.";
+"No service for %@ matches “%@”. Choose All countries to see the matches elsewhere." = "No service for %1$@ matches “%2$@”. Choose All countries to see the matches elsewhere.";
 "Deselect all %@" = "Deselect all %@";
 "All selected" = "All selected";
 "Some selected" = "Some selected";

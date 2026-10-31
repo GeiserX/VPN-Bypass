@@ -67,6 +67,39 @@ final class FirstRunSetupTests: XCTestCase {
         XCTAssertEqual(ServiceChip.iconName(for: "no-such-service"), "globe")
     }
 
+    // MARK: The country suggestion (regional packs)
+
+    func testTheMacsRegionIsSuggestedWhenTheCatalogueHasItsServices() {
+        let catalogue = [ServiceCatalogue.Entry(category: .banks, region: "FR",
+                                                service: ServiceEntry(id: "fr_lcl", name: "LCL", enabled: false,
+                                                                      domains: ["*.lcl.fr"], ipRanges: []))]
+        XCTAssertEqual(FirstRunSetup.suggestedRegion("FR", catalogue: catalogue), "FR")
+        XCTAssertEqual(FirstRunSetup.suggestedRegion("fr", catalogue: catalogue), "FR")
+        XCTAssertNil(FirstRunSetup.suggestedRegion("JP", catalogue: catalogue), "no Japanese service: no row")
+        XCTAssertNil(FirstRunSetup.suggestedRegion(nil, catalogue: catalogue), "no region set on the Mac")
+        XCTAssertNil(FirstRunSetup.suggestedRegion("FR", catalogue: []))
+    }
+
+    func testTheMacsRegionIsReadEachTime() {
+        defer { FirstRunSetup.regionOverride = nil }
+        FirstRunSetup.regionOverride = "JP"
+        XCTAssertEqual(FirstRunSetup.macRegion, "JP")
+        FirstRunSetup.regionOverride = nil
+        XCTAssertEqual(FirstRunSetup.macRegion, Locale.current.region?.identifier, "nil reads the Mac's region")
+    }
+
+    func testEveryShippedPackIsSuggestedOnItsCountry() {
+        for region in ["FR", "ES", "DE", "IT", "GB", "US"] {
+            XCTAssertEqual(FirstRunSetup.suggestedRegion(region), region)
+        }
+        XCTAssertNil(FirstRunSetup.suggestedRegion("JP"))
+    }
+
+    func testTheCountryRowNamesTheCountry() {
+        XCTAssertEqual(FirstRunSetup.regionServices("FR", locale: Locale(identifier: "en_US")), "Services for France…")
+        XCTAssertEqual(FirstRunSetup.regionServices("GB", locale: Locale(identifier: "en_US")), "Services for United Kingdom…")
+    }
+
     func testWording() {
         XCTAssertEqual(FirstRunSetup.title, "What should skip the VPN?")
         XCTAssertEqual(FirstRunSetup.allServices(37), "All 37 services…")
@@ -123,7 +156,8 @@ final class FirstRunSetupTests: XCTestCase {
         let keys = ["What should skip the VPN?", "Switched-on services use your normal connection.",
                     "All %lld services…", "Add a site, like example.com", "Add Site",
                     "Mode: Bypass. Want only a few sites on the VPN and everything else direct?",
-                    "Use VPN Only instead…", "Nothing skips the VPN yet.", "1 domain", "%lld domains"]
+                    "Use VPN Only instead…", "Nothing skips the VPN yet.", "1 domain", "%lld domains",
+                    "Services for %@…"]
         for lang in ["en", "es", "fr"] {
             let url = dir.appendingPathComponent("Sources/VPNBypassCore/Resources/\(lang).lproj/Localizable.strings")
             let table = try XCTUnwrap(NSDictionary(contentsOf: url) as? [String: String], lang)
@@ -318,6 +352,27 @@ final class FirstRunSetupViewTests: XCTestCase {
                  size: NSSize(width: 580, height: 680))
         XCTAssertNil(SettingsPageRequest.shared.page)
         XCTAssertFalse(SettingsPageRequest.shared.openCatalogue, "the Services page took the request")
+    }
+
+    /// The first run's country row: the Services page takes the country with the request and
+    /// clears it, so the next "All services…" opens on every country.
+    func testTheCountryRowOpensTheCatalogueOnTheCountry() throws {
+        SettingsPageRequest.shared.catalogueRegion = "FR"
+        SettingsPageRequest.shared.openCatalogue = true
+        SettingsPageRequest.shared.page = .services
+        defer {
+            SettingsPageRequest.shared.openCatalogue = false
+            SettingsPageRequest.shared.catalogueRegion = nil
+        }
+        _ = host(SettingsView()
+                    .environmentObject(rm)
+                    .environmentObject(NotificationManager.shared)
+                    .environmentObject(LaunchAtLoginManager.shared)
+                    .environmentObject(ModeSwitchRequest())
+                    .environmentObject(SettingsUndo(routeManager: rm)),
+                 size: NSSize(width: 580, height: 680))
+        XCTAssertFalse(SettingsPageRequest.shared.openCatalogue, "the Services page took the request")
+        XCTAssertNil(SettingsPageRequest.shared.catalogueRegion, "and its country")
     }
 
     /// The row counts the catalogue, not the services in the config, which may hold custom ones.

@@ -108,6 +108,158 @@
       "domains": [
         "*.creditmutuel.fr"
       ]
+    },
+    {
+      "id": "es_santander",
+      "name": "Banco Santander",
+      "region": "ES",
+      "domains": [
+        "*.bancosantander.es"
+      ]
+    },
+    {
+      "id": "es_bbva",
+      "name": "BBVA",
+      "region": "ES",
+      "domains": [
+        "*.bbva.es"
+      ]
+    },
+    {
+      "id": "es_caixabank",
+      "name": "CaixaBank",
+      "region": "ES",
+      "domains": [
+        "*.caixabank.es"
+      ]
+    },
+    {
+      "id": "es_sabadell",
+      "name": "Banco Sabadell",
+      "region": "ES",
+      "domains": [
+        "*.bancsabadell.com"
+      ]
+    },
+    {
+      "id": "de_sparkasse",
+      "name": "Sparkasse",
+      "region": "DE",
+      "domains": [
+        "*.sparkasse.de"
+      ]
+    },
+    {
+      "id": "de_deutschebank",
+      "name": "Deutsche Bank",
+      "region": "DE",
+      "domains": [
+        "*.deutsche-bank.de"
+      ]
+    },
+    {
+      "id": "de_commerzbank",
+      "name": "Commerzbank",
+      "region": "DE",
+      "domains": [
+        "*.commerzbank.de"
+      ]
+    },
+    {
+      "id": "de_postbank",
+      "name": "Postbank",
+      "region": "DE",
+      "domains": [
+        "*.postbank.de"
+      ]
+    },
+    {
+      "id": "it_intesasanpaolo",
+      "name": "Intesa Sanpaolo",
+      "region": "IT",
+      "domains": [
+        "*.intesasanpaolo.com"
+      ]
+    },
+    {
+      "id": "it_unicredit",
+      "name": "UniCredit",
+      "region": "IT",
+      "domains": [
+        "*.unicredit.it"
+      ]
+    },
+    {
+      "id": "it_posteitaliane",
+      "name": "Poste Italiane",
+      "region": "IT",
+      "domains": [
+        "*.poste.it"
+      ]
+    },
+    {
+      "id": "gb_barclays",
+      "name": "Barclays",
+      "region": "GB",
+      "domains": [
+        "*.barclays.co.uk"
+      ]
+    },
+    {
+      "id": "gb_hsbc",
+      "name": "HSBC UK",
+      "region": "GB",
+      "domains": [
+        "*.hsbc.co.uk"
+      ]
+    },
+    {
+      "id": "gb_lloyds",
+      "name": "Lloyds Bank",
+      "region": "GB",
+      "domains": [
+        "*.lloydsbank.com"
+      ]
+    },
+    {
+      "id": "gb_natwest",
+      "name": "NatWest",
+      "region": "GB",
+      "domains": [
+        "*.natwest.com"
+      ]
+    },
+    {
+      "id": "us_chase",
+      "name": "Chase",
+      "region": "US",
+      "domains": [
+        "*.chase.com"
+      ]
+    },
+    {
+      "id": "us_bankofamerica",
+      "name": "Bank of America",
+      "region": "US",
+      "domains": [
+        "*.bankofamerica.com"
+      ]
+    },
+    {
+      "id": "us_wellsfargo",
+      "name": "Wells Fargo",
+      "region": "US",
+      "domains": [
+        "*.wellsfargo.com"
+      ]
+    },
+    {
+      "id": "us_citi",
+      "name": "Citi",
+      "region": "US",
+      "domains": [
+        "*.citi.com"
+      ]
     }
   ]
 }
