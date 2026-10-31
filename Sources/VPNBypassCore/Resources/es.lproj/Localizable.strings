@@ -973,3 +973,27 @@
 "Routes are still being applied. Added %lld of %lld; press Add again when they finish." = "Las rutas todavía se están aplicando. Añadidos %lld de %lld; pulsa Añadir de nuevo cuando terminen.";
 "A name here is on the list but switched off. Turn it on from the Domains page." = "Un nombre de aquí está en la lista pero desactivado. Actívalo desde la página Dominios.";
 "Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory." = "Aprender un sitio ha activado la captura solo durante sus 60 segundos, y guarda los nombres en memoria.";
+
+/* Profiles per network */
+"Wi-Fi" = "Wi-Fi";
+"Ethernet" = "Ethernet";
+"Other connection" = "Otra conexión";
+"%@, router %@" = "%1$@, router %2$@";
+"Other networks" = "Otras redes";
+"No network yet" = "Ninguna red todavía";
+"1 network" = "1 red";
+"%lld networks" = "%lld redes";
+"Any network without a profile" = "Cualquier red sin perfil";
+"Use %@ on this network" = "Usar %@ en esta red";
+"Network profiles" = "Perfiles de red";
+"A profile keeps a mode and its lists. When the Mac joins one of its networks, the profile is put in use. Networks are told apart by their router." = "Un perfil guarda un modo y sus listas. Cuando el Mac se une a una de sus redes, el perfil se pone en uso. Las redes se distinguen por su router.";
+"This network" = "Esta red";
+"Not identified yet" = "Aún sin identificar";
+"Use on This Network" = "Usar en esta red";
+"Save as Profile for This Network…" = "Guardar como perfil para esta red…";
+"In use" = "En uso";
+"New profile" = "Nuevo perfil";
+"Save" = "Guardar";
+"Saves the mode and lists in use now for this network. Changes made while the profile is in use stay in it." = "Guarda el modo y las listas en uso ahora para esta red. Los cambios hechos mientras el perfil está en uso se quedan en él.";
+"Home, Office…" = "Casa, Oficina…";
+"A profile with this name exists." = "Ya existe un perfil con este nombre.";

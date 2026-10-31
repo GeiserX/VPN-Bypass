@@ -1,6 +1,6 @@
 // GeneralPage.swift
-// The General page (section 3.5 of docs/design/APP-REWORK-PROPOSALS.md): five native groups
-// with no icons (Startup, Routing, DNS servers, Notifications, Configuration), then the global
+// The General page (section 3.5 of docs/design/APP-REWORK-PROPOSALS.md): native groups with no
+// icons (Startup, Routing, Network profiles, DNS servers, Notifications, Configuration), then the global
 // SOCKS5 proxy behind an Advanced disclosure. Custom mode has its own proxy routes, so there the
 // disclosure gives way to one sentence that points at the Routes page.
 
@@ -14,12 +14,13 @@ import UniformTypeIdentifiers
 enum GeneralPage {
     /// The page's groups, top to bottom.
     enum Group: CaseIterable {
-        case startup, routing, dnsServers, notifications, configuration
+        case startup, routing, networkProfiles, dnsServers, notifications, configuration
 
         func title(in bundle: Bundle = .main) -> String {
             switch self {
             case .startup: return String(localized: "Startup", bundle: bundle)
             case .routing: return String(localized: "Routing", bundle: bundle)
+            case .networkProfiles: return String(localized: "Network profiles", bundle: bundle)
             case .dnsServers: return String(localized: "DNS servers", bundle: bundle)
             case .notifications: return String(localized: "Notifications", bundle: bundle)
             case .configuration: return String(localized: "Configuration", bundle: bundle)
@@ -134,6 +135,7 @@ struct GeneralTab: View {
         VStack(alignment: .leading, spacing: Theme.Space.page) {
             startup
             routing
+            NetworkProfilesGroup()
             dnsServers
             notifications
             configuration

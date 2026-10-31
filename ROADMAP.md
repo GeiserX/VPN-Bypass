@@ -95,7 +95,7 @@ planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`, with kernel routes kept as
 | **Kill Switch** | Block all traffic if VPN disconnects unexpectedly |
 | **DNS Leak Protection** | Ensure DNS queries don't leak through VPN |
 | **IPv6 Leak Protection** | Block IPv6 to prevent leaks |
-| **Connection Profiles** | Different configs for "Home", "Work", "Travel" |
+| ~~**Connection Profiles**~~ | ✅ Done in 6.0 as network profiles on the General page: a mode and its lists per network, told apart by the router (address, MAC, Wi-Fi or Ethernet) |
 | ~~**Scheduled Rules**~~ | ✅ Done in 6.0 through Shortcuts actions (Set Routing Mode, Add Domain, Turn Service On or Off, Get Status), which Shortcuts automations run at a time, on a Focus or on a network |
 | **Local DNS Proxy** | Run local DNS that uses ISP DNS for bypass domains |
 

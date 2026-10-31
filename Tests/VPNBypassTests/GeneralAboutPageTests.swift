@@ -13,9 +13,9 @@ final class GeneralAboutModelTests: XCTestCase {
 
     // MARK: General
 
-    func testGeneralIsFiveGroupsInOrder() {
+    func testGeneralGroupsInOrder() {
         XCTAssertEqual(GeneralPage.Group.allCases.map { $0.title() },
-                       ["Startup", "Routing", "DNS servers", "Notifications", "Configuration"])
+                       ["Startup", "Routing", "Network profiles", "DNS servers", "Notifications", "Configuration"])
     }
 
     /// Auto DNS Refresh and Refresh Interval are one popup, with Never as its last choice.
@@ -221,6 +221,26 @@ final class GeneralAboutViewTests: XCTestCase {
             XCTAssertFalse(texts.contains(gone), "\(gone) is still on General")
         }
         XCTAssertFalse(texts.contains("Enable SOCKS5 Proxy"), "Advanced starts closed when the proxy is off")
+    }
+
+    /// Network profiles: this network, Other networks and each profile with its state, and
+    /// every button named for VoiceOver.
+    func testGeneralShowsNetworkProfiles() {
+        setMode(.bypass)
+        let savedNetwork = rm.currentNetwork
+        defer { rm.currentNetwork = savedNetwork }
+        let office = NetworkIdentity(gateway: "192.0.2.1", routerMAC: "02:00:00:00:00:01", kind: .ethernet)
+        rm.currentNetwork = NetworkIdentity(gateway: "192.0.2.1", routerMAC: "02:00:00:00:00:02", kind: .wifi)
+        var config = rm.config
+        config.profiles = [NetworkProfile(id: UUID(), name: "Office", networks: [office],
+                                          settings: ProfileSettings(capturing: config))]
+        config.activeProfileId = nil
+        rm.config = config
+        let texts = texts(on: .general)
+        for name in ["Network profiles", "This network", "Wi-Fi, router 192.0.2.1", "Other networks", "In use",
+                     "Office", "Use Office on this network", "Delete Office", "Save as Profile for This Network…"] {
+            XCTAssertTrue(texts.contains(name), "\(name) missing from General: \(texts.sorted())")
+        }
     }
 
     func testAdvancedOpensForAUserOfTheProxy() {
