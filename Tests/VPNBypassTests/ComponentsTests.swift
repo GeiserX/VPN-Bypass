@@ -206,9 +206,10 @@ final class ComponentsTests: XCTestCase {
 
     /// Esc cancels and Return confirms, in every sheet; a sheet that cannot confirm yet ignores Return.
     func testSheetKeys() {
-        for canConfirm in [true, false] {
+        for (canConfirm, destructive) in [(true, false), (false, false), (true, true), (false, true)] {
             var cancels = 0, confirms = 0
-            let window = host(SheetScaffold("New Rule", confirmTitle: "Add Rule", canConfirm: canConfirm,
+            let window = host(SheetScaffold("New Rule", confirmTitle: "Add Rule", isDestructive: destructive,
+                                            canConfirm: canConfirm,
                                             onCancel: { cancels += 1 }, onConfirm: { confirms += 1 }) {
                 Text("content")
             })
@@ -223,6 +224,8 @@ final class ComponentsTests: XCTestCase {
     func testTheConfirmButtonIsAccentOrFailure() {
         XCTAssertEqual(SheetScaffold<EmptyView>.confirmColor(isDestructive: false), Theme.accent)
         XCTAssertEqual(SheetScaffold<EmptyView>.confirmColor(isDestructive: true), Theme.failure)
+        XCTAssertNil(SheetScaffold<EmptyView>.confirmRole(isDestructive: false))
+        XCTAssertEqual(SheetScaffold<EmptyView>.confirmRole(isDestructive: true), .destructive)
     }
 
     /// ⌘F puts the cursor in the page's search field.

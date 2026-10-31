@@ -596,6 +596,11 @@ struct SheetScaffold<Content: View>: View {
         isDestructive ? Theme.failure : Theme.accent
     }
 
+    /// The confirm button's role, so a destructive confirm is destructive beyond its colour.
+    static func confirmRole(isDestructive: Bool) -> ButtonRole? {
+        isDestructive ? .destructive : nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             Text(title)
@@ -607,7 +612,7 @@ struct SheetScaffold<Content: View>: View {
                 Spacer()
                 Button(String(localized: "Cancel"), action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button(confirmTitle, action: onConfirm)
+                Button(confirmTitle, role: Self.confirmRole(isDestructive: isDestructive), action: onConfirm)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .tint(Self.confirmColor(isDestructive: isDestructive))
