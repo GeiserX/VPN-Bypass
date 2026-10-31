@@ -186,7 +186,9 @@ final class NamedControlsTests: XCTestCase {
                 XCTAssertFalse(modifiers.contains(".scaleEffect"), "\(name):\(i + 1) is scaled")
             }
         }
-        XCTAssertGreaterThanOrEqual(switches, 6, "the scan found too few switches; the style moved")
+        // Pages on the shared rows draw ListRow's one switch, so the count falls as they move
+        // over (Rules and Routes in rework step 8); the floor still catches a style that moved.
+        XCTAssertGreaterThanOrEqual(switches, 4, "the scan found too few switches; the style moved")
     }
 
     /// The dropdown puts each shortcut on a control that is always there, since a closed menu
