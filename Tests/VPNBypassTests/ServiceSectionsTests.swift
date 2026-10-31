@@ -3,7 +3,7 @@
 // the page opened come first, then the custom services that are off, each in the catalogue's
 // order. A catalogue service that is off is not on the page: it waits in the catalogue sheet. A
 // switch flipped on the page does not move its row, search filters every section, Turn All On
-// covers the page only, and the headers are translated.
+// covers the page only. The page shows both parts as one list.
 
 import XCTest
 @testable import VPNBypassCore
@@ -194,21 +194,9 @@ final class ServiceSectionsTests: XCTestCase {
         XCTAssertEqual(ServiceSections.pin(services), ["dup": true])
     }
 
-    // MARK: - Headers in Spanish and French
-
-    /// A language folder from the source tree; a test run has no app bundle to take it from.
-    private func lproj(_ language: String) throws -> Bundle {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        return try XCTUnwrap(Bundle(url: root.appendingPathComponent("Sources/VPNBypassCore/Resources/\(language).lproj")))
-    }
-
-    func testTheHeadersAreTranslated() throws {
-        let en = try lproj("en"), es = try lproj("es"), fr = try lproj("fr")
-        XCTAssertEqual(ServiceSections.Kind.allCases.map { ServiceSections.title($0, in: en) },
-                       ["ON", "CUSTOM SERVICES"])
-        XCTAssertEqual(ServiceSections.Kind.allCases.map { ServiceSections.title($0, in: es) },
-                       ["ACTIVADOS", "SERVICIOS PERSONALIZADOS"])
-        XCTAssertEqual(ServiceSections.Kind.allCases.map { ServiceSections.title($0, in: fr) },
-                       ["ACTIVÉS", "SERVICES PERSONNALISÉS"])
+    func testThePageShowsTheTwoPartsAsOneList() {
+        let services = catalogue + [service("work", custom: true)]
+        let sections = ServiceSections(services: services, pinned: ServiceSections.pin(services), search: "")
+        XCTAssertEqual(ids(sections.rows), ["telegram", "whatsapp", "youtube", "slack", "work"])
     }
 }

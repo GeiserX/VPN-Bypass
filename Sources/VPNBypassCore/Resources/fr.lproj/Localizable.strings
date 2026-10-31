@@ -34,9 +34,6 @@
 "Create Custom Service" = "Créer un service personnalisé";
 "Custom" = "Personnalisé";
 "%lld domains" = "%lld domaines";
-/* Services page section headers; the On header is not the dropdown's ON pill */
-"services.section.on" = "ACTIVÉS";
-"CUSTOM SERVICES" = "SERVICES PERSONNALISÉS";
 
 /* ===== Réglages — Éditeur de service ===== */
 "Edit Service" = "Modifier le service";
@@ -705,7 +702,11 @@
 "catalogue.category.developer" = "Développement";
 "catalogue.category.ai" = "IA";
 "Browse catalogue…" = "Parcourir le catalogue…";
-"No services yet. Pick the ones you use from the catalogue." = "Aucun service pour l'instant. Choisissez ceux que vous utilisez dans le catalogue.";
+"A service skips the VPN while its switch is on." = "Un service contourne le VPN tant que son interrupteur est activé.";
+"Your services" = "Vos services";
+"%lld services, pick several at once" = "%lld services, choisissez-en plusieurs à la fois";
+"No services yet" = "Aucun service pour l'instant";
+"Pick the ones you use from the catalogue, or make your own with the + button." = "Choisissez ceux que vous utilisez dans le catalogue, ou créez le vôtre avec le bouton +.";
 "Nothing on this page matches “%@”." = "Rien sur cette page ne correspond à « %@ ».";
 "Search the catalogue" = "Rechercher dans le catalogue";
 "Service catalogue" = "Catalogue de services";
@@ -951,3 +952,16 @@
 "Success" = "Réussite";
 "Warning" = "Avertissement";
 "Error" = "Erreur";
+
+/* ===== Contourner le site ouvert (idée 3) ===== */
+"open in %@" = "ouvert dans %@";
+"The site open in %@" = "Le site ouvert dans %@";
+"Allow…" = "Autoriser…";
+"macOS asks once whether VPN Bypass may read the address of the front tab in %@." = "macOS demande une seule fois si VPN Bypass peut lire l’adresse de l’onglet actif de %@.";
+"Allow Reading the Front Tab in %@" = "Autoriser la lecture de l’onglet actif de %@";
+"Add %@ to Bypass" = "Ajouter %@ au Contournement";
+"Add %@ to VPN Only" = "Ajouter %@ à VPN uniquement";
+"Send %@ Direct" = "Envoyer %@ en Direct";
+
+"Shared CDN address (%@): other sites on it bypass the VPN too" = "Adresse CDN partagée (%@) : les autres sites qui y sont hébergés contournent aussi le VPN";
+"Shared CDN address (%@): other sites on it use the VPN too" = "Adresse CDN partagée (%@) : les autres sites qui y sont hébergés passent aussi par le VPN";

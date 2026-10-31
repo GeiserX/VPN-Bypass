@@ -88,6 +88,7 @@ final class DocScreenshotsTests: XCTestCase {
         rm.lastDNSRefresh = saved.dns
         HelperManager.shared.helperState = saved.helper
         SettingsPageRequest.shared.page = nil
+        FrontTabWatcher.shared.suggestion = nil
     }
 
     // MARK: - The screenshots
@@ -201,6 +202,39 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(size, Self.settingsSize)
     }
 
+    /// A name added to Telegram from the Lookups page, a custom service that is off, and the
+    /// pointer on Telegram, whose row offers the added name's remove.
+    func testSettingsOnServicesHovered() throws {
+        seedBypass()
+        rm.config.builtInServiceExtras["telegram"] = ["telegram-cdn.example"]
+        if let i = rm.config.services.firstIndex(where: { $0.id == "telegram" }) {
+            rm.config.services[i].domains.append("telegram-cdn.example")
+        }
+        rm.config.services.append(ServiceEntry(id: "custom_work_tools", name: "Work Tools", enabled: false,
+                                               domains: ["jira.example.com", "wiki.example.com"],
+                                               ipRanges: ["203.0.113.0/24"], isCustom: true))
+        ServicesTab.hoveredForScreenshots = "Telegram"
+        defer { ServicesTab.hoveredForScreenshots = nil }
+        let size = try renderSettings(page: .services, to: "services-hover.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// A fresh install: no service of the user's yet, so the page offers the catalogue.
+    func testSettingsOnServicesWhenEmpty() throws {
+        seedConnected(mode: .bypass)
+        let size = try renderSettings(page: .services, to: "services-empty.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
+    /// A search that none of the user's services matches offers the same search in the catalogue.
+    func testSettingsOnServicesWithASearchThatMisses() throws {
+        seedBypass()
+        SettingsView.searchForScreenshots = "netflix"
+        defer { SettingsView.searchForScreenshots = nil }
+        let size = try renderSettings(page: .services, to: "services-search.png")
+        XCTAssertEqual(size, Self.settingsSize)
+    }
+
     /// The catalogue sheet on the Banks chip, two banks picked: "Bypass 2 services".
     func testCatalogueSheet() throws {
         seedBypass()
@@ -266,6 +300,34 @@ final class DocScreenshotsTests: XCTestCase {
         DomainsTab.staleOnlyForScreenshots = true
         defer { DomainsTab.staleOnlyForScreenshots = false }
         XCTAssertEqual(try renderSettings(page: .domains, to: "domains-stale-filter.png"), Self.settingsSize)
+    }
+
+    /// A listed name and a wildcard whose routes reach CDN addresses (Fastly, Cloudflare): each
+    /// row's detail line says other sites on the address take the same way.
+    func testSettingsOnDomainsWithSharedCDNAddresses() throws {
+        seedSharedDomains(mode: .bypass)
+        XCTAssertEqual(try renderSettings(page: .domains, to: "domains-shared.png"), Self.settingsSize)
+    }
+
+    /// The same in VPN Only mode, where the other sites use the VPN too.
+    func testSettingsOnDomainsWithASharedCDNAddressInVPNOnlyMode() throws {
+        seedSharedDomains(mode: .vpnOnly)
+        XCTAssertEqual(try renderSettings(page: .domains, to: "domains-shared-vpn-only.png"), Self.settingsSize)
+    }
+
+    /// CDN addresses from the published ranges the warning reads (SharedAddress), on top of
+    /// the usual Domains seed.
+    private func seedSharedDomains(mode: RoutingMode) {
+        seedDomains(mode: mode)
+        let cdn = ["151.101.1.140", "151.101.65.140", "151.101.129.140", "151.101.193.140"]
+        if mode == .vpnOnly {
+            rm.config.inverseDomains.insert(DomainEntry(domain: "status.example.org", enabled: true), at: 1)
+            rm.activeRoutes += cdn.prefix(2).map { route($0, via: "iface:utun4", for: "status.example.org") }
+        } else {
+            rm.config.domains.insert(DomainEntry(domain: "www.reddit.com", enabled: true), at: 1)
+            rm.activeRoutes += cdn.map { route($0, via: "192.168.1.1", for: "www.reddit.com") }
+            rm.activeRoutes += ["104.18.32.7", "172.64.155.9"].map { route($0, via: "192.168.1.1", for: "*.example.com") }
+        }
     }
 
     private func seedStaleDomain() {
@@ -886,6 +948,61 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderDropdown(to: "pause-custom.png")
     }
     // END PAUSE SHOTS
+
+    // MARK: - Bypass the site you are on (idea 3), drawn for the pull request
+
+    // BEGIN FRONT TAB SHOTS
+    func testFrontTabBypass() throws {
+        seedBypass()
+        showFrontTab(host: "shop.example.com", browser: "Safari", id: "com.apple.Safari")
+        _ = try renderDropdown(to: "fronttab-bypass.png")
+    }
+
+    func testFrontTabAlreadyListed() throws {
+        seedBypass()
+        showFrontTab(host: "en.wikipedia.org", browser: "Google Chrome", id: "com.google.Chrome")
+        _ = try renderDropdown(to: "fronttab-listed.png")
+    }
+
+    func testFrontTabNotYetAllowed() throws {
+        seedBypass()
+        showFrontTab(host: nil, browser: "Safari", id: "com.apple.Safari")
+        _ = try renderDropdown(to: "fronttab-allow.png")
+    }
+
+    func testFrontTabVPNOnly() throws {
+        seedConnected(mode: .vpnOnly)
+        rm.config.inverseDomains = [DomainEntry(domain: "intranet.example.com", enabled: true)]
+        rm.activeRoutes = ClassicRouteCompiler.bypassAllCatchAlls.map {
+            route($0, via: "192.168.1.1", for: ClassicRouteCompiler.catchAllSource)
+        } + addresses(["intranet.example.com": 2], gateway: "10.0.0.1")
+        rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-19), routeCount: 2, failedCount: 0)
+        showFrontTab(host: "git.example.com", browser: "Brave Browser", id: "com.brave.Browser")
+        _ = try renderDropdown(to: "fronttab-vpn-only.png")
+    }
+
+    func testFrontTabCustom() throws {
+        seedCustom()
+        showFrontTab(host: "shop.example.com", browser: "Microsoft Edge", id: "com.microsoft.edgemac")
+        _ = try renderDropdown(to: "fronttab-custom.png")
+    }
+
+    func testFrontTabDisconnected() throws {
+        seedBypass()
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        rm.activeRoutes = []
+        showFrontTab(host: "shop.example.com", browser: "Safari", id: "com.apple.Safari")
+        _ = try renderDropdown(to: "fronttab-disconnected.png")
+    }
+    // END FRONT TAB SHOTS
+
+    /// What the front tab row shows; nil `host` is a browser macOS has not been asked about.
+    private func showFrontTab(host: String?, browser: String, id: String) {
+        let found = FrontTabBrowser.detect(bundleID: id, name: browser)!
+        FrontTabWatcher.shared.suggestion = host.map { .site(host: $0, browser: found) } ?? .needsConsent(browser: found)
+    }
 
     func testPausePausedForAnHour() throws {
         seedPaused(.oneHour)

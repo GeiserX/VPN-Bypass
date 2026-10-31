@@ -132,7 +132,7 @@ uninstall-helper:
 # since the helper only accepts an app signed by our Developer ID team.
 release: bundle
 	@echo "Creating release v$(VERSION)..."
-	@scripts/sign-and-notarize.sh app "$(APP_BUNDLE)"
+	@scripts/sign-and-notarize.sh app --entitlements VPNBypass.entitlements "$(APP_BUNDLE)"
 	@mkdir -p dist
 	@$(MAKE) dmg
 	@scripts/sign-and-notarize.sh dmg "dist/VPN-Bypass-$(VERSION).dmg"
