@@ -289,6 +289,11 @@ struct PageHeader: View {
     var addName: String = ""
     var onAdd: (() -> Void)?
 
+    /// The + button's spoken name: the page's own, or "Add" when the page gave none, never empty.
+    static func addButtonName(_ addName: String, in bundle: Bundle = .main) -> String {
+        addName.isEmpty ? String(localized: "Add", bundle: bundle) : addName
+    }
+
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -340,8 +345,8 @@ struct PageHeader: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help(addName)
-                    .accessibilityLabel(addName)
+                    .help(Self.addButtonName(addName))
+                    .accessibilityLabel(Self.addButtonName(addName))
                 }
             }
             if let subtitle {
@@ -534,7 +539,8 @@ struct RouteChip: View {
             RoundedRectangle(cornerRadius: Theme.Radius.control)
                 .fill(Theme.bgDisabled)
         )
-        .fixedSize()
+        // Ideal width when there is room, narrower (the name truncates in the middle) when not.
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Self.spokenName(name))
     }
@@ -560,7 +566,7 @@ struct RouteChipMenu<Content: View>: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityLabel(RouteChip.spokenName(chip.name))
     }
 }

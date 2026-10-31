@@ -111,6 +111,30 @@ final class ComponentsTests: XCTestCase {
         XCTAssertEqual(RouteChip.spokenName("Direct"), "Route: Direct")
     }
 
+    /// A chip keeps its own width when there is room and gets narrower when there is not, so a
+    /// long route name truncates inside a narrow sheet instead of running past its edge.
+    func testRouteChipFitsTheWidthItIsGiven() {
+        let long = String(repeating: "Office proxy through the second building ", count: 4)
+        let short = RouteChip(systemImage: "arrow.up.right", name: "Direct")
+        for (label, chip) in [("chip", AnyView(RouteChip(systemImage: "key", name: long))),
+                              ("menu", AnyView(RouteChipMenu(RouteChip(systemImage: "key", name: long)) { Text("x") }))] {
+            let width = NSHostingController(rootView: chip).sizeThatFits(in: CGSize(width: 150, height: 100)).width
+            XCTAssertLessThanOrEqual(width, 150, "\(label) runs past the width it was given")
+        }
+        for (label, chip) in [("chip", AnyView(short)), ("menu", AnyView(RouteChipMenu(short) { Text("x") }))] {
+            let width = NSHostingController(rootView: chip).sizeThatFits(in: CGSize(width: 1000, height: 100)).width
+            XCTAssertLessThan(width, 120, "\(label) stretches past its own width")
+            XCTAssertGreaterThan(width, 40, "\(label) collapsed")
+        }
+    }
+
+    /// The + is never silent: a page that gives no name gets "Add".
+    func testTheAddButtonAlwaysHasAName() throws {
+        XCTAssertEqual(PageHeader.addButtonName("Add Route"), "Add Route")
+        XCTAssertEqual(PageHeader.addButtonName(""), "Add")
+        XCTAssertEqual(PageHeader.addButtonName("", in: try lproj("es")), "Añadir")
+    }
+
     // MARK: - List row
 
     /// The #183 rule: the column is as wide as the widest number on screen, on every row.
