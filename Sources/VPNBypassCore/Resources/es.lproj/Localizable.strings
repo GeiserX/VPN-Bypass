@@ -635,14 +635,15 @@
 
 /* ===== DNS Lookups (#176) ===== */
 "Lookups" = "Consultas";
-"DNS Lookups" = "Consultas DNS";
-"Watch DNS Lookups" = "Ver las consultas DNS";
 "Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) never show here. To see them, turn Secure DNS off in the browser's settings." = "Las consultas que un navegador envía por DNS cifrado (DNS seguro, DNS sobre HTTPS) nunca aparecen aquí. Para verlas, desactiva el DNS seguro en los ajustes del navegador.";
 "Start counting again from now" = "Volver a contar desde ahora";
 "Waiting for lookups…" = "Esperando consultas…";
+"Start Watching" = "Empezar a observar";
+"Stop Watching" = "Dejar de observar";
+"DNS lookups are not being watched" = "No se están observando las consultas DNS";
+"Stop reading DNS lookups, and clear the list" = "Dejar de leer las consultas DNS y vaciar la lista";
 "No name matches \"%@\"" = "Ningún nombre coincide con «%@»";
 "Showing the top %lld. Search to find the rest." = "Se muestran los %lld primeros. Busca para encontrar el resto.";
-"Times looked up" = "Veces consultado";
 "Add to the VPN Only list" = "Añadir a la lista Solo VPN";
 "Add a rule that sends it Direct" = "Añadir una regla que lo envíe por Directo";
 "Add to the Bypass list" = "Añadir a la lista Bypass";
@@ -651,11 +652,6 @@
 "See the names this Mac looks up, and add the ones you need." = "Mira los nombres que busca este Mac y añade los que necesites.";
 "Off until you turn it on. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit." = "Desactivado hasta que lo actives. Entonces el asistente lee solo las preguntas DNS que envía este Mac, nunca las respuestas ni ningún otro tráfico. La lista se guarda solo en memoria y se borra al desactivarlo o salir.";
 "%lld names since %@" = "%lld nombres desde las %@";
-"LOOKUPS" = "CONSULTAS";
-"NAME" = "NOMBRE";
-"BYPASS" = "BYPASS";
-"VPN ONLY" = "SOLO VPN";
-"RULE" = "REGLA";
 "Bypassed" = "Con bypass";
 "Via VPN" = "Por la VPN";
 "On the Bypass list" = "En la Lista Bypass";
@@ -681,12 +677,10 @@
 
 /* ===== DNS Lookups add panel ===== */
 "%@ on the Services page lists this name and is off. Turn it on to bypass it." = "%@, en la página Servicios, incluye este nombre y está desactivado. Actívalo para que haga bypass.";
-"Add a wildcard, or add it somewhere else" = "Añadir un comodín, o añadirlo en otro sitio";
-"Add a wildcard instead" = "Añadir un comodín en su lugar";
 "More ways to add %@" = "Más formas de añadir %@";
-"WHAT TO ADD" = "QUÉ AÑADIR";
-"A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off." = "Un comodín cubre cada nombre bajo ese dominio. El asistente enruta cada uno en cuanto se consulta, así que Ver las consultas DNS puede seguir desactivado.";
-"WHERE" = "DÓNDE";
+"What to Add" = "Qué añadir";
+"A wildcard covers every name under it. The helper routes each one as it is looked up, so the Lookups page need not be watching." = "Un comodín cubre cada nombre bajo ese dominio. El asistente enruta cada uno en cuanto se consulta, así que la página Consultas no necesita estar observando.";
+"Where" = "Dónde";
 "Matches every name under %@" = "Coincide con cada nombre bajo %@";
 "Matches this name only" = "Coincide solo con este nombre";
 "Add…" = "Añadir…";
