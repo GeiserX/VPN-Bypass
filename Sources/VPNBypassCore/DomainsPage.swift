@@ -258,8 +258,10 @@ struct DomainsTab: View {
                     .toggleStyle(.button)
                     .controlSize(.small)
                     .help(String(localized: "Show only the domains that have stopped resolving"))
-                    .accessibilityLabel(String(localized: "Show only the domains that have stopped resolving"))
-                    .accessibilityValue(title)
+                    // VoiceOver names it by its title, count included, and keeps the toggle's
+                    // own on/off value; an explicit value would hide whether the filter is on.
+                    .accessibilityLabel(title)
+                    .accessibilityHint(String(localized: "Show only the domains that have stopped resolving"))
             }
             if !routeManager.isApplyingRoutes && !activeDomains.isEmpty {
                 BulkSwitchMenu(
