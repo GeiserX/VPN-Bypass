@@ -106,6 +106,34 @@ final class FrontTabTests: XCTestCase {
         XCTAssertEqual(FrontTabWatcher.shared.suggestion, before)
     }
 
+    func testAnOldSiteIsNotOfferedWhileTheNextReadRuns() {
+        let safari = FrontTabBrowser(bundleID: "com.apple.Safari", name: "Safari", family: .safari)
+        XCTAssertNil(FrontTabWatcher.whileReading(.site(host: "old.example.com", browser: safari)))
+        XCTAssertEqual(FrontTabWatcher.whileReading(.needsConsent(browser: safari)), .needsConsent(browser: safari))
+        XCTAssertNil(FrontTabWatcher.whileReading(nil))
+    }
+
+    func testAReadIsDroppedWhenTheUserLeftThatBrowser() {
+        let watcher = FrontTabWatcher.shared
+        let before = watcher.suggestion
+        defer { watcher.suggestion = before }
+        let safari = FrontTabBrowser(bundleID: "com.apple.Safari", name: "Safari", family: .safari)
+        let chrome = FrontTabBrowser(bundleID: "com.google.Chrome", name: "Google Chrome", family: .chromium)
+
+        watcher.suggestion = .site(host: "old.example.com", browser: safari)
+        var asked = false
+        watcher.finish(safari, permission: .granted, current: chrome) { asked = true; return "https://shop.example.com/" }
+        XCTAssertNil(watcher.suggestion, "a read of a browser the user left is not offered")
+        XCTAssertFalse(asked, "the tab of a browser the user left is not read")
+
+        watcher.finish(safari, permission: .granted, current: safari) { "https://shop.example.com/" }
+        XCTAssertEqual(watcher.suggestion, .site(host: "shop.example.com", browser: safari))
+        watcher.finish(safari, permission: .needsConsent, current: safari) { nil }
+        XCTAssertEqual(watcher.suggestion, .needsConsent(browser: safari))
+        watcher.finish(safari, permission: .denied, current: safari) { "https://shop.example.com/" }
+        XCTAssertNil(watcher.suggestion)
+    }
+
     // MARK: - Wording
 
     func testTheWordsAreTranslated() throws {
@@ -188,7 +216,9 @@ final class FrontTabTests: XCTestCase {
         XCTAssertTrue(read.contains("Allow Reading the Front Tab in Safari"), "read: \(read)")
     }
 
-    func testTheRowSitsUnderTheAddFieldInEveryState() throws {
+    // Outside the first-run screen only: on a fresh install the dropdown shows the first-run
+    // block, with its own add field, in place of the normal content and this row.
+    func testTheRowSitsUnderTheAddFieldOutsideFirstRun() throws {
         let menu = try ReworkSource.body(of: "struct MenuContent: View", in: "MenuBarViews.swift")
         let field = try XCTUnwrap(menu.range(of: "QuickAddField("))
         let row = try XCTUnwrap(menu.range(of: "FrontTabRow("), "no front tab row in the dropdown")
@@ -215,6 +245,7 @@ final class FrontTabTests: XCTestCase {
         let info = try plist("Info.plist")
         let why = try XCTUnwrap(info["NSAppleEventsUsageDescription"] as? String)
         XCTAssertTrue(why.contains("front tab"))
+        XCTAssertFalse(why.lowercased().contains("bypass the site"), "the prompt fits every mode, not Bypass only")
         for language in ["en", "es", "fr"] {
             let strings = try plist("Sources/VPNBypassCore/Resources/\(language).lproj/InfoPlist.strings")
             XCTAssertNotNil(strings["NSAppleEventsUsageDescription"], "\(language) has the prompt's text")

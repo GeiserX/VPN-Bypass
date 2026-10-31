@@ -1,2 +1,2 @@
 /* InfoPlist.strings — English. macOS shows this in the Automation prompt. */
-"NSAppleEventsUsageDescription" = "VPN Bypass reads the address of your browser's front tab, so it can offer to bypass the site you are on.";
+"NSAppleEventsUsageDescription" = "VPN Bypass reads the address of your browser's front tab, so it can offer to add the site you are on to your lists.";

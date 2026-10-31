@@ -203,7 +203,16 @@ final class FrontTabWatcher: ObservableObject {
             suggestion = nil
             return
         }
+        // A site read on an earlier open may be another tab by now: never offer it while the
+        // new read runs.
+        suggestion = Self.whileReading(suggestion)
         read(browser, ask: false)
+    }
+
+    /// The row while a read runs: a site from an earlier read is dropped, the Allow… row stays.
+    static func whileReading(_ suggestion: FrontTabSuggestion?) -> FrontTabSuggestion? {
+        if case .site = suggestion { return nil }
+        return suggestion
     }
 
     /// The row's Allow… button: shows macOS's prompt for this browser, then reads.
@@ -217,17 +226,30 @@ final class FrontTabWatcher: ObservableObject {
         Task {
             let bundleID = browser.bundleID
             let permission = await Task.detached { FrontTabPermission.check(bundleID: bundleID, ask: ask) }.value
-            defer { reading = false }
-            switch permission {
-            case .granted:
-                suggestion = Self.runScript(browser.scriptSource)
-                    .flatMap(FrontTabHost.host(fromURL:))
-                    .map { .site(host: $0, browser: browser) }
-            case .needsConsent:
-                suggestion = .needsConsent(browser: browser)
-            case .denied, .unavailable:
-                suggestion = nil
-            }
+            reading = false
+            finish(browser, permission: permission, current: lastBrowser) { Self.runScript(browser.scriptSource) }
+            // The user went to another app while the check ran: read that one instead.
+            if lastBrowser != browser, lastBrowser != nil { refresh() }
+        }
+    }
+
+    /// Publishes a read of `browser`, unless the user has left it for `current` meanwhile:
+    /// then the read is dropped and the tab is not read at all.
+    func finish(_ browser: FrontTabBrowser, permission: FrontTabPermission, current: FrontTabBrowser?,
+                readURL: () -> String?) {
+        guard current == browser else {
+            suggestion = nil
+            return
+        }
+        switch permission {
+        case .granted:
+            suggestion = readURL()
+                .flatMap(FrontTabHost.host(fromURL:))
+                .map { .site(host: $0, browser: browser) }
+        case .needsConsent:
+            suggestion = .needsConsent(browser: browser)
+        case .denied, .unavailable:
+            suggestion = nil
         }
     }
 
