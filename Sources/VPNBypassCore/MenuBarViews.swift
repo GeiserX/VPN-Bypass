@@ -517,7 +517,7 @@ struct MenuContent: View {
             if let routed = RoutedBySource.make(mode: mode, config: routeManager.config,
                                                 routes: routeManager.installedRoutes,
                                                 busy: false, routedOnly: true,
-                                                title: RoutedBySource.disconnectedTitle(mode)) {
+                                                title: RoutedBySource.disconnectedTitle(mode, lastChange: routeManager.lastRouteChange)) {
                 RoutedBySourceCard(summary: routed)
             }
         }
@@ -1083,7 +1083,9 @@ enum RoutedBySource {
         /// VPN Only's catch-alls are installed: everything not listed goes direct.
         let everythingElseDirect: Bool
         /// Entries that should have routes and have none, shown or not (`Row.isProblem`).
-        var problemCount: Int = 0
+        var problemCount: Int { problemRows.count }
+        /// Those entries, every one, for Status > Problems: `rows` stops at `visibleRows`.
+        var problemRows: [Row] = []
 
         var countText: String { routes(routeCount) }
     }
@@ -1143,10 +1145,13 @@ enum RoutedBySource {
     }
 
     /// The list's title with no VPN connected: Bypass keeps its routes for the reconnect on
-    /// purpose; in the other modes a route still installed is a removal that failed.
-    static func disconnectedTitle(_ mode: DropdownCopy.Mode, in bundle: Bundle = .main) -> String {
-        mode == .bypass ? String(localized: "Kept for when it reconnects", bundle: bundle)
-                        : String(localized: "Still routed", bundle: bundle)
+    /// purpose; in the other modes, or after a Remove All Routes that left some, a route still
+    /// installed is a removal that failed.
+    static func disconnectedTitle(_ mode: DropdownCopy.Mode, lastChange: RouteManager.RouteChangeOutcome? = nil,
+                                  in bundle: Bundle = .main) -> String {
+        let removalFailed = lastChange?.kind == .removedAll && (lastChange?.failedCount ?? 0) > 0
+        return mode == .bypass && !removalFailed ? String(localized: "Kept for when it reconnects", bundle: bundle)
+                                                 : String(localized: "Still routed", bundle: bundle)
     }
 
     static var leftoverName: String { String(localized: "Left from earlier") }
@@ -1240,7 +1245,7 @@ enum RoutedBySource {
                        rows: Array(rows.prefix(visibleRows)),
                        hiddenRows: max(0, rows.count - visibleRows),
                        everythingElseDirect: everythingElseDirect,
-                       problemCount: rows.filter(\.isProblem).count)
+                       problemRows: rows.filter(\.isProblem))
     }
 
     private static func routes(_ count: Int) -> String {

@@ -879,9 +879,10 @@
 "1 more failure" = "1 fallo más";
 "%lld more failures" = "%lld fallos más";
 "Settings > Logs has the details." = "Los detalles están en Ajustes > Registros.";
-"Has no addresses: none of its names resolved" = "Sin direcciones: ninguno de sus nombres se resolvió";
 "Problems" = "Problemas";
 "Apply the routes again" = "Aplicar las rutas de nuevo";
 "Retry: apply the routes again" = "Reintentar: aplicar las rutas de nuevo";
 "Remove the routes again" = "Quitar las rutas de nuevo";
 "Retry: remove the routes again" = "Reintentar: quitar las rutas de nuevo";
+"No address is routed for it." = "No hay ninguna dirección enrutada para esta entrada.";
+"it is the VPN's own gateway, which is never rerouted" = "es la puerta de enlace de la propia VPN, que nunca se desvía";

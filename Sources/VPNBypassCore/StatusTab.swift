@@ -269,13 +269,18 @@ enum StatusPage {
     /// and the names that did not resolve, with their entry and the DNS error. Then the
     /// entries left with no address, and a last row for failures counted but not itemised.
     /// Empty when nothing failed. Shown on the same rule as the dropdown (`shownRouteChange`),
-    /// so the page never lists failures the dropdown no longer counts.
+    /// so the page never lists failures the dropdown no longer counts. An address that is
+    /// routed by now (a DNS retry or a later add put it in) is left out.
     static func problems(lastChange: RouteManager.RouteChangeOutcome?, installed: Int, helperReady: Bool,
-                         withoutAddresses: [RoutedBySource.Row], bundle: Bundle = .main) -> [Problem] {
+                         withoutAddresses: [RoutedBySource.Row], routes: [RoutedBySource.InstalledRoute] = [],
+                         bundle: Bundle = .main) -> [Problem] {
         var out: [Problem] = []
         if let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed, helperReady: helperReady),
            change.failedCount > 0 {
+            // The kernel route is per address, so one in place now serves its entry too.
+            let routedNow = Set(routes.map(\.destination))
             for failure in change.failures {
+                if failure.kind == .notRouted, routedNow.contains(failure.target) { continue }
                 let kind: Problem.Kind
                 let what: String
                 switch failure.kind {
@@ -306,7 +311,7 @@ enum StatusPage {
         }
         for row in withoutAddresses where row.isProblem {
             out.append(Problem(kind: .noAddresses, title: row.name,
-                               detail: String(localized: "Has no addresses: none of its names resolved", bundle: bundle)))
+                               detail: String(localized: "No address is routed for it.", bundle: bundle)))
         }
         return out
     }
@@ -534,13 +539,15 @@ struct StatusTab: View {
     /// Where the dropdown's "Show" lands: every failure behind its count, with Retry.
     @ViewBuilder
     private func problemsSection(_ input: DropdownStatus.Input) -> some View {
-        let missing = RoutedBySource.make(
+        // With no VPN an entry without addresses is expected, as in the dropdown's list.
+        let missing = !input.isVPNConnected ? [] : RoutedBySource.make(
             mode: input.mode, config: routeManager.config, routes: routeManager.installedRoutes,
             busy: RoutedBySource.mayStillAddRoutes(running: routeManager.isLoading || routeManager.isApplyingRoutes,
-                                                   pending: routeManager.pendingReconnectApply))?.rows ?? []
+                                                   pending: routeManager.pendingReconnectApply))?.problemRows ?? []
         let problems = StatusPage.problems(lastChange: routeManager.lastRouteChange,
                                            installed: routeManager.routedAddressCount,
-                                           helperReady: input.helperReady, withoutAddresses: missing)
+                                           helperReady: input.helperReady, withoutAddresses: missing,
+                                           routes: routeManager.installedRoutes)
         if !problems.isEmpty {
             StatusSection(String(localized: "Problems"), trailing: {
                 let retry = StatusPage.retryAction(lastChange: routeManager.lastRouteChange,

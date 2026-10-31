@@ -879,9 +879,10 @@
 "1 more failure" = "1 more failure";
 "%lld more failures" = "%lld more failures";
 "Settings > Logs has the details." = "Settings > Logs has the details.";
-"Has no addresses: none of its names resolved" = "Has no addresses: none of its names resolved";
 "Problems" = "Problems";
 "Apply the routes again" = "Apply the routes again";
 "Retry: apply the routes again" = "Retry: apply the routes again";
 "Remove the routes again" = "Remove the routes again";
 "Retry: remove the routes again" = "Retry: remove the routes again";
+"No address is routed for it." = "No address is routed for it.";
+"it is the VPN's own gateway, which is never rerouted" = "it is the VPN's own gateway, which is never rerouted";

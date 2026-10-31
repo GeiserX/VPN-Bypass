@@ -210,6 +210,16 @@ final class RouteFailureTests: XCTestCase {
                         .first?.reason, "the system did not remove it", "an empty error is no reason")
     }
 
+    /// The app refuses the VPN's own gateway before the helper sees the batch; Problems says so.
+    func testTheVPNGatewayGetsItsOwnReason() {
+        let failures = RouteManager.RouteFailure.batch(.notRouted, failed: ["203.0.113.5/32", "192.0.2.2"],
+                                                       sources: [], error: "File exists", vpnGateway: "203.0.113.5")
+        XCTAssertEqual(failures.map(\.reason), ["File exists", "it is the VPN's own gateway, which is never rerouted"])
+        XCTAssertEqual(RouteManager.RouteFailure.batch(.notRouted, failed: ["203.0.113.5"], sources: [], error: nil,
+                                                       vpnGateway: "iface:utun4").first?.reason,
+                       "the system refused the route", "an interface gateway has no address to protect")
+    }
+
     func testANameThatDidNotResolveSaysSo() {
         let failures = RouteManager.RouteFailure.unresolved([("zoom.us", "Zoom"), ("zoom.us", "Zoom"), ("a.example", "a.example")])
         XCTAssertEqual(failures, [
@@ -304,6 +314,40 @@ final class StatusProblemsTests: XCTestCase {
         let failed = applied(failed: 1, [.init(kind: .notRouted, target: "192.0.2.7", entry: "Telegram", reason: "x")])
         XCTAssertEqual(StatusPage.retryAction(lastChange: failed, installed: 60, helperReady: true), .apply)
         XCTAssertEqual(StatusPage.retryAction(lastChange: nil, installed: 60, helperReady: true), .apply)
+    }
+
+    /// An address a DNS retry or a later add routed since is no longer a problem.
+    func testAnAddressRoutedSinceIsNotListed() {
+        let change = applied(failed: 2, [
+            .init(kind: .notRouted, target: "192.0.2.7", entry: "Telegram", reason: "File exists"),
+            .init(kind: .notRouted, target: "192.0.2.8", entry: "Telegram", reason: "File exists"),
+        ])
+        let problems = StatusPage.problems(lastChange: change, installed: 60, helperReady: true, withoutAddresses: [],
+                                           routes: [.init(destination: "192.0.2.7", source: "Telegram")])
+        XCTAssertEqual(problems.map(\.title), ["192.0.2.8"], "and no \"1 more failure\" for the one routed since")
+    }
+
+    /// Problems lists every entry with no addresses, past the dropdown's eight rows too.
+    func testEveryEntryWithNoAddressesReachesProblems() throws {
+        var config = RouteManager.Config()
+        config.services = []
+        config.domains = (1...10).map { RouteManager.DomainEntry(domain: "site\($0).example") }
+        let summary = try XCTUnwrap(RoutedBySource.make(mode: .bypass, config: config, routes: [], busy: false))
+        XCTAssertEqual(summary.rows.count, RoutedBySource.visibleRows)
+        XCTAssertEqual(summary.problemCount, 10)
+        let problems = StatusPage.problems(lastChange: nil, installed: 0, helperReady: true,
+                                           withoutAddresses: summary.problemRows)
+        XCTAssertEqual(problems.count, 10)
+        XCTAssertEqual(problems.first?.detail, "No address is routed for it.")
+    }
+
+    /// After a Remove All that left routes, Bypass's disconnected list does not call them kept.
+    func testAFailedRemovalIsNotKeptForTheReconnect() {
+        let removed = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now, routeCount: 2, failedCount: 2)
+        XCTAssertEqual(RoutedBySource.disconnectedTitle(.bypass, lastChange: removed), "Still routed")
+        XCTAssertEqual(RoutedBySource.disconnectedTitle(.bypass, lastChange: applied(failed: 0, [])),
+                       "Kept for when it reconnects")
+        XCTAssertEqual(RoutedBySource.disconnectedTitle(.vpnOnly), "Still routed")
     }
 
     func testTheProblemsWordsAreTranslated() throws {
