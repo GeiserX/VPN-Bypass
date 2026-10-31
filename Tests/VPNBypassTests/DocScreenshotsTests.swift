@@ -702,6 +702,82 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderSettings(page: .status, to: "status-problems.png")
     }
 
+    // MARK: - Status and Logs on the components (step 9), drawn for the pull request
+
+    // BEGIN STATUS LOGS SHOTS
+    /// "Where does this site go?" for a site no list has: it follows the VPN, with Add.
+    func testStatusPageSiteCheckUnlisted() throws {
+        seedBypass()
+        StatusTab.siteCheckForScreenshots = ("cdn.example.net", siteAnswer(
+            host: "cdn.example.net", found: SiteRoute.Found(match: .none, expected: .tunnel("utun4")), via: "utun4"))
+        defer { StatusTab.siteCheckForScreenshots = nil }
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-site-unlisted.png"), Self.settingsSize)
+    }
+
+    /// The same for a listed site whose route took it the wrong way.
+    func testStatusPageSiteCheckWrongWay() throws {
+        seedBypass()
+        StatusTab.siteCheckForScreenshots = ("en.wikipedia.org", siteAnswer(
+            host: "en.wikipedia.org",
+            found: SiteRoute.Found(match: .route, entry: "en.wikipedia.org", routedDestination: "198.51.100.4",
+                                   expected: .physical),
+            via: "utun4"))
+        defer { StatusTab.siteCheckForScreenshots = nil }
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-site-wrong-way.png"), Self.settingsSize)
+    }
+
+    /// The helper down with no VPN: the helper is the verdict and its section comes first.
+    func testStatusPageHelperDownWithNoVPN() throws {
+        seedBypass()
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        HelperManager.shared.helperState = .failed("Helper could not be started")
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-helper-down.png"), Self.settingsSize)
+    }
+
+    func testLogsPage() throws {
+        try renderLogs(search: nil, to: "logs.png")
+    }
+
+    /// The title bar search on Logs.
+    func testLogsPageSearched() throws {
+        try renderLogs(search: "wiki", to: "logs-search.png")
+    }
+
+    private func renderLogs(search: String?, to name: String) throws {
+        let savedLogs = rm.recentLogs
+        addTeardownBlock { @MainActor in RouteManager.shared.recentLogs = savedLogs }
+        seedBypass()
+        let now = Date()
+        func line(_ ago: TimeInterval, _ level: RouteManager.LogEntry.LogLevel, _ message: String) -> RouteManager.LogEntry {
+            RouteManager.LogEntry(timestamp: now.addingTimeInterval(-ago), level: level, message: message)
+        }
+        rm.recentLogs = [
+            line(20, .success, "Routes applied: 62"),
+            line(64, .warning, "Could not resolve zoom.us: no answer from DNS"),
+            line(65, .error, "Route add failed for 192.0.2.240: File exists"),
+            line(119, .success, "Added domain: en.wikipedia.org"),
+            line(119, .info, "Config saved"),
+            line(240, .success, "DNS refresh complete: 2 added, 1 removed"),
+            line(600, .info, "Detected VPN: WireGuard on utun4"),
+        ]
+        SettingsView.searchForScreenshots = search
+        defer { SettingsView.searchForScreenshots = nil }
+        XCTAssertEqual(try renderSettings(page: .logs, to: name), Self.settingsSize)
+    }
+
+    private func siteAnswer(host: String, found: SiteRoute.Found, via interface: String) -> SiteRouteAnswer {
+        let probes = ["203.0.113.7", "203.0.113.8"].map {
+            PathCheck.Probe(address: $0, routeInterface: interface, sourceAddress: "10.8.0.2",
+                            sourceInterface: interface, answer: .connected, latencyMs: 24)
+        }
+        let control = PathCheck.Probe(address: "192.0.2.1", routeInterface: "utun4", answer: .notTried)
+        return SiteRoute.answer(host: host, mode: .bypass, addresses: probes.map(\.address), found: found,
+                                probes: probes, control: (control, .passed), vpnConnected: true)
+    }
+    // END STATUS LOGS SHOTS
+
     // MARK: - Dropdown rows and the add field (step 11), drawn for the pull request
 
     // BEGIN ROWS SHOTS

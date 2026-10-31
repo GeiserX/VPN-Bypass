@@ -936,3 +936,11 @@
 "Paused, but 1 address is still routed: removing it failed. Retry from the dropdown." = "En pause, mais 1 adresse est encore routée : impossible de la retirer. Réessayez depuis le menu.";
 "Paused, but %lld addresses are still routed: removing them failed. Retry from the dropdown." = "En pause, mais %lld adresses sont encore routées : impossible de les retirer. Réessayez depuis le menu.";
 "Routing was not paused." = "Le routage n’était pas en pause.";
+"Where does this site go?" = "Par où passe ce site ?";
+"A name, a link or an address" = "Un nom, un lien ou une adresse";
+"Site to check" = "Site à vérifier";
+"Check" = "Vérifier";
+"Check the site" = "Vérifier le site";
+"Say which entry routes this site, and check the way it leaves" = "Indique quelle entrée route ce site et vérifie par où il sort";
+"That is not a name, a link or an address." = "Ce n’est ni un nom, ni un lien, ni une adresse.";
+"Read the tunnels again" = "Relire les tunnels";

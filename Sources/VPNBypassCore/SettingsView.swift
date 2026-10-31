@@ -1772,67 +1772,49 @@ struct SettingsToggleRow: View {
 
 struct LogsTab: View {
     @EnvironmentObject var routeManager: RouteManager
+    /// The title bar search (⌘F), the page's search term.
+    @Environment(\.settingsSearch) private var search
     @State private var filter: LogFilter
 
     init(filter: LogFilter = LogFilter()) {
         _filter = State(initialValue: filter)
     }
 
+    /// The filter the page applies: its level and source, and the title bar's search.
+    static func effectiveFilter(_ filter: LogFilter, search: String) -> LogFilter {
+        var effective = filter
+        effective.query = search
+        return effective
+    }
+
     var body: some View {
+        let filter = Self.effectiveFilter(self.filter, search: search)
         let shown = filter.apply(routeManager.recentLogs)
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 10) {
-                if routeManager.recentLogs.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 36))
-                            .foregroundColor(Theme.textDisabled)
-                        Text("No activity yet")
-                            .font(.system(size: 14, weight: .medium))
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            if routeManager.recentLogs.isEmpty {
+                GroupSection {
+                    EmptyState(systemImage: "doc.text",
+                               title: String(localized: "No activity yet"),
+                               message: String(localized: "Logs will appear here when routes are applied"))
+                }
+            } else {
+                filterBar(filter, shown: shown)
+
+                GroupSection {
+                    if let empty = filter.emptyLine(shown: shown.count) {
+                        Text(empty)
+                            .font(Theme.Font.body)
                             .foregroundColor(Theme.textSecondary)
-                        Text("Logs will appear here when routes are applied")
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.textDisabled)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 10)
-                } else {
-                    filterBar(shown: shown)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            Text(filter.countLine(shown: shown.count, total: routeManager.recentLogs.count))
-                                .font(.system(size: 11))
-                                .foregroundColor(Theme.textTertiary)
-                                .padding(.leading, 2)
-                            if filter.onlySource != nil {
-                                sourceToken
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, Theme.Space.page)
+                    } else {
+                        // The window's scroll view scrolls the lines; the page has none of its own.
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(shown) { log in
+                                LogRow(entry: log, highlight: filter.term)
                             }
                         }
-
-                        if let empty = filter.emptyLine(shown: shown.count) {
-                            Text(empty)
-                                .font(.system(size: 12))
-                                .foregroundColor(Theme.textSecondary)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.vertical, 24)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Theme.bgElevated)
-                                )
-                        } else {
-                            // The window's scroll view scrolls the lines; the page has none of its own.
-                            LazyVStack(alignment: .leading, spacing: 1) {
-                                ForEach(shown) { log in
-                                    LogRow(entry: log, highlight: filter.term)
-                                }
-                            }
-                            .padding(4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Theme.bgElevated)
-                            )
-                        }
+                        .padding(.vertical, Theme.Space.xs)
                     }
                 }
             }
@@ -1845,25 +1827,25 @@ struct LogsTab: View {
         Button {
             filter.onlySource = nil
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: Theme.Space.xs) {
                 Image(systemName: filter.sourceToken.symbol)
                 Text(filter.sourceToken.title)
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(Theme.textTertiary)
             }
-            .font(.system(size: 11))
+            .font(Theme.Font.detail)
             .foregroundColor(Theme.textSecondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(Theme.bgElevated))
+            .padding(.horizontal, Theme.Space.s)
+            .padding(.vertical, 2)
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(Theme.bgDisabled))
         }
         .buttonStyle(.plain)
         .help(LogFilter.sourceTokenHelp)
     }
 
-    /// The level filter, the search field, and Copy and Clear, as in proposal 14 of #119.
-    private func filterBar(shown: [RouteManager.LogEntry]) -> some View {
-        HStack(spacing: 10) {
+    /// The page's top line: the level filter, how many entries show, and Copy and Clear. The
+    /// search is the title bar's.
+    private func filterBar(_ filter: LogFilter, shown: [RouteManager.LogEntry]) -> some View {
+        HStack(spacing: Theme.Space.m) {
             Picker(LogLevelFilter.controlName, selection: $filter.level) {
                 ForEach(LogLevelFilter.allCases) { level in
                     Text(level.title).tag(level)
@@ -1873,24 +1855,31 @@ struct LogsTab: View {
             .labelsHidden()
             .fixedSize()
             .help(LogLevelFilter.controlHelp)
+            .accessibilityLabel(LogLevelFilter.controlName)
 
-            LogSearchField(text: $filter.query, placeholder: String(localized: "Search"))
-                .frame(minWidth: 110, maxWidth: 190)
+            Text(filter.countLine(shown: shown.count, total: routeManager.recentLogs.count))
+                .font(Theme.Font.detail)
+                .monospacedDigit()
+                .foregroundColor(Theme.textSecondary)
+                .lineLimit(1)
+            if filter.onlySource != nil {
+                sourceToken
+            }
 
             Spacer(minLength: 0)
 
-            Button("Copy") {
+            Button(String(localized: "Copy")) {
                 copyLogsToClipboard(shown)
             }
             .disabled(shown.isEmpty)
             .help(String(localized: "Copy the entries shown"))
 
-            Button("Clear") {
+            Button(String(localized: "Clear")) {
                 withAnimation { routeManager.recentLogs.removeAll() }
             }
             .help(String(localized: "Remove every entry, including any the filter hides"))
         }
-        .controlSize(.regular)
+        .controlSize(.small)
     }
 
     private func copyLogsToClipboard(_ entries: [RouteManager.LogEntry]) {
@@ -2158,62 +2147,68 @@ struct LogRow: View {
         for range in LogFilter.ranges(of: highlight, in: entry.message) {
             guard let lower = AttributedString.Index(range.lowerBound, within: text),
                   let upper = AttributedString.Index(range.upperBound, within: text) else { continue }
-            text[lower..<upper].backgroundColor = Color(hex: "FACC15").opacity(0.35)
+            text[lower..<upper].backgroundColor = Theme.attention.opacity(0.35)
         }
         return text
     }
-    
-    private var levelColor: Color {
-        switch entry.level {
-        case .info: return Theme.textTertiary
-        case .success: return Theme.success
-        case .warning: return Theme.warning
-        case .error: return Theme.error
+
+    /// Colour only for what needs a look: amber for a warning, red for an error. Green is for
+    /// live routing, so a success line is grey like the rest.
+    static func levelColor(_ level: RouteManager.LogEntry.LogLevel) -> Color {
+        switch level {
+        case .info, .success: return Theme.textSecondary
+        case .warning: return Theme.attention
+        case .error: return Theme.failure
         }
     }
-    
-    private var levelIcon: String {
-        switch entry.level {
-        case .info: return "info.circle.fill"
-        case .success: return "checkmark.circle.fill"
+
+    static func levelIcon(_ level: RouteManager.LogEntry.LogLevel) -> String {
+        switch level {
+        case .info: return "info.circle"
+        case .success: return "checkmark.circle"
         case .warning: return "exclamationmark.triangle.fill"
         case .error: return "xmark.circle.fill"
         }
     }
-    
+
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: levelIcon)
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+            Image(systemName: Self.levelIcon(entry.level))
                 .font(.system(size: 10))
-                .foregroundColor(levelColor)
-            
+                .foregroundColor(Self.levelColor(entry.level))
+                .frame(width: ListRow.glyphColumn)
+                .accessibilityHidden(true)
+
             Text(entry.timestamp, format: .dateTime.hour().minute().second())
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(Theme.textTertiary)
-                .frame(width: 70, alignment: .leading)
-            
+                .font(Theme.Font.mono)
+                .monospacedDigit()
+                .foregroundColor(Theme.textSecondary)
+                .fixedSize()
+
             Text(message)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.white)
+                .font(Theme.Font.mono)
+                .foregroundColor(Theme.text)
                 .lineLimit(1)
-            
-            Spacer()
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
 
             if let tag = entry.source.tag {
                 Text(tag)
-                    .font(.system(size: 11))
+                    .font(Theme.Font.detail)
                     .foregroundColor(Theme.textSecondary)
                     .lineLimit(1)
                     .fixedSize()
                     .help(entry.source.helpText)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, ListRow.inset)
+        .padding(.vertical, 5)
+        .help(entry.message)
     }
 }
 
-/// The Logs page's search field: a native NSSearchField, with its magnifier and clear button.
+/// A native NSSearchField, with its magnifier and clear button (the Lookups add panel's service search).
 struct LogSearchField: NSViewRepresentable {
     @Binding var text: String
     let placeholder: String

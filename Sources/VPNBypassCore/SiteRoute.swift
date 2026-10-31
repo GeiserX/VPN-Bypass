@@ -468,17 +468,27 @@ final class SiteRouteModel: ObservableObject {
     @Published var query = ""
     @Published private(set) var answer: SiteRouteAnswer?
     @Published private(set) var isChecking = false
+    /// What the last finished check was asked, so a nil answer can say the input held no host.
+    @Published private(set) var checkedQuery: String?
     /// Bumped per check, so a slow answer never replaces a newer one.
     private var generation = 0
+
+    init(query: String = "", answer: SiteRouteAnswer? = nil) {
+        self.query = query
+        self.answer = answer
+        checkedQuery = answer == nil ? nil : query
+    }
 
     func check(_ routeManager: RouteManager? = nil) async {
         let routeManager = routeManager ?? .shared
         generation += 1
         let mine = generation
         isChecking = true
-        let result = await routeManager.whereDoesItGo(query)
+        let asked = query
+        let result = await routeManager.whereDoesItGo(asked)
         guard mine == generation else { return }
         answer = result
+        checkedQuery = asked
         isChecking = false
     }
 }
