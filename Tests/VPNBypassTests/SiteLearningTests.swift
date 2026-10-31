@@ -38,6 +38,15 @@ final class SiteLearningTests: XCTestCase {
         XCTAssertEqual(learning.names, ["shop.example.com"])
     }
 
+    func testAnEmptyDrainInTheWindowSaysTheCaptureRan() {
+        var learning = SiteLearning(started: start)
+        learning.record([], at: start.addingTimeInterval(-1))
+        XCTAssertFalse(learning.heard, "a drain before the window is not this window's")
+        learning.record([], at: start.addingTimeInterval(2))
+        XCTAssertTrue(learning.heard)
+        XCTAssertEqual(learning.names, [])
+    }
+
     func testTheWindowIsSixtySecondsAndCountsDown() {
         let learning = SiteLearning(started: start)
         XCTAssertEqual(learning.ends.timeIntervalSince(start), 60)

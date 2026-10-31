@@ -23,12 +23,21 @@ struct LearnSiteSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
+            // The page shows the capture's problem only while it watches; the window needs it too.
+            if learning.isOpen, let problem = monitor.problem {
+                Label(problem, systemImage: "exclamationmark.triangle.fill")
+                    .font(Theme.Font.body)
+                    .foregroundColor(Theme.attention)
+            }
             GroupSection(title, trailing: { trailing }) {
                 if groups.isEmpty {
-                    EmptyState(systemImage: learning.isOpen ? "arrow.clockwise" : "checkmark.circle",
+                    EmptyState(systemImage: learning.isOpen ? "arrow.clockwise"
+                                   : learning.heard ? "checkmark.circle" : "exclamationmark.triangle",
                                title: learning.isOpen
                                    ? String(localized: "Reload the page that does not work now.")
-                                   : String(localized: "No name was looked up in the 60 seconds."))
+                                   : learning.heard
+                                   ? String(localized: "No name was looked up while learning.")
+                                   : String(localized: "The helper read no lookups in this window, so nothing was learned."))
                 } else {
                     let numberWidth = ListRow.numberColumnWidth(for: groups.map { LookupRow.format($0.names.count) })
                     ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
@@ -50,7 +59,7 @@ struct LearnSiteSection: View {
         if learning.isOpen {
             return String(localized: "Learning a site: reload the page now")
         }
-        return String(localized: "Learned in 60 s: \(learning.names.count) names")
+        return String(localized: "Learned: \(learning.names.count) names")
     }
 
     @ViewBuilder private var trailing: some View {

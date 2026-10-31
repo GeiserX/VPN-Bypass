@@ -970,9 +970,10 @@
 "Learn a Site" = "Learn a Site";
 "Watch the lookups for 60 seconds while you reload a page, and see the names it needs" = "Watch the lookups for 60 seconds while you reload a page, and see the names it needs";
 "Reload the page that does not work now." = "Reload the page that does not work now.";
-"No name was looked up in the 60 seconds." = "No name was looked up in the 60 seconds.";
+"No name was looked up while learning." = "No name was looked up while learning.";
+"The helper read no lookups in this window, so nothing was learned." = "The helper read no lookups in this window, so nothing was learned.";
 "Learning a site: reload the page now" = "Learning a site: reload the page now";
-"Learned in 60 s: %lld names" = "Learned in 60 s: %lld names";
+"Learned: %lld names" = "Learned: %lld names";
 "%lld s left" = "%lld s left";
 "Stop" = "Stop";
 "Stop learning now and keep the names seen so far" = "Stop learning now and keep the names seen so far";

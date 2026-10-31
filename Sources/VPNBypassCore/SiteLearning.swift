@@ -23,6 +23,9 @@ struct SiteLearning: Equatable {
     private(set) var isOpen = true
     /// Each name once, in the order it was first seen in the window.
     private(set) var names: [String] = []
+    /// True once a drain landed in the window, even an empty one: the capture was running. An
+    /// empty result without it means the helper read nothing, not that nothing was asked.
+    private(set) var heard = false
 
     init(started: Date) {
         self.started = started
@@ -32,6 +35,7 @@ struct SiteLearning: Equatable {
     /// ended, or after it was closed, are not the page's and are left out.
     mutating func record(_ batch: [String], at date: Date) {
         guard isOpen, date >= started, date <= ends else { return }
+        heard = true
         for name in batch where !names.contains(name) {
             names.append(name)
         }

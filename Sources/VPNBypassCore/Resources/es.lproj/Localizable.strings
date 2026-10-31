@@ -970,9 +970,10 @@
 "Learn a Site" = "Aprender un sitio";
 "Watch the lookups for 60 seconds while you reload a page, and see the names it needs" = "Observa las búsquedas durante 60 segundos mientras recargas una página, y verás los nombres que necesita";
 "Reload the page that does not work now." = "Recarga ahora la página que no funciona.";
-"No name was looked up in the 60 seconds." = "No se buscó ningún nombre en los 60 segundos.";
+"No name was looked up while learning." = "No se buscó ningún nombre mientras aprendía.";
+"The helper read no lookups in this window, so nothing was learned." = "El asistente no leyó ninguna búsqueda en este intervalo, así que no se aprendió nada.";
 "Learning a site: reload the page now" = "Aprendiendo un sitio: recarga la página ahora";
-"Learned in 60 s: %lld names" = "Aprendidos en 60 s: %lld nombres";
+"Learned: %lld names" = "Aprendidos: %lld nombres";
 "%lld s left" = "Quedan %lld s";
 "Stop" = "Detener";
 "Stop learning now and keep the names seen so far" = "Deja de aprender ahora y conserva los nombres vistos hasta aquí";

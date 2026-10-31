@@ -181,11 +181,14 @@ final class DNSLookupsMonitor: ObservableObject {
 
         let drainGeneration = generation
         if isCapturing, let names = await HelperManager.shared.drainDNSQueries() {
-            guard wanted, generation == drainGeneration, !names.isEmpty else { return }
+            guard wanted, generation == drainGeneration else { return }
             let now = Date()
-            if enabled { tally.record(names, at: now) }
-            // A drain that lands just after the window's end holds names asked before it.
-            if let window = learning, window.isOpen { learning?.record(names, at: min(now, window.ends)) }
+            if enabled, !names.isEmpty { tally.record(names, at: now) }
+            // A drain that lands just after the window's end holds names asked before it. An
+            // empty drain is recorded once, so the window knows the capture ran.
+            if let window = learning, window.isOpen, !names.isEmpty || !window.heard {
+                learning?.record(names, at: min(now, window.ends))
+            }
             return
         }
         // At launch this runs before the helper check finishes: say so on the page, without a

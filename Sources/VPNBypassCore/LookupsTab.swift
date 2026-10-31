@@ -53,7 +53,9 @@ struct LookupsTab: View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             purposeLine
             if let learning = monitor.learning {
+                // A new window starts with no wildcard chosen.
                 LearnSiteSection(learning: learning, feedback: $feedback)
+                    .id(learning.started)
             }
             if content == .off {
                 // Learn a site adds from here too while the page is not watching.
