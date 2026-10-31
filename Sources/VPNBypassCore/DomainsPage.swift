@@ -38,6 +38,8 @@ enum DomainsPage {
         let isReadOnly: Bool
         /// Every entry of the list; `rows` is what the search leaves of them.
         let total: Int
+        /// The entries that have stopped resolving (StaleEntries), whatever the search or filter.
+        let staleCount: Int
         let rows: [Row]
     }
 
@@ -49,6 +51,8 @@ enum DomainsPage {
         /// The addresses routed for the entry; none on a read-only row or in Custom, where the
         /// list routes nothing, or on a row that is off. A wildcard's are the routes it has learned.
         let number: String?
+        /// The name has stopped resolving: the row says since when and shows the attention glyph.
+        let isStale: Bool
         var id: UUID { entry.id }
     }
 
@@ -58,8 +62,11 @@ enum DomainsPage {
     }
 
     /// `routeSources` is the `source` of every installed route: a domain's routes carry its
-    /// name, a wildcard's learned routes carry `*.suffix`, as the entry does.
+    /// name, a wildcard's learned routes carry `*.suffix`, as the entry does. `staleOnly` is the
+    /// header's filter: the list in use keeps only the entries that stopped resolving, and the
+    /// other list is left out. It does nothing while no entry has stopped resolving.
     static func sections(mode: RoutingMode, config: Config, routeSources: [String], search: String,
+                         staleOnly: Bool = false, locale: Locale = .current,
                          bundle: Bundle = .main) -> [Section] {
         var counts: [String: Int] = [:]
         for source in routeSources { counts[source, default: 0] += 1 }
@@ -72,8 +79,12 @@ enum DomainsPage {
         }
 
         func row(_ entry: DomainEntry, readOnly: Bool) -> Row {
+            // Only the list in use is refreshed, and only its rows can be removed.
+            let stale = !readOnly && StaleEntries.isStale(entry)
             let detail: String?
-            if readOnly && !entry.enabled {
+            if stale, let since = entry.resolveFailures?.since {
+                detail = StaleEntries.detail(since: since, locale: locale, bundle: bundle)
+            } else if readOnly && !entry.enabled {
                 detail = String(localized: "Off", bundle: bundle)
             } else if entry.isWildcard {
                 detail = String(localized: "learned as you browse", bundle: bundle)
@@ -86,24 +97,29 @@ enum DomainsPage {
             // routes anything there.
             let routes = !readOnly && entry.enabled && mode != .custom
             let number = routes ? String(counts[entry.domain] ?? 0) : nil
-            return Row(entry: entry, detail: detail, number: number)
+            return Row(entry: entry, detail: detail, number: number, isStale: stale)
         }
 
-        func section(_ list: DomainList, readOnly: Bool) -> Section {
+        func section(_ list: DomainList, readOnly: Bool, staleOnly: Bool = false) -> Section {
             let all = entries(list)
             let isInverse = list == .vpnOnly
+            let staleCount = readOnly ? 0 : all.filter(StaleEntries.isStale).count
             return Section(
                 list: list,
                 title: readOnly ? DomainListCopy.otherTitle(isInverse: isInverse, bundle: bundle)
                                 : DomainListCopy.title(isInverse: isInverse, bundle: bundle),
                 isReadOnly: readOnly,
                 total: all.count,
+                staleCount: staleCount,
                 rows: all.filter { SettingsSidebar.matches($0.domain, search: search) }
+                         .filter { !staleOnly || StaleEntries.isStale($0) }
                          .map { row($0, readOnly: readOnly) }
             )
         }
 
-        var out = [section(active, readOnly: false)]
+        let filtering = staleOnly && entries(active).contains(where: StaleEntries.isStale)
+        var out = [section(active, readOnly: false, staleOnly: filtering)]
+        if filtering { return out }
         // The other mode's list shows only rows: it is left out when it is empty, and when the
         // search leaves none of it, so it never says "nothing matches" beside a list that does.
         let readOnly = section(other, readOnly: true)
@@ -124,6 +140,10 @@ struct DomainsTab: View {
 
     /// The doc screenshots draw this name's row as if the pointer were on it.
     static var hoveredForScreenshots: String?
+    /// The doc screenshots open the page with the "Not resolving" filter on.
+    static var staleOnlyForScreenshots = false
+    /// The header's filter: only the entries that have stopped resolving.
+    @State private var staleOnly = DomainsTab.staleOnlyForScreenshots
 
     /// The arguments seed the field and the line under the list, for a rendered screenshot.
     init(newDomain: String = "", feedback: AddDomainFeedback? = nil) {
@@ -139,7 +159,8 @@ struct DomainsTab: View {
 
     private var sections: [DomainsPage.Section] {
         DomainsPage.sections(mode: routeManager.config.routingMode, config: routeManager.config,
-                             routeSources: routeManager.activeRoutes.map(\.source), search: searchText)
+                             routeSources: routeManager.activeRoutes.map(\.source), search: searchText,
+                             staleOnly: staleOnly)
     }
 
     var body: some View {
@@ -167,7 +188,14 @@ struct DomainsTab: View {
         .onChange(of: newDomain) { text in
             if text != feedback?.fieldText { feedback = nil }
         }
-        .onChange(of: routeManager.config.routingMode) { _ in feedback = nil }
+        .onChange(of: routeManager.config.routingMode) { _ in
+            feedback = nil
+            staleOnly = false
+        }
+        // The filter goes when its last row does, so it is not on, unseen, the next time.
+        .onChange(of: activeDomains.contains(where: StaleEntries.isStale)) { any in
+            if !any { staleOnly = false }
+        }
         // A refusal such as "already on your list" stops being true once the list changes
         // (a row's delete, `vpnb domain.rm`). A saved add changes the list itself, so its
         // line stays.
@@ -181,7 +209,9 @@ struct DomainsTab: View {
     @ViewBuilder
     private func activeSection(_ section: DomainsPage.Section, numberWidth: CGFloat, pageHasNoMatch: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            GroupSection(section.title, trailing: { activeTrailing(numberWidth: numberWidth) }) {
+            GroupSection(section.title, trailing: {
+                activeTrailing(numberWidth: numberWidth, staleCount: section.staleCount)
+            }) {
                 addRow
                 if section.total == 0 {
                     InsetDivider()
@@ -194,7 +224,7 @@ struct DomainsTab: View {
                     ForEach(section.rows) { row in
                         InsetDivider()
                         ListRow(glyph: glyph(for: row.entry), name: row.entry.domain, detail: row.detail,
-                                number: row.number, numberWidth: numberWidth,
+                                needsAttention: row.isStale, number: row.number, numberWidth: numberWidth,
                                 actions: [RowAction.delete(row.entry.domain) { removeDomain(row.entry) }],
                                 isOn: switchBinding(for: row.entry),
                                 showsActions: Self.hoveredForScreenshots == row.entry.domain)
@@ -218,9 +248,19 @@ struct DomainsTab: View {
         }
     }
 
-    /// Turn All On / Off, then the label over the number column.
-    private func activeTrailing(numberWidth: CGFloat) -> some View {
+    /// The "Not resolving" filter while an entry has stopped resolving, Turn All On / Off, then
+    /// the label over the number column.
+    private func activeTrailing(numberWidth: CGFloat, staleCount: Int) -> some View {
         HStack(spacing: Theme.Space.s) {
+            if staleCount > 0 {
+                let title = String(localized: "Not resolving · \(staleCount)")
+                Toggle(title, isOn: $staleOnly)
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                    .help(String(localized: "Show only the domains that have stopped resolving"))
+                    .accessibilityLabel(String(localized: "Show only the domains that have stopped resolving"))
+                    .accessibilityValue(title)
+            }
             if !routeManager.isApplyingRoutes && !activeDomains.isEmpty {
                 BulkSwitchMenu(
                     turnAllOnTitle: String(localized: "Turn All On"),

@@ -897,3 +897,6 @@
 "learned as you browse" = "se aprende mientras navegas";
 "IP range" = "Rango de IP";
 "addresses" = "direcciones";
+"Hasn't resolved since %@" = "No se resuelve desde el %@";
+"Not resolving · %lld" = "Sin resolver · %lld";
+"Show only the domains that have stopped resolving" = "Mostrar solo los dominios que han dejado de resolverse";

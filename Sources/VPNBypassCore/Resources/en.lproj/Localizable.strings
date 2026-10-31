@@ -897,3 +897,6 @@
 "learned as you browse" = "learned as you browse";
 "IP range" = "IP range";
 "addresses" = "addresses";
+"Hasn't resolved since %@" = "Hasn't resolved since %@";
+"Not resolving · %lld" = "Not resolving · %lld";
+"Show only the domains that have stopped resolving" = "Show only the domains that have stopped resolving";
