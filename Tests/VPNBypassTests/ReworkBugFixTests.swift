@@ -345,13 +345,38 @@ final class ReworkDropdownTests: RouteManagerTestCase {
     }
 
     /// A5: a Direct route switched off routes nothing, so the quick-add refuses to put a rule
-    /// there rather than say it was added to the Direct route.
+    /// there, and says why, rather than say it was added to the Direct route.
     func testACustomAddRefusesADirectRouteThatIsOff() throws {
         var (direct, _) = custom { _, _ in [] }
         direct.enabled = false
         rm.config.routes[0] = direct
-        XCTAssertNil(rm.addForCurrentMode("news.ycombinator.com"))
+        let result = rm.addForCurrentMode("news.ycombinator.com")
+        XCTAssertEqual(result, .failure(.directRouteOff(value: "news.ycombinator.com")))
         XCTAssertTrue(rm.config.rules.isEmpty, "no rule saved on a route that is off")
+        let state = MenuContent.quickAdd(after: result, typed: "news.ycombinator.com")
+        XCTAssertTrue(state.isOpen, "the field stays open to say why")
+        XCTAssertEqual(state.text, "news.ycombinator.com")
+        XCTAssertEqual(state.feedback?.message,
+                       "The Direct route is off, so a rule for news.ycombinator.com would route nothing. Turn it on in Routes first.")
+        for language in ["es", "fr"] {
+            let bundle = try ReworkSource.lproj(language)
+            let key = "The Direct route is off, so a rule for %@ would route nothing. Turn it on in Routes first."
+            XCTAssertNotEqual(bundle.localizedString(forKey: key, value: nil, table: nil), key, language)
+        }
+    }
+
+    /// A5: a service rule routes its IP ranges too, so a Direct range inside one of them is
+    /// matched first by the service rule.
+    func testAServiceRangeMatchesARangeFirst() throws {
+        let service = ServiceEntry(id: "corp", name: "Corp", enabled: true, domains: ["corp.example"],
+                                   ipRanges: ["198.51.100.0/24"], isCustom: true)
+        let rules = [Rule(matchType: .service, pattern: "corp", routeId: UUID(), order: 0)]
+        XCTAssertTrue(RulePlace.covers(rules[0], Rule(matchType: .cidr, pattern: "198.51.100.128/25", routeId: UUID(), order: 1),
+                                       services: [service]))
+        XCTAssertFalse(RulePlace.covers(rules[0], Rule(matchType: .cidr, pattern: "198.51.0.0/16", routeId: UUID(), order: 1),
+                                        services: [service]), "a wider range is only partly claimed")
+        XCTAssertFalse(RulePlace.covers(rules[0], Rule(matchType: .cidr, pattern: "203.0.113.0/24", routeId: UUID(), order: 1),
+                                        services: [service]))
     }
 
     /// An apply replaces the routes the last check looked at, so every apply path drops it:

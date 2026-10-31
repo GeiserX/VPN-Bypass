@@ -5961,6 +5961,9 @@ enum AddDomainError: Error, Equatable {
     /// `route`. On another route it matches first, so a Direct rule after it would do nothing.
     /// `vpnName` names the primary-VPN route as the Rules page does.
     case ruleExists(value: String, route: Route, vpnName: String?)
+    /// Custom mode's quick-add: the Direct route is switched off, and the compiler skips rules
+    /// on a route that is off, so a rule there would route nothing.
+    case directRouteOff(value: String)
 
     /// One line for under the add field, in the user's words and the app's language.
     var message: String { message(in: .main) }
@@ -5988,6 +5991,8 @@ enum AddDomainError: Error, Equatable {
             return route.egress == .direct
                 ? String(localized: "\(value) already has a rule on the \(routeName) route.", bundle: bundle)
                 : String(localized: "\(value) already has a rule on the \(routeName) route, and the first matching rule wins. To send it direct, change that rule's route on the Rules page.", bundle: bundle)
+        case .directRouteOff(let value):
+            return String(localized: "The Direct route is off, so a rule for \(value) would route nothing. Turn it on in Routes first.", bundle: bundle)
         }
     }
 }
@@ -6080,12 +6085,21 @@ struct RulePlace: Equatable {
         case (.cidr, .domain):
             return RuleResolver.ipv4(rule.pattern, inCIDR: earlier.pattern)
         case (.cidr, .cidr):
-            let mine = rule.pattern.split(separator: "/"), theirs = earlier.pattern.split(separator: "/")
-            guard mine.count == 2, theirs.count == 2, let bits = Int(mine[1]), let theirBits = Int(theirs[1]) else { return false }
-            return theirBits <= bits && RuleResolver.ipv4(String(mine[0]), inCIDR: earlier.pattern)
+            return contains(earlier.pattern, rule.pattern)
+        case (.service, .cidr):
+            // A service rule routes its ranges too, and a range inside one of them is claimed first.
+            guard let service = services.first(where: { $0.id == earlier.pattern }) else { return false }
+            return service.ipRanges.contains { contains($0, rule.pattern) }
         default:
             return false
         }
+    }
+
+    /// Whether the range `outer` holds all of the range `inner`.
+    static func contains(_ outer: String, _ inner: String) -> Bool {
+        let mine = inner.split(separator: "/"), theirs = outer.split(separator: "/")
+        guard mine.count == 2, theirs.count == 2, let bits = Int(mine[1]), let theirBits = Int(theirs[1]) else { return false }
+        return theirBits <= bits && RuleResolver.ipv4(String(mine[0]), inCIDR: outer)
     }
 
     func message(in bundle: Bundle = .main) -> String {

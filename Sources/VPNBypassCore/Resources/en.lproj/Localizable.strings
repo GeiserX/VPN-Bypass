@@ -791,6 +791,7 @@
 "Add a Direct rule…" = "Add a Direct rule…";
 "Added as rule %lld, to the Direct route." = "Added as rule %lld, to the Direct route.";
 "Added as rule %lld; rule %lld matches first." = "Added as rule %1$lld; rule %2$lld matches first.";
+"The Direct route is off, so a rule for %@ would route nothing. Turn it on in Routes first." = "The Direct route is off, so a rule for %@ would route nothing. Turn it on in Routes first.";
 
 /* Path check and "where does this site go?" */
 "No interface" = "No interface";

@@ -197,6 +197,9 @@ enum ClassicControl {
         case .ruleExists(let value, let route, _):
             // Only Custom mode's quick-add returns this; domain.add never does.
             return fail("already_exists", "\(value) already has a rule on the route \(route.name)")
+        case .directRouteOff(let value):
+            // Only Custom mode's quick-add returns this; domain.add never does.
+            return fail("invalid_args", "the Direct route is disabled, so a rule for \(value) would route nothing")
         }
     }
 

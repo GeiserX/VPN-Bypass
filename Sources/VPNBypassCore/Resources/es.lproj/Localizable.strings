@@ -791,6 +791,7 @@
 "Add a Direct rule…" = "Añadir una regla Directo…";
 "Added as rule %lld, to the Direct route." = "Añadida como regla %lld, a la ruta Directo.";
 "Added as rule %lld; rule %lld matches first." = "Añadida como regla %1$lld; la regla %2$lld coincide antes.";
+"The Direct route is off, so a rule for %@ would route nothing. Turn it on in Routes first." = "La ruta Directo está desactivada, así que una regla para %@ no enrutaría nada. Actívala antes en Rutas.";
 
 /* Path check and "where does this site go?" */
 "No interface" = "Sin interfaz";
