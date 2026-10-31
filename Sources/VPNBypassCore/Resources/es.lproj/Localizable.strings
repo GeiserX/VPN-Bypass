@@ -969,3 +969,31 @@
 
 "Shared CDN address (%@): other sites on it bypass the VPN too" = "Dirección de CDN compartida (%@): los demás sitios en ella también evitan la VPN";
 "Shared CDN address (%@): other sites on it use the VPN too" = "Dirección de CDN compartida (%@): los demás sitios en ella también usan la VPN";
+
+"Learn a Site…" = "Aprender un sitio…";
+"Learn a Site" = "Aprender un sitio";
+"Watch the lookups for 60 seconds while you reload a page, and see the names it needs" = "Observa las búsquedas durante 60 segundos mientras recargas una página, y verás los nombres que necesita";
+"Reload the page that does not work now." = "Recarga ahora la página que no funciona.";
+"No name was looked up while learning." = "No se buscó ningún nombre mientras aprendía.";
+"The helper read no lookups in this window, so nothing was learned." = "El asistente no leyó ninguna búsqueda en este intervalo, así que no se aprendió nada.";
+"Learning a site: reload the page now" = "Aprendiendo un sitio: recarga la página ahora";
+"Learned: %lld names" = "Aprendidos: %lld nombres";
+"%lld s left" = "Quedan %lld s";
+"Stop" = "Detener";
+"Stop learning now and keep the names seen so far" = "Deja de aprender ahora y conserva los nombres vistos hasta aquí";
+"Stop Learning" = "Dejar de aprender";
+"Done" = "Hecho";
+"Forget these names" = "Olvidar estos nombres";
+"Done Learning" = "Terminar de aprender";
+"Every name of %@ is routed already" = "Todos los nombres de %@ ya están enrutados";
+"Add %@ instead of these names: it covers every name under the site, now and later" = "Añadir %@ en lugar de estos nombres: cubre todos los nombres bajo el sitio, ahora y en adelante";
+"Add as %@" = "Añadir como %@";
+"Every name here is routed already." = "Todos estos nombres ya están enrutados.";
+"Entries to add: %lld" = "Entradas que añadir: %lld";
+"%@, %lld entries" = "%@, %lld entradas";
+"There is no Direct route to send these names to." = "No hay una ruta Directa a la que enviar estos nombres.";
+"Added %lld of %lld. The others were not added; Logs says why." = "Añadidos %lld de %lld. Los demás no se añadieron; los Registros dicen por qué.";
+"Added %lld of %lld." = "Añadidos %lld de %lld.";
+"Routes are still being applied. Added %lld of %lld; press Add again when they finish." = "Las rutas todavía se están aplicando. Añadidos %lld de %lld; pulsa Añadir de nuevo cuando terminen.";
+"A name here is on the list but switched off. Turn it on from the Domains page." = "Un nombre de aquí está en la lista pero desactivado. Actívalo desde la página Dominios.";
+"Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory." = "Aprender un sitio ha activado la captura solo durante sus 60 segundos, y guarda los nombres en memoria.";

@@ -969,3 +969,31 @@
 
 "Shared CDN address (%@): other sites on it bypass the VPN too" = "Shared CDN address (%@): other sites on it bypass the VPN too";
 "Shared CDN address (%@): other sites on it use the VPN too" = "Shared CDN address (%@): other sites on it use the VPN too";
+
+"Learn a Site…" = "Learn a Site…";
+"Learn a Site" = "Learn a Site";
+"Watch the lookups for 60 seconds while you reload a page, and see the names it needs" = "Watch the lookups for 60 seconds while you reload a page, and see the names it needs";
+"Reload the page that does not work now." = "Reload the page that does not work now.";
+"No name was looked up while learning." = "No name was looked up while learning.";
+"The helper read no lookups in this window, so nothing was learned." = "The helper read no lookups in this window, so nothing was learned.";
+"Learning a site: reload the page now" = "Learning a site: reload the page now";
+"Learned: %lld names" = "Learned: %lld names";
+"%lld s left" = "%lld s left";
+"Stop" = "Stop";
+"Stop learning now and keep the names seen so far" = "Stop learning now and keep the names seen so far";
+"Stop Learning" = "Stop Learning";
+"Done" = "Done";
+"Forget these names" = "Forget these names";
+"Done Learning" = "Done Learning";
+"Every name of %@ is routed already" = "Every name of %@ is routed already";
+"Add %@ instead of these names: it covers every name under the site, now and later" = "Add %@ instead of these names: it covers every name under the site, now and later";
+"Add as %@" = "Add as %@";
+"Every name here is routed already." = "Every name here is routed already.";
+"Entries to add: %lld" = "Entries to add: %lld";
+"%@, %lld entries" = "%@, %lld entries";
+"There is no Direct route to send these names to." = "There is no Direct route to send these names to.";
+"Added %lld of %lld. The others were not added; Logs says why." = "Added %lld of %lld. The others were not added; Logs says why.";
+"Added %lld of %lld." = "Added %lld of %lld.";
+"Routes are still being applied. Added %lld of %lld; press Add again when they finish." = "Routes are still being applied. Added %lld of %lld; press Add again when they finish.";
+"A name here is on the list but switched off. Turn it on from the Domains page." = "A name here is on the list but switched off. Turn it on from the Domains page.";
+"Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory." = "Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory.";

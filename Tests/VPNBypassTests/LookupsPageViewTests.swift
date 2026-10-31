@@ -28,6 +28,7 @@ final class LookupsPageViewTests: XCTestCase {
         rm.config = savedConfig
         DNSLookupsMonitor.shared.tally = DNSLookupTally()
         DNSLookupsMonitor.shared.since = nil
+        DNSLookupsMonitor.shared.learning = nil
         UserDefaults.standard.set(savedLastPage, forKey: SettingsSidebar.lastPageKey)
         SettingsPageRequest.shared.page = nil
     }
@@ -79,6 +80,25 @@ final class LookupsPageViewTests: XCTestCase {
         XCTAssertTrue(texts.contains("Add to Bypass"), "VoiceOver cannot reach the add: \(texts.sorted())")
         XCTAssertTrue(texts.contains("More ways to add unlisted-probe.example"), "VoiceOver cannot reach the add panel")
         XCTAssertTrue(texts.contains("Remove"), "VoiceOver cannot reach a listed name's remove: \(texts.sorted())")
+    }
+
+    /// Learn a site, closed with three names under one site: VoiceOver reaches the Learn
+    /// button, the wildcard offer, the one Add with its count, and Done.
+    func testLearnedNamesOfferTheWildcardAndOneAddToVoiceOver() {
+        var config = rm.config
+        config.routingMode = .bypass
+        config.dnsLookupsEnabled = false
+        config.domains = []
+        rm.config = config
+        var learning = SiteLearning(started: Date())
+        learning.record(["www.learn-probe.test", "api.learn-probe.test", "img.learn-probe.test"], at: Date())
+        learning.close()
+        DNSLookupsMonitor.shared.learning = learning
+        let texts = texts(onLookups: open())
+        XCTAssertTrue(texts.contains("Learn a Site"), "VoiceOver cannot reach Learn a Site: \(texts.sorted())")
+        XCTAssertTrue(texts.contains("Add as *.learn-probe.test"), "no wildcard offer: \(texts.sorted())")
+        XCTAssertTrue(texts.contains("Add to Bypass, 3 entries"), "no one Add: \(texts.sorted())")
+        XCTAssertTrue(texts.contains("Done Learning"))
     }
 
     // MARK: - Helpers

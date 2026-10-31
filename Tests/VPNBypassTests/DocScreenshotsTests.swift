@@ -77,6 +77,7 @@ final class DocScreenshotsTests: XCTestCase {
         rm.config = saved.config
         DNSLookupsMonitor.shared.tally = DNSLookupTally()
         DNSLookupsMonitor.shared.since = nil
+        DNSLookupsMonitor.shared.learning = nil
         rm.isVPNConnected = saved.connected
         rm.vpnInterface = saved.iface
         rm.vpnType = saved.type
@@ -477,6 +478,30 @@ final class DocScreenshotsTests: XCTestCase {
         seedBypass()
         rm.config.dnsLookupsEnabled = false
         XCTAssertEqual(try renderSettings(page: .lookups, to: "lookups-off.png"), Self.settingsSize)
+    }
+
+    /// Learn a site, 23 seconds into its window: the countdown, Stop, and the names the
+    /// reload asked for so far, grouped by site.
+    func testSettingsOnLookupsLearning() throws {
+        seedBypass()
+        rm.config.dnsLookupsEnabled = false
+        var learning = SiteLearning(started: Date().addingTimeInterval(-23))
+        learning.record(["shop.example.com", "static.example-cdn.net", "api.example.com"], at: Date().addingTimeInterval(-20))
+        DNSLookupsMonitor.shared.learning = learning
+        XCTAssertEqual(try renderSettings(page: .lookups, to: "lookups-learning.png"), Self.settingsSize)
+    }
+
+    /// Learn a site after its window: one row per site, the wildcard offer for the site with
+    /// three names or more, a site already on the Bypass list with a check, and the one Add.
+    func testSettingsOnLookupsLearned() throws {
+        seedBypass()
+        rm.config.dnsLookupsEnabled = false
+        var learning = SiteLearning(started: Date().addingTimeInterval(-60))
+        learning.record(["shop.example.com", "static.example-cdn.net", "api.example.com", "login.example.com",
+                         "img.example-cdn.net", "en.wikipedia.org", "assets.example.com"], at: Date().addingTimeInterval(-50))
+        learning.close()
+        DNSLookupsMonitor.shared.learning = learning
+        XCTAssertEqual(try renderSettings(page: .lookups, to: "lookups-learned.png"), Self.settingsSize)
     }
 
     /// A change a Shortcuts action made, named in the dropdown footer as `vpnb` changes are,
