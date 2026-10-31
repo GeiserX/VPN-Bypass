@@ -175,6 +175,9 @@ struct SettingsView: View {
                     StatusTab(onShowWarnings: {
                         logsFilter = LogFilter(level: .warnings)
                         selectedTab = .logs
+                    }, onShowLogs: {
+                        logsFilter = LogFilter()
+                        selectedTab = .logs
                     })
                 case .domains:  DomainsTab()
                 case .services: ServicesTab()

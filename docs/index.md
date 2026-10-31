@@ -52,19 +52,19 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 
 ## The menu bar app
 
-Everything lives in the dropdown: the VPN it found, a pill that says whether routes are enforced, the Mode switch, a field to add a domain, and what is routed, one row per service or domain you added. Settings opens from the gear at its foot. See [Usage](usage.md).
+Everything lives in the dropdown: the VPN it found, a status chip that says whether routes are enforced, the Mode popup, a field to add a domain, and what is routed, one row per service or domain you added. Settings opens from the gear at its foot. See [Usage](usage.md).
 
 <div class="vb-gallery" markdown>
 <figure markdown>
-![The dropdown in Bypass mode: WireGuard connected, the pill reads ON, and four services and two domains skip the VPN, each with how many addresses it routes](images/screenshots/menu-bar.png)
+![The dropdown in Bypass mode: WireGuard connected, the status chip reads On, and four services and two domains skip the VPN, each with how many addresses it routes](images/screenshots/menu-bar.png)
 <figcaption>Bypass mode</figcaption>
 </figure>
 <figure markdown>
-![The dropdown right after install: WireGuard connected, the pill reads NOT SET UP, and the question What should skip the VPN? over six services with switches and a field to add a site](images/screenshots/first-run.png)
+![The dropdown right after install: WireGuard connected, the status chip reads Off, and the question What should skip the VPN? over six services with switches and a field to add a site](images/screenshots/first-run.png)
 <figcaption>First run</figcaption>
 </figure>
 <figure markdown>
-![The dropdown in VPN Only mode: the Mode control on VPN Only, the pill reads ON, two domains go through the VPN, and everything else goes direct](images/screenshots/vpn-only.png)
+![The dropdown in VPN Only mode: the Mode popup on VPN Only, the status chip reads On, two domains go through the VPN, and everything else goes direct](images/screenshots/vpn-only.png)
 <figcaption>VPN Only mode</figcaption>
 </figure>
 </div>

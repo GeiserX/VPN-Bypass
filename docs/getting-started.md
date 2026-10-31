@@ -44,17 +44,17 @@ Open `Package.swift` in Xcode and run the project.
 2. macOS asks for an administrator password once. That installs the root helper that edits the routing table. On macOS 13 and later it may also ask you to allow VPN Bypass under System Settings > General > Login Items; the app says so in its dropdown when that is the case.
 3. Connect your VPN. The dropdown reads VPN Connected and names the client it found.
 
-A fresh install routes nothing. The pill in the dropdown reads NOT SET UP, and the dropdown asks "What should skip the VPN?" with six common services, each with a switch, a row for all the services, and a field to add a site.
+A fresh install routes nothing. The status chip in the dropdown reads Off, in grey, and the dropdown asks "What should skip the VPN?" with six common services, each with a switch, a row for all the services, and a field to add a site.
 
-![The dropdown right after install: WireGuard connected, the pill reads NOT SET UP, and the question What should skip the VPN? over six services with switches and a field to add a site](images/screenshots/first-run.png){ width="340" }
+![The dropdown right after install: WireGuard connected, the status chip reads Off, and the question What should skip the VPN? over six services with switches and a field to add a site](images/screenshots/first-run.png){ width="340" }
 
 Switch on a service there, or type a site into the field and press Return. "All 51 services…" opens Settings on the Services page with the service catalogue open. If you want the opposite, only a few sites on the VPN, click "Use VPN Only instead…". It worked when:
 
-- the pill reads ON;
+- the status chip reads On;
 - the menu bar mark shows its arrow head (it is two plain lines and a bar while nothing is routed);
 - the question gives way to the normal dropdown, and the service or domain appears under Skipping the VPN with how many addresses it routes.
 
-If the pill reads NOT ENFORCING, the helper is not running; Settings > Status shows its state, with an Install, Update or Retry button; the dropdown's Fix… button opens it. If macOS says the app is damaged, see [Troubleshooting](troubleshooting.md#app-wont-open-damaged-error-macos-gatekeeper).
+If the status chip reads Not routing and the dropdown says the helper is not running, Settings > Status shows its state, with an Install, Update or Retry button; the dropdown's Fix… button opens it. If macOS says the app is damaged, see [Troubleshooting](troubleshooting.md#app-wont-open-damaged-error-macos-gatekeeper).
 
 ## Requirements
 

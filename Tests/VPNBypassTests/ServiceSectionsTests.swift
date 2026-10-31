@@ -210,7 +210,5 @@ final class ServiceSectionsTests: XCTestCase {
                        ["ACTIVADOS", "SERVICIOS PERSONALIZADOS"])
         XCTAssertEqual(ServiceSections.Kind.allCases.map { ServiceSections.title($0, in: fr) },
                        ["ACTIVÉS", "SERVICES PERSONNALISÉS"])
-        // The dropdown's pill keeps its own word.
-        XCTAssertEqual(String(localized: "ON", bundle: es), "ON")
     }
 }

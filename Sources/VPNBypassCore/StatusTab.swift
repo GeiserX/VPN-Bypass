@@ -248,6 +248,85 @@ enum StatusPage {
             : Line(text: String(localized: "\(checked) of \(total) checked, \(failed) not reachable, \(when)", bundle: bundle), tone: .warn)
     }
 
+    // MARK: Problems
+
+    /// One row of Problems: what failed, and why.
+    struct Problem: Equatable, Identifiable {
+        enum Kind: Equatable {
+            case notRouted, notResolved, notRemoved, noAddresses, unlisted
+        }
+        let kind: Kind
+        /// The address, the name, or the entry.
+        let title: String
+        /// What it was for and the reason.
+        let detail: String
+
+        var id: String { "\(kind)|\(title)|\(detail)" }
+    }
+
+    /// Every failure the dropdown's count includes, in the order the apply met them: the
+    /// addresses the helper did not route (or remove), with their entry and the reason it gave,
+    /// and the names that did not resolve, with their entry and the DNS error. Then the
+    /// entries left with no address, and a last row for failures counted but not itemised.
+    /// Empty when nothing failed. Shown on the same rule as the dropdown (`shownRouteChange`),
+    /// so the page never lists failures the dropdown no longer counts. An address that is
+    /// routed by now (a DNS retry or a later add put it in) is left out.
+    static func problems(lastChange: RouteManager.RouteChangeOutcome?, installed: Int, helperReady: Bool,
+                         withoutAddresses: [RoutedBySource.Row], routes: [RoutedBySource.InstalledRoute] = [],
+                         bundle: Bundle = .main) -> [Problem] {
+        var out: [Problem] = []
+        let lastChange = lastChange?.outstanding(routedNow: Set(routes.map(\.destination)))
+        if let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed, helperReady: helperReady),
+           change.failedCount > 0 {
+            for failure in change.failures {
+                let kind: Problem.Kind
+                let what: String
+                switch failure.kind {
+                case .notRouted:
+                    kind = .notRouted
+                    what = String(localized: "Not routed", bundle: bundle)
+                case .notResolved:
+                    kind = .notResolved
+                    what = String(localized: "Did not resolve", bundle: bundle)
+                case .notRemoved:
+                    kind = .notRemoved
+                    what = String(localized: "Not removed", bundle: bundle)
+                }
+                // A domain listed on its own is its own entry: say it once.
+                let detail = failure.entry.isEmpty || failure.entry == failure.target
+                    ? String(localized: "\(what): \(failure.reason)", bundle: bundle)
+                    : String(localized: "\(what), for \(failure.entry): \(failure.reason)", bundle: bundle)
+                out.append(Problem(kind: kind, title: failure.target, detail: detail))
+            }
+            let unlisted = change.failedCount - change.failures.count
+            if unlisted > 0 {
+                out.append(Problem(kind: .unlisted,
+                                   title: unlisted == 1
+                                       ? String(localized: "1 more failure", bundle: bundle)
+                                       : String(localized: "\(unlisted) more failures", bundle: bundle),
+                                   detail: String(localized: "Settings > Logs has the details.", bundle: bundle)))
+            }
+        }
+        // After Remove All Routes an empty entry is what the user asked for; what it could not
+        // remove is listed above.
+        let removed = DropdownCopy.removalStands(lastChange, currentRouteCount: installed, helperReady: helperReady)
+        for row in withoutAddresses where row.isProblem && !removed {
+            out.append(Problem(kind: .noAddresses, title: row.name,
+                               detail: String(localized: "No address is routed for it.", bundle: bundle)))
+        }
+        return out
+    }
+
+    /// What Problems' Retry does: after a Remove All Routes that left routes behind it removes
+    /// them again, since applying would put back every route the user just took away.
+    enum RetryAction: Equatable { case apply, remove }
+
+    static func retryAction(lastChange: RouteManager.RouteChangeOutcome?, installed: Int,
+                            helperReady: Bool) -> RetryAction {
+        let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed, helperReady: helperReady)
+        return change?.kind == .removedAll && (change?.failedCount ?? 0) > 0 ? .remove : .apply
+    }
+
     // MARK: DNS
 
     static func resolverLine(_ detected: String?, bundle: Bundle = .main) -> Line {
@@ -341,7 +420,8 @@ extension DropdownStatus.Input {
             enabledRules: config.rules.filter { $0.enabled }.count,
             installedRoutes: routeManager.routedAddressCount,
             pending: routeManager.pendingReconnectApply,
-            lastRouteChange: routeManager.lastRouteChange,
+            // Without the failed addresses routed since, as Problems lists them.
+            lastRouteChange: routeManager.lastRouteChange?.outstanding(routedNow: routed),
             lastDNSRefresh: routeManager.lastDNSRefresh,
             nextDNSRefresh: routeManager.nextDNSRefresh,
             autoDNSRefresh: config.autoDNSRefresh,
@@ -352,7 +432,10 @@ extension DropdownStatus.Input {
             everythingElseDirect: routeManager.everythingElseDirect,
             killSwitch: routeManager.vpnKillSwitch,
             isStarting: routeManager.isLoading && routeManager.lastUpdate == nil,
-            entriesWithoutAddresses: RoutedBySource.make(
+            // After Remove All Routes an empty entry is what the user asked for.
+            entriesWithoutAddresses: DropdownCopy.removalStands(routeManager.lastRouteChange,
+                                                                currentRouteCount: routeManager.routedAddressCount,
+                                                                helperReady: helperReady) ? 0 : RoutedBySource.make(
                 mode: mode, config: config, routes: routeManager.installedRoutes,
                 busy: RoutedBySource.mayStillAddRoutes(running: routeManager.isLoading || routeManager.isApplyingRoutes,
                                                        pending: routeManager.pendingReconnectApply))?.problemCount ?? 0,
@@ -372,6 +455,8 @@ struct StatusTab: View {
     @ObservedObject private var helperManager = HelperManager.shared
     /// Opens the Logs page with Warnings selected.
     private let onShowWarnings: () -> Void
+    /// Opens the Logs page on every line, for the route check's results.
+    private let onShowLogs: () -> Void
     /// False when a snapshot was handed in: the page shows it as given, so a test or a render
     /// can show any tunnel state, until Refresh reads the real one.
     private let readsTunnelsOnChange: Bool
@@ -379,8 +464,10 @@ struct StatusTab: View {
     @State private var snapshot: RouteManager.CoexistenceSnapshot?
     @State private var isReadingTunnels = false
 
-    init(onShowWarnings: @escaping () -> Void = {}, snapshot: RouteManager.CoexistenceSnapshot? = nil) {
+    init(onShowWarnings: @escaping () -> Void = {}, onShowLogs: @escaping () -> Void = {},
+         snapshot: RouteManager.CoexistenceSnapshot? = nil) {
         self.onShowWarnings = onShowWarnings
+        self.onShowLogs = onShowLogs
         _snapshot = State(initialValue: snapshot)
         readsTunnelsOnChange = snapshot == nil
     }
@@ -400,6 +487,8 @@ struct StatusTab: View {
         let input = DropdownStatus.Input.current(routeManager, helperReady: helperManager.helperState.isReady)
         return VStack(alignment: .leading, spacing: 18) {
             summaryView(StatusPage.summary(input, now: now))
+            problemsSection(input)
+            routeCheckSection
             helperSection
             connectionSection
             routesSection(input, now: now)
@@ -452,6 +541,58 @@ struct StatusTab: View {
 
     // MARK: Sections
 
+    /// Where the dropdown's "Show" lands: every failure behind its count, with Retry.
+    @ViewBuilder
+    private func problemsSection(_ input: DropdownStatus.Input) -> some View {
+        // With no VPN an entry without addresses is expected, as in the dropdown's list.
+        let missing = !input.isVPNConnected ? [] : RoutedBySource.make(
+            mode: input.mode, config: routeManager.config, routes: routeManager.installedRoutes,
+            busy: RoutedBySource.mayStillAddRoutes(running: routeManager.isLoading || routeManager.isApplyingRoutes,
+                                                   pending: routeManager.pendingReconnectApply))?.problemRows ?? []
+        let problems = StatusPage.problems(lastChange: routeManager.lastRouteChange,
+                                           installed: routeManager.routedAddressCount,
+                                           helperReady: input.helperReady, withoutAddresses: missing,
+                                           routes: routeManager.installedRoutes)
+        if !problems.isEmpty {
+            StatusSection(String(localized: "Problems"), trailing: {
+                let retry = StatusPage.retryAction(lastChange: routeManager.lastRouteChange,
+                                                   installed: routeManager.routedAddressCount,
+                                                   helperReady: input.helperReady)
+                Button(String(localized: "Retry")) {
+                    switch retry {
+                    case .apply: routeManager.refreshRoutes()
+                    case .remove: Task { await routeManager.removeAllRoutes() }
+                    }
+                }
+                    .controlSize(.small)
+                    .disabled(routeManager.isLoading || routeManager.isApplyingRoutes || !input.helperReady
+                              || (retry == .apply && !routeManager.isVPNConnected))
+                    .help(retry == .apply ? String(localized: "Apply the routes again")
+                                          : String(localized: "Remove the routes again"))
+                    .accessibilityLabel(retry == .apply ? String(localized: "Retry: apply the routes again")
+                                                        : String(localized: "Retry: remove the routes again"))
+            }) {
+                ForEach(Array(problems.enumerated()), id: \.element.id) { index, problem in
+                    if index > 0 { StatusDivider() }
+                    ListRow(glyph: "exclamationmark.triangle.fill", name: problem.title,
+                            detail: problem.detail, needsAttention: true)
+                        .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+
+    /// The last Verify Routes, moved here from the dropdown; Dismiss takes it away.
+    @ViewBuilder
+    private var routeCheckSection: some View {
+        if let run = routeManager.lastRouteCheck {
+            RouteCheckCard(run: run,
+                           logsHoldResults: run.logsHoldResults(oldestLogAt: routeManager.recentLogs.last?.timestamp),
+                           onShowLogs: onShowLogs,
+                           onDismiss: { routeManager.clearRouteCheck() })
+        }
+    }
+
     private var helperSection: some View {
         let state = helperManager.helperState
         let line = StatusPage.helperLine(state, version: helperManager.helperVersion)
@@ -491,7 +632,7 @@ struct StatusTab: View {
         StatusSection(String(localized: "Addresses")) {
             StatusLineRow(label: String(localized: "Routed"),
                           line: StatusPage.appliedLine(installed: routeManager.routedAddressCount,
-                                                       lastChange: routeManager.lastRouteChange, now: now,
+                                                       lastChange: input.lastRouteChange, now: now,
                                                        helperReady: input.helperReady))
             StatusDivider()
             StatusLineRow(label: String(localized: "From"), line: StatusPage.fromLine(input))

@@ -28,9 +28,9 @@ enum ControlNames {
     static func help(_ name: String, shortcut: String) -> String { "\(name) (\(shortcut))" }
 }
 
-/// The dropdown's keyboard shortcuts. Each one sits on the visible button that does the same
-/// thing, because a SwiftUI `Menu` only answers its items' keys while it is open; the "…" menu
-/// lists them as well, where macOS lists a shortcut.
+/// The dropdown's keyboard shortcuts. Each one sits on a control that is always there (⌘R on
+/// Refresh, ⌘, on the gear, ⌘Q on a hidden button), because a SwiftUI `Menu` only answers its
+/// items' keys while it is open; the "…" menu lists ⌘Q on its Quit item.
 enum DropdownShortcut: CaseIterable {
     case refreshRoutes, settings, quit
 
@@ -75,9 +75,12 @@ extension View {
     }
 }
 
-/// The dropdown footer's gear and power buttons: the icon, its name for VoiceOver, its
-/// shortcut, and the shortcut in the tooltip.
+/// The dropdown footer's gear button: the icon, its name for VoiceOver, its shortcut, and the
+/// shortcut in the tooltip.
 struct DropdownIconButton: View {
+    /// The footer icons' hit area, larger than the glyph so a click near it lands.
+    static let hitSize: CGFloat = 24
+
     let systemImage: String
     let name: String
     let shortcut: DropdownShortcut
@@ -88,6 +91,8 @@ struct DropdownIconButton: View {
             Image(systemName: systemImage)
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
+                .frame(width: Self.hitSize, height: Self.hitSize)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .keyboardShortcut(shortcut)

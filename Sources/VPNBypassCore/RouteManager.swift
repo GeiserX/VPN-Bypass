@@ -136,7 +136,71 @@ final class RouteManager: ObservableObject {
         /// apply resolved live (an apply from the DNS cache skips uncached domains uncounted);
         /// the same number the "routes applied" notification reports. `.removedAll`: routes
         /// that could not be removed.
-        let failedCount: Int
+        var failedCount: Int
+        /// The failures behind `failedCount`, each with its entry and reason, for Status >
+        /// Problems. It can hold fewer than `failedCount`: the page counts the rest.
+        var failures: [RouteFailure] = []
+
+        /// This outcome without the addresses it failed to route that are routed now (a DNS
+        /// retry or a later add put them in), so the dropdown's count, its Show and Problems
+        /// all leave them out. The kernel route is per address, so any entry's route counts.
+        func outstanding(routedNow: Set<String>) -> RouteChangeOutcome {
+            let fixed = failures.filter { $0.kind == .notRouted && routedNow.contains($0.target) }
+            guard !fixed.isEmpty else { return self }
+            var out = self
+            out.failures = failures.filter { !($0.kind == .notRouted && routedNow.contains($0.target)) }
+            out.failedCount = max(0, failedCount - fixed.count)
+            return out
+        }
+    }
+
+    /// One failure an apply or a removal counted: an address the helper did not route or did
+    /// not remove, or a name that did not resolve. Read by Status > Problems only.
+    struct RouteFailure: Equatable, Identifiable {
+        enum Kind: Equatable {
+            case notRouted, notResolved, notRemoved
+        }
+        let kind: Kind
+        /// The address, or for `notResolved` the name.
+        let target: String
+        /// The service, domain or rule it was routed for.
+        let entry: String
+        /// What the helper or the lookup said.
+        let reason: String
+
+        var id: String { "\(kind)|\(target)|\(entry)" }
+
+        /// The failures for the addresses a helper batch did not route or remove. Each takes
+        /// the first entry it was routed for, and the batch's error, which the helper gives
+        /// once per batch, not per address. The VPN's own gateway, which the app refuses
+        /// before the helper sees the batch, gets that reason instead.
+        static func batch(_ kind: Kind, failed: some Collection<String>,
+                          sources: [(destination: String, source: String)], error: String?,
+                          vpnGateway: String? = nil) -> [RouteFailure] {
+            var entryFor: [String: String] = [:]
+            for item in sources where entryFor[item.destination] == nil {
+                entryFor[item.destination] = item.source
+            }
+            let reason = error.flatMap { $0.isEmpty ? nil : $0 } ?? (kind == .notRemoved
+                ? String(localized: "the system did not remove it")
+                : String(localized: "the system refused the route"))
+            let gateway = vpnGateway.flatMap { $0.hasPrefix("iface:") ? nil : $0 }
+            return failed.sorted().map {
+                let isGateway = kind == .notRouted && gateway != nil && ($0 == gateway || $0 == gateway! + "/32")
+                return RouteFailure(kind: kind, target: $0, entry: entryFor[$0] ?? "",
+                                    reason: isGateway ? String(localized: "it is the VPN's own gateway, which is never rerouted")
+                                                      : reason)
+            }
+        }
+
+        /// The names that resolved to nothing and had no cached answer.
+        static func unresolved(_ names: [(domain: String, source: String)]) -> [RouteFailure] {
+            var seen: Set<String> = []
+            return names.filter { seen.insert("\($0.domain)|\($0.source)").inserted }.map {
+                RouteFailure(kind: .notResolved, target: $0.domain, entry: $0.source,
+                             reason: String(localized: "no answer from DNS"))
+            }
+        }
     }
 
     /// The post-reconnect apply the settle gate is holding, for the dropdown's WAITING and
@@ -2252,6 +2316,8 @@ final class RouteManager: ObservableObject {
         }
 
         var failedCount = 0
+        /// The names behind `failedCount`, with the entry each was resolved for.
+        var unresolvedNames: [(domain: String, source: String)] = []
 
         // Clear DNS cache for fresh resolution
         dnsCache.removeAll()
@@ -2349,6 +2415,7 @@ final class RouteManager: ObservableObject {
                     resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: item.source, ips: cachedIPs))
                 } else {
                     failedDomains.insert(item.domain)
+                    unresolvedNames.append((item.domain, item.source))
                     failedCount += 1
                 }
             }
@@ -2410,11 +2477,13 @@ final class RouteManager: ObservableObject {
         // Apply all routes in batch (single XPC call for massive speedup)
         var batchFailureCount = 0
         var batchFailedDests: Set<String> = []
+        var batchError: String?
         if HelperManager.shared.isHelperInstalled {
             let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
             let result = await addRoutesBatchTracked(routes: helperRoutes)
             batchFailureCount = result.failureCount
             batchFailedDests = Set(result.failedDestinations)
+            batchError = result.error
 
             if result.failureCount > 0 {
                 log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed (\(result.failedDestinations.prefix(3).joined(separator: ", "))...)")
@@ -2432,7 +2501,11 @@ final class RouteManager: ObservableObject {
 
         let confirmedUniqueCount = uniqueRouteCount
         let totalFailures = failedCount + batchFailureCount
-        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: totalFailures)
+        let failures = RouteFailure.unresolved(unresolvedNames)
+            + RouteFailure.batch(.notRouted, failed: batchFailedDests,
+                                 sources: routesToAdd.map { ($0.destination, $0.source) }, error: batchError,
+                                 vpnGateway: vpnGateway)
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: totalFailures, failures: failures)
         // The last check described the routes before this apply; a stale wrong-way or broken
         // result must not keep the pill amber over routes that were just put back.
         clearRouteCheck()
@@ -2549,12 +2622,14 @@ final class RouteManager: ObservableObject {
 
         var batchFailureCount = 0
         var batchFailedDests: Set<String> = []
+        var batchError: String?
         if !routesToAdd.isEmpty {
             if HelperManager.shared.isHelperInstalled {
                 let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
                 let result = await addRoutesBatchTracked(routes: helperRoutes)
                 batchFailureCount = result.failureCount
                 batchFailedDests = Set(result.failedDestinations)
+                batchError = result.error
                 if result.failureCount > 0 {
                     log(.warning, "Custom route batch: \(result.successCount) succeeded, \(result.failureCount) failed (\(result.failedDestinations.prefix(3).joined(separator: ", "))...)")
                 }
@@ -2568,7 +2643,17 @@ final class RouteManager: ObservableObject {
         guard committed else { return false }
 
         let confirmedUniqueCount = uniqueRouteCount
-        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount)
+        // A service rule's routes are recorded under the service id; Problems names the service.
+        var serviceRuleNames: [String: String] = [:]
+        for rule in config.rules where rule.matchType == .service {
+            if let service = config.services.first(where: { $0.id == rule.pattern }) {
+                serviceRuleNames[rule.pattern] = service.name
+            }
+        }
+        let failures = RouteFailure.batch(.notRouted, failed: batchFailedDests,
+                                          sources: routesToAdd.map { ($0.destination, serviceRuleNames[$0.source] ?? $0.source) },
+                                          error: batchError, vpnGateway: vpnGateway)
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount, failures: failures)
         // The last check described the routes before this apply; a stale wrong-way or broken
         // result must not keep the pill amber over routes that were just put back.
         clearRouteCheck()
@@ -2707,6 +2792,10 @@ final class RouteManager: ObservableObject {
             .subtracting(blockedDestinations))
 
         var failedDests: Set<String> = []
+        // What each address was routed for, read before the model forgets it.
+        let routedFor = activeRoutes.map { (destination: $0.destination, source: $0.source) }
+        /// Each failed address with its own batch's reason, for Status > Problems.
+        var removeFailures: [RouteFailure] = []
         if !destinations.isEmpty {
             if HelperManager.shared.isHelperInstalled || removeRoutesBatchOverrideForTests != nil {
                 // Remove the catch-all routes (the bypass-all set, or a custom 0.0.0.0/0)
@@ -2718,10 +2807,14 @@ final class RouteManager: ObservableObject {
                 if !catchAlls.isEmpty {
                     let r = await removeRoutesBatchVia(catchAlls)
                     failedDests.formUnion(r.failedDestinations)
+                    removeFailures += RouteFailure.batch(.notRemoved, failed: Set(r.failedDestinations),
+                                                         sources: routedFor, error: r.error)
                 }
                 if !rest.isEmpty {
                     let result = await removeRoutesBatchVia(rest)
                     failedDests.formUnion(result.failedDestinations)
+                    removeFailures += RouteFailure.batch(.notRemoved, failed: Set(result.failedDestinations),
+                                                         sources: routedFor, error: result.error)
                     if result.failureCount > 0 {
                         log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
                     } else {
@@ -2741,6 +2834,8 @@ final class RouteManager: ObservableObject {
                 // the survivors can include the catch-alls, which then steer every connection
                 // around the tunnel with nothing left able to identify or remove them.
                 failedDests.formUnion(destinations)
+                removeFailures = RouteFailure.batch(.notRemoved, failed: Set(destinations), sources: routedFor,
+                                                    error: String(localized: "the helper is not running"))
             }
         }
         // After the catch-alls: a time-capped quit must spend its first write on them.
@@ -2766,7 +2861,8 @@ final class RouteManager: ObservableObject {
         lastUpdate = Date()
         // A removal with nothing installed is a no-op and must not hide the last apply's result.
         if !destinations.isEmpty {
-            lastRouteChange = RouteChangeOutcome(kind: .removedAll, at: Date(), routeCount: routedAddressCount, failedCount: failedDests.count)
+            lastRouteChange = RouteChangeOutcome(kind: .removedAll, at: Date(), routeCount: routedAddressCount, failedCount: failedDests.count,
+                                                 failures: removeFailures)
         }
 
         if config.manageHostsFile {
@@ -2883,12 +2979,14 @@ final class RouteManager: ObservableObject {
         // Apply routes in batch via helper
         var batchFailureCount = 0
         var batchFailedDests: Set<String> = []
+        var batchError: String?
         if !routesToAdd.isEmpty {
             if HelperManager.shared.isHelperInstalled {
                 let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
                 let result = await addRoutesBatchTracked(routes: helperRoutes)
                 batchFailureCount = result.failureCount
                 batchFailedDests = Set(result.failedDestinations)
+                batchError = result.error
                 if result.failureCount > 0 {
                     log(.warning, "Cache route batch: \(result.successCount) succeeded, \(result.failureCount) failed — will reconcile on DNS refresh")
                 }
@@ -2900,7 +2998,10 @@ final class RouteManager: ObservableObject {
 
         let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Cache ")
         guard committed else { return false }
-        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount)
+        let failures = RouteFailure.batch(.notRouted, failed: batchFailedDests,
+                                          sources: routesToAdd.map { ($0.destination, $0.source) }, error: batchError,
+                                          vpnGateway: vpnGateway)
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount, failures: failures)
         // The last check described the routes before this apply; a stale wrong-way or broken
         // result must not keep the pill amber over routes that were just put back.
         clearRouteCheck()
