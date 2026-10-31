@@ -291,8 +291,16 @@ struct CustomServiceEditor: View {
     /// `name` seeds the Service Name field of a new service, for a rendered screenshot.
     init(service: RouteManager.ServiceEntry?, name: String = "") {
         self.service = service
-        _serviceName = State(initialValue: name)
+        _serviceName = State(initialValue: service?.name ?? name)
+        if let service {
+            _domains = State(initialValue: service.domains.isEmpty ? [""] : service.domains)
+            _ipRanges = State(initialValue: service.ipRanges)
+        }
     }
+
+    /// Past this many rows the Domains and IP Ranges fields scroll, so a long service keeps
+    /// the sheet on screen and its buttons in reach.
+    static let rowsBeforeScrolling = 8
 
     private var isEditing: Bool { service != nil }
 
@@ -327,42 +335,49 @@ struct CustomServiceEditor: View {
                 }
             }
 
-            SheetField(String(localized: "Domains")) {
-                ForEach(domains.indices, id: \.self) { index in
-                    HStack(spacing: Theme.Space.s) {
-                        TextField("example.com", text: $domains[index])
-                            .textFieldStyle(.roundedBorder)
-                        if domains.count > 1 {
-                            removeButton(name: domains[index]) { domains.remove(at: index) }
-                        }
-                    }
+            if domains.count + ipRanges.count > Self.rowsBeforeScrolling {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Space.l) { listFields }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.trailing, Theme.Space.m)
                 }
-                addButton { domains.append("") }
-            }
-
-            SheetField(String(localized: "IP Ranges (optional)")) {
-                ForEach(ipRanges.indices, id: \.self) { index in
-                    HStack(spacing: Theme.Space.s) {
-                        TextField("10.0.0.0/8", text: $ipRanges[index])
-                            .textFieldStyle(.roundedBorder)
-                            .font(Theme.Font.mono)
-                        removeButton(name: ipRanges[index]) { ipRanges.remove(at: index) }
-                    }
-                }
-                Text(ipRanges.isEmpty
-                     ? "No IP ranges added. Only domain-based routing will be used."
-                     : "CIDR notation, e.g. 192.168.1.0/24")
-                    .font(Theme.Font.detail)
-                    .foregroundColor(Theme.textSecondary)
-                addButton { ipRanges.append("") }
+                .frame(height: 340)
+            } else {
+                listFields
             }
         }
-        .onAppear {
-            if let service {
-                serviceName = service.name
-                domains = service.domains.isEmpty ? [""] : service.domains
-                ipRanges = service.ipRanges
+    }
+
+    @ViewBuilder
+    private var listFields: some View {
+        SheetField(String(localized: "Domains")) {
+            ForEach(domains.indices, id: \.self) { index in
+                HStack(spacing: Theme.Space.s) {
+                    TextField("example.com", text: $domains[index])
+                        .textFieldStyle(.roundedBorder)
+                    if domains.count > 1 {
+                        removeButton(name: domains[index]) { domains.remove(at: index) }
+                    }
+                }
             }
+            addButton { domains.append("") }
+        }
+
+        SheetField(String(localized: "IP Ranges (optional)")) {
+            ForEach(ipRanges.indices, id: \.self) { index in
+                HStack(spacing: Theme.Space.s) {
+                    TextField("10.0.0.0/8", text: $ipRanges[index])
+                        .textFieldStyle(.roundedBorder)
+                        .font(Theme.Font.mono)
+                    removeButton(name: ipRanges[index]) { ipRanges.remove(at: index) }
+                }
+            }
+            Text(ipRanges.isEmpty
+                 ? "No IP ranges added. Only domain-based routing will be used."
+                 : "CIDR notation, e.g. 192.168.1.0/24")
+                .font(Theme.Font.detail)
+                .foregroundColor(Theme.textSecondary)
+            addButton { ipRanges.append("") }
         }
     }
 

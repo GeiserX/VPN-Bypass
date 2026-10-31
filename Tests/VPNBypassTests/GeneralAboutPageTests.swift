@@ -26,6 +26,9 @@ final class GeneralAboutModelTests: XCTestCase {
         XCTAssertEqual(GeneralPage.refreshChoices(current: 600).map { GeneralPage.refreshLabel($0) },
                        ["Every 10 minutes", "Every 15 minutes", "Every 30 minutes", "Every hour",
                         "Every 2 hours", "Every 6 hours", "Never"])
+        XCTAssertEqual(GeneralPage.refreshLabel(10), "Every 10 seconds", "an interval under a minute says so")
+        XCTAssertEqual(GeneralPage.refreshChoices(current: 3599).map { GeneralPage.refreshLabel($0) }.filter { $0 == "Every hour" }.count,
+                       1, "3599 s is not a second Every hour")
         XCTAssertEqual(GeneralPage.refreshSelection(autoRefresh: true, interval: 1800), 1800)
         XCTAssertNil(GeneralPage.refreshSelection(autoRefresh: false, interval: 1800), "off reads Never")
     }
@@ -149,6 +152,10 @@ final class GeneralAboutModelTests: XCTestCase {
         XCTAssertTrue(Diagnostics.bundle(input(recent: [])).hasSuffix("Recent warnings and errors:\n(none)"))
     }
 
+    func testOneLetterNamesGoAndWordsAroundThemStay() {
+        XCTAssertEqual(Diagnostics.redact("Route a failed via B", names: ["a", "b"]), "Route <name> failed via <name>")
+    }
+
     func testTheHelperStateIsRedactedToo() {
         var failed = input(recent: [])
         failed.helperState = #"failed("Cannot copy /Users/alice/Downloads/helper to intranet.example.org")"#
@@ -257,6 +264,18 @@ final class GeneralAboutViewTests: XCTestCase {
         XCTAssertTrue(text.contains("[ERROR]"), "the error line is still there")
     }
 
+    func testAServiceRemovedAfterItsWarningIsStillTakenOut() {
+        var config = rm.config
+        config.services.append(ServiceEntry(id: "custom_gone", name: "Gone Tools", enabled: true,
+                                            domains: ["gone.example.net"], ipRanges: [], isCustom: true))
+        rm.config = config
+        rm.recentLogs = [RouteManager.LogEntry(timestamp: Date(), level: .warning, message: "Gone Tools got no addresses")]
+        config.services.removeAll { $0.id == "custom_gone" }
+        rm.config = config
+        let text = Diagnostics.bundle(Diagnostics.current(rm))
+        XCTAssertFalse(text.contains("Gone Tools"), text)
+    }
+
     // MARK: Sheets
 
     /// Every sheet is one width and is built on SheetScaffold, with no close button.
@@ -272,6 +291,10 @@ final class GeneralAboutViewTests: XCTestCase {
             ("rule editor", AnyView(RuleEditorSheet(editingRule: rule, services: rm.config.services,
                                                    onSave: { _ in }, onCancel: {}).environmentObject(rm))),
             ("custom service", AnyView(CustomServiceEditor(service: nil, name: "Work Tools").environmentObject(rm))),
+            ("long custom service", AnyView(CustomServiceEditor(service: ServiceEntry(
+                id: "custom_long", name: "Long", enabled: true,
+                domains: (1...40).map { "host\($0).example.com" }, ipRanges: ["198.51.100.0/24"], isCustom: true))
+                .environmentObject(rm))),
             ("catalogue", AnyView(CatalogueSheet { _ in }.environmentObject(rm))),
         ]
         for (name, sheet) in sheets {

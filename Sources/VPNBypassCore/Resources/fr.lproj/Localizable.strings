@@ -939,6 +939,7 @@
 "Never" = "Jamais";
 "Every hour" = "Toutes les heures";
 "Every %lld hours" = "Toutes les %lld heures";
+"Every %lld seconds" = "Toutes les %lld secondes";
 "Every %lld minutes" = "Toutes les %lld minutes";
 "In Custom mode, send traffic through a proxy with a route on the Routes page." = "En mode Personnalisé, faites passer le trafic par un proxy avec une route sur la page Routes.";
 "VPN connects" = "Le VPN se connecte";

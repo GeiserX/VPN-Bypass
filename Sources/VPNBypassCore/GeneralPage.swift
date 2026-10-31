@@ -58,7 +58,11 @@ enum GeneralPage {
 
     static func refreshLabel(_ interval: TimeInterval?, in bundle: Bundle = .main) -> String {
         guard let interval else { return String(localized: "Never", bundle: bundle) }
-        let minutes = Int((interval / 60).rounded())
+        // An interval that is not whole minutes (set in config.json) is said in seconds, so
+        // its label is true and never the same as a listed one.
+        let seconds = Int(interval.rounded())
+        guard seconds % 60 == 0 else { return String(localized: "Every \(seconds) seconds", bundle: bundle) }
+        let minutes = seconds / 60
         if minutes == 60 { return String(localized: "Every hour", bundle: bundle) }
         if minutes > 60, minutes % 60 == 0 {
             let hours = minutes / 60

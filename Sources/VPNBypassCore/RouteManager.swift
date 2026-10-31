@@ -56,7 +56,12 @@ final class RouteManager: ObservableObject {
         RoutedBySource.everythingElseDirect(installedRoutes, vpnOnly: config.routingMode == .vpnOnly)
     }
     @Published var lastUpdate: Date?
-    @Published var config: Config = Config()
+    @Published var config: Config = Config() {
+        didSet { namesSeenThisSession.formUnion(Diagnostics.names(in: config)) }
+    }
+    /// Every name any config held since launch, so the diagnostics report can take out a name
+    /// that a log line still mentions after it was removed. Memory only, like `recentLogs`.
+    private(set) var namesSeenThisSession = Set<String>()
     @Published var recentLogs: [LogEntry] = []
     /// The last Verify Routes, or nil before the first one and after routes are removed.
     @Published var lastRouteCheck: RouteCheck.Run?

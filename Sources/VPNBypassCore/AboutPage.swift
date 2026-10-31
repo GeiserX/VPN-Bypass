@@ -120,9 +120,13 @@ enum Diagnostics {
     static func redact(_ line: String, names: [String]) -> String {
         var out = line
         // Longest first, so "mail.example.com" goes before "example.com" leaves "mail." behind.
-        for name in names.map({ $0.trimmingCharacters(in: .whitespaces) }).filter({ $0.count >= 2 })
+        // Whole names only, so a route called "a" goes and the "a" inside "failed" stays.
+        for name in Set(names.map({ $0.trimmingCharacters(in: .whitespaces) })).filter({ !$0.isEmpty })
             .sorted(by: { $0.count > $1.count }) {
-            out = out.replacingOccurrences(of: name, with: "<name>", options: [.caseInsensitive])
+            let pattern = "(?<![A-Za-z0-9])" + NSRegularExpression.escapedPattern(for: name) + "(?![A-Za-z0-9])"
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            out = regex.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out),
+                                                 withTemplate: "<name>")
         }
         for (regex, replacement) in patterns {
             out = regex.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out),
@@ -150,9 +154,8 @@ enum Diagnostics {
     }
 
     /// The live state, read on the main actor when the button is pressed.
-    @MainActor
-    static func current(_ rm: RouteManager) -> Input {
-        let config = rm.config
+    /// Every name a config holds: domains, services, rule patterns, route names, proxy hosts.
+    static func names(in config: RouteManager.Config) -> Set<String> {
         var names = config.domains.map(\.domain) + config.inverseDomains.map(\.domain)
         names += config.services.flatMap { [$0.name] + $0.domains + $0.ipRanges }
         // The built-in Direct and VPN routes' names are words every log line may use; they name nothing.
@@ -160,6 +163,14 @@ enum Diagnostics {
             + config.routes.filter { $0.egress != .direct && $0.name.lowercased() != "vpn" }.map(\.name)
         names += config.routes.compactMap(\.proxyHost)
         names += [config.proxyConfig.server, config.proxyConfig.username].filter { !$0.isEmpty }
+        return Set(names)
+    }
+
+    @MainActor
+    static func current(_ rm: RouteManager) -> Input {
+        let config = rm.config
+        // Names removed since launch too: a warning about a deleted service still names it.
+        let names = Array(names(in: config).union(rm.namesSeenThisSession))
         let recent = rm.recentLogs
             .filter { $0.level == .warning || $0.level == .error }
             .sorted { $0.timestamp < $1.timestamp }
@@ -251,8 +262,7 @@ struct AboutTab: View {
     private func reportProblem() {
         let text = Diagnostics.bundle(Diagnostics.current(RouteManager.shared))
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        reportCopied = true
+        reportCopied = NSPasteboard.general.setString(text, forType: .string)
         NSWorkspace.shared.open(Diagnostics.issueURL(version: AboutPage.appVersion, bundle: text))
     }
 }
