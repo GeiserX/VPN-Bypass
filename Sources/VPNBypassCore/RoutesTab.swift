@@ -173,6 +173,8 @@ struct RoutesTab: View {
     // MARK: - Mutations
 
     private func saveRoute(_ route: Route) {
+        // An edit can rename the route or move its listener, so the copy line may be stale.
+        copiedLine = nil
         if let idx = routeManager.config.routes.firstIndex(where: { $0.id == route.id }) {
             routeManager.config.routes[idx] = route
         } else {
