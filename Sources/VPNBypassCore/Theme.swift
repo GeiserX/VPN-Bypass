@@ -134,12 +134,6 @@ enum Theme {
     static let border = Color.white.opacity(0.10)
     static let separator = Color.white.opacity(0.08)
 
-    // MARK: - Brand (fundraising)
-
-    static let githubSponsors = Color(hex: "DB61A2")
-    static let buyMeACoffee = Color(hex: "FFDD00")
-    static let patreon = Color(hex: "FF424D")
-
     // MARK: - Brand Identity
 
     /// The "Lanes" identity (2026-08). Electric blue on deep navy, with a sky accent that

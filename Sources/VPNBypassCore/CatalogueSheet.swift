@@ -141,6 +141,9 @@ struct CatalogueSheet: View {
         self.onBypass = onBypass
     }
 
+    /// The list's height: the sheet fits its content, and a scrolling list has none of its own.
+    static let listHeight: CGFloat = 400
+
     private var rows: [CatalogueSelection.Row] {
         CatalogueSelection.rows(catalogue: ServiceCatalogue.shipped, services: routeManager.config.services)
     }
@@ -153,53 +156,53 @@ struct CatalogueSheet: View {
     var body: some View {
         let rows = self.rows
         let groups = CatalogueSelection.groups(rows, category: category, region: region, search: search)
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Service catalogue")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Theme.textPrimary)
+        let count = pickedNow.count
+        SheetScaffold(String(localized: "Service catalogue"), confirmTitle: CatalogueSelection.buttonTitle(count: count),
+                      canConfirm: count > 0 && !routeManager.isApplyingRoutes,
+                      onCancel: { dismiss() }, onConfirm: { onBypass(pickedNow) }) {
+            // The search takes the full width; the country menu leads the chip row, so the
+            // placeholder fits the sheet's 420 pt.
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.textSecondary)
+                    .accessibilityHidden(true)
+                TextField(String(localized: "Search by name, domain or country"), text: $search)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .focused($isSearchFocused)
+                if !search.isEmpty {
+                    Button {
+                        search = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(String(localized: "Clear search"))
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Theme.bgInput)
+            .cornerRadius(8)
 
             HStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.textSecondary)
-                        .accessibilityHidden(true)
-                    TextField(String(localized: "Search by name, domain or country"), text: $search)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .focused($isSearchFocused)
-                    if !search.isEmpty {
-                        Button {
-                            search = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundColor(Theme.textSecondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(String(localized: "Clear search"))
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Theme.bgInput)
-                .cornerRadius(8)
-
                 regionMenu(rows)
-            }
-
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        chip(String(localized: "All"), selected: category == nil) { category = nil }
-                        ForEach(CatalogueSelection.categories(rows, region: region), id: \.self) { cat in
-                            chip(cat.displayName(), selected: category == cat) { category = cat }
-                                .id(cat)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            chip(String(localized: "All"), selected: category == nil) { category = nil }
+                            ForEach(CatalogueSelection.categories(rows, region: region), id: \.self) { cat in
+                                chip(cat.displayName(), selected: category == cat) { category = cat }
+                                    .id(cat)
+                            }
                         }
                     }
+                    // A sheet opened on a category shows its chip, which may sit past the edge.
+                    .onAppear { if let category { proxy.scrollTo(category, anchor: .trailing) } }
                 }
-                // A sheet opened on a category shows its chip, which may sit past the edge.
-                .onAppear { if let category { proxy.scrollTo(category, anchor: .trailing) } }
             }
 
             ScrollView {
@@ -239,35 +242,9 @@ struct CatalogueSheet: View {
                     .padding(.vertical, 4)
                 }
             }
-            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.bgElevated))
-
-            HStack(spacing: 10) {
-                Spacer()
-                Button(String(localized: "Cancel")) { dismiss() }
-                    .buttonStyle(.plain)
-                    .foregroundColor(Theme.textPrimary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(Theme.bgInput)
-                    .cornerRadius(7)
-                    .keyboardShortcut(.cancelAction)
-                let count = pickedNow.count
-                let canBypass = count > 0 && !routeManager.isApplyingRoutes
-                Button(CatalogueSelection.buttonTitle(count: count)) { onBypass(pickedNow) }
-                    .buttonStyle(.plain)
-                    .foregroundColor(canBypass ? .white : Theme.textDisabled)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(canBypass ? AnyShapeStyle(Theme.purpleGradient) : AnyShapeStyle(Theme.bgDisabled))
-                    .cornerRadius(7)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canBypass)
-            }
-            .font(.system(size: 13, weight: .medium))
+            .frame(height: Self.listHeight)
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.group).fill(Theme.bgElevated))
         }
-        .padding(20)
-        .frame(width: 520, height: 600)
-        .background(Theme.bgSecondary)
         .onAppear { isSearchFocused = true }
     }
 
@@ -302,7 +279,7 @@ struct CatalogueSheet: View {
                 .foregroundColor(selected ? .white : Theme.textSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
-                .background(Capsule().fill(selected ? AnyShapeStyle(Theme.purpleGradient) : AnyShapeStyle(Theme.bgInput)))
+                .background(Capsule().fill(selected ? Theme.accent : Theme.bgInput))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -337,7 +314,7 @@ struct CatalogueSheet: View {
             } label: {
                 Image(systemName: symbol)
                     .font(.system(size: 13))
-                    .foregroundColor(state == .all || state == .some ? Theme.purpleLight : Theme.textSecondary)
+                    .foregroundColor(state == .all || state == .some ? Theme.accentText : Theme.textSecondary)
             }
             .buttonStyle(.plain)
             .disabled(state == .unavailable)

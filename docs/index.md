@@ -89,7 +89,7 @@ Status comes first and says whether it is working right now: the helper, the VPN
 ## What it changes on your Mac
 
 - Host routes in the system routing table, one per resolved address of each domain or service pack you turned on. In Bypass mode they point at your local gateway, in VPN Only mode at the VPN interface, in Custom mode at whatever the matching rule says. The app removes its routes when you quit, when you choose Remove All Routes…, and when the VPN goes away.
-- Entries in `/etc/hosts`, only if you turn on DNS bypass in Settings > General.
+- Entries in `/etc/hosts`, only if you turn on Pin listed names in /etc/hosts in Settings > General.
 - One small root helper, installed once with your admin password as a launchd daemon. It is the only part that runs as root, it does nothing but add and remove routes and hosts entries, and it accepts requests from this app alone (pinned to the app's code hash). There is no Network Extension and no kernel extension, so nothing to approve in System Settings beyond the Login Items entry on macOS 13 and later.
 - A config file and a log under `~/Library/Application Support/VPNBypass/`, plus a socket there that only your account can open, which is what `vpnb` and the [MCP server](mcp-server.md) talk to.
 

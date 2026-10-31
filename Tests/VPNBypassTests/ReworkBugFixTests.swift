@@ -473,10 +473,13 @@ final class ReworkViewTests: XCTestCase {
         XCTAssertTrue(shared.contains(".menuIndicator(.hidden)"))
     }
 
-    /// B2: every General icon was green, on or off.
-    func testAGeneralIconIsGreenOnlyWhenOn() {
-        XCTAssertEqual(SettingsToggleRow.iconColor(isOn: true), Theme.success)
-        XCTAssertNotEqual(SettingsToggleRow.iconColor(isOn: false), Theme.success)
+    /// B2: every General icon was green, on or off. The page now has no icons at all (3.5).
+    func testTheGeneralPageHasNoIcons() throws {
+        let general = try ReworkSource.body(of: "struct GeneralTab: View", in: "GeneralPage.swift")
+        XCTAssertFalse(general.contains("Image(systemName: \"gearshape"), "the page header icon is back")
+        XCTAssertFalse(general.contains("Theme.success"), "a General control is green again")
+        let row = try ReworkSource.body(of: "struct GeneralRow<Control: View>: View", in: "GeneralPage.swift")
+        XCTAssertFalse(row.contains("Image("), "a General row draws an icon again")
     }
 
     /// B3: the Services page had a VPN Only banner it could never show.

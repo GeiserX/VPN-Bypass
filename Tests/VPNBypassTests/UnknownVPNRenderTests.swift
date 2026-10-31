@@ -150,13 +150,13 @@ final class UnknownVPNRenderTests: XCTestCase {
         }
     }
 
-    func testTheGeneralPageNamesTheRefreshIntervalMenu() throws {
+    func testTheGeneralPageNamesTheLookUpAgainMenu() throws {
         for language in Self.languages {
             let shown = try render(GeneralTab().environmentObject(rm).environmentObject(NotificationManager.shared)
                                        .environmentObject(LaunchAtLoginManager.shared).frame(width: 532).padding(24)
                                        .background(Theme.bgPrimary),
                                    language: language, name: "general-\(language).png")
-            XCTAssertTrue(shown.controlNames.contains(Self.word("Refresh Interval", language)),
+            XCTAssertTrue(shown.controlNames.contains(Self.word("Look up addresses again", language)),
                           "\(language): the DNS refresh menu's name, in \(shown.controlNames)")
             XCTAssertFalse(shown.controlNames.contains(""), "\(language): an unnamed control in \(shown.controlNames)")
         }
