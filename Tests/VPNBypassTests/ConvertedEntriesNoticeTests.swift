@@ -108,7 +108,7 @@ final class ConvertedEntriesNoticeTests: RouteManagerTestCase {
                        "2 entrées sont passées au nouveau format joker : .example.net devient *.example.net, .example.org devient *.example.org. Elles routent les mêmes noms qu'avant.")
     }
 
-    /// The note is on Status with a Dismiss VoiceOver can name, and goes when dismissed.
+    /// The note is on Status with a Dismiss VoiceOver can name and press, and goes when pressed.
     func testStatusShowsTheNoteWithANamedDismiss() throws {
         let label = "Dismiss the note about updated entries"
         rm.recordConvertedEntries([".example.net"])
@@ -120,10 +120,15 @@ final class ConvertedEntriesNoticeTests: RouteManagerTestCase {
         window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
         window.orderFront(nil)
         defer { window.orderOut(nil) }
-        XCTAssertTrue(hasElement(labelled: label, in: window))
-
-        rm.dismissConvertedEntries()
-        XCTAssertFalse(hasElement(labelled: label, in: window), "gone once dismissed")
+        func dismiss() -> NSObject? {
+            AccessibilityTree.elements(under: window, settle: { settle(window) })
+                .first { AccessibilityTree.label($0) == label }
+        }
+        let button = try XCTUnwrap(dismiss(), "VoiceOver finds Dismiss by its name")
+        AccessibilityTree.press(button)
+        settle(window)
+        XCTAssertEqual(rm.convertedEntries, [])
+        XCTAssertNil(dismiss(), "the note is gone once dismissed")
     }
 
     private func settle(_ window: NSWindow) {
@@ -131,24 +136,5 @@ final class ConvertedEntriesNoticeTests: RouteManagerTestCase {
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))
             window.contentView?.layoutSubtreeIfNeeded()
         }
-    }
-
-    /// Found the way VoiceOver finds it, as in SettingsShellTests.
-    private func hasElement(labelled label: String, in window: NSWindow) -> Bool {
-        let attribute = NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface")
-        let wasClient = (NSApplication.shared.accessibilityAttributeValue(attribute) as? Bool) ?? false
-        NSApplication.shared.accessibilitySetValue(true, forAttribute: attribute)
-        defer { NSApplication.shared.accessibilitySetValue(wasClient, forAttribute: attribute) }
-        settle(window)
-        func find(_ element: Any, depth: Int) -> Bool {
-            guard depth < 80, let element = element as? NSObject else { return false }
-            func get(_ name: String) -> Any? {
-                let selector = NSSelectorFromString(name)
-                return element.responds(to: selector) ? element.perform(selector)?.takeUnretainedValue() : nil
-            }
-            if (get("accessibilityLabel") as? String) == label { return true }
-            return (get("accessibilityChildren") as? [Any] ?? []).contains { find($0, depth: depth + 1) }
-        }
-        return find(window, depth: 0)
     }
 }
