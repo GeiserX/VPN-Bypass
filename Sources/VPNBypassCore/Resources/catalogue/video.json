@@ -42,8 +42,8 @@
       "domains": [
         "disneyplus.com",
         "www.disneyplus.com",
-        "disney-plus.net",
-        "bamgrid.com",
+        "*.disney-plus.net",
+        "*.bamgrid.com",
         "dssott.com"
       ]
     },

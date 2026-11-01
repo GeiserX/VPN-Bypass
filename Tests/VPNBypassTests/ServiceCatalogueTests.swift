@@ -74,6 +74,31 @@ final class ServiceCatalogueTests: XCTestCase {
         }
     }
 
+    /// Names `scripts/check-catalogue-resolves.py` found dead, so none comes back. A retired
+    /// host is gone; an apex with no address of its own, whose hosts are what the service
+    /// uses, became the wildcard over it.
+    func testNamesFoundDeadAreNotShippedAgain() {
+        let dead: [String: [String]] = [
+            "openai": ["labs.openai.com", "arena.openai.com", "beta.openai.com", "oaiusercontent.com", "host.livekit.cloud"],
+            "disneyplus": ["disney-plus.net", "bamgrid.com"],
+            "discord": ["discordapp.net", "router.discordapp.net"],
+        ]
+        let wildcards: [String: [String]] = [
+            "openai": ["*.oaiusercontent.com"],
+            "disneyplus": ["*.disney-plus.net", "*.bamgrid.com"],
+            "discord": ["*.discordapp.net"],
+        ]
+        let byId = Dictionary(uniqueKeysWithValues: ServiceCatalogue.shipped.map { ($0.service.id, $0.service.domains) })
+        for (id, names) in dead {
+            let domains = byId[id] ?? []
+            XCTAssertFalse(domains.isEmpty, "\(id) is missing")
+            for name in names { XCTAssertFalse(domains.contains(name), "\(id) still ships \(name)") }
+        }
+        for (id, names) in wildcards {
+            for name in names { XCTAssertTrue(byId[id]?.contains(name) == true, "\(id) lacks \(name)") }
+        }
+    }
+
     func testTheBuiltInIdsAndTheirOrderAreFrozen() {
         XCTAssertEqual(Config.defaultServices.map(\.id), Self.frozenIds)
         XCTAssertTrue(Config.defaultServices.allSatisfy { !$0.enabled && !$0.isCustom })
