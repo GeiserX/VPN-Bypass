@@ -112,6 +112,53 @@ final class GlobalProxyRouteTests: XCTestCase {
         XCTAssertEqual(next.routes.first { $0.id == mine.id }, mine)
     }
 
+    /// A config read from disk links the Proxy route `derive` made, so a Routes-page edit of
+    /// its address survives a General toggle: no second route, the edited address kept.
+    func testTheDecodedProxyRouteStaysLinkedAfterARoutesPageEdit() throws {
+        var legacy = Config()
+        legacy.proxyConfig = proxy("198.51.100.7")
+        legacy.routes = []
+        var c = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(legacy))
+        let route = try XCTUnwrap(proxyRoutes(c).first)
+        XCTAssertEqual(c.proxyConfig.routeId, route.id)
+        let i = try XCTUnwrap(c.routes.firstIndex { $0.id == route.id })
+        c.routes[i].proxyHost = "198.51.100.20"   // edited on the Routes page
+        var p = c.proxyConfig
+        p.enabled = false
+        c = c.withGlobalProxy(p)
+        p.enabled = true
+        c = c.withGlobalProxy(p)
+        XCTAssertEqual(proxyRoutes(c).map(\.proxyHost), ["198.51.100.20"])
+        XCTAssertEqual(proxyRoutes(c).map(\.enabled), [true])
+    }
+
+    /// The linked route retyped on the Routes page is the user's: General leaves it alone.
+    func testALinkedRouteRetypedIsLeftAlone() throws {
+        var c = derivedConfig(with: proxy("198.51.100.7"))
+        c = c.withGlobalProxy(c.proxyConfig)   // links it
+        let id = try XCTUnwrap(c.proxyConfig.routeId)
+        let i = try XCTUnwrap(c.routes.firstIndex { $0.id == id })
+        c.routes[i].egress = .direct
+        let retyped = c.routes[i]
+        var p = c.proxyConfig
+        p.enabled = false
+        c = c.withGlobalProxy(p)
+        XCTAssertEqual(c.routes.first { $0.id == id }, retyped)
+    }
+
+    /// From before the link, two SOCKS5 routes on the proxy's address: neither is known to be
+    /// the proxy's, so neither is changed.
+    func testTwoRoutesOnTheProxyAddressAreBothLeftAlone() {
+        var c = derivedConfig(with: proxy("198.51.100.7"))
+        let twin = Route(name: "Twin", egress: .proxySOCKS5, proxyHost: "198.51.100.7", proxyPort: 1080)
+        c.routes.insert(twin, at: 0)
+        let before = c.routes
+        var p = c.proxyConfig
+        p.server = "198.51.100.8"
+        c = c.withGlobalProxy(p)
+        XCTAssertEqual(c.routes.filter { before.contains($0) }.count, before.count, "a route was rewritten")
+    }
+
     /// General's fields go through the app, which saves the route with the proxy.
     func testTheAppKeepsTheRouteInStep() {
         rm.config = derivedConfig(with: proxy("198.51.100.7"))

@@ -637,6 +637,7 @@ final class RouteManager: ObservableObject {
         config.routes = derived.routes
         config.rules = derived.rules
         config.defaultRouteId = derived.defaultRouteId
+        config.proxyConfig.routeId = derived.routes.first { $0.egress == .proxySOCKS5 }?.id
     }
     
     private func createDailyBackupIfNeededThrowing() throws {
@@ -6322,6 +6323,13 @@ final class RouteManager: ObservableObject {
     /// Test-only: reverses beginShutdown so shared-singleton tests can restore state.
     func resetShutdownStateForTests() {
         isShuttingDown = false
+    }
+
+    /// Stops a stale-ARP re-check a test left running, so it cannot read the real ARP table
+    /// into the next test.
+    func cancelARPRecheckForTests() {
+        arpRecheckTask?.cancel()
+        arpRecheckTask = nil
     }
 
     /// Forgets the last connect and every apply-kill strike, which an earlier test's reconnect

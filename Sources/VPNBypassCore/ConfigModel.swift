@@ -198,6 +198,7 @@ struct Config: Codable {
             routes = derived.routes
             rules = derived.rules
             defaultRouteId = derived.defaultRouteId
+            proxyConfig.routeId = derived.routes.first { $0.egress == .proxySOCKS5 }?.id
         }
         if !(dnsRefreshInterval > 0) || !dnsRefreshInterval.isFinite {
             // Zero, negative or NaN from a hand edit: a repeating timer of that interval fires
@@ -218,20 +219,27 @@ struct Config: Codable {
         var c = self
         var next = proxy
         let old = c.proxyConfig
-        var index = old.routeId.flatMap { id in c.routes.firstIndex { $0.id == id } }
-        if index == nil, old.isConfigured {
-            index = c.routes.firstIndex {
-                $0.egress == .proxySOCKS5 && $0.proxyHost == old.server && $0.proxyPort == old.port
+        // The linked route counts only while it is still a SOCKS5 route: retyped on the Routes
+        // page, it is the user's now.
+        var index = old.routeId.flatMap { id in c.routes.firstIndex { $0.id == id && $0.egress == .proxySOCKS5 } }
+        if index == nil, old.routeId == nil, old.isConfigured {
+            // A config from before the link: the one SOCKS5 route on the proxy's address. With
+            // two on it, neither is known to be the proxy's, so neither is taken.
+            let matches = c.routes.indices.filter {
+                c.routes[$0].egress == .proxySOCKS5 && c.routes[$0].proxyHost == old.server && c.routes[$0].proxyPort == old.port
             }
+            if matches.count == 1 { index = matches[0] }
         }
         if let i = index {
             next.routeId = c.routes[i].id
-            if proxy.isConfigured {
+            // Only what changed in General is written, so an address or login set on the
+            // Routes page stays until General's own changes.
+            if proxy.isConfigured, proxy.server != old.server || proxy.port != old.port {
                 c.routes[i].proxyHost = proxy.server
                 c.routes[i].proxyPort = proxy.port
-                c.routes[i].proxyUser = proxy.username
-                c.routes[i].proxyPass = proxy.password
             }
+            if proxy.username != old.username { c.routes[i].proxyUser = proxy.username }
+            if proxy.password != old.password { c.routes[i].proxyPass = proxy.password }
             c.routes[i].enabled = proxy.enabled
         } else if proxy.enabled && proxy.isConfigured && !c.routes.isEmpty {
             let route = Route(name: "Proxy", egress: .proxySOCKS5, proxyHost: proxy.server, proxyPort: proxy.port,
@@ -379,6 +387,7 @@ struct Config: Codable {
             c.routes = derived.routes + userRoutes
             c.rules = derived.rules
             c.defaultRouteId = derived.defaultRouteId
+            if let id = derived.routes.first(where: { $0.egress == .proxySOCKS5 })?.id { c.proxyConfig.routeId = id }
             return c
         }
 

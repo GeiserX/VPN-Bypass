@@ -349,6 +349,7 @@ final class NetworkProfileSwitchTests: XCTestCase {
         await waitForApply()
         FakeKernel.detach(from: rm)
         rm.detectVPNInterfaceOverrideForTests = nil
+        rm.cancelARPRecheckForTests()
         rm.detectNetworkIdentityOverrideForTests = nil
         rm.readARPTableOverrideForTests = nil
         NetworkProfiles.arpRecheckPoll = 5
