@@ -34,7 +34,7 @@ final class StatusPageTests: XCTestCase {
     func testWorkingMatchesTheMockup() {
         let s = summary()
         XCTAssertEqual(s.title, "Working")
-        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 62 addresses routed 23 s ago, none failed.")
+        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 62 addresses routed now, applied 23 s ago, none failed.")
         XCTAssertEqual(s.tone, .ok)
         XCTAssertNil(s.note)
     }
@@ -46,8 +46,8 @@ final class StatusPageTests: XCTestCase {
     }
 
     func testFailedRoutesShowInTheSentence() {
-        let s = summary { $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-5), routeCount: 60, failedCount: 2) }
-        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 60 addresses routed 5 s ago, 2 failed.")
+        let s = summary { $0.installedRoutes = 60; $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-5), routeCount: 60, failedCount: 2) }
+        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 60 addresses routed now, applied 5 s ago, 2 failed.")
     }
 
     /// With the helper down, the summary says why no route can change, and what is still in place.
@@ -237,10 +237,10 @@ final class StatusPageTests: XCTestCase {
 
     func testAppliedLine() {
         let applied = RouteManager.RouteChangeOutcome(kind: .applied, at: now.addingTimeInterval(-23), routeCount: 62, failedCount: 0)
-        XCTAssertEqual(StatusPage.appliedLine(installed: 62, lastChange: applied, now: now), .init(text: "62 addresses, 23 s ago, none failed"))
+        XCTAssertEqual(StatusPage.appliedLine(installed: 62, lastChange: applied, now: now), .init(text: "62 addresses, applied 23 s ago, none failed"))
         let failed = RouteManager.RouteChangeOutcome(kind: .applied, at: now.addingTimeInterval(-23), routeCount: 1, failedCount: 2)
         XCTAssertEqual(StatusPage.appliedLine(installed: 1, lastChange: failed, now: now),
-                       .init(text: "1 address, 23 s ago, 2 failed", tone: .warn))
+                       .init(text: "1 address, applied 23 s ago, 2 failed", tone: .warn))
         XCTAssertEqual(StatusPage.appliedLine(installed: 5, lastChange: nil, now: now).text, "5 addresses")
         XCTAssertEqual(StatusPage.appliedLine(installed: 0, lastChange: nil, now: now).text, "None yet")
     }

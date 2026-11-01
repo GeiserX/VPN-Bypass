@@ -118,8 +118,6 @@
 "%@, outside the VPN" = "%@, outside the VPN";
 "Routed" = "Routed";
 "None yet" = "None yet";
-"%@, %@, none failed" = "%1$@, %2$@, none failed";
-"%@, %@, %lld failed" = "%1$@, %2$@, %3$lld failed";
 "All removed %@" = "All removed %@";
 "Removed %@, %lld could not be removed" = "Removed %1$@, %2$lld could not be removed";
 "From" = "From";
@@ -428,8 +426,6 @@
 "Addresses" = "Addresses";
 "VPN Bypass: VPN connected but nothing is being routed" = "VPN Bypass: VPN connected but nothing is being routed";
 "No addresses to route, checked %@." = "No addresses to route, checked %@.";
-"%@ routed %@, none failed." = "%1$@ routed %2$@, none failed.";
-"%@ routed %@, %lld failed." = "%1$@ routed %2$@, %3$lld failed.";
 "Removed all routed addresses %@." = "Removed all routed addresses %@.";
 "Removed routed addresses %@, %lld could not be removed." = "Removed routed addresses %1$@, %2$lld could not be removed.";
 "Stop routing the 1 address?" = "Stop routing the 1 address?";
@@ -1019,3 +1015,10 @@
 "VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language." = "VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language.";
 "Restart Failed" = "Restart Failed";
 "Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings." = "Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings.";
+"%@ routed now, applied %@, none failed." = "%1$@ routed now, applied %2$@, none failed.";
+"%@ routed now, applied %@, %lld failed." = "%1$@ routed now, applied %2$@, %3$lld failed.";
+"%@, applied %@, none failed" = "%1$@, applied %2$@, none failed";
+"%@, applied %@, %lld failed" = "%1$@, applied %2$@, %3$lld failed";
+"Routing is paused until %@, so %@ follows the VPN until then." = "Routing is paused until %1$@, so %2$@ follows the VPN until then.";
+"Routing is paused until the VPN reconnects, so %@ follows the VPN until then." = "Routing is paused until the VPN reconnects, so %@ follows the VPN until then.";
+"Routing is paused until you resume, so %@ follows the VPN until then." = "Routing is paused until you resume, so %@ follows the VPN until then.";

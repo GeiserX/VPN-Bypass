@@ -686,6 +686,37 @@ final class PauseLifecycleTests: XCTestCase {
         XCTAssertEqual(kernel.installed, ["203.0.113.0/24"])
     }
 
+    /// The live test: with the tunnel up for minutes, `vpnb resume` left the routes out for
+    /// 49 s, the time the full apply took to resolve 206 names before it wrote a route. A
+    /// Resume puts back what was resolved before the pause at once, then refreshes DNS.
+    func testResumeDoesNotWaitForDNSBeforeItPutsTheRoutesBack() async throws {
+        rm.config.domains = [DomainEntry(domain: "cached.example.com")]
+        rm.setDNSDiskCacheForTests(["cached.example.com": ["198.51.100.20"]])
+        let fakeDNS = rm.resolveIPsOverrideForTests
+        rm.resolveIPsOverrideForTests = { _ in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)   // a slow lookup
+            return ["198.51.100.20"]
+        }
+        defer {
+            rm.setDNSDiskCacheForTests([:])
+            rm.resolveIPsOverrideForTests = fakeDNS
+        }
+        await pauseWithHelperReady()
+        XCTAssertTrue(kernel.installed.isEmpty)
+        let resumedAt = Date()
+        rm.resume()
+        let deadline = Date().addingTimeInterval(2)
+        while !kernel.installed.contains("198.51.100.20") && Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertEqual(kernel.installed, ["198.51.100.20", "203.0.113.0/24"],
+                       "the routes are back before the lookup ends")
+        XCTAssertLessThan(Date().timeIntervalSince(resumedAt), 2)
+        // The refresh after it finds the same address, so nothing more is written.
+        await rm.waitForBackgroundRefreshForTests()
+        XCTAssertEqual(kernel.installed, ["198.51.100.20", "203.0.113.0/24"])
+    }
+
     func testChangingModeEndsThePause() async {
         await rm.pause(for: .untilResume)
         rm.isVPNConnected = false   // the switch then applies nothing here

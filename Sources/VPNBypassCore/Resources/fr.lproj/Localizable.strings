@@ -118,8 +118,6 @@
 "%@, outside the VPN" = "%@, hors du VPN";
 "Routed" = "Routées";
 "None yet" = "Aucune pour l’instant";
-"%@, %@, none failed" = "%1$@, %2$@, aucun échec";
-"%@, %@, %lld failed" = "%1$@, %2$@, %3$lld en échec";
 "All removed %@" = "Toutes retirées %@";
 "Removed %@, %lld could not be removed" = "Retirées %1$@, échec pour %2$lld";
 "From" = "Depuis";
@@ -428,8 +426,6 @@
 "Addresses" = "Adresses";
 "VPN Bypass: VPN connected but nothing is being routed" = "VPN Bypass : VPN connecté, mais rien n'est routé";
 "No addresses to route, checked %@." = "Aucune adresse à router, vérifié %@.";
-"%@ routed %@, none failed." = "Routage %2$@ : %1$@, aucune en échec.";
-"%@ routed %@, %lld failed." = "Routage %2$@ : %1$@, %3$lld en échec.";
 "Removed all routed addresses %@." = "Toutes les adresses routées ont été retirées %@.";
 "Removed routed addresses %@, %lld could not be removed." = "Adresses routées retirées %1$@ ; %2$lld n'ont pas pu l'être.";
 "Stop routing the 1 address?" = "Ne plus router la seule adresse ?";
@@ -1019,3 +1015,10 @@
 "VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language." = "VPN Bypass n'a pas pu redémarrer (%@). Quittez-le et rouvrez-le pour utiliser la nouvelle langue.";
 "Restart Failed" = "Échec du redémarrage";
 "Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings." = "Reprise impossible : VPN Bypass n’a pas pu lire son fichier de configuration. Réparez-le ou importez une configuration enregistrée dans les Réglages.";
+"%@ routed now, applied %@, none failed." = "Routage actuel : %1$@, appliqué %2$@, aucune en échec.";
+"%@ routed now, applied %@, %lld failed." = "Routage actuel : %1$@, appliqué %2$@, %3$lld en échec.";
+"%@, applied %@, none failed" = "%1$@, appliqué %2$@, aucun échec";
+"%@, applied %@, %lld failed" = "%1$@, appliqué %2$@, %3$lld en échec";
+"Routing is paused until %@, so %@ follows the VPN until then." = "Le routage est en pause jusqu’à %1$@, donc %2$@ passe par le VPN d’ici là.";
+"Routing is paused until the VPN reconnects, so %@ follows the VPN until then." = "Le routage est en pause jusqu’à la reconnexion du VPN, donc %@ passe par le VPN d’ici là.";
+"Routing is paused until you resume, so %@ follows the VPN until then." = "Le routage est en pause jusqu’à ce que vous le repreniez, donc %@ passe par le VPN d’ici là.";

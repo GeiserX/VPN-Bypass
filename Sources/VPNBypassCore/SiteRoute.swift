@@ -55,6 +55,8 @@ public struct SiteRouteAnswer: Codable, Equatable, Sendable {
         case none
         /// The name did not resolve.
         case unresolved
+        /// Routing is paused: the app's routes are out, so it follows the VPN until the pause ends.
+        case paused
     }
 
     /// The whole check, worst address first.
@@ -85,6 +87,8 @@ public struct SiteRouteAnswer: Codable, Equatable, Sendable {
     public var summary: String
     /// Nothing lists it, so the Status page offers to add it.
     public var canAdd: Bool
+    /// While routing is paused, how long for (`PauseState.wireDescription`); nil otherwise.
+    public var paused: String? = nil
 }
 
 enum SiteRoute {
@@ -112,6 +116,8 @@ enum SiteRoute {
         /// (`RouteManager.ifaceGateway`, which follows a renumbered utun). A pinned route
         /// missing here is not up, so its traffic takes the system's default.
         var pinnedInterfaces: [UUID: String] = [:]
+        /// The pause in progress, if any: its routes are out, so the lists decide nothing.
+        var pause: PauseState? = nil
     }
 
     /// What `match` found, before the check.
@@ -126,12 +132,28 @@ enum SiteRoute {
         var routeName: String? = nil
         /// Nil when the routing table does not decide the way.
         var expected: PathCheck.Way?
+        /// paused: the pause, and what would match once it ends (for the Add offer).
+        var pause: PauseState? = nil
+        var matchAfterPause: SiteRouteAnswer.Match? = nil
     }
 
     // MARK: - Matching
 
     static func match(host: String, addresses: [String], in s: Snapshot) -> Found {
         guard !addresses.isEmpty else { return Found(match: .unresolved, expected: nil) }
+        // Paused, the app's routes are out (Pause.swift), and Pause runs only where that sends
+        // everything through the VPN: an entry's missing route is the pause, not a stale lookup.
+        // A route the pause could not remove is still in, so that answer stands.
+        if let pause = s.pause {
+            var lists = s
+            lists.pause = nil
+            let after = match(host: host, addresses: addresses, in: lists)
+            if after.match == .route { return after }
+            let loopback = addresses.allSatisfy { $0.hasPrefix("127.") }
+            return Found(match: .paused, entry: after.entry,
+                         expected: loopback ? .physical : (s.vpnInterface.map { .tunnel($0) } ?? .physical),
+                         pause: pause, matchAfterPause: after.match)
+        }
         // With no VPN there is one way out, around every tunnel, listed or not.
         let vpnWay: PathCheck.Way = s.vpnInterface.map { .tunnel($0) } ?? .physical
         let listedWay: PathCheck.Way = s.mode == .vpnOnly ? vpnWay : .physical
@@ -296,12 +318,16 @@ enum SiteRoute {
             expected: expected?.code, checks: checks,
             control: control.map { SiteRouteCheck($0.probe, verdict: nil) },
             verdict: verdict, summary: check.map { why + " " + $0 } ?? why,
-            canAdd: found.match == .none || found.match == .defaultRoute)
+            canAdd: [.none, .defaultRoute].contains(found.matchAfterPause ?? found.match),
+            paused: found.pause?.wireDescription)
     }
 
-    static func whySentence(host: String, mode: RoutingMode, found: Found) -> String {
+    static func whySentence(host: String, mode: RoutingMode, found: Found, now: Date = Date()) -> String {
         let entry = found.entry ?? ""
         switch found.match {
+        case .paused:
+            return pausedSentence(host: host, length: found.pause?.length ?? .untilResume,
+                                  until: found.pause?.until, now: now)
         case .unresolved:
             return String(localized: "\(host) did not resolve, so there is nothing to check.")
         case .route:
@@ -328,6 +354,19 @@ enum SiteRoute {
             case .vpnOnly: return String(localized: "\(host) is not on your list, so it goes around the VPN.")
             case .custom: return String(localized: "\(host) matches no rule, so it follows the system's own routing.")
             }
+        }
+    }
+
+    /// "Routing is paused until 14:32, so example.com follows the VPN until then."
+    static func pausedSentence(host: String, length: PauseLength, until: Date?, now: Date = Date()) -> String {
+        switch length {
+        case .minutes:
+            let when = (until ?? now).formatted(date: .omitted, time: .shortened)
+            return String(localized: "Routing is paused until \(when), so \(host) follows the VPN until then.")
+        case .untilReconnect:
+            return String(localized: "Routing is paused until the VPN reconnects, so \(host) follows the VPN until then.")
+        case .untilResume:
+            return String(localized: "Routing is paused until you resume, so \(host) follows the VPN until then.")
         }
     }
 
@@ -425,7 +464,8 @@ extension RouteManager {
             services: custom ? config.services : config.services.filter(\.enabled),
             rules: config.rules, routes: config.routes, defaultRouteId: config.defaultRouteId,
             activeRoutes: activeRoutes.map { ($0.destination, $0.gateway, $0.source) },
-            localGateway: localGateway, vpnInterface: isVPNConnected ? vpnInterface : nil)
+            localGateway: localGateway, vpnInterface: isVPNConnected ? vpnInterface : nil,
+            pause: pauseState)
     }
 
     /// "Where does this site go?" for a name, a link or an address. Nil when the input holds

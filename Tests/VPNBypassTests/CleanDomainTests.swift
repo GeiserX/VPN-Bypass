@@ -311,7 +311,8 @@ final class CleanDomainTests: XCTestCase {
     }
 
     func testDotOnlyDomain() {
-        XCTAssertEqual(rm.cleanDomain("."), ".")
+        // A leading dot is read as the old wildcard form, and "." names no suffix, so nothing.
+        XCTAssertEqual(rm.cleanDomain("."), "")
     }
 
     func testHyphenOnlyInput() {
