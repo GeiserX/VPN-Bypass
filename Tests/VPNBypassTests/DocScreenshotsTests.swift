@@ -1298,6 +1298,48 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderSettings(page: .status, to: "pause-paused-status.png")
     }
 
+    // BEGIN FOLLOWUPS CORE SHOTS
+    /// "Until the VPN reconnects": the VPN came back while the helper was down, so the pause
+    /// holds and says it waits for the helper.
+    func testFollowupsPauseWaitingForTheHelper() throws {
+        seedPaused(.untilReconnect)
+        var pause = try XCTUnwrap(rm.pauseState)
+        pause.reconnectedWaiting = true
+        rm.setPauseStateForTests(pause)
+        HelperManager.shared.helperState = .missing
+        _ = try renderDropdown(to: "followups-pause-waiting.png")
+    }
+
+    /// Custom paused with every rule Direct: the list says what Resume puts back.
+    func testFollowupsPauseCustom() throws {
+        seedConnected(mode: .custom)
+        let direct = Route(name: "Direct", egress: .direct)
+        let vpn = Route(name: "Primary VPN", egress: .vpnDefault, vpnSelector: VPNSelector(kind: .primary))
+        rm.config.routes = [direct, vpn]
+        rm.config.rules = [
+            Rule(matchType: .domain, pattern: "en.wikipedia.org", routeId: direct.id, order: 0),
+            Rule(matchType: .domain, pattern: "news.ycombinator.com", routeId: direct.id, order: 1),
+            Rule(matchType: .cidr, pattern: "203.0.113.0/24", routeId: direct.id, order: 2),
+        ]
+        rm.config.defaultRouteId = vpn.id
+        rm.config.schemaVersion = 2
+        rm.activeRoutes = []
+        rm.lastRouteChange = .init(kind: .removedAll, at: Date().addingTimeInterval(-120), routeCount: 0, failedCount: 0)
+        rm.setPauseStateForTests(PauseState(length: .oneHour, since: Date().addingTimeInterval(-120), mode: .custom))
+        addTeardownBlock { @MainActor in RouteManager.shared.setPauseStateForTests(nil) }
+        _ = try renderDropdown(to: "followups-pause-custom.png")
+    }
+
+    /// A VPN kill switch is on: the shared CDN line no longer says the other sites bypass it.
+    func testFollowupsSharedAddressUnderAKillSwitch() throws {
+        seedSharedDomains(mode: .bypass)
+        rm.vpnKillSwitch = VPNKillSwitch(name: "Proton VPN", includeAllNetworks: true, enforceRoutes: false,
+                                         excludeLocalNetworks: false)
+        addTeardownBlock { @MainActor in RouteManager.shared.vpnKillSwitch = nil }
+        XCTAssertEqual(try renderSettings(page: .domains, to: "followups-shared-kill-switch.png"), Self.settingsSize)
+    }
+    // END FOLLOWUPS CORE SHOTS
+
     /// Bypass paused two minutes ago: every route out, the lists kept for Resume.
     private func seedPaused(_ length: PauseLength) {
         seedBypass()

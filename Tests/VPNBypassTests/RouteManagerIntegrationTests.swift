@@ -17,7 +17,19 @@ class RouteManagerTestCase: XCTestCase {
         super.setUp()
         try? FileManager.default.removeItem(at: testBackupURL)
         try? FileManager.default.copyItem(at: configURL, to: testBackupURL)
+        // Each test starts from a fresh install's config. It used to start from whatever the
+        // previous test's tearDown reloaded from disk, and the file holds what any earlier test
+        // class last saved (most put back only the config in memory): a "Service A" that is
+        // neither custom nor shipped failed testOffersEveryServiceAlphabetically under
+        // `swift test --filter Lookup`, and passed in a full run only by the order of classes.
+        rm.config = Self.freshConfig
     }
+
+    /// A new user's config, decoded as the app decodes one, so its routes are derived.
+    static let freshConfig: RouteManager.Config = {
+        let data = try! JSONEncoder().encode(RouteManager.Config())
+        return try! JSONDecoder().decode(RouteManager.Config.self, from: data)
+    }()
 
     override func tearDown() {
         let fm = FileManager.default

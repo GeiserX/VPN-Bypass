@@ -97,6 +97,10 @@ struct PauseState: Equatable {
     let since: Date
     /// The mode it was taken in. A switch to another mode ends it.
     let mode: RouteManager.RoutingMode
+    /// "Until the VPN reconnects": the VPN came back while the helper could not apply, so the
+    /// pause holds until it can (`PauseGate.canResume`). Ending it then would leave the routes
+    /// out with nothing to bring them back.
+    var reconnectedWaiting: Bool = false
 
     /// When a timed pause ends on its own; nil for the other two.
     var until: Date? {
@@ -111,7 +115,7 @@ struct PauseState: Equatable {
             f.formatOptions = [.withInternetDateTime]
             return "until \(f.string(from: until))"
         }
-        return length.logText
+        return reconnectedWaiting ? "until the helper is ready" : length.logText
     }
 }
 
@@ -185,6 +189,12 @@ enum PauseGate {
         case waitForSettle
         /// Apply after this many seconds; 0 is now.
         case apply(after: TimeInterval, heldBackStrikes: Int?)
+    }
+
+    /// Whether a resume can put the routes back now: the helper is ready and config.json was
+    /// read. "Until the VPN reconnects" ends at the reconnect only then; otherwise it holds.
+    static func canResume(helperReady: Bool, configLoadFailed: Bool) -> Bool {
+        helperReady && !configLoadFailed
     }
 
     static func resumeAction(vpnConnected: Bool, canApply: Bool, settlePending: Bool,

@@ -67,9 +67,11 @@ enum DomainsPage {
     /// header's filter: the list in use keeps only the entries that stopped resolving, and the
     /// other list is left out. It does nothing while no entry has stopped resolving.
     /// `sharedCDNs` names, per route source, the CDN one of its routes reaches
-    /// (`SharedAddress.cdnBySource`).
+    /// (`SharedAddress.cdnBySource`). `killSwitch`: the connected VPN forces every connection
+    /// into its tunnel, so no route takes a site around it.
     static func sections(mode: RoutingMode, config: Config, routeSources: [String], search: String,
                          staleOnly: Bool = false, sharedCDNs: [String: String] = [:],
+                         killSwitch: Bool = false,
                          locale: Locale? = nil, bundle: Bundle = .main) -> [Section] {
         var counts: [String: Int] = [:]
         for source in routeSources { counts[source, default: 0] += 1 }
@@ -103,7 +105,7 @@ enum DomainsPage {
             // wildcard's addresses came from a lookup.
             if routes, !stale, !entry.isCIDR, RouteKernel.ipv4ToUInt32(entry.domain) == nil,
                let cdn = sharedCDNs[entry.domain] {
-                let shared = SharedAddress.detail(cdn: cdn, isInverse: mode == .vpnOnly, bundle: bundle)
+                let shared = SharedAddress.detail(cdn: cdn, isInverse: mode == .vpnOnly, killSwitch: killSwitch, bundle: bundle)
                 detail = detail.map { "\($0) · \(shared)" } ?? shared
             }
             let number = routes ? String(counts[entry.domain] ?? 0) : nil
@@ -173,7 +175,8 @@ struct DomainsTab: View {
                              staleOnly: staleOnly,
                              sharedCDNs: SharedAddress.cdnBySource(routeManager.activeRoutes.map {
                                  (source: $0.source, destination: $0.destination)
-                             }))
+                             }),
+                             killSwitch: routeManager.isVPNConnected && routeManager.vpnKillSwitch != nil)
     }
 
     var body: some View {

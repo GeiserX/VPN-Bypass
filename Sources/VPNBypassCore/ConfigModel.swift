@@ -86,6 +86,10 @@ struct ProxyConfig: Codable, Equatable {
     var username: String = ""
     var password: String = ""
     var useForServices: [String] = []  // Service IDs that should use proxy (empty = all enabled services)
+    /// The Proxy route this proxy became (`Config.derive`, `Config.withGlobalProxy`), which the
+    /// settings keep in step. Nil in a config written before it was kept: then the route is
+    /// found by this proxy's address.
+    var routeId: UUID? = nil
     
     var isConfigured: Bool {
         !server.isEmpty && port > 0 && port < 65536
@@ -195,6 +199,48 @@ struct Config: Codable {
             rules = derived.rules
             defaultRouteId = derived.defaultRouteId
         }
+        if !(dnsRefreshInterval > 0) || !dnsRefreshInterval.isFinite {
+            // Zero, negative or NaN from a hand edit: a repeating timer of that interval fires
+            // without pause. The default instead, as when the key is missing.
+            dnsRefreshInterval = Config.defaultDNSRefreshInterval
+        }
+    }
+
+    static let defaultDNSRefreshInterval: TimeInterval = 3600
+
+    /// `self` with the global SOCKS5 proxy set to `proxy`, and the Proxy route it became kept in
+    /// step: its address and login follow, and it is on while the proxy is. `derive` makes that
+    /// route only for a config with no routes yet, so without this an edit in General reached
+    /// nothing. A proxy turned on with no route of its own gets one (never into an empty route
+    /// list, which `derive` fills, system routes and all). An address being typed that is not
+    /// usable yet leaves the route's address as it was.
+    func withGlobalProxy(_ proxy: ProxyConfig) -> Config {
+        var c = self
+        var next = proxy
+        let old = c.proxyConfig
+        var index = old.routeId.flatMap { id in c.routes.firstIndex { $0.id == id } }
+        if index == nil, old.isConfigured {
+            index = c.routes.firstIndex {
+                $0.egress == .proxySOCKS5 && $0.proxyHost == old.server && $0.proxyPort == old.port
+            }
+        }
+        if let i = index {
+            next.routeId = c.routes[i].id
+            if proxy.isConfigured {
+                c.routes[i].proxyHost = proxy.server
+                c.routes[i].proxyPort = proxy.port
+                c.routes[i].proxyUser = proxy.username
+                c.routes[i].proxyPass = proxy.password
+            }
+            c.routes[i].enabled = proxy.enabled
+        } else if proxy.enabled && proxy.isConfigured && !c.routes.isEmpty {
+            let route = Route(name: "Proxy", egress: .proxySOCKS5, proxyHost: proxy.server, proxyPort: proxy.port,
+                              proxyUser: proxy.username, proxyPass: proxy.password)
+            c.routes.append(route)
+            next.routeId = route.id
+        }
+        c.proxyConfig = next
+        return c
     }
 
     // Default initializer

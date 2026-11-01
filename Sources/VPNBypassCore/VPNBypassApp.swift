@@ -320,6 +320,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let statusStr = path.status == .satisfied ? "connected" : "disconnected"
                 let interfaceStr = interfaceNames.sorted().joined(separator: ", ")
                 RouteManager.shared.log(.info, "Network change detected: \(statusStr) via \(interfaceStr)")
+                RouteManager.shared.noteNetworkChange()
                 
                 RouteManager.shared.refreshStatus()
             }

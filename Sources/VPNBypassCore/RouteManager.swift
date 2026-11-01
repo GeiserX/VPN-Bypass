@@ -970,19 +970,32 @@ final class RouteManager: ObservableObject {
         // before anything below applies them. At a connect the settle-gated apply carries them.
         await updateNetworkProfile(justConnected: isVPNConnected && !wasVPNConnected)
 
-        // "Until the VPN reconnects": this is the reconnect. The pause ends here and the apply
-        // below goes through the settle gate like any post-reconnect apply, even with
-        // auto-apply off, since resuming is what the user asked for.
+        // "Until the VPN reconnects": this is the reconnect. The pause ends here only when the
+        // routes can come back, and Resume's apply puts them back: through the settle gate,
+        // after any apply or load that is running, even with auto-apply off, since resuming is
+        // what the user asked for. With the helper not ready the pause holds, says why, and
+        // ends on the first status pass that finds it ready.
         var resumedByReconnect = false
-        if isVPNConnected && !wasVPNConnected, pauseState?.length == .untilReconnect {
-            endPause(reason: "the VPN reconnected", apply: false)
-            resumedByReconnect = true
+        if isVPNConnected, let pause = pauseState, pause.length == .untilReconnect,
+           !wasVPNConnected || pause.reconnectedWaiting {
+            if PauseGate.canResume(helperReady: HelperManager.shared.isHelperInstalled,
+                                   configLoadFailed: isConfigLoadFailed) {
+                endPause(reason: pause.reconnectedWaiting ? "the VPN reconnected and the helper is ready"
+                                                          : "the VPN reconnected", apply: true)
+                resumedByReconnect = true
+                if !wasVPNConnected { NotificationManager.shared.notifyVPNConnected(interface: interface ?? "unknown") }
+            } else if !pause.reconnectedWaiting {
+                var waiting = pause
+                waiting.reconnectedWaiting = true
+                pauseState = waiting
+                log(.warning, "The VPN reconnected, but the helper is not ready: staying paused until it is")
+            }
         }
 
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
         // Also skip if helper is not ready — no point attempting routes that will all fail.
-        // Never while paused: Resume applies.
-        if isVPNConnected && !wasVPNConnected && (config.autoApplyOnVPN || resumedByReconnect) && !isPaused && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled && !isConfigLoadFailed {
+        // Never while paused, nor when the reconnect just ended a pause: Resume applies.
+        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !resumedByReconnect && !isPaused && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled && !isConfigLoadFailed {
             let now = Date()
             let vpnLabel = "\(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type"))"
             // Fresh routes = the newer of the last full apply and the last DNS refresh.
@@ -1043,7 +1056,7 @@ final class RouteManager: ObservableObject {
                 reconnectSettleTask = Task { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     guard !Task.isCancelled, let self else { return }
-                    await self.runSettledApply(requireAutoApply: !resumedByReconnect)
+                    await self.runSettledApply()
                 }
                 pendingReconnectApply = PendingReconnectApply(reason: reason, connectedAt: now,
                                                               appliesAt: now.addingTimeInterval(delay))
@@ -4198,6 +4211,21 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Edits the global SOCKS5 proxy (General > Advanced) and keeps its Proxy route in step
+    /// (`Config.withGlobalProxy`), then saves, and restarts or re-points that route's listener.
+    func updateGlobalProxy(_ change: (inout ProxyConfig) -> Void) {
+        guard !isConfigLoadFailed else { return }
+        var next = config.proxyConfig
+        change(&next)
+        guard next != config.proxyConfig else { return }
+        let routesBefore = config.routes
+        config = config.withGlobalProxy(next)
+        saveConfig()
+        if config.routes != routesBefore {
+            Task { await reconcileProxyListeners() }
+        }
+    }
+
     /// Test SOCKS5 proxy connection
     func testProxyConnection() async {
         guard config.proxyConfig.isConfigured else {
@@ -6109,6 +6137,11 @@ final class RouteManager: ObservableObject {
     var detectVPNInterfaceOverrideForTests: (() async -> (connected: Bool, interface: String?, type: VPNType?))?
     /// What `detectNetworkIdentity` answers, so a test can move the Mac between networks.
     var detectNetworkIdentityOverrideForTests: (() async -> NetworkIdentity?)?
+    /// What `arp -a -n -l` prints, for the stale-ARP re-check.
+    var readARPTableOverrideForTests: (() async -> String?)?
+    /// A path change was seen since the last profile pass.
+    private var networkChangeNoted = false
+    private var arpRecheckTask: Task<Void, Never>?
     var routeEpochForTests: UInt64 { routeEpoch }
 
     private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil, persistCache: Bool = true) async -> [ActiveRoute]? {
@@ -6284,6 +6317,14 @@ final class RouteManager: ObservableObject {
     /// Test-only: reverses beginShutdown so shared-singleton tests can restore state.
     func resetShutdownStateForTests() {
         isShuttingDown = false
+    }
+
+    /// Forgets the last connect and every apply-kill strike, which an earlier test's reconnect
+    /// or drop leaves behind: a Resume would otherwise wait out its cold delay or back-off.
+    func resetSettleStateForTests() {
+        lastVPNConnectAt = nil
+        applyKillStrikes = 0
+        lastApplyKillAt = nil
     }
 
     /// Sets the pause without touching any route, for renders of the paused dropdown.
@@ -6736,11 +6777,65 @@ extension RouteManager {
     /// Reads the network, and switches profile when it belongs to another one. Run on every
     /// status pass, after the gateway is detected.
     func updateNetworkProfile(justConnected: Bool = false) async {
+        let previous = currentNetwork
         let network = await detectNetworkIdentity()
         if currentNetwork != network { currentNetwork = network }
+        if networkChangeNoted {
+            networkChangeNoted = false
+            if let network, network == previous { await recheckNetworkWhenARPRefreshes(network) }
+        }
         guard !isConfigLoadFailed, !isShuttingDown,
               let target = NetworkProfiles.switchTarget(for: network, in: config) else { return }
         commitProfileChange(NetworkProfiles.switching(config, to: target), justConnected: justConnected)
+    }
+
+    /// The path monitor saw the network change: the next profile pass reads the router with
+    /// that in mind (`recheckNetworkWhenARPRefreshes`).
+    func noteNetworkChange() {
+        networkChangeNoted = true
+    }
+
+    /// The network changed but the router reads as before. That reading may be the previous
+    /// router's ARP entry, still cached, when both networks use one router address: read the
+    /// network again as soon as the entry refreshes, so the right profile is in use before the
+    /// settle-gated apply after a reconnect runs, instead of on a later 30 s pass.
+    private func recheckNetworkWhenARPRefreshes(_ network: NetworkIdentity) async {
+        arpRecheckTask?.cancel()
+        arpRecheckTask = nil
+        guard let snapshot = await readARPTable(gateway: network.gateway)
+                .first(where: { $0.mac == network.routerMAC }) else { return }
+        let started = Date()
+        log(.info, "Network changed and the router reads as before: reading it again once its ARP entry refreshes")
+        arpRecheckTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(NetworkProfiles.arpRecheckPoll * 1_000_000_000))
+                guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
+                let elapsed = Date().timeIntervalSince(started)
+                let now = await self.readARPTable(gateway: network.gateway)
+                    .first(where: { $0.interface == snapshot.interface })
+                if NetworkProfiles.arpEntryRefreshed(snapshot: snapshot, now: now, elapsed: elapsed) {
+                    self.arpRecheckTask = nil
+                    await self.updateNetworkProfile()
+                    return
+                }
+                if elapsed >= NetworkProfiles.arpRecheckLimit {
+                    self.arpRecheckTask = nil
+                    return
+                }
+            }
+        }
+    }
+
+    /// The gateway's rows of the ARP table, with the time each has left.
+    private func readARPTable(gateway: String) async -> [NetworkIdentity.ARPEntry] {
+        let output: String?
+        if let override = readARPTableOverrideForTests {
+            output = await override()
+        } else {
+            output = await runProcessAsync("/usr/sbin/arp", arguments: ["-a", "-n", "-l"], timeout: 3.0)
+                .flatMap { $0.exitCode == 0 ? $0.output : nil }
+        }
+        return output.map { NetworkIdentity.parseARPTable($0, gateway: gateway) } ?? []
     }
 
     /// At launch: reads the network and puts its profile in use without an apply of its own,

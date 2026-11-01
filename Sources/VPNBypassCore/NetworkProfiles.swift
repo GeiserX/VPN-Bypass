@@ -74,6 +74,46 @@ struct NetworkIdentity: Codable, Hashable {
         return nil
     }
 
+    /// One row of `arp -a -n -l`: the neighbour's MAC, the interface, and how long the entry
+    /// has left (nil once expired).
+    struct ARPEntry: Equatable {
+        var mac: String
+        var interface: String
+        var expiresIn: TimeInterval?
+    }
+
+    /// The gateway's rows of `arp -a -n -l`:
+    /// `192.0.2.1   3c:84:6a:1:2:3 1m20s   1m1s   en0    1`. A row whose MAC is incomplete
+    /// is left out.
+    static func parseARPTable(_ output: String, gateway: String) -> [ARPEntry] {
+        output.split(whereSeparator: \.isNewline).compactMap { line in
+            let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+            guard fields.count >= 5, fields[0] == gateway, let mac = normalizedMAC(fields[1]) else { return nil }
+            return ARPEntry(mac: mac, interface: fields[4], expiresIn: parseExpiry(fields[2]))
+        }
+    }
+
+    /// "1m20s", "45s", "1h2m3s" in seconds; nil for "expired" or anything else.
+    static func parseExpiry(_ text: String) -> TimeInterval? {
+        var total = 0
+        var digits = ""
+        for c in text {
+            if c.isASCII && c.isNumber {
+                digits.append(c)
+                continue
+            }
+            guard let n = Int(digits) else { return nil }
+            switch c {
+            case "h": total += n * 3600
+            case "m": total += n * 60
+            case "s": total += n
+            default: return nil
+            }
+            digits = ""
+        }
+        return digits.isEmpty && !text.isEmpty ? TimeInterval(total) : nil
+    }
+
     /// `arp` drops leading zeros ("3c:84:6a:1:2:3"); stored and compared with them back.
     static func normalizedMAC(_ raw: String) -> String? {
         let parts = raw.lowercased().split(separator: ":")
@@ -176,6 +216,26 @@ enum NetworkProfiles {
         let wanted = profileId(for: network, in: config.profiles)
         guard wanted != config.activeProfileId else { return nil }
         return wanted.map(Target.profile) ?? .otherNetworks
+    }
+
+    /// A network change that reads the router as before may be reading the previous
+    /// router's ARP entry: two networks can share a router address, and the entry outlives the
+    /// move. The router is read again once that entry refreshes, checked this often, for at
+    /// most `arpRecheckLimit`.
+    static var arpRecheckPoll: TimeInterval = 5
+    static let arpRecheckLimit: TimeInterval = 300
+
+    /// Whether the ARP entry read as `snapshot` `elapsed` seconds ago has refreshed since: it
+    /// holds another MAC, or its time left went up, which only a fresh answer from the router
+    /// does. An entry gone or expired has not refreshed yet.
+    static func arpEntryRefreshed(snapshot: NetworkIdentity.ARPEntry, now: NetworkIdentity.ARPEntry?,
+                                  elapsed: TimeInterval) -> Bool {
+        guard let now else { return false }
+        if now.mac != snapshot.mac { return true }
+        guard let left = now.expiresIn else { return false }
+        guard let before = snapshot.expiresIn else { return true }
+        // Time left counts down with the clock; one second of slack for the whole-second print.
+        return left > before - elapsed + 1
     }
 
     /// `config` with the settings in use stored into the slot of whatever is in use.

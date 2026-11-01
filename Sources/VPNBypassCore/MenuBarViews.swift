@@ -477,11 +477,12 @@ struct MenuContent: View {
             if let routed = RoutedBySource.make(
                 mode: statusInput.mode, config: routeManager.config,
                 routes: routeManager.installedRoutes,
-                busy: routeManager.isPaused || RoutedBySource.emptyEntriesAreExpected(
+                busy: RoutedBySource.emptyEntriesAreExpected(
                     running: isBusy, pending: routeManager.pendingReconnectApply,
                     lastChange: routeManager.lastRouteChange,
                     currentRouteCount: routeManager.routedAddressCount,
                     helperReady: helperManager.helperState.isReady),
+                paused: routeManager.isPaused,
                 title: routeManager.isPaused ? RoutedBySource.pausedTitle(statusInput.mode) : nil) {
                 routedList(routed)
             }
@@ -1383,9 +1384,11 @@ enum RoutedBySource {
     /// nil when there is nothing to list: no entry on and no route installed (the status line
     /// above already says so). `routedOnly` lists only entries that have routes, for the
     /// disconnected dropdown, where an entry without any is expected, not a problem.
+    /// `paused` lists what Resume puts back: every entry that routes, with or without routes
+    /// now, Custom's rules too (which otherwise show only once they have routes).
     static func make(mode: DropdownCopy.Mode, config: RouteManager.Config,
                      routes: [InstalledRoute], busy: Bool, routedOnly: Bool = false,
-                     title: String? = nil) -> Summary? {
+                     paused: Bool = false, title: String? = nil) -> Summary? {
         // Each entry's route `source` (what its routes are recorded under) and how it reads.
         // Custom rules that use a proxy or the primary VPN install no kernel route, so a rule
         // with none is normal and is not listed.
@@ -1398,6 +1401,8 @@ enum RoutedBySource {
             entries += config.inverseDomains.filter(\.enabled).map { ($0.domain, $0.domain, $0.isCIDR ? .ipRange : .domain, true) }
         case .custom:
             for rule in config.rules.filter(\.enabled).sorted(by: { $0.order < $1.order }) {
+                // Paused, a rule whose route is gone or off would route nothing on Resume.
+                if paused, !config.routes.contains(where: { $0.id == rule.routeId && $0.enabled }) { continue }
                 // A service rule's pattern is the service id; show the service's name.
                 if rule.matchType == .service, let service = config.services.first(where: { $0.id == rule.pattern }) {
                     entries.append((rule.pattern, service.name, .service(id: service.id), false))
@@ -1434,7 +1439,7 @@ enum RoutedBySource {
 
         func row(id: String, name: String, icon: Icon, destinations: [String], expectsRoutes: Bool) -> Row {
             Row(id: id, name: name, icon: icon, routeCount: destinations.count,
-                isProblem: expectsRoutes && destinations.isEmpty && !busy && !idleAllowed.contains(id),
+                isProblem: expectsRoutes && destinations.isEmpty && !busy && !paused && !idleAllowed.contains(id),
                 addresses: Array(destinations.prefix(tooltipAddresses)),
                 hiddenAddresses: max(0, destinations.count - tooltipAddresses),
                 allAddresses: destinations)
@@ -1445,7 +1450,7 @@ enum RoutedBySource {
         for entry in entries where !listed.contains(entry.source) {
             listed.insert(entry.source)
             let destinations = bySource[entry.source] ?? []
-            if destinations.isEmpty && (!entry.expectsRoutes || routedOnly) { continue }
+            if destinations.isEmpty && (!(entry.expectsRoutes || paused) || routedOnly) { continue }
             rows.append(row(id: entry.source, name: entry.name, icon: entry.icon,
                             destinations: destinations, expectsRoutes: entry.expectsRoutes))
         }
@@ -1855,9 +1860,11 @@ struct DropdownStatus: Equatable {
         // Paused, and every route is out: the state drawn. When some are still in, the block
         // says how many with Retry, and never says Paused (flow fix 2).
         if let pause = input.pause {
-            // A helper that is down with a VPN up is shown as the helper's state, with Fix.
+            // A helper that is down with a VPN up is shown as the helper's state, with Fix,
+            // except for a pause the reconnect would have ended: it says it is waiting for the
+            // helper, with Fix.
             if input.installedRoutes == 0 && !input.everythingElseDirect
-                && (input.helperReady || !input.isVPNConnected) {
+                && (input.helperReady || !input.isVPNConnected || pause.reconnectedWaiting) {
                 return paused(pause, input: input, name: name, now: now)
             }
             if input.helperReady {
@@ -2002,8 +2009,10 @@ struct DropdownStatus: Equatable {
             ? String(localized: "Paused: traffic follows the VPN's own routes.")
             : String(localized: "Paused: the app routes nothing.")
         let when = resumesLine(pause, now: now)
+        // Waiting for the helper, Fix is what moves it on; Resume would only end the pause.
+        let action: Line3.Action = pause.reconnectedWaiting && !input.helperReady ? .fix : .resume
         return DropdownStatus(chip: .paused, tone: .idle, headline: headline, sentence: sentence,
-                              note: when, line3: Line3(text: when, action: .resume))
+                              note: when, line3: Line3(text: when, action: action))
     }
 
     /// "Resumes at 14:32, in 58 min", "Resumes when the VPN reconnects", "Paused until you resume".
@@ -2017,7 +2026,9 @@ struct DropdownStatus: Equatable {
                 ? String(localized: "Resumes at \(when), in \(countdown(left))")
                 : String(localized: "Resuming now.")
         case .untilReconnect:
-            return String(localized: "Resumes when the VPN reconnects.")
+            return pause.reconnectedWaiting
+                ? String(localized: "The VPN is back. Resumes when the helper is ready.")
+                : String(localized: "Resumes when the VPN reconnects.")
         case .untilResume:
             return String(localized: "Paused until you resume.")
         }

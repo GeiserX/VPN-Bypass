@@ -273,6 +273,18 @@ final class PauseStatusTests: XCTestCase {
                        "Paused until you resume.")
     }
 
+    /// The VPN came back with the helper down, so "until the VPN reconnects" holds: Paused,
+    /// saying it waits for the helper, with Fix. Any other pause shows the helper's state.
+    func testAPauseWaitingForTheHelperSaysSoWithFix() {
+        var waiting = input(paused: .untilReconnect, helperReady: false)
+        waiting.pause?.reconnectedWaiting = true
+        let status = DropdownStatus.make(waiting, now: now)
+        XCTAssertEqual(status.chip, .paused)
+        XCTAssertEqual(status.line3.text, "The VPN is back. Resumes when the helper is ready.")
+        XCTAssertEqual(status.line3.action, .fix)
+        XCTAssertNotEqual(DropdownStatus.make(input(paused: .untilReconnect, helperReady: false), now: now).chip, .paused)
+    }
+
     /// Paused with no VPN: still Paused, with Resume.
     func testPausedWithNoVPN() {
         let status = DropdownStatus.make(input(paused: .untilResume, connected: false), now: now)
@@ -333,6 +345,26 @@ final class PauseStatusTests: XCTestCase {
         XCTAssertEqual(rows?.problemRows, [])
     }
 
+    /// Paused in Custom, the list says what Resume puts back: the rules, which otherwise show
+    /// only once they have routes. A rule whose route is off routes nothing on Resume.
+    func testPausedCustomListsTheRulesResumePutsBack() {
+        var cfg = RouteManager.Config()
+        cfg.routingMode = .custom
+        cfg.schemaVersion = 2
+        let direct = Route(name: "Direct", egress: .direct)
+        let off = Route(name: "Old", egress: .direct, enabled: false)
+        cfg.routes = [direct, off]
+        cfg.rules = [Rule(matchType: .domain, pattern: "en.wikipedia.org", routeId: direct.id, order: 0),
+                     Rule(matchType: .domain, pattern: "old.example.com", routeId: off.id, order: 1)]
+        let rows = RoutedBySource.make(mode: .custom, config: cfg, routes: [], busy: false, paused: true,
+                                       title: RoutedBySource.pausedTitle(.custom))
+        XCTAssertEqual(rows?.title, "Will be routed by your rules again")
+        XCTAssertEqual(rows?.rows.map(\.name), ["en.wikipedia.org"])
+        XCTAssertEqual(rows?.problemRows, [], "paused, an entry with no addresses is what was asked for")
+        // Not paused, a rule with no routes yet is not listed, as before.
+        XCTAssertNil(RoutedBySource.make(mode: .custom, config: cfg, routes: [], busy: false))
+    }
+
     private func lproj(_ language: String) throws -> Bundle {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         return try XCTUnwrap(Bundle(url: root.appendingPathComponent("Sources/VPNBypassCore/Resources/\(language).lproj")))
@@ -349,6 +381,8 @@ final class PauseStatusTests: XCTestCase {
             }
             XCTAssertNotEqual(DropdownStatus.Line3.spokenName(.resume, in: bundle), DropdownStatus.Line3.spokenName(.resume))
             XCTAssertNotEqual(RoutedBySource.pausedTitle(.bypass, in: bundle), RoutedBySource.pausedTitle(.bypass))
+            XCTAssertNotEqual(String(localized: "The VPN is back. Resumes when the helper is ready.", bundle: bundle),
+                              "The VPN is back. Resumes when the helper is ready.")
         }
     }
 }
@@ -397,6 +431,9 @@ final class PauseLifecycleTests: XCTestCase {
             return self.kernel.add(destination, gateway: gateway)
         }
         rm.activeRoutes = listed.map { .init(destination: $0, gateway: "192.168.1.1", source: "Lab", timestamp: Date()) }
+        // An earlier test's reconnect or drop would make a Resume wait out a cold delay or a
+        // back-off, past what a test waits.
+        rm.resetSettleStateForTests()
     }
 
     override func tearDown() async throws {
@@ -562,6 +599,41 @@ final class PauseLifecycleTests: XCTestCase {
         XCTAssertEqual(addCalls, [], "nothing is written before the tunnel settles")
     }
 
+    /// "Until the VPN reconnects" with the helper not ready at the reconnect: ending the pause
+    /// then left the routes out with nothing to bring them back. It holds, says why, and ends
+    /// on the first pass that finds the helper ready, with the apply in the settle gate.
+    func testUntilReconnectHoldsUntilTheHelperIsReady() async throws {
+        await rm.pause(for: .untilReconnect)
+        HelperManager.shared.helperState = .missing
+        await reconnect()
+        XCTAssertTrue(rm.isPaused, "the pause ended while nothing could put the routes back")
+        let pause = try XCTUnwrap(rm.pauseState)
+        XCTAssertTrue(pause.reconnectedWaiting)
+        XCTAssertEqual(DropdownStatus.resumesLine(pause, now: Date()), "The VPN is back. Resumes when the helper is ready.")
+        XCTAssertEqual(pause.wireDescription, "until the helper is ready")
+
+        await rm.checkVPNStatus()   // still not ready: still paused
+        XCTAssertTrue(rm.isPaused)
+
+        HelperManager.shared.helperState = .ready
+        await rm.checkVPNStatus()
+        XCTAssertFalse(rm.isPaused)
+        XCTAssertNotNil(rm.pendingReconnectApply, "the routes come back through the settle gate")
+        XCTAssertEqual(addCalls, [], "nothing is written before the tunnel settles")
+    }
+
+    /// The reconnect lands while an apply or a load runs: the pause ends and its apply waits
+    /// for that work and the settle gate, instead of being skipped with the routes left out.
+    func testUntilReconnectWaitsOutAnApplyThatIsRunning() async {
+        await rm.pause(for: .untilReconnect)
+        HelperManager.shared.helperState = .ready
+        rm.isLoading = true
+        await reconnect()
+        rm.isLoading = false
+        XCTAssertFalse(rm.isPaused)
+        XCTAssertNotNil(rm.pendingReconnectApply, "the pause ended and no apply is coming")
+    }
+
     func testWildcardsLearnNothingWhilePaused() async {
         await rm.pause(for: .untilResume)
         XCTAssertTrue(rm.wildcards.suspended)
@@ -588,8 +660,8 @@ final class PauseLifecycleTests: XCTestCase {
         HelperManager.shared.helperState = .ready
         rm.resume()
         XCTAssertFalse(rm.isPaused)
-        // At once on a calm tunnel; after the settle wait when an earlier test's reconnect is recent.
-        let deadline = Date().addingTimeInterval(20)
+        // At once: setUp forgets earlier tests' reconnects and strikes, so no settle wait.
+        let deadline = Date().addingTimeInterval(5)
         while addCalls.isEmpty && Date() < deadline { try await Task.sleep(nanoseconds: 100_000_000) }
         XCTAssertEqual(addCalls, ["203.0.113.0/24"])
         XCTAssertEqual(kernel.installed, ["203.0.113.0/24"])
@@ -650,8 +722,8 @@ final class PauseLifecycleTests: XCTestCase {
         XCTAssertFalse(rm.activeRoutes.isEmpty)
         XCTAssertTrue(rm.wildcards.suspended)
         rm.resume()
-        // At once on a calm tunnel; after the settle wait when an earlier test's reconnect is recent.
-        let deadline = Date().addingTimeInterval(20)
+        // At once: setUp forgets earlier tests' reconnects and strikes, so no settle wait.
+        let deadline = Date().addingTimeInterval(5)
         while rm.wildcards.suspended && Date() < deadline { try await Task.sleep(nanoseconds: 100_000_000) }
         XCTAssertFalse(rm.wildcards.suspended)
         XCTAssertEqual(addCalls, [], "the apply skipped: the routes were current")

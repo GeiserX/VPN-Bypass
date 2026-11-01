@@ -60,10 +60,14 @@ enum SharedAddress {
     }
 
     /// The row's detail line. Which way the other sites go depends on the list: around the VPN
-    /// for the Bypass list, into it for the VPN Only list.
-    static func detail(cdn: String, isInverse: Bool, bundle: Bundle = .main) -> String {
-        isInverse
-            ? String(localized: "Shared CDN address (\(cdn)): other sites on it use the VPN too", bundle: bundle)
+    /// for the Bypass list, into it for the VPN Only list. Under a VPN kill switch (#189) a
+    /// Bypass route takes nothing around the VPN, so the line says only that the route is shared.
+    static func detail(cdn: String, isInverse: Bool, killSwitch: Bool = false, bundle: Bundle = .main) -> String {
+        if isInverse {
+            return String(localized: "Shared CDN address (\(cdn)): other sites on it use the VPN too", bundle: bundle)
+        }
+        return killSwitch
+            ? String(localized: "Shared CDN address (\(cdn)): other sites on it share this route", bundle: bundle)
             : String(localized: "Shared CDN address (\(cdn)): other sites on it bypass the VPN too", bundle: bundle)
     }
 }
