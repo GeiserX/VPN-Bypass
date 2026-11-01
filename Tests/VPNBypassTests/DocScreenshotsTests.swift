@@ -630,6 +630,33 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(try renderSettings(page: .lookups, to: "lookups-learned.png"), Self.settingsSize)
     }
 
+    /// Learn a site beside other apps: a news site's names first, a failed name's search-domain
+    /// retries folded under their toggle, and a music and a call app that were already looking
+    /// up their names set apart under Seen before you started.
+    func testSettingsOnLookupsLearnedBesideOtherApps() throws {
+        seedBypass()
+        rm.config.dnsLookupsEnabled = false
+        DNSLookupsMonitor.shared.readsSearchDomains = false
+        DNSLookupsMonitor.shared.searchDomains = ["corp.example"]
+        defer {
+            DNSLookupsMonitor.shared.searchDomains = []
+            DNSLookupsMonitor.shared.readsSearchDomains = true
+        }
+        var learning = SiteLearning(started: Date().addingTimeInterval(-60), seenBefore: Self.learnedNoiseSeenBefore)
+        learning.record(Self.learnedNoiseNames, at: Date().addingTimeInterval(-50))
+        learning.close()
+        DNSLookupsMonitor.shared.learning = learning
+        XCTAssertEqual(try renderSettings(page: .lookups, to: "lookups-learned-noise.png"), Self.settingsSize)
+    }
+
+    /// What a news site reload looked up, with the noise around it.
+    static let learnedNoiseNames = [
+        "www.news.example", "api.music.example", "img.news.example", "metrics.news.example",
+        "metrics.news.example.corp.example", "audio.music.example", "static.news-cdn.example",
+        "ads.example.net", "ads.example.net.corp.example", "sip.voip.example", "api.news.example",
+    ]
+    static let learnedNoiseSeenBefore: Set<String> = ["api.music.example", "audio.music.example", "sip.voip.example"]
+
     /// A change a Shortcuts action made, named in the dropdown footer as `vpnb` changes are,
     /// and the Logs page that a click on the line opens.
     func testDropdownWithAShortcutsChange() throws {

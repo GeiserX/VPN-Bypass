@@ -1048,3 +1048,13 @@
 "Show %lld search-domain retries" = "Show %lld search-domain retries";
 "Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer" = "Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer";
 "The names this Mac looks up." = "The names this Mac looks up.";
+
+/* Learn a site: search-domain retries and sites seen before the window */
+"Every name was looked up before you started too." = "Every name was looked up before you started too.";
+"Only search-domain retries were looked up while learning." = "Only search-domain retries were looked up while learning.";
+"Seen before you started" = "Seen before you started";
+"Every name of these sites was looked up in the 5 minutes before learning started, so another app may have asked for them" = "Every name of these sites was looked up in the 5 minutes before learning started, so another app may have asked for them";
+"Add these too" = "Add these too";
+"Add these sites with the rest: leave this off when another app asked for them" = "Add these sites with the rest: leave this off when another app asked for them";
+"Add the sites seen before you started too" = "Add the sites seen before you started too";
+"Nothing to add from this window. Tick Add these too to add the sites seen before." = "Nothing to add from this window. Tick Add these too to add the sites seen before.";
