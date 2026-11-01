@@ -985,6 +985,7 @@
 "%lld networks" = "%lld redes";
 "Any network without a profile" = "Cualquier red sin perfil";
 "Use %@ on this network" = "Usar %@ en esta red";
+"This network is not identified yet." = "Esta red aún no está identificada.";
 "Delete the profile %@?" = "¿Eliminar el perfil %@?";
 "Its mode and lists are lost, and its networks use Other networks." = "Se pierden su modo y sus listas, y sus redes pasan a usar Otras redes.";
 "Network profiles" = "Perfiles de red";

@@ -985,6 +985,7 @@
 "%lld networks" = "%lld networks";
 "Any network without a profile" = "Any network without a profile";
 "Use %@ on this network" = "Use %@ on this network";
+"This network is not identified yet." = "This network is not identified yet.";
 "Delete the profile %@?" = "Delete the profile %@?";
 "Its mode and lists are lost, and its networks use Other networks." = "Its mode and lists are lost, and its networks use Other networks.";
 "Network profiles" = "Network profiles";

@@ -363,7 +363,7 @@ struct NetworkProfilesGroup: View {
             }
         }
         .sheet(isPresented: $showingNewProfile) {
-            NewProfileSheet(profiles: config.profiles,
+            NewProfileSheet(profiles: config.profiles, networkKnown: network != nil,
                             onCancel: { showingNewProfile = false },
                             onSave: { name in
                                 if routeManager.createProfile(named: name) { showingNewProfile = false }
@@ -399,19 +399,22 @@ struct NetworkProfilesGroup: View {
 /// Names a new profile for this network.
 struct NewProfileSheet: View {
     let profiles: [NetworkProfile]
+    /// Save needs this network identified; it greys out while it is not.
+    var networkKnown = true
     let onCancel: () -> Void
     let onSave: (String) -> Void
     @State private var name: String
 
-    init(profiles: [NetworkProfile], name: String = "", onCancel: @escaping () -> Void, onSave: @escaping (String) -> Void) {
+    init(profiles: [NetworkProfile], networkKnown: Bool = true, name: String = "", onCancel: @escaping () -> Void, onSave: @escaping (String) -> Void) {
         self.profiles = profiles
+        self.networkKnown = networkKnown
         self.onCancel = onCancel
         self.onSave = onSave
         _name = State(initialValue: name)
     }
 
     var body: some View {
-        let free = NetworkProfiles.nameIsFree(name, in: profiles)
+        let free = NetworkProfiles.nameIsFree(name, in: profiles) && networkKnown
         let blank = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         SheetScaffold(String(localized: "New profile"), confirmTitle: String(localized: "Save"), canConfirm: free,
                       onCancel: onCancel, onConfirm: { if free { onSave(name) } }) {
@@ -425,7 +428,9 @@ struct NewProfileSheet: View {
                         .textFieldStyle(.roundedBorder)
                         .accessibilityLabel(String(localized: "Name"))
                 }
-                if !blank && !free {
+                if !networkKnown {
+                    SheetError(message: String(localized: "This network is not identified yet."))
+                } else if !blank && !free {
                     SheetError(message: String(localized: "A profile with this name exists."))
                 }
             }
