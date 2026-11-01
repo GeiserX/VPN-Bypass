@@ -32,6 +32,8 @@ git tag v1.0.0
 for i in $(seq 1 25); do git commit -q --allow-empty -m "feat: feature $i"; done
 for i in $(seq 1 22); do git commit -q --allow-empty -m "fix: fix $i"; done
 for i in $(seq 1 14); do git commit -q --allow-empty -m "docs: doc $i"; done
+# A body line starting "fix" must not move a commit under Bug Fixes: lists sort by subject.
+git commit -q --allow-empty -m "ci: tag releases" -m "fix: a line in the body"
 git tag v2.0.0
 
 export GITHUB_REPOSITORY=example/repo
@@ -41,6 +43,10 @@ check_lists() {
   [ "$(grep -c '^- feat: feature ' "$out")" -eq 25 ] || fail "$label: expected 25 features, got $(grep -c '^- feat: feature ' "$out")"
   [ "$(grep -c '^- fix: fix ' "$out")" -eq 22 ] || fail "$label: expected 22 fixes, got $(grep -c '^- fix: fix ' "$out")"
   [ "$(grep -c '^- docs: doc ' "$out")" -eq 14 ] || fail "$label: expected 14 other changes, got $(grep -c '^- docs: doc ' "$out")"
+  grep -qx -- '- ci: tag releases' "$out" || fail "$label: a commit with a fix line in its body is not listed as it should be"
+  awk '/^### 🔧 Other Changes$/{o=1} o&&/^- ci: tag releases$/{f=1} END{exit !f}' "$out" \
+    || fail "$label: the ci commit is not under Other Changes"
+  grep -q -- '- fix: a line in the body' "$out" && fail "$label: a body line was listed as a commit"
   grep -qx '\*\*Full Changelog\*\*: https://github.com/example/repo/compare/v1.0.0...v2.0.0' "$out" \
     || fail "$label: compare link missing or wrong"
   grep -qx '\*\*SHA256:\*\* `abc123`' "$out" || fail "$label: SHA256 line missing"
@@ -68,6 +74,19 @@ check_lists with.md "with notes file"
 # 3. Another version's file is not picked up.
 "$SCRIPT" 2.0.1 abc123 > other.md 2>/dev/null
 [ "$(head -1 other.md)" = "## What's Changed" ] || fail "a notes file for 2.0.0 leaked into 2.0.1"
+
+# 4. A first release (no earlier tag) lists the root commit too.
+mkdir "$WORK/first" && cd "$WORK/first"
+git init -q -b main .
+git config user.name test; git config user.email test@example.invalid
+git config core.hooksPath /dev/null; git config commit.gpgsign false; git config tag.gpgsign false
+git commit -q --allow-empty -m "feat: first commit"
+git commit -q --allow-empty -m "fix: second commit"
+git tag v0.1.0
+"$SCRIPT" 0.1.0 abc123 > first.md 2>/dev/null
+grep -qx -- '- feat: first commit' first.md || fail "a first release leaves out its root commit"
+grep -qx -- '- fix: second commit' first.md || fail "a first release leaves out its second commit"
+cd "$WORK"
 
 if [ "$fails" -gt 0 ]; then
   echo "--- notes rendered with the file:"; cat with.md

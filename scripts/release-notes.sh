@@ -20,7 +20,11 @@ NOTES_FILE="docs/release-notes/$VERSION_NUMBER.md"
 
 PREV_TAG=$(git tag -l "v*" --sort=-version:refname | sed -n '2p')
 if [ -z "$PREV_TAG" ]; then
+  # A first release lists every commit, the root one too (ROOT..HEAD would leave it out).
   PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+  LOG_RANGE=HEAD
+else
+  LOG_RANGE="$PREV_TAG..HEAD"
 fi
 echo "📝 Generating changelog from $PREV_TAG to $VERSION" >&2
 
@@ -35,8 +39,12 @@ fi
 echo "## What's Changed"
 echo ""
 
+# Sort by the subject alone: git log --grep also matches body lines, so a "ci:" commit
+# whose body has a line starting "fix" would land under Bug Fixes.
+SUBJECTS=$(git log "$LOG_RANGE" --pretty=format:"- %s")
+
 # Features
-FEATURES=$(git log "$PREV_TAG"..HEAD --pretty=format:"- %s" --grep="^feat" 2>/dev/null || true)
+FEATURES=$(printf '%s\n' "$SUBJECTS" | grep '^- feat' || true)
 if [ -n "$FEATURES" ]; then
   echo "### ✨ Features"
   echo "$FEATURES"
@@ -44,7 +52,7 @@ if [ -n "$FEATURES" ]; then
 fi
 
 # Fixes
-FIXES=$(git log "$PREV_TAG"..HEAD --pretty=format:"- %s" --grep="^fix" 2>/dev/null || true)
+FIXES=$(printf '%s\n' "$SUBJECTS" | grep '^- fix' || true)
 if [ -n "$FIXES" ]; then
   echo "### 🐛 Bug Fixes"
   echo "$FIXES"
@@ -52,7 +60,7 @@ if [ -n "$FIXES" ]; then
 fi
 
 # Other changes
-OTHERS=$(git log "$PREV_TAG"..HEAD --pretty=format:"- %s" --invert-grep --grep="^feat" --invert-grep --grep="^fix" 2>/dev/null || true)
+OTHERS=$(printf '%s\n' "$SUBJECTS" | grep -v -e '^- feat' -e '^- fix' | grep -v '^$' || true)
 if [ -n "$OTHERS" ]; then
   echo "### 🔧 Other Changes"
   echo "$OTHERS"
