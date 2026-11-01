@@ -14,18 +14,22 @@ import SwiftUI
 /// lay them out by hand with `InsetDivider` between them.
 struct GroupSection<Content: View, Trailing: View>: View {
     let title: String?
+    /// Drawn right after the title, such as a filter chip that belongs to it.
+    let titleAccessory: AnyView?
     let trailing: Trailing
     let content: Content
 
-    init(_ title: String? = nil, @ViewBuilder trailing: () -> Trailing, @ViewBuilder content: () -> Content) {
+    init(_ title: String? = nil, titleAccessory: AnyView? = nil, @ViewBuilder trailing: () -> Trailing,
+         @ViewBuilder content: () -> Content) {
         self.title = title
+        self.titleAccessory = titleAccessory
         self.trailing = trailing()
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if title != nil || Trailing.self != EmptyView.self {
+            if title != nil || titleAccessory != nil || Trailing.self != EmptyView.self {
                 HStack(alignment: .firstTextBaseline) {
                     if let title {
                         Text(title)
@@ -33,6 +37,7 @@ struct GroupSection<Content: View, Trailing: View>: View {
                             .foregroundColor(Theme.textSecondary)
                             .accessibilityAddTraits(.isHeader)
                     }
+                    if let titleAccessory { titleAccessory }
                     Spacer(minLength: Theme.Space.s)
                     trailing
                         .font(Theme.Font.detail)
@@ -53,6 +58,38 @@ struct GroupSection<Content: View, Trailing: View>: View {
                 RoundedRectangle(cornerRadius: Theme.Radius.group)
                     .strokeBorder(Theme.border, lineWidth: 0.5)
             )
+        }
+    }
+}
+
+/// The end of a list section's header, the same on Domains and Services: the word
+/// "addresses" over the rows' number column, and the section's ⋯ menu (or a spinner while an
+/// apply runs) at the trailing edge, over the switches it turns on and off.
+struct ListSectionTrailing<Menu: View>: View {
+    /// The rows' number column; 0 hides the label, as when no row has a number.
+    let numberWidth: CGFloat
+    let menu: Menu
+
+    init(numberWidth: CGFloat, @ViewBuilder menu: () -> Menu) {
+        self.numberWidth = numberWidth
+        self.menu = menu()
+    }
+
+    /// From the header's trailing edge to the end of the number column: the small switch
+    /// (44 pt measured on the rendered page), the row's spacing and its inset, less the
+    /// header's own 2 pt.
+    static var labelTrailingPadding: CGFloat { 44 + Theme.Space.s + ListRow.inset - 2 }
+    /// From the header's trailing edge to the switches' trailing edge.
+    static var menuTrailingPadding: CGFloat { ListRow.inset - 2 }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            if numberWidth > 0 {
+                Text("addresses")
+                    .padding(.trailing, Self.labelTrailingPadding)
+            }
+            menu
+                .padding(.trailing, Self.menuTrailingPadding)
         }
     }
 }
@@ -401,6 +438,9 @@ struct PageHeader: View {
     /// takes the same height, so the app name and the page title sit level.
     static let height: CGFloat = 56
 
+    /// The most lines the purpose line takes: two fit under the title within `height`.
+    static let subtitleLines = 2
+
     /// The search field's prompt, which says what it filters: "Search Services".
     static func searchPrompt(for title: String, in bundle: Bundle = .main) -> String {
         String(localized: "Search \(title)", bundle: bundle)
@@ -422,11 +462,14 @@ struct PageHeader: View {
                     .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
                 if let subtitle {
+                    // Two lines fit the band under the title, so a line the smallest window
+                    // cannot hold wraps instead of losing its end.
                     Text(subtitle)
                         .font(Theme.Font.detail)
                         .foregroundColor(Theme.textSecondary)
-                        .lineLimit(1)
+                        .lineLimit(Self.subtitleLines)
                         .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                         .help(subtitle)
                 }
             }
@@ -466,6 +509,8 @@ extension PageHeader {
         ForEach(actions.filter { $0.kind == .button }) { action in
             Button(action.name, action: action.perform)
                 .controlSize(.small)
+                // Never narrower than its words: the purpose line wraps first.
+                .fixedSize()
                 .disabled(!action.isEnabled)
                 .help(action.help ?? action.name)
                 .accessibilityLabel(action.name)

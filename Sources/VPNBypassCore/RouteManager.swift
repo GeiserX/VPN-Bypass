@@ -126,6 +126,42 @@ final class RouteManager: ObservableObject {
     /// it to decide routing.
     @Published var lastRouteChange: RouteChangeOutcome?
 
+    /// The names the last lookup for each entry got no answer for, by the entry's route source
+    /// (a domain, or a service's name). An entry with no address that is in here did not
+    /// resolve, which Status > Problems and the dropdown's Show say instead of the vaguer "No
+    /// address is routed for it.": the last apply may not name the failure, when it came from
+    /// the DNS cache, found the routes already current, or added one entry. A live full apply
+    /// replaces it; an entry's own apply updates that entry.
+    @Published private(set) var unresolvedLookups: [String: Set<String>] = [:]
+
+    /// Records one entry's lookups: the names of `source` that got no answer, none when all did.
+    func noteLookups(for source: String, unresolved names: Set<String>) {
+        if names.isEmpty {
+            if unresolvedLookups[source] != nil { unresolvedLookups[source] = nil }
+        } else if unresolvedLookups[source] != names {
+            unresolvedLookups[source] = names
+        }
+    }
+
+    /// Every DNS failure known for the entries now listed: the names the last lookups got no
+    /// answer for, then the listed domains a refresh found no address for (StaleEntries), each
+    /// entry once. A problem row's reason reads these before saying no address is routed.
+    nonisolated static func dnsFailures(lookups: [String: Set<String>], domains: [DomainEntry]) -> [RouteFailure] {
+        var names: [(domain: String, source: String)] = lookups.keys.sorted().flatMap { source in
+            lookups[source, default: []].sorted().map { (domain: $0, source: source) }
+        }
+        let known = Set(names.map(\.source))
+        for entry in domains where entry.resolveFailures != nil && !known.contains(entry.domain) {
+            names.append((domain: entry.domain, source: entry.domain))
+        }
+        return RouteFailure.unresolved(names)
+    }
+
+    /// `dnsFailures` for the config and lookups now held.
+    var currentDNSFailures: [RouteFailure] {
+        Self.dnsFailures(lookups: unresolvedLookups, domains: config.domains + config.inverseDomains)
+    }
+
     /// The last settings change a control-socket request made, for the dropdown footer. A
     /// save made outside a socket request (the app's own controls) clears it, so the footer
     /// never names a change that a later one in the app has replaced.
@@ -2546,6 +2582,8 @@ final class RouteManager: ObservableObject {
 
         // Save updated DNS cache to disk
         saveDNSCache()
+        // Every enabled entry was looked up: what did not answer replaces the last record.
+        unresolvedLookups = Dictionary(grouping: unresolvedNames, by: \.source).mapValues { Set($0.map(\.domain)) }
 
         // Service IP ranges (bypass mode only — services are not used in VPN Only mode)
         var serviceRanges: [(source: String, range: String)] = []
@@ -5460,6 +5498,8 @@ final class RouteManager: ObservableObject {
             for domain in service.resolvableDomains {
                 for ip in resolved[domain] ?? [] { take(ip, isNetwork: false, for: service) }
             }
+            noteLookups(for: service.name,
+                        unresolved: Set(service.resolvableDomains.filter { resolved[$0]?.isEmpty ?? true }))
             // Add IP ranges (no DNS needed)
             for range in service.ipRanges { take(range, isNetwork: true, for: service) }
         }
@@ -6301,11 +6341,15 @@ final class RouteManager: ObservableObject {
         // A wildcard has nothing to resolve: its names are routed by the helper's forwarder as
         // they are looked up. An empty result is a success, so no DNS retry is scheduled.
         if WildcardDomain.isWildcard(domain) { return [] }
+        let entry = source ?? domain
         guard let ips = await resolveIPs(for: domain) else {
             failedDomains.insert(domain)
+            noteLookups(for: entry, unresolved: unresolvedLookups[entry, default: []].union([domain]))
             return nil
         }
-        
+        let earlier = unresolvedLookups[entry, default: []]
+        noteLookups(for: entry, unresolved: ips.isEmpty ? earlier.union([domain]) : earlier.subtracting([domain]))
+
         if let firstIP = ips.first {
             dnsCache[domain] = firstIP
         }

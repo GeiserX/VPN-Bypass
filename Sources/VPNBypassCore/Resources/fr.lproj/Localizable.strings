@@ -24,8 +24,6 @@
 /* ===== Réglages — Onglet Domaines ===== */
 "VPN Only list" = "Liste VPN uniquement";
 "Bypass list" = "Liste Contournement";
-"Only these domains will use the VPN. Everything else bypasses it." = "Seuls ces domaines utiliseront le VPN. Tout le reste le contourne.";
-"Add domains that should bypass VPN and use your regular connection." = "Ajoutez les domaines qui doivent contourner le VPN et utiliser votre connexion habituelle.";
 "Applying..." = "Application...";
 "All" = "Tous";
 "Add a domain above to bypass VPN" = "Ajoutez un domaine ci-dessus pour contourner le VPN";
@@ -511,7 +509,7 @@
 /* ===== Réglages : page Règles (mode Personnalisé) ===== */
 "No rules yet" = "Aucune règle pour l'instant";
 "The first rule that matches wins." = "La première règle qui correspond l'emporte.";
-"The first rule that matches wins. Drag to reorder." = "La première règle qui correspond l'emporte. Faites glisser pour réordonner.";
+"The first rule that matches wins. Drag to reorder." = "La première règle qui correspond l'emporte. Glissez pour trier.";
 "Only apps set to use %@. Other apps take the Mac's normal route, even if a rule below matches." = "Seulement les apps réglées pour utiliser %@. Les autres apps prennent la route normale du Mac, même si une règle plus bas correspond.";
 "Route for %@: %@" = "Route de %@ : %@";
 "The ways out a rule can pick." = "Les sorties qu'une règle peut choisir.";
@@ -574,7 +572,6 @@
 "Add to the Bypass list" = "Ajouter à la liste Contournement";
 "The privileged helper is not running." = "L'assistant privilégié ne tourne pas.";
 "The privileged helper did not answer." = "L'assistant privilégié n'a pas répondu.";
-"See the names this Mac looks up, and add the ones you need." = "Voyez les noms que ce Mac recherche et ajoutez ceux dont vous avez besoin.";
 "Off until you start watching. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you stop watching or quit." = "Désactivé tant que vous ne commencez pas le suivi. L'assistant lit alors uniquement les questions DNS que ce Mac envoie, jamais les réponses ni aucun autre trafic. La liste reste en mémoire et s'efface quand vous arrêtez le suivi ou quittez.";
 "%lld names since %@" = "%lld noms depuis %@";
 "Bypassed" = "Contourné";
@@ -1040,3 +1037,14 @@
 "Updated %lld entries to the new wildcard form: %@. They route the same names as before." = "%lld entrées sont passées au nouveau format joker : %@. Elles routent les mêmes noms qu'avant.";
 "Entries updated to wildcards" = "Entrées passées en jokers";
 "Dismiss the note about updated entries" = "Masquer la note sur les entrées mises à jour";
+"What is routed now, and what needs a look." = "Ce qui est routé maintenant, et ce qui demande attention.";
+"How the app starts, looks up names and lets you know." = "Comment l'app démarre, résout les noms et vous prévient.";
+"What the app did, and why." = "Ce que l'app a fait, et pourquoi.";
+"The version, updates and where to get help." = "La version, les mises à jour et où trouver de l'aide.";
+"Only the domains on this list use the VPN." = "Seuls les domaines de cette liste passent par le VPN.";
+"The domains on this list skip the VPN." = "Les domaines de cette liste contournent le VPN.";
+"Hide search-domain retries" = "Masquer les nouvelles tentatives avec domaine de recherche";
+"Show 1 search-domain retry" = "Afficher 1 nouvelle tentative avec domaine de recherche";
+"Show %lld search-domain retries" = "Afficher %lld nouvelles tentatives avec domaine de recherche";
+"Names the resolver asked again with a search domain added, after the name itself got no answer" = "Noms que le système a redemandés en ajoutant un domaine de recherche, après que le nom lui-même n'a reçu aucune réponse";
+"The names this Mac looks up." = "Les noms que ce Mac recherche.";

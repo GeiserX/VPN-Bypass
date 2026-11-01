@@ -44,6 +44,46 @@ struct DNSLookupTally: Equatable {
     }
 }
 
+/// The lookups the resolver made by appending a DNS search domain to a name that did not
+/// answer: with search domains `corp.example` and `lab.example`, a failed `host.example.com`
+/// is asked again as `host.example.com.corp.example` and `host.example.com.lab.example`, and
+/// each retry is one more row on the page. They are folded under the name they came from.
+/// A single-label name is left alone: `intranet` asked as `intranet.corp.example` is the name
+/// the user means, not a retry.
+enum SearchDomainRetries {
+    /// The search domains of the system resolver, in order, each once, from `scutil --dns`
+    /// ("search domain[0] : corp.example").
+    static func searchDomains(fromScutilDNS output: String) -> [String] {
+        var out: [String] = []
+        for line in output.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("search domain["), let colon = trimmed.firstIndex(of: ":") else { continue }
+            let domain = trimmed[trimmed.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+            if !domain.isEmpty && !out.contains(domain) { out.append(domain) }
+        }
+        return out
+    }
+
+    /// The names that are another of `names`, a name with a dot in it, with one of
+    /// `searchDomains` appended.
+    static func retries(among names: some Collection<String>, searchDomains: [String]) -> Set<String> {
+        guard !searchDomains.isEmpty else { return [] }
+        let all = Set(names)
+        var out: Set<String> = []
+        for name in all {
+            for domain in searchDomains where name.hasSuffix("." + domain) {
+                let base = String(name.dropLast(domain.count + 1))
+                if base.contains("."), all.contains(base) {
+                    out.insert(name)
+                    break
+                }
+            }
+        }
+        return out
+    }
+}
+
 @MainActor
 final class DNSLookupsMonitor: ObservableObject {
     static let shared = DNSLookupsMonitor()
@@ -52,6 +92,12 @@ final class DNSLookupsMonitor: ObservableObject {
 
     /// Settable from tests, which seed the doc screenshot with it.
     @Published var tally = DNSLookupTally()
+    /// The system resolver's search domains (`SearchDomainRetries`), read when watching starts
+    /// and again each minute while it runs, since a VPN brings its own. Settable from tests.
+    @Published var searchDomains: [String] = []
+    /// False keeps `searchDomains` as a test set it.
+    var readsSearchDomains = true
+    private var searchDomainsReadAt: Date?
     @Published private(set) var isCapturing = false
     /// Why the capture is not running although the page is on, such as a helper that is down.
     @Published private(set) var problem: String?
@@ -173,8 +219,19 @@ final class DNSLookupsMonitor: ObservableObject {
         Task { await tick() }
     }
 
+    /// Reads the search domains at the first tick and once a minute after.
+    private func readSearchDomainsIfDue() async {
+        guard readsSearchDomains, searchDomainsReadAt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
+        searchDomainsReadAt = Date()
+        guard let result = await RouteManager.shared.runProcessAsync("/usr/sbin/scutil", arguments: ["--dns"], timeout: 3.0),
+              result.exitCode == 0 else { return }
+        let domains = SearchDomainRetries.searchDomains(fromScutilDNS: result.output)
+        if domains != searchDomains { searchDomains = domains }
+    }
+
     private func stop() {
         generation += 1
+        searchDomainsReadAt = nil
         timer?.invalidate()
         timer = nil
         isCapturing = false
@@ -190,6 +247,7 @@ final class DNSLookupsMonitor: ObservableObject {
         guard wanted, !tickInFlight else { return }
         tickInFlight = true
         defer { tickInFlight = false }
+        await readSearchDomainsIfDue()
 
         let drainGeneration = generation
         if isCapturing, let names = await HelperManager.shared.drainDNSQueries() {

@@ -68,13 +68,6 @@ struct RoutesTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            HStack(alignment: .center, spacing: Theme.Space.m) {
-                Text("The ways out a rule can pick.")
-                    .font(Theme.Font.detail)
-                    .foregroundColor(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             systemRoutesSection
 
             VStack(alignment: .leading, spacing: Theme.Space.s) {
