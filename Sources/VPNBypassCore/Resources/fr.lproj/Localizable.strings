@@ -1033,3 +1033,10 @@
 "Only your list uses the VPN." = "Seule votre liste utilise le VPN.";
 "Your rules pick each route." = "Vos règles choisissent chaque route.";
 "Search %@" = "Rechercher dans %@";
+
+/* Entries an older version saved as ".example.com", rewritten as wildcards */
+"%@ is now %@" = "%1$@ devient %2$@";
+"Updated 1 entry to the new wildcard form: %@. It routes the same names as before." = "1 entrée est passée au nouveau format joker : %@. Elle route les mêmes noms qu'avant.";
+"Updated %lld entries to the new wildcard form: %@. They route the same names as before." = "%lld entrées sont passées au nouveau format joker : %@. Elles routent les mêmes noms qu'avant.";
+"Entries updated to wildcards" = "Entrées passées en jokers";
+"Dismiss the note about updated entries" = "Masquer la note sur les entrées mises à jour";

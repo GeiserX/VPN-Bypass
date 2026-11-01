@@ -192,6 +192,9 @@ public enum VPNBCLI {
             if let killSwitch = runtime.killSwitch { line += "  kill switch: \(killSwitch.joined(separator: ","))" }
             if let paused = runtime.paused { line += "  paused: \(paused)" }
             out.append(line)
+            if let converted = runtime.convertedEntries, !converted.isEmpty {
+                out.append("updated to wildcards: " + converted.map { "\($0.from) is now \($0.to)" }.joined(separator: ", "))
+            }
         }
 
         if let why = result.why { out += whyLines(why) }

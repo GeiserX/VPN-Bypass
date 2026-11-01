@@ -1033,3 +1033,10 @@
 "Only your list uses the VPN." = "Solo tu lista usa la VPN.";
 "Your rules pick each route." = "Tus reglas eligen cada ruta.";
 "Search %@" = "Buscar en %@";
+
+/* Entries an older version saved as ".example.com", rewritten as wildcards */
+"%@ is now %@" = "%1$@ ahora es %2$@";
+"Updated 1 entry to the new wildcard form: %@. It routes the same names as before." = "Se ha actualizado 1 entrada a la nueva forma de comodín: %@. Enruta los mismos nombres que antes.";
+"Updated %lld entries to the new wildcard form: %@. They route the same names as before." = "Se han actualizado %lld entradas a la nueva forma de comodín: %@. Enrutan los mismos nombres que antes.";
+"Entries updated to wildcards" = "Entradas actualizadas a comodines";
+"Dismiss the note about updated entries" = "Descartar el aviso sobre las entradas actualizadas";

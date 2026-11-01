@@ -201,6 +201,18 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         )
     }
     
+    /// A launch rewrote entries saved as ".example.com" to "*.example.com": the one time this
+    /// is said, so it ignores the per-event switches and only follows the master one.
+    func notifyEntriesConverted(_ changes: [ConvertedEntry]) {
+        guard notificationsEnabled, !changes.isEmpty else { return }
+
+        sendNotification(
+            title: String(localized: "Entries updated to wildcards"),
+            body: ConvertedEntry.sentence(changes),
+            identifier: "entries-converted"
+        )
+    }
+
     /// Open System Settings to Notifications pane
     func openNotificationSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {

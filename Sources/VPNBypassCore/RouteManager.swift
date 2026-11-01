@@ -325,6 +325,16 @@ final class RouteManager: ObservableObject {
 
     /// The wildcard route ledger's file, beside the config (and redirected under tests with it).
     let wildcardLedgerURL: URL
+    /// The entries the leading-dot migration rewrote that Status still lists, beside the config.
+    /// Its own file, so an exported config never carries the note.
+    let convertedEntriesURL: URL
+    /// Entries the leading-dot migration rewrote and the user has not dismissed yet. Status
+    /// shows them in one line, and `vpnb status` carries them.
+    @Published private(set) var convertedEntries: [ConvertedEntry] = []
+    /// Sends the one notification for a launch that rewrote entries; tests count the calls.
+    var notifyConvertedEntries: @MainActor ([ConvertedEntry]) -> Void = {
+        NotificationManager.shared.notifyEntriesConverted($0)
+    }
     /// Always-on wildcard domains (see WildcardEngine).
     private(set) lazy var wildcards = WildcardEngine(manager: self, ledgerURL: wildcardLedgerURL)
     
@@ -404,6 +414,7 @@ final class RouteManager: ObservableObject {
         configURL = appDir.appendingPathComponent("config.json")
         dnsCacheURL = appDir.appendingPathComponent("dns-cache.json")
         wildcardLedgerURL = appDir.appendingPathComponent("wildcard-routes.json")
+        convertedEntriesURL = appDir.appendingPathComponent("converted-entries.json")
     }
     
     // MARK: - Public API
@@ -412,6 +423,7 @@ final class RouteManager: ObservableObject {
         hasLoadedConfig = true
         // Load DNS cache for faster startup / fallback
         loadDNSCache()
+        loadConvertedEntries()
         // A catalogue file CI should have refused; its other services still load.
         for problem in ServiceCatalogue.problems {
             log(.error, "Service catalogue: \(problem)")
@@ -441,9 +453,13 @@ final class RouteManager: ObservableObject {
             mergeBuiltInServices()
             log(.info, "Config loaded")
             if !migration.migrated.isEmpty {
+                // Listed before the config is saved, so a quit between the two cannot lose the
+                // note; a name already listed is not returned again, so it is notified once.
+                let changes = recordConvertedEntries(migration.migrated)
                 // Saved at once, so the next load finds nothing to change and this logs once.
                 saveConfig()
                 log(.info, "Changed \(migration.migrated.joined(separator: ", ")) to the *.name form, which covers the name and every name under it")
+                if !changes.isEmpty { notifyConvertedEntries(changes) }
             }
         } catch {
             isConfigLoadFailed = true
@@ -806,6 +822,8 @@ final class RouteManager: ObservableObject {
                 log(.error, "Failed to persist imported config: \(error.localizedDescription)")
                 return false
             }
+            // Listed only once the import is saved: a rejected import leaves the note as it was.
+            recordConvertedEntries(migration.migrated)
 
             // An import replaces what a pause was taken on; the apply below is its own.
             if isPaused { endPause(reason: "a configuration was imported", apply: false) }
@@ -5686,6 +5704,45 @@ final class RouteManager: ObservableObject {
         return "left through \(via), \(probe.answer == .failed ? "the connection could not start" : "nothing answered on port 443")"
     }
     
+    /// Adds the rewritten `names` to the list Status shows and saves it, so it outlives a
+    /// relaunch until dismissed. Returns the changes that were not listed yet.
+    @discardableResult
+    func recordConvertedEntries(_ names: [String]) -> [ConvertedEntry] {
+        let new = names.compactMap(ConvertedEntry.of(legacy:))
+            .filter { change in !convertedEntries.contains { $0.from == change.from } }
+        guard !new.isEmpty else { return [] }
+        convertedEntries = ConvertedEntry.merging(convertedEntries, new)
+        do {
+            try JSONEncoder().encode(convertedEntries).write(to: convertedEntriesURL, options: .atomic)
+            // Owner-only, like config.json: it names the user's entries.
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: convertedEntriesURL.path)
+        } catch {
+            log(.warning, "Could not save the list of updated entries: \(error.localizedDescription)")
+        }
+        return new
+    }
+
+    /// The user read the note: it goes, and does not come back on the next launch.
+    func dismissConvertedEntries() {
+        convertedEntries = []
+        guard FileManager.default.fileExists(atPath: convertedEntriesURL.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: convertedEntriesURL)
+        } catch {
+            log(.warning, "Could not remove the list of updated entries, so the note may come back on the next launch: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadConvertedEntries() {
+        convertedEntries = []
+        guard FileManager.default.fileExists(atPath: convertedEntriesURL.path) else { return }
+        do {
+            convertedEntries = try JSONDecoder().decode([ConvertedEntry].self, from: Data(contentsOf: convertedEntriesURL))
+        } catch {
+            log(.warning, "Could not read the list of updated entries: \(error.localizedDescription)")
+        }
+    }
+
     /// Drops the card, and the result of any check still running.
     func clearRouteCheck() {
         routeCheckGeneration += 1

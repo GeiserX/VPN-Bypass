@@ -1498,6 +1498,25 @@ final class DocScreenshotsTests: XCTestCase {
     }
     // END LIVE TEST CORE SHOTS
 
+    // BEGIN LEGACY DOT NOTICE SHOTS
+    /// The first launch after the upgrade rewrote two entries saved as ".name": Status says which.
+    func testLegacyDotNoticeStatus() throws {
+        seedBypass()
+        try? FileManager.default.removeItem(at: rm.convertedEntriesURL)
+        let notify = rm.notifyConvertedEntries
+        rm.notifyConvertedEntries = { _ in }
+        defer {
+            rm.notifyConvertedEntries = notify
+            rm.dismissConvertedEntries()
+        }
+        var cfg = rm.config
+        cfg.domains += [DomainEntry(domain: ".example.net", enabled: true), DomainEntry(domain: ".example.org", enabled: true)]
+        try JSONEncoder().encode(cfg).write(to: rm.configURL)
+        rm.loadConfig()
+        _ = try renderSettings(page: .status, to: "legacy-dot-notice-status.png")
+    }
+    // END LEGACY DOT NOTICE SHOTS
+
     // BEGIN FOLLOWUPS CORE SHOTS
     /// "Until the VPN reconnects": the VPN came back while the helper was down, so the pause
     /// holds and says it waits for the helper.

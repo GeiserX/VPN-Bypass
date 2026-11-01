@@ -124,11 +124,15 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
     /// How long routing is paused: "until 2026-10-31T14:32:00Z", "until the VPN reconnects"
     /// or "until resumed". Nil (omitted) when not paused.
     public var paused: String? = nil
+    /// Entries saved as ".example.com" that this version rewrote as "*.example.com", until the
+    /// user dismisses the note on Status. Nil (omitted) when there are none.
+    public var convertedEntries: [ConvertedEntry]? = nil
 
     public init(helperReady: Bool, helperState: String, vpnConnected: Bool,
                 vpnInterface: String? = nil, vpnType: String? = nil,
                 enforcedRouteCount: Int, enforcing: Bool, appVersion: String? = nil,
-                killSwitch: [String]? = nil, paused: String? = nil) {
+                killSwitch: [String]? = nil, paused: String? = nil,
+                convertedEntries: [ConvertedEntry]? = nil) {
         self.helperReady = helperReady
         self.helperState = helperState
         self.vpnConnected = vpnConnected
@@ -139,6 +143,7 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
         self.appVersion = appVersion
         self.killSwitch = killSwitch
         self.paused = paused
+        self.convertedEntries = convertedEntries
     }
 }
 

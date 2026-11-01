@@ -572,6 +572,10 @@ struct StatusTab: View {
         let input = DropdownStatus.Input.current(routeManager, helperReady: helperManager.helperState.isReady)
         return VStack(alignment: .leading, spacing: Theme.Space.l + 2) {
             MenuBarIconHiddenNote()
+            if !routeManager.convertedEntries.isEmpty {
+                ConvertedEntriesNote(changes: routeManager.convertedEntries,
+                                     onDismiss: { routeManager.dismissConvertedEntries() })
+            }
             summaryView(StatusPage.summary(input, now: now))
             ForEach(StatusPage.sections(helperReady: helperManager.helperState.isReady), id: \.self) { section in
                 switch section {
@@ -1055,6 +1059,31 @@ struct StatusNote: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, ListRow.inset)
             .padding(.bottom, Theme.Space.s)
+    }
+}
+
+/// Which entries saved as ".example.com" this version rewrote as wildcards, until Dismiss.
+struct ConvertedEntriesNote: View {
+    let changes: [ConvertedEntry]
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Theme.Space.s) {
+            Image(systemName: "info.circle")
+                .foregroundColor(Theme.textSecondary)
+                .accessibilityHidden(true)
+            Text(ConvertedEntry.sentence(changes))
+                .font(Theme.Font.body)
+                .foregroundColor(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: Theme.Space.s)
+            Button(String(localized: "Dismiss"), action: onDismiss)
+                .accessibilityLabel(String(localized: "Dismiss the note about updated entries"))
+        }
+        .padding(Theme.Space.m)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.group).fill(Theme.bgCard))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.group).strokeBorder(Theme.border, lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
     }
 }
 
