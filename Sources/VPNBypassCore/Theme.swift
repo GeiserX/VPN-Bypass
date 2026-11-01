@@ -64,11 +64,6 @@ enum Theme {
     /// Disabled text and decoration only: ~3.8:1, too faint for words a user must read.
     static let textTertiary = Color(hex: "6B7280")
 
-    /// The HTTP and SOCKS5 dots in the dropdown's Custom-mode "Routes In Use" summary,
-    /// the last place an egress still has a hue (`Route.accentColor`).
-    static let blue = Color(hex: "3B82F6")
-    static let purple = Color(hex: "8B5CF6")
-
     static let bgPrimary = Color(hex: "0F0F14")
     static let bgSecondary = Color(hex: "1A1B26")
     static let bgCard = Color.white.opacity(0.05)

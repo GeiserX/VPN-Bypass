@@ -352,6 +352,7 @@ final class NetworkProfileSwitchTests: XCTestCase {
         rm.cancelARPRecheckForTests()
         rm.detectNetworkIdentityOverrideForTests = nil
         rm.readARPTableOverrideForTests = nil
+        rm.currentNetworkInterface = nil
         NetworkProfiles.arpRecheckPoll = 5
         rm.activeRoutes = []
         rm.pendingKernelAdds = []
@@ -414,6 +415,41 @@ final class NetworkProfileSwitchTests: XCTestCase {
         let deadline = Date().addingTimeInterval(3)
         while rm.config.activeProfileId == nil && Date() < deadline { try await Task.sleep(nanoseconds: 50_000_000) }
         XCTAssertEqual(rm.config.activeProfileId, rm.config.profiles.first?.id, "the office profile is in use")
+    }
+
+    /// Wi-Fi and Ethernet to one router: two rows with the same address and MAC. The network
+    /// was read on Ethernet (en7), so only en7's row is watched. The Wi-Fi row listed first
+    /// refreshing on its own must not count, and the re-read waits for en7's.
+    func testTheARPRecheckWatchesTheInterfaceTheNetworkWasReadOn() async throws {
+        NetworkProfiles.arpRecheckPoll = 0.05
+        rm.readARPTableOverrideForTests = { [unowned self] in self.arpTable }
+        rm.currentNetwork = home
+        rm.currentNetworkInterface = "en7"
+        arpTable = """
+        192.168.1.1             3c:84:6a:1:2:3    1m20s     1m1s           en0    1
+        192.168.1.1             3c:84:6a:1:2:3    1m20s     1m1s           en7    1
+        """
+        rm.noteNetworkChange()
+        await rm.updateNetworkProfile()
+        XCTAssertNil(rm.config.activeProfileId)
+
+        // The office network answers the next read, but only the Wi-Fi row has refreshed.
+        onNetwork = office
+        arpTable = """
+        192.168.1.1             3c:84:6a:1:2:3    19m59s    19m59s         en0    1
+        192.168.1.1             3c:84:6a:1:2:3    1m20s     1m1s           en7    1
+        """
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertNil(rm.config.activeProfileId, "the Wi-Fi row refreshing is not the Ethernet entry refreshing")
+
+        // Control: en7's row now holds the office router.
+        arpTable = """
+        192.168.1.1             3c:84:6a:1:2:3    19m59s    19m59s         en0    1
+        192.168.1.1             a4:91:b1:a:b:c    19m59s    19m59s         en7    1
+        """
+        let deadline = Date().addingTimeInterval(3)
+        while rm.config.activeProfileId == nil && Date() < deadline { try await Task.sleep(nanoseconds: 50_000_000) }
+        XCTAssertEqual(rm.config.activeProfileId, rm.config.profiles.first?.id, "en7's refresh reads the network again")
     }
 
     /// Use on This Network at home moves home to the Office profile and puts it in use.

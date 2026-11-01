@@ -724,6 +724,30 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderDropdown(to: "rework-a5-custom.png")
     }
 
+    /// The Custom-mode "Routes In Use" summary with every kind of way out: Direct, the VPN,
+    /// an HTTP proxy, a SOCKS5 proxy and a Tailscale exit node. Each shows its grey glyph,
+    /// never a colour of its own.
+    func testDropdownRoutesInUseWithEveryEgress() throws {
+        seedCustom()
+        let http = Route(name: "web-proxy", egress: .proxyHTTP, proxyHost: "198.51.100.8", proxyPort: 3128)
+        let exit = Route(name: "exit-node", egress: .tailscaleExit, proxyHost: "100.64.0.9", proxyPort: 1055)
+        // The summary shows four: Direct, grey before and after, is the one left in "+1 more".
+        let seeded = rm.config.routes
+        rm.config.routes = [http, seeded[2], exit, seeded[1], seeded[0]]
+        rm.config.rules += [Rule(matchType: .domain, pattern: "intranet.example.com", routeId: http.id, order: 3),
+                            Rule(matchType: .suffix, pattern: "example.org", routeId: exit.id, order: 4)]
+        _ = try renderDropdown(to: "routes-in-use-every-egress.png")
+    }
+
+    /// Paused until resumed, then config.json stopped reading: Resume would put nothing back,
+    /// so line 3 says why instead of offering it.
+    func testDropdownPausedWithAnUnreadableConfig() throws {
+        seedPaused(.untilResume)
+        rm.isConfigLoadFailed = true
+        addTeardownBlock { @MainActor in RouteManager.shared.isConfigLoadFailed = false }
+        _ = try renderDropdown(to: "paused-config-unreadable.png")
+    }
+
     /// A6 and A7: Custom mode with no VPN, and a removal that left an address behind.
     func testReworkDisconnectedCustom() throws {
         seedCustom()

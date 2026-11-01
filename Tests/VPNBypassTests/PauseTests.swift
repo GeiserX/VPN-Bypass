@@ -383,6 +383,8 @@ final class PauseStatusTests: XCTestCase {
             XCTAssertNotEqual(RoutedBySource.pausedTitle(.bypass, in: bundle), RoutedBySource.pausedTitle(.bypass))
             XCTAssertNotEqual(String(localized: "The VPN is back. Resumes when the helper is ready.", bundle: bundle),
                               "The VPN is back. Resumes when the helper is ready.")
+            let cannotResume = "Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings."
+            XCTAssertNotEqual(String(localized: String.LocalizationValue(cannotResume), bundle: bundle), cannotResume)
         }
     }
 }
@@ -441,6 +443,8 @@ final class PauseLifecycleTests: XCTestCase {
             // Cancels the settle task a test left scheduled.
             _ = await rm.pause(for: .untilResume)
         }
+        // A Resume schedules an apply 300 ms out; it must not run after the fakes are gone.
+        await rm.cancelResumeApplyForTests()
         rm.endPause(reason: "test over", apply: false)
         FakeKernel.detach(from: rm)
         rm.detectVPNInterfaceOverrideForTests = nil
@@ -742,6 +746,35 @@ final class PauseLifecycleTests: XCTestCase {
         while rm.wildcards.suspended && Date() < deadline { try await Task.sleep(nanoseconds: 100_000_000) }
         XCTAssertFalse(rm.wildcards.suspended)
         XCTAssertEqual(addCalls, [], "the apply skipped: the routes were current")
+    }
+
+    /// config.json became unreadable while paused: a Resume would end the pause and put
+    /// nothing back (the apply refuses an unreadable config). It stays paused, the log, the
+    /// control socket and the dropdown say why, and Resume works again once the file is read.
+    func testAResumeWhileTheConfigCannotBeReadKeepsThePauseAndSaysWhy() async {
+        await pauseWithHelperReady()
+        rm.isConfigLoadFailed = true
+        defer { rm.isConfigLoadFailed = false }
+        rm.recentLogs = []
+
+        XCTAssertFalse(rm.resume())
+        XCTAssertTrue(rm.isPaused, "the pause holds")
+        XCTAssertTrue(rm.recentLogs.contains { $0.message.hasPrefix("Resume refused: config.json could not be read") })
+        let socket = await ControlSurface.handle(ControlRequest(cmd: "resume"))
+        XCTAssertEqual(socket.error?.code, "config_unreadable")
+        XCTAssertTrue(rm.isPaused)
+
+        let status = DropdownStatus.make(.current(rm, helperReady: true), now: Date())
+        XCTAssertEqual(status.chip, .paused)
+        XCTAssertTrue(status.line3.isProblem)
+        XCTAssertTrue(status.line3.text.hasPrefix("Can't resume"), status.line3.text)
+        XCTAssertNil(status.line3.action, "no Resume button that would do nothing")
+
+        // Control: the file is read again, and Resume ends the pause.
+        rm.isConfigLoadFailed = false
+        XCTAssertEqual(DropdownStatus.make(.current(rm, helperReady: true), now: Date()).line3.action, .resume)
+        XCTAssertTrue(rm.resume())
+        XCTAssertFalse(rm.isPaused)
     }
 
     func testTheControlSocketPausesAndResumes() async {

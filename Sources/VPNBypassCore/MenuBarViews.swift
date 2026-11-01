@@ -601,9 +601,10 @@ struct MenuContent: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
+                // A count, not live state: green is only for what is routed right now.
                 Text("\(routesWithRules.count)")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(Theme.live)
+                    .foregroundColor(Theme.textSecondary)
             }
 
             if routesWithRules.isEmpty {
@@ -613,9 +614,13 @@ struct MenuContent: View {
             } else {
                 ForEach(visibleRoutes) { route in
                     HStack(spacing: 6) {
-                        Circle()
-                            .fill(route.accentColor)
-                            .frame(width: 4, height: 4)
+                        // The egress is a glyph, grey, as on the Rules and Routes pages: colour
+                        // is for state only (rework section 2).
+                        Image(systemName: RouteChip.systemImage(for: route.egress))
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(Theme.textSecondary)
+                            .frame(width: 10)
+                            .accessibilityHidden(true)
                         Text(route.friendlyName(vpnName: routeManager.vpnType?.knownName))
                             .font(.system(size: 10))
                             .foregroundStyle(.primary)
@@ -1828,6 +1833,8 @@ struct DropdownStatus: Equatable {
         var lastCheckBroken: Bool = false
         /// The pause in progress (Pause.swift), nil when not paused.
         var pause: PauseState? = nil
+        /// config.json could not be read: a Resume would have nothing to put back.
+        var configUnreadable: Bool = false
     }
 
     /// The chip right of the wordmark: the only coloured signal in the block.
@@ -2008,6 +2015,12 @@ struct DropdownStatus: Equatable {
         let sentence = input.isVPNConnected
             ? String(localized: "Paused: traffic follows the VPN's own routes.")
             : String(localized: "Paused: the app routes nothing.")
+        // A Resume now would end the pause and put nothing back, so it stays paused and says why.
+        if input.configUnreadable {
+            let why = String(localized: "Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings.")
+            return DropdownStatus(chip: .paused, tone: .idle, headline: headline, sentence: sentence,
+                                  note: why, line3: Line3(text: why, isProblem: true))
+        }
         let when = resumesLine(pause, now: now)
         // Waiting for the helper, Fix is what moves it on; Resume would only end the pause.
         let action: Line3.Action = pause.reconnectedWaiting && !input.helperReady ? .fix : .resume

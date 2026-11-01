@@ -113,50 +113,7 @@ func printUsage() {
 
 // MARK: - Socket I/O
 
-/// Connects to the control socket. Returns nil on ANY failure (bad path,
-/// ENOENT because the app isn't running, ECONNREFUSED because a stale socket
-/// file has nothing listening, etc.) — the caller prints one clear message
-/// regardless of the specific cause.
-func connectToSocket(path: String) -> Int32? {
-    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    guard fd >= 0 else { return nil }
-
-    var addr = sockaddr_un()
-    addr.sun_family = sa_family_t(AF_UNIX)
-    let bytes = Array(path.utf8)
-    let maxLen = MemoryLayout.size(ofValue: addr.sun_path)
-    guard bytes.count < maxLen else {
-        close(fd)
-        return nil
-    }
-    withUnsafeMutableBytes(of: &addr.sun_path) { raw in
-        let buf = raw.bindMemory(to: UInt8.self)
-        buf.initialize(repeating: 0)
-        for (i, byte) in bytes.enumerated() {
-            buf[i] = byte
-        }
-    }
-    addr.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
-
-    let addrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
-    let rc = withUnsafePointer(to: &addr) { rawAddr in
-        rawAddr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-            connect(fd, sockPtr, addrLen)
-        }
-    }
-    guard rc == 0 else {
-        close(fd)
-        return nil
-    }
-
-    // Darwin has no MSG_NOSIGNAL; without SO_NOSIGPIPE, the server closing
-    // mid-write would deliver SIGPIPE to this process and kill the CLI
-    // instead of returning EPIPE from write().
-    var noSigPipe: Int32 = 1
-    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
-
-    return fd
-}
+// The connect itself is VPNBCLI.connect(path:), in VPNBypassCore, so the tests reach it.
 
 func writeAll(fd: Int32, data: Data) -> Bool {
     var remaining = data
@@ -258,7 +215,7 @@ let request = ControlRequest(
 // VPNB_SOCKET overrides the default socket path (for tests, or a non-standard
 // install). Falls back to the app's standard user-only socket otherwise.
 let socketPath = ProcessInfo.processInfo.environment["VPNB_SOCKET"] ?? ControlSocketServer.defaultSocketPath()
-guard let fd = connectToSocket(path: socketPath) else {
+guard let fd = VPNBCLI.connect(path: socketPath) else {
     failUnreachable(code: "app_unreachable",
                     message: "VPN Bypass isn't running, or its control socket is unavailable. Start the app and try again.")
 }

@@ -21,18 +21,6 @@ extension Route {
         case .proxyHTTP, .proxySOCKS5, .tailscaleExit: return name
         }
     }
-
-    /// Accent color by egress type, left only on the dropdown's Custom-mode rollup dots.
-    /// The Rules and Routes pages show a grey glyph and a word instead (`RouteChip`).
-    var accentColor: Color {
-        switch egress {
-        case .direct:       return Theme.textSecondary
-        case .proxyHTTP:    return Theme.blue
-        case .proxySOCKS5:  return Theme.purple
-        case .tailscaleExit: return Theme.live
-        case .vpnDefault:   return Theme.attention
-        }
-    }
 }
 
 extension RouteManager {
@@ -43,7 +31,7 @@ extension RouteManager {
     func addRoute(_ route: Route) {
         config.routes.append(route)
         saveConfig()
-        Task { await reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: false) }
+        startConfigFollowUp(reconcileListeners: true, reapplyRoutes: false)
     }
 
     /// Deletes a rule and re-applies, as the Rules page's trash button does.
@@ -142,7 +130,7 @@ extension RouteManager {
         }
         switch addDirectRule(input) {
         case .success(let rule)?:
-            Task { await reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
+            startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
             return .success(AddedDomain(rule: rule, typed: input,
                                         place: RulePlace(of: rule, in: config.rules, routes: config.routes,
                                                          services: config.services)))
@@ -444,7 +432,7 @@ extension RouteManager {
     /// Saves and re-applies after a rule change (RulesTab's `persistAndReapply`).
     func saveRulesAndReapply() {
         saveConfig()
-        Task { await reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
+        startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
     }
 }
 

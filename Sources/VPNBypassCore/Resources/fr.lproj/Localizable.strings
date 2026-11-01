@@ -1018,3 +1018,4 @@
 "Shared CDN address (%@): other sites on it share this route" = "Adresse CDN partagée (%@) : les autres sites qui y sont hébergés partagent cette route";
 "VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language." = "VPN Bypass n'a pas pu redémarrer (%@). Quittez-le et rouvrez-le pour utiliser la nouvelle langue.";
 "Restart Failed" = "Échec du redémarrage";
+"Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings." = "Reprise impossible : VPN Bypass n’a pas pu lire son fichier de configuration. Réparez-le ou importez une configuration enregistrée dans les Réglages.";
