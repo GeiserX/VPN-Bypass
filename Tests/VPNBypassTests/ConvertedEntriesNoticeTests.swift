@@ -58,6 +58,16 @@ final class ConvertedEntriesNoticeTests: RouteManagerTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: rm.convertedEntriesURL.path))
     }
 
+    /// The list is written before the config: a launch that quit before its config save
+    /// converts the same entries again next time, and must not notify them twice.
+    func testAConversionAlreadyListedIsNotNotifiedAgain() throws {
+        try JSONEncoder().encode(changes).write(to: rm.convertedEntriesURL)
+        try writeConfig(domains: [DomainEntry(domain: ".example.net"), DomainEntry(domain: ".example.org")])
+        rm.loadConfig()
+        XCTAssertEqual(rm.convertedEntries, changes)
+        XCTAssertEqual(notified.count, 0)
+    }
+
     func testNothingConvertedShowsNothing() throws {
         try writeConfig(domains: [DomainEntry(domain: "example.net"), DomainEntry(domain: "*.example.org")])
         rm.loadConfig()

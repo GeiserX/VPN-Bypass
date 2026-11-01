@@ -453,11 +453,12 @@ final class RouteManager: ObservableObject {
             mergeBuiltInServices()
             log(.info, "Config loaded")
             if !migration.migrated.isEmpty {
+                // Listed before the config is saved, so a quit between the two cannot lose the
+                // note; a name already listed is not returned again, so it is notified once.
+                let changes = recordConvertedEntries(migration.migrated)
                 // Saved at once, so the next load finds nothing to change and this logs once.
                 saveConfig()
                 log(.info, "Changed \(migration.migrated.joined(separator: ", ")) to the *.name form, which covers the name and every name under it")
-                // The save above means this runs on one launch only, so the notification is sent once.
-                let changes = recordConvertedEntries(migration.migrated)
                 if !changes.isEmpty { notifyConvertedEntries(changes) }
             }
         } catch {
@@ -5702,7 +5703,6 @@ final class RouteManager: ObservableObject {
         return "left through \(via), \(probe.answer == .failed ? "the connection could not start" : "nothing answered on port 443")"
     }
     
-    /// Drops the card, and the result of any check still running.
     /// Adds the rewritten `names` to the list Status shows and saves it, so it outlives a
     /// relaunch until dismissed. Returns the changes that were not listed yet.
     @discardableResult
@@ -5734,6 +5734,7 @@ final class RouteManager: ObservableObject {
         convertedEntries = saved
     }
 
+    /// Drops the card, and the result of any check still running.
     func clearRouteCheck() {
         routeCheckGeneration += 1
         lastRouteCheck = nil
