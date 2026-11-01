@@ -365,6 +365,19 @@ final class NetworkProfileSwitchTests: XCTestCase {
         XCTAssertEqual(kernel.installed, ["198.51.100.0/24"])
     }
 
+    /// At launch on the office network the Office profile is in use before the startup apply,
+    /// and nothing is written by the switch itself.
+    func testAtLaunchTheProfileIsChosenBeforeTheStartupApply() async {
+        let before = kernel.installed
+        onNetwork = office
+        await rm.selectNetworkProfileBeforeStartupApply()
+        XCTAssertEqual(rm.config.activeProfileId, rm.config.profiles.first?.id)
+        XCTAssertEqual(rm.config.services.filter(\.enabled).map(\.id), ["custom_office"])
+        await Task.yield()
+        await waitForApply()
+        XCTAssertEqual(kernel.installed, before, "the startup apply writes, not the switch")
+    }
+
     /// The same network on the next pass switches nothing and writes nothing.
     func testStayingOnANetworkWritesNothing() async {
         let before = kernel.installed

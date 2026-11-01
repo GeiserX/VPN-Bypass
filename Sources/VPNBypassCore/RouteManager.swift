@@ -2140,6 +2140,8 @@ final class RouteManager: ObservableObject {
         // Detect local gateway
         localGateway = await detectLocalGateway()
         log(.info, "Gateway detected: \(localGateway ?? "none")")
+        // This network's profile, before the startup apply below puts its lists in.
+        await selectNetworkProfileBeforeStartupApply()
 
         // Detect VPN gateway (needed for VPN Only mode)
         if connected {
@@ -6739,6 +6741,19 @@ extension RouteManager {
         guard !isConfigLoadFailed, !isShuttingDown,
               let target = NetworkProfiles.switchTarget(for: network, in: config) else { return }
         commitProfileChange(NetworkProfiles.switching(config, to: target), justConnected: justConnected)
+    }
+
+    /// At launch: reads the network and puts its profile in use without an apply of its own,
+    /// since the startup apply that follows applies the lists in use.
+    func selectNetworkProfileBeforeStartupApply() async {
+        let network = await detectNetworkIdentity()
+        if currentNetwork != network { currentNetwork = network }
+        guard !isConfigLoadFailed, let target = NetworkProfiles.switchTarget(for: network, in: config) else { return }
+        let fromName = profileName(config.activeProfileId)
+        config = NetworkProfiles.switching(config, to: target)
+        listsSwitchedSinceCommit = true
+        saveConfig()
+        log(.info, "Network profile at launch: \(fromName) → \(profileName(config.activeProfileId)), mode \(config.routingMode.displayName)")
     }
 
     /// Saves the settings in use as a new profile for this network. False when the network
