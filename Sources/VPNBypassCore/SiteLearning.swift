@@ -16,6 +16,8 @@ struct SiteLearning: Equatable {
     static let duration: TimeInterval = 60
     /// A site domain with this many names gets the offer of a wildcard over it.
     static let wildcardMinimum = 3
+    /// A name looked up this long before the window opened was another app's, not the page's.
+    static let seenBeforeWindow: TimeInterval = 300
 
     let started: Date
     var ends: Date { started.addingTimeInterval(Self.duration) }
@@ -26,9 +28,20 @@ struct SiteLearning: Equatable {
     /// True once a drain landed in the window, even an empty one: the capture was running. An
     /// empty result without it means the helper read nothing, not that nothing was asked.
     private(set) var heard = false
+    /// The names the Lookups count saw in the `seenBeforeWindow` before the window opened: a
+    /// music or call app looking up its own names meanwhile. Empty when the page was not
+    /// watching, since then nothing was counted.
+    let seenBefore: Set<String>
 
-    init(started: Date) {
+    init(started: Date, seenBefore: Set<String> = []) {
         self.started = started
+        self.seenBefore = seenBefore
+    }
+
+    /// The names `tally` last saw in the `seenBeforeWindow` up to `started`.
+    static func seenBefore(in tally: DNSLookupTally, before started: Date) -> Set<String> {
+        let from = started.addingTimeInterval(-seenBeforeWindow)
+        return Set(tally.entries.values.filter { $0.lastSeen >= from && $0.lastSeen <= started }.map(\.name))
     }
 
     /// One drain's names, drained at `date`. Names drained before the window opened or after it
@@ -59,14 +72,39 @@ struct SiteLearning: Equatable {
         let names: [String]
         /// `*.site`, offered when the group has `wildcardMinimum` names or more.
         let wildcard: String?
+        /// Every one of its names was looked up before the window opened too.
+        var seenBefore = false
         var id: String { site }
     }
 
-    var groups: [Group] { Self.groups(names) }
+    var groups: [Group] { Self.groups(names, seenBefore: seenBefore) }
+
+    /// What the learning view lists, apart from the search-domain retries
+    /// (`SearchDomainRetries`), which it folds as the Lookups list does: a failed name asked
+    /// again with each search domain appended is not a name the page needs. With
+    /// `showsRetries` they are grouped with the rest.
+    struct Shown: Equatable {
+        /// The groups with a name first looked up in the window: the site's own, first.
+        let site: [Group]
+        /// The groups whose names were all looked up before the window opened, last.
+        let seenBefore: [Group]
+        /// How many retries there are, shown or not.
+        let retries: Int
+    }
+
+    func shown(searchDomains: [String], showsRetries: Bool) -> Shown {
+        // The name a retry came from may have been asked just before the window.
+        let retries = SearchDomainRetries.retries(among: Set(names).union(seenBefore), searchDomains: searchDomains)
+            .filter(names.contains)
+        let listed = showsRetries ? names : names.filter { !retries.contains($0) }
+        let groups = Self.groups(listed, seenBefore: seenBefore)
+        return Shown(site: groups.filter { !$0.seenBefore }, seenBefore: groups.filter(\.seenBefore),
+                     retries: retries.count)
+    }
 
     /// `names` grouped by site domain: the groups with the most names first, and among equals
-    /// the one seen first.
-    static func groups(_ names: [String]) -> [Group] {
+    /// the one seen first. A group whose names are all in `seenBefore` is marked so.
+    static func groups(_ names: [String], seenBefore: Set<String> = []) -> [Group] {
         var order: [String] = []
         var members: [String: [String]] = [:]
         for name in names {
@@ -80,7 +118,8 @@ struct SiteLearning: Equatable {
             let isSite = LookupAddLevels.registrableDomain(site) == site
             let wildcard = names.count >= wildcardMinimum && isSite
                 ? WildcardDomain.normalizedSuffix(site).map(WildcardDomain.entry(for:)) : nil
-            return Group(site: site, names: names, wildcard: wildcard)
+            return Group(site: site, names: names, wildcard: wildcard,
+                         seenBefore: !seenBefore.isEmpty && names.allSatisfy(seenBefore.contains))
         }
         return groups.enumerated()
             .sorted { $0.element.names.count != $1.element.names.count

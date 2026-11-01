@@ -1048,3 +1048,13 @@
 "Show %lld search-domain retries" = "Mostrar %lld reintentos con dominio de búsqueda";
 "Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer" = "Nombres que son otro nombre de la lista con un dominio de búsqueda añadido, como pregunta el sistema cuando un nombre no obtiene respuesta";
 "The names this Mac looks up." = "Los nombres que busca este Mac.";
+
+/* Learn a site: search-domain retries and sites seen before the window */
+"Every name was looked up before you started too." = "Todos los nombres se buscaron también antes de empezar.";
+"Only search-domain retries were looked up while learning." = "Mientras aprendía solo se buscaron reintentos con dominio de búsqueda.";
+"Seen before you started" = "Vistos antes de empezar";
+"Every name of these sites was looked up in the 5 minutes before learning started, so another app may have asked for them" = "Todos los nombres de estos sitios se buscaron en los 5 minutos antes de empezar a aprender, así que puede que los pidiera otra app";
+"Add these too" = "Añadir también estos";
+"Add these sites with the rest: leave this off when another app asked for them" = "Añade estos sitios con los demás: déjalo sin marcar si los pidió otra app";
+"Add the sites seen before you started too" = "Añadir también los sitios vistos antes de empezar";
+"Nothing to add from this window. Tick Add these too to add the sites seen before." = "Nada que añadir de esta ventana. Marca Añadir también estos para añadir los sitios vistos antes.";

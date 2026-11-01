@@ -103,6 +103,29 @@ final class LookupsPageViewTests: XCTestCase {
         XCTAssertTrue(texts.contains("Done Learning"))
     }
 
+    /// Learn a site, closed, with a search-domain retry and a music app's names looked up
+    /// before it started: VoiceOver reaches the retries toggle and the choice to add the music
+    /// app too, the retry is not listed, and the one Add counts the site's names only.
+    func testLearnedNamesFoldRetriesAndSetApartWhatWasSeenBefore() throws {
+        var config = rm.config
+        config.routingMode = .bypass
+        config.dnsLookupsEnabled = false
+        rm.config = config
+        DNSLookupsMonitor.shared.readsSearchDomains = false
+        DNSLookupsMonitor.shared.searchDomains = ["corp.example"]
+        var learning = SiteLearning(started: Date(), seenBefore: ["api.music-probe.test", "audio.music-probe.test"])
+        learning.record(["www.learn-probe.test", "api.learn-probe.test", "fail.learn-probe.test",
+                         "fail.learn-probe.test.corp.example", "api.music-probe.test", "audio.music-probe.test"], at: Date())
+        learning.close()
+        DNSLookupsMonitor.shared.learning = learning
+        let texts = texts(onLookups: open())
+        XCTAssertFalse(texts.contains { $0.contains("fail.learn-probe.test.corp.example") }, "a retry is listed: \(texts.sorted())")
+        XCTAssertTrue(texts.contains("Show 1 search-domain retry"), "no toggle for the retry: \(texts.sorted())")
+        XCTAssertTrue(texts.contains("Seen before you started"), "no section for other apps: \(texts.sorted())")
+        XCTAssertTrue(texts.contains("Add the sites seen before you started too"), "no way to add them: \(texts.sorted())")
+        XCTAssertTrue(texts.contains("Add to Bypass, 3 entries"), "the Add takes more than the site: \(texts.sorted())")
+    }
+
     // MARK: - Helpers
 
     /// One failed name the resolver retried with each search domain appended filled the list

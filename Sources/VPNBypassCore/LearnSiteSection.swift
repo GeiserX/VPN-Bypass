@@ -1,7 +1,9 @@
 // LearnSiteSection.swift
 // Learn a site on the Lookups page (SiteLearning.swift): the countdown while the window is
 // open, then the names first seen in it, one row per site domain, the wildcard offer for a
-// site with three names or more, and one Add for all of it.
+// site with three names or more, and one Add for all of it. The search-domain retries are
+// folded as on the Lookups list, and the sites whose names other apps were already looking up
+// before the window opened are listed apart, last, and added only when the user says so.
 
 import SwiftUI
 
@@ -14,11 +16,26 @@ struct LearnSiteSection: View {
     /// The wildcards the user chose instead of a site's names.
     @State private var wildcards: Set<String> = []
     @State private var isAdding = false
+    /// The search-domain retries are listed too.
+    @State private var showsRetries = false
+    /// The one Add takes the sites seen before the window too.
+    @State private var addsSeenBefore = false
 
     private var mode: LookupMode { LookupMode(routeManager) }
-    private var groups: [SiteLearning.Group] { learning.groups }
+    private var shown: SiteLearning.Shown {
+        learning.shown(searchDomains: monitor.searchDomains, showsRetries: showsRetries)
+    }
+    /// What the one Add covers.
+    private var added: [SiteLearning.Group] {
+        let shown = self.shown
+        return shown.site + (addsSeenBefore ? shown.seenBefore : [])
+    }
     private var plan: [String] {
-        SiteLearning.plan(groups, wildcards: wildcards, isListed: { routeManager.lookupListing($0) != nil })
+        SiteLearning.plan(added, wildcards: wildcards, isListed: { routeManager.lookupListing($0) != nil })
+    }
+    /// Sites seen before that the Add leaves out and that have a name the mode does not route.
+    private var leavesOutSeenBefore: Bool {
+        !addsSeenBefore && shown.seenBefore.contains { $0.names.contains { routeManager.lookupListing($0) == nil } }
     }
     /// Routed by the mode: listed and on. A name whose own entry is switched off is not routed,
     /// and adding it again is refused, so it is turned on from the Domains page instead.
@@ -38,28 +55,66 @@ struct LearnSiteSection: View {
                     .font(Theme.Font.body)
                     .foregroundColor(Theme.attention)
             }
+            let shown = self.shown
+            let numberWidth = ListRow.numberColumnWidth(
+                for: (shown.site + shown.seenBefore).map { LookupRow.format($0.names.count) })
             GroupSection(title, trailing: { trailing }) {
-                if groups.isEmpty {
+                if shown.site.isEmpty {
                     EmptyState(systemImage: learning.isOpen ? "arrow.clockwise"
                                    : learning.heard ? "checkmark.circle" : "exclamationmark.triangle",
                                title: learning.isOpen
                                    ? String(localized: "Reload the page that does not work now.")
+                                   : !shown.seenBefore.isEmpty
+                                   ? String(localized: "Every name was looked up before you started too.")
+                                   : shown.retries > 0
+                                   ? String(localized: "Only search-domain retries were looked up while learning.")
                                    : learning.heard
                                    ? String(localized: "No name was looked up while learning.")
                                    : String(localized: "The helper read no lookups in this window, so nothing was learned."))
                 } else {
-                    let numberWidth = ListRow.numberColumnWidth(for: groups.map { LookupRow.format($0.names.count) })
-                    ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-                        VStack(spacing: 0) {
-                            if index > 0 { InsetDivider() }
-                            row(group, numberWidth: numberWidth)
-                        }
-                    }
+                    rows(shown.site, numberWidth: numberWidth)
                 }
             }
-            if !learning.isOpen, !groups.isEmpty {
+            if shown.retries > 0 {
+                let title = LookupsTab.retriesToggleTitle(count: shown.retries, showing: showsRetries)
+                Button(title) { showsRetries.toggle() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help(String(localized: "Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer"))
+                    .accessibilityLabel(title)
+                    .padding(.leading, 2)
+            }
+            if !shown.seenBefore.isEmpty {
+                GroupSection(String(localized: "Seen before you started"), trailing: { seenBeforeTrailing }) {
+                    rows(shown.seenBefore, numberWidth: numberWidth)
+                }
+                .help(String(localized: "Every name of these sites was looked up in the 5 minutes before learning started, so another app may have asked for them"))
+            }
+            if !learning.isOpen, !(shown.site + shown.seenBefore).isEmpty {
                 addBar
             }
+        }
+    }
+
+    private func rows(_ groups: [SiteLearning.Group], numberWidth: CGFloat) -> some View {
+        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+            VStack(spacing: 0) {
+                if index > 0 { InsetDivider() }
+                row(group, numberWidth: numberWidth)
+            }
+        }
+    }
+
+    /// Once the window is closed, the choice to add the sites seen before too.
+    @ViewBuilder private var seenBeforeTrailing: some View {
+        if !learning.isOpen {
+            Toggle(isOn: $addsSeenBefore) {
+                Text("Add these too")
+            }
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+            .help(String(localized: "Add these sites with the rest: leave this off when another app asked for them"))
+            .accessibilityLabel(String(localized: "Add the sites seen before you started too"))
         }
     }
 
@@ -138,6 +193,8 @@ struct LearnSiteSection: View {
         HStack(spacing: Theme.Space.m) {
             Text(!plan.isEmpty
                  ? String(localized: "Entries to add: \(plan.count)")
+                 : leavesOutSeenBefore
+                 ? String(localized: "Nothing to add from this window. Tick Add these too to add the sites seen before.")
                  : hasSwitchedOff
                  ? String(localized: "A name here is on the list but switched off. Turn it on from the Domains page.")
                  : String(localized: "Every name here is routed already."))

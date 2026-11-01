@@ -157,13 +157,17 @@ final class DNSLookupsMonitor: ObservableObject {
 
     /// Opens a learning window of `SiteLearning.duration`. When the page is not watching, the
     /// capture starts for the window alone and stops after it. Names the helper holds from
-    /// before the click are drained first, into the count only.
+    /// before the click are drained first, into the count only, and the window keeps the names
+    /// the count saw just before it (`SiteLearning.seenBefore`).
     func startLearning() async {
         guard learning?.isOpen != true else { return }
         if isCapturing { await drainNow() }
         // A second click that waited on the same drain finds the window already open.
         guard learning?.isOpen != true else { return }
-        learning = SiteLearning(started: Date())
+        // The names the count saw in the last minutes, so the window can set apart what other
+        // apps were already asking for.
+        let started = Date()
+        learning = SiteLearning(started: started, seenBefore: SiteLearning.seenBefore(in: tally, before: started))
         followConfig()
         learnTask?.cancel()
         learnTask = Task { @MainActor [weak self] in
