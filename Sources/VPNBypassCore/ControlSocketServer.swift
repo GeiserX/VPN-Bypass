@@ -141,6 +141,12 @@ public final class ControlSocketServer {
         guard fd >= 0 else {
             throw ServerError.systemError("socket() failed: \(String(cString: strerror(errno)))")
         }
+        // Accepted sockets inherit SO_NOSIGPIPE from the listener. The kernel refuses the
+        // option (EINVAL) on a socket whose peer already closed, so a client that sends its
+        // line and closes before accept() would leave the per-connection setsockopt below
+        // without effect, and writing the reply would raise SIGPIPE in the app.
+        var noSigPipe: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
 
         var addr: sockaddr_un
         do {

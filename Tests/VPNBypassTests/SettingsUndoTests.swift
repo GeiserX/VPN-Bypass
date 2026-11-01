@@ -83,16 +83,16 @@ final class UndoableChangeWordingTests: XCTestCase {
         XCTAssertEqual(ServiceBulkSwitch.turnAllOnTitle(offCount: 6), "Turn All On…")
     }
 
-    /// The default catalogue with four services on: Turn All On asks about the 33 that are
-    /// off, not all 37.
-    func testTheDefaultCatalogueAsksAboutTheServicesThatAreOff() throws {
-        var services = RouteManager.Config().services.filter { !$0.isCustom }
-        for i in services.indices where ["telegram", "whatsapp", "youtube", "slack"].contains(services[i].id) {
-            services[i].enabled = true
-        }
-        let question = try XCTUnwrap(ServiceBulkSwitch.question(turningOn: services.filter { !$0.enabled }))
-        XCTAssertEqual(question.title, "Send 33 services around the VPN?")
-        XCTAssertTrue(question.message.contains("and 31 more"), question.message)
+    /// The default catalogue with eight services switched off on the page this visit: Turn All
+    /// On asks about those eight, never about the catalogue's other services.
+    func testTheDefaultCatalogueAsksAboutThePagesServicesOnly() throws {
+        let services = RouteManager.Config().services.filter { !$0.isCustom }
+        var pinned = ServiceSections.pin(services)
+        for service in services.prefix(8) { pinned[service.id] = true }
+        let off = ServiceSections.turnAllOn(services: services, pinned: pinned)
+        let question = try XCTUnwrap(ServiceBulkSwitch.question(turningOn: off))
+        XCTAssertEqual(question.title, "Send 8 services around the VPN?")
+        XCTAssertTrue(question.message.contains("and 6 more"), question.message)
     }
 
     // MARK: Spanish and French

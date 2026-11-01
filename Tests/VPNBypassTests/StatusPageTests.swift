@@ -34,7 +34,7 @@ final class StatusPageTests: XCTestCase {
     func testWorkingMatchesTheMockup() {
         let s = summary()
         XCTAssertEqual(s.title, "Working")
-        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 62 addresses routed 23 s ago, none failed.")
+        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 62 addresses routed now, applied 23 s ago, none failed.")
         XCTAssertEqual(s.tone, .ok)
         XCTAssertNil(s.note)
     }
@@ -46,15 +46,16 @@ final class StatusPageTests: XCTestCase {
     }
 
     func testFailedRoutesShowInTheSentence() {
-        let s = summary { $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-5), routeCount: 60, failedCount: 2) }
-        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 60 addresses routed 5 s ago, 2 failed.")
+        let s = summary { $0.installedRoutes = 60; $0.lastRouteChange = .init(kind: .applied, at: self.now.addingTimeInterval(-5), routeCount: 60, failedCount: 2) }
+        XCTAssertEqual(s.sentence, "4 services and 2 domains skip the VPN. 60 addresses routed now, applied 5 s ago, 2 failed.")
     }
 
-    /// The caption of image 13: with the helper down, the summary says why nothing is routed.
+    /// With the helper down, the summary says why no route can change, and what is still in place.
     func testHelperDownSaysWhyNothingIsRouted() {
         let s = summary { $0.helperReady = false }
         XCTAssertEqual(s.title, "Not working")
-        XCTAssertEqual(s.sentence, "Nothing is routed while the privileged helper is not running.")
+        XCTAssertEqual(s.sentence, "The helper is not running, so no route can change.")
+        XCTAssertEqual(s.note, "62 addresses from before are still routed.")
         XCTAssertEqual(s.tone, .warn)
     }
 
@@ -62,7 +63,7 @@ final class StatusPageTests: XCTestCase {
         let s = summary { $0.isVPNConnected = false; $0.installedRoutes = 0 }
         XCTAssertEqual(s.title, "No VPN connected")
         XCTAssertEqual(s.sentence, "Nothing is routed until a VPN connects.")
-        XCTAssertEqual(s.tone, .bad)
+        XCTAssertEqual(s.tone, .idle, "no VPN is an ordinary state, grey, not red")
     }
 
     func testWaitingAfterAReconnectUsesTheDropdownHeadline() {
@@ -86,7 +87,7 @@ final class StatusPageTests: XCTestCase {
         XCTAssertEqual(s.title, "Working")
         XCTAssertEqual(s.note, "The scheduled re-apply still runs in 10 min.")
         XCTAssertFalse(StatusPage.isWaiting(input { $0.pending = pending }))
-        XCTAssertEqual(DropdownStatus.make(input { $0.pending = pending }, now: now).pill, "ON",
+        XCTAssertEqual(DropdownStatus.make(input { $0.pending = pending }, now: now).chip, .on,
                        "the page's verdict follows the dropdown's own decision")
     }
 
@@ -134,13 +135,10 @@ final class StatusPageTests: XCTestCase {
                        .init(text: "Not connected", tone: .bad))
     }
 
+    /// No Wi-Fi name: it came from `airport -I`, which current macOS does not have (B4).
     func testNormalConnectionLine() {
-        XCTAssertEqual(StatusPage.normalConnectionLine(ssid: "Home", gateway: "192.168.1.1").text,
-                       "Wi-Fi “Home”, gateway 192.168.1.1")
-        XCTAssertEqual(StatusPage.normalConnectionLine(ssid: nil, gateway: "192.168.1.1"), .init(text: "Gateway 192.168.1.1"))
-        XCTAssertEqual(StatusPage.normalConnectionLine(ssid: "Home", gateway: nil),
-                       .init(text: "Wi-Fi “Home”, no gateway found", tone: .warn))
-        XCTAssertEqual(StatusPage.normalConnectionLine(ssid: nil, gateway: nil), .init(text: "No gateway found", tone: .warn))
+        XCTAssertEqual(StatusPage.normalConnectionLine(gateway: "192.168.1.1"), .init(text: "Gateway 192.168.1.1"))
+        XCTAssertEqual(StatusPage.normalConnectionLine(gateway: nil), .init(text: "No gateway found", tone: .warn))
     }
 
     private let wireguard = RouteManager.VPNLink(interface: "utun4", addresses: ["10.0.0.2"], label: "WireGuard", isTailscale: false)
@@ -239,10 +237,10 @@ final class StatusPageTests: XCTestCase {
 
     func testAppliedLine() {
         let applied = RouteManager.RouteChangeOutcome(kind: .applied, at: now.addingTimeInterval(-23), routeCount: 62, failedCount: 0)
-        XCTAssertEqual(StatusPage.appliedLine(installed: 62, lastChange: applied, now: now), .init(text: "62 addresses, 23 s ago, none failed"))
+        XCTAssertEqual(StatusPage.appliedLine(installed: 62, lastChange: applied, now: now), .init(text: "62 addresses, applied 23 s ago, none failed"))
         let failed = RouteManager.RouteChangeOutcome(kind: .applied, at: now.addingTimeInterval(-23), routeCount: 1, failedCount: 2)
         XCTAssertEqual(StatusPage.appliedLine(installed: 1, lastChange: failed, now: now),
-                       .init(text: "1 address, 23 s ago, 2 failed", tone: .warn))
+                       .init(text: "1 address, applied 23 s ago, 2 failed", tone: .warn))
         XCTAssertEqual(StatusPage.appliedLine(installed: 5, lastChange: nil, now: now).text, "5 addresses")
         XCTAssertEqual(StatusPage.appliedLine(installed: 0, lastChange: nil, now: now).text, "None yet")
     }
@@ -271,7 +269,7 @@ final class StatusPageTests: XCTestCase {
 
     private func result(_ ip: String, ok: Bool, ago: TimeInterval) -> RouteVerificationResult {
         RouteVerificationResult(destination: ip, isReachable: ok, latency: ok ? 12 : nil,
-                                timestamp: now.addingTimeInterval(-ago), error: ok ? nil : "Ping timed out")
+                                timestamp: now.addingTimeInterval(-ago), error: ok ? nil : "Left through en0, but nothing answered on port 443")
     }
 
     func testLastCheckSaysHowManyOfTheRoutesItChecked() {
@@ -346,9 +344,10 @@ final class StatusPageTests: XCTestCase {
     // MARK: Pages
 
     func testStatusIsTheFirstPageInEveryMode() {
-        XCTAssertEqual(SettingsView.tabs(for: .bypass), [.status, .domains, .services, .lookups, .general, .logs, .info])
-        XCTAssertEqual(SettingsView.tabs(for: .vpnOnly), [.status, .domains, .lookups, .general, .logs, .info])
-        XCTAssertEqual(SettingsView.tabs(for: .custom), [.status, .rules, .routes, .lookups, .general, .logs, .info])
+        XCTAssertEqual(SettingsSidebar.pages.first, .status)
+        for mode in [RoutingMode.bypass, .vpnOnly, .custom] {
+            XCTAssertFalse(SettingsSidebar.isReadOnly(.status, in: mode))
+        }
     }
 
     // MARK: Tunnel reads
@@ -434,10 +433,8 @@ final class StatusPageTests: XCTestCase {
             StatusPage.vpnLine(isConnected: true, name: "WireGuard", interface: "utun4", bundle: bundle).text,
             StatusPage.vpnLine(isConnected: true, name: nil, interface: "utun4", bundle: bundle).text,
             StatusPage.vpnLine(isConnected: true, name: "WireGuard", interface: nil, bundle: bundle).text,
-            StatusPage.normalConnectionLine(ssid: "Home", gateway: "1.2.3.4", bundle: bundle).text,
-            StatusPage.normalConnectionLine(ssid: nil, gateway: "1.2.3.4", bundle: bundle).text,
-            StatusPage.normalConnectionLine(ssid: "Home", gateway: nil, bundle: bundle).text,
-            StatusPage.normalConnectionLine(ssid: nil, gateway: nil, bundle: bundle).text,
+            StatusPage.normalConnectionLine(gateway: "1.2.3.4", bundle: bundle).text,
+            StatusPage.normalConnectionLine(gateway: nil, bundle: bundle).text,
             StatusPage.defaultRouteLine(nil, bundle: bundle).text,
             StatusPage.defaultRouteLine(snapshot(default: nil), bundle: bundle).text,
             StatusPage.defaultRouteLine(s, bundle: bundle).text,
@@ -495,8 +492,8 @@ final class StatusPageTests: XCTestCase {
         }
         XCTAssertEqual(StatusPage.vpnLine(isConnected: true, name: "WireGuard", interface: "utun4", bundle: es).text,
                        "WireGuard, conectada en utun4")
-        XCTAssertEqual(StatusPage.normalConnectionLine(ssid: "Home", gateway: "192.168.1.1", bundle: fr).text,
-                       "Wi-Fi « Home », passerelle 192.168.1.1")
+        XCTAssertEqual(StatusPage.normalConnectionLine(gateway: "192.168.1.1", bundle: fr).text,
+                       "Passerelle 192.168.1.1")
         XCTAssertEqual(StatusPage.lastCheckLine([result("1.1.1.1", ok: false, ago: 5)], installed: 62, now: now, bundle: es).text
                         .hasPrefix("1 de 62 comprobadas, 1 sin respuesta"), true)
     }

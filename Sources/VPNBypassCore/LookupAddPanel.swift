@@ -1,5 +1,5 @@
 // LookupAddPanel.swift
-// The DNS Lookups page's add panel: the popover a row's chevron opens. It picks what to add
+// The DNS Lookups page's add panel: the popover a row's ⋯ (More ways to add) opens. It picks what to add
 // (the looked-up name, or a wildcard over it) and where (the current mode's list, a new
 // service, or any service). The choice logic is plain values here, so it is tested without
 // a view; `LookupAddPanel` only draws it.
@@ -220,35 +220,35 @@ struct LookupAddPanel: View {
     private var isWildcard: Bool { WildcardDomain.isWildcard(level) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            section(String(localized: "WHAT TO ADD")) {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            section(String(localized: "What to Add")) {
                 ForEach(choices.levels, id: \.self) { value in
                     choiceRow(selected: level == value, action: { level = value }) {
                         Text(verbatim: value)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(Theme.Font.body)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
                 }
                 if choices.levels.count > 1 {
-                    Text("A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off.")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textTertiary)
+                    Text("A wildcard covers every name under it. The helper routes each one as it is looked up, so the Lookups page need not be watching.")
+                        .font(Theme.Font.detail)
+                        .foregroundColor(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.leading, 22)
                 }
             }
 
-            section(String(localized: "WHERE")) {
+            section(String(localized: "Where")) {
                 ForEach(choices.targets, id: \.self) { place in
                     choiceRow(selected: target == place, action: { target = place }) {
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(title(place)).font(.system(size: 12))
+                            Text(title(place)).font(Theme.Font.body)
                             if place == .directRule {
                                 Text(isWildcard ? String(localized: "Matches every name under \(String(level.dropFirst(WildcardDomain.prefix.count)))")
                                                 : String(localized: "Matches this name only"))
-                                    .font(.system(size: 11))
-                                    .foregroundColor(Theme.textTertiary)
+                                    .font(Theme.Font.detail)
+                                    .foregroundColor(Theme.textSecondary)
                             }
                         }
                     }
@@ -266,10 +266,12 @@ struct LookupAddPanel: View {
                     onAdd(level, target)
                 }
                 .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
                 .disabled(isBusy)
             }
         }
-        .padding(14)
+        .padding(Theme.Space.l)
         .frame(width: Self.width)
         // A service picked here and deleted meanwhile is no longer picked.
         .onChange(of: choices.services.map(\.id)) { _ in target = choices.target(target, whenSearching: search) }
@@ -283,7 +285,7 @@ struct LookupAddPanel: View {
             Group {
                 if shown.isEmpty {
                     Text("No service matches \"\(search)\"")
-                        .font(.system(size: 11))
+                        .font(Theme.Font.detail)
                         .foregroundColor(Theme.textSecondary)
                         .frame(maxWidth: .infinity, minHeight: Self.rowHeight)
                 } else {
@@ -297,9 +299,9 @@ struct LookupAddPanel: View {
                 }
             }
             .padding(.vertical, 2)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Theme.bgInput))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.bgCardBorder, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(Theme.bgInput))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.border, lineWidth: 0.5))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
         }
         .padding(.leading, 22)
     }
@@ -310,21 +312,17 @@ struct LookupAddPanel: View {
                 choiceRow(selected: target == .service(service.id), action: { target = .service(service.id) }) {
                     HStack(spacing: 6) {
                         Text(service.name)
-                            .font(.system(size: 12))
-                            .foregroundColor(service.enabled ? .white : Theme.textSecondary)
+                            .font(Theme.Font.body)
+                            .foregroundColor(service.enabled ? Theme.text : Theme.textSecondary)
                             .lineLimit(1)
                         if !service.enabled {
                             Text("off")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(Theme.Font.detail)
                                 .foregroundColor(Theme.textSecondary)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(Color.white.opacity(0.08))
-                                .cornerRadius(4)
                         }
                     }
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, Theme.Space.s)
                 .frame(height: Self.rowHeight)
             }
         }
@@ -333,9 +331,9 @@ struct LookupAddPanel: View {
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .tracking(1)
+                .font(Theme.Font.section)
                 .foregroundColor(Theme.textSecondary)
+                .accessibilityAddTraits(.isHeader)
             content()
         }
     }
@@ -343,10 +341,11 @@ struct LookupAddPanel: View {
     private func choiceRow<Label: View>(selected: Bool, action: @escaping () -> Void,
                                         @ViewBuilder label: () -> Label) -> some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Space.s) {
                 Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 12))
-                    .foregroundColor(selected ? Theme.success : Theme.textSecondary)
+                    .foregroundColor(selected ? Theme.accent : Theme.textSecondary)
+                    .accessibilityHidden(true)
                 label()
                 Spacer(minLength: 0)
             }

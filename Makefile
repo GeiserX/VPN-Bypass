@@ -3,7 +3,10 @@
 APP_NAME = VPN Bypass
 BUNDLE_ID = com.geiserx.vpn-bypass
 HELPER_ID = com.geiserx.vpnbypass.helper
-BUILD_DIR = .build/apple/Products/Release
+# Where `make build` puts the universal binaries. SwiftPM picks the folder
+# (.build/apple/Products/Release before Swift 6.4, .build/out/Products/Release
+# since), so ask it rather than name one. Asked once, when a recipe first uses it.
+BUILD_DIR = $(eval BUILD_DIR := $(shell swift build -c release --arch arm64 --arch x86_64 --show-bin-path))$(or $(BUILD_DIR),$(error swift build --show-bin-path returned no path))
 APP_BUNDLE = $(APP_NAME).app
 HELPER_BUILD_DIR = .build/helper
 VERSION = $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0")
@@ -81,6 +84,12 @@ bundle: build build-helper
 	@cp assets/menubar-icon-error@2x.png "$(APP_BUNDLE)/Contents/Resources/"
 	@# Copy localizations
 	@cp -R Sources/VPNBypassCore/Resources/*.lproj "$(APP_BUNDLE)/Contents/Resources/"
+	@# Copy the service catalogue; an empty copy fails here instead of shipping no services
+	@mkdir -p "$(APP_BUNDLE)/Contents/Resources/catalogue"
+	@cp Sources/VPNBypassCore/Resources/catalogue/*.json "$(APP_BUNDLE)/Contents/Resources/catalogue/"
+	@ls "$(APP_BUNDLE)"/Contents/Resources/catalogue/*.json >/dev/null
+	@# The Shortcuts actions: Shortcuts finds them only through Metadata.appintents
+	@scripts/appintents-metadata.sh "$(APP_BUNDLE)"
 	@echo "App bundle created: $(APP_BUNDLE)"
 
 clean:
@@ -126,7 +135,7 @@ uninstall-helper:
 # since the helper only accepts an app signed by our Developer ID team.
 release: bundle
 	@echo "Creating release v$(VERSION)..."
-	@scripts/sign-and-notarize.sh app "$(APP_BUNDLE)"
+	@scripts/sign-and-notarize.sh app --entitlements VPNBypass.entitlements "$(APP_BUNDLE)"
 	@mkdir -p dist
 	@$(MAKE) dmg
 	@scripts/sign-and-notarize.sh dmg "dist/VPN-Bypass-$(VERSION).dmg"

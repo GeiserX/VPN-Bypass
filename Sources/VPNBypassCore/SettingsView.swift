@@ -1,5 +1,6 @@
 // SettingsView.swift
-// Settings window with tabs for Status, Domains, Services, Rules, Routes, Lookups, General, Logs, and Info.
+// The Settings window: a sidebar (SettingsSidebar.swift) with Status, Domains, Services, Rules,
+// Routes, Lookups, Logs, General and About, and the page picked in it.
 
 import SwiftUI
 import UniformTypeIdentifiers
@@ -8,33 +9,62 @@ struct SettingsView: View {
     @EnvironmentObject var routeManager: RouteManager
     @EnvironmentObject var notificationManager: NotificationManager
     @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
-    /// The mode picked in the title bar's Mode menu; set, it opens the sheet.
+    /// The mode picked in the sidebar's mode popup or a read-only page's Switch…; set, it opens the sheet.
     @EnvironmentObject var modeSwitch: ModeSwitchRequest
     /// The last delete or bulk switch, which the page that made it offers to undo.
     @EnvironmentObject var settingsUndo: SettingsUndo
     @Environment(\.undoManager) private var undoManager
-    @State private var selectedTab: SettingsTab = .status
+    /// Opens on the page shown last time the window was open.
+    @State private var selectedTab = SettingsSidebar.restoredPage(UserDefaults.standard.string(forKey: SettingsSidebar.lastPageKey))
+    /// The title bar search on a list page; emptied when the page changes.
+    @State private var searchText = SettingsView.searchForScreenshots ?? ""
+    /// The search a page asked for from outside opens with, set once the page has changed.
+    @State private var pendingSearch: String?
+    /// The doc screenshots open each page with this in the search.
+    static var searchForScreenshots: String?
     /// What the Logs page shows when it opens: All, or Warnings after the Status page's Show in Log.
     @State private var logsFilter = LogFilter()
     /// Bumped when a filter is asked for from outside, so a Logs page already open takes it.
     @State private var logsFilterRequest = 0
+    /// The line the page on screen publishes under its title (`pageSubtitle(_:)`).
+    @State private var pageSubtitle: String?
 
-    // MARK: - Tab model
+    // MARK: - Page model
 
-    enum SettingsTab: Hashable {
-        case status, domains, services, rules, routes, lookups, general, logs, info
+    enum SettingsTab: String, Hashable, CaseIterable {
+        case status, domains, services, rules, routes, lookups, general, logs, about
 
-        var title: LocalizedStringKey {
+        /// The page's name, also the window's title.
+        var name: String { name(in: .main) }
+
+        func name(in bundle: Bundle) -> String {
             switch self {
-            case .status:   return "Status"
-            case .domains:  return "Domains"
-            case .services: return "Services"
-            case .rules:    return "Rules"
-            case .routes:   return "Routes"
-            case .lookups:  return "Lookups"
-            case .general:  return "General"
-            case .logs:     return "Logs"
-            case .info:     return "Info"
+            case .status:   return String(localized: "Status", bundle: bundle)
+            case .domains:  return String(localized: "Domains", bundle: bundle)
+            case .services: return String(localized: "Services", bundle: bundle)
+            case .rules:    return String(localized: "Rules", bundle: bundle)
+            case .routes:   return String(localized: "Routes", bundle: bundle)
+            case .lookups:  return String(localized: "Lookups", bundle: bundle)
+            case .general:  return String(localized: "General", bundle: bundle)
+            case .logs:     return String(localized: "Logs", bundle: bundle)
+            case .about:    return String(localized: "About", bundle: bundle)
+            }
+        }
+
+        /// The page's purpose line, under its title in the header band. Domains and Rules
+        /// publish their own (`pageSubtitle(_:)`), which changes with the mode and the rule
+        /// count; this is what every other page shows, and their line before they publish.
+        func purpose(in bundle: Bundle = .main) -> String {
+            switch self {
+            case .status:   return String(localized: "What is routed now, and what needs a look.", bundle: bundle)
+            case .domains:  return DomainsPage.purpose(isInverse: false, in: bundle)
+            case .services: return ServicesPage.purpose(in: bundle)
+            case .rules:    return RulesTab.purpose(ruleCount: 0, in: bundle)
+            case .routes:   return String(localized: "The ways out a rule can pick.", bundle: bundle)
+            case .lookups:  return String(localized: "The names this Mac looks up.", bundle: bundle)
+            case .general:  return String(localized: "How the app starts, looks up names and lets you know.", bundle: bundle)
+            case .logs:     return String(localized: "What the app did, and why.", bundle: bundle)
+            case .about:    return String(localized: "The version, updates and where to get help.", bundle: bundle)
             }
         }
 
@@ -42,73 +72,52 @@ struct SettingsView: View {
             switch self {
             case .status:   return "waveform.path.ecg.rectangle"
             case .domains:  return "globe"
-            case .services: return "square.grid.2x2.fill"
-            case .rules:    return "list.bullet.indent"
+            case .services: return "square.grid.2x2"
+            case .rules:    return "list.bullet"
             case .routes:   return "arrow.triangle.branch"
             case .lookups:  return "magnifyingglass"
-            case .general:  return "gearshape.fill"
+            case .general:  return "slider.horizontal.3"
             case .logs:     return "list.bullet.rectangle"
-            case .info:     return "info.circle.fill"
+            case .about:    return "info.circle"
             }
         }
     }
 
-    /// Ordered tabs to display, driven by the routing mode (chosen from the Mode menu in the
-    /// title bar): Status comes first in every mode; Bypass/VPN Only keep the classic tabs;
-    /// Custom Routes swaps Domains/Services for Rules + Routes.
-    private var visibleTabs: [SettingsTab] { Self.tabs(for: routeManager.config.routingMode) }
-
-    static func tabs(for mode: RouteManager.RoutingMode) -> [SettingsTab] {
-        switch mode {
-        case .bypass:  return [.status, .domains, .services, .lookups, .general, .logs, .info]
-        case .vpnOnly: return [.status, .domains, .lookups, .general, .logs, .info]
-        case .custom:  return [.status, .rules, .routes, .lookups, .general, .logs, .info]
-        }
-    }
-
-    /// If the selected tab isn't visible under the current mode (e.g. a fresh
-    /// window opened while already in Custom mode, or a mode switch while the
-    /// window is open), fall back to the first visible tab so the view is never
-    /// left showing hidden-tab content with no pill selected in the tab bar.
-    private func clampSelectedTabIfNeeded() {
-        if !visibleTabs.contains(selectedTab) {
-            selectedTab = visibleTabs.first ?? .general
-        }
-    }
+    private var mode: RoutingMode { routeManager.config.routingMode }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Beautiful gradient header
-            headerView
-
-            // Tab content with animation
-            tabContent
-                .animation(.easeInOut(duration: 0.2), value: selectedTab)
+        // The title bar's height is the top safe area (28 pt, 32 on macOS 26). The sidebar's app
+        // name and the page header both start under it, on one centre line.
+        GeometryReader { proxy in
+            let titleBar = max(proxy.safeAreaInsets.top, 28)
+            HStack(spacing: 0) {
+                SettingsSidebarView(selection: $selectedTab, topInset: titleBar)
+                Rectangle()
+                    .fill(Theme.separator)
+                    .frame(width: 1)
+                detail(titleBar: titleBar)
+            }
+            .ignoresSafeArea(.container, edges: .top)
         }
-        .frame(width: 580, height: 680)
-        .background(
-            LinearGradient(
-                colors: [Theme.bgPrimary, Theme.bgSecondary],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .background(WindowTitleSetter(title: selectedTab.name))
         .onAppear {
-            clampSelectedTabIfNeeded()
             settingsUndo.undoManager = undoManager
         }
+        // The page stays where it is; a page of the old mode turns read-only.
         .onChange(of: routeManager.config.routingMode) { _ in
-            clampSelectedTabIfNeeded()
-            // The change was made to another mode's list, which this page no longer shows.
+            // The change was made to another mode's list, which this page no longer edits.
             settingsUndo.clear()
         }
         // The line belongs to the page that made the change.
         .onChange(of: selectedTab) { tab in
             settingsUndo.clear()
+            searchText = pendingSearch ?? Self.searchForScreenshots ?? ""
+            pendingSearch = nil
+            UserDefaults.standard.set(tab.rawValue, forKey: SettingsSidebar.lastPageKey)
             // The Logs filter resets when the page is left, as it always has.
             if tab != .logs { logsFilter = LogFilter() }
         }
-        // A page asked for from outside, such as the dropdown's "All 37 services…" row. The
+        // A page asked for from outside, such as the dropdown's "All N services…" row. The
         // publisher sends its current value on subscribe, so a fresh window opens on it too.
         .onReceive(SettingsPageRequest.shared.$page) { page in
             guard let page else { return }
@@ -118,8 +127,15 @@ struct SettingsView: View {
                 logsFilter = filter
                 logsFilterRequest += 1
             }
+            let search = SettingsPageRequest.shared.search
+            SettingsPageRequest.shared.search = nil
+            // Changing page clears the search, so a search for another page waits for it.
+            if page == selectedTab {
+                if let search { searchText = search }
+            } else {
+                pendingSearch = search
+            }
             selectedTab = page
-            clampSelectedTabIfNeeded()
         }
         .sheet(isPresented: Binding(
             get: { modeSwitch.pickedMode != nil },
@@ -137,345 +153,153 @@ struct SettingsView: View {
         }
     }
 
-    /// The page toolbar: icon above label, a plain highlight on the page shown. The routing
-    /// mode is not here; it is the Mode menu in the title bar, so no page button changes it.
-    private var headerView: some View {
+    /// The page: under the title bar (which holds only the traffic lights), a header band with
+    /// the page's name and purpose line, the search field on a list page and the page's own
+    /// primary actions (`pageTitleActions`), then the page itself in the one scroll view of the
+    /// window.
+    private func detail(titleBar: CGFloat) -> some View {
         VStack(spacing: 0) {
-            // Each item is at least 80 pt wide, so seven with 4 pt gaps need 584 pt of a 580 pt
-            // window; seven sit edge to edge instead.
-            HStack(spacing: visibleTabs.count > 6 ? 0 : 4) {
-                ForEach(visibleTabs, id: \.self) { tab in
-                    SettingsToolbarItem(
-                        title: tab.title,
-                        icon: tab.icon,
-                        isSelected: selectedTab == tab
-                    ) {
-                        selectedTab = tab
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            // The hosting view's safe area already starts below the title bar row (traffic
-            // lights, app name, Mode menu), so only a small gap is added here.
-            .padding(.top, 6)
-            .padding(.bottom, 8)
+            // The header's room. The header itself is drawn over it, from the actions the page
+            // publishes from inside the scroll view.
+            Color.clear
+                .frame(height: titleBar + PageHeader.height)
 
             Rectangle()
-                .fill(Theme.divider)
+                .fill(Theme.separator)
                 .frame(height: 1)
-        }
-        .background(Theme.bgPrimary.opacity(0.8))
-    }
 
-    private var tabContent: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                switch selectedTab {
-                case .status:
-                    StatusTab(onShowWarnings: {
-                        logsFilter = LogFilter(level: .warnings)
-                        selectedTab = .logs
-                    })
-                case .domains:  DomainsTab()
-                case .services: ServicesTab()
-                case .rules:    RulesTab()
-                case .routes:   RoutesTab()
-                case .lookups:  LookupsTab()
-                case .general:  GeneralTab()
-                case .logs:     LogsTab(filter: logsFilter).id(logsFilterRequest)
-                case .info:     InfoTab()
-                }
-            }
-            .padding(24)
-        }
-    }
-}
-
-// MARK: - Toolbar Item
-
-/// One page button in the Settings toolbar, laid out like macOS System Settings: icon above
-/// label, and a plain highlight on the page shown rather than the green pill the mode used to wear.
-struct SettingsToolbarItem: View {
-    let title: LocalizedStringKey
-    let icon: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 17, weight: .regular))
-                    .frame(height: 20)
-                    .foregroundColor(isSelected ? Theme.Brand.sky : Theme.textSecondary)
-                Text(title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(isSelected ? Theme.textPrimary : Theme.textSecondary)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .frame(minWidth: 64)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isSelected ? Color.white.opacity(0.10) : (isHovered ? Theme.bgCard : Color.clear))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.15)) {
-                isHovered = hovering
-            }
-        }
-    }
-}
-
-// MARK: - Domains Tab
-
-/// The Domains page's title names the list after its mode. It said "Custom Domains", which
-/// read as Custom mode's list (proposal 16 of #119).
-enum DomainListCopy {
-    static func title(isInverse: Bool, bundle: Bundle = .main) -> String {
-        isInverse
-            ? String(localized: "VPN Only list", bundle: bundle)
-            : String(localized: "Bypass list", bundle: bundle)
-    }
-}
-
-struct DomainsTab: View {
-    @EnvironmentObject var routeManager: RouteManager
-    @EnvironmentObject var settingsUndo: SettingsUndo
-    @State private var newDomain: String
-    /// What the last add did, shown under the field.
-    @State private var feedback: AddDomainFeedback?
-    @FocusState private var isInputFocused: Bool
-
-    /// The arguments seed the field and the line under it, for a rendered screenshot.
-    init(newDomain: String = "", feedback: AddDomainFeedback? = nil) {
-        _newDomain = State(initialValue: newDomain)
-        _feedback = State(initialValue: feedback)
-    }
-
-    private var fieldOutline: Color {
-        if feedback?.isError == true { return Theme.error.opacity(0.8) }
-        return isInputFocused ? Theme.success.opacity(0.5) : Color.clear
-    }
-
-    private var isInverse: Bool { routeManager.config.routingMode == .vpnOnly }
-    private var activeDomains: [RouteManager.DomainEntry] {
-        isInverse ? routeManager.config.inverseDomains : routeManager.config.domains
-    }
-    private var enabledCount: Int { activeDomains.filter { $0.enabled }.count }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Header
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Image(systemName: isInverse ? "lock.shield.fill" : "globe.americas.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(isInverse ? Theme.warningGradient : Theme.successGradient)
-                    Text(DomainListCopy.title(isInverse: isInverse))
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
-                Text(isInverse
-                    ? "Only these domains will use the VPN. Everything else bypasses it."
-                    : "Add domains that should bypass VPN and use your regular connection.")
-                    .font(.system(size: 13))
-                    .foregroundColor(Theme.textSecondary)
-            }
-
-            // Add domain input, and what the last add did
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    HStack {
-                        Image(systemName: "link")
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.textSecondary)
-
-                        TextField(isInverse ? "e.g., example.com or 10.0.0.0/24" : "e.g., example.com", text: $newDomain)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .focused($isInputFocused)
-                            .onSubmit { addDomain() }
-                            .disabled(routeManager.isApplyingRoutes)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.l) {
+                    if let line = SettingsSidebar.readOnlyLine(selectedTab, in: mode),
+                       let target = SettingsSidebar.switchTarget(for: selectedTab) {
+                        ReadOnlyPageLine(text: line, target: target) {
+                            modeSwitch.pickedMode = RoutingModeCopy.sheetSelection(forPick: target, current: mode)
+                        }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Theme.bgInput)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(fieldOutline, lineWidth: 1)
-                            )
+                    // Dimmed as well as disabled: the page's own toggles keep their colours
+                    // when disabled, so they would still look live.
+                    page
+                        .disabled(SettingsSidebar.isReadOnly(selectedTab, in: mode))
+                        .opacity(SettingsSidebar.isReadOnly(selectedTab, in: mode) ? 0.55 : 1)
+                        .environment(\.settingsSearch, searchText)
+                }
+                .padding(Theme.Space.page)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlayPreferenceValue(PageTitleActionsKey.self) { actions in
+                VStack(spacing: 0) {
+                    // The title bar row stays clear: only the traffic lights, over the sidebar.
+                    Color.clear.frame(height: titleBar)
+                    PageHeader(
+                        title: selectedTab.name,
+                        subtitle: pageSubtitle ?? selectedTab.purpose(),
+                        search: SettingsSidebar.isSearchable(selectedTab) ? $searchText : nil,
+                        searchPrompt: PageHeader.searchPrompt(for: selectedTab.name),
+                        actions: actions,
+                        // A page of another mode is read-only, its header actions too.
+                        actionsEnabled: !SettingsSidebar.isReadOnly(selectedTab, in: mode)
                     )
-
-                    // Loading indicator or add button
-                    if routeManager.isApplyingRoutes {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
-                            .frame(width: 42, height: 42)
-                            .background(Theme.bgDisabled)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    } else {
-                        Button(action: addDomain) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 42, height: 42)
-                                .background(
-                                    LinearGradient(
-                                        colors: newDomain.isEmpty ? [Theme.textDisabled, Theme.textDisabled] : [Theme.success, Theme.successDark],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                                .shadow(color: newDomain.isEmpty ? .clear : Theme.success.opacity(0.3), radius: 6, y: 2)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(newDomain.isEmpty)
-                        .accessibilityLabel(String(localized: "Add"))
-                    }
+                    .padding(.horizontal, Theme.Space.page)
+                    .frame(height: PageHeader.height)
+                    Spacer(minLength: 0)
                 }
-
-                if let feedback {
-                    AddDomainFeedbackLine(feedback: feedback)
-                }
-            }
-            // Editing the text the line talks about, or switching lists, makes it stale.
-            .onChange(of: newDomain) { text in
-                if text != feedback?.fieldText { feedback = nil }
-            }
-            .onChange(of: routeManager.config.routingMode) { _ in feedback = nil }
-            // A refusal such as "already on your list" stops being true once the list
-            // changes (the trash button below, `vpnb domain.rm`). A saved add changes the
-            // list itself, so its line stays.
-            .onChange(of: activeDomains.map(\.domain)) { _ in
-                if feedback?.isError == true { feedback = nil }
-            }
-
-            // Domain list
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("CONFIGURED DOMAINS")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundColor(Theme.textSecondary)
-                        .tracking(1)
-
-                    Spacer()
-
-                    // Loading indicator, or the Turn All On/Off menu after the count
-                    if routeManager.isApplyingRoutes {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .scaleEffect(0.5)
-                                .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
-                            Text("Applying...")
-                                .font(.system(size: 9))
-                                .foregroundColor(Theme.textSecondary)
-                        }
-                    }
-
-                    Text("\(enabledCount)/\(activeDomains.count)")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundColor(isInverse ? Theme.warning : Theme.success)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background((isInverse ? Theme.warning : Theme.success).opacity(0.15))
-                        .clipShape(Capsule())
-
-                    if !routeManager.isApplyingRoutes && !activeDomains.isEmpty {
-                        BulkSwitchMenu(
-                            turnAllOnTitle: String(localized: "Turn All On"),
-                            canTurnOn: enabledCount < activeDomains.count,
-                            canTurnOff: enabledCount > 0,
-                            onTurnAllOn: { switchAll(true) },
-                            onTurnAllOff: { switchAll(false) }
-                        )
-                    }
-                }
-
-                if activeDomains.isEmpty {
-                    emptyState
-                } else {
-                    VStack(spacing: 6) {
-                        ForEach(activeDomains) { domain in
-                            DomainRow(domain: domain, isInverse: isInverse) { removeDomain(domain) }
-                        }
-                    }
-                }
-
-                if let change = settingsUndo.last, change.page == .domains {
-                    UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
-                }
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Theme.bgCard)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Theme.bgCardBorder, lineWidth: 1)
-                    )
-            )
-
-            Spacer()
         }
+        .onPreferenceChange(PageSubtitleKey.self) { pageSubtitle = $0 }
+        .background(Theme.bgPrimary)
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: isInverse ? "lock.shield" : "globe")
-                .font(.system(size: 28))
-                .foregroundColor(Theme.textDisabled)
-            Text("No entries configured")
-                .font(.system(size: 13))
-                .foregroundColor(Theme.textSecondary)
-            Text(isInverse ? "Add domains or IP ranges that should use VPN" : "Add a domain above to bypass VPN")
-                .font(.system(size: 11))
-                .foregroundColor(Theme.textDisabled)
+    @ViewBuilder
+    private var page: some View {
+        switch selectedTab {
+        case .status:
+            StatusTab(onShowWarnings: {
+                logsFilter = LogFilter(level: .warnings)
+                selectedTab = .logs
+            }, onShowLogs: {
+                logsFilter = LogFilter()
+                selectedTab = .logs
+            })
+        case .domains:  DomainsTab()
+        case .services: ServicesTab()
+        case .rules:    RulesTab()
+        case .routes:   RoutesTab()
+        case .lookups:  LookupsTab()
+        case .general:  GeneralTab()
+        case .logs:     LogsTab(filter: logsFilter).id(logsFilterRequest)
+        case .about:    AboutTab()
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 30)
-    }
-
-    /// Turn All On / Turn All Off. Neither asks: the list is the user's own, and the undo
-    /// line switches back exactly the entries this switched.
-    private func switchAll(_ on: Bool) {
-        let list: DomainList = isInverse ? .vpnOnly : .bypass
-        let changed = isInverse ? routeManager.setAllInverseDomainsEnabled(on) : routeManager.setAllDomainsEnabled(on)
-        if !changed.isEmpty { settingsUndo.record(.domainsSwitched(ids: changed, on: on, list: list)) }
-    }
-
-    private func removeDomain(_ domain: RouteManager.DomainEntry) {
-        let list: DomainList = isInverse ? .vpnOnly : .bypass
-        let index = activeDomains.firstIndex(where: { $0.id == domain.id }) ?? activeDomains.count
-        withAnimation(.easeOut(duration: 0.2)) {
-            if isInverse { routeManager.removeInverseDomain(domain) }
-            else { routeManager.removeDomain(domain) }
-        }
-        settingsUndo.record(.domain(domain, index: index, list: list))
-    }
-
-    private func addDomain() {
-        guard !newDomain.isEmpty else { return }
-        let result = isInverse ? routeManager.addInverseDomain(newDomain) : routeManager.addDomain(newDomain)
-        let shown = AddDomainFeedback(result, typed: newDomain)
-        feedback = shown
-        newDomain = shown.fieldText
     }
 }
 
-/// The line under the Domains tab's add field: what the last add saved, or why it saved
+// MARK: - Title bar actions
+
+/// A page's primary action, drawn in the window's title bar row beside the search: the + of a
+/// page that adds through a sheet, or a word such as Stop Watching, Copy or Clear. A page
+/// publishes its actions with `pageTitleActions(_:)` and the shell draws them, so every page
+/// puts them in the same place, and ⌘N runs the page's add.
+struct PageTitleAction: Identifiable {
+    enum Kind { case add, button }
+
+    let kind: Kind
+    /// The button's title and spoken name: "Add Rule", "Stop Watching".
+    let name: String
+    var help: String?
+    var isEnabled = true
+    /// False for an add with no button of its own, such as the Domains page's always-open
+    /// field: ⌘N still runs it.
+    var showsButton = true
+    let perform: () -> Void
+
+    var id: String { name }
+
+    /// The page's add: the + with ⌘N.
+    static func add(_ name: String, showsButton: Bool = true, perform: @escaping () -> Void) -> PageTitleAction {
+        PageTitleAction(kind: .add, name: name, showsButton: showsButton, perform: perform)
+    }
+
+    /// A small button with a word on it.
+    static func button(_ name: String, help: String? = nil, isEnabled: Bool = true,
+                       perform: @escaping () -> Void) -> PageTitleAction {
+        PageTitleAction(kind: .button, name: name, help: help, isEnabled: isEnabled, perform: perform)
+    }
+}
+
+/// The actions of the page on screen, read by the shell's title bar.
+struct PageTitleActionsKey: PreferenceKey {
+    static let defaultValue: [PageTitleAction] = []
+
+    static func reduce(value: inout [PageTitleAction], nextValue: () -> [PageTitleAction]) {
+        value += nextValue()
+    }
+}
+
+/// The one line under the page title that says what the page is for, read by the shell's
+/// header. A page publishes it with `pageSubtitle(_:)`; nil leaves the title alone.
+struct PageSubtitleKey: PreferenceKey {
+    static let defaultValue: String? = nil
+
+    static func reduce(value: inout String?, nextValue: () -> String?) {
+        value = nextValue() ?? value
+    }
+}
+
+extension View {
+    /// Puts this line under the page title while the page shows.
+    func pageSubtitle(_ text: String?) -> some View {
+        preference(key: PageSubtitleKey.self, value: text)
+    }
+
+    /// Puts these actions in the Settings window's title bar row while the page shows.
+    func pageTitleActions(_ actions: [PageTitleAction]) -> some View {
+        preference(key: PageTitleActionsKey.self, value: actions)
+    }
+}
+
+// MARK: - Add feedback (Domains page in DomainsPage.swift)
+
+/// The line under the Domains page's add row: what the last add saved, or why it saved
 /// nothing. A failed add keeps the text so it can be fixed; a saved one empties the field.
 struct AddDomainFeedback: Equatable {
     let isError: Bool
@@ -521,418 +345,9 @@ struct AddDomainFeedbackLine: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .font(.system(size: 12))
-        .foregroundColor(feedback.isError ? Theme.error : Theme.success)
+        .foregroundColor(feedback.isError ? Theme.failure : Theme.live)
         .padding(.horizontal, 4)
         .accessibilityElement(children: .combine)
-    }
-}
-
-struct DomainRow: View {
-    @EnvironmentObject var routeManager: RouteManager
-    let domain: RouteManager.DomainEntry
-    var isInverse: Bool = false
-    /// The trash button. DomainsTab removes the entry and leaves the undo line.
-    let onDelete: () -> Void
-    @State private var isHovered = false
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            // Status dot
-            Circle()
-                .fill(domain.enabled ? Theme.success : Theme.textDisabled)
-                .frame(width: 8, height: 8)
-                .shadow(color: domain.enabled ? Theme.success.opacity(0.5) : .clear, radius: 4)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(domain.domain)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(domain.enabled ? .white : Theme.textSecondary)
-                    if domain.isCIDR {
-                        Text("CIDR")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(Theme.warning)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Theme.warning.opacity(0.15))
-                            .cornerRadius(4)
-                    }
-                }
-            }
-
-            Spacer()
-
-            // Toggle - disabled during route operations
-            Toggle(domain.domain, isOn: Binding(
-                get: { domain.enabled },
-                set: { _ in
-                    if !routeManager.isApplyingRoutes {
-                        if isInverse { routeManager.toggleInverseDomain(domain.id) }
-                        else { routeManager.toggleDomain(domain.id) }
-                    }
-                }
-            ))
-            .toggleStyle(.switch)
-            .tint(isInverse ? Theme.warning : Theme.success)
-            .labelsHidden()
-            .controlSize(.small)
-            .disabled(routeManager.isApplyingRoutes)
-            .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
-
-            // Delete button - disabled during route operations
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.error.opacity(isHovered ? 1 : 0.6))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(ControlNames.delete(domain.domain))
-            .disabled(routeManager.isApplyingRoutes)
-            .opacity(routeManager.isApplyingRoutes ? 0.5 : 1)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(isHovered ? Theme.bgHover : Color.clear)
-        )
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
-    }
-}
-
-// MARK: - Services Tab
-
-/// How the Services page splits the list: an On section with the services that were on when
-/// the page opened, then the custom and the built-in services that were not, each in the
-/// catalogue's order. Kept pure so the split, its wording and its edge cases are unit-tested.
-///
-/// The split follows the switches as they were when the page opened (`pinned`), not as they
-/// are now, so a switch flipped on the page leaves its row where it is. The row moves on the
-/// next visit, never from under the pointer. A service added since the page opened, such as a
-/// custom service just created, goes by its own switch, and the page pins it as soon as it sees
-/// it, so flipping its switch does not move it either.
-struct ServiceSections {
-    enum Kind: CaseIterable {
-        case on, custom, builtIn
-    }
-
-    var on: [ServiceEntry]
-    var custom: [ServiceEntry]
-    var builtIn: [ServiceEntry]
-
-    /// Each service's switch as it is now, by id: what the page pins when it opens.
-    static func pin(_ services: [ServiceEntry]) -> [String: Bool] {
-        Dictionary(services.map { ($0.id, $0.enabled) }, uniquingKeysWith: { first, _ in first })
-    }
-
-    /// The pin plus every service it has not seen yet, at its switch as it is now. The services
-    /// already pinned keep their pin.
-    static func pinNew(_ services: [ServiceEntry], into pinned: [String: Bool]) -> [String: Bool] {
-        pinned.merging(pin(services)) { kept, _ in kept }
-    }
-
-    /// Whether a service shows for the search text: its name or one of its domains contains
-    /// the text, ignoring case. Empty text shows everything.
-    static func matches(_ service: ServiceEntry, search: String) -> Bool {
-        search.isEmpty
-            || service.name.localizedCaseInsensitiveContains(search)
-            || service.domains.contains { $0.localizedCaseInsensitiveContains(search) }
-    }
-
-    init(services: [ServiceEntry], pinned: [String: Bool], search: String) {
-        let shown = services.filter { Self.matches($0, search: search) }
-        let isOn = { (service: ServiceEntry) in pinned[service.id] ?? service.enabled }
-        on = shown.filter { isOn($0) }
-        custom = shown.filter { !isOn($0) && $0.isCustom }
-        builtIn = shown.filter { !isOn($0) && !$0.isCustom }
-    }
-
-    /// The sections that have rows, top to bottom.
-    var nonEmpty: [(kind: Kind, services: [ServiceEntry])] {
-        Kind.allCases.compactMap { kind in
-            let rows = self[kind]
-            return rows.isEmpty ? nil : (kind, rows)
-        }
-    }
-
-    subscript(kind: Kind) -> [ServiceEntry] {
-        switch kind {
-        case .on: return on
-        case .custom: return custom
-        case .builtIn: return builtIn
-        }
-    }
-
-    /// A section's header. The On header has its own key: the dropdown's "ON" pill says the
-    /// app is enforcing, and Spanish and French word the two differently.
-    static func title(_ kind: Kind, in bundle: Bundle = .main) -> String {
-        switch kind {
-        case .on: return String(localized: "services.section.on", defaultValue: "ON", bundle: bundle)
-        case .custom: return String(localized: "CUSTOM SERVICES", bundle: bundle)
-        case .builtIn: return String(localized: "BUILT-IN SERVICES", bundle: bundle)
-        }
-    }
-}
-
-struct ServicesTab: View {
-    @EnvironmentObject var routeManager: RouteManager
-    @EnvironmentObject var settingsUndo: SettingsUndo
-    @State private var searchText = ""
-    /// ⌘F puts the cursor in the search field.
-    @FocusState private var isSearchFocused: Bool
-    /// Set, Turn All On asks this before it runs.
-    @State private var turnOnQuestion: ServiceBulkSwitch.Question?
-    @State private var showingCustomServiceEditor = false
-    @State private var editingService: RouteManager.ServiceEntry?
-    /// Each service's switch when the page opened; nil until it appears.
-    @State private var pinned: [String: Bool]?
-
-    /// The argument seeds the question Turn All On asks, for a rendered screenshot.
-    init(turnOnQuestion: ServiceBulkSwitch.Question? = nil) {
-        _turnOnQuestion = State(initialValue: turnOnQuestion)
-    }
-
-    private var isVPNOnly: Bool {
-        routeManager.config.routingMode == .vpnOnly
-    }
-
-    private var sections: ServiceSections {
-        let services = routeManager.config.services
-        return ServiceSections(services: services,
-                               pinned: pinned ?? ServiceSections.pin(services),
-                               search: searchText)
-    }
-
-    private var enabledCount: Int {
-        routeManager.config.services.filter { $0.enabled }.count
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header
-            HStack {
-                HStack(spacing: 8) {
-                    Image(systemName: "square.grid.2x2.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Theme.purpleGradient)
-                    Text("Services")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
-
-                Spacer()
-
-                if !isVPNOnly {
-                    Text("\(enabledCount)/\(routeManager.config.services.count) enabled")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textSecondary)
-
-                    Button {
-                        editingService = nil
-                        showingCustomServiceEditor = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(Theme.purpleLight)
-                            .frame(width: 24, height: 24)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Create Custom Service")
-                    .accessibilityLabel("Create Custom Service")
-                }
-            }
-
-            if isVPNOnly {
-                // VPN Only mode banner
-                HStack(spacing: 10) {
-                    Image(systemName: "info.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(Theme.warning)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Services disabled in VPN Only mode")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(Theme.warning)
-                        Text("Switch to Bypass mode above to manage services.")
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.textSecondary)
-                    }
-
-                    Spacer()
-                }
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Theme.warning.opacity(0.08))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Theme.warning.opacity(0.2), lineWidth: 1)
-                        )
-                )
-
-                Spacer()
-            } else {
-                // Search and bulk actions
-                HStack(spacing: 10) {
-                    // Search box
-                    HStack(spacing: 8) {
-                        // The magnifier carries ⌘F, so the shortcut has a control to belong to.
-                        Button {
-                            isSearchFocused = true
-                        } label: {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 12))
-                                .foregroundColor(Theme.textSecondary)
-                        }
-                        .buttonStyle(.plain)
-                        .keyboardShortcut("f", modifiers: .command)
-                        .help(ControlNames.help(String(localized: "Search services"), shortcut: "⌘F"))
-                        .accessibilityLabel(String(localized: "Search services"))
-
-                        TextField("Search services...", text: $searchText)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12))
-                            .focused($isSearchFocused)
-                            .disabled(routeManager.isApplyingRoutes)
-
-                        if !searchText.isEmpty {
-                            Button {
-                                searchText = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(Theme.textSecondary)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(String(localized: "Clear search"))
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Theme.bgInput)
-                    .cornerRadius(8)
-
-                    // Loading indicator
-                    if routeManager.isApplyingRoutes {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .scaleEffect(0.6)
-                                .progressViewStyle(CircularProgressViewStyle(tint: Theme.success))
-                            Text("Applying...")
-                                .font(.system(size: 10))
-                                .foregroundColor(Theme.textSecondary)
-                        }
-                        .frame(width: 80)
-                    } else {
-                        BulkSwitchMenu(
-                            turnAllOnTitle: ServiceBulkSwitch.turnAllOnTitle(offCount: offServices.count),
-                            canTurnOn: !offServices.isEmpty,
-                            canTurnOff: enabledCount > 0,
-                            onTurnAllOn: turnAllOn,
-                            onTurnAllOff: { switchAll(false) }
-                        )
-                    }
-                }
-
-                if let change = settingsUndo.last, change.page == .services {
-                    UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
-                }
-
-                // Services list: the services that were on when the page opened, then the rest
-                ScrollView {
-                    if !sections.nonEmpty.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(sections.nonEmpty.enumerated()), id: \.element.kind) { index, section in
-                                if index > 0 {
-                                    Rectangle()
-                                        .fill(Theme.divider.opacity(0.6))
-                                        .frame(height: 1)
-                                        .padding(.horizontal, 12)
-                                        .padding(.top, 4)
-                                }
-
-                                HStack(spacing: 8) {
-                                    Text(ServiceSections.title(section.kind))
-                                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                                        .foregroundColor(Theme.textSecondary)
-                                    Text(verbatim: String(section.services.count))
-                                        .font(.system(size: 10, weight: .medium))
-                                        .foregroundColor(Theme.textTertiary)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.top, 8)
-
-                                LazyVStack(spacing: 2) {
-                                    ForEach(section.services) { service in
-                                        ServiceRow(service: service, onEdit: service.isCustom ? {
-                                            editingService = service
-                                            showingCustomServiceEditor = true
-                                        } : nil, onDelete: { removeCustomService(service) })
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.bottom, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Theme.bgElevated)
-                        )
-                    }
-                }
-                .onAppear {
-                    pinned = ServiceSections.pin(routeManager.config.services)
-                }
-                .onChange(of: routeManager.config.services.map(\.id)) { _ in
-                    if let current = pinned {
-                        pinned = ServiceSections.pinNew(routeManager.config.services, into: current)
-                    }
-                }
-                // An undone Turn All On/Off moves many rows at once, like the switch itself.
-                .onChange(of: settingsUndo.undoneCount) { _ in
-                    pinned = ServiceSections.pin(routeManager.config.services)
-                }
-            }
-        }
-        .sheet(isPresented: $showingCustomServiceEditor) {
-            CustomServiceEditor(service: editingService)
-                .environmentObject(routeManager)
-        }
-        .alert(turnOnQuestion?.title ?? "", isPresented: Binding(
-            get: { turnOnQuestion != nil },
-            set: { if !$0 { turnOnQuestion = nil } }
-        )) {
-            Button(turnOnQuestion?.confirm ?? "") { switchAll(true) }
-            Button(String(localized: "Cancel"), role: .cancel) {}
-                .keyboardShortcut(.defaultAction)
-        } message: {
-            Text(turnOnQuestion?.message ?? "")
-        }
-    }
-
-    private var offServices: [RouteManager.ServiceEntry] {
-        routeManager.servicesTurnAllOnSwitchesOn
-    }
-
-    private func turnAllOn() {
-        if let question = ServiceBulkSwitch.question(turningOn: offServices) {
-            turnOnQuestion = question
-        } else {
-            switchAll(true)
-        }
-    }
-
-    private func switchAll(_ on: Bool) {
-        let changed = routeManager.setAllServicesEnabled(on)
-        // The pointer is on the menu, not on a row: show the new split now.
-        pinned = ServiceSections.pin(routeManager.config.services)
-        if !changed.isEmpty { settingsUndo.record(.servicesSwitched(ids: changed, on: on)) }
-    }
-
-    private func removeCustomService(_ service: RouteManager.ServiceEntry) {
-        let index = routeManager.config.services.firstIndex(where: { $0.id == service.id }) ?? routeManager.config.services.count
-        routeManager.removeCustomService(service.id)
-        settingsUndo.record(.customService(service, index: index))
     }
 }
 
@@ -962,145 +377,6 @@ struct BulkSwitchMenu: View {
     }
 }
 
-struct ServiceRow: View {
-    @EnvironmentObject var routeManager: RouteManager
-    let service: RouteManager.ServiceEntry
-    var onEdit: (() -> Void)?
-    /// The trash button of a custom service. ServicesTab removes it and leaves the undo line.
-    var onDelete: (() -> Void)?
-    @State private var isHovered = false
-
-    /// The custom service that keeps this built-in one off by having its name (an app update
-    /// can bring a built-in service named like one of the user's), or nil.
-    private var heldBy: RouteManager.ServiceEntry? { routeManager.customServiceHolding(nameOf: service) }
-
-    /// The red line a name clash puts under the row: on a custom service, the editor's line
-    /// asking for another name; on a built-in service kept off, which custom service to rename.
-    private var nameLine: String? {
-        if service.isCustom { return routeManager.customServiceNameClash(service.name, excluding: service.id)?.message }
-        return heldBy.map { ServiceNameClash.builtInOffMessage(custom: $0.name) }
-    }
-
-    /// A built-in service kept off by a custom one cannot be turned on from its switch.
-    private var switchLocked: Bool { heldBy != nil && !service.enabled }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            // Status dot
-            Circle()
-                .fill(service.enabled ? Theme.success : Theme.textDisabled)
-                .frame(width: 8, height: 8)
-                .shadow(color: service.enabled ? Theme.success.opacity(0.5) : .clear, radius: 4)
-
-            // Service info
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(service.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(service.enabled ? .white : Theme.textSecondary)
-
-                    if service.isCustom {
-                        Text("Custom")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(Theme.purpleLight)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Theme.purple.opacity(0.12))
-                            .cornerRadius(4)
-                    }
-                }
-
-                Text("\(service.domains.count) domains" + (service.ipRanges.isEmpty ? "" : " · \(service.ipRanges.count) IPs"))
-                    .font(.system(size: 10))
-                    .foregroundColor(Theme.textSecondary)
-
-                // Domains the user added to a built-in service (from the DNS Lookups page).
-                // They follow the shipped ones across launches; only these can be removed.
-                if !service.isCustom {
-                    ForEach(routeManager.domainsAddedToBuiltInService(service.id), id: \.self) { domain in
-                        HStack(spacing: 4) {
-                            Text("Added: \(domain)")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(Theme.textSecondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Button {
-                                routeManager.removeDomainFromBuiltInService(domain, serviceId: service.id)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(Theme.textTertiary)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(routeManager.isApplyingRoutes)
-                            .help(String(localized: "Remove \(domain) from \(service.name)"))
-                            .accessibilityLabel(String(localized: "Remove \(domain) from \(service.name)"))
-                        }
-                    }
-                }
-
-                if let nameLine {
-                    AddDomainFeedbackLine(feedback: AddDomainFeedback(refusal: nameLine, typed: service.name))
-                        .padding(.top, 2)
-                }
-            }
-
-            Spacer()
-
-            // Edit/delete buttons for custom services
-            if service.isCustom {
-                Button {
-                    onEdit?()
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.purple)
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .opacity(isHovered ? 1.0 : 0.4)
-                .accessibilityLabel(ControlNames.edit(service.name))
-
-                Button {
-                    onDelete?()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.error)
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .opacity(isHovered ? 1.0 : 0.4)
-                .accessibilityLabel(ControlNames.delete(service.name))
-            }
-
-            // Toggle
-            Toggle(service.name, isOn: Binding(
-                get: { service.enabled },
-                set: { _ in
-                    if !routeManager.isApplyingRoutes {
-                        routeManager.toggleService(service.id)
-                    }
-                }
-            ))
-            .toggleStyle(.switch)
-            .tint(Theme.success)
-            .labelsHidden()
-            .controlSize(.small)
-            .disabled(routeManager.isApplyingRoutes || switchLocked)
-            .opacity(routeManager.isApplyingRoutes || switchLocked ? 0.5 : 1)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isHovered ? Theme.bgHover : Color.clear)
-        )
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
-    }
-}
-
 // MARK: - Custom Service Editor
 
 struct CustomServiceEditor: View {
@@ -1115,8 +391,16 @@ struct CustomServiceEditor: View {
     /// `name` seeds the Service Name field of a new service, for a rendered screenshot.
     init(service: RouteManager.ServiceEntry?, name: String = "") {
         self.service = service
-        _serviceName = State(initialValue: name)
+        _serviceName = State(initialValue: service?.name ?? name)
+        if let service {
+            _domains = State(initialValue: service.domains.isEmpty ? [""] : service.domains)
+            _ipRanges = State(initialValue: service.ipRanges)
+        }
     }
+
+    /// Past this many rows the Domains and IP Ranges fields scroll, so a long service keeps
+    /// the sheet on screen and its buttons in reach.
+    static let rowsBeforeScrolling = 8
 
     private var isEditing: Bool { service != nil }
 
@@ -1139,199 +423,82 @@ struct CustomServiceEditor: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text(isEditing ? "Edit Service" : "Create Custom Service")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(Theme.textSecondary)
+        SheetScaffold(isEditing ? String(localized: "Edit Service") : String(localized: "Create Custom Service"),
+                      confirmTitle: isEditing ? String(localized: "Save Changes") : String(localized: "Create Service"),
+                      canConfirm: canSave,
+                      onCancel: { dismiss() }, onConfirm: { if save() { dismiss() } }) {
+            SheetField(String(localized: "Service Name")) {
+                TextField("e.g. My Service", text: $serviceName)
+                    .textFieldStyle(.roundedBorder)
+                if let nameClash {
+                    AddDomainFeedbackLine(feedback: AddDomainFeedback(refusal: nameClash.message, typed: serviceName))
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(String(localized: "Cancel"))
-            }
-            .padding(16)
-
-            Divider().background(Theme.divider)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Service Name
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Service Name")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(Theme.textSecondary)
-
-                        TextField("e.g. My Service", text: $serviceName)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .padding(10)
-                            .background(Theme.bgInput)
-                            .cornerRadius(8)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(nameClash == nil ? Color.clear : Theme.error.opacity(0.8), lineWidth: 1)
-                            )
-
-                        if let nameClash {
-                            AddDomainFeedbackLine(feedback: AddDomainFeedback(refusal: nameClash.message, typed: serviceName))
-                        }
-                    }
-
-                    // Domains
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Domains")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(Theme.textSecondary)
-                            Spacer()
-                            Button {
-                                domains.append("")
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 10, weight: .bold))
-                                    Text("Add")
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                .foregroundColor(Theme.success)
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        ForEach(domains.indices, id: \.self) { index in
-                            HStack(spacing: 8) {
-                                TextField("example.com", text: $domains[index])
-                                    .textFieldStyle(.plain)
-                                    .font(.system(size: 12))
-                                    .padding(8)
-                                    .background(Theme.bgInput)
-                                    .cornerRadius(6)
-
-                                if domains.count > 1 {
-                                    Button {
-                                        domains.remove(at: index)
-                                    } label: {
-                                        Image(systemName: "minus.circle.fill")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(Theme.error.opacity(0.7))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel(ControlNames.delete(domains[index]))
-                                }
-                            }
-                        }
-                    }
-
-                    // IP Ranges (optional)
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("IP Ranges (optional)")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(Theme.textSecondary)
-                                Text("CIDR notation, e.g. 192.168.1.0/24")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(Theme.textSecondary)
-                            }
-                            Spacer()
-                            Button {
-                                ipRanges.append("")
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 10, weight: .bold))
-                                    Text("Add")
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                .foregroundColor(Theme.success)
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        ForEach(ipRanges.indices, id: \.self) { index in
-                            HStack(spacing: 8) {
-                                TextField("10.0.0.0/8", text: $ipRanges[index])
-                                    .textFieldStyle(.plain)
-                                    .font(.system(size: 12))
-                                    .padding(8)
-                                    .background(Theme.bgInput)
-                                    .cornerRadius(6)
-
-                                Button {
-                                    ipRanges.remove(at: index)
-                                } label: {
-                                    Image(systemName: "minus.circle.fill")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(Theme.error.opacity(0.7))
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(ControlNames.delete(ipRanges[index]))
-                            }
-                        }
-
-                        if ipRanges.isEmpty {
-                            Text("No IP ranges added. Only domain-based routing will be used.")
-                                .font(.system(size: 10))
-                                .foregroundColor(Theme.textSecondary)
-                                .italic()
-                        }
-                    }
-                }
-                .padding(16)
             }
 
-            Divider().background(Theme.divider)
-
-            // Actions
-            HStack {
-                Button("Cancel") {
-                    dismiss()
+            if domains.count + ipRanges.count > Self.rowsBeforeScrolling {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Space.l) { listFields }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.trailing, Theme.Space.m)
                 }
-                .buttonStyle(.plain)
+                .frame(height: 340)
+            } else {
+                listFields
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var listFields: some View {
+        SheetField(String(localized: "Domains")) {
+            ForEach(domains.indices, id: \.self) { index in
+                HStack(spacing: Theme.Space.s) {
+                    TextField("example.com", text: $domains[index])
+                        .textFieldStyle(.roundedBorder)
+                    if domains.count > 1 {
+                        removeButton(name: domains[index]) { domains.remove(at: index) }
+                    }
+                }
+            }
+            addButton { domains.append("") }
+        }
+
+        SheetField(String(localized: "IP Ranges (optional)")) {
+            ForEach(ipRanges.indices, id: \.self) { index in
+                HStack(spacing: Theme.Space.s) {
+                    TextField("10.0.0.0/8", text: $ipRanges[index])
+                        .textFieldStyle(.roundedBorder)
+                        .font(Theme.Font.mono)
+                    removeButton(name: ipRanges[index]) { ipRanges.remove(at: index) }
+                }
+            }
+            Text(ipRanges.isEmpty
+                 ? "No IP ranges added. Only domain-based routing will be used."
+                 : "CIDR notation, e.g. 192.168.1.0/24")
+                .font(Theme.Font.detail)
                 .foregroundColor(Theme.textSecondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-
-                Spacer()
-
-                Button {
-                    if save() { dismiss() }
-                } label: {
-                    Text(isEditing ? "Save Changes" : "Create Service")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(canSave ? Theme.purple : Theme.textDisabled)
-                        .cornerRadius(8)
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSave)
-            }
-            .padding(16)
+            addButton { ipRanges.append("") }
         }
-        .frame(width: 440, height: 480)
-        .background(
-            LinearGradient(
-                colors: [Theme.bgPrimary, Theme.bgSecondary],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .onAppear {
-            if let service {
-                serviceName = service.name
-                domains = service.domains.isEmpty ? [""] : service.domains
-                ipRanges = service.ipRanges
-            }
+    }
+
+    private func addButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text("Add")
+                .font(Theme.Font.detail)
+                .foregroundColor(Theme.accentText)
         }
+        .buttonStyle(.plain)
+    }
+
+    private func removeButton(name: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "minus.circle")
+                .font(.system(size: 13))
+                .foregroundColor(Theme.textSecondary)
+        }
+        .buttonStyle(.plain)
+        .help(ControlNames.delete(name))
+        .accessibilityLabel(ControlNames.delete(name))
     }
 
     /// False when the service was refused and nothing saved; the field then says why.
@@ -1352,815 +519,92 @@ struct CustomServiceEditor: View {
     }
 }
 
-// MARK: - General Tab
-
-struct GeneralTab: View {
-    @EnvironmentObject var routeManager: RouteManager
-    @EnvironmentObject var notificationManager: NotificationManager
-    @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
-    @State private var showingExportSuccess = false
-    @State private var showingImportPicker = false
-    @State private var showingImportError = false
-    @State private var importErrorMessage = ""
-    @State private var selectedLanguage: String = UserDefaults.standard.string(forKey: "UserLanguageOverride") ?? "system"
-    @State private var showingRestartAlert = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Header
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Theme.warningGradient)
-                    Text("Settings")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
-            }
-            
-            // Language section
-            SettingsCard(title: "Language", icon: "globe", iconColor: Theme.blue) {
-                HStack(spacing: 12) {
-                    Image(systemName: "character.bubble.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(Theme.blue)
-                        .frame(width: 20)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Language")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white)
-                        Text("App language (restart required)")
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.textSecondary)
-                    }
-
-                    Spacer()
-
-                    Picker("Language", selection: $selectedLanguage) {
-                        Text("System").tag("system")
-                        Text("English").tag("en")
-                        Text("Español").tag("es")
-                        Text("Français").tag("fr")
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(width: 120)
-                    .onChange(of: selectedLanguage) { newValue in
-                        if newValue == "system" {
-                            UserDefaults.standard.removeObject(forKey: "UserLanguageOverride")
-                            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
-                        } else {
-                            UserDefaults.standard.set(newValue, forKey: "UserLanguageOverride")
-                            UserDefaults.standard.set([newValue], forKey: "AppleLanguages")
-                        }
-                        showingRestartAlert = true
-                    }
-                }
-            }
-
-            // Startup section
-            SettingsCard(title: "Startup", icon: "power", iconColor: Theme.success) {
-                SettingsToggleRow(
-                    icon: "arrow.clockwise",
-                    title: "Launch at Login",
-                    subtitle: "Automatically start VPN Bypass when you log in",
-                    isOn: Binding(
-                        get: { launchAtLoginManager.isEnabled },
-                        set: { _ in launchAtLoginManager.toggle() }
-                    )
-                )
-            }
-            
-            // Behavior section
-            SettingsCard(title: "Behavior", icon: "bolt.fill", iconColor: Theme.warning) {
-                SettingsToggleRow(
-                    icon: "play.circle.fill",
-                    title: "Auto-apply on VPN Connect",
-                    subtitle: "Automatically apply routes when VPN connects",
-                    isOn: Binding(
-                        get: { routeManager.config.autoApplyOnVPN },
-                        set: { routeManager.config.autoApplyOnVPN = $0; routeManager.saveConfig() }
-                    )
-                )
-                
-                Divider().background(Theme.divider)
-                
-                SettingsToggleRow(
-                    icon: "doc.text.fill",
-                    title: "Manage /etc/hosts",
-                    subtitle: "Add DNS bypass entries (requires admin)",
-                    isOn: Binding(
-                        get: { routeManager.config.manageHostsFile },
-                        set: { routeManager.config.manageHostsFile = $0; routeManager.saveConfig() }
-                    )
-                )
-                
-                Divider().background(Theme.divider)
-                
-                SettingsToggleRow(
-                    icon: "checkmark.circle.fill",
-                    title: "Verify Routes After Apply",
-                    subtitle: "Ping test routes to ensure they're working",
-                    isOn: Binding(
-                        get: { routeManager.config.verifyRoutesAfterApply },
-                        set: { routeManager.config.verifyRoutesAfterApply = $0; routeManager.saveConfig() }
-                    )
-                )
-            }
-            
-            // DNS Refresh section
-            SettingsCard(title: "DNS Refresh", icon: "arrow.triangle.2.circlepath", iconColor: Theme.cyan) {
-                SettingsToggleRow(
-                    icon: "clock.arrow.circlepath",
-                    title: "Auto DNS Refresh",
-                    subtitle: "Periodically re-resolve domains and update routes",
-                    isOn: Binding(
-                        get: { routeManager.config.autoDNSRefresh },
-                        set: { 
-                            routeManager.config.autoDNSRefresh = $0
-                            routeManager.saveConfig()
-                            routeManager.startDNSRefreshTimer()
-                        }
-                    )
-                )
-                
-                if routeManager.config.autoDNSRefresh {
-                    Divider().background(Theme.divider)
-                    
-                    // Interval picker
-                    HStack(spacing: 12) {
-                        Image(systemName: "timer")
-                            .font(.system(size: 14))
-                            .foregroundColor(Theme.cyan)
-                            .frame(width: 20)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Refresh Interval")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.white)
-                            Text("How often to re-check DNS for changes")
-                                .font(.system(size: 11))
-                                .foregroundColor(Theme.textSecondary)
-                        }
-                        
-                        Spacer()
-                        
-                        Picker(String(localized: "Refresh Interval"), selection: Binding(
-                            get: { routeManager.config.dnsRefreshInterval },
-                            set: { 
-                                routeManager.config.dnsRefreshInterval = $0
-                                routeManager.saveConfig()
-                                routeManager.startDNSRefreshTimer()
-                            }
-                        )) {
-                            Text("15 min").tag(TimeInterval(900))
-                            Text("30 min").tag(TimeInterval(1800))
-                            Text("1 hour").tag(TimeInterval(3600))
-                            Text("2 hours").tag(TimeInterval(7200))
-                            Text("6 hours").tag(TimeInterval(21600))
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .frame(width: 100)
-                    }
-                    
-                }
-
-                Text("Re-resolves all domains to catch IP changes and ensure routes stay up to date.")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textSecondary)
-            }
-            
-            // Fallback DNS section
-            SettingsCard(title: "Fallback DNS", icon: "server.rack", iconColor: Theme.purple) {
-                VStack(alignment: .leading, spacing: 12) {
-                    // Detected DNS - prominent display
-                    if let detected = routeManager.detectedDNSServerDisplay {
-                        HStack(spacing: 10) {
-                            Image(systemName: "antenna.radiowaves.left.and.right")
-                                .foregroundColor(Theme.cyan)
-                                .font(.system(size: 14))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Detected Non-VPN DNS")
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(Theme.textSecondary)
-                                Text(detected)
-                                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                    .foregroundColor(Theme.cyan)
-                            }
-                            Spacer()
-                        }
-                        .padding(12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Theme.cyan.opacity(0.1))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Theme.cyan.opacity(0.3), lineWidth: 1)
-                                )
-                        )
-                    }
-
-                    Text("Fallback DNS servers when detected DNS is unavailable.\nSupported formats: IP (1.1.1.1), DoH (https://...), DoT (tls://... or IP:853)")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textSecondary)
-                    
-                    ForEach(Array(routeManager.config.fallbackDNS.enumerated()), id: \.offset) { index, dns in
-                        HStack(spacing: 8) {
-                            Text("\(index + 1).")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(Theme.textSecondary)
-                                .frame(width: 20)
-
-                            TextField("DNS server", text: Binding(
-                                get: { routeManager.config.fallbackDNS[index] },
-                                set: {
-                                    routeManager.config.fallbackDNS[index] = $0
-                                    routeManager.saveConfig()
-                                }
-                            ))
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12, design: .monospaced))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Theme.bgInputAlt)
-                            .cornerRadius(6)
-
-                            Button {
-                                routeManager.config.fallbackDNS.remove(at: index)
-                                routeManager.saveConfig()
-                            } label: {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundColor(Theme.error)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-
-                    Button {
-                        routeManager.config.fallbackDNS.append("")
-                        routeManager.saveConfig()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("Add DNS Server")
-                        }
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Theme.success)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            
-            // Notifications section
-            SettingsCard(title: "Notifications", icon: "bell.fill", iconColor: Theme.purple) {
-                SettingsToggleRow(
-                    icon: "bell.badge.fill",
-                    title: "Enable Notifications",
-                    subtitle: "Show alerts for VPN events",
-                    isOn: Binding(
-                        get: { notificationManager.notificationsEnabled },
-                        set: { 
-                            notificationManager.notificationsEnabled = $0
-                            notificationManager.savePreferences()
-                        }
-                    )
-                )
-                
-                if notificationManager.notificationsEnabled {
-                    Divider().background(Theme.divider)
-                    
-                    SettingsToggleRow(
-                        icon: "speaker.slash.fill",
-                        title: "Silent",
-                        subtitle: "No sound",
-                        isOn: Binding(
-                            get: { notificationManager.silentNotifications },
-                            set: { 
-                                notificationManager.silentNotifications = $0
-                                notificationManager.savePreferences()
-                            }
-                        )
-                    )
-                    
-                    Divider().background(Theme.divider)
-                    
-                    HStack(spacing: 12) {
-                        NotificationChip(
-                            label: "Connect",
-                            isOn: Binding(
-                                get: { notificationManager.notifyOnVPNConnect },
-                                set: { notificationManager.notifyOnVPNConnect = $0; notificationManager.savePreferences() }
-                            )
-                        )
-                        NotificationChip(
-                            label: "Disconnect",
-                            isOn: Binding(
-                                get: { notificationManager.notifyOnVPNDisconnect },
-                                set: { notificationManager.notifyOnVPNDisconnect = $0; notificationManager.savePreferences() }
-                            )
-                        )
-                        NotificationChip(
-                            label: "Addresses",
-                            isOn: Binding(
-                                get: { notificationManager.notifyOnRoutesApplied },
-                                set: { notificationManager.notifyOnRoutesApplied = $0; notificationManager.savePreferences() }
-                            )
-                        )
-                        NotificationChip(
-                            label: "Failures",
-                            isOn: Binding(
-                                get: { notificationManager.notifyOnRouteFailure },
-                                set: { notificationManager.notifyOnRouteFailure = $0; notificationManager.savePreferences() }
-                            )
-                        )
-                    }
-                    
-                    Text("Addresses: services, domains, DNS refresh")
-                        .font(.system(size: 10))
-                        .foregroundColor(Theme.textSecondary)
-                }
-            }
-            
-            // SOCKS5 Proxy section (Aggressive Bypass Mode)
-            SettingsCard(title: "SOCKS5 Proxy", icon: "network.badge.shield.half.filled", iconColor: Theme.warning) {
-                VStack(alignment: .leading, spacing: 12) {
-                    // Warning/info box
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(Theme.warning)
-                            .font(.system(size: 12))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Aggressive Bypass Mode")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(Theme.warning)
-                            Text("For corporate VPNs (Cisco, Zscaler) that block UDP. Requires external SOCKS5 proxy server with UDP support.")
-                                .font(.system(size: 10))
-                                .foregroundColor(Theme.textSecondary)
-                        }
-                    }
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Theme.warning.opacity(0.1))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Theme.warning.opacity(0.3), lineWidth: 1)
-                            )
-                    )
-                    
-                    SettingsToggleRow(
-                        icon: "shield.lefthalf.filled",
-                        title: "Enable SOCKS5 Proxy",
-                        subtitle: "Route traffic through proxy to bypass UDP blocking",
-                        isOn: Binding(
-                            get: { routeManager.config.proxyConfig.enabled },
-                            set: { 
-                                routeManager.config.proxyConfig.enabled = $0
-                                routeManager.saveConfig()
-                            }
-                        )
-                    )
-                    
-                    if routeManager.config.proxyConfig.enabled {
-                        Divider().background(Theme.divider)
-                        
-                        // Server and port
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Proxy Server")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Theme.textSecondary)
-
-                            HStack(spacing: 8) {
-                                TextField("Server address", text: Binding(
-                                    get: { routeManager.config.proxyConfig.server },
-                                    set: {
-                                        routeManager.config.proxyConfig.server = $0
-                                        routeManager.saveConfig()
-                                    }
-                                ))
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 12, design: .monospaced))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(Theme.bgInputAlt)
-                                .cornerRadius(6)
-
-                                TextField("Port", value: Binding(
-                                    get: { routeManager.config.proxyConfig.port },
-                                    set: {
-                                        routeManager.config.proxyConfig.port = $0
-                                        routeManager.saveConfig()
-                                    }
-                                ), format: .number)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 12, design: .monospaced))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(Theme.bgInputAlt)
-                                .cornerRadius(6)
-                                .frame(width: 80)
-                            }
-                        }
-
-                        // Authentication (optional)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Authentication (optional)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Theme.textSecondary)
-
-                            HStack(spacing: 8) {
-                                TextField("Username", text: Binding(
-                                    get: { routeManager.config.proxyConfig.username },
-                                    set: {
-                                        routeManager.config.proxyConfig.username = $0
-                                        routeManager.saveConfig()
-                                    }
-                                ))
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 12))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(Theme.bgInputAlt)
-                                .cornerRadius(6)
-
-                                SecureField("Password", text: Binding(
-                                    get: { routeManager.config.proxyConfig.password },
-                                    set: {
-                                        routeManager.config.proxyConfig.password = $0
-                                        routeManager.saveConfig()
-                                    }
-                                ))
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 12))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(Theme.bgInputAlt)
-                                .cornerRadius(6)
-                            }
-                        }
-
-                        // Test connection button
-                        HStack {
-                            Button {
-                                Task {
-                                    await routeManager.testProxyConnection()
-                                }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    if routeManager.isTestingProxy {
-                                        ProgressView()
-                                            .scaleEffect(0.6)
-                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    } else {
-                                        Image(systemName: "antenna.radiowaves.left.and.right")
-                                            .font(.system(size: 11))
-                                    }
-                                    Text(routeManager.isTestingProxy ? "Testing..." : "Test Connection")
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(
-                                    routeManager.config.proxyConfig.isConfigured
-                                        ? Theme.warning
-                                        : Theme.textDisabled
-                                )
-                                .clipShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(!routeManager.config.proxyConfig.isConfigured || routeManager.isTestingProxy)
-
-                            if let result = routeManager.proxyTestResult {
-                                HStack(spacing: 4) {
-                                    Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                        .foregroundColor(result.success ? Theme.success : Theme.error)
-                                    Text(result.message)
-                                        .font(.system(size: 10))
-                                        .foregroundColor(result.success ? Theme.success : Theme.error)
-                                }
-                            }
-                        }
-
-                        Text("Proxy will be used for services that need UDP (Discord voice, gaming, etc.) when corporate VPN blocks direct UDP traffic.")
-                            .font(.system(size: 10))
-                            .foregroundColor(Theme.textSecondary)
-                    }
-                }
-            }
-            
-            // Import/Export section
-            SettingsCard(title: "Configuration", icon: "doc.badge.arrow.up.fill", iconColor: Theme.blue) {
-                HStack(spacing: 12) {
-                    Button {
-                        exportConfig()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 12))
-                            Text("Export")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            LinearGradient(
-                                colors: [Theme.blue, Theme.blueDark],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        showingImportPicker = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "square.and.arrow.down")
-                                .font(.system(size: 12))
-                            Text("Import")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(Theme.blue)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(Theme.blue.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Text("Export your domains and services configuration to a file, or import from a backup.")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textSecondary)
-            }
-            
-            Spacer()
-        }
-        .fileImporter(
-            isPresented: $showingImportPicker,
-            allowedContentTypes: [.json],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first {
-                    // Need to start accessing security-scoped resource
-                    let accessing = url.startAccessingSecurityScopedResource()
-                    defer {
-                        if accessing {
-                            url.stopAccessingSecurityScopedResource()
-                        }
-                    }
-                    
-                    if routeManager.importConfig(from: url) {
-                        // Success handled by routeManager
-                    } else {
-                        importErrorMessage = routeManager.lastImportRefusal
-                            ?? String(localized: "Failed to import configuration file.")
-                        showingImportError = true
-                    }
-                }
-            case .failure(let error):
-                importErrorMessage = error.localizedDescription
-                showingImportError = true
-            }
-        }
-        .alert("Import Error", isPresented: $showingImportError) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(importErrorMessage)
-        }
-        .alert(String(localized: "Restart Required"), isPresented: $showingRestartAlert) {
-            Button(String(localized: "Restart Now")) {
-                // Not `open -n` followed by a quit: the new copy would start while this one
-                // still holds the single-instance lock, exit at once, and leave the app closed.
-                do {
-                    try AppUpdateRelauncher.restart(bundlePath: Bundle.main.bundlePath)
-                } catch {
-                    RouteManager.shared.log(.warning, "Restart could not be scheduled: \(error.localizedDescription)")
-                }
-            }
-            Button(String(localized: "Later"), role: .cancel) { }
-        } message: {
-            Text("The app needs to restart to apply the language change.")
-        }
-    }
-    
-    private func exportConfig() {
-        guard let exportURL = routeManager.exportConfig() else {
-            return
-        }
-        
-        let savePanel = NSSavePanel()
-        savePanel.allowedContentTypes = [.json]
-        savePanel.nameFieldStringValue = exportURL.lastPathComponent
-        savePanel.canCreateDirectories = true
-        
-        if savePanel.runModal() == .OK, let destinationURL = savePanel.url {
-            try? FileManager.default.copyItem(at: exportURL, to: destinationURL)
-        }
-        
-        // Clean up temp file
-        try? FileManager.default.removeItem(at: exportURL)
-    }
-}
-
-struct NotificationChip: View {
-    let label: LocalizedStringKey
-    @Binding var isOn: Bool
-    
-    var body: some View {
-        Button {
-            isOn.toggle()
-        } label: {
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(isOn ? .white : Theme.textSecondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(
-                    Capsule()
-                        .fill(isOn ? Theme.purple.opacity(0.3) : Theme.bgCard)
-                )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-struct SettingsCard<Content: View>: View {
-    let title: LocalizedStringKey
-    let icon: String
-    let iconColor: Color
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(iconColor)
-                Text(title)
-                    .textCase(.uppercase)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(Theme.textSecondary)
-                    .tracking(1)
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                content
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Theme.bgCard)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(Theme.bgCardBorder, lineWidth: 1)
-                )
-        )
-    }
-}
-
-struct SettingsToggleRow: View {
-    let icon: String
-    let title: LocalizedStringKey
-    let subtitle: LocalizedStringKey
-    @Binding var isOn: Bool
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 14))
-                .foregroundColor(Theme.success)
-                .frame(width: 20)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white)
-                Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textSecondary)
-            }
-
-            Spacer()
-
-            Toggle(title, isOn: $isOn)
-                .toggleStyle(.switch)
-                .tint(Theme.success)
-                .labelsHidden()
-                .controlSize(.small)
-        }
-    }
-}
-
 // MARK: - Logs Tab
 
 struct LogsTab: View {
     @EnvironmentObject var routeManager: RouteManager
+    /// The title bar search (⌘F), the page's search term.
+    @Environment(\.settingsSearch) private var search
     @State private var filter: LogFilter
 
     init(filter: LogFilter = LogFilter()) {
         _filter = State(initialValue: filter)
     }
 
+    /// The filter the page applies: its level and source, and the title bar's search.
+    static func effectiveFilter(_ filter: LogFilter, search: String) -> LogFilter {
+        var effective = filter
+        effective.query = search
+        return effective
+    }
+
     var body: some View {
+        let filter = Self.effectiveFilter(self.filter, search: search)
         let shown = filter.apply(routeManager.recentLogs)
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 10) {
-                if routeManager.recentLogs.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 36))
-                            .foregroundColor(Theme.textDisabled)
-                        Text("No activity yet")
-                            .font(.system(size: 14, weight: .medium))
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            if routeManager.recentLogs.isEmpty {
+                GroupSection {
+                    EmptyState(systemImage: "doc.text",
+                               title: String(localized: "No activity yet"),
+                               message: String(localized: "Logs will appear here when routes are applied"))
+                }
+            } else {
+                filterBar(filter, shown: shown)
+
+                GroupSection {
+                    if let empty = filter.emptyLine(shown: shown.count) {
+                        Text(empty)
+                            .font(Theme.Font.body)
                             .foregroundColor(Theme.textSecondary)
-                        Text("Logs will appear here when routes are applied")
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.textDisabled)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 10)
-                } else {
-                    filterBar(shown: shown)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            Text(filter.countLine(shown: shown.count, total: routeManager.recentLogs.count))
-                                .font(.system(size: 11))
-                                .foregroundColor(Theme.textTertiary)
-                                .padding(.leading, 2)
-                            if filter.onlyControlSocket {
-                                sourceToken
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, Theme.Space.page)
+                    } else {
+                        // The window's scroll view scrolls the lines; the page has none of its own.
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(shown) { log in
+                                LogRow(entry: log, highlight: filter.term)
                             }
                         }
-
-                        if let empty = filter.emptyLine(shown: shown.count) {
-                            Text(empty)
-                                .font(.system(size: 12))
-                                .foregroundColor(Theme.textSecondary)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.vertical, 24)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Theme.bgElevated)
-                                )
-                        } else {
-                            ScrollView {
-                                LazyVStack(alignment: .leading, spacing: 1) {
-                                    ForEach(shown) { log in
-                                        LogRow(entry: log, highlight: filter.term)
-                                    }
-                                }
-                                .padding(4)
-                            }
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Theme.bgElevated)
-                            )
-                        }
+                        .padding(.vertical, Theme.Space.xs)
                     }
                 }
             }
         }
+        .pageTitleActions([
+            .button(String(localized: "Copy"), help: String(localized: "Copy the entries shown"),
+                    isEnabled: !shown.isEmpty) { copyLogsToClipboard(shown) },
+            .button(String(localized: "Clear"), help: String(localized: "Remove every entry, including any the filter hides"),
+                    isEnabled: !routeManager.recentLogs.isEmpty) {
+                withAnimation { routeManager.recentLogs.removeAll() }
+            },
+        ])
     }
 
     /// Shown while only the control socket's lines show (proposal 15 of #119); a click shows
     /// every line again.
     private var sourceToken: some View {
         Button {
-            filter.onlyControlSocket = false
+            filter.onlySource = nil
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "terminal")
-                Text(LogFilter.sourceTokenTitle)
+            HStack(spacing: Theme.Space.xs) {
+                Image(systemName: filter.sourceToken.symbol)
+                Text(filter.sourceToken.title)
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(Theme.textTertiary)
             }
-            .font(.system(size: 11))
+            .font(Theme.Font.detail)
             .foregroundColor(Theme.textSecondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(Theme.bgElevated))
+            .padding(.horizontal, Theme.Space.s)
+            .padding(.vertical, 2)
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(Theme.bgDisabled))
         }
         .buttonStyle(.plain)
         .help(LogFilter.sourceTokenHelp)
     }
 
-    /// The level filter, the search field, and Copy and Clear, as in proposal 14 of #119.
-    private func filterBar(shown: [RouteManager.LogEntry]) -> some View {
-        HStack(spacing: 10) {
+    /// The page's top line: the level filter and how many entries show. The search, Copy and
+    /// Clear are in the title bar.
+    private func filterBar(_ filter: LogFilter, shown: [RouteManager.LogEntry]) -> some View {
+        HStack(spacing: Theme.Space.m) {
             Picker(LogLevelFilter.controlName, selection: $filter.level) {
                 ForEach(LogLevelFilter.allCases) { level in
                     Text(level.title).tag(level)
@@ -2170,278 +614,25 @@ struct LogsTab: View {
             .labelsHidden()
             .fixedSize()
             .help(LogLevelFilter.controlHelp)
+            .accessibilityLabel(LogLevelFilter.controlName)
 
-            LogSearchField(text: $filter.query, placeholder: String(localized: "Search"))
-                .frame(minWidth: 110, maxWidth: 190)
+            Text(filter.countLine(shown: shown.count, total: routeManager.recentLogs.count))
+                .font(Theme.Font.detail)
+                .monospacedDigit()
+                .foregroundColor(Theme.textSecondary)
+                .lineLimit(1)
+            if filter.onlySource != nil {
+                sourceToken
+            }
 
             Spacer(minLength: 0)
-
-            Button("Copy") {
-                copyLogsToClipboard(shown)
-            }
-            .disabled(shown.isEmpty)
-            .help(String(localized: "Copy the entries shown"))
-
-            Button("Clear") {
-                withAnimation { routeManager.recentLogs.removeAll() }
-            }
-            .help(String(localized: "Remove every entry, including any the filter hides"))
         }
-        .controlSize(.regular)
+        .controlSize(.small)
     }
 
     private func copyLogsToClipboard(_ entries: [RouteManager.LogEntry]) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(LogFilter.clipboardText(entries), forType: .string)
-    }
-}
-
-// MARK: - Info Tab
-
-struct InfoTab: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // App info header
-            appInfoSection
-            
-            // Author section
-            authorSection
-            
-            // Support section
-            supportSection
-            
-            // Links section
-            linksSection
-            
-            // License section
-            licenseSection
-            
-            Spacer()
-        }
-    }
-    
-    private var appInfoSection: some View {
-        VStack(alignment: .center, spacing: 10) {
-            // App logo from bundle
-            if let logoPath = Bundle.main.path(forResource: "VPNBypass", ofType: "png"),
-               let nsImage = NSImage(contentsOfFile: logoPath) {
-                Image(nsImage: nsImage)
-                    .interpolation(.high)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 96, height: 96)
-                    .clipShape(RoundedRectangle(cornerRadius: 21.6, style: .continuous))
-                    .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
-            } else {
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 48))
-                    .foregroundColor(Theme.Brand.sky)
-            }
-
-            // Type only — the icon directly above IS the mark. Repeating it here duplicated
-            // the mark and, because a mark+type lockup centres as one unit, left the type
-            // visibly off-centre under the icon.
-            BrandedAppName(fontSize: 26)
-                .padding(.top, 2)
-
-            Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundColor(Theme.textTertiary)
-
-            Text("Route specific traffic around your corporate VPN")
-                .font(.system(size: 13))
-                .foregroundColor(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.top, 2)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 26)
-    }
-    
-    private var authorSection: some View {
-        SettingsCard(title: "Author", icon: "person.fill", iconColor: Theme.purple) {
-            HStack(spacing: 16) {
-                // Avatar from GitHub
-                if let avatarPath = Bundle.main.path(forResource: "author-avatar", ofType: "png"),
-                   let nsImage = NSImage(contentsOfFile: avatarPath) {
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 50, height: 50)
-                        .clipShape(Circle())
-                } else {
-                    // Fallback
-                    Circle()
-                        .fill(
-                            Theme.purpleGradient
-                        )
-                        .frame(width: 50, height: 50)
-                        .overlay(
-                            Text("SF")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
-                        )
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Sergio Fernández")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                    
-                    Text("Your 100x Engineer, with ❤️")
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.textSecondary)
-                }
-                
-                Spacer()
-            }
-        }
-    }
-    
-    private var supportSection: some View {
-        SettingsCard(title: "Support the Project", icon: "heart.fill", iconColor: Theme.error) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("If you find VPN Bypass useful, consider supporting its development!")
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.textSecondary)
-                
-                // First row
-                HStack(spacing: 10) {
-                    LinkButton(
-                        title: "GitHub Sponsors",
-                        icon: "heart.fill",
-                        color: Theme.githubSponsors,
-                        url: "https://github.com/sponsors/GeiserX"
-                    )
-
-                    LinkButton(
-                        title: "Buy Me a Coffee",
-                        icon: "cup.and.saucer.fill",
-                        color: Theme.buyMeACoffee,
-                        url: "https://buymeacoffee.com/geiser"
-                    )
-                }
-
-                // Second row
-                HStack(spacing: 10) {
-                    LinkButton(
-                        title: "Patreon",
-                        icon: "paintpalette.fill",
-                        color: Theme.patreon,
-                        url: "https://patreon.com/geiser"
-                    )
-
-                    LinkButton(
-                        title: "Thanks.dev",
-                        icon: "hands.clap.fill",
-                        color: Theme.success,
-                        url: "https://thanks.dev/u/gh/geiserx"
-                    )
-                }
-            }
-        }
-    }
-    
-    private var linksSection: some View {
-        SettingsCard(title: "Links", icon: "link", iconColor: Theme.blue) {
-            VStack(spacing: 8) {
-                LinkRow(icon: "globe", title: "Blog", subtitle: "geiser.cloud", url: "https://geiser.cloud")
-                Divider().background(Theme.divider)
-                LinkRow(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub", subtitle: "github.com/GeiserX", url: "https://github.com/GeiserX")
-                Divider().background(Theme.divider)
-                LinkRow(icon: "doc.text", title: "Source Code", subtitle: "VPN Bypass", url: "https://github.com/GeiserX/VPN-Bypass")
-                Divider().background(Theme.divider)
-                LinkRow(icon: "exclamationmark.bubble", title: "Report Issue", subtitle: "GitHub Issues", url: "https://github.com/GeiserX/VPN-Bypass/issues")
-            }
-        }
-    }
-    
-    private var licenseSection: some View {
-        SettingsCard(title: "License", icon: "doc.badge.gearshape", iconColor: Theme.warning) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("GPL-3.0 License")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white)
-
-                Text("This software is free and open source under the GNU General Public License v3.0. You are free to use, modify, and distribute it under the same license terms.")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textSecondary)
-
-                Text("© 2026 Sergio Fernández (GeiserX)")
-                    .font(.system(size: 10))
-                    .foregroundColor(Theme.textTertiary)
-            }
-        }
-    }
-}
-
-// MARK: - Info Tab Components
-
-struct LinkButton: View {
-    let title: LocalizedStringKey
-    let icon: String
-    let color: Color
-    let url: String
-    
-    var body: some View {
-        Button {
-            if let url = URL(string: url) {
-                NSWorkspace.shared.open(url)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 12))
-                Text(title)
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .foregroundColor(color == Theme.buyMeACoffee ? .black : .white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(color)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-struct LinkRow: View {
-    let icon: String
-    let title: LocalizedStringKey
-    let subtitle: LocalizedStringKey
-    let url: String
-    
-    var body: some View {
-        Button {
-            if let url = URL(string: url) {
-                NSWorkspace.shared.open(url)
-            }
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.blue)
-                    .frame(width: 20)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white)
-                    Text(subtitle)
-                        .font(.system(size: 10))
-                        .foregroundColor(Theme.textTertiary)
-                }
-
-                Spacer()
-
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 10))
-                    .foregroundColor(Theme.textTertiary)
-            }
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -2455,84 +646,115 @@ struct LogRow: View {
         for range in LogFilter.ranges(of: highlight, in: entry.message) {
             guard let lower = AttributedString.Index(range.lowerBound, within: text),
                   let upper = AttributedString.Index(range.upperBound, within: text) else { continue }
-            text[lower..<upper].backgroundColor = Color(hex: "FACC15").opacity(0.35)
+            text[lower..<upper].backgroundColor = Theme.attention.opacity(0.35)
         }
         return text
     }
-    
-    private var levelColor: Color {
-        switch entry.level {
-        case .info: return Theme.textTertiary
-        case .success: return Theme.success
-        case .warning: return Theme.warning
-        case .error: return Theme.error
+
+    /// Colour only for what needs a look: amber for a warning, red for an error. Green is for
+    /// live routing, so a success line is grey like the rest.
+    static func levelColor(_ level: RouteManager.LogEntry.LogLevel) -> Color {
+        switch level {
+        case .info, .success: return Theme.textSecondary
+        case .warning: return Theme.attention
+        case .error: return Theme.failure
         }
     }
-    
-    private var levelIcon: String {
-        switch entry.level {
-        case .info: return "info.circle.fill"
-        case .success: return "checkmark.circle.fill"
+
+    /// The level as VoiceOver says it, so a warning or an error does not sound like an info line.
+    static func levelName(_ level: RouteManager.LogEntry.LogLevel, bundle: Bundle = .main) -> String {
+        switch level {
+        case .info: return String(localized: "Info", bundle: bundle)
+        case .success: return String(localized: "Success", bundle: bundle)
+        case .warning: return String(localized: "Warning", bundle: bundle)
+        case .error: return String(localized: "Error", bundle: bundle)
+        }
+    }
+
+    static func levelIcon(_ level: RouteManager.LogEntry.LogLevel) -> String {
+        switch level {
+        case .info: return "info.circle"
+        case .success: return "checkmark.circle"
         case .warning: return "exclamationmark.triangle.fill"
         case .error: return "xmark.circle.fill"
         }
     }
-    
+
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: levelIcon)
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+            Image(systemName: Self.levelIcon(entry.level))
                 .font(.system(size: 10))
-                .foregroundColor(levelColor)
-            
+                .foregroundColor(Self.levelColor(entry.level))
+                .frame(width: ListRow.glyphColumn)
+                .accessibilityLabel(Self.levelName(entry.level))
+
             Text(entry.timestamp, format: .dateTime.hour().minute().second())
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(Theme.textTertiary)
-                .frame(width: 70, alignment: .leading)
-            
+                .font(Theme.Font.mono)
+                .monospacedDigit()
+                .foregroundColor(Theme.textSecondary)
+                .fixedSize()
+
             Text(message)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.white)
+                .font(Theme.Font.mono)
+                .foregroundColor(Theme.text)
                 .lineLimit(1)
-            
-            Spacer()
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
 
             if let tag = entry.source.tag {
                 Text(tag)
-                    .font(.system(size: 11))
+                    .font(Theme.Font.detail)
                     .foregroundColor(Theme.textSecondary)
                     .lineLimit(1)
                     .fixedSize()
-                    .help(LogSource.tagHelp)
+                    .help(entry.source.helpText)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, ListRow.inset)
+        .padding(.vertical, 5)
+        .help(entry.message)
     }
 }
 
-/// The Logs page's search field: a native NSSearchField, with its magnifier and clear button.
+/// A native NSSearchField, with its magnifier and clear button: the Settings page header's search
+/// and the Lookups add panel's service search.
 struct LogSearchField: NSViewRepresentable {
     @Binding var text: String
     let placeholder: String
+    /// A change moves the keyboard focus into the field (the page header search's ⌘F).
+    var focusRequest = 0
 
     func makeNSView(context: Context) -> NSSearchField {
         let field = NSSearchField()
         field.placeholderString = placeholder
+        field.setAccessibilityLabel(placeholder)
         field.sendsSearchStringImmediately = true
         field.delegate = context.coordinator
         field.stringValue = text
+        context.coordinator.focusRequest = focusRequest
         return field
     }
 
     func updateNSView(_ field: NSSearchField, context: Context) {
         context.coordinator.text = $text
         if field.stringValue != text { field.stringValue = text }
+        // The header keeps one field across pages, so the prompt follows the page.
+        if field.placeholderString != placeholder {
+            field.placeholderString = placeholder
+            field.setAccessibilityLabel(placeholder)
+        }
+        if context.coordinator.focusRequest != focusRequest {
+            context.coordinator.focusRequest = focusRequest
+            field.window?.makeFirstResponder(field)
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
 
     final class Coordinator: NSObject, NSSearchFieldDelegate {
         var text: Binding<String>
+        var focusRequest = 0
         init(text: Binding<String>) { self.text = text }
 
         func controlTextDidChange(_ note: Notification) {
@@ -2546,6 +768,21 @@ struct LogSearchField: NSViewRepresentable {
     }
 }
 
+// MARK: - Search
+
+/// What a list page shows when the title bar search leaves none of its rows.
+struct SettingsSearchMiss: View {
+    let search: String
+
+    var body: some View {
+        Text(String(localized: "Nothing on this page matches \u{201C}\(search)\u{201D}."))
+            .font(Theme.Font.body)
+            .foregroundColor(Theme.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, Theme.Space.l)
+    }
+}
+
 // MARK: - Settings Window Controller
 
 /// The page the Settings window should show next. Set before the window opens or while it is
@@ -2556,6 +793,13 @@ final class SettingsPageRequest: ObservableObject {
     @Published var page: SettingsView.SettingsTab?
     /// The filter the Logs page opens with, read together with `page`.
     var logFilter: LogFilter?
+    /// The Services page opens its catalogue sheet; the page takes it and clears it.
+    @Published var openCatalogue = false
+    /// The country the catalogue sheet opens on, read together with `openCatalogue`.
+    var catalogueRegion: String?
+    /// The title bar search the page opens with, read together with `page`: the dropdown's
+    /// Show in Settings opens the page filtered to the row's entry.
+    var search: String?
 }
 
 @MainActor
@@ -2565,6 +809,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     /// The open window's undo line, dropped when the window closes.
     private var settingsUndo: SettingsUndo?
+
+    /// The window is open on screen (not closed, not minimized).
+    var isShown: Bool { window?.isVisible == true && window?.isMiniaturized == false }
 
     /// Shows the window, on `page` when one is given.
     func show(page: SettingsView.SettingsTab? = nil) {
@@ -2599,7 +846,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.window = window
     }
 
-    /// The Settings window, built without showing it. The title bar's Mode menu and the
+    /// The window's size when it first opens, and the smallest it can be made.
+    static let defaultContentSize = NSSize(width: 860, height: 620)
+    static let minimumContentSize = NSSize(width: 720, height: 480)
+
+    /// The Settings window, built without showing it. The sidebar's mode popup and the
     /// content's mode sheet share one `ModeSwitchRequest`.
     static func makeWindow(settingsUndo: SettingsUndo? = nil) -> NSWindow {
         let modeSwitch = ModeSwitchRequest()
@@ -2612,8 +863,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let hostingView = NSHostingView(rootView: settingsView)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 580, height: 680),
-            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+            contentRect: NSRect(origin: .zero, size: defaultContentSize),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -2621,15 +872,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.contentView = hostingView
         window.title = "VPN Bypass"
         window.titlebarAppearsTransparent = true
+        // The page header draws the page name; the window keeps it as its title for the
+        // Window menu, Mission Control and VoiceOver (`WindowTitleSetter`).
         window.titleVisibility = .hidden
+        // No toolbar: a toolbar's title view would take the clicks meant for the search field
+        // drawn under it. The page header sits in the transparent title bar instead.
         window.backgroundColor = NSColor(Theme.bgPrimary)
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 580, height: 680)
-        window.contentMaxSize = NSSize(width: 580, height: 680)
+        window.contentMinSize = minimumContentSize
         window.center()
-
-        // Branded title bar, with the Mode menu at its right end
-        addBrandedTitlebar(to: window, modeSwitch: modeSwitch)
+        // A size the user gave the window comes back next time.
+        window.setFrameAutosaveName("VPNBypassSettings")
         return window
     }
 
@@ -2640,66 +893,5 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // Hide Dock icon when settings window closes
         NSApp.setActivationPolicy(.accessory)
     }
-
-    private static func addBrandedTitlebar(to window: NSWindow, modeSwitch: ModeSwitchRequest) {
-        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: window.frame.width, height: 28))
-
-        let titleView = NSHostingView(rootView: BrandedTitlebarView()
-            .environmentObject(RouteManager.shared)
-            .environmentObject(modeSwitch))
-        titleView.frame = containerView.bounds
-        titleView.autoresizingMask = [.width, .height]
-        containerView.addSubview(titleView)
-
-        let accessory = NSTitlebarAccessoryViewController()
-        accessory.view = containerView
-        accessory.layoutAttribute = .right
-
-        window.addTitlebarAccessoryViewController(accessory)
-    }
 }
 
-// MARK: - Branded Titlebar View
-
-struct BrandedTitlebarView: View {
-    var body: some View {
-        ZStack {
-            brand
-            HStack {
-                Spacer()
-                RoutingModeTitlebarButton()
-                    .padding(.trailing, 10)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var brand: some View {
-        HStack {
-            Spacer()
-
-            // The FLAT mark, tinted — not the squircle app icon scaled to 18px, which turns to
-            // mud at that size because its gradient ground and rounded shape carry no detail
-            // there. The title bar is exactly what the template glyph is drawn for.
-            HStack(spacing: 7) {
-                if let mark = Bundle.main.image(forResource: "menubar-icon-active") {
-                    Image(nsImage: mark)
-                        .renderingMode(.template)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 15, height: 15)
-                        .foregroundColor(Theme.Brand.sky)
-                } else {
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(Theme.Brand.sky)
-                }
-
-                BrandedAppName(fontSize: 13)
-            }
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}

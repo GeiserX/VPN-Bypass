@@ -1,16 +1,17 @@
 // RoutingModeSwitcher.swift
-// The routing mode in the Settings window: a Mode menu at the right end of the title bar, and
-// the sheet that explains each mode before anything changes. The page buttons sit in their own
-// toolbar row, so a click meant to change the page can no longer change the routing mode.
+// The routing mode: the mode control the Settings sidebar and the dropdown share (`ModeControl`),
+// and the sheet that explains each mode before anything changes. The sheet opens from the
+// sidebar's mode control (`SettingsModeControl`) and from a read-only page's Switch…, so a click
+// meant to change the page never changes the mode.
 
 import AppKit
 import SwiftUI
 
 // MARK: - Wording
 
-/// The words the Mode menu and the sheet use, kept pure so they are unit-tested.
+/// The words the mode sheet uses, kept pure so they are unit-tested.
 enum RoutingModeCopy {
-    /// Menu and sheet order.
+    /// Sheet order.
     static let order: [RoutingMode] = [.bypass, .vpnOnly, .custom]
 
     /// What the user's own lists hold, read from the config by `lists(from:)`.
@@ -46,28 +47,6 @@ enum RoutingModeCopy {
         case .vpnOnly: return String(localized: "VPN Only")
         case .custom: return String(localized: "Custom Routes")
         }
-    }
-
-    static func icon(_ mode: RoutingMode) -> String {
-        switch mode {
-        case .bypass: return "globe"
-        case .vpnOnly: return "lock.shield"
-        case .custom: return "arrow.triangle.branch"
-        }
-    }
-
-    /// The short line under each name in the Mode menu (macOS 14.4 and later).
-    static func menuLine(_ mode: RoutingMode) -> String {
-        switch mode {
-        case .bypass: return String(localized: "Everything uses the VPN except what you list")
-        case .vpnOnly: return String(localized: "Only what you list uses the VPN")
-        case .custom: return String(localized: "Pick a route for each destination")
-        }
-    }
-
-    /// The title bar button's spoken label.
-    static func accessibilityLabel(_ mode: RoutingMode) -> String {
-        String(localized: "Routing mode: \(name(mode))")
     }
 
     /// The sheet's text for one mode: what it does, then what the user's lists hold for it.
@@ -111,7 +90,7 @@ enum RoutingModeCopy {
         }
     }
 
-    /// A pick in the Mode menu opens the sheet with that mode selected. Picking the mode
+    /// A pick in the mode control opens the sheet with that mode selected. Picking the mode
     /// already in use opens nothing.
     static func sheetSelection(forPick picked: RoutingMode, current: RoutingMode) -> RoutingMode? {
         picked == current ? nil : picked
@@ -125,121 +104,16 @@ enum RoutingModeCopy {
 
 // MARK: - Shared state
 
-/// The mode picked in the title bar's Mode menu, waiting in the sheet for Switch or Cancel.
-/// The menu lives in a title bar accessory and the sheet in the window's content, two
-/// separate hosting views, so both read this one object.
+/// The mode picked in the sidebar's mode control or a read-only page's Switch…, waiting in the
+/// sheet for Switch or Cancel.
 @MainActor
 final class ModeSwitchRequest: ObservableObject {
     @Published var pickedMode: RoutingMode?
 }
 
-// MARK: - Mode menu
-
-/// The Mode menu as a real NSMenu: the current mode checked, a short line under each name
-/// (`NSMenuItem.subtitle`, macOS 14.4 and later; earlier versions show the names only).
-@MainActor
-final class RoutingModeMenu: NSObject {
-    let menu: NSMenu
-    private let onPick: (RoutingMode) -> Void
-
-    init(current: RoutingMode, onPick: @escaping (RoutingMode) -> Void) {
-        self.onPick = onPick
-        self.menu = NSMenu()
-        super.init()
-        menu.autoenablesItems = false
-        for mode in RoutingModeCopy.order {
-            let item = NSMenuItem(title: RoutingModeCopy.name(mode), action: #selector(pick(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = mode.rawValue
-            item.state = mode == current ? .on : .off
-            item.image = NSImage(systemSymbolName: RoutingModeCopy.icon(mode), accessibilityDescription: nil)
-            if #available(macOS 14.4, *) {
-                item.subtitle = RoutingModeCopy.menuLine(mode)
-            }
-            menu.addItem(item)
-        }
-    }
-
-    @objc func pick(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let mode = RoutingMode(rawValue: raw) else { return }
-        onPick(mode)
-    }
-}
-
-/// Holds the NSView under the title bar button so the menu can drop down from it.
-private final class MenuAnchorRef {
-    weak var view: NSView?
-}
-
-private struct MenuAnchor: NSViewRepresentable {
-    let ref: MenuAnchorRef
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        ref.view = view
-        return view
-    }
-    func updateNSView(_ nsView: NSView, context: Context) {
-        ref.view = nsView
-    }
-}
-
-/// "Mode  Bypass ⌄" at the right end of the title bar. It always shows the mode in use: a
-/// pick only opens the sheet, and the mode changes on Switch.
-struct RoutingModeTitlebarButton: View {
-    @EnvironmentObject var routeManager: RouteManager
-    @EnvironmentObject var request: ModeSwitchRequest
-    @State private var anchor = MenuAnchorRef()
-    @State private var isHovered = false
-
-    var body: some View {
-        let mode = routeManager.config.routingMode
-        Button(action: showMenu) {
-            HStack(spacing: 5) {
-                Text("Mode")
-                    .foregroundColor(Theme.textSecondary)
-                Image(systemName: RoutingModeCopy.icon(mode))
-                    .foregroundColor(Theme.Brand.sky)
-                Text(RoutingModeCopy.name(mode))
-                    .foregroundColor(Theme.textPrimary)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundColor(Theme.textSecondary)
-            }
-            .font(.system(size: 12, weight: .medium))
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, 9)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isHovered ? Theme.bgHover : Theme.bgCard)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Theme.bgCardBorder, lineWidth: 1)
-            )
-            .background(MenuAnchor(ref: anchor))
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .accessibilityLabel(RoutingModeCopy.accessibilityLabel(mode))
-    }
-
-    private func showMenu() {
-        guard let view = anchor.view else { return }
-        let current = routeManager.config.routingMode
-        let menu = RoutingModeMenu(current: current) { picked in
-            request.pickedMode = RoutingModeCopy.sheetSelection(forPick: picked, current: current)
-        }
-        // popUp runs the menu to completion, so `menu` (the items' target) lives until a pick.
-        menu.menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.isFlipped ? view.bounds.height + 4 : -4), in: view)
-    }
-}
-
 // MARK: - Mode sheet
 
-/// Opens with the mode picked in the menu selected. Nothing changes until Switch, which goes
+/// Opens with the mode picked in the mode control selected. Nothing changes until Switch, which goes
 /// through the same `RouteManager.setRoutingMode` the old confirmation alert used.
 struct RoutingModeSheet: View {
     let lists: RoutingModeCopy.Lists
@@ -256,46 +130,18 @@ struct RoutingModeSheet: View {
     }
 
     var body: some View {
-        let canSwitch = RoutingModeCopy.canSwitch(to: selected, from: lists.current)
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Routing mode")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Theme.textPrimary)
-                .padding(.bottom, 14)
-
-            ForEach(Array(RoutingModeCopy.order.enumerated()), id: \.element) { index, mode in
-                if index > 0 {
-                    Rectangle().fill(Theme.divider).frame(height: 1)
+        SheetScaffold(String(localized: "Routing mode"), confirmTitle: String(localized: "Switch"),
+                      canConfirm: RoutingModeCopy.canSwitch(to: selected, from: lists.current),
+                      onCancel: onCancel, onConfirm: { onSwitch(selected) }) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(RoutingModeCopy.order.enumerated()), id: \.element) { index, mode in
+                    if index > 0 {
+                        Rectangle().fill(Theme.separator).frame(height: 0.5)
+                    }
+                    row(mode)
                 }
-                row(mode)
             }
-
-            HStack(spacing: 10) {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.plain)
-                    .foregroundColor(Theme.textPrimary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(Theme.bgInput)
-                    .cornerRadius(7)
-                    .keyboardShortcut(.cancelAction)
-                Button("Switch") { onSwitch(selected) }
-                    .buttonStyle(.plain)
-                    .foregroundColor(canSwitch ? .white : Theme.textDisabled)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(canSwitch ? AnyShapeStyle(Theme.blueGradient) : AnyShapeStyle(Theme.bgDisabled))
-                    .cornerRadius(7)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canSwitch)
-            }
-            .font(.system(size: 13, weight: .medium))
-            .padding(.top, 18)
         }
-        .padding(20)
-        .frame(width: 400)
-        .background(Theme.bgSecondary)
     }
 
     private func row(_ mode: RoutingMode) -> some View {
@@ -304,14 +150,14 @@ struct RoutingModeSheet: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 15))
-                    .foregroundColor(isSelected ? Theme.Brand.blueLight : Theme.textTertiary)
+                    .foregroundColor(isSelected ? Theme.accentText : Theme.textSecondary)
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(RoutingModeCopy.name(mode))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Theme.textPrimary)
+                        .font(Theme.Font.strong)
+                        .foregroundColor(Theme.text)
                     Text(RoutingModeCopy.sheetLine(mode, lists: lists))
-                        .font(.system(size: 12))
+                        .font(Theme.Font.detail)
                         .foregroundColor(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -322,5 +168,169 @@ struct RoutingModeSheet: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+// MARK: - Mode control
+
+/// The routing mode as the app's main control, the same in the Settings sidebar and in the
+/// dropdown: all three modes, each with its name and what it does, the mode in use marked. In
+/// the sidebar the modes are stacked cards (glyph, name, meaning, the one in use ringed and
+/// checked); in the dropdown they are one track of three segments, the mode in use raised, with
+/// its meaning under it. A pick changes nothing by itself: `onPick` asks first (the sheet in
+/// Settings, the alert in the dropdown), and the control keeps showing the saved mode.
+struct ModeControl: View {
+    enum Layout { case cards, track }
+
+    static let modes = DropdownModePicker.modes
+
+    let current: RoutingMode
+    let layout: Layout
+    let onPick: (RoutingMode) -> Void
+
+    static func glyph(_ mode: RoutingMode) -> String {
+        switch mode {
+        case .bypass: return "arrow.turn.up.right"
+        case .vpnOnly: return "lock.shield"
+        case .custom: return "point.3.connected.trianglepath.dotted"
+        }
+    }
+
+    /// What a mode does, in one sentence: the card's second line, the line under the track and
+    /// every mode's VoiceOver hint, so both surfaces say the same thing.
+    static func meaning(_ mode: RoutingMode, in bundle: Bundle = .main) -> String {
+        switch mode {
+        case .bypass: return String(localized: "Your list skips the VPN.", bundle: bundle)
+        case .vpnOnly: return String(localized: "Only your list uses the VPN.", bundle: bundle)
+        case .custom: return String(localized: "Your rules pick each route.", bundle: bundle)
+        }
+    }
+
+    /// A card's height in the sidebar: two lines and 4 pt above and below.
+    static let cardHeight: CGFloat = 38
+    /// A segment's height on the dropdown's track.
+    static let segmentHeight: CGFloat = 24
+
+    var body: some View {
+        Group {
+            switch layout {
+            case .cards:
+                VStack(spacing: Theme.Space.xs) {
+                    ForEach(Self.modes, id: \.self) { card($0) }
+                }
+            case .track:
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 2) {
+                        ForEach(Self.modes, id: \.self) { segment($0) }
+                    }
+                    .padding(2)
+                    .background(RoundedRectangle(cornerRadius: Theme.Radius.control + 2).fill(Theme.bgInput))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control + 2).strokeBorder(Theme.border, lineWidth: 0.5))
+                    Text(Self.meaning(current))
+                        .font(Theme.Font.detail)
+                        .foregroundColor(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 2)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(String(localized: "Mode"))
+    }
+
+    private func pick(_ mode: RoutingMode) {
+        if mode != current { onPick(mode) }
+    }
+
+    private func card(_ mode: RoutingMode) -> some View {
+        ModeCard(mode: mode, isCurrent: mode == current) { pick(mode) }
+            .modeAccessibility(mode, isCurrent: mode == current)
+    }
+
+    private func segment(_ mode: RoutingMode) -> some View {
+        let isCurrent = mode == current
+        return Button { pick(mode) } label: {
+            Text(DropdownModePicker.label(mode))
+                .font(.system(size: 12, weight: isCurrent ? .semibold : .regular))
+                .foregroundColor(isCurrent ? Theme.text : Theme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.horizontal, 6)
+                .frame(maxWidth: .infinity)
+                .frame(height: Self.segmentHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.control)
+                        .fill(isCurrent ? Theme.bgRaised : Color.clear)
+                        .shadow(color: .black.opacity(isCurrent ? 0.2 : 0), radius: 1, y: 0.5)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .modeAccessibility(mode, isCurrent: isCurrent)
+    }
+}
+
+/// One mode in the sidebar: glyph, name, meaning, on the card ground. The mode in use gets a
+/// 1 pt accent ring and a checkmark, no fill, so the selected page stays the sidebar's one
+/// filled row.
+private struct ModeCard: View {
+    let mode: RoutingMode
+    let isCurrent: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: ModeControl.glyph(mode))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(isCurrent ? Theme.accentText : Theme.textSecondary)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(DropdownModePicker.label(mode))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(isCurrent ? Theme.text : Theme.textSecondary)
+                        .lineLimit(1)
+                    Text(ModeControl.meaning(mode))
+                        .font(Theme.Font.detail)
+                        .foregroundColor(Theme.textSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if isCurrent {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(Theme.accentText)
+                }
+            }
+            .padding(.horizontal, Theme.Space.s)
+            .padding(.vertical, Theme.Space.xs)
+            .frame(minHeight: ModeControl.cardHeight)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.control + 2)
+                    .fill(isHovered && !isCurrent ? Theme.bgHover : Theme.bgCard)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.control + 2)
+                    .strokeBorder(isCurrent ? Theme.accent : Theme.border, lineWidth: isCurrent ? 1 : 0.5)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
+private extension View {
+    /// Each mode reads as its name, what it does as the hint, and selected when in use.
+    func modeAccessibility(_ mode: RoutingMode, isCurrent: Bool) -> some View {
+        self
+            .help(DropdownStatus.modeDescription(DropdownModePicker.copyMode(mode)))
+            .accessibilityLabel(DropdownModePicker.label(mode))
+            .accessibilityHint(ModeControl.meaning(mode))
+            .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 }

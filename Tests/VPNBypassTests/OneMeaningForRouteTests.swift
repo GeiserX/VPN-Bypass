@@ -46,11 +46,10 @@ final class OneMeaningForRouteTests: XCTestCase {
         let summary = RoutedBySource.make(mode: .bypass, config: config, routes: telegram, busy: false)
 
         var texts = [
-            DropdownCopy.routeChangeLine(applied, now: now).text,
-            DropdownCopy.routeChangeLine(failed, now: now).text,
-            DropdownCopy.routeChangeLine(removed, now: now).text,
-            DropdownCopy.routeChangeLine(removedSome, now: now).text,
-            DropdownCopy.routeChangeHelp,
+            DropdownCopy.routeChangeLine(applied, installed: applied.routeCount, now: now).text,
+            DropdownCopy.routeChangeLine(failed, installed: failed.routeCount, now: now).text,
+            DropdownCopy.routeChangeLine(removed, installed: removed.routeCount, now: now).text,
+            DropdownCopy.routeChangeLine(removedSome, installed: removedSome.routeCount, now: now).text,
             DropdownCopy.removeAllConfirmation(mode: .bypass, routeCount: n, serviceCount: 1, domainCount: 0,
                                                autoApplyOnVPN: false, autoDNSRefresh: false).title,
             RouteCheck.scope(checked: 0, singleAddresses: 0, routeCount: n).text,
@@ -67,7 +66,8 @@ final class OneMeaningForRouteTests: XCTestCase {
             NotificationManager.disconnectedBody(wasInterface: "utun9", routesKept: 0, routesFailed: n),
             NotificationManager.disconnectedBody(wasInterface: "utun9", routesKept: 0, routesFailed: 0),
         ]
-        texts += DropdownStatus.make(input { $0.installedRoutes = n }, now: now).facts.map { "\($0.label): \($0.value)" }
+        texts.append(DropdownStatus.make(input { $0.installedRoutes = n }, now: now).line3.text)
+        texts.append(DropdownStatus.make(input { $0.installedRoutes = n; $0.helperReady = false }, now: now).line3.text)
         texts += summary.map { [$0.countText] + $0.rows.map(\.countText) } ?? []
         return texts
     }
@@ -75,7 +75,7 @@ final class OneMeaningForRouteTests: XCTestCase {
     func testNoKernelCountSaysRoute() {
         for n in [1, 62] {
             let texts = kernelCountTexts(n)
-            XCTAssertGreaterThan(texts.count, 19, "a count went missing from the list")
+            XCTAssertGreaterThan(texts.count, 20, "a count went missing from the list")
             for text in texts {
                 // "routed" is the verb and stays; the noun "route" or "routes" may not appear.
                 XCTAssertNil(text.range(of: #"\b[Rr]outes?\b"#, options: .regularExpression), "n=\(n): \(text)")
@@ -83,8 +83,8 @@ final class OneMeaningForRouteTests: XCTestCase {
         }
         // The empty states, which have no count.
         let empty = DropdownStatus.make(input { $0.installedRoutes = 0 }, now: now)
-        XCTAssertEqual(empty.pill, "NOTHING ROUTED")
-        XCTAssertEqual(empty.facts.map(\.label), ["Addresses", "DNS"])
+        XCTAssertEqual(empty.chip, .notRouting)
+        XCTAssertEqual(empty.line3.text, "0 addresses · applied 23 s ago · DNS again in 18 min")
         XCTAssertEqual(StatusPage.summary(input { $0.installedRoutes = 0 }, now: now).title, "Nothing routed")
         XCTAssertEqual(RoutedBySource.Row(id: "x", name: "x", icon: .domain, routeCount: 0, isProblem: true,
                                           addresses: [], hiddenAddresses: 0).countText, "no addresses")
@@ -111,9 +111,9 @@ final class OneMeaningForRouteTests: XCTestCase {
 
     func testTheRefreshLineAndTheFactsSayRouted() {
         let removedSome = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now, routeCount: 4, failedCount: 2)
-        XCTAssertEqual(DropdownCopy.routeChangeLine(removedSome, now: now).text,
+        XCTAssertEqual(DropdownCopy.routeChangeLine(removedSome, installed: removedSome.routeCount, now: now).text,
                        "Removed routed addresses just now, 2 could not be removed.")
-        XCTAssertEqual(DropdownStatus.routesFact(input(), now: now), "62 routed 23 s ago, none failed")
+        XCTAssertEqual(DropdownStatus.make(input(), now: now).line3.text, "62 addresses · applied 23 s ago · DNS again in 18 min")
     }
 
     // MARK: "Route" stays for the Custom-mode ways out
@@ -145,15 +145,13 @@ final class OneMeaningForRouteTests: XCTestCase {
     /// The lookup keys this change introduced. Each needs an entry in all three tables, and the
     /// Spanish and French ones must not be the English text.
     static let newKeys = [
-        "1 address", "%lld addresses", "no addresses", "Addresses", "NOTHING ROUTED", "Nothing routed", "Routed",
-        "%lld routed", "none routed yet", "%lld routed %@, none failed", "%lld routed %@, %lld failed",
+        "1 address", "%lld addresses", "no addresses", "Addresses", "Nothing routed", "Routed",
         "VPN Bypass: VPN connected but nothing is being routed",
-        "No addresses to route, checked %@.", "%@ routed %@, none failed.", "%@ routed %@, %lld failed.",
+        "No addresses to route, checked %@.", "%@ routed now, applied %@, none failed.", "%@ routed now, applied %@, %lld failed.",
         "Removed all routed addresses %@.", "Removed routed addresses %@, %lld could not be removed.",
-        "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details.",
         "Stop routing the 1 address?", "Stop routing all %lld addresses?",
-        "Nothing to check: the only address is a range, which ping cannot test",
-        "Nothing to check: all %lld addresses are ranges, which ping cannot test",
+        "Nothing to check: the only address is a range, which the path check cannot test",
+        "Nothing to check: all %lld addresses are ranges, which the path check cannot test",
         "Checked the only address", "Checked all %lld addresses", "Checked %lld of %lld addresses",
         "Checked 1 of %lld addresses",
         "1 address stays routed for when it reconnects.", "%lld addresses stay routed for when it reconnects.",

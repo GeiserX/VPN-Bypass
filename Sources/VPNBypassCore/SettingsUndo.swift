@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-/// What the last delete or bulk switch on a Settings page changed, with what it takes to put
+/// What the last delete, duplicate or bulk switch on a Settings page changed, with what it takes to put
 /// it back. Kept pure so its wording and which page shows it are unit-tested.
 enum UndoableChange {
     /// A Bypass or VPN Only entry, and where it sat in its list.
@@ -17,6 +17,8 @@ enum UndoableChange {
     case rule(Rule, label: String)
     /// A route from the Routes page, and where it sat in the routes list.
     case route(Route, index: Int)
+    /// The copy Duplicate added on the Routes page, and the name of the route it copies.
+    case routeDuplicated(Route, original: String)
     /// The domains a Turn All On or Turn All Off switched, and which way.
     case domainsSwitched(ids: [UUID], on: Bool, list: DomainList)
     /// The services a Turn All On or Turn All Off switched, and which way.
@@ -28,7 +30,7 @@ enum UndoableChange {
         case .domain, .domainsSwitched: return .domains
         case .customService, .servicesSwitched: return .services
         case .rule: return .rules
-        case .route: return .routes
+        case .route, .routeDuplicated: return .routes
         }
     }
 
@@ -59,6 +61,8 @@ enum UndoableChange {
             return String(localized: "Removed the rule for \(label).", bundle: bundle)
         case .route(let route, _):
             return String(localized: "Removed the route \(route.friendlyName(vpnName: nil, in: bundle)).", bundle: bundle)
+        case .routeDuplicated(let copy, let original):
+            return String(localized: "Duplicated \(original) as \(copy.name).", bundle: bundle)
         case .domainsSwitched(let ids, let on, _):
             let what = ids.count == 1 ? String(localized: "1 domain", bundle: bundle)
                 : String(localized: "\(ids.count) domains", bundle: bundle)
@@ -94,6 +98,10 @@ extension RouteManager {
             return restoreRule(rule)
         case .route(let route, let index):
             return restoreRoute(route, at: index)
+        case .routeDuplicated(let copy, _):
+            guard config.routes.contains(where: { $0.id == copy.id }) else { return false }
+            removeRoute(copy.id)
+            return true
         case .domainsSwitched(let ids, let on, .bypass):
             return !setDomainsEnabled(Set(ids), !on).isEmpty
         case .domainsSwitched(let ids, let on, .vpnOnly):
@@ -127,6 +135,8 @@ final class SettingsUndo: ObservableObject {
     /// Moves on with every recorded or dropped change. An undo waiting for the gate goes
     /// ahead, or puts its line back, only if nothing replaced or dropped it meanwhile.
     private var generation = 0
+    /// The change an undo is waiting to put back, off the line while it waits.
+    private var waiting: UndoableChange?
 
     /// `last` seeds the line, for a rendered screenshot.
     init(routeManager: RouteManager? = nil, last: UndoableChange? = nil) {
@@ -136,6 +146,7 @@ final class SettingsUndo: ObservableObject {
 
     func record(_ change: UndoableChange) {
         generation += 1
+        waiting = nil
         undoManager?.removeAllActions(withTarget: self)
         last = change
         register()
@@ -143,8 +154,16 @@ final class SettingsUndo: ObservableObject {
 
     func clear() {
         generation += 1
+        waiting = nil
         undoManager?.removeAllActions(withTarget: self)
         last = nil
+    }
+
+    /// A route was edited or switched. Undo of a Duplicate removes the copy by id, so once
+    /// the copy changes the line goes, or the undo waiting for the gate is cancelled: either
+    /// would throw the change away with the copy.
+    func routeSaved(_ id: UUID) {
+        if case .routeDuplicated(let copy, _) = waiting ?? last, copy.id == id { clear() }
     }
 
     /// The line's Undo button.
@@ -172,6 +191,7 @@ final class SettingsUndo: ObservableObject {
             finish(change)
             return
         }
+        waiting = change
         Task { @MainActor in
             var polls = 0
             while routeManager.isApplyingRoutes && polls < gateWaitPolls {
@@ -179,6 +199,7 @@ final class SettingsUndo: ObservableObject {
                 polls += 1
             }
             guard generation == started else { return }
+            waiting = nil
             guard !routeManager.isApplyingRoutes else {
                 last = change
                 register()
@@ -211,10 +232,10 @@ struct UndoLine: View {
             Button(action: onUndo) {
                 Text("Undo")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(Theme.text)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 3)
-                    .background(Color.white.opacity(0.14))
+                    .background(Theme.bgDisabled)
                     .cornerRadius(5)
             }
             .buttonStyle(.plain)
@@ -225,10 +246,10 @@ struct UndoLine: View {
         .padding(.vertical, 9)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color.white.opacity(0.04))
+                .fill(Theme.bgElevated)
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .strokeBorder(Theme.border, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 )
         )
         .accessibilityElement(children: .combine)

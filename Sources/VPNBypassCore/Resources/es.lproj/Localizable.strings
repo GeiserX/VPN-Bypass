@@ -3,8 +3,6 @@
 /* ===== Barra de menú ===== */
 "VPN Connected" = "VPN conectada";
 "VPN Disconnected" = "VPN desconectada";
-"Add Domain to VPN" = "Añadir dominio a la VPN";
-"Add Domain to Bypass" = "Añadir dominio al bypass";
 "Refresh Routes" = "Actualizar rutas";
 "Clear" = "Limpiar";
 "Verify Routes" = "Verificar rutas";
@@ -13,44 +11,27 @@
 "Mode" = "Modo";
 "Bypass" = "Bypass";
 "VPN Only" = "Solo VPN";
-"Setting Up..." = "Configurando...";
-"Detecting VPN and applying routes" = "Detectando VPN y aplicando rutas";
-"No VPN Connection" = "Sin conexión VPN";
-"Connect to a VPN to start bypassing\ntraffic for configured services." = "Conéctate a una VPN para empezar a desviar\nel tráfico de los servicios configurados.";
 "Services" = "Servicios";
 "Domains" = "Dominios";
 "Settings" = "Ajustes";
 "Settings…" = "Ajustes…";
 "Quit VPN Bypass" = "Salir de VPN Bypass";
-"ON" = "ON";
-"OFF" = "OFF";
 
 /* ===== Ajustes — Pestañas ===== */
 "General" = "General";
 "Logs" = "Registros";
-"Info" = "Información";
 
 /* ===== Ajustes — Pestaña Dominios ===== */
 "VPN Only list" = "Lista Solo VPN";
 "Bypass list" = "Lista Bypass";
-"Only these domains will use the VPN. Everything else bypasses it." = "Solo estos dominios usarán la VPN. Todo lo demás la evita.";
-"Add domains that should bypass VPN and use your regular connection." = "Añade dominios que deben evitar la VPN y usar tu conexión habitual.";
-"CONFIGURED DOMAINS" = "DOMINIOS CONFIGURADOS";
 "Applying..." = "Aplicando...";
 "All" = "Todos";
 "Add a domain above to bypass VPN" = "Añade un dominio arriba para evitar la VPN";
 
 /* ===== Ajustes — Pestaña Servicios ===== */
-"%lld/%lld enabled" = "%lld/%lld habilitados";
-"Services disabled in VPN Only mode" = "Servicios deshabilitados en modo Solo VPN";
-"Search services..." = "Buscar servicios...";
 "Create Custom Service" = "Crear servicio personalizado";
 "Custom" = "Personalizado";
 "%lld domains" = "%lld dominios";
-/* Services page section headers; the On header is not the dropdown's ON pill */
-"services.section.on" = "ACTIVADOS";
-"CUSTOM SERVICES" = "SERVICIOS PERSONALIZADOS";
-"BUILT-IN SERVICES" = "SERVICIOS INTEGRADOS";
 
 /* ===== Ajustes — Editor de servicio ===== */
 "Edit Service" = "Editar servicio";
@@ -65,8 +46,6 @@
 
 /* ===== Ajustes — Pestaña General ===== */
 "Startup" = "Inicio";
-"Launch at Login" = "Iniciar con el sistema";
-"Automatically start VPN Bypass when you log in" = "Iniciar VPN Bypass automáticamente al acceder";
 "Not Installed" = "No instalado";
 "Checking..." = "Comprobando...";
 "Update Required (v%@ → v%@)" = "Actualización requerida (v%@ → v%@)";
@@ -88,44 +67,12 @@
 "Retry" = "Reintentar";
 "Install" = "Instalar";
 "The helper runs as root and handles route/hosts changes without prompting." = "El asistente se ejecuta como root y gestiona los cambios de rutas y hosts sin solicitar contraseña.";
-"Behavior" = "Comportamiento";
-"Auto-apply on VPN Connect" = "Aplicar automáticamente al conectar VPN";
-"Automatically apply routes when VPN connects" = "Aplicar rutas automáticamente cuando la VPN se conecta";
-"Manage /etc/hosts" = "Gestionar /etc/hosts";
-"Add DNS bypass entries (requires admin)" = "Añadir entradas DNS de bypass (requiere admin)";
-"Verify Routes After Apply" = "Verificar rutas tras aplicar";
-"Ping test routes to ensure they're working" = "Hacer ping de prueba a las rutas para asegurar que funcionan";
-"DNS Refresh" = "Actualización DNS";
-"Auto DNS Refresh" = "Actualización DNS automática";
-"Periodically re-resolve domains and update routes" = "Re-resolver dominios periódicamente y actualizar rutas";
-"Refresh Interval" = "Intervalo de actualización";
-"How often to re-check DNS for changes" = "Frecuencia de comprobación de cambios DNS";
-"15 min" = "15 min";
-"30 min" = "30 min";
-"1 hour" = "1 hora";
-"2 hours" = "2 horas";
-"6 hours" = "6 horas";
 "Refresh Now" = "Actualizar ahora";
-"Re-resolves all domains to catch IP changes and ensure routes stay up to date." = "Re-resuelve todos los dominios para detectar cambios de IP y mantener las rutas actualizadas.";
-"Fallback DNS" = "DNS de respaldo";
-"Detected Non-VPN DNS" = "DNS no-VPN detectado";
-"Fallback DNS servers when detected DNS is unavailable.\nSupported formats: IP (1.1.1.1), DoH (https://...), DoT (tls://... or IP:853)" = "Servidores DNS de respaldo cuando el DNS detectado no está disponible.\nFormatos admitidos: IP (1.1.1.1), DoH (https://...), DoT (tls://... o IP:853)";
-"Add DNS Server" = "Añadir servidor DNS";
 "Notifications" = "Notificaciones";
-"Enable Notifications" = "Activar notificaciones";
-"Show alerts for VPN events" = "Mostrar alertas para eventos de la VPN";
-"Silent" = "Silencioso";
-"No sound" = "Sin sonido";
-"Connect" = "Conexión";
-"Disconnect" = "Desconexión";
 "Routes" = "Rutas";
-"Failures" = "Errores";
 "Addresses: services, domains, DNS refresh" = "Direcciones: servicios, dominios, actualización DNS";
-"SOCKS5 Proxy" = "Proxy SOCKS5";
-"Aggressive Bypass Mode" = "Modo bypass agresivo";
 "For corporate VPNs (Cisco, Zscaler) that block UDP. Requires external SOCKS5 proxy server with UDP support." = "Para VPNs corporativas (Cisco, Zscaler) que bloquean UDP. Requiere servidor proxy SOCKS5 externo con soporte UDP.";
 "Enable SOCKS5 Proxy" = "Activar proxy SOCKS5";
-"Route traffic through proxy to bypass UDP blocking" = "Enrutar tráfico a través del proxy para evitar el bloqueo UDP";
 "Proxy Server" = "Servidor proxy";
 "Authentication (optional)" = "Autenticación (opcional)";
 "Test Connection" = "Probar conexión";
@@ -135,11 +82,7 @@
 "Connected to %@" = "Conectado a %@";
 "Cannot connect to %@" = "No se puede conectar a %@";
 "Testing..." = "Probando...";
-"Proxy will be used for services that need UDP (Discord voice, gaming, etc.) when corporate VPN blocks direct UDP traffic." = "El proxy se usará para servicios que necesitan UDP (voz de Discord, juegos, etc.) cuando la VPN corporativa bloquea el tráfico UDP directo.";
 "Configuration" = "Configuración";
-"Export" = "Exportar";
-"Import" = "Importar";
-"Export your domains and services configuration to a file, or import from a backup." = "Exporta la configuración de dominios y servicios a un archivo, o importa desde una copia de seguridad.";
 "Import Error" = "Error de importación";
 "OK" = "OK";
 "Failed to import configuration file." = "No se pudo importar el archivo de configuración.";
@@ -162,9 +105,7 @@
 "Connected on %@" = "Conectada en %@";
 "%@, connected" = "%@, conectada";
 "Normal connection" = "Conexión normal";
-"Wi-Fi “%@”, gateway %@" = "Wi-Fi «%1$@», puerta de enlace %2$@";
 "Gateway %@" = "Puerta de enlace %@";
-"Wi-Fi “%@”, no gateway found" = "Wi-Fi «%@», sin puerta de enlace";
 "No gateway found" = "No se encuentra la puerta de enlace";
 "Default route" = "Ruta por defecto";
 "Reading…" = "Leyendo…";
@@ -175,8 +116,6 @@
 "%@, outside the VPN" = "%@, fuera de la VPN";
 "Routed" = "Enrutadas";
 "None yet" = "Ninguna todavía";
-"%@, %@, none failed" = "%1$@, %2$@, ninguna falló";
-"%@, %@, %lld failed" = "%1$@, %2$@, %3$lld con fallo";
 "All removed %@" = "Todas quitadas %@";
 "Removed %@, %lld could not be removed" = "Quitadas %1$@, %2$lld sin quitar";
 "From" = "Desde";
@@ -223,20 +162,6 @@
 "Logs will appear here when routes are applied" = "Los registros aparecerán aquí cuando se apliquen rutas";
 
 /* ===== Ajustes — Pestaña Información ===== */
-"Route specific traffic around your corporate VPN" = "Enruta tráfico específico fuera de tu VPN corporativa";
-"Author" = "Autor";
-"Your 100x Engineer, with ❤️" = "Tu ingeniero 100x, con ❤️";
-"Support the Project" = "Apoya el proyecto";
-"If you find VPN Bypass useful, consider supporting its development!" = "Si VPN Bypass te resulta útil, ¡considera apoyar su desarrollo!";
-"GitHub Sponsors" = "GitHub Sponsors";
-"Buy Me a Coffee" = "Buy Me a Coffee";
-"Links" = "Enlaces";
-"Blog" = "Blog";
-"Source Code" = "Código fuente";
-"Report Issue" = "Reportar problema";
-"License" = "Licencia";
-"GPL-3.0 License" = "Licencia GPL-3.0";
-"This software is free and open source under the GNU General Public License v3.0. You are free to use, modify, and distribute it under the same license terms." = "Este software es libre y de código abierto bajo la Licencia Pública General de GNU v3.0. Puedes usarlo, modificarlo y distribuirlo bajo los mismos términos de licencia.";
 
 /* ===== Notificaciones ===== */
 "Connected via %@. Routes will be applied automatically." = "Conectado vía %@. Las rutas se aplicarán automáticamente.";
@@ -248,7 +173,6 @@
 "%lld address(es) routed." = "%lld dirección(es) enrutada(s).";
 "%lld failed." = "%lld fallida(s).";
 "Route Verification Failed" = "Verificación de ruta fallida";
-"VPN Bypass" = "VPN Bypass";
 "DNS Refresh Complete" = "Actualización DNS completada";
 "%lld address(es) updated" = "%lld dirección(es) actualizada(s)";
 
@@ -273,12 +197,23 @@
 "Everything else still goes direct: removing that failed." = "Todo lo demás sigue yendo directo: no se pudo quitar.";
 "%lld addresses stay routed for when it reconnects." = "%lld direcciones siguen enrutadas para cuando se reconecte.";
 "%lld addresses are still routed: removing them failed." = "%lld direcciones siguen enrutadas: no se pudieron quitar.";
-"NOT ENFORCING" = "SIN APLICAR";
 "%@ connected" = "%@ conectada";
-"Nothing is routed while the privileged helper is not running." = "No se enruta nada mientras el asistente privilegiado no esté en marcha.";
+"No effect" = "Sin efecto";
+"%@'s kill switch sends all traffic through the VPN." = "El kill switch de %@ envía todo el tráfico por la VPN.";
+"%@ makes its own routes win over this app's." = "%@ hace que sus rutas manden sobre las de esta app.";
+"Sites set to skip it still go through it." = "Los sitios que deberían evitarla siguen pasando por ella.";
+"Everything meant to skip it still goes through it." = "Todo lo que debería evitarla sigue pasando por ella.";
+"Rules set to go direct still go through it." = "Las reglas que deberían ir directas siguen pasando por ella.";
+"VPN Bypass: the VPN's own routes win over this app's, so routes set here have no effect" = "VPN Bypass: las rutas de la VPN mandan sobre las de esta app, así que las rutas de aquí no tienen efecto";
+"VPN Bypass: the VPN's kill switch sends all traffic through it except local-network addresses" = "VPN Bypass: el kill switch de la VPN envía todo el tráfico por ella salvo las direcciones de la red local";
+"Anything its routes cover goes through it, whatever is set here." = "Todo lo que cubren sus rutas pasa por ella, se configure aquí lo que se configure.";
+"A connected VPN's kill switch sends all traffic through the VPN." = "El kill switch de una VPN conectada envía todo el tráfico por la VPN.";
+"Turn off its kill switch, or use its own split tunnelling." = "Desactiva su kill switch o usa su propio túnel dividido.";
+"Turn off that setting in the VPN app, or use its own split tunnelling." = "Desactiva ese ajuste en la app de la VPN o usa su propio túnel dividido.";
+"Local-network addresses still skip it." = "Las direcciones de la red local sí la siguen evitando.";
+"VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it" = "VPN Bypass: el kill switch de la VPN envía todo el tráfico por ella, así que nada la evita";
 "The scheduled re-apply still runs in %@." = "La reaplicación programada se ejecuta igualmente en %@.";
 "The scheduled re-apply runs now." = "La reaplicación programada se ejecuta ahora.";
-"HELD BACK" = "EN PAUSA";
 "%@ keeps dropping" = "%@ se cae una y otra vez";
 "It dropped %lld times right after routes were applied, so the app is not applying again until the tunnel has held for %@." = "Se cayó %lld veces justo después de aplicar las rutas, así que la app no vuelve a aplicarlas hasta que el túnel aguante %@.";
 "Refresh Routes applies now anyway." = "Actualizar rutas las aplica ahora de todos modos.";
@@ -287,9 +222,7 @@
 "The %lld addresses routed before the drop stay routed." = "Las %lld direcciones enrutadas antes de la caída siguen enrutadas.";
 "Nothing is routed until then." = "Nada se enruta hasta entonces.";
 "Everything else still goes direct, as before the drop." = "Todo lo demás sigue yendo directo, como antes de la caída.";
-"WAITING" = "ESPERANDO";
 "%@ reconnected %@" = "%@ reconectada %@";
-"NOTHING ROUTED" = "NADA ENRUTADO";
 "Nothing is routed right now." = "Ahora mismo no se enruta nada.";
 "Bypass: everything else uses the VPN" = "Bypass: todo lo demás usa la VPN";
 "VPN Only: everything else goes direct" = "Solo VPN: todo lo demás va directo";
@@ -308,15 +241,6 @@
 "No rules yet." = "Aún no hay reglas.";
 "1 rule decides where traffic goes." = "1 regla decide adónde va el tráfico.";
 "%lld rules decide where traffic goes." = "%lld reglas deciden adónde va el tráfico.";
-"%lld routed" = "%lld enrutadas";
-"none routed yet" = "ninguna enrutada aún";
-"%lld routed %@, none failed" = "%lld enrutadas %@, ninguna falló";
-"%lld routed %@, %lld failed" = "%lld enrutadas %@, %lld fallaron";
-"all removed %@" = "todas eliminadas %@";
-"removed %@, %lld could not be" = "eliminadas %@, %lld no se pudieron eliminar";
-"checked %@" = "comprobado %@";
-"not checked yet" = "sin comprobar aún";
-"%@, automatic check off" = "%@, comprobación automática desactivada";
 "%@, next in %@" = "%@, la próxima en %@";
 "%@, next one due now" = "%@, la próxima toca ahora";
 "1 address" = "1 dirección";
@@ -330,10 +254,10 @@
 "%lld more minutes" = "%lld minutos más";
 
 /* ===== Barra de menú: la pregunta del primer arranque ===== */
-"NOT SET UP" = "SIN CONFIGURAR";
 "What should skip the VPN?" = "¿Qué debe evitar la VPN?";
 "Switched-on services use your normal connection." = "Los servicios activados usan tu conexión normal.";
 "All %lld services…" = "Los %lld servicios…";
+"Services for %@…" = "Servicios de %@…";
 "Add a site, like example.com" = "Añade un sitio, como example.com";
 "Add Site" = "Añadir sitio";
 "Mode: Bypass. Want only a few sites on the VPN and everything else direct?" = "Modo: Bypass. ¿Quieres que solo unos pocos sitios usen la VPN y todo lo demás vaya directo?";
@@ -365,20 +289,13 @@
 /* ===== Settings — Routes and Rules (Custom mode) ===== */
 "Copy Proxy URL" = "Copiar URL del proxy";
 "Copy Shell Exports" = "Copiar exports de shell";
-"Copied" = "Copiado";
-"Only apps set to use %@ (%@) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Solo las apps configuradas para usar %@ (%@) salen por aquí. Las demás apps llegan a estos hosts por la ruta habitual del Mac, aunque una regla de más abajo también los incluya.";
-"Only apps set to use %@ go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them." = "Solo las apps configuradas para usar %@ salen por aquí. Las demás apps llegan a estos hosts por la ruta habitual del Mac, aunque una regla de más abajo también los incluya.";
 "%@ is off, so this rule does nothing." = "La ruta %@ está desactivada, así que esta regla no hace nada.";
 
 /* ===== Ajustes — Modo de enrutamiento (menú de la barra de título y hoja) ===== */
 "Custom Routes" = "Rutas personalizadas";
 "Rules" = "Reglas";
 "Routing mode" = "Modo de enrutamiento";
-"Routing mode: %@" = "Modo de enrutamiento: %@";
 "Switch" = "Cambiar";
-"Everything uses the VPN except what you list" = "Todo usa la VPN salvo lo que pongas en la lista";
-"Only what you list uses the VPN" = "Solo lo que pongas en la lista usa la VPN";
-"Pick a route for each destination" = "Elige una ruta para cada destino";
 "Everything uses the VPN except what you list." = "Todo usa la VPN salvo lo que pongas en la lista.";
 "Only what you list uses the VPN; everything else goes direct." = "Solo lo que pongas en la lista usa la VPN; todo lo demás va directo.";
 "Send each destination through a route you pick: direct, a VPN, a proxy or a Tailscale peer." = "Envía cada destino por la ruta que elijas: directa, una VPN, un proxy o un nodo de Tailscale.";
@@ -450,8 +367,8 @@
 
 /* ===== Barra de menús: qué comprobó Verificar rutas ===== */
 "Route check" = "Comprobación de rutas";
-"Nothing to check: the only address is a range, which ping cannot test" = "Nada que comprobar: la única dirección es un rango, y ping no puede comprobar rangos";
-"Nothing to check: all %lld addresses are ranges, which ping cannot test" = "Nada que comprobar: las %lld direcciones son rangos, y ping no puede comprobar rangos";
+"Nothing to check: the only address is a range, which the path check cannot test" = "Nada que comprobar: la única dirección es un rango, y la comprobación de ruta no puede comprobar rangos";
+"Nothing to check: all %lld addresses are ranges, which the path check cannot test" = "Nada que comprobar: las %lld direcciones son rangos, y la comprobación de ruta no puede comprobar rangos";
 "Checked the only address" = "Comprobada la única dirección";
 "Checked all %lld addresses" = "Comprobadas las %lld direcciones";
 "Checked %lld of %lld addresses" = "Comprobadas %1$lld de %2$lld direcciones";
@@ -460,8 +377,6 @@
 "All reachable." = "Todas son accesibles.";
 "1 not reachable" = "1 no accesible";
 "%lld not reachable" = "%lld no accesibles";
-"Ping timed out" = "Tiempo de ping agotado";
-"Host unreachable" = "Host inaccesible";
 "1 reachable" = "1 accesible";
 "%lld reachable" = "%lld accesibles";
 "%lld ms" = "%lld ms";
@@ -496,6 +411,8 @@
 "More actions" = "Más acciones";
 "Search services" = "Buscar servicios";
 "Clear search" = "Borrar búsqueda";
+"Country" = "País";
+"All countries" = "Todos los países";
 "Add Route" = "Añadir ruta";
 "Add Rule" = "Añadir regla";
 
@@ -507,11 +424,8 @@
 "Addresses" = "Direcciones";
 "VPN Bypass: VPN connected but nothing is being routed" = "VPN Bypass: VPN conectada, pero no se enruta nada";
 "No addresses to route, checked %@." = "Ninguna dirección que enrutar, comprobado %@.";
-"%@ routed %@, none failed." = "Enrutado %2$@: %1$@, ninguna falló.";
-"%@ routed %@, %lld failed." = "Enrutado %2$@: %1$@, %3$lld fallaron.";
 "Removed all routed addresses %@." = "Se quitaron todas las direcciones enrutadas %@.";
 "Removed routed addresses %@, %lld could not be removed." = "Se quitaron las direcciones enrutadas %1$@; %2$lld no se pudieron quitar.";
-"Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details." = "Los errores son direcciones que el sistema rechazó y, en una aplicación que resolvió el DNS, dominios que no se resolvieron. Ajustes > Registros tiene los detalles.";
 "Stop routing the 1 address?" = "¿Dejar de enrutar la única dirección?";
 "Stop routing all %lld addresses?" = "¿Dejar de enrutar las %lld direcciones?";
 "Stop sending everything else direct?" = "¿Dejar de enviar todo lo demás directo?";
@@ -520,7 +434,6 @@
 "The privileged helper is not running — no routes are being enforced. Open Settings → Status to repair it." = "El asistente privilegiado no está en marcha: no se aplica ninguna ruta. Abre Ajustes → Estado para repararlo.";
 "Can't refresh: the privileged helper is not running. Open Settings → Status to repair it." = "No se puede actualizar: el asistente privilegiado no está en marcha. Abre Ajustes → Estado para repararlo.";
 "The privileged helper isn't ready, so no routes could be applied." = "El asistente privilegiado no está listo, así que no se pudo aplicar ninguna ruta.";
-"Helper not running — nothing is being routed" = "El asistente no está en marcha: no se enruta nada";
 "Fix…" = "Reparar…";
 "Not running from app bundle" = "La app no se está ejecutando desde su paquete";
 "Helper binary not found in app bundle" = "No se encuentra el asistente en el paquete de la app";
@@ -540,12 +453,10 @@
 "VPN Bypass — VPN Only: %lld destinations use the VPN, everything else is direct" = "VPN Bypass — Solo VPN: %lld destinos usan la VPN, todo lo demás va directo";
 "VPN Bypass — Custom: %lld destinations routed by your rules" = "VPN Bypass — Personalizado: %lld destinos enrutados por tus reglas";
 "VPN Bypass — Bypass: %lld destinations skip the VPN, everything else is tunnelled" = "VPN Bypass — Bypass: %lld destinos evitan la VPN, todo lo demás va por el túnel";
-"domain.com" = "domain.com";
 "Refreshing routes…" = "Actualizando rutas…";
 "Re-resolve DNS Now" = "Volver a resolver el DNS ahora";
 "Remove All Routes…" = "Quitar todas las rutas…";
 "Remove Routes" = "Quitar rutas";
-"VPN Entries" = "Entradas VPN";
 "Routes In Use" = "Rutas en uso";
 "No rules configured" = "No hay reglas configuradas";
 "until you refresh routes, the VPN reconnects, or DNS is next refreshed" = "hasta que actualices las rutas, la VPN se reconecte o se vuelva a actualizar el DNS";
@@ -560,18 +471,9 @@
 "Traffic your rules send direct or to a specific VPN will follow your VPN's own routing %@. Rules that use a proxy keep working." = "El tráfico que tus reglas envían directo o a una VPN concreta seguirá el enrutamiento de tu VPN %@. Las reglas que usan un proxy siguen funcionando.";
 
 /* ===== Ajustes: página Rutas (modo Personalizado) ===== */
-"%lld/%lld active" = "%1$lld/%2$lld activas";
-"Point an app at a route: paste the copied shell exports into a shell, or the copied proxy URL into an app's proxy setting. A browser set to 127.0.0.1 and the port asks you to sign in: the user is vpnb, the password is the part between vpnb: and @ in the proxy URL." = "Para usar una ruta en una app: pega los exports de shell copiados en una terminal, o la URL del proxy copiada en los ajustes de proxy de la app. Un navegador configurado con 127.0.0.1 y el puerto pide iniciar sesión: el usuario es vpnb y la contraseña es lo que hay entre vpnb: y @ en la URL del proxy.";
-"System Routes" = "Rutas del sistema";
 "Your physical connection" = "Tu conexión física";
-"Whatever tunnel is currently up" = "El túnel que esté activo en este momento";
-"Detected automatically." = "Se detecta automáticamente.";
 "No proxy routes yet" = "Aún no hay rutas de proxy";
 "Add one to route specific traffic through a proxy, a Tailscale peer, or a specific VPN." = "Añade una para enviar tráfico concreto por un proxy, un nodo de Tailscale o una VPN concreta.";
-"Edit route" = "Editar ruta";
-"Delete route" = "Eliminar ruta";
-"Upstream" = "Proxy remoto";
-"Listening on" = "Escuchando en";
 "Listener starting…" = "Iniciando la escucha…";
 "Listener off" = "Escucha desactivada";
 "Edit Route" = "Editar ruta";
@@ -605,14 +507,22 @@
 "primary VPN" = "VPN principal";
 
 /* ===== Ajustes: página Reglas (modo Personalizado) ===== */
-"Routing Rules" = "Reglas de enrutamiento";
-"Send specific destinations through specific routes. Rules are checked in order — the first match wins." = "Envía destinos concretos por rutas concretas. Las reglas se comprueban en orden: gana la primera que coincida.";
-"Drag to reorder — earlier rules win." = "Arrastra para reordenar: ganan las reglas de más arriba.";
 "No rules yet" = "Aún no hay reglas";
+"The first rule that matches wins." = "Gana la primera regla que coincide.";
+"The first rule that matches wins. Drag to reorder." = "Gana la primera regla que coincide. Arrastra para reordenar.";
+"Only apps set to use %@. Other apps take the Mac's normal route, even if a rule below matches." = "Solo las apps configuradas para usar %@. Las demás apps toman la ruta normal del Mac, aunque coincida una regla de más abajo.";
+"Route for %@: %@" = "Ruta de %@: %@";
+"The ways out a rule can pick." = "Las salidas que puede elegir una regla.";
+"Always there" = "Siempre disponibles";
+"Whatever tunnel is up, detected automatically" = "El túnel que esté activo, detectado automáticamente";
+"Your routes" = "Tus rutas";
+"%@ copy" = "Copia de %@";
+"Duplicate %@" = "Duplicar %@";
+"More actions for %@" = "Más acciones para %@";
+"Copied the proxy URL for %@. Paste it into an app's proxy setting. A browser asks you to sign in: the user is vpnb, the password is the part between vpnb: and @ in the URL." = "URL del proxy de %@ copiada. Pégala en los ajustes de proxy de una app. Un navegador pide iniciar sesión: el usuario es vpnb y la contraseña es lo que hay entre vpnb: y @ en la URL.";
+"Copied the shell exports for %@. Paste them into a shell, and the apps you start from it use this route." = "Exports de shell de %@ copiados. Pégalos en una terminal y las apps que abras desde ella usarán esta ruta.";
 "Add a rule to send a domain, service, or IP range through a specific route." = "Añade una regla para enviar un dominio, un servicio o un rango de IP por una ruta concreta.";
 "Destinations that don't match any rule above use this route." = "Los destinos que no coinciden con ninguna regla de arriba usan esta ruta.";
-"Edit rule" = "Editar regla";
-"Delete rule" = "Eliminar regla";
 "Your Routes" = "Tus rutas";
 "New Route…" = "Nueva ruta…";
 "Edit Rule" = "Editar regla";
@@ -629,63 +539,41 @@
 "Enter a valid IPv4 address (e.g. 10.0.0.5)." = "Escribe una dirección IPv4 válida (ej.: 10.0.0.5).";
 "Enter a valid IPv4 CIDR range (e.g. 10.0.0.0/8)." = "Escribe un rango CIDR IPv4 válido (ej.: 10.0.0.0/8).";
 "Select a route." = "Elige una ruta.";
-"DOMAIN" = "DOMINIO";
-"SUFFIX" = "SUFIJO";
-"SERVICE" = "SERVICIO";
-"PROCESS" = "PROCESO";
 "Choose Route" = "Elegir ruta";
 
 /* ===== Ajustes: Dominios, Servicios, General e Información ===== */
-"e.g., example.com or 10.0.0.0/24" = "ej.: example.com o 10.0.0.0/24";
-"e.g., example.com" = "ej.: example.com";
 "No entries configured" = "No hay entradas configuradas";
 "Add domains or IP ranges that should use VPN" = "Añade los dominios o rangos de IP que deben usar la VPN";
-"Switch to Bypass mode above to manage services." = "Cambia arriba al modo Bypass para gestionar los servicios.";
 "e.g. My Service" = "ej.: Mi servicio";
 "example.com" = "example.com";
-"DNS server" = "Servidor DNS";
 "Server address" = "Dirección del servidor";
 "Port" = "Puerto";
 "Username" = "Usuario";
 "Password" = "Contraseña";
-"GitHub Issues" = "Incidencias en GitHub";
 
 /* ===== Nombres y ejemplos que se escriben igual en todos los idiomas ===== */
 "English" = "English";
 "Español" = "Español";
 "Français" = "Français";
-"v%@" = "v%@";
-"SF" = "SF";
-"Sergio Fernández" = "Sergio Fernández";
-"Patreon" = "Patreon";
-"Thanks.dev" = "Thanks.dev";
-"geiser.cloud" = "geiser.cloud";
-"github.com/GeiserX" = "github.com/GeiserX";
-"© 2026 Sergio Fernández (GeiserX)" = "© 2026 Sergio Fernández (GeiserX)";
 
 /* ===== DNS Lookups (#176) ===== */
 "Lookups" = "Consultas";
-"DNS Lookups" = "Consultas DNS";
-"Watch DNS Lookups" = "Ver las consultas DNS";
 "Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) never show here. To see them, turn Secure DNS off in the browser's settings." = "Las consultas que un navegador envía por DNS cifrado (DNS seguro, DNS sobre HTTPS) nunca aparecen aquí. Para verlas, desactiva el DNS seguro en los ajustes del navegador.";
 "Start counting again from now" = "Volver a contar desde ahora";
 "Waiting for lookups…" = "Esperando consultas…";
+"Start Watching" = "Empezar a observar";
+"Stop Watching" = "Dejar de observar";
+"DNS lookups are not being watched" = "No se están observando las consultas DNS";
+"Stop reading DNS lookups, and clear the list" = "Dejar de leer las consultas DNS y vaciar la lista";
 "No name matches \"%@\"" = "Ningún nombre coincide con «%@»";
 "Showing the top %lld. Search to find the rest." = "Se muestran los %lld primeros. Busca para encontrar el resto.";
-"Times looked up" = "Veces consultado";
 "Add to the VPN Only list" = "Añadir a la lista Solo VPN";
 "Add a rule that sends it Direct" = "Añadir una regla que lo envíe por Directo";
 "Add to the Bypass list" = "Añadir a la lista Bypass";
 "The privileged helper is not running." = "El asistente con privilegios no está en marcha.";
 "The privileged helper did not answer." = "El asistente con privilegios no respondió.";
-"See the names this Mac looks up, and add the ones you need." = "Mira los nombres que busca este Mac y añade los que necesites.";
-"Off until you turn it on. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit." = "Desactivado hasta que lo actives. Entonces el asistente lee solo las preguntas DNS que envía este Mac, nunca las respuestas ni ningún otro tráfico. La lista se guarda solo en memoria y se borra al desactivarlo o salir.";
+"Off until you start watching. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you stop watching or quit." = "Desactivado hasta que empieces a observar. Entonces el asistente lee solo las preguntas DNS que envía este Mac, nunca las respuestas ni ningún otro tráfico. La lista se guarda solo en memoria y se borra al dejar de observar o salir.";
 "%lld names since %@" = "%lld nombres desde las %@";
-"LOOKUPS" = "CONSULTAS";
-"NAME" = "NOMBRE";
-"BYPASS" = "BYPASS";
-"VPN ONLY" = "SOLO VPN";
-"RULE" = "REGLA";
 "Bypassed" = "Con bypass";
 "Via VPN" = "Por la VPN";
 "On the Bypass list" = "En la Lista Bypass";
@@ -711,12 +599,10 @@
 
 /* ===== DNS Lookups add panel ===== */
 "%@ on the Services page lists this name and is off. Turn it on to bypass it." = "%@, en la página Servicios, incluye este nombre y está desactivado. Actívalo para que haga bypass.";
-"Add a wildcard, or add it somewhere else" = "Añadir un comodín, o añadirlo en otro sitio";
-"Add a wildcard instead" = "Añadir un comodín en su lugar";
 "More ways to add %@" = "Más formas de añadir %@";
-"WHAT TO ADD" = "QUÉ AÑADIR";
-"A wildcard covers every name under it. The helper routes each one as it is looked up, so Watch DNS Lookups can stay off." = "Un comodín cubre cada nombre bajo ese dominio. El asistente enruta cada uno en cuanto se consulta, así que Ver las consultas DNS puede seguir desactivado.";
-"WHERE" = "DÓNDE";
+"What to Add" = "Qué añadir";
+"A wildcard covers every name under it. The helper routes each one as it is looked up, so the Lookups page need not be watching." = "Un comodín cubre cada nombre bajo ese dominio. El asistente enruta cada uno en cuanto se consulta, así que la página Consultas no necesita estar observando.";
+"Where" = "Dónde";
 "Matches every name under %@" = "Coincide con cada nombre bajo %@";
 "Matches this name only" = "Coincide solo con este nombre";
 "Add…" = "Añadir…";
@@ -739,3 +625,440 @@
 "Take %@ out of the service %@" = "Quitar %1$@ del servicio %2$@";
 "%@ comes with this name and cannot lose it. Turning %@ off stops bypassing all of its names." = "%1$@ trae este nombre de serie y no se le puede quitar. Desactivar %2$@ deja de saltarse la VPN para todos sus nombres.";
 "Delete the rule for %@ on the Rules page, which sends it to %@" = "Borrar la regla de %1$@ de la página Reglas, que lo envía por %2$@";
+"catalogue.category.messaging" = "Mensajería";
+"catalogue.category.video" = "Vídeo";
+"catalogue.category.music" = "Música";
+"catalogue.category.social" = "Redes sociales";
+"catalogue.category.work" = "Trabajo";
+"catalogue.category.cloud" = "Almacenamiento en la nube";
+"catalogue.category.gaming" = "Juegos";
+"catalogue.category.developer" = "Desarrollo";
+"catalogue.category.ai" = "IA";
+"Browse catalogue…" = "Explorar el catálogo…";
+"A service skips the VPN while its switch is on." = "Un servicio evita la VPN mientras su interruptor está activado.";
+"Your services" = "Tus servicios";
+"%lld services, pick several at once" = "%lld servicios, elige varios a la vez";
+"No services yet" = "Aún no hay servicios";
+"Pick the ones you use from the catalogue, or make your own with the + button." = "Elige los que usas en el catálogo, o crea el tuyo con el botón +.";
+"Nothing on this page matches “%@”." = "Nada en esta página coincide con “%@”.";
+"Search the catalogue" = "Buscar en el catálogo";
+"Service catalogue" = "Catálogo de servicios";
+"Search by name, domain or country" = "Buscar por nombre, dominio o país";
+"No service in the catalogue matches “%@”. Make a custom service with the + button." = "Ningún servicio del catálogo coincide con “%@”. Crea un servicio personalizado con el botón +.";
+"Select all %@" = "Seleccionar todo: %@";
+"No service in %@ matches “%@”. Choose All to see the matches in other categories." = "Ningún servicio de %1$@ coincide con “%2$@”. Elige Todos para ver los que coinciden en otras categorías.";
+"No service for %@ matches “%@”. Choose All countries to see the matches elsewhere." = "Ningún servicio de %1$@ coincide con “%2$@”. Elige Todos los países para ver los que coinciden en otros.";
+"Deselect all %@" = "Deseleccionar todo: %@";
+"All selected" = "Todos seleccionados";
+"Some selected" = "Algunos seleccionados";
+"None selected" = "Ninguno seleccionado";
+"Already on" = "Ya activado";
+"Bypass services" = "Hacer bypass de servicios";
+"Bypass 1 service" = "Hacer bypass de 1 servicio";
+"Bypass %lld services" = "Hacer bypass de %lld servicios";
+"Added %@ to %@. The service is off; add it from Browse catalogue on the Services page to bypass it." = "%@ añadido a %@. El servicio está desactivado; añádelo desde Explorar el catálogo en la página Servicios para que haga bypass.";
+"catalogue.category.government" = "Administración pública";
+"catalogue.category.banks" = "Bancos";
+"Starting…" = "Iniciando…";
+"Detecting the VPN and applying routes." = "Detectando la VPN y aplicando las rutas.";
+"1 failed in the last apply." = "1 falló en la última aplicación.";
+"%lld failed in the last apply." = "%lld fallaron en la última aplicación.";
+"1 entry has no addresses." = "1 entrada no tiene direcciones.";
+"%lld entries have no addresses." = "%lld entradas no tienen direcciones.";
+"%lld of %lld checked addresses left the wrong way." = "%1$lld de %2$lld direcciones comprobadas salieron por el camino equivocado.";
+"The last route check is broken: it cannot tell the two ways apart." = "La última comprobación de rutas está rota: no distingue los dos caminos.";
+"Partly working" = "Funciona en parte";
+"Add a Direct rule…" = "Añadir una regla Directo…";
+"Added as rule %lld, to the Direct route." = "Añadida como regla %lld, a la ruta Directo.";
+"Added as rule %lld; rule %lld matches first." = "Añadida como regla %1$lld; la regla %2$lld coincide antes.";
+"The Direct route is off, so a rule for %@ would route nothing. Turn it on in Routes first." = "La ruta Directo está desactivada, así que una regla para %@ no enrutaría nada. Actívala antes en Rutas.";
+
+/* Path check and "where does this site go?" */
+"No interface" = "Sin interfaz";
+"Could not connect via %@" = "No se pudo conectar por %@";
+"No answer on 443 via %@" = "Sin respuesta en 443 por %@";
+"Went into %@" = "Entró en %@";
+"Went via %@, not %@" = "Salió por %@, no por %@";
+"Check broken" = "Comprobación rota";
+"%@ did not resolve, so there is nothing to check." = "%@ no se resolvió, así que no hay nada que comprobar.";
+"%@ is on your list, and its address %@ has a route." = "%@ está en tu lista y su dirección %@ tiene una ruta.";
+"%@ uses %@, which has a route added for %@." = "%@ usa %@, que tiene una ruta añadida para %@.";
+"%@ is covered by %@, which adds its routes when it is looked up." = "%@ está cubierto por %@, que añade sus rutas cuando se busca el nombre.";
+"%@ is listed under %@, but none of its addresses has a route now; Re-resolve DNS adds them." = "%@ está en la lista como %@, pero ninguna de sus direcciones tiene ruta ahora; Volver a resolver el DNS las añade.";
+"%@ matches rule %lld, %@ %@, which sends it to %@." = "%@ coincide con la regla %lld, %@ %@, que lo envía a %@.";
+"%@ matches no rule, so it takes the default route, %@." = "%@ no coincide con ninguna regla, así que toma la ruta predeterminada, %@.";
+"%@ is not on your list, so it follows the VPN." = "%@ no está en tu lista, así que sigue la VPN.";
+"%@ is not on your list, so it goes around the VPN." = "%@ no está en tu lista, así que evita la VPN.";
+"%@ matches no rule, so it follows the system's own routing." = "%@ no coincide con ninguna regla, así que sigue el enrutamiento del propio sistema.";
+"The check saw it leave through %@, and it answered on port 443." = "La comprobación lo vio salir por %@ y respondió en el puerto 443.";
+"The check saw it leave through %@, but nothing answered on port 443." = "La comprobación lo vio salir por %@, pero nada respondió en el puerto 443.";
+"But the check saw it leave through %@, not through %@." = "Pero la comprobación lo vio salir por %@, no por %@.";
+"But the check saw it leave through %@, a tunnel, not around the VPN." = "Pero la comprobación lo vio salir por %@, un túnel, en lugar de evitar la VPN.";
+"The routing table named no interface for it." = "La tabla de rutas no indicó ninguna interfaz para él.";
+"The check is broken: an address the app does not route also left through %@, so it cannot tell the two ways apart." = "La comprobación está rota: una dirección que la app no enruta también salió por %@, así que no distingue los dos caminos.";
+"A proxy or an exit node carries it, which the routing table does not decide, so the path was not checked." = "Lo lleva un proxy o un nodo de salida, que la tabla de rutas no decide, así que no se comprobó el camino.";
+"The VPN is not connected, so it leaves through %@ like everything else." = "La VPN no está conectada, así que sale por %@ como todo lo demás.";
+"%@ is on your list, but none of its addresses has a route now; Re-resolve DNS adds them." = "%@ está en tu lista, pero ninguna de sus direcciones tiene ruta ahora; Volver a resolver el DNS las añade.";
+
+/* Shortcuts actions */
+"via Shortcuts" = "desde Atajos";
+"Came from a Shortcuts action" = "Vino de una acción de Atajos";
+"Last change: added %@ via Shortcuts, %@" = "Último cambio: se añadió %1$@ desde Atajos, %2$@";
+"Last change: turned on %@ via Shortcuts, %@" = "Último cambio: se activó %1$@ desde Atajos, %2$@";
+"Last change: turned off %@ via Shortcuts, %@" = "Último cambio: se desactivó %1$@ desde Atajos, %2$@";
+"Last change: switched to %@ via Shortcuts, %@" = "Último cambio: se cambió a %1$@ desde Atajos, %2$@";
+"Show what came from Shortcuts in Logs" = "Ver en Registros lo que vino de Atajos";
+"From Shortcuts" = "Desde Atajos";
+"Nothing came from Shortcuts." = "No ha llegado nada desde Atajos.";
+"Nothing from Shortcuts matches this filter." = "Nada de Atajos coincide con este filtro.";
+"The mode is now %@." = "El modo es ahora %@.";
+"Added %@ to the Bypass list." = "Se añadió %@ a la lista Bypass.";
+"Added %@ to the VPN Only list." = "Se añadió %@ a la lista Solo VPN.";
+"%@ is on." = "%@ está activado.";
+"%@ is off." = "%@ está desactivado.";
+"%@ mode." = "Modo %@.";
+"%@ mode. The helper is not ready, so nothing is routed." = "Modo %@. El asistente no está listo, así que no se enruta nada.";
+"%@ mode. The VPN is not connected." = "Modo %@. La VPN no está conectada.";
+"%@ mode. Nothing is routed yet." = "Modo %@. Todavía no se enruta nada.";
+"%@ mode. The VPN's kill switch sends all traffic through it, so nothing skips it." = "Modo %@. El kill switch de la VPN envía todo el tráfico por ella, así que nada la evita.";
+"VPN Bypass is still starting. Run the shortcut again in a moment." = "VPN Bypass todavía se está iniciando. Vuelve a ejecutar el atajo en un momento.";
+"VPN Bypass could not read its configuration file, so it saves no changes. Repair it or import a saved configuration in Settings." = "VPN Bypass no pudo leer su archivo de configuración, así que no guarda ningún cambio. Repáralo o importa una configuración guardada en Ajustes.";
+"%@ mode. The VPN's own routes win over this app's, so routes set here have no effect." = "Modo %@. Las rutas de la VPN mandan sobre las de esta app, así que las rutas de aquí no tienen efecto.";
+"%@ mode. The VPN's kill switch sends all traffic through it except local-network addresses." = "Modo %@. El kill switch de la VPN envía todo el tráfico por ella salvo las direcciones de la red local.";
+"%@ mode. Routed addresses: %lld" = "Modo %1$@. Direcciones enrutadas: %2$lld";
+"Set Routing Mode" = "Cambiar el modo de enrutamiento";
+"Switches VPN Bypass to Bypass, VPN Only or Custom, as vpnb mode does." = "Cambia VPN Bypass a Bypass, Solo VPN o Personalizado, como vpnb mode.";
+"Add Domain" = "Añadir dominio";
+"Adds a domain to the Bypass list or the VPN Only list, as vpnb domain add does." = "Añade un dominio a la lista Bypass o a la lista Solo VPN, como vpnb domain add.";
+"List" = "Lista";
+"Domain list" = "Lista de dominios";
+"Turn Service On or Off" = "Activar o desactivar un servicio";
+"Turns a service on the Services page on or off, as vpnb service enable and disable do." = "Activa o desactiva un servicio de la página Servicios, como vpnb service enable y disable.";
+"Turn On" = "Activar";
+"on" = "activado";
+"Get Status" = "Obtener el estado";
+"Tells the routing mode and whether anything is routed now, as vpnb status does." = "Dice el modo de enrutamiento y si ahora se enruta algo, como vpnb status.";
+"VPN Only: hold the listed addresses back until the VPN returns" = "Solo VPN: retiene las direcciones de la lista hasta que vuelva la VPN";
+"VPN down: listed addresses blocked for %lld site(s)" = "VPN caída: direcciones de la lista bloqueadas para %lld sitio(s)";
+"Waiting for VPN routes: listed addresses blocked for %lld site(s)" = "Esperando las rutas de la VPN: direcciones de la lista bloqueadas para %lld sitio(s)";
+"Open them directly" = "Abrirlos directamente";
+"Open the blocked sites directly, outside the VPN" = "Abrir los sitios bloqueados directamente, fuera de la VPN";
+"%lld listed address(es) are blocked until the VPN returns." = "%lld dirección(es) de la lista quedan bloqueadas hasta que vuelva la VPN.";
+
+/* Shared components (Components.swift) */
+"Needs attention" = "Requiere atención";
+"On" = "Activado";
+"Not routing" = "Sin enrutar";
+"Partly routed" = "Enrutado en parte";
+"Waiting" = "En espera";
+"Paused" = "En pausa";
+"Route: %@" = "Ruta: %@";
+
+/* Dropdown status block, footer and Status > Problems */
+"Problem: %@" = "Problema: %@";
+"Show" = "Ver";
+"Fix the helper in Settings > Status" = "Reparar el asistente en Ajustes > Estado";
+"Show the problems in Settings > Status" = "Ver los problemas en Ajustes > Estado";
+"No address is routed." = "No hay ninguna dirección enrutada.";
+"1 address from before is still routed." = "Sigue enrutada 1 dirección de antes.";
+"%lld addresses from before are still routed." = "Siguen enrutadas %lld direcciones de antes.";
+"The helper is not running, so no route can change." = "El asistente no está en marcha, así que ninguna ruta puede cambiar.";
+"applied %@" = "aplicado %@";
+"removed %@" = "quitado %@";
+"DNS again in %@" = "DNS de nuevo en %@";
+"DNS again now" = "DNS de nuevo ahora";
+"%@, %lld failed" = "%@, %lld fallidas";
+"Your list skips the VPN once one connects." = "Tu lista evita la VPN en cuanto se conecte una.";
+"Your list goes through the VPN once one connects." = "Tu lista pasa por la VPN en cuanto se conecte una.";
+"Your rules apply once a VPN connects." = "Tus reglas se aplican en cuanto se conecte una VPN.";
+"Kept for when it reconnects" = "Guardado para cuando se reconecte";
+"Still routed" = "Aún enrutado";
+"Dismiss" = "Descartar";
+"Dismiss the route check" = "Descartar la comprobación de rutas";
+"the system did not remove it" = "el sistema no la quitó";
+"the system refused the route" = "el sistema rechazó la ruta";
+"no answer from DNS" = "sin respuesta del DNS";
+"the helper is not running" = "el asistente no está en marcha";
+"Not routed" = "Sin enrutar";
+"Did not resolve" = "No se resolvió";
+"Not removed" = "Sin quitar";
+"%@: %@" = "%1$@: %2$@";
+"%@, for %@: %@" = "%1$@, para %2$@: %3$@";
+"1 more failure" = "1 fallo más";
+"%lld more failures" = "%lld fallos más";
+"Settings > Logs has the details." = "Los detalles están en Ajustes > Registros.";
+"Problems" = "Problemas";
+"Apply the routes again" = "Aplicar las rutas de nuevo";
+"Retry: apply the routes again" = "Reintentar: aplicar las rutas de nuevo";
+"Remove the routes again" = "Quitar las rutas de nuevo";
+"Retry: remove the routes again" = "Reintentar: quitar las rutas de nuevo";
+"No address is routed for it." = "No hay ninguna dirección enrutada para esta entrada.";
+"it is the VPN's own gateway, which is never rerouted" = "es la puerta de enlace de la propia VPN, que nunca se desvía";
+"About" = "Acerca de";
+"Routing" = "Enrutamiento";
+"Insight" = "Análisis";
+"App" = "Aplicación";
+"Domains apply in Bypass and VPN Only modes. You are in %@." = "Los dominios se aplican en los modos Bypass y Solo VPN. Estás en %@.";
+"Services apply in Bypass mode. You are in %@." = "Los servicios se aplican en el modo Bypass. Estás en %@.";
+"Rules apply in Custom mode. You are in %@." = "Las reglas se aplican en el modo Personalizado. Estás en %@.";
+"Routes apply in Custom mode. You are in %@." = "Las rutas se aplican en el modo Personalizado. Estás en %@.";
+"Switch…" = "Cambiar…";
+"Switch to %@…" = "Cambiar a %@…";
+"Read-only in this mode" = "Solo lectura en este modo";
+
+/* Dropdown rows, add field, hidden menu bar icon */
+"Turn Off %@" = "Desactivar %@";
+"Retry %@" = "Reintentar %@";
+"Show %@ in Settings" = "Ver %@ en Ajustes";
+"Copy the Addresses of %@" = "Copiar las direcciones de %@";
+"Add a Site" = "Añadir un sitio";
+"Add a site to bypass…" = "Añadir un sitio que evite la VPN…";
+"Add a site for the VPN…" = "Añadir un sitio para la VPN…";
+"The menu bar icon is not visible. It may be switched off in System Settings, or hidden by the notch." = "El icono de la barra de menús no se ve. Puede estar desactivado en Ajustes del Sistema u oculto tras la muesca.";
+"Open Menu Bar Settings…" = "Abrir los ajustes de la barra de menús…";
+
+/* Domains page on the shared components */
+"VPN Only list · used in VPN Only mode" = "Lista Solo VPN · se usa en el modo Solo VPN";
+"Bypass list · used in Bypass mode" = "Lista Bypass · se usa en el modo Bypass";
+"Add a domain, *.wildcard or IP range…" = "Añade un dominio, un *.comodín o un rango de IP…";
+"Add a domain or *.wildcard…" = "Añade un dominio o un *.comodín…";
+"learned as you browse" = "se aprende mientras navegas";
+"IP range" = "Rango de IP";
+"addresses" = "direcciones";
+"Hasn't resolved since %@" = "No se resuelve desde el %@";
+"Not resolving · %lld" = "Sin resolver · %lld";
+"Show only the domains that have stopped resolving" = "Mostrar solo los dominios que han dejado de resolverse";
+
+/* Pause (flow fix 2) */
+"Pause or Resume" = "Pausar o reanudar";
+"Will skip the VPN again" = "Volverá a saltarse la VPN";
+"Will go through the VPN again" = "Volverá a pasar por la VPN";
+"Will be routed by your rules again" = "Volverá a enrutarse según tus reglas";
+"Resume" = "Reanudar";
+"Resume: put the routes back" = "Reanudar: volver a poner las rutas";
+"Retry removing the routes" = "Reintentar quitar las rutas";
+"1 address is still routed." = "1 dirección sigue enrutada.";
+"%lld addresses are still routed." = "%lld direcciones siguen enrutadas.";
+"Pausing could not remove every route." = "Al pausar no se pudieron quitar todas las rutas.";
+"Paused: traffic follows the VPN's own routes." = "En pausa: el tráfico sigue las rutas propias de la VPN.";
+"Paused: the app routes nothing." = "En pausa: la app no enruta nada.";
+"Resumes at %@, in %@" = "Se reanuda a las %1$@, dentro de %2$@";
+"Resuming now." = "Reanudando ahora.";
+"Resumes when the VPN reconnects." = "Se reanuda cuando la VPN se vuelva a conectar.";
+"Paused until you resume." = "En pausa hasta que la reanudes.";
+"VPN Bypass: paused, traffic follows the VPN's own routes" = "VPN Bypass: en pausa, el tráfico sigue las rutas propias de la VPN";
+"Pause" = "Pausar";
+"Takes the app's routes out for a while, so traffic follows the VPN's own routes." = "Quita las rutas de la app durante un rato, para que el tráfico siga las rutas propias de la VPN.";
+"Pausing VPN Only would send listed sites outside the VPN. Switch mode instead." = "Pausar Solo VPN enviaría los sitios de la lista fuera de la VPN. Cambia de modo en su lugar.";
+"The rule %@ does not go Direct: pausing could send its traffic outside the VPN. Turn the rule off or switch mode instead." = "La regla %@ no va por Directo: pausar podría enviar su tráfico fuera de la VPN. Desactiva la regla o cambia de modo.";
+"The rule %@ uses a proxy, which keeps running while paused. Turn the rule off first." = "La regla %@ usa un proxy, que sigue funcionando en pausa. Desactiva antes la regla.";
+"The route %@ keeps its local listener running, so Pause would not stop it. Turn the route off first." = "La ruta %@ mantiene su escucha local en marcha, así que Pausar no la detendría. Desactiva antes la ruta.";
+"Nothing to pause: no VPN is connected and no route is in." = "No hay nada que pausar: no hay ninguna VPN conectada ni ninguna ruta puesta.";
+"For 15 Minutes" = "Durante 15 minutos";
+"For 1 Hour" = "Durante 1 hora";
+"For %@" = "Durante %@";
+"Until the VPN Reconnects" = "Hasta que la VPN se reconecte";
+"Until I Resume" = "Hasta que la reanude";
+"Paused for %@: traffic follows the VPN's own routes." = "En pausa durante %@: el tráfico sigue las rutas propias de la VPN.";
+"Paused until the VPN reconnects: traffic follows the VPN's own routes." = "En pausa hasta que la VPN se reconecte: el tráfico sigue las rutas propias de la VPN.";
+"Paused until you resume: traffic follows the VPN's own routes." = "En pausa hasta que la reanudes: el tráfico sigue las rutas propias de la VPN.";
+"Resumed: the routes are coming back." = "Reanudado: las rutas están volviendo.";
+"%@ mode. Paused: traffic follows the VPN's own routes." = "Modo %@. En pausa: el tráfico sigue las rutas propias de la VPN.";
+"Pause Routing" = "Pausar el enrutamiento";
+"Takes the app's routes out for a while, so traffic follows the VPN's own routes, as vpnb pause does. Not offered in VPN Only." = "Quita las rutas de la app durante un rato, para que el tráfico siga las rutas propias de la VPN, como hace vpnb pause. No disponible en Solo VPN.";
+"Length" = "Duración";
+"Resume Routing" = "Reanudar el enrutamiento";
+"Ends a pause and puts the routes back, as vpnb resume does." = "Termina una pausa y vuelve a poner las rutas, como hace vpnb resume.";
+"Pause length" = "Duración de la pausa";
+"Pause incomplete" = "Pausa incompleta";
+"Paused, but 1 address is still routed: removing it failed. Retry from the dropdown." = "En pausa, pero 1 dirección sigue enrutada: no se pudo quitar. Reinténtalo desde el menú.";
+"Paused, but %lld addresses are still routed: removing them failed. Retry from the dropdown." = "En pausa, pero %lld direcciones siguen enrutadas: no se pudieron quitar. Reinténtalo desde el menú.";
+"Routing was not paused." = "El enrutamiento no estaba en pausa.";
+"Where does this site go?" = "¿Por dónde va este sitio?";
+"A name, a link or an address" = "Un nombre, un enlace o una dirección";
+"Site to check" = "Sitio que comprobar";
+"Check" = "Comprobar";
+"Check the site" = "Comprobar el sitio";
+"Say which entry routes this site, and check the way it leaves" = "Dice qué entrada enruta este sitio y comprueba por dónde sale";
+"That is not a name, a link or an address." = "Eso no es un nombre, un enlace ni una dirección.";
+"Read the tunnels again" = "Volver a leer los túneles";
+"Info" = "Información";
+"Success" = "Correcto";
+"Warning" = "Aviso";
+"Error" = "Error";
+
+/* ===== Saltar la VPN en el sitio que estás viendo (idea 3) ===== */
+"open in %@" = "abierto en %@";
+"The site open in %@" = "El sitio abierto en %@";
+"Allow…" = "Permitir…";
+"macOS asks once whether VPN Bypass may read the address of the front tab in %@." = "macOS pregunta una sola vez si VPN Bypass puede leer la dirección de la pestaña activa de %@.";
+"Allow Reading the Front Tab in %@" = "Permitir leer la pestaña activa de %@";
+"Add %@ to Bypass" = "Añadir %@ a Bypass";
+"Add %@ to VPN Only" = "Añadir %@ a Solo VPN";
+"Send %@ Direct" = "Enviar %@ en Directo";
+"%@ access is off" = "El acceso a %@ está desactivado";
+"Open Settings" = "Abrir Ajustes";
+"Open Automation Settings for %@" = "Abrir los ajustes de Automatización para %@";
+"Switch on %@ under VPN Bypass in Privacy & Security > Automation, so the app can read the front tab." = "Activa %@ bajo VPN Bypass en Privacidad y seguridad > Automatización para que la app pueda leer la pestaña activa.";
+
+"Shared CDN address (%@): other sites on it bypass the VPN too" = "Dirección de CDN compartida (%@): los demás sitios en ella también evitan la VPN";
+"Shared CDN address (%@): other sites on it use the VPN too" = "Dirección de CDN compartida (%@): los demás sitios en ella también usan la VPN";
+
+/* ===== General and About (6.0) ===== */
+"Website" = "Sitio web";
+"Report a problem…" = "Informar de un problema…";
+"Copies a diagnostics bundle with no names in it and opens a new issue" = "Copia un informe de diagnóstico sin nombres y abre una incidencia nueva";
+"Diagnostics copied, with no names in them. If the issue's Logs field is empty, paste them there." = "Diagnóstico copiado, sin nombres. Si el campo Logs de la incidencia está vacío, pégalo ahí.";
+"Support the project" = "Apoyar el proyecto";
+"Four ways to give, in one menu" = "Cuatro formas de aportar, en un menú";
+"Choose…" = "Elegir…";
+"Version %@ · GPL-3.0 · by GeiserX" = "Versión %@ · GPL-3.0 · por GeiserX";
+"Open at login" = "Abrir al iniciar sesión";
+"Apply when a VPN connects" = "Aplicar cuando se conecte una VPN";
+"Pin listed names in /etc/hosts" = "Fijar los nombres de la lista en /etc/hosts";
+"Needs the helper. Covers apps that use the system resolver." = "Necesita el asistente. Cubre las apps que usan el resolvedor del sistema.";
+"DNS servers" = "Servidores DNS";
+"Look up addresses again" = "Volver a buscar direcciones";
+"Check the path after applying" = "Comprobar el camino tras aplicar";
+"Checks which way up to 10 routed addresses leave, and that they answer on port 443." = "Comprueba por dónde salen hasta 10 direcciones enrutadas y que respondan en el puerto 443.";
+"Block listed sites when the VPN drops" = "Bloquear los sitios de la lista si cae la VPN";
+"Detected" = "Detectado";
+"Asked at the same time as the detected server. Cloudflare and Google DoH join after 200 ms, and the first answer with addresses wins. When all of them fail, the system resolver answers, which may use the VPN's DNS." = "Se consultan a la vez que el servidor detectado. Cloudflare y Google DoH se suman a los 200 ms, y gana la primera respuesta con direcciones. Si todos fallan, responde el resolvedor del sistema, que puede usar el DNS de la VPN.";
+"1.1.1.1, https://… or tls://…" = "1.1.1.1, https://… o tls://…";
+"DNS server %lld" = "Servidor DNS %lld";
+"Add Server" = "Añadir servidor";
+"Send notifications" = "Enviar notificaciones";
+"Tell me when" = "Avisarme cuando";
+"Play a sound" = "Reproducir un sonido";
+"Domains, services, rules and routes" = "Dominios, servicios, reglas y rutas";
+"Export…" = "Exportar…";
+"Import…" = "Importar…";
+"Advanced: SOCKS5 for VPNs that block UDP" = "Avanzado: SOCKS5 para VPN que bloquean UDP";
+"Never" = "Nunca";
+"Every hour" = "Cada hora";
+"Every %lld hours" = "Cada %lld horas";
+"Every %lld seconds" = "Cada %lld segundos";
+"Every %lld minutes" = "Cada %lld minutos";
+"In Custom mode, send traffic through a proxy with a route on the Routes page." = "En el modo Personalizado, envía tráfico por un proxy con una ruta en la página Rutas.";
+"VPN connects" = "La VPN se conecta";
+"VPN drops" = "La VPN cae";
+"Addresses change" = "Cambian las direcciones";
+"Something fails" = "Algo falla";
+"Learn a Site…" = "Aprender un sitio…";
+"Learn a Site" = "Aprender un sitio";
+"Watch the lookups for 60 seconds while you reload a page, and see the names it needs" = "Observa las búsquedas durante 60 segundos mientras recargas una página, y verás los nombres que necesita";
+"Reload the page that does not work now." = "Recarga ahora la página que no funciona.";
+"No name was looked up while learning." = "No se buscó ningún nombre mientras aprendía.";
+"The helper read no lookups in this window, so nothing was learned." = "El asistente no leyó ninguna búsqueda en este intervalo, así que no se aprendió nada.";
+"Learning a site: reload the page now" = "Aprendiendo un sitio: recarga la página ahora";
+"Learned: %lld names" = "Aprendidos: %lld nombres";
+"%lld s left" = "Quedan %lld s";
+"Stop" = "Detener";
+"Stop learning now and keep the names seen so far" = "Deja de aprender ahora y conserva los nombres vistos hasta aquí";
+"Stop Learning" = "Dejar de aprender";
+"Done" = "Hecho";
+"Forget these names" = "Olvidar estos nombres";
+"Done Learning" = "Terminar de aprender";
+"Every name of %@ is routed already" = "Todos los nombres de %@ ya están enrutados";
+"Add %@ instead of these names: it covers every name under the site, now and later" = "Añadir %@ en lugar de estos nombres: cubre todos los nombres bajo el sitio, ahora y en adelante";
+"Add as %@" = "Añadir como %@";
+"Every name here is routed already." = "Todos estos nombres ya están enrutados.";
+"Entries to add: %lld" = "Entradas que añadir: %lld";
+"%@, %lld entries" = "%@, %lld entradas";
+"There is no Direct route to send these names to." = "No hay una ruta Directa a la que enviar estos nombres.";
+"Added %lld of %lld. The others were not added; Logs says why." = "Añadidos %lld de %lld. Los demás no se añadieron; los Registros dicen por qué.";
+"Added %lld of %lld." = "Añadidos %lld de %lld.";
+"Routes are still being applied. Added %lld of %lld; press Add again when they finish." = "Las rutas todavía se están aplicando. Añadidos %lld de %lld; pulsa Añadir de nuevo cuando terminen.";
+"A name here is on the list but switched off. Turn it on from the Domains page." = "Un nombre de aquí está en la lista pero desactivado. Actívalo desde la página Dominios.";
+"Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory." = "Aprender un sitio ha activado la captura solo durante sus 60 segundos, y guarda los nombres en memoria.";
+
+/* Profiles per network */
+"Wi-Fi" = "Wi-Fi";
+"Ethernet" = "Ethernet";
+"Other connection" = "Otra conexión";
+"%@, router %@" = "%1$@, router %2$@";
+"Other networks" = "Otras redes";
+"No network yet" = "Ninguna red todavía";
+"1 network" = "1 red";
+"%lld networks" = "%lld redes";
+"Any network without a profile" = "Cualquier red sin perfil";
+"Use %@ on this network" = "Usar %@ en esta red";
+"This network is not identified yet." = "Esta red aún no está identificada.";
+"Delete the profile %@?" = "¿Eliminar el perfil %@?";
+"Its mode and lists are lost, and its networks use Other networks." = "Se pierden su modo y sus listas, y sus redes pasan a usar Otras redes.";
+"Network profiles" = "Perfiles de red";
+"A profile keeps a mode and its lists. When the Mac joins one of its networks, the profile is put in use. Networks are told apart by their router." = "Un perfil guarda un modo y sus listas. Cuando el Mac se une a una de sus redes, el perfil se pone en uso. Las redes se distinguen por su router.";
+"This network" = "Esta red";
+"Not identified yet" = "Aún sin identificar";
+"Use on This Network" = "Usar en esta red";
+"Save as Profile for This Network…" = "Guardar como perfil para esta red…";
+"In use" = "En uso";
+"New profile" = "Nuevo perfil";
+"Save" = "Guardar";
+"Saves the mode and lists in use now for this network. Changes made while the profile is in use stay in it." = "Guarda el modo y las listas en uso ahora para esta red. Los cambios hechos mientras el perfil está en uso se quedan en él.";
+"Home, Office…" = "Casa, Oficina…";
+"A profile with this name exists." = "Ya existe un perfil con este nombre.";
+"1 lookup" = "1 consulta";
+"%lld lookups" = "%lld consultas";
+"1 name" = "1 nombre";
+"%lld names" = "%lld nombres";
+"Copy %@" = "Copiar %@";
+"Duplicated %@ as %@." = "Se duplicó %1$@ como %2$@.";
+"Rename %@" = "Renombrar %@";
+"Profile: %@" = "Perfil: %@";
+"Profile" = "Perfil";
+"Rename profile" = "Renombrar perfil";
+"Rename" = "Renombrar";
+"Only the name changes. Its networks, mode and lists stay." = "Solo cambia el nombre. Sus redes, su modo y sus listas se mantienen.";
+"The network profile in use. Profiles are on the General page." = "El perfil de red en uso. Los perfiles están en la página General.";
+"Read the DNS lookups this Mac sends, and list the names" = "Leer las consultas DNS que envía este Mac y listar los nombres";
+"The VPN is back. Resumes when the helper is ready." = "La VPN ha vuelto. Se reanuda cuando el asistente esté listo.";
+"Shared CDN address (%@): other sites on it share this route" = "Dirección de CDN compartida (%@): los demás sitios en ella comparten esta ruta";
+"VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language." = "VPN Bypass no pudo reiniciarse (%@). Ciérralo y vuelve a abrirlo para usar el nuevo idioma.";
+"Restart Failed" = "No se pudo reiniciar";
+"Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings." = "No se puede reanudar: VPN Bypass no pudo leer su archivo de configuración. Repáralo o importa una configuración guardada en Ajustes.";
+"%@ routed now, applied %@, none failed." = "Enrutado ahora: %1$@, aplicado %2$@, ninguna falló.";
+"%@ routed now, applied %@, %lld failed." = "Enrutado ahora: %1$@, aplicado %2$@, %3$lld fallaron.";
+"%@, applied %@, none failed" = "%1$@, aplicado %2$@, ninguna falló";
+"%@, applied %@, %lld failed" = "%1$@, aplicado %2$@, %3$lld con fallo";
+"Routing is paused until %@, so %@ follows the VPN until then." = "El enrutamiento está en pausa hasta las %1$@, así que %2$@ va por la VPN hasta entonces.";
+"Routing is paused until the VPN reconnects, so %@ follows the VPN until then." = "El enrutamiento está en pausa hasta que la VPN se reconecte, así que %@ va por la VPN hasta entonces.";
+"Routing is paused until you resume, so %@ follows the VPN until then." = "El enrutamiento está en pausa hasta que lo reanudes, así que %@ va por la VPN hasta entonces.";
+"Routing is paused until %@." = "El enrutamiento está en pausa hasta las %@.";
+"Routing is paused until the VPN reconnects." = "El enrutamiento está en pausa hasta que la VPN se reconecte.";
+"Routing is paused until you resume." = "El enrutamiento está en pausa hasta que lo reanudes.";
+"Routing is paused until the helper is ready, so %@ follows the VPN until then." = "El enrutamiento está en pausa hasta que el asistente esté listo, así que %@ va por la VPN hasta entonces.";
+
+/* The mode control and the page header's search */
+"Your list skips the VPN." = "Tu lista evita la VPN.";
+"Only your list uses the VPN." = "Solo tu lista usa la VPN.";
+"Your rules pick each route." = "Tus reglas eligen cada ruta.";
+"Search %@" = "Buscar en %@";
+
+/* Entries an older version saved as ".example.com", rewritten as wildcards */
+"%@ is now %@" = "%1$@ ahora es %2$@";
+"Updated 1 entry to the new wildcard form: %@. It routes the same names as before." = "Se ha actualizado 1 entrada a la nueva forma de comodín: %@. Enruta los mismos nombres que antes.";
+"Updated %lld entries to the new wildcard form: %@. They route the same names as before." = "Se han actualizado %lld entradas a la nueva forma de comodín: %@. Enrutan los mismos nombres que antes.";
+"Entries updated to wildcards" = "Entradas actualizadas a comodines";
+"Dismiss the note about updated entries" = "Descartar el aviso sobre las entradas actualizadas";
+"What is routed now, and what needs a look." = "Lo que se enruta ahora y lo que conviene revisar.";
+"How the app starts, looks up names and lets you know." = "Cómo se inicia la app, busca nombres y te avisa.";
+"What the app did, and why." = "Lo que hizo la app, y por qué.";
+"The version, updates and where to get help." = "La versión, las actualizaciones y dónde pedir ayuda.";
+"Only the domains on this list use the VPN." = "Solo los dominios de esta lista usan la VPN.";
+"The domains on this list skip the VPN." = "Los dominios de esta lista evitan la VPN.";
+"Hide search-domain retries" = "Ocultar los reintentos con dominio de búsqueda";
+"Show 1 search-domain retry" = "Mostrar 1 reintento con dominio de búsqueda";
+"Show %lld search-domain retries" = "Mostrar %lld reintentos con dominio de búsqueda";
+"Names that are another looked-up name with a domain appended, as the resolver or a VPN client asks when a name gets no answer" = "Nombres que son otro nombre consultado con un dominio añadido al final, como pregunta el sistema o un cliente VPN cuando un nombre no obtiene respuesta";
+"The names this Mac looks up." = "Los nombres que busca este Mac.";
+
+/* Learn a site: search-domain retries and sites seen before the window */
+"Every name was looked up before you started too." = "Todos los nombres se buscaron también antes de empezar.";
+"Only search-domain retries were looked up while learning." = "Mientras aprendía solo se buscaron reintentos con dominio de búsqueda.";
+"Seen before you started" = "Vistos antes de empezar";
+"Every name of these sites was looked up in the 5 minutes before learning started, so another app may have asked for them" = "Todos los nombres de estos sitios se buscaron en los 5 minutos antes de empezar a aprender, así que puede que los pidiera otra app";
+"Add these too" = "Añadir también estos";
+"Add these sites with the rest: leave this off when another app asked for them" = "Añade estos sitios con los demás: déjalo sin marcar si los pidió otra app";
+"Add the sites seen before you started too" = "Añadir también los sitios vistos antes de empezar";
+"Nothing to add from this window. Tick Add these too to add the sites seen before." = "Nada que añadir de esta ventana. Marca Añadir también estos para añadir los sitios vistos antes.";

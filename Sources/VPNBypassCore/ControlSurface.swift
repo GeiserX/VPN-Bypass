@@ -57,7 +57,8 @@ public enum ControlSurface {
             } else if let change = OutsideChange.make(cmd: request.cmd, result: response.result,
                                                       before: before, after: rm.config,
                                                       routesBefore: routesBefore, routesLeft: rm.routedAddressCount,
-                                                      everythingElseDirect: rm.everythingElseDirect, at: Date()) {
+                                                      everythingElseDirect: rm.everythingElseDirect, at: Date(),
+                                                      via: ControlOrigin.channel) {
                 rm.lastOutsideChange = change
             }
             return response
@@ -71,6 +72,9 @@ public enum ControlSurface {
         // CommandRouter, which answers unsupported_version for every verb.
         if request.v == 1, let response = await ClassicControl.handle(request) {
             return response
+        }
+        if request.v == 1, request.cmd == "why" {
+            return await why(request.args ?? [:])
         }
 
         let ports = ProxyListenerManager.shared.activePorts
@@ -89,8 +93,12 @@ public enum ControlSurface {
                 vpnInterface: rm.vpnInterface,
                 vpnType: rm.vpnType?.rawValue,
                 enforcedRouteCount: rm.uniqueRouteCount,
-                enforcing: rm.isVPNConnected && helper.helperState.isReady && !rm.activeRoutes.isEmpty,
-                appVersion: appVersion(from: Bundle.main.infoDictionary)
+                enforcing: rm.isVPNConnected && helper.helperState.isReady && !rm.activeRoutes.isEmpty
+                    && rm.vpnKillSwitch == nil,
+                appVersion: appVersion(from: Bundle.main.infoDictionary),
+                killSwitch: rm.vpnKillSwitch?.flagNames,
+                paused: rm.pauseState?.wireDescription,
+                convertedEntries: rm.convertedEntries.isEmpty ? nil : rm.convertedEntries
             )
         }
 
@@ -122,6 +130,18 @@ public enum ControlSurface {
         await RouteManager.shared.reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: reapply)
 
         return response
+    }
+
+    /// `why host=<name, link or address>`: which entry routes it, and the path check on it.
+    @MainActor
+    private static func why(_ args: [String: String]) async -> ControlResponse {
+        guard let host = args["host"], !host.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return ControlResponse(ok: false, error: ControlError(code: "invalid_args", message: "why needs host=<name or address>"))
+        }
+        guard let answer = await RouteManager.shared.whereDoesItGo(host) else {
+            return ControlResponse(ok: false, error: ControlError(code: "invalid_args", message: "'\(host)' holds no host name or address"))
+        }
+        return ControlResponse(ok: true, result: ControlResult(why: answer))
     }
 
     /// The running app's CFBundleShortVersionString, or nil when the bundle has none

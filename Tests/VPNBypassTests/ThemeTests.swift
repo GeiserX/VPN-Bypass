@@ -1,210 +1,90 @@
 import XCTest
 @testable import VPNBypassCore
+import AppKit
 import SwiftUI
 
 final class ThemeColorTests: XCTestCase {
 
-    // MARK: - Text Colors
+    // MARK: - Greys and surfaces
 
-    func testTextPrimaryIsWhite() {
-        XCTAssertEqual(Theme.textPrimary, Color.white)
-    }
-
-    func testTextSecondaryNotNil() {
-        // Secondary text is a mid-grey, distinct from the pure-white primary.
-        XCTAssertNotEqual(Theme.textSecondary, Theme.textPrimary)
-    }
-
-    func testTextTertiaryNotNil() {
-        // Tertiary (decorative) grey is a different shade from secondary text.
+    func testTextGreysAreDistinct() {
+        // Secondary text is a mid-grey, distinct from the pure-white text and the tertiary grey.
+        XCTAssertNotEqual(Theme.textSecondary, Theme.text)
         XCTAssertNotEqual(Theme.textTertiary, Theme.textSecondary)
     }
 
-    func testTextDisabledNotNil() {
-        XCTAssertNotEqual(Theme.textDisabled, Theme.textPrimary)
+    /// An egress gets no colour of its own (rework section 2): the dropdown's Custom-mode
+    /// "Routes In Use" summary gave HTTP and SOCKS5 their own blue and purple dots, Tailscale
+    /// the live green and the VPN the attention orange. It shows the grey glyph the Rules and
+    /// Routes pages use.
+    func testAnEgressHasNoColourOfItsOwn() throws {
+        let files = try FileManager.default.contentsOfDirectory(atPath: ReworkSource.core.path)
+            .filter { $0.hasSuffix(".swift") }
+        XCTAssertGreaterThan(files.count, 20)
+        let regex = try NSRegularExpression(pattern: #"Theme\.(blue|purple)\b|\.accentColor\b"#)
+        for file in files {
+            let text = try ReworkSource.read(file)
+            let hits = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+            XCTAssertTrue(hits.isEmpty, "\(file) gives an egress a colour")
+        }
+        let dropdown = try ReworkSource.read("MenuBarViews.swift")
+        XCTAssertTrue(dropdown.contains("Image(systemName: RouteChip.systemImage(for: route.egress))"),
+                      "the summary shows the egress glyph")
     }
 
-    // MARK: - Semantic Status Colors
+    // Several surfaces are Color.white at differing opacities, so some share an alpha
+    // (bgInput and bgHover are both 0.08). Translucent members are compared against a solid,
+    // opaque anchor (bgPrimary) rather than a possibly-equal sibling.
 
-    func testSuccessColor() {
-        // Success (green) and error (red) must never collide.
-        XCTAssertNotEqual(Theme.success, Theme.error)
-    }
-
-    func testSuccessDarkColor() {
-        XCTAssertNotEqual(Theme.successDark, Theme.success)
-    }
-
-    func testSuccessLightColor() {
-        XCTAssertNotEqual(Theme.successLight, Theme.success)
-    }
-
-    func testErrorColor() {
-        // Error (red) and warning (amber) are semantically distinct status colors.
-        XCTAssertNotEqual(Theme.error, Theme.warning)
-    }
-
-    func testWarningColor() {
-        XCTAssertNotEqual(Theme.warning, Theme.warningLight)
-    }
-
-    func testWarningLightColor() {
-        XCTAssertNotEqual(Theme.warningLight, Theme.warning)
-    }
-
-    func testPurpleColor() {
-        XCTAssertNotEqual(Theme.purple, Theme.purpleLight)
-    }
-
-    func testPurpleLightColor() {
-        XCTAssertNotEqual(Theme.purpleLight, Theme.purple)
-    }
-
-    func testBlueColor() {
-        XCTAssertNotEqual(Theme.blue, Theme.blueDark)
-    }
-
-    func testBlueDarkColor() {
-        XCTAssertNotEqual(Theme.blueDark, Theme.blueLight)
-    }
-
-    func testBlueLightColor() {
-        XCTAssertNotEqual(Theme.blueLight, Theme.blue)
-    }
-
-    func testCyanColor() {
-        XCTAssertNotEqual(Theme.cyan, Theme.blue)
-    }
-
-    // MARK: - Gradients
-
-    func testAccentGradient() {
-        // LinearGradient's Equatable conformance is not guaranteed across SDKs, so assert
-        // the value is constructible and has a non-empty textual representation.
-        XCTAssertFalse(String(describing: Theme.accentGradient).isEmpty)
-    }
-
-    func testWarningGradient() {
-        XCTAssertFalse(String(describing: Theme.warningGradient).isEmpty)
-    }
-
-    func testSuccessGradient() {
-        XCTAssertFalse(String(describing: Theme.successGradient).isEmpty)
-    }
-
-    func testPurpleGradient() {
-        XCTAssertFalse(String(describing: Theme.purpleGradient).isEmpty)
-    }
-
-    func testBlueGradient() {
-        XCTAssertFalse(String(describing: Theme.blueGradient).isEmpty)
-    }
-
-    // MARK: - Backgrounds
-    // Several background/structural values are Color.white at differing opacities, so some
-    // share an alpha (e.g. bgInput and bgHover are both 0.08). To keep every assertion true,
-    // translucent members are compared against a solid, opaque anchor (bgPrimary) rather than
-    // a possibly-equal sibling.
-
-    func testBgPrimary() {
+    func testSurfaces() {
         XCTAssertNotEqual(Theme.bgPrimary, Theme.bgSecondary)
-    }
-
-    func testBgSecondary() {
-        XCTAssertNotEqual(Theme.bgSecondary, Theme.bgInputAlt)
-    }
-
-    func testBgCard() {
-        XCTAssertNotEqual(Theme.bgCard, Theme.bgPrimary)
-    }
-
-    func testBgCardBorder() {
-        XCTAssertNotEqual(Theme.bgCardBorder, Theme.bgPrimary)
-    }
-
-    func testBgInput() {
-        XCTAssertNotEqual(Theme.bgInput, Theme.bgPrimary)
-    }
-
-    func testBgInputAlt() {
-        XCTAssertNotEqual(Theme.bgInputAlt, Theme.bgSecondary)
-    }
-
-    func testBgDisabled() {
-        XCTAssertNotEqual(Theme.bgDisabled, Theme.bgPrimary)
-    }
-
-    func testBgHover() {
-        XCTAssertNotEqual(Theme.bgHover, Theme.bgPrimary)
-    }
-
-    func testBgElevated() {
-        XCTAssertNotEqual(Theme.bgElevated, Theme.bgPrimary)
-    }
-
-    // MARK: - Structural
-
-    func testDivider() {
-        XCTAssertNotEqual(Theme.divider, Theme.bgPrimary)
-    }
-
-    func testBorder() {
-        XCTAssertNotEqual(Theme.border, Theme.bgPrimary)
-    }
-
-    func testSeparator() {
-        XCTAssertNotEqual(Theme.separator, Theme.bgPrimary)
-    }
-
-    // MARK: - Brand (fundraising)
-
-    func testGithubSponsors() {
-        XCTAssertNotEqual(Theme.githubSponsors, Theme.patreon)
-    }
-
-    func testBuyMeACoffee() {
-        XCTAssertNotEqual(Theme.buyMeACoffee, Theme.patreon)
-    }
-
-    func testPatreon() {
-        XCTAssertNotEqual(Theme.patreon, Theme.githubSponsors)
+        for surface in [Theme.bgCard, Theme.bgInput, Theme.bgDisabled, Theme.bgHover, Theme.bgElevated,
+                        Theme.border, Theme.separator] {
+            XCTAssertNotEqual(surface, Theme.bgPrimary)
+        }
     }
 
     // MARK: - Brand Identity
 
-    func testBrandBlue() {
-        XCTAssertNotEqual(Theme.Brand.blue, Theme.Brand.blueLight)
+    func testBrandColours() {
+        XCTAssertEqual(Theme.Brand.blue, Color(hex: "2563EB"))
+        // The art's sky; the app draws a darker one on light grounds (ComponentsTests).
+        var sky = ""
+        NSAppearance(named: .darkAqua)!.performAsCurrentDrawingAppearance {
+            let c = NSColor(Theme.Brand.sky).usingColorSpace(.sRGB)!
+            sky = String(format: "%02X%02X%02X", Int(round(c.redComponent * 255)), Int(round(c.greenComponent * 255)),
+                         Int(round(c.blueComponent * 255)))
+        }
+        XCTAssertEqual(sky, "38BDF8")
     }
 
-    func testBrandBlueLight() {
-        XCTAssertNotEqual(Theme.Brand.blueLight, Theme.Brand.blueDark)
-    }
+    // MARK: - The migration is over
 
-    func testBrandBlueDark() {
-        XCTAssertNotEqual(Theme.Brand.blueDark, Theme.Brand.blue)
-    }
-
-    func testBrandSilver() {
-        XCTAssertNotEqual(Theme.Brand.silver, Theme.Brand.silverLight)
-    }
-
-    func testBrandSilverLight() {
-        XCTAssertNotEqual(Theme.Brand.silverLight, Theme.Brand.silverDark)
-    }
-
-    func testBrandSilverDark() {
-        XCTAssertNotEqual(Theme.Brand.silverDark, Theme.Brand.silver)
-    }
-
-    func testBrandArrowBlue() {
-        XCTAssertNotEqual(Theme.Brand.arrowBlue, Theme.Brand.blue)
-    }
-
-    func testBrandBlueGradient() {
-        XCTAssertFalse(String(describing: Theme.Brand.blueGradient).isEmpty)
-    }
-
-    func testBrandSilverGradient() {
-        XCTAssertFalse(String(describing: Theme.Brand.silverGradient).isEmpty)
+    /// The names kept for the move to the colour roles (`textPrimary`, `success`, `warning`,
+    /// `error`), the five gradients and the colours nothing draws any more are gone, from
+    /// `Theme.swift` and from every source file. A new use of one would bring a second name
+    /// for the same job back.
+    func testTheOldThemeNamesAreGone() throws {
+        let old = ["textPrimary", "textDisabled", "success", "successDark", "successLight", "error",
+                   "warning", "warningLight", "purpleLight", "blueDark", "blueLight", "cyan",
+                   "accentGradient", "warningGradient", "successGradient", "purpleGradient",
+                   "blueGradient", "bgCardBorder", "bgInputAlt", "divider", "silver", "silverLight",
+                   "silverDark", "arrowBlue", "silverGradient"]
+        let theme = try ReworkSource.read("Theme.swift")
+        for name in old {
+            XCTAssertNil(theme.range(of: "static let \(name) "), "Theme declares \(name) again")
+        }
+        let files = try FileManager.default.contentsOfDirectory(atPath: ReworkSource.core.path)
+            .filter { $0.hasSuffix(".swift") }
+        XCTAssertGreaterThan(files.count, 20)
+        let pattern = "Theme\\.(Brand\\.)?(" + old.joined(separator: "|") + ")\\b"
+        let regex = try NSRegularExpression(pattern: pattern)
+        for file in files {
+            let source = try ReworkSource.read(file)
+            let range = NSRange(source.startIndex..., in: source)
+            if let hit = regex.firstMatch(in: source, range: range) {
+                XCTFail("\(file) still uses \((source as NSString).substring(with: hit.range))")
+            }
+        }
     }
 }

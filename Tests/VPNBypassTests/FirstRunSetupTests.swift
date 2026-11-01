@@ -67,6 +67,59 @@ final class FirstRunSetupTests: XCTestCase {
         XCTAssertEqual(ServiceChip.iconName(for: "no-such-service"), "globe")
     }
 
+    /// Live test: Signal and Netflix drew the globe while Telegram and YouTube had their own
+    /// symbol. Every catalogue service draws a symbol for what it is, never the globe, and
+    /// every symbol exists on this macOS.
+    func testEveryCatalogueServiceHasASymbolOtherThanTheGlobe() {
+        XCTAssertGreaterThan(ServiceCatalogue.shipped.count, 50, "control: the catalogue loaded")
+        for entry in ServiceCatalogue.shipped {
+            let symbol = ServiceChip.iconName(for: entry.service.id)
+            XCTAssertNotEqual(symbol, "globe", "\(entry.service.id) falls back to the globe")
+            XCTAssertNotNil(NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
+                            "\(symbol) for \(entry.service.id) is not an SF Symbol here")
+        }
+        XCTAssertEqual(ServiceChip.iconName(for: "signal"), "bubble.left.fill")
+        XCTAssertEqual(ServiceChip.iconName(for: "netflix"), "film.fill")
+        XCTAssertEqual(ServiceChip.iconName(for: "telegram"), "paperplane.fill", "a service's own symbol wins")
+        // The Services page draws the same symbol as the dropdown.
+        let signal = ServiceEntry(id: "signal", name: "Signal", enabled: true, domains: ["signal.org"], ipRanges: [])
+        XCTAssertEqual(ServicesPage.rows([signal], mode: .bypass, routeSources: [], added: { _ in [] },
+                                         clash: { _ in nil }).first?.glyph, "bubble.left.fill")
+    }
+
+    // MARK: The country suggestion (regional packs)
+
+    func testTheMacsRegionIsSuggestedWhenTheCatalogueHasItsServices() {
+        let catalogue = [ServiceCatalogue.Entry(category: .banks, region: "FR",
+                                                service: ServiceEntry(id: "fr_lcl", name: "LCL", enabled: false,
+                                                                      domains: ["*.lcl.fr"], ipRanges: []))]
+        XCTAssertEqual(FirstRunSetup.suggestedRegion("FR", catalogue: catalogue), "FR")
+        XCTAssertEqual(FirstRunSetup.suggestedRegion("fr", catalogue: catalogue), "FR")
+        XCTAssertNil(FirstRunSetup.suggestedRegion("JP", catalogue: catalogue), "no Japanese service: no row")
+        XCTAssertNil(FirstRunSetup.suggestedRegion(nil, catalogue: catalogue), "no region set on the Mac")
+        XCTAssertNil(FirstRunSetup.suggestedRegion("FR", catalogue: []))
+    }
+
+    func testTheMacsRegionIsReadEachTime() {
+        defer { FirstRunSetup.regionOverride = nil }
+        FirstRunSetup.regionOverride = "JP"
+        XCTAssertEqual(FirstRunSetup.macRegion, "JP")
+        FirstRunSetup.regionOverride = nil
+        XCTAssertEqual(FirstRunSetup.macRegion, Locale.current.region?.identifier, "nil reads the Mac's region")
+    }
+
+    func testEveryShippedPackIsSuggestedOnItsCountry() {
+        for region in ["FR", "ES", "DE", "IT", "GB", "US"] {
+            XCTAssertEqual(FirstRunSetup.suggestedRegion(region), region)
+        }
+        XCTAssertNil(FirstRunSetup.suggestedRegion("JP"))
+    }
+
+    func testTheCountryRowNamesTheCountry() {
+        XCTAssertEqual(FirstRunSetup.regionServices("FR", locale: Locale(identifier: "en_US")), "Services for France…")
+        XCTAssertEqual(FirstRunSetup.regionServices("GB", locale: Locale(identifier: "en_US")), "Services for United Kingdom…")
+    }
+
     func testWording() {
         XCTAssertEqual(FirstRunSetup.title, "What should skip the VPN?")
         XCTAssertEqual(FirstRunSetup.allServices(37), "All 37 services…")
@@ -92,33 +145,24 @@ final class FirstRunSetupTests: XCTestCase {
 
     func testAFreshInstallIsNotSetUpNotNoRoutes() {
         let s = DropdownStatus.make(input(), now: now)
-        XCTAssertEqual(s.pill, "NOT SET UP")
+        XCTAssertEqual(s.chip, .off)
         XCTAssertEqual(s.tone, .idle, "grey, not the amber of a fault")
-        XCTAssertEqual(s.headerTone, .ok, "the VPN itself is connected and fine")
         XCTAssertEqual(s.headline, "WireGuard connected")
         XCTAssertEqual(s.sentence, "Nothing skips the VPN yet.")
-        XCTAssertEqual(s.facts, [], "no Routes or DNS facts about routes nobody asked for")
+        XCTAssertEqual(s.line3, .blank, "no numbers about routes nobody asked for")
     }
 
     func testOnceSomethingIsOnTheNormalStatesReturn() {
-        XCTAssertEqual(DropdownStatus.make(input { $0.nothingConfigured = false; $0.enabledServices = 1 }, now: now).pill,
-                       "NOTHING ROUTED", "a service is on but its routes are not in yet")
-        XCTAssertEqual(DropdownStatus.make(input { $0.nothingConfigured = false; $0.enabledServices = 1; $0.installedRoutes = 6 }, now: now).pill,
-                       "ON")
+        XCTAssertEqual(DropdownStatus.make(input { $0.nothingConfigured = false; $0.enabledServices = 1 }, now: now).chip,
+                       .notRouting, "a service is on but its routes are not in yet")
+        XCTAssertEqual(DropdownStatus.make(input { $0.nothingConfigured = false; $0.enabledServices = 1; $0.installedRoutes = 6 }, now: now).chip,
+                       .on)
     }
 
     /// No VPN and a dead helper are bigger facts than an empty list.
     func testNotSetUpNeverHidesAProblem() {
-        XCTAssertEqual(DropdownStatus.make(input { $0.isVPNConnected = false }, now: now).pill, "OFF")
-        XCTAssertEqual(DropdownStatus.make(input { $0.helperReady = false }, now: now).pill, "NOT ENFORCING")
-        XCTAssertEqual(DropdownStatus.make(input { $0.isVPNConnected = false }, now: now).headerTone, .bad)
-    }
-
-    func testOtherTonesKeepTheirHeaderColour() {
-        for tone: DropdownStatus.Tone in [.ok, .warn, .bad] {
-            let s = DropdownStatus(pill: "", tone: tone, headline: "", sentence: "", note: nil, facts: [])
-            XCTAssertEqual(s.headerTone, tone)
-        }
+        XCTAssertEqual(DropdownStatus.make(input { $0.isVPNConnected = false }, now: now).chip, .off)
+        XCTAssertEqual(DropdownStatus.make(input { $0.helperReady = false }, now: now).chip, .notRouting)
     }
 
     // MARK: Translations
@@ -129,10 +173,11 @@ final class FirstRunSetupTests: XCTestCase {
             guard dir.pathComponents.count > 1 else { throw XCTSkip("repo root not found from \(#filePath)") }
             dir = dir.deletingLastPathComponent()
         }
-        let keys = ["NOT SET UP", "What should skip the VPN?", "Switched-on services use your normal connection.",
+        let keys = ["What should skip the VPN?", "Switched-on services use your normal connection.",
                     "All %lld services…", "Add a site, like example.com", "Add Site",
                     "Mode: Bypass. Want only a few sites on the VPN and everything else direct?",
-                    "Use VPN Only instead…", "Nothing skips the VPN yet.", "1 domain", "%lld domains"]
+                    "Use VPN Only instead…", "Nothing skips the VPN yet.", "1 domain", "%lld domains",
+                    "Services for %@…"]
         for lang in ["en", "es", "fr"] {
             let url = dir.appendingPathComponent("Sources/VPNBypassCore/Resources/\(lang).lproj/Localizable.strings")
             let table = try XCTUnwrap(NSDictionary(contentsOf: url) as? [String: String], lang)
@@ -286,9 +331,13 @@ final class FirstRunSetupViewTests: XCTestCase {
     }
 
     /// The "All N services…" row opens Settings on the Services page, and the request is used
-    /// once. The Domains page, the default, has no switch with an empty list; the Services page
-    /// has one per service.
+    /// once. The Status page, the default with no page saved, has no switch; the Services page
+    /// has one per service that is on (here Telegram only; the rest are in the catalogue).
     func testTheSettingsWindowOpensOnTheRequestedPage() throws {
+        let savedPage = UserDefaults.standard.string(forKey: SettingsSidebar.lastPageKey)
+        UserDefaults.standard.removeObject(forKey: SettingsSidebar.lastPageKey)
+        defer { UserDefaults.standard.set(savedPage, forKey: SettingsSidebar.lastPageKey) }
+        rm.config.services[try XCTUnwrap(rm.config.services.firstIndex { $0.id == "telegram" })].enabled = true
         func settings() -> some View {
             SettingsView()
                 .environmentObject(rm)
@@ -298,12 +347,57 @@ final class FirstRunSetupViewTests: XCTestCase {
                 .environmentObject(SettingsUndo(routeManager: rm))
         }
         let plain = host(settings(), size: NSSize(width: 580, height: 680))
-        XCTAssertEqual(switches(in: plain).count, 0, "control: with no request the window opens on Domains")
+        XCTAssertEqual(switches(in: plain).count, 0, "control: with no request and no saved page the window opens on Status")
         window?.orderOut(nil)
 
         SettingsPageRequest.shared.page = .services
         let asked = host(settings(), size: NSSize(width: 580, height: 680))
-        XCTAssertGreaterThan(switches(in: asked).count, 5, "the Services page, with its switches")
+        XCTAssertEqual(switches(in: asked).count, 1, "the Services page, with the one service that is on")
         XCTAssertNil(SettingsPageRequest.shared.page, "the window took the request")
+        XCTAssertFalse(SettingsPageRequest.shared.openCatalogue, "control: nobody asked for the catalogue")
+    }
+
+    /// The row asks for the catalogue sheet too: the Services page takes the request and clears
+    /// it, so the next visit opens without the sheet.
+    func testTheAllServicesRowOpensTheCatalogue() throws {
+        SettingsPageRequest.shared.openCatalogue = true
+        SettingsPageRequest.shared.page = .services
+        defer { SettingsPageRequest.shared.openCatalogue = false }
+        _ = host(SettingsView()
+                    .environmentObject(rm)
+                    .environmentObject(NotificationManager.shared)
+                    .environmentObject(LaunchAtLoginManager.shared)
+                    .environmentObject(ModeSwitchRequest())
+                    .environmentObject(SettingsUndo(routeManager: rm)),
+                 size: NSSize(width: 580, height: 680))
+        XCTAssertNil(SettingsPageRequest.shared.page)
+        XCTAssertFalse(SettingsPageRequest.shared.openCatalogue, "the Services page took the request")
+    }
+
+    /// The first run's country row: the Services page takes the country with the request and
+    /// clears it, so the next "All services…" opens on every country.
+    func testTheCountryRowOpensTheCatalogueOnTheCountry() throws {
+        SettingsPageRequest.shared.catalogueRegion = "FR"
+        SettingsPageRequest.shared.openCatalogue = true
+        SettingsPageRequest.shared.page = .services
+        defer {
+            SettingsPageRequest.shared.openCatalogue = false
+            SettingsPageRequest.shared.catalogueRegion = nil
+        }
+        _ = host(SettingsView()
+                    .environmentObject(rm)
+                    .environmentObject(NotificationManager.shared)
+                    .environmentObject(LaunchAtLoginManager.shared)
+                    .environmentObject(ModeSwitchRequest())
+                    .environmentObject(SettingsUndo(routeManager: rm)),
+                 size: NSSize(width: 580, height: 680))
+        XCTAssertFalse(SettingsPageRequest.shared.openCatalogue, "the Services page took the request")
+        XCTAssertNil(SettingsPageRequest.shared.catalogueRegion, "and its country")
+    }
+
+    /// The row counts the catalogue, not the services in the config, which may hold custom ones.
+    func testTheAllServicesRowCountsTheCatalogue() {
+        XCTAssertEqual(FirstRunSetup.allServices(Config.defaultServices.count),
+                       "All \(ServiceCatalogue.shipped.count) services…")
     }
 }

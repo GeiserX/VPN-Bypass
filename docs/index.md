@@ -40,7 +40,7 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 
     ---
 
-    The dropdown, the Settings tabs, the `vpnb` command line and the [MCP server](mcp-server.md) for AI agents.
+    The dropdown, the Settings pages, the `vpnb` command line and the [MCP server](mcp-server.md) for AI agents.
 
 -   :material-source-branch: **[Routing modes](routing.md)**
 
@@ -52,36 +52,36 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 
 ## The menu bar app
 
-Everything lives in the dropdown: the VPN it found, a pill that says whether routes are enforced, the Mode switch, a field to add a domain, and what is routed, one row per service or domain you added. Settings opens from the gear at its foot. See [Usage](usage.md).
+Everything lives in the dropdown: the VPN it found, a status chip that says whether routes are enforced, the mode, a field to add a domain, and what is routed, one row per service or domain you added. Settings opens from the gear at its foot. See [Usage](usage.md).
 
 <div class="vb-gallery" markdown>
 <figure markdown>
-![The dropdown in Bypass mode: WireGuard connected, the pill reads ON, and four services and two domains skip the VPN, each with how many addresses it routes](images/screenshots/menu-bar.png)
+![The dropdown in Bypass mode: WireGuard connected, the status chip reads On, and four services and two domains skip the VPN, each with how many addresses it routes](images/screenshots/menu-bar.png)
 <figcaption>Bypass mode</figcaption>
 </figure>
 <figure markdown>
-![The dropdown right after install: WireGuard connected, the pill reads NOT SET UP, and the question What should skip the VPN? over six services with switches and a field to add a site](images/screenshots/first-run.png)
+![The dropdown right after install: WireGuard connected, the status chip reads Off, and the question What should skip the VPN? over six services with switches and a field to add a site](images/screenshots/first-run.png)
 <figcaption>First run</figcaption>
 </figure>
 <figure markdown>
-![The dropdown in VPN Only mode: the Mode control on VPN Only, the pill reads ON, two domains go through the VPN, and everything else goes direct](images/screenshots/vpn-only.png)
+![The dropdown in VPN Only mode: the mode track on VPN Only, the status chip reads On, two domains go through the VPN, and everything else goes direct](images/screenshots/vpn-only.png)
 <figcaption>VPN Only mode</figcaption>
 </figure>
 </div>
 
 ## Settings
 
-Status comes first and says whether it is working right now: the helper, the VPN and gateway, the routes, DNS, the tunnels and recent warnings. Bypass and VPN Only use the Domains and Services tabs. Custom mode swaps them for Rules and Routes. General holds launch at login, `/etc/hosts` and notifications; Logs and Info are for debugging. See [Settings](usage.md#settings).
+Status comes first and says whether it is working right now: the helper, the VPN and gateway, the routes, DNS, the tunnels and recent warnings. Every page is in the sidebar in every mode. Bypass and VPN Only use Domains and Services, Custom mode uses Rules and Routes, and a page of another mode opens read-only. General holds launch at login, `/etc/hosts` and notifications; Logs and About are for debugging. See [Settings](usage.md#settings).
 
-![The Services tab: the four services that are on, Telegram, WhatsApp, YouTube and Spotify, listed first under On, then the other built-in services, each with a switch](images/screenshots/services.png){ width="580" }
+![The Services page: Your services lists Telegram, WhatsApp, YouTube and Spotify, each with what it holds, the addresses it routes and its switch, and Browse catalogue… under the list](images/screenshots/services.png){ width="580" }
 
 <div class="vb-gallery vb-gallery--2" markdown>
 <figure markdown>
-![The Rules tab in Custom mode: a domain sent to a SOCKS5 proxy, a service sent direct, a subnet sent to the VPN, and the pinned default rule](images/screenshots/rules.png)
+![The Rules page in Custom mode: a domain sent to a SOCKS5 proxy, a service sent direct, a subnet sent to the VPN, and Everything else as the last row](images/screenshots/rules.png)
 <figcaption>Rules, first match wins</figcaption>
 </figure>
 <figure markdown>
-![The Routes tab in Custom mode: Direct, the detected VPN, and a SOCKS5 proxy route with its local address and copy buttons](images/screenshots/routes.png)
+![The Routes page in Custom mode: Direct and the detected VPN under Always there, and a SOCKS5 proxy route with its local address and upstream on one line](images/screenshots/routes.png)
 <figcaption>Routes: where traffic can exit</figcaption>
 </figure>
 </div>
@@ -89,7 +89,7 @@ Status comes first and says whether it is working right now: the helper, the VPN
 ## What it changes on your Mac
 
 - Host routes in the system routing table, one per resolved address of each domain or service pack you turned on. In Bypass mode they point at your local gateway, in VPN Only mode at the VPN interface, in Custom mode at whatever the matching rule says. The app removes its routes when you quit, when you choose Remove All Routes…, and when the VPN goes away.
-- Entries in `/etc/hosts`, only if you turn on DNS bypass in Settings > General.
+- Entries in `/etc/hosts`, only if you turn on Pin listed names in /etc/hosts in Settings > General.
 - One small root helper, installed once with your admin password as a launchd daemon. It is the only part that runs as root, it does nothing but add and remove routes and hosts entries, and it accepts requests from this app alone (pinned to the app's code hash). There is no Network Extension and no kernel extension, so nothing to approve in System Settings beyond the Login Items entry on macOS 13 and later.
 - A config file and a log under `~/Library/Application Support/VPNBypass/`, plus a socket there that only your account can open, which is what `vpnb` and the [MCP server](mcp-server.md) talk to.
 
@@ -110,7 +110,7 @@ flowchart LR
 - The app watches the network interfaces and running processes. A tunnel counts as a VPN when it is up and has an IPv4 address in a VPN range; Tailscale counts only when it is an exit node. See [Supported VPN types](how-it-works.md#supported-vpn-types).
 - When the VPN connects, disconnects, or the network changes, the routes are rebuilt. Domains are re-resolved on a schedule, so a route follows a CDN when its addresses rotate.
 - With several tunnels up, Bypass and VPN Only act on one and leave the others alone; in Custom mode a VPN route can name a specific tunnel. See [Other VPNs and proxies](coexistence.md).
-- Route verification pings up to 10 routed single addresses, shows which ones answer, and says how many of the routes it checked.
+- Route verification checks which way up to 10 routed single addresses leave and whether they answer on port 443, with a control address that must leave the other way, and says how many of the routes it checked. `vpnb why <host>` answers the same for any site, with the entry or rule that routes it.
 - A proxy route is a listener on `127.0.0.1` that forwards to the proxy you gave it; a Tailscale peer route sends traffic out through a device already in your tailnet. The app runs no VPN of its own.
 
 ## What it does not do
@@ -121,7 +121,7 @@ flowchart LR
 
 ## Privacy
 
-- The app talks to no server of its own: no telemetry, no update check, no account. The only network activity it starts is resolving the domains you list, forwarding traffic to a proxy you configured, and, when route verification is on, pinging the routed destinations.
+- The app talks to no server of its own: no telemetry, no update check, no account. The only network activity it starts is resolving the domains you list, forwarding traffic to a proxy you configured, and, when you check routes, opening a connection to port 443 of up to 10 routed destinations and of the site you ask `vpnb why` about, plus one connection attempt to a documentation address (`192.0.2.1`, `198.51.100.1` or `203.0.113.1`) that serves as the check's control and is closed before it completes.
 - Config, logs and proxy credentials stay in your account's Application Support folder. The Logs tab shows local events only.
 - Proxy credentials live in the config file, readable by your account alone, and the local listener asks for them, so another account on the same Mac cannot spend them. `vpnb` reads passwords from standard input, never from the command line.
 

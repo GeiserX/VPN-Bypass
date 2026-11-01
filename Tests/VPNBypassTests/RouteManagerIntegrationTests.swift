@@ -17,6 +17,26 @@ class RouteManagerTestCase: XCTestCase {
         super.setUp()
         try? FileManager.default.removeItem(at: testBackupURL)
         try? FileManager.default.copyItem(at: configURL, to: testBackupURL)
+        // Each test starts from a fresh install's config. It used to start from whatever the
+        // previous test's tearDown reloaded from disk, and the file holds what any earlier test
+        // class last saved (most put back only the config in memory): a "Service A" that is
+        // neither custom nor shipped failed testOffersEveryServiceAlphabetically under
+        // `swift test --filter Lookup`, and passed in a full run only by the order of classes.
+        rm.config = Self.freshConfig
+    }
+
+    /// A new user's config, decoded as the app decodes one, so its routes are derived.
+    static let freshConfig: RouteManager.Config = {
+        let data = try! JSONEncoder().encode(RouteManager.Config())
+        return try! JSONDecoder().decode(RouteManager.Config.self, from: data)
+    }()
+
+    /// Runs before the `tearDown` below. A rule or route edit starts a reapply nobody awaits;
+    /// left running, it checked the real VPN and gateway and applied this test's rules inside
+    /// the next test (ServiceNameClashTests lost its route under the Custom filter).
+    override func tearDown() async throws {
+        await rm.cancelConfigFollowUps()
+        try await super.tearDown()
     }
 
     override func tearDown() {
@@ -27,6 +47,44 @@ class RouteManagerTestCase: XCTestCase {
             rm.loadConfig()
         }
         super.tearDown()
+    }
+}
+
+/// A rule or route edit starts its reapply in a task of its own. Tests cancel and await those
+/// in tearDown: one left running checked the real VPN and gateway, then applied this test's
+/// rules inside the next test.
+@MainActor
+final class ConfigFollowUpTests: RouteManagerTestCase {
+
+    func testACancelledFollowUpNeverRuns() async {
+        rm.isConfigLoadFailed = true   // the apply then only logs; nothing real is read
+        defer { rm.isConfigLoadFailed = false }
+        rm.recentLogs = []
+        let ran = { self.rm.recentLogs.contains { $0.message.hasPrefix("Config failed to load") } }
+
+        rm.startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
+        XCTAssertEqual(rm.pendingConfigFollowUps, 1)
+        await rm.cancelConfigFollowUps()
+        XCTAssertEqual(rm.pendingConfigFollowUps, 0)
+        XCTAssertFalse(ran(), "cancelled before it started, it did nothing")
+
+        // Control: left alone, the same follow-up runs the apply.
+        rm.startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
+        for _ in 0..<200 where rm.pendingConfigFollowUps > 0 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(rm.pendingConfigFollowUps, 0)
+        XCTAssertTrue(ran(), "the control must run, or the check above proves nothing")
+    }
+
+    /// The Rules page's save goes through the tracked follow-up, so a tearDown can wait for it.
+    func testARuleSaveIsAFollowUpATestCanAwait() async {
+        rm.isConfigLoadFailed = true
+        defer { rm.isConfigLoadFailed = false }
+        rm.saveRulesAndReapply()
+        XCTAssertEqual(rm.pendingConfigFollowUps, 1)
+        await rm.cancelConfigFollowUps()
+        XCTAssertEqual(rm.pendingConfigFollowUps, 0)
     }
 }
 

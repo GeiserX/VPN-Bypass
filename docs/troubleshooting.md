@@ -43,7 +43,8 @@ Your `HTTP(S)_PROXY` is pointing at the listener without its credentials — usu
 
 ## Route verification failing
 
-If routes are applied but verification fails:
-- The destination host may be blocking ping (ICMP)
-- Try accessing the service directly - it may still work
-- Check if the service is actually accessible from your network
+If routes are applied but verification fails, the card says why:
+- "Went into utun4": the address left through the VPN although its route sends it around. Refresh Routes, and check that no other VPN or filter claims it.
+- "No answer on 443 via en0": the route is right, but nothing answered on port 443. The host may not serve HTTPS on that address; try the service directly.
+- "Check broken": the control address left the same way as the routed ones, so the check could not tell the two ways apart. Common with a split-tunnel VPN that does not carry public traffic.
+- `vpnb why <host>` says which entry routes a site and runs the same check on it.
