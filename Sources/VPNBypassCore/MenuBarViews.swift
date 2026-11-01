@@ -753,7 +753,7 @@ struct MenuContent: View {
     /// Why Pause is greyed now, as RouteManager.pause would refuse it.
     private var pauseBlocker: PauseGate.Blocker? {
         PauseGate.blocker(routeManager.config, isPaused: routeManager.isPaused,
-                          vpnConnected: routeManager.isVPNConnected, routedCount: routeManager.activeRoutes.count)
+                          vpnConnected: routeManager.vpnMayBeConnected, routedCount: routeManager.activeRoutes.count)
     }
 
     private func pause(_ length: PauseLength) {

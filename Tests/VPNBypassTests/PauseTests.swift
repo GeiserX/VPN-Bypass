@@ -543,6 +543,19 @@ final class PauseLifecycleTests: XCTestCase {
         XCTAssertFalse(rm.isPaused)
     }
 
+    /// Before the first detection at launch "not connected" only means not checked yet: a
+    /// pause sent then (a Shortcut that launches the app) is taken, holding the startup apply.
+    func testPauseBeforeTheFirstDetectionIsTaken() async {
+        rm.activeRoutes = []
+        kernel.installed = []
+        rm.isVPNConnected = false
+        rm.vpnStateKnown = false
+        defer { rm.vpnStateKnown = true }
+        let result = await rm.pause(for: .oneHour)
+        XCTAssertEqual(result, .success(0))
+        XCTAssertTrue(rm.isPaused)
+    }
+
     /// A VPN up with nothing in yet still pauses: the apply it would run is held back.
     func testPauseWithAVPNUpAndNoRoutesStillPauses() async {
         rm.activeRoutes = []

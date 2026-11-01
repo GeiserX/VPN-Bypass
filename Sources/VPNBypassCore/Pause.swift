@@ -135,6 +135,7 @@ enum PauseGate {
 
     /// Nil when Pause may run now: `blocker(config)`, then nothing to pause. While paused a
     /// new length may still replace the old one, so "nothing routed" does not apply then.
+    /// `vpnConnected` is true too while the first detection has not run.
     static func blocker(_ config: RouteManager.Config, isPaused: Bool, vpnConnected: Bool,
                         routedCount: Int) -> Blocker? {
         if let blocker = blocker(config) { return blocker }

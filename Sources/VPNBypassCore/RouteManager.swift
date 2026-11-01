@@ -12,7 +12,14 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Published State
     
-    @Published var isVPNConnected = false
+    @Published var isVPNConnected = false {
+        didSet { vpnStateKnown = true }
+    }
+    /// False until something sets `isVPNConnected`, the first detection at launch: until then
+    /// its false means "not checked yet", not "no VPN".
+    var vpnStateKnown = false
+    /// What Pause may assume: connected, or not checked yet.
+    var vpnMayBeConnected: Bool { isVPNConnected || !vpnStateKnown }
     @Published var vpnInterface: String?
     @Published var vpnType: VPNType?
     /// A connected VPN's setting that sends every connection into its tunnel above the routing
@@ -2980,7 +2987,7 @@ final class RouteManager: ObservableObject {
     func pause(for length: PauseLength) async -> Result<Int, PauseRefusal> {
         guard !isShuttingDown else { return .failure(.shuttingDown) }
         guard !isConfigLoadFailed else { return .failure(.configUnreadable) }
-        if let blocker = PauseGate.blocker(config, isPaused: isPaused, vpnConnected: isVPNConnected,
+        if let blocker = PauseGate.blocker(config, isPaused: isPaused, vpnConnected: vpnMayBeConnected,
                                            routedCount: activeRoutes.count) {
             log(.info, "Pause refused: \(PauseGate.message(blocker))")
             return .failure(.blocked(blocker))
