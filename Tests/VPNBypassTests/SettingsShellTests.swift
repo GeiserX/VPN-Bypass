@@ -1,7 +1,7 @@
 // SettingsShellTests.swift
 // The Settings window's shell (section 3.2 B and flow fix 1 of the 6.0 rework): a sidebar that
 // lists every page in every mode, pages of another mode that open read-only, a resizable
-// window that reopens on the last page, and one search field in the title bar of list pages.
+// window that reopens on the last page, and one search field in the page header of list pages.
 
 import AppKit
 import SwiftUI
@@ -159,8 +159,8 @@ final class SettingsShellTests: XCTestCase {
         XCTAssertFalse(hasElement(labelled: "Switch to Bypass…", in: window), "the page is still read-only in its own mode")
     }
 
-    /// ⌘F puts the cursor in the title bar search on every list page, and a click on the field
-    /// reaches it through the title bar.
+    /// ⌘F puts the cursor in the page header's search on every list page, and a click on the
+    /// field reaches it.
     func testCommandFSearchesEveryListPage() throws {
         var config = rm.config
         config.routingMode = .custom
@@ -174,7 +174,7 @@ final class SettingsShellTests: XCTestCase {
             let editor = window.firstResponder as? NSTextView
             let field = editor?.delegate as? NSTextField
             if SettingsSidebar.isSearchable(page) {
-                XCTAssertEqual(field?.placeholderString, "Search", "\(page): ⌘F left the cursor in \(String(describing: window.firstResponder))")
+                XCTAssertEqual(field?.placeholderString, "Search \(page.name)", "\(page): ⌘F left the cursor in \(String(describing: window.firstResponder))")
             } else {
                 XCTAssertNil(editor, "\(page) is not a list page but ⌘F found a field")
             }
@@ -182,9 +182,9 @@ final class SettingsShellTests: XCTestCase {
 
         SettingsPageRequest.shared.page = .rules
         settle(window)
-        let search = try XCTUnwrap(find(in: window.contentView!) { ($0 as? NSTextField)?.placeholderString == "Search" })
+        let search = try XCTUnwrap(find(in: window.contentView!) { ($0 as? NSTextField)?.placeholderString == "Search Rules" })
         let center = search.convert(NSPoint(x: search.bounds.midX, y: search.bounds.midY), to: nil)
-        XCTAssertGreaterThan(center.y, window.contentLayoutRect.maxY - 1, "the search field is not in the title bar row")
+        XCTAssertLessThan(center.y, window.contentLayoutRect.maxY, "the search field is in the title bar row")
         window.makeFirstResponder(nil)
         click(center, in: window)
         let editor = window.firstResponder as? NSTextView

@@ -1020,3 +1020,9 @@
 "VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language." = "VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language.";
 "Restart Failed" = "Restart Failed";
 "Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings." = "Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings.";
+
+/* The mode control and the page header's search */
+"Your list skips the VPN." = "Your list skips the VPN.";
+"Only your list uses the VPN." = "Only your list uses the VPN.";
+"Your rules pick each route." = "Your rules pick each route.";
+"Search %@" = "Search %@";

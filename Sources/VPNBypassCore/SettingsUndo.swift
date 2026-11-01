@@ -232,10 +232,10 @@ struct UndoLine: View {
             Button(action: onUndo) {
                 Text("Undo")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(Theme.text)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 3)
-                    .background(Color.white.opacity(0.14))
+                    .background(Theme.bgDisabled)
                     .cornerRadius(5)
             }
             .buttonStyle(.plain)
@@ -246,10 +246,10 @@ struct UndoLine: View {
         .padding(.vertical, 9)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color.white.opacity(0.04))
+                .fill(Theme.bgElevated)
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .strokeBorder(Theme.border, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 )
         )
         .accessibilityElement(children: .combine)

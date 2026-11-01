@@ -582,13 +582,6 @@ struct RulesTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            HStack(alignment: .center, spacing: Theme.Space.m) {
-                Text(Self.purpose(ruleCount: sortedRules.count))
-                    .font(Theme.Font.detail)
-                    .foregroundColor(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 GroupSection {
                     if sortedRules.isEmpty {
@@ -608,6 +601,7 @@ struct RulesTab: View {
                 }
             }
         }
+        .pageSubtitle(Self.purpose(ruleCount: sortedRules.count))
         .pageTitleActions([.add(String(localized: "Add Rule")) { sheetState = .add }])
         .sheet(item: $sheetState) { state in
             RuleEditorSheet(editingRule: state.rule, services: routeManager.config.services) { rule in

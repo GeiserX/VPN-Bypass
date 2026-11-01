@@ -1573,55 +1573,27 @@ enum RoutedBySource {
 
 // MARK: - Mode control
 
-/// The Mode row under the status block: the word "Mode", then a popup with all three modes,
-/// the same in every mode. Switching mode changes how all traffic routes, and entering Custom
-/// migrates the lists into rules, so a pick asks first. The selection reads the saved mode: the
-/// popup changes after Switch, and Cancel leaves it where it was.
+/// The mode under the status block: the three modes on one track, the mode in use raised, and
+/// what it does under it; the same control as the Settings sidebar's (`ModeControl`). Switching
+/// mode changes how all traffic routes, and entering Custom migrates the lists into rules, so a
+/// pick asks first. The track reads the saved mode: it changes after Switch, Cancel leaves it.
 struct DropdownModeRow: View {
     @EnvironmentObject var routeManager: RouteManager
     /// The mode a pick is asking about while the question is open.
     @State private var asking: RouteManager.RoutingMode?
-    /// Bumped on every pick. The popup shows the picked item itself, and SwiftUI does not push
-    /// the unchanged saved mode back into it, so it is rebuilt from the saved mode.
-    @State private var generation = 0
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text("Mode")
-                .font(Theme.Font.body)
-                .foregroundColor(Theme.textSecondary)
-                .accessibilityHidden(true)
-            Spacer(minLength: 0)
-            picker
+        ModeControl(current: routeManager.config.routingMode, layout: .track) { picked in
+            guard asking == nil,
+                  let mode = DropdownModePicker.pendingSwitch(picked: picked, current: routeManager.config.routingMode)
+            else { return }
+            asking = mode
+            // After this click is handled. Through the run loop, not DispatchQueue.main: a
+            // modal opened inside a main-queue block holds that serial queue for as long as it
+            // is open, which stops every main-actor task, the control socket and network-change
+            // handling.
+            RunLoop.main.perform(inModes: [.common]) { ask(mode) }
         }
-    }
-
-    private var picker: some View {
-        Picker("Mode", selection: Binding(
-            get: { routeManager.config.routingMode },
-            set: { picked in
-                guard asking == nil,
-                      let mode = DropdownModePicker.pendingSwitch(picked: picked, current: routeManager.config.routingMode)
-                else { return }
-                asking = mode
-                generation += 1
-                // After this click is handled, so the popup is rebuilt from the saved mode.
-                // Through the run loop, not DispatchQueue.main: a modal opened inside a
-                // main-queue block holds that serial queue for as long as it is open, which
-                // stops every main-actor task, the control socket and network-change handling.
-                RunLoop.main.perform(inModes: [.common]) { ask(mode) }
-            }
-        )) {
-            ForEach(DropdownModePicker.modes, id: \.self) { mode in
-                Text(DropdownModePicker.label(mode)).tag(mode)
-            }
-        }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .fixedSize()
-        .id(generation)
-        .help(DropdownStatus.modeDescription(DropdownModePicker.copyMode(routeManager.config.routingMode)))
-        .accessibilityLabel(String(localized: "Mode"))
     }
 
     /// While the question is open the run loop is in its modal panel mode, so the app's
@@ -2479,7 +2451,7 @@ struct FirstRunSetupView: View {
             Spacer(minLength: 4)
             Text(FirstRunSetup.domainCount(service.domains.count))
                 .font(.system(size: 10.5))
-                .foregroundColor(Theme.textTertiary)
+                .foregroundColor(Theme.textSecondary)
             // The Services page's switch (ServiceRow), and the same call behind it.
             Toggle(service.name, isOn: Binding(
                 get: { service.enabled },
@@ -2524,7 +2496,7 @@ struct FirstRunSetupView: View {
 
     private var rowSeparator: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.07))
+            .fill(Theme.bgInput)
             .frame(height: 1)
             .padding(.leading, 39)
     }
@@ -2782,7 +2754,11 @@ struct RouteCheckCard: View {
     }
 }
 
-/// The SF Symbol each service draws in the dropdown's list and in the first-run question.
+/// The SF Symbol each service draws in the dropdown's list, the Services page and the
+/// first-run question. One rule, no brand logos: a symbol says what the service is for. A
+/// service whose main use has a clear symbol of its own (a call, a stream, a chat) keeps it;
+/// every other catalogue service draws its category's symbol. Only a name the catalogue does
+/// not know draws the globe.
 enum ServiceChip {
     static func iconName(for serviceID: String) -> String {
         switch serviceID {
@@ -2796,7 +2772,7 @@ enum ServiceChip {
         case "twitch": return "tv.fill"
         case "zoom": return "video.fill"
         case "teams": return "person.2.fill"
-        default: return "globe"
+        default: return ServiceCatalogue.category(of: serviceID)?.glyph ?? "globe"
         }
     }
 }

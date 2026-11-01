@@ -396,60 +396,67 @@ struct PageHeader: View {
         addName.isEmpty ? String(localized: "Add", bundle: bundle) : addName
     }
 
-    @FocusState private var searchFocused: Bool
+    /// The header band under the title bar: title and subtitle on the left, the search and
+    /// the page's actions on the right, all centred on one line. The sidebar's brand header
+    /// takes the same height, so the app name and the page title sit level.
+    static let height: CGFloat = 56
+
+    /// The search field's prompt, which says what it filters: "Search Services".
+    static func searchPrompt(for title: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Search \(title)", bundle: bundle)
+    }
+
+    /// The search field's width: 240 pt, narrowing to 220 pt on a small window so the subtitle
+    /// keeps its room. 220 pt holds the longest prompt whole ("Rechercher dans Domaines").
+    static let searchWidth: ClosedRange<CGFloat> = 220...240
+
+    /// Bumped by ⌘F: the system search field takes the keyboard focus.
+    @State private var searchFocusRequest = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: Theme.Space.s) {
+        HStack(alignment: .center, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(Theme.Font.title)
+                    .font(Theme.Font.pageTitle)
                     .foregroundColor(Theme.text)
+                    .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: Theme.Space.m)
-                if let search {
-                    HStack(spacing: Theme.Space.xs) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.textSecondary)
-                            .accessibilityHidden(true)
-                        TextField(searchPrompt, text: search)
-                            .textFieldStyle(.plain)
-                            .font(Theme.Font.body)
-                            .focused($searchFocused)
-                            .accessibilityLabel(searchPrompt)
-                    }
-                    .padding(.horizontal, Theme.Space.s)
-                    .padding(.vertical, Theme.Space.xs)
-                    .frame(width: 180)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.control)
-                            .fill(Theme.bgInput)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.control)
-                            .strokeBorder(searchFocused ? Theme.accentText : Theme.border, lineWidth: searchFocused ? 1 : 0.5)
-                    )
-                    .help(ControlNames.help(searchPrompt, shortcut: "⌘F"))
-                    .background {
-                        Button("") { searchFocused = true }
-                            .keyboardShortcut("f", modifiers: .command)
-                            .opacity(0)
-                            .frame(width: 0, height: 0)
-                            .accessibilityHidden(true)
-                    }
+                if let subtitle {
+                    Text(subtitle)
+                        .font(Theme.Font.detail)
+                        .foregroundColor(Theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(subtitle)
                 }
+            }
+            .layoutPriority(1)
+            Spacer(minLength: Theme.Space.m)
+            HStack(spacing: Theme.Space.m) {
+                if let search { searchField(search) }
                 pageActions
                 if let onAdd {
                     PageAddButton(name: Self.addButtonName(addName), action: onAdd)
                 }
             }
-            if let subtitle {
-                Text(subtitle)
-                    .font(Theme.Font.detail)
-                    .foregroundColor(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
+    }
+
+    /// The system search field, with its magnifier and clear button, named for the list it
+    /// filters ("Search Domains"). It has no focus ring until it is clicked or ⌘F is pressed.
+    private func searchField(_ search: Binding<String>) -> some View {
+        LogSearchField(text: search, placeholder: searchPrompt, focusRequest: searchFocusRequest)
+            .frame(minWidth: Self.searchWidth.lowerBound, idealWidth: Self.searchWidth.upperBound,
+                   maxWidth: Self.searchWidth.upperBound)
+            .fixedSize(horizontal: false, vertical: true)
+            .help(ControlNames.help(searchPrompt, shortcut: "⌘F"))
+            .background {
+                Button("") { searchFocusRequest += 1 }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
     }
 }
 
@@ -489,10 +496,11 @@ struct PageAddButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "plus")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundColor(Theme.textSecondary)
-                .frame(width: 24, height: 22)
-                .contentShape(Rectangle())
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Theme.bgInput))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .keyboardShortcut("n", modifiers: .command)

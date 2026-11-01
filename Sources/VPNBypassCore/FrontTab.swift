@@ -152,9 +152,48 @@ enum FrontTabSuggestion: Equatable {
     }
 }
 
-/// Remembers the last app the user was in, other than this one, and reads its front tab when
-/// the dropdown opens. Reads only that app, and only when it is a browser we know, so a
-/// browser in the background is never asked.
+/// Which app the user is in, as the dropdown reads it on each open. The app in front now when
+/// it is one the user works in; otherwise the last such app. Only apps with a Dock icon count:
+/// a menu bar app (the VPN client's own menu, this app), the Automation prompt and other system
+/// agents also become active, and remembering one of them dropped the browser row on every
+/// open after the first.
+struct FrontAppTracker: Equatable {
+    struct App: Equatable {
+        let bundleID: String?
+        let name: String?
+        /// The app shows in the Dock (`NSApplication.ActivationPolicy.regular`).
+        let isRegular: Bool
+        /// The process, so a quit browser is not stood in for by another copy with its bundle ID.
+        var pid: pid_t? = nil
+    }
+
+    let ownBundleID: String?
+    private(set) var last: App?
+
+    init(ownBundleID: String?) { self.ownBundleID = ownBundleID }
+
+    /// An app the user works in: in the Dock, and not this one.
+    func counts(_ app: App?) -> Bool {
+        guard let app, app.isRegular else { return false }
+        return app.bundleID != ownBundleID
+    }
+
+    /// An app became active.
+    mutating func activated(_ app: App?) {
+        if counts(app) { last = app }
+    }
+
+    /// The app the user is in at an open: the one in front, or the last one when the app in
+    /// front is a menu bar app or this one.
+    mutating func current(frontmost: App?) -> App? {
+        activated(frontmost)
+        return last
+    }
+}
+
+/// Follows the app the user is in (`FrontAppTracker`) and reads its front tab when the
+/// dropdown opens. Reads only that app, and only when it is a browser we know, so a browser in
+/// the background is never asked.
 @MainActor
 final class FrontTabWatcher: ObservableObject {
     static let shared = FrontTabWatcher()
@@ -166,38 +205,51 @@ final class FrontTabWatcher: ObservableObject {
     var readsTabs = !(NSClassFromString("XCTestCase") != nil
                       || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil)
 
-    private var lastApp: NSRunningApplication?
+    private var tracker = FrontAppTracker(ownBundleID: Bundle.main.bundleIdentifier)
     private var observer: NSObjectProtocol?
     private var reading = false
+    /// How many times the dropdown asked for a refresh, for the tests of every open.
+    private(set) var refreshRequests = 0
 
     private init() {}
 
     /// Starts following which app is in front. The app calls it once at launch.
     func start() {
         guard observer == nil else { return }
-        remember(NSWorkspace.shared.frontmostApplication)
+        tracker.activated(Self.describe(NSWorkspace.shared.frontmostApplication))
         observer = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            MainActor.assumeIsolated { self?.remember(app) }
+            MainActor.assumeIsolated { self?.tracker.activated(Self.describe(app)) }
         }
     }
 
-    private func remember(_ app: NSRunningApplication?) {
-        guard let app, app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
-        lastApp = app
+    private static func describe(_ app: NSRunningApplication?) -> FrontAppTracker.App? {
+        app.map { .init(bundleID: $0.bundleIdentifier, name: $0.localizedName,
+                        isRegular: $0.activationPolicy == .regular, pid: $0.processIdentifier) }
     }
 
-    /// The browser the user was last in, or nil when it was another app or has quit.
+    /// The browser the user is in, or was last in, or nil when it was another app or has quit.
+    /// The app in front now is read first, so a missed activation cannot leave an old app. The
+    /// process the user was in must still run: another copy of the same browser is not it.
     private var lastBrowser: FrontTabBrowser? {
-        guard let app = lastApp, !app.isTerminated else { return nil }
-        return FrontTabBrowser.detect(bundleID: app.bundleIdentifier, name: app.localizedName)
+        guard let app = tracker.current(frontmost: Self.describe(NSWorkspace.shared.frontmostApplication)),
+              let bundleID = app.bundleID, Self.stillRuns(app)
+        else { return nil }
+        return FrontTabBrowser.detect(bundleID: bundleID, name: app.name)
+    }
+
+    /// The very process the user was in is still running, not another copy of its bundle ID.
+    nonisolated static func stillRuns(_ app: FrontAppTracker.App) -> Bool {
+        guard let pid = app.pid, let running = NSRunningApplication(processIdentifier: pid) else { return false }
+        return !running.isTerminated && running.bundleIdentifier == app.bundleID
     }
 
     /// Called on every dropdown open. Never shows the Automation prompt: a browser not yet
     /// allowed gets the row that asks.
     func refresh() {
+        refreshRequests += 1
         guard readsTabs, !reading else { return }
         guard let browser = lastBrowser else {
             suggestion = nil
