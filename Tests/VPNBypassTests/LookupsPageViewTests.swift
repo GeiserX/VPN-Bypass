@@ -126,6 +126,24 @@ final class LookupsPageViewTests: XCTestCase {
         XCTAssertTrue(texts.contains("Add to Bypass, 3 entries"), "the Add takes more than the site: \(texts.sorted())")
     }
 
+    /// A site name switched off on the list, beside a music app's names seen before: the
+    /// status line says to turn the name on, not to tick Add these too, which would not.
+    func testASwitchedOffSiteNameIsNamedBeforeTheSitesSeenBefore() throws {
+        var config = rm.config
+        config.routingMode = .bypass
+        config.dnsLookupsEnabled = false
+        config.domains = [RouteManager.DomainEntry(domain: "www.learn-probe.test", enabled: false)]
+        rm.config = config
+        var learning = SiteLearning(started: Date(), seenBefore: ["api.music-probe.test"])
+        learning.record(["www.learn-probe.test", "api.music-probe.test"], at: Date())
+        learning.close()
+        DNSLookupsMonitor.shared.learning = learning
+        let texts = texts(onLookups: open())
+        XCTAssertTrue(texts.contains("A name here is on the list but switched off. Turn it on from the Domains page."),
+                      "the switched-off name is not named: \(texts.sorted())")
+        XCTAssertFalse(texts.contains { $0.hasPrefix("Nothing to add from this window") }, "\(texts.sorted())")
+    }
+
     // MARK: - Helpers
 
     /// One failed name the resolver retried with each search domain appended filled the list

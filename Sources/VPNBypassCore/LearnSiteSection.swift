@@ -46,6 +46,11 @@ struct LearnSiteSection: View {
     private var hasSwitchedOff: Bool {
         learning.names.contains { routeManager.lookupListing($0) == .listedOff }
     }
+    /// A name the Add covers is switched off: that comes before the sites it leaves out, since
+    /// ticking them would not turn the name on.
+    private var addedHasSwitchedOff: Bool {
+        added.contains { $0.names.contains { routeManager.lookupListing($0) == .listedOff } }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -193,6 +198,8 @@ struct LearnSiteSection: View {
         HStack(spacing: Theme.Space.m) {
             Text(!plan.isEmpty
                  ? String(localized: "Entries to add: \(plan.count)")
+                 : addedHasSwitchedOff
+                 ? String(localized: "A name here is on the list but switched off. Turn it on from the Domains page.")
                  : leavesOutSeenBefore
                  ? String(localized: "Nothing to add from this window. Tick Add these too to add the sites seen before.")
                  : hasSwitchedOff
