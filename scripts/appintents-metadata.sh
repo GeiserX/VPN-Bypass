@@ -16,7 +16,7 @@ set -euo pipefail
 APP="${1:?usage: $0 <app bundle>}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODULE=VPNBypassCore
-ACTIONS=(AddDomainIntent GetStatusIntent SetModeIntent SetServiceIntent)
+ACTIONS=(AddDomainIntent GetStatusIntent PauseIntent ResumeIntent SetModeIntent SetServiceIntent)
 WORK="$ROOT/.build/appintents"
 rm -rf "$WORK/meta" "$WORK/lists"
 mkdir -p "$WORK/meta" "$WORK/lists"

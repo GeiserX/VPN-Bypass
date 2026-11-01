@@ -168,7 +168,7 @@ struct SettingsSidebarView: View {
                 }
                 .padding(.horizontal, Theme.Space.s)
                 .padding(.bottom, Theme.Space.m)
-                .focusable()
+                .sidebarListFocusable()
                 .focused($listFocused)
                 .sidebarFocusRingHidden()
                 .onMoveCommand { direction in
@@ -183,6 +183,10 @@ struct SettingsSidebarView: View {
         .frame(width: Self.width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.bgSecondary)
+        // A page opens with the focus on the list, never in the title bar search: on a page of
+        // another mode every control is disabled, so the search was the first field to take it.
+        .onAppear { listFocused = true }
+        .onChange(of: selection) { _ in listFocused = true }
     }
 }
 
@@ -326,6 +330,16 @@ struct WindowTitleSetter: NSViewRepresentable {
 }
 
 private extension View {
+    /// The list takes the focus on a click and from code, as a native sidebar does. A plain
+    /// `focusable()` on macOS 14 and later takes it only with full keyboard access on.
+    @ViewBuilder func sidebarListFocusable() -> some View {
+        if #available(macOS 14.0, *) {
+            focusable(true, interactions: .edit)
+        } else {
+            focusable()
+        }
+    }
+
     /// The focused list moves with ↑ and ↓; the selected row shows where it is, so the ring
     /// macOS draws around a focusable view would only frame the whole sidebar.
     @ViewBuilder func sidebarFocusRingHidden() -> some View {

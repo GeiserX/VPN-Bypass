@@ -148,6 +148,24 @@ final class PauseLengthTests: XCTestCase {
                        ["For 15 Minutes", "For 1 Hour", "Until the VPN Reconnects", "Until I Resume"])
     }
 
+    /// With no VPN connected and no route in, Pause would take nothing out: it is greyed with
+    /// one line saying so. A route left in (a removal that failed) or a VPN up offers it again,
+    /// and while paused a new length may still replace the old one.
+    func testPauseIsGreyedWhenNothingIsRouted() {
+        let cfg = RouteManager.Config()
+        XCTAssertEqual(PauseGate.blocker(cfg, isPaused: false, vpnConnected: false, routedCount: 0), .nothingRouted)
+        XCTAssertNil(PauseGate.blocker(cfg, isPaused: false, vpnConnected: true, routedCount: 0))
+        XCTAssertNil(PauseGate.blocker(cfg, isPaused: false, vpnConnected: false, routedCount: 2))
+        XCTAssertNil(PauseGate.blocker(cfg, isPaused: true, vpnConnected: false, routedCount: 0))
+        var vpnOnly = cfg
+        vpnOnly.routingMode = .vpnOnly
+        XCTAssertEqual(PauseGate.blocker(vpnOnly, isPaused: false, vpnConnected: false, routedCount: 0), .vpnOnly,
+                       "the mode's reason comes first")
+        XCTAssertNil(PauseGate.blocker(cfg), "a config alone never says nothing is routed, so a pause is not ended for it")
+        XCTAssertEqual(PauseGate.message(.nothingRouted), "Nothing to pause: no VPN is connected and no route is in.")
+        XCTAssertEqual(PauseShortcut.action(isPaused: false, blocker: .nothingRouted), .nothing)
+    }
+
     func testTheShortcutResumesOrPausesForAnHour() {
         XCTAssertEqual(PauseShortcut.action(isPaused: true, blocker: nil), .resume)
         XCTAssertEqual(PauseShortcut.action(isPaused: true, blocker: .vpnOnly), .resume)
@@ -376,7 +394,7 @@ final class PauseStatusTests: XCTestCase {
             for length in PauseLength.choices {
                 XCTAssertNotEqual(length.title(in: bundle), length.title(), "\(language): \(length)")
             }
-            for blocker: PauseGate.Blocker in [.vpnOnly, .rule("x", usesProxy: false), .rule("x", usesProxy: true), .listener("x")] {
+            for blocker: PauseGate.Blocker in [.vpnOnly, .rule("x", usesProxy: false), .rule("x", usesProxy: true), .listener("x"), .nothingRouted] {
                 XCTAssertNotEqual(PauseGate.message(blocker, in: bundle), PauseGate.message(blocker), "\(language): \(blocker)")
             }
             XCTAssertNotEqual(DropdownStatus.Line3.spokenName(.resume, in: bundle), DropdownStatus.Line3.spokenName(.resume))
@@ -494,6 +512,57 @@ final class PauseLifecycleTests: XCTestCase {
         XCTAssertEqual(result, .failure(.blocked(.rule("10.20.0.0/16", usesProxy: false))))
         XCTAssertFalse(rm.isPaused)
         XCTAssertEqual(kernel.installed, Set(listed))
+    }
+
+    /// No VPN and no route: Pause, `vpnb pause` and the Pause Routing shortcut all refuse,
+    /// the last two with nothing_to_pause, and nothing changes.
+    func testPauseWithNothingRoutedIsRefusedEverywhere() async throws {
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.activeRoutes = []
+        kernel.installed = []
+        let result = await rm.pause(for: .oneHour)
+        XCTAssertEqual(result, .failure(.blocked(.nothingRouted)))
+        XCTAssertFalse(rm.isPaused)
+
+        let response = await ControlSurface.handle(ControlRequest(cmd: "pause"))
+        XCTAssertFalse(response.ok)
+        XCTAssertEqual(response.error?.code, "nothing_to_pause")
+        XCTAssertEqual(response.error?.message, PauseGate.message(.nothingRouted))
+        XCTAssertFalse(rm.isPaused)
+
+        let loaded = rm.hasLoadedConfig
+        rm.hasLoadedConfig = true
+        defer { rm.hasLoadedConfig = loaded }
+        do {
+            _ = try await ShortcutActions.run(PauseIntent(length: .oneHour).action)
+            XCTFail("the Pause Routing shortcut paused with nothing routed")
+        } catch let error as ShortcutActionError {
+            XCTAssertEqual(error.code, "nothing_to_pause")
+        }
+        XCTAssertFalse(rm.isPaused)
+    }
+
+    /// Before the first detection at launch "not connected" only means not checked yet: a
+    /// pause sent then (a Shortcut that launches the app) is taken, holding the startup apply.
+    func testPauseBeforeTheFirstDetectionIsTaken() async {
+        rm.activeRoutes = []
+        kernel.installed = []
+        rm.isVPNConnected = false
+        rm.vpnStateKnown = false
+        defer { rm.vpnStateKnown = true }
+        let result = await rm.pause(for: .oneHour)
+        XCTAssertEqual(result, .success(0))
+        XCTAssertTrue(rm.isPaused)
+    }
+
+    /// A VPN up with nothing in yet still pauses: the apply it would run is held back.
+    func testPauseWithAVPNUpAndNoRoutesStillPauses() async {
+        rm.activeRoutes = []
+        kernel.installed = []
+        let result = await rm.pause(for: .oneHour)
+        XCTAssertEqual(result, .success(0))
+        XCTAssertTrue(rm.isPaused)
     }
 
     /// A removal that fails keeps its routes, and the count comes back for the dropdown.

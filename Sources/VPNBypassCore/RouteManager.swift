@@ -12,7 +12,14 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Published State
     
-    @Published var isVPNConnected = false
+    @Published var isVPNConnected = false {
+        didSet { vpnStateKnown = true }
+    }
+    /// False until something sets `isVPNConnected`, the first detection at launch: until then
+    /// its false means "not checked yet", not "no VPN".
+    var vpnStateKnown = false
+    /// What Pause may assume: connected, or not checked yet.
+    var vpnMayBeConnected: Bool { isVPNConnected || !vpnStateKnown }
     @Published var vpnInterface: String?
     @Published var vpnType: VPNType?
     /// A connected VPN's setting that sends every connection into its tunnel above the routing
@@ -1410,8 +1417,9 @@ final class RouteManager: ObservableObject {
         // First check for specific VPN processes to help identify type
         let runningVPNType = await detectRunningVPNProcess()
 
-        if let hint = runningVPNType {
-            await MainActor.run { log(.info, "VPN process hint: \(hint.rawValue)") }
+        // Every status pass runs this, every 30 s: log the hint only when it changes.
+        await MainActor.run {
+            logWhenChanged(.processHint, runningVPNType.map { "VPN process hint: \($0.rawValue)" })
         }
 
         // Use ifconfig to detect VPN
@@ -1616,16 +1624,17 @@ final class RouteManager: ObservableObject {
                 }
             }
             let type = hintType ?? detectVPNTypeFromInterface(selected)
+            // A match ends the run of "none matched": the next miss logs again.
+            await MainActor.run { logWhenChanged(.unmatchedCandidates, nil) }
             return (true, selected, type)
         }
 
-        // Debug: log what we found if no VPN detected
-        if !candidates.isEmpty {
-            let summary = candidates.map {
-                "\($0.interface) up=\($0.isUp) corp=\($0.isCorporateAddress) tailscale=\($0.isTailscale)"
-            }.joined(separator: ", ")
-            await MainActor.run { log(.info, "VPN candidates (none matched): \(summary)") }
-        }
+        // What was found when no VPN is detected. With no VPN this repeats every status pass,
+        // so it is logged only when the candidates change.
+        let summary = candidates.isEmpty ? nil : candidates.map {
+            "\($0.interface) up=\($0.isUp) corp=\($0.isCorporateAddress) tailscale=\($0.isTailscale)"
+        }.joined(separator: ", ")
+        await MainActor.run { logWhenChanged(.unmatchedCandidates, summary.map { "VPN candidates (none matched): \($0)" }) }
 
         return (false, nil, nil)
     }
@@ -2988,7 +2997,8 @@ final class RouteManager: ObservableObject {
     func pause(for length: PauseLength) async -> Result<Int, PauseRefusal> {
         guard !isShuttingDown else { return .failure(.shuttingDown) }
         guard !isConfigLoadFailed else { return .failure(.configUnreadable) }
-        if let blocker = PauseGate.blocker(config) {
+        if let blocker = PauseGate.blocker(config, isPaused: isPaused, vpnConnected: vpnMayBeConnected,
+                                           routedCount: activeRoutes.count) {
             log(.info, "Pause refused: \(PauseGate.message(blocker))")
             return .failure(.blocked(blocker))
         }
@@ -6631,6 +6641,31 @@ final class RouteManager: ObservableObject {
     /// Persistent append handle so we don't open/seek/close on every line.
     /// Safe to cache: `RouteManager` is `@MainActor`, so `log()` is serialized.
     private var logFileHandle: FileHandle?
+
+    /// A detection line that every status pass would repeat while nothing changes.
+    enum RepeatingLine: Hashable {
+        /// "VPN process hint: …"
+        case processHint
+        /// "VPN candidates (none matched): …"
+        case unmatchedCandidates
+    }
+
+    /// The last line logged for each `RepeatingLine`.
+    private var lastRepeatingLines: [RepeatingLine: String] = [:]
+
+    /// Logs `message` only when it differs from the last one logged for `line`. The status
+    /// timer runs every 30 s, and two such lines a pass pushed every useful line out of the
+    /// 200 kept in about 50 minutes. Nil means the condition is gone: nothing is logged, and
+    /// the next line for `line` logs again even when it is the same as before.
+    func logWhenChanged(_ line: RepeatingLine, _ message: String?) {
+        guard let message else {
+            lastRepeatingLines[line] = nil
+            return
+        }
+        guard lastRepeatingLines[line] != message else { return }
+        lastRepeatingLines[line] = message
+        log(.info, message)
+    }
 
     func log(_ level: LogEntry.LogLevel, _ message: String) {
         let source: LogSource = ControlOrigin.logSource

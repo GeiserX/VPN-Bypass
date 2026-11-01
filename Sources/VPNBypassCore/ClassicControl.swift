@@ -338,6 +338,8 @@ enum ClassicControl {
             return fail("invalid_args", "pause takes 15m, 1h, any length up to 24h, reconnect, or nothing for until resumed")
         }
         switch await rm.pause(for: length) {
+        case .failure(.blocked(.nothingRouted)):
+            return fail("nothing_to_pause", PauseGate.message(.nothingRouted))
         case .failure(.blocked(let blocker)):
             return fail("pause_refused", PauseGate.message(blocker))
         case .failure(.shuttingDown):
