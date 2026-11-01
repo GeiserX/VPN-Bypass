@@ -1014,3 +1014,7 @@
 "Only the name changes. Its networks, mode and lists stay." = "Only the name changes. Its networks, mode and lists stay.";
 "The network profile in use. Profiles are on the General page." = "The network profile in use. Profiles are on the General page.";
 "Read the DNS lookups this Mac sends, and list the names" = "Read the DNS lookups this Mac sends, and list the names";
+"The VPN is back. Resumes when the helper is ready." = "The VPN is back. Resumes when the helper is ready.";
+"Shared CDN address (%@): other sites on it share this route" = "Shared CDN address (%@): other sites on it share this route";
+"VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language." = "VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language.";
+"Restart Failed" = "Restart Failed";

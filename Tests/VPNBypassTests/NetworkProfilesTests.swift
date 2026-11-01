@@ -52,6 +52,43 @@ final class NetworkProfilesModelTests: XCTestCase {
         XCTAssertNil(NetworkIdentity.parseARP(out, gateway: "192.168.1.100"), "a prefix of another address is not a match")
     }
 
+    /// `arp -a -n -l`: the gateway's rows, each with its interface and the time it has left.
+    func testTheARPTableGivesEachEntrysTimeLeft() {
+        let out = """
+        Neighbor                Linklayer Address Expire(O) Expire(I)          Netif Refs Prbs
+        169.254.34.26           44:a3:bb:8f:b4:48 expired   expired        en0    2
+        192.0.2.1               3c:84:6a:1:2:3    1m20s     1m1s           en0    1
+        192.0.2.1               3c:84:6a:1:2:3    expired   2m9s           en1    1
+        192.0.2.10              (incomplete)      expired   expired        en0    1
+        """
+        XCTAssertEqual(NetworkIdentity.parseARPTable(out, gateway: "192.0.2.1"), [
+            .init(mac: "3c:84:6a:01:02:03", interface: "en0", expiresIn: 80),
+            .init(mac: "3c:84:6a:01:02:03", interface: "en1", expiresIn: nil),
+        ])
+        XCTAssertEqual(NetworkIdentity.parseARPTable(out, gateway: "192.0.2.10"), [], "an incomplete entry is no router")
+        XCTAssertEqual(NetworkIdentity.parseExpiry("45s"), 45)
+        XCTAssertEqual(NetworkIdentity.parseExpiry("1h2m3s"), 3723)
+        XCTAssertNil(NetworkIdentity.parseExpiry("expired"))
+        XCTAssertNil(NetworkIdentity.parseExpiry("12"))
+    }
+
+    /// The entry has refreshed when it holds another MAC or its time left went up; counting
+    /// down, gone or expired, it has not.
+    func testAnARPEntryRefreshesWhenItsTimeGoesUpOrItsMACChanges() {
+        let snap = NetworkIdentity.ARPEntry(mac: "3c:84:6a:01:02:03", interface: "en0", expiresIn: 80)
+        func entry(mac: String = "3c:84:6a:01:02:03", _ left: TimeInterval?) -> NetworkIdentity.ARPEntry {
+            .init(mac: mac, interface: "en0", expiresIn: left)
+        }
+        XCTAssertFalse(NetworkProfiles.arpEntryRefreshed(snapshot: snap, now: entry(70), elapsed: 10), "counting down")
+        XCTAssertFalse(NetworkProfiles.arpEntryRefreshed(snapshot: snap, now: entry(nil), elapsed: 90), "expired")
+        XCTAssertFalse(NetworkProfiles.arpEntryRefreshed(snapshot: snap, now: nil, elapsed: 5), "gone")
+        XCTAssertTrue(NetworkProfiles.arpEntryRefreshed(snapshot: snap, now: entry(1199), elapsed: 10))
+        XCTAssertTrue(NetworkProfiles.arpEntryRefreshed(snapshot: snap, now: entry(mac: "a4:91:b1:0a:0b:0c", 30), elapsed: 10))
+        XCTAssertTrue(NetworkProfiles.arpEntryRefreshed(
+            snapshot: .init(mac: snap.mac, interface: "en0", expiresIn: nil), now: entry(60), elapsed: 5),
+            "an expired entry answered again")
+    }
+
     func testBroadcastAndEmptyMACsAreNoRouter() {
         XCTAssertNil(NetworkIdentity.normalizedMAC("ff:ff:ff:ff:ff:ff"))
         XCTAssertNil(NetworkIdentity.normalizedMAC("0:0:0:0:0:0"))
@@ -262,6 +299,8 @@ final class NetworkProfileSwitchTests: XCTestCase {
     private let office = NetworkIdentity(gateway: "192.168.1.1", routerMAC: "a4:91:b1:0a:0b:0c", kind: .wifi)
     /// The network the override answers.
     private var onNetwork: NetworkIdentity?
+    /// What `arp -a -n -l` prints.
+    private var arpTable: String?
 
     override func setUp() async throws {
         saved = (rm.config, rm.isVPNConnected, rm.vpnInterface, rm.localGateway, rm.isLoading,
@@ -310,7 +349,10 @@ final class NetworkProfileSwitchTests: XCTestCase {
         await waitForApply()
         FakeKernel.detach(from: rm)
         rm.detectVPNInterfaceOverrideForTests = nil
+        rm.cancelARPRecheckForTests()
         rm.detectNetworkIdentityOverrideForTests = nil
+        rm.readARPTableOverrideForTests = nil
+        NetworkProfiles.arpRecheckPoll = 5
         rm.activeRoutes = []
         rm.pendingKernelAdds = []
         rm.config = saved.config
@@ -350,6 +392,28 @@ final class NetworkProfileSwitchTests: XCTestCase {
         await waitForApply()
         XCTAssertNil(rm.config.activeProfileId)
         XCTAssertEqual(kernel.installed, ["203.0.113.0/24"])
+    }
+
+    /// Home and the office share a router address. Right after the move the ARP table can
+    /// still hold home's router, so the network reads as home: it is read again once that
+    /// entry refreshes, and the office's profile is put in use then, not on a later pass.
+    func testAStaleARPEntryIsReadAgainOnceItRefreshes() async throws {
+        NetworkProfiles.arpRecheckPoll = 0.05
+        rm.readARPTableOverrideForTests = { [unowned self] in self.arpTable }
+        rm.currentNetwork = home
+        arpTable = "192.168.1.1             3c:84:6a:1:2:3    1m20s     1m1s           en0    1\n"
+        rm.noteNetworkChange()
+        await rm.updateNetworkProfile()   // still home's entry
+        XCTAssertNil(rm.config.activeProfileId)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertNil(rm.config.activeProfileId, "an entry that has not refreshed is not read again")
+
+        // The office router answers: the entry now holds its MAC.
+        onNetwork = office
+        arpTable = "192.168.1.1             a4:91:b1:a:b:c    19m59s    19m59s         en0    1\n"
+        let deadline = Date().addingTimeInterval(3)
+        while rm.config.activeProfileId == nil && Date() < deadline { try await Task.sleep(nanoseconds: 50_000_000) }
+        XCTAssertEqual(rm.config.activeProfileId, rm.config.profiles.first?.id, "the office profile is in use")
     }
 
     /// Use on This Network at home moves home to the Office profile and puts it in use.

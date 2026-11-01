@@ -1014,3 +1014,7 @@
 "Only the name changes. Its networks, mode and lists stay." = "Seul le nom change. Ses réseaux, son mode et ses listes restent.";
 "The network profile in use. Profiles are on the General page." = "Le profil réseau en service. Les profils sont sur la page Général.";
 "Read the DNS lookups this Mac sends, and list the names" = "Lire les requêtes DNS que ce Mac envoie et lister les noms";
+"The VPN is back. Resumes when the helper is ready." = "Le VPN est revenu. Reprise quand l'assistant sera prêt.";
+"Shared CDN address (%@): other sites on it share this route" = "Adresse CDN partagée (%@) : les autres sites qui y sont hébergés partagent cette route";
+"VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language." = "VPN Bypass n'a pas pu redémarrer (%@). Quittez-le et rouvrez-le pour utiliser la nouvelle langue.";
+"Restart Failed" = "Échec du redémarrage";

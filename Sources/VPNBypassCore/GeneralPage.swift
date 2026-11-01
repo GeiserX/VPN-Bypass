@@ -90,6 +90,26 @@ enum GeneralPage {
         proxyEnabled
     }
 
+    // MARK: Restart Now
+
+    /// Restart Now after a language change. Nil when the restart is under way; otherwise the
+    /// line its alert shows, since a restart that could not start leaves the app running in
+    /// the old language with nothing on screen to say so.
+    @MainActor static func restartNow(_ restart: (() throws -> Void)? = nil, in bundle: Bundle = .main) -> String? {
+        do {
+            if let restart {
+                try restart()
+            } else {
+                try AppUpdateRelauncher.restart(bundlePath: Bundle.main.bundlePath)
+            }
+            return nil
+        } catch {
+            RouteManager.shared.log(.warning, "Restart could not be scheduled: \(error.localizedDescription)")
+            let reason = error.localizedDescription
+            return String(localized: "VPN Bypass could not restart itself (\(reason)). Quit it and open it again to use the new language.", bundle: bundle)
+        }
+    }
+
     // MARK: Notifications
 
     /// The kinds of notification, as checkboxes under the master switch.
@@ -127,6 +147,7 @@ struct GeneralTab: View {
     @State private var importErrorMessage = ""
     @State private var selectedLanguage: String = UserDefaults.standard.string(forKey: "UserLanguageOverride") ?? "system"
     @State private var showingRestartAlert = false
+    @State private var restartError: String?
     @State private var advancedOpen: Bool?
     /// The doc screenshots show a documentation address here, never the build Mac's own.
     static var detectedDNSForScreenshots: String?
@@ -171,15 +192,19 @@ struct GeneralTab: View {
             Button(String(localized: "Restart Now")) {
                 // Not `open -n` followed by a quit: the new copy would start while this one
                 // still holds the single-instance lock, exit at once, and leave the app closed.
-                do {
-                    try AppUpdateRelauncher.restart(bundlePath: Bundle.main.bundlePath)
-                } catch {
-                    RouteManager.shared.log(.warning, "Restart could not be scheduled: \(error.localizedDescription)")
-                }
+                restartError = GeneralPage.restartNow()
             }
             Button(String(localized: "Later"), role: .cancel) { }
         } message: {
             Text("The app needs to restart to apply the language change.")
+        }
+        .alert(String(localized: "Restart Failed"), isPresented: Binding(
+            get: { restartError != nil },
+            set: { if !$0 { restartError = nil } }
+        )) {
+            Button(String(localized: "OK"), role: .cancel) { }
+        } message: {
+            Text(restartError ?? "")
         }
     }
 
@@ -422,7 +447,7 @@ struct GeneralTab: View {
                        detailLines: nil) {
                 switchControl(String(localized: "Enable SOCKS5 Proxy"), isOn: Binding(
                     get: { routeManager.config.proxyConfig.enabled },
-                    set: { routeManager.config.proxyConfig.enabled = $0; routeManager.saveConfig() }
+                    set: { value in routeManager.updateGlobalProxy { $0.enabled = value } }
                 ))
             }
             if routeManager.config.proxyConfig.enabled {
@@ -430,14 +455,14 @@ struct GeneralTab: View {
                 GeneralRow(String(localized: "Proxy Server")) {
                     TextField(String(localized: "Server address"), text: Binding(
                         get: { routeManager.config.proxyConfig.server },
-                        set: { routeManager.config.proxyConfig.server = $0; routeManager.saveConfig() }
+                        set: { value in routeManager.updateGlobalProxy { $0.server = value } }
                     ))
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 200)
                     .accessibilityLabel(String(localized: "Server address"))
                     TextField(String(localized: "Port"), value: Binding(
                         get: { routeManager.config.proxyConfig.port },
-                        set: { routeManager.config.proxyConfig.port = $0; routeManager.saveConfig() }
+                        set: { value in routeManager.updateGlobalProxy { $0.port = value } }
                     ), format: .number.grouping(.never))
                     .textFieldStyle(.roundedBorder)
                     .font(Theme.Font.mono)
@@ -448,14 +473,14 @@ struct GeneralTab: View {
                 GeneralRow(String(localized: "Authentication (optional)")) {
                     TextField(String(localized: "Username"), text: Binding(
                         get: { routeManager.config.proxyConfig.username },
-                        set: { routeManager.config.proxyConfig.username = $0; routeManager.saveConfig() }
+                        set: { value in routeManager.updateGlobalProxy { $0.username = value } }
                     ))
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 130)
                     .accessibilityLabel(String(localized: "Username"))
                     SecureField(String(localized: "Password"), text: Binding(
                         get: { routeManager.config.proxyConfig.password },
-                        set: { routeManager.config.proxyConfig.password = $0; routeManager.saveConfig() }
+                        set: { value in routeManager.updateGlobalProxy { $0.password = value } }
                     ))
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 130)

@@ -111,6 +111,29 @@ final class SharedAddressTests: XCTestCase {
                        ["Shared CDN address (Fastly): other sites on it use the VPN too"])
     }
 
+    /// Under a VPN kill switch no route takes a site around the VPN, so a Bypass row says only
+    /// that its route is shared, never that the other sites bypass the VPN. VPN Only's line
+    /// stays true either way.
+    func testUnderAKillSwitchABypassRowNeverClaimsABypass() throws {
+        let s = DomainsPage.sections(mode: .bypass, config: config(bypass: [DomainEntry(domain: "news.example.com")]),
+                                     routeSources: ["news.example.com"], search: "",
+                                     sharedCDNs: ["news.example.com": "Cloudflare"], killSwitch: true)
+        let detail = try XCTUnwrap(try XCTUnwrap(s.first).rows.first?.detail)
+        XCTAssertEqual(detail, "Shared CDN address (Cloudflare): other sites on it share this route")
+        XCTAssertFalse(detail.contains("bypass"))
+        let vpnOnly = DomainsPage.sections(mode: .vpnOnly, config: config(bypass: [], vpnOnly: [DomainEntry(domain: "app.example.com")]),
+                                           routeSources: ["app.example.com"], search: "",
+                                           sharedCDNs: ["app.example.com": "Fastly"], killSwitch: true)
+        XCTAssertEqual(try XCTUnwrap(vpnOnly.first).rows.map(\.detail),
+                       ["Shared CDN address (Fastly): other sites on it use the VPN too"])
+        let es = try XCTUnwrap(Self.lproj("es"))
+        let fr = try XCTUnwrap(Self.lproj("fr"))
+        XCTAssertEqual(SharedAddress.detail(cdn: "Cloudflare", isInverse: false, killSwitch: true, bundle: es),
+                       "Dirección de CDN compartida (Cloudflare): los demás sitios en ella comparten esta ruta")
+        XCTAssertEqual(SharedAddress.detail(cdn: "Cloudflare", isInverse: false, killSwitch: true, bundle: fr),
+                       "Adresse CDN partagée (Cloudflare) : les autres sites qui y sont hébergés partagent cette route")
+    }
+
     /// A wildcard keeps its own words and adds the warning after them.
     func testAWildcardKeepsItsWordsFirst() throws {
         let s = DomainsPage.sections(mode: .bypass, config: config(bypass: [DomainEntry(domain: "*.example.com")]),
