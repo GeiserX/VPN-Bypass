@@ -206,7 +206,7 @@ struct LookupsTab: View {
                 Button(title) { showsRetries.toggle() }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
-                    .help(String(localized: "Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer"))
+                    .help(String(localized: "Names that are another looked-up name with a domain appended, as the resolver or a VPN client asks when a name gets no answer"))
                     .accessibilityLabel(title)
                     .padding(.leading, 2)
             }

@@ -50,7 +50,27 @@ struct DNSLookupTally: Equatable {
 /// each retry is one more row on the page. They are folded under the name they came from.
 /// A single-label name is left alone: `intranet` asked as `intranet.corp.example` is the name
 /// the user means, not a retry.
+///
+/// Some VPN clients and profiles append a list of their own that `scutil --dns` never shows,
+/// so a retry is also told by its shape alone (`retriesByShape`).
 enum SearchDomainRetries {
+    /// Generic top-level domains a looked-up name commonly ends in. Every two-letter label is
+    /// taken as a country's, so the list only needs the longer ones.
+    static let genericTopLevelDomains: Set<String> = [
+        "com", "net", "org", "edu", "gov", "mil", "int", "info", "biz", "name", "pro", "mobi",
+        "app", "dev", "cloud", "online", "site", "tech", "xyz", "media", "news", "live", "store",
+        "shop", "blog", "page", "link", "top", "club", "digital", "network", "systems", "services",
+        "solutions", "company", "agency", "group", "global", "world", "email", "zone", "one",
+        "today", "studio", "design", "games", "video", "music", "social", "health", "travel",
+    ]
+
+    /// True when `label` is a top-level domain: a generic one or any two letters.
+    static func isTopLevelDomain(_ label: Substring) -> Bool {
+        let lower = label.lowercased()
+        if lower.count == 2 { return lower.allSatisfy { $0.isASCII && $0.isLetter } }
+        return genericTopLevelDomains.contains(lower)
+    }
+
     /// The search domains of the system resolver, in order, each once, from `scutil --dns`
     /// ("search domain[0] : corp.example").
     static func searchDomains(fromScutilDNS output: String) -> [String] {
@@ -71,16 +91,41 @@ enum SearchDomainRetries {
         output.map { searchDomains(fromScutilDNS: $0) } ?? []
     }
 
-    /// The names that are another of `names`, a name with a dot in it, with one of
-    /// `searchDomains` appended.
+    /// The names that are another of `names` with a domain appended: one of `searchDomains`
+    /// after a name with a dot in it, or any domain by its shape (`retriesByShape`).
     static func retries(among names: some Collection<String>, searchDomains: [String]) -> Set<String> {
-        guard !searchDomains.isEmpty else { return [] }
         let all = Set(names)
-        var out: Set<String> = []
-        for name in all {
+        var out = retriesByShape(among: all)
+        for name in all where !out.contains(name) {
             for domain in searchDomains where name.hasSuffix("." + domain) {
                 let base = String(name.dropLast(domain.count + 1))
                 if base.contains("."), all.contains(base) {
+                    out.insert(name)
+                    break
+                }
+            }
+        }
+        return out
+    }
+
+    /// The names that are another of `names`, N, plus "." plus a suffix S, where N has two
+    /// labels or more and ends in a top-level domain (`isTopLevelDomain`), and S has two labels
+    /// or more and is neither a public suffix alone (`co.uk`) nor under a hosting domain
+    /// (`github.io`, `amazonaws.com`), where a bucket's `www.example.com.s3.amazonaws.com` is a
+    /// real name. So `host.example.com.example.net` folds under `host.example.com`, while `example.com.cn` (a one-label tail) and
+    /// `www.example.co.uk` (no top-level domain before `co.uk`) never do.
+    static func retriesByShape(among names: Set<String>) -> Set<String> {
+        var out: Set<String> = []
+        for name in names {
+            let labels = name.split(separator: ".", omittingEmptySubsequences: false)
+            guard labels.count >= 4, !labels.contains(where: \.isEmpty) else { continue }
+            // N is labels[..<cut], S is labels[cut...]; both keep two labels or more.
+            for cut in 2...(labels.count - 2) where isTopLevelDomain(labels[cut - 1]) {
+                let suffix = labels[cut...].joined(separator: ".").lowercased()
+                if LookupAddLevels.twoLabelPublicSuffixes.contains(suffix)
+                    || LookupAddLevels.hostingSuffixes.contains(suffix)
+                    || LookupAddLevels.hostingSuffixes.contains(where: { suffix.hasSuffix("." + $0) }) { continue }
+                if names.contains(labels[..<cut].joined(separator: ".")) {
                     out.insert(name)
                     break
                 }

@@ -130,6 +130,16 @@ final class SiteLearningTests: XCTestCase {
         XCTAssertEqual(learning.shown(searchDomains: [], showsRetries: false).retries, 0)
     }
 
+    /// A VPN client's own suffixes, which no resolver lists, are folded by shape too.
+    func testFoldsRetriesNoResolverListsOutOfTheGroups() {
+        var learning = SiteLearning(started: start)
+        learning.record(["www.news.example", "host.example.com", "host.example.com.corp.example.net",
+                         "host.example.com.lab.example.co", "host.example.com.media.example.media"], at: start.addingTimeInterval(2))
+        let folded = learning.shown(searchDomains: [], showsRetries: false)
+        XCTAssertEqual(folded.site.map(\.site), ["news.example", "example.com"])
+        XCTAssertEqual(folded.retries, 3)
+    }
+
     /// The name a retry came from may have been looked up just before the window opened.
     func testFoldsARetryWhoseNameWasLookedUpBeforeTheWindow() {
         var learning = SiteLearning(started: start, seenBefore: ["host.example.com"])

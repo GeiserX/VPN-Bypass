@@ -66,7 +66,43 @@ final class SearchDomainRetriesTests: XCTestCase {
                      "other.example.org.corp.example", "intranet", "intranet.corp.example", "host.example.comcorp.example"]
         XCTAssertEqual(SearchDomainRetries.retries(among: names, searchDomains: domains),
                        ["host.example.com.corp.example", "host.example.com.lab.example", "host.example.com.vpn.example"])
+        // `.lab.example` style suffixes are found by shape too, so only the one-label one needs scutil.
+        XCTAssertEqual(SearchDomainRetries.retries(among: ["host.example.com", "host.example.com.lan"], searchDomains: ["lan"]),
+                       ["host.example.com.lan"])
+        XCTAssertEqual(SearchDomainRetries.retries(among: ["host.example.com", "host.example.com.lan"], searchDomains: []), [])
+    }
+
+    /// A VPN client appended its own list of company domains, which `scutil --dns` never shows:
+    /// one failed name became twenty rows, each looked up again and again.
+    private let clientSuffixes = (1...20).map { "corp\($0).example.\(["net", "co", "media", "com", "org"][$0 % 5])" }
+
+    func testRetriesWithSuffixesNoResolverListsAreFoldedByShape() {
+        let retries = clientSuffixes.map { "host.example.com.\($0)" }
+        let names = ["host.example.com", "github.com"] + retries
+        XCTAssertEqual(SearchDomainRetries.retries(among: names, searchDomains: []), Set(retries))
+        XCTAssertEqual(SearchDomainRetries.retries(among: names, searchDomains: ["tail.example.ts.net"]), Set(retries))
+    }
+
+    func testACountryOrPublicSuffixTailIsNeverARetry() {
+        let names = ["example.com", "example.com.cn", "www.example.com", "www.example.com.cn",
+                     "www.example", "www.example.co", "www.example.co.uk", "example.co", "example.co.uk",
+                     "host.example.com", "host.example.com.co.uk",
+                     "host.example.com.github.io", "www.example.com.s3.amazonaws.com"]
         XCTAssertEqual(SearchDomainRetries.retries(among: names, searchDomains: []), [])
+    }
+
+    func testARetryWhoseBaseWasNeverLookedUpIsNotFolded() {
+        let names = ["github.com"] + clientSuffixes.map { "host.example.com.\($0)" }
+        XCTAssertEqual(SearchDomainRetries.retries(among: names, searchDomains: []), [])
+    }
+
+    /// The Lookups list folds them under its toggle with no search domain read.
+    func testTheListFoldsShapeRetriesWithNoSearchDomain() {
+        var tally = DNSLookupTally()
+        tally.record(["host.example.com", "github.com"] + clientSuffixes.map { "host.example.com.\($0)" }, at: Date())
+        let listed = LookupsTab.listed(tally, matching: "", searchDomains: [], showsRetries: false)
+        XCTAssertEqual(Set(listed.names.map(\.name)), ["host.example.com", "github.com"])
+        XCTAssertEqual(listed.retries, 20)
     }
 
     func testThePageHidesTheRetriesUntilAskedAndCountsThem() throws {
