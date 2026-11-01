@@ -433,12 +433,18 @@ final class RouteManager: ObservableObject {
         do {
             let data = try Data(contentsOf: configURL)
             let loaded = try JSONDecoder().decode(Config.self, from: data)
-            config = loaded
+            let migration = loaded.migratingLeadingDotEntries()
+            config = migration.config
             isConfigLoadFailed = false
             seedSystemRoutesIfEmpty()
             ensurePrimaryVPNRoute()
             mergeBuiltInServices()
             log(.info, "Config loaded")
+            if !migration.migrated.isEmpty {
+                // Saved at once, so the next load finds nothing to change and this logs once.
+                saveConfig()
+                log(.info, "Changed \(migration.migrated.joined(separator: ", ")) to the *.name form, which covers the name and every name under it")
+            }
         } catch {
             isConfigLoadFailed = true
             log(.error, "Failed to load config from \(configURL.path): \(error.localizedDescription). Preserving file on disk.")
@@ -744,11 +750,14 @@ final class RouteManager: ObservableObject {
         do {
             let data = try Data(contentsOf: url)
             let exportData = try JSONDecoder().decode(ExportData.self, from: data)
+            // Old ".example.com" entries become "*.example.com" first, so the clash check
+            // below sees the names the routes will carry.
+            let migration = exportData.config.migratingLeadingDotEntries()
 
             // A custom service sharing its name with another service or a Bypass list entry
             // would share its routes too (see ServiceNameClash). Refuse the file whole, before
             // anything changes, rather than load it and guess which one to rename.
-            if let found = ServiceNameClash.firstInImport(exportData.config) {
+            if let found = ServiceNameClash.firstInImport(migration.config) {
                 let refusal = found.clash.importMessage(service: found.service)
                 lastImportRefusal = refusal
                 log(.error, "Config not imported: \(refusal)")
@@ -769,8 +778,11 @@ final class RouteManager: ObservableObject {
                 previousDiskPermissions = nil
             }
 
-            config = exportData.config
+            config = migration.config
             mergeBuiltInServices(autoSave: false)
+            if !migration.migrated.isEmpty {
+                log(.info, "Changed \(migration.migrated.joined(separator: ", ")) to the *.name form, which covers the name and every name under it")
+            }
 
             // Keep the latch SET across the write. Clearing it here to get past the save guard
             // also defeated the backup guard, so recovering from a corrupt config.json copied
@@ -3140,7 +3152,19 @@ final class RouteManager: ObservableObject {
                 if let applied = self.lastUpdate, applied > resumedAt, !self.activeRoutes.isEmpty {
                     return   // that apply already put the routes back
                 }
+                // The addresses resolved before the pause, as the startup apply does: a full
+                // apply resolves every name before it writes a route, which left the routes out
+                // for 49 s on a live test (206 names). DNS is refreshed right after, off the gate.
                 self.isLoading = true
+                let fromCache = self.dnsDiskCache.isEmpty ? false : await self.applyRoutesFromCache()
+                if fromCache {
+                    self.isLoading = false
+                    self.log(.info, "Resumed: routes put back from the DNS cache; refreshing DNS in the background")
+                    self.backgroundRefreshTask = Task.detached { [weak self] in
+                        await self?.backgroundDNSRefresh(sendNotification: false)
+                    }
+                    return
+                }
                 await self.applyAllRoutes()
                 self.isLoading = false
             }
@@ -3282,7 +3306,9 @@ final class RouteManager: ObservableObject {
         } else {
             log(.success, "Applied \(uniqueRouteCount) unique routes from cache")
         }
-        return true
+        // A failed add is not retried by the DNS refresh after it, which adds only addresses
+        // whose answer changed: false sends Resume on to the full apply, which re-adds it.
+        return batchFailureCount == 0
     }
 
     /// Partition the stale kernel routes (active destinations no longer in the new set)
@@ -6394,6 +6420,16 @@ final class RouteManager: ObservableObject {
         arpRecheckTask = nil
     }
 
+    /// Sets the persistent DNS cache the startup and Resume applies read, without disk.
+    func setDNSDiskCacheForTests(_ cache: [String: [String]]) {
+        dnsDiskCache = cache
+    }
+
+    /// Waits for the background DNS refresh a startup or a Resume started, so none outlives a test.
+    func waitForBackgroundRefreshForTests() async {
+        await backgroundRefreshTask?.value
+    }
+
     /// Forgets the last connect and every apply-kill strike, which an earlier test's reconnect
     /// or drop leaves behind: a Resume would otherwise wait out its cold delay or back-off.
     func resetSettleStateForTests() {
@@ -6502,8 +6538,11 @@ final class RouteManager: ObservableObject {
 
         // A wildcard ("*.example.com") keeps its "*." and is cleaned like a name after it. The
         // suffix needs two labels, so "*.com" cleans to nothing rather than to the TLD.
-        let isWildcard = domain.hasPrefix(WildcardDomain.prefix)
-        if isWildcard { domain.removeFirst(WildcardDomain.prefix.count) }
+        // ".example.com", the form versions before 6.0 took for a name and every name under
+        // it, means the same wildcard (`LeadingDotMigration`); kept as is it would never resolve.
+        let isWildcard = domain.hasPrefix(WildcardDomain.prefix) || domain.hasPrefix(".")
+        if domain.hasPrefix(WildcardDomain.prefix) { domain.removeFirst(WildcardDomain.prefix.count) }
+        else if isWildcard { domain = String(domain.drop { $0 == "." }) }
 
         // Reject characters that are invalid in domain names (prevents shell injection)
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-"))

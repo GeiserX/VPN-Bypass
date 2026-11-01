@@ -46,10 +46,10 @@ final class OneMeaningForRouteTests: XCTestCase {
         let summary = RoutedBySource.make(mode: .bypass, config: config, routes: telegram, busy: false)
 
         var texts = [
-            DropdownCopy.routeChangeLine(applied, now: now).text,
-            DropdownCopy.routeChangeLine(failed, now: now).text,
-            DropdownCopy.routeChangeLine(removed, now: now).text,
-            DropdownCopy.routeChangeLine(removedSome, now: now).text,
+            DropdownCopy.routeChangeLine(applied, installed: applied.routeCount, now: now).text,
+            DropdownCopy.routeChangeLine(failed, installed: failed.routeCount, now: now).text,
+            DropdownCopy.routeChangeLine(removed, installed: removed.routeCount, now: now).text,
+            DropdownCopy.routeChangeLine(removedSome, installed: removedSome.routeCount, now: now).text,
             DropdownCopy.removeAllConfirmation(mode: .bypass, routeCount: n, serviceCount: 1, domainCount: 0,
                                                autoApplyOnVPN: false, autoDNSRefresh: false).title,
             RouteCheck.scope(checked: 0, singleAddresses: 0, routeCount: n).text,
@@ -111,7 +111,7 @@ final class OneMeaningForRouteTests: XCTestCase {
 
     func testTheRefreshLineAndTheFactsSayRouted() {
         let removedSome = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now, routeCount: 4, failedCount: 2)
-        XCTAssertEqual(DropdownCopy.routeChangeLine(removedSome, now: now).text,
+        XCTAssertEqual(DropdownCopy.routeChangeLine(removedSome, installed: removedSome.routeCount, now: now).text,
                        "Removed routed addresses just now, 2 could not be removed.")
         XCTAssertEqual(DropdownStatus.make(input(), now: now).line3.text, "62 addresses · applied 23 s ago · DNS again in 18 min")
     }
@@ -147,7 +147,7 @@ final class OneMeaningForRouteTests: XCTestCase {
     static let newKeys = [
         "1 address", "%lld addresses", "no addresses", "Addresses", "Nothing routed", "Routed",
         "VPN Bypass: VPN connected but nothing is being routed",
-        "No addresses to route, checked %@.", "%@ routed %@, none failed.", "%@ routed %@, %lld failed.",
+        "No addresses to route, checked %@.", "%@ routed now, applied %@, none failed.", "%@ routed now, applied %@, %lld failed.",
         "Removed all routed addresses %@.", "Removed routed addresses %@, %lld could not be removed.",
         "Stop routing the 1 address?", "Stop routing all %lld addresses?",
         "Nothing to check: the only address is a range, which the path check cannot test",

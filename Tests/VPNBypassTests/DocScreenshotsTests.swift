@@ -1451,6 +1451,53 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderSettings(page: .status, to: "pause-paused-status.png")
     }
 
+    // BEGIN LIVE TEST CORE SHOTS
+    /// A list entry an older version saved as ".example.net", loaded from config.json.
+    private func seedLeadingDotEntry() throws {
+        seedBypass()
+        var cfg = rm.config
+        cfg.domains.append(DomainEntry(domain: ".example.net", enabled: true))
+        try JSONEncoder().encode(cfg).write(to: rm.configURL)
+        rm.loadConfig()
+    }
+
+    func testLiveCoreLeadingDotDomains() throws {
+        try seedLeadingDotEntry()
+        _ = try renderSettings(page: .domains, to: "live-leading-dot-domains.png")
+    }
+
+    func testLiveCoreLeadingDotDropdown() throws {
+        try seedLeadingDotEntry()
+        _ = try renderDropdown(to: "live-leading-dot-dropdown.png")
+    }
+
+    /// "Where does this site go?" for a listed site while routing is paused for 15 minutes.
+    func testLiveCoreSiteCheckWhilePaused() throws {
+        seedPaused(.fifteenMinutes)
+        let addresses = ["203.0.113.7", "203.0.113.8"]
+        let found = SiteRoute.match(host: "en.wikipedia.org", addresses: addresses, in: rm.siteRouteSnapshot)
+        StatusTab.siteCheckForScreenshots = ("en.wikipedia.org", siteAnswer(host: "en.wikipedia.org", found: found, via: "utun4"))
+        defer { StatusTab.siteCheckForScreenshots = nil }
+        _ = try renderSettings(page: .status, to: "live-why-paused.png")
+    }
+
+    /// The apply installed 58; a wildcard lookup added 4 since. The dropdown and Status count the same.
+    private func seedRoutesLearnedSinceTheApply() {
+        seedBypass()
+        rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-23), routeCount: 58, failedCount: 0)
+    }
+
+    func testLiveCoreCountDropdown() throws {
+        seedRoutesLearnedSinceTheApply()
+        _ = try renderDropdown(to: "live-count-dropdown.png")
+    }
+
+    func testLiveCoreCountStatus() throws {
+        seedRoutesLearnedSinceTheApply()
+        _ = try renderSettings(page: .status, to: "live-count-status.png")
+    }
+    // END LIVE TEST CORE SHOTS
+
     // BEGIN FOLLOWUPS CORE SHOTS
     /// "Until the VPN reconnects": the VPN came back while the helper was down, so the pause
     /// holds and says it waits for the helper.

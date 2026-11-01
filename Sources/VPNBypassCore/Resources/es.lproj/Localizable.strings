@@ -118,8 +118,6 @@
 "%@, outside the VPN" = "%@, fuera de la VPN";
 "Routed" = "Enrutadas";
 "None yet" = "Ninguna todavía";
-"%@, %@, none failed" = "%1$@, %2$@, ninguna falló";
-"%@, %@, %lld failed" = "%1$@, %2$@, %3$lld con fallo";
 "All removed %@" = "Todas quitadas %@";
 "Removed %@, %lld could not be removed" = "Quitadas %1$@, %2$lld sin quitar";
 "From" = "Desde";
@@ -428,8 +426,6 @@
 "Addresses" = "Direcciones";
 "VPN Bypass: VPN connected but nothing is being routed" = "VPN Bypass: VPN conectada, pero no se enruta nada";
 "No addresses to route, checked %@." = "Ninguna dirección que enrutar, comprobado %@.";
-"%@ routed %@, none failed." = "Enrutado %2$@: %1$@, ninguna falló.";
-"%@ routed %@, %lld failed." = "Enrutado %2$@: %1$@, %3$lld fallaron.";
 "Removed all routed addresses %@." = "Se quitaron todas las direcciones enrutadas %@.";
 "Removed routed addresses %@, %lld could not be removed." = "Se quitaron las direcciones enrutadas %1$@; %2$lld no se pudieron quitar.";
 "Stop routing the 1 address?" = "¿Dejar de enrutar la única dirección?";
@@ -1020,6 +1016,17 @@
 "VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language." = "VPN Bypass no pudo reiniciarse (%@). Ciérralo y vuelve a abrirlo para usar el nuevo idioma.";
 "Restart Failed" = "No se pudo reiniciar";
 "Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings." = "No se puede reanudar: VPN Bypass no pudo leer su archivo de configuración. Repáralo o importa una configuración guardada en Ajustes.";
+"%@ routed now, applied %@, none failed." = "Enrutado ahora: %1$@, aplicado %2$@, ninguna falló.";
+"%@ routed now, applied %@, %lld failed." = "Enrutado ahora: %1$@, aplicado %2$@, %3$lld fallaron.";
+"%@, applied %@, none failed" = "%1$@, aplicado %2$@, ninguna falló";
+"%@, applied %@, %lld failed" = "%1$@, aplicado %2$@, %3$lld con fallo";
+"Routing is paused until %@, so %@ follows the VPN until then." = "El enrutamiento está en pausa hasta las %1$@, así que %2$@ va por la VPN hasta entonces.";
+"Routing is paused until the VPN reconnects, so %@ follows the VPN until then." = "El enrutamiento está en pausa hasta que la VPN se reconecte, así que %@ va por la VPN hasta entonces.";
+"Routing is paused until you resume, so %@ follows the VPN until then." = "El enrutamiento está en pausa hasta que lo reanudes, así que %@ va por la VPN hasta entonces.";
+"Routing is paused until %@." = "El enrutamiento está en pausa hasta las %@.";
+"Routing is paused until the VPN reconnects." = "El enrutamiento está en pausa hasta que la VPN se reconecte.";
+"Routing is paused until you resume." = "El enrutamiento está en pausa hasta que lo reanudes.";
+"Routing is paused until the helper is ready, so %@ follows the VPN until then." = "El enrutamiento está en pausa hasta que el asistente esté listo, así que %@ va por la VPN hasta entonces.";
 
 /* The mode control and the page header's search */
 "Your list skips the VPN." = "Tu lista evita la VPN.";

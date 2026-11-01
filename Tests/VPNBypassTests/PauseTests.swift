@@ -755,6 +755,70 @@ final class PauseLifecycleTests: XCTestCase {
         XCTAssertEqual(kernel.installed, ["203.0.113.0/24"])
     }
 
+    /// The live test: with the tunnel up for minutes, `vpnb resume` left the routes out for
+    /// 49 s, the time the full apply took to resolve 206 names before it wrote a route. A
+    /// Resume puts back what was resolved before the pause at once, then refreshes DNS.
+    func testResumeDoesNotWaitForDNSBeforeItPutsTheRoutesBack() async throws {
+        rm.config.domains = [DomainEntry(domain: "cached.example.com")]
+        rm.setDNSDiskCacheForTests(["cached.example.com": ["198.51.100.20"]])
+        let fakeDNS = rm.resolveIPsOverrideForTests
+        rm.resolveIPsOverrideForTests = { _ in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)   // a slow lookup
+            return ["198.51.100.20"]
+        }
+        defer {
+            rm.setDNSDiskCacheForTests([:])
+            rm.resolveIPsOverrideForTests = fakeDNS
+        }
+        await pauseWithHelperReady()
+        XCTAssertTrue(kernel.installed.isEmpty)
+        let resumedAt = Date()
+        rm.resume()
+        let deadline = Date().addingTimeInterval(2)
+        while !kernel.installed.contains("198.51.100.20") && Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertEqual(kernel.installed, ["198.51.100.20", "203.0.113.0/24"],
+                       "the routes are back before the lookup ends")
+        XCTAssertLessThan(Date().timeIntervalSince(resumedAt), 2)
+        // The refresh after it finds the same address, so nothing more is written.
+        await rm.waitForBackgroundRefreshForTests()
+        XCTAssertEqual(kernel.installed, ["198.51.100.20", "203.0.113.0/24"])
+    }
+
+    /// A cache add that fails is not retried by the DNS refresh, which adds only changed
+    /// answers, so Resume goes on to the full apply, which puts it back.
+    func testResumeRunsTheFullApplyWhenACacheAddFails() async throws {
+        rm.config.domains = [DomainEntry(domain: "cached.example.com")]
+        rm.setDNSDiskCacheForTests(["cached.example.com": ["198.51.100.20"]])
+        let fakeDNS = rm.resolveIPsOverrideForTests
+        rm.resolveIPsOverrideForTests = { _ in ["198.51.100.20"] }
+        defer {
+            rm.setDNSDiskCacheForTests([:])
+            rm.resolveIPsOverrideForTests = fakeDNS
+        }
+        await pauseWithHelperReady()
+        var failOnce = true
+        rm.addRoutesBatchOverrideForTests = { [unowned self] routes in
+            self.addCalls += routes.map(\.destination)
+            if failOnce, routes.contains(where: { $0.destination == "198.51.100.20" }) {
+                failOnce = false
+                let rest = routes.filter { $0.destination != "198.51.100.20" }
+                let r = self.kernel.add(rest)
+                return (r.successCount, r.failureCount + 1, r.failedDestinations + ["198.51.100.20"], "test")
+            }
+            return self.kernel.add(routes)
+        }
+        rm.resume()
+        let deadline = Date().addingTimeInterval(5)
+        while !kernel.installed.contains("198.51.100.20") && Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertFalse(failOnce, "the cache add was tried and failed")
+        XCTAssertTrue(kernel.installed.contains("198.51.100.20"), "the full apply put the failed address back")
+        await rm.waitForBackgroundRefreshForTests()
+    }
+
     func testChangingModeEndsThePause() async {
         await rm.pause(for: .untilResume)
         rm.isVPNConnected = false   // the switch then applies nothing here

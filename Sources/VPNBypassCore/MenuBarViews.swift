@@ -1038,18 +1038,21 @@ enum DropdownCopy {
     }
 
     /// What the last apply or removal did, as one sentence: the Status page's summary adds it.
-    /// `isProblem` is true when something failed or every route was removed.
-    static func routeChangeLine(_ outcome: RouteManager.RouteChangeOutcome, now: Date) -> (text: String, isProblem: Bool) {
+    /// `isProblem` is true when something failed or every route was removed. The count is
+    /// `installed`, the addresses with a route now (`RouteManager.routedAddressCount`), the
+    /// number the dropdown shows: wildcard lookups and DNS refreshes add routes after the apply,
+    /// so the apply's own count (`outcome.routeCount`) falls behind it.
+    static func routeChangeLine(_ outcome: RouteManager.RouteChangeOutcome, installed: Int, now: Date) -> (text: String, isProblem: Bool) {
         let when = age(since: outcome.at, now: now)
         switch outcome.kind {
         case .applied:
-            if outcome.routeCount == 0 && outcome.failedCount == 0 {
+            if installed == 0 && outcome.failedCount == 0 {
                 return (String(localized: "No addresses to route, checked \(when)."), false)
             }
             if outcome.failedCount == 0 {
-                return (String(localized: "\(routes(outcome.routeCount)) routed \(when), none failed."), false)
+                return (String(localized: "\(routes(installed)) routed now, applied \(when), none failed."), false)
             }
-            return (String(localized: "\(routes(outcome.routeCount)) routed \(when), \(outcome.failedCount) failed."), true)
+            return (String(localized: "\(routes(installed)) routed now, applied \(when), \(outcome.failedCount) failed."), true)
         case .removedAll:
             if outcome.failedCount == 0 {
                 // No promise that Refresh brings them back: when the removal came from a mode

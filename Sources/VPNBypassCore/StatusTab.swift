@@ -82,7 +82,7 @@ enum StatusPage {
             if let change = DropdownCopy.shownRouteChange(input.lastRouteChange,
                                                           currentRouteCount: input.installedRoutes),
                change.kind == .applied {
-                sentence += " " + DropdownCopy.routeChangeLine(change, now: now).text
+                sentence += " " + DropdownCopy.routeChangeLine(change, installed: input.installedRoutes, now: now).text
             }
         }
         return Summary(title: title, sentence: sentence, note: note, tone: tone)
@@ -244,10 +244,12 @@ enum StatusPage {
         let when = DropdownCopy.age(since: change.at, now: now)
         switch change.kind {
         case .applied:
-            let count = routes(change.routeCount, bundle: bundle)
+            // The addresses routed now, as the dropdown counts them; the apply's own count
+            // falls behind once a wildcard lookup or a DNS refresh adds a route.
+            let count = routes(installed, bundle: bundle)
             return change.failedCount == 0
-                ? Line(text: String(localized: "\(count), \(when), none failed", bundle: bundle))
-                : Line(text: String(localized: "\(count), \(when), \(change.failedCount) failed", bundle: bundle), tone: .warn)
+                ? Line(text: String(localized: "\(count), applied \(when), none failed", bundle: bundle))
+                : Line(text: String(localized: "\(count), applied \(when), \(change.failedCount) failed", bundle: bundle), tone: .warn)
         case .removedAll:
             return change.failedCount == 0
                 ? Line(text: String(localized: "All removed \(when)", bundle: bundle), tone: .warn)

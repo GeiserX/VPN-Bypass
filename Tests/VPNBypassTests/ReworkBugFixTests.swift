@@ -167,7 +167,7 @@ final class ReworkStatusTests: XCTestCase {
     /// apply under a "Not working" title; it says what is still installed.
     func testTheStatusRoutedRowHidesThePastApplyWhileTheHelperIsDown() {
         let applied = RouteManager.RouteChangeOutcome(kind: .applied, at: now.addingTimeInterval(-23), routeCount: 62, failedCount: 0)
-        XCTAssertEqual(StatusPage.appliedLine(installed: 62, lastChange: applied, now: now).text, "62 addresses, 23 s ago, none failed")
+        XCTAssertEqual(StatusPage.appliedLine(installed: 62, lastChange: applied, now: now).text, "62 addresses, applied 23 s ago, none failed")
         XCTAssertEqual(StatusPage.appliedLine(installed: 62, lastChange: applied, now: now, helperReady: false).text, "62 addresses")
         let source = (try? ReworkSource.body(of: "private func routesSection", in: "StatusTab.swift")) ?? ""
         XCTAssertTrue(source.contains("helperReady: input.helperReady"), "the page passes the helper state to the row")
