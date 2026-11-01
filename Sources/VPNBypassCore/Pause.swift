@@ -129,6 +129,17 @@ enum PauseGate {
         case rule(String, usesProxy: Bool)
         /// A proxy or Tailscale route whose loopback listener runs; Pause would not stop it.
         case listener(String)
+        /// No VPN is connected and the app has no route in: there is nothing to take out.
+        case nothingRouted
+    }
+
+    /// Nil when Pause may run now: `blocker(config)`, then nothing to pause. While paused a
+    /// new length may still replace the old one, so "nothing routed" does not apply then.
+    static func blocker(_ config: RouteManager.Config, isPaused: Bool, vpnConnected: Bool,
+                        routedCount: Int) -> Blocker? {
+        if let blocker = blocker(config) { return blocker }
+        if !isPaused && !vpnConnected && routedCount == 0 { return .nothingRouted }
+        return nil
     }
 
     /// Nil when Pause may run in this config. Checked in this order: the mode, then the first
@@ -176,6 +187,8 @@ enum PauseGate {
             return String(localized: "The rule \(name) uses a proxy, which keeps running while paused. Turn the rule off first.", bundle: bundle)
         case .listener(let name):
             return String(localized: "The route \(name) keeps its local listener running, so Pause would not stop it. Turn the route off first.", bundle: bundle)
+        case .nothingRouted:
+            return String(localized: "Nothing to pause: no VPN is connected and no route is in.", bundle: bundle)
         }
     }
 

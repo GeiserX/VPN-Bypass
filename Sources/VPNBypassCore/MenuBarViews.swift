@@ -714,7 +714,7 @@ struct MenuContent: View {
     /// Pause, with its four lengths. Greyed when pausing is not safe in this config, with the
     /// one line that says why as the menu's first item, its tooltip and its VoiceOver hint.
     private var pauseMenu: some View {
-        let blocker = PauseGate.blocker(routeManager.config)
+        let blocker = pauseBlocker
         let why = blocker.map { PauseGate.message($0) }
         return Menu {
             if let why {
@@ -750,6 +750,12 @@ struct MenuContent: View {
         .accessibilityHint(why ?? String(localized: "Takes the app's routes out for a while, so traffic follows the VPN's own routes."))
     }
 
+    /// Why Pause is greyed now, as RouteManager.pause would refuse it.
+    private var pauseBlocker: PauseGate.Blocker? {
+        PauseGate.blocker(routeManager.config, isPaused: routeManager.isPaused,
+                          vpnConnected: routeManager.isVPNConnected, routedCount: routeManager.activeRoutes.count)
+    }
+
     private func pause(_ length: PauseLength) {
         Task { await routeManager.pause(for: length) }
     }
@@ -762,7 +768,7 @@ struct MenuContent: View {
     private func pauseShortcut() {
         guard !DropdownShortcut.isKeyRepeat(NSApp.currentEvent) else { return }
         switch PauseShortcut.action(isPaused: routeManager.isPaused,
-                                    blocker: PauseGate.blocker(routeManager.config)) {
+                                    blocker: pauseBlocker) {
         case .resume: resume()
         case .pause(let length): pause(length)
         case .nothing: break

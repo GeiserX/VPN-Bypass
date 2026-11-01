@@ -860,6 +860,7 @@
 "The rule %@ does not go Direct: pausing could send its traffic outside the VPN. Turn the rule off or switch mode instead." = "La regla %@ no va por Directo: pausar podría enviar su tráfico fuera de la VPN. Desactiva la regla o cambia de modo.";
 "The rule %@ uses a proxy, which keeps running while paused. Turn the rule off first." = "La regla %@ usa un proxy, que sigue funcionando en pausa. Desactiva antes la regla.";
 "The route %@ keeps its local listener running, so Pause would not stop it. Turn the route off first." = "La ruta %@ mantiene su escucha local en marcha, así que Pausar no la detendría. Desactiva antes la ruta.";
+"Nothing to pause: no VPN is connected and no route is in." = "No hay nada que pausar: no hay ninguna VPN conectada ni ninguna ruta puesta.";
 "For 15 Minutes" = "Durante 15 minutos";
 "For 1 Hour" = "Durante 1 hora";
 "For %@" = "Durante %@";
