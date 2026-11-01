@@ -1020,3 +1020,9 @@
 "VPN Bypass could not restart itself (%@). Quit it and open it again to use the new language." = "VPN Bypass no pudo reiniciarse (%@). Ciérralo y vuelve a abrirlo para usar el nuevo idioma.";
 "Restart Failed" = "No se pudo reiniciar";
 "Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings." = "No se puede reanudar: VPN Bypass no pudo leer su archivo de configuración. Repáralo o importa una configuración guardada en Ajustes.";
+
+/* The mode control and the page header's search */
+"Your list skips the VPN." = "Tu lista evita la VPN.";
+"Only your list uses the VPN." = "Solo tu lista usa la VPN.";
+"Your rules pick each route." = "Tus reglas eligen cada ruta.";
+"Search %@" = "Buscar en %@";

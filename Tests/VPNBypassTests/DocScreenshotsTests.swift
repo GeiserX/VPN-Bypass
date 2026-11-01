@@ -39,7 +39,14 @@ final class DocScreenshotsTests: XCTestCase {
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
     /// The dropdown's ground in the menu bar on a dark desktop, sampled from a real capture.
-    private static let dropdownGround = Color(red: 15 / 255, green: 15 / 255, blue: 15 / 255)
+    private static var dropdownGround: Color {
+        isLight ? Color(red: 236 / 255, green: 236 / 255, blue: 236 / 255)
+                : Color(red: 15 / 255, green: 15 / 255, blue: 15 / 255)
+    }
+
+    /// VPNB_DOC_APPEARANCE=light renders in the light appearance; dark otherwise.
+    private static var isLight: Bool { ProcessInfo.processInfo.environment["VPNB_DOC_APPEARANCE"] == "light" }
+    private static var renderAppearance: NSAppearance? { NSAppearance(named: isLight ? .aqua : .darkAqua) }
 
     override func setUp() async throws {
         guard let dir = ProcessInfo.processInfo.environment["VPNB_DOC_SCREENSHOTS"], !dir.isEmpty else {
@@ -48,12 +55,13 @@ final class DocScreenshotsTests: XCTestCase {
         outputDir = URL(fileURLWithPath: dir, isDirectory: true)
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         Self.serveBrandMark(true)
+        Self.serveLanguage(true)
         XCTAssertNotNil(Bundle.main.image(forResource: "menubar-icon-active"), "the title bar's mark loads")
         Self.drawAsFrontmost(true)
         XCTAssertNotEqual(NSApplication.shared.appearance?.name, .darkAqua,
                           "an earlier render's tearDown left the app forced dark")
         savedAppearance = NSApplication.shared.appearance
-        NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        NSApplication.shared.appearance = Self.renderAppearance
 
         saved = (rm.config, rm.isVPNConnected, rm.vpnInterface, rm.vpnType, rm.localGateway,
                  rm.activeRoutes, rm.lastUpdate, rm.isLoading, rm.lastRouteChange,
@@ -66,6 +74,7 @@ final class DocScreenshotsTests: XCTestCase {
         guard saved != nil else { return }
         Self.drawAsFrontmost(false)
         Self.serveBrandMark(false)
+        Self.serveLanguage(false)
         XCTAssertNil(Bundle.main.image(forResource: "menubar-icon-active"),
                      "the test runner's own bundle answers again once the renders are done")
         NSApplication.shared.appearance = savedAppearance
@@ -418,6 +427,67 @@ final class DocScreenshotsTests: XCTestCase {
         seedCustom()
         rm.config.routes.removeAll { ProxyListenerManager.usesLocalListener($0.egress) }
         XCTAssertEqual(try renderSettings(page: .routes, to: "routes-empty.png"), Self.settingsSize)
+    }
+
+    // MARK: - The header, the search, the mode control and the logo
+
+    // Every page's header band, the sidebar's logo and mode cards, and the dropdown's mode track,
+    // rendered for the pull request in dark and light (VPNB_DOC_APPEARANCE) and in French
+    // (VPNB_DOC_LANGUAGE=fr).
+
+    func testHeaderEveryPage() throws {
+        seedBypass()
+        for page in SettingsView.SettingsTab.allCases {
+            _ = try renderSettings(page: page, to: "header-\(page.rawValue).png")
+        }
+    }
+
+    func testHeaderDomains() throws {
+        seedDomains(mode: .bypass)
+        _ = try renderSettings(page: .domains, to: "header-domains-filled.png")
+    }
+
+    func testHeaderRulesReadOnly() throws {
+        seedBypass()
+        seedCustomRules()
+        _ = try renderSettings(page: .rules, to: "header-rules-readonly.png")
+    }
+
+    func testHeaderSearchTyped() throws {
+        seedDomains(mode: .bypass)
+        SettingsView.searchForScreenshots = "wiki"
+        defer { SettingsView.searchForScreenshots = nil }
+        _ = try renderSettings(page: .domains, to: "header-search.png")
+    }
+
+    /// The smallest window: the subtitle gives way, the search narrows, nothing overlaps.
+    func testHeaderAtTheMinimumSize() throws {
+        seedDomains(mode: .bypass)
+        let min = SettingsWindowController.minimumContentSize
+        _ = try renderSettings(page: .domains, height: min.height, width: min.width, to: "header-minimum.png")
+    }
+
+    func testHeaderCustomMode() throws {
+        seedBypass()
+        seedCustomRules()
+        var config = rm.config
+        config.routingMode = .custom
+        rm.config = config
+        _ = try renderSettings(page: .rules, to: "header-custom-rules.png")
+    }
+
+    func testHeaderDropdown() throws {
+        seedBypass()
+        _ = try renderDropdown(to: "header-dropdown.png")
+    }
+
+    func testHeaderDropdownCustom() throws {
+        seedBypass()
+        seedCustomRules()
+        var config = rm.config
+        config.routingMode = .custom
+        rm.config = config
+        _ = try renderDropdown(to: "header-dropdown-custom.png")
     }
 
     /// The Settings window at its default size, at 2x.
@@ -1582,7 +1652,7 @@ final class DocScreenshotsTests: XCTestCase {
             .background(Self.dropdownGround))
         let window = DocScreenshotKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 600),
                                             styleMask: [.borderless], backing: .buffered, defer: false)
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = Self.renderAppearance
         window.contentView = hosting
         show(window)
         window.setContentSize(hosting.fittingSize)
@@ -1590,7 +1660,7 @@ final class DocScreenshotsTests: XCTestCase {
         return try write(hosting, cornerRadius: 15, outline: NSColor(white: 0.2, alpha: 1), to: name)
     }
 
-    private func renderSettings(page: SettingsView.SettingsTab, height: CGFloat? = nil,
+    private func renderSettings(page: SettingsView.SettingsTab, height: CGFloat? = nil, width: CGFloat? = nil,
                                 settingsUndo: SettingsUndo? = nil, to name: String) throws -> NSSize {
         SettingsPageRequest.shared.page = page
         let window = SettingsWindowController.makeWindow(settingsUndo: settingsUndo)
@@ -1598,22 +1668,28 @@ final class DocScreenshotsTests: XCTestCase {
         // or a taller window to show a whole page.
         var windowSize = SettingsWindowController.defaultContentSize
         if let height { windowSize.height = height }
+        if let width { windowSize.width = width }
         window.setContentSize(windowSize)
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = Self.renderAppearance
         show(window)
         window.makeFirstResponder(nil)
         let frame = try XCTUnwrap(window.contentView?.superview, "the window's frame view")
         settle(frame)
         let size = try write(frame, cornerRadius: 17, outline: NSColor(white: 1, alpha: 0.2), to: name)
-        try assertCloseButtonIsRed(name)
+        // Sampled where the close button really is, so a title bar change cannot move it off
+        // the sampled pixel and pass on the window's ground.
+        let close = try XCTUnwrap(window.standardWindowButton(.closeButton), "the window has a close button")
+        let centre = close.convert(NSPoint(x: close.bounds.midX, y: close.bounds.midY), to: nil)
+        try assertCloseButtonIsRed(name, at: NSPoint(x: centre.x, y: frame.bounds.height - centre.y))
         return size
     }
 
     /// The close button is red only in the key window of the active app: grey here means the
     /// render came out inactive, switches and accents included.
-    private func assertCloseButtonIsRed(_ name: String) throws {
+    private func assertCloseButtonIsRed(_ name: String, at point: NSPoint) throws {
         let rep = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: outputDir.appendingPathComponent(name))))
-        let close = try XCTUnwrap(rep.colorAt(x: 32, y: 32)?.usingColorSpace(.sRGB))
+        // The renders are 2x; the point is in the window's points, from its top left.
+        let close = try XCTUnwrap(rep.colorAt(x: Int(point.x * 2), y: Int(point.y * 2))?.usingColorSpace(.sRGB))
         XCTAssertGreaterThan(close.redComponent, 0.8, "\(name): close button \(close)")
         XCTAssertLessThan(close.greenComponent, 0.5, "\(name): close button \(close)")
     }
@@ -1712,9 +1788,36 @@ final class DocScreenshotsTests: XCTestCase {
         method_exchangeImplementations(original, replacement)
     }
 
+    // MARK: - Language
+
+    /// VPNB_DOC_LANGUAGE=fr (or es) renders in that language: `Bundle.main`, the test runner,
+    /// answers from the source tree's lproj folder while on.
+    nonisolated(unsafe) fileprivate static var languageBundle: Bundle?
+    private static var languageInstalled = false
+
+    private static func serveLanguage(_ on: Bool) {
+        guard let language = ProcessInfo.processInfo.environment["VPNB_DOC_LANGUAGE"], language != "en",
+              on != languageInstalled else { return }
+        languageInstalled = on
+        languageBundle = on ? Bundle(url: repoRoot.appendingPathComponent("Sources/VPNBypassCore/Resources/\(language).lproj")) : nil
+        // Text and String(localized:) reach the table through one of these three.
+        for (name, swap) in [("localizedStringForKey:value:table:", #selector(Bundle.docScreenshotLocalizedString(forKey:value:table:))),
+                             ("localizedStringForKey:value:table:localizations:",
+                              #selector(Bundle.docScreenshotLocalizedString(forKey:value:table:localizations:))),
+                             ("_localizedStringForKey:value:table:localizations:",
+                              #selector(Bundle.docScreenshotPrivateLocalizedString(forKey:value:table:localizations:)))] {
+            // A selector this macOS lacks (the public localizations: one arrived in 15.4) is skipped.
+            guard let original = class_getInstanceMethod(Bundle.self, NSSelectorFromString(name)),
+                  let replacement = class_getInstanceMethod(Bundle.self, swap) else { continue }
+            method_exchangeImplementations(original, replacement)
+        }
+    }
+
     nonisolated fileprivate static func assetImage(_ name: String) -> NSImage? {
         let assets = repoRoot.appendingPathComponent("assets")
-        guard let one = NSImageRep(contentsOf: assets.appendingPathComponent("\(name).png")) else { return nil }
+        guard let one = NSImageRep(contentsOf: assets.appendingPathComponent("\(name).png")) else {
+            return NSImage(contentsOf: assets.appendingPathComponent("\(name).icns"))
+        }
         let image = NSImage(size: one.size)
         image.addRepresentation(one)
         if let two = NSImageRep(contentsOf: assets.appendingPathComponent("\(name)@2x.png")) {
@@ -1730,6 +1833,31 @@ extension NSWindow {
 }
 
 extension Bundle {
+    /// Swapped with `localizedString(forKey:value:table:)` while a language other than English
+    /// renders; calling itself calls the original.
+    @objc fileprivate func docScreenshotLocalizedString(forKey key: String, value: String?, table: String?) -> String {
+        if self == Bundle.main, let language = DocScreenshotsTests.languageBundle {
+            return language.docScreenshotLocalizedString(forKey: key, value: value, table: table)
+        }
+        return docScreenshotLocalizedString(forKey: key, value: value, table: table)
+    }
+
+    @objc fileprivate func docScreenshotLocalizedString(forKey key: String, value: String?, table: String?,
+                                                        localizations: [String]?) -> String {
+        if self == Bundle.main, let language = DocScreenshotsTests.languageBundle {
+            return language.docScreenshotLocalizedString(forKey: key, value: value, table: table)
+        }
+        return docScreenshotLocalizedString(forKey: key, value: value, table: table, localizations: localizations)
+    }
+
+    @objc fileprivate func docScreenshotPrivateLocalizedString(forKey key: String, value: String?, table: String?,
+                                                               localizations: [String]?) -> String {
+        if self == Bundle.main, let language = DocScreenshotsTests.languageBundle {
+            return language.docScreenshotLocalizedString(forKey: key, value: value, table: table)
+        }
+        return docScreenshotPrivateLocalizedString(forKey: key, value: value, table: table, localizations: localizations)
+    }
+
     /// Swapped with `image(forResource:)` while the screenshots render; calling itself calls
     /// the original.
     @objc fileprivate func docScreenshotImage(forResource name: NSImage.Name) -> NSImage? {

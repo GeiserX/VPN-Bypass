@@ -184,13 +184,6 @@ struct DomainsTab: View {
         // One width for every number on the page, so the column lines up across both lists.
         let numberWidth = ListRow.numberColumnWidth(for: sections.flatMap { $0.rows.compactMap(\.number) })
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            Text(isInverse
-                ? "Only these domains will use the VPN. Everything else bypasses it."
-                : "Add domains that should bypass VPN and use your regular connection.")
-                .font(Theme.Font.body)
-                .foregroundColor(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
             ForEach(sections, id: \.list) { section in
                 if section.isReadOnly {
                     readOnlySection(section, numberWidth: numberWidth)
@@ -200,6 +193,9 @@ struct DomainsTab: View {
                 }
             }
         }
+        .pageSubtitle(isInverse
+            ? String(localized: "Only these domains will use the VPN. Everything else bypasses it.")
+            : String(localized: "Add domains that should bypass VPN and use your regular connection."))
         // The field is always open, so the page's add has no + of its own: ⌘N focuses it.
         .pageTitleActions([.add(String(localized: "Add"), showsButton: false) { isInputFocused = true }])
         // Editing the text the line talks about, or switching lists, makes it stale.

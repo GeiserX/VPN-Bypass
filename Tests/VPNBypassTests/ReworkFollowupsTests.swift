@@ -141,9 +141,9 @@ final class ReworkFollowupsTests: XCTestCase {
 
     // MARK: - 2. Title bar actions and ⌘N
 
-    /// The page's primary actions sit in the title bar row, level with the traffic lights,
-    /// not in the page under it.
-    func testPrimaryActionsSitInTheTitleBarRow() throws {
+    /// The page's primary actions sit in the page header band under the title bar, beside the
+    /// title, not in the title bar row and not in the page under the band.
+    func testPrimaryActionsSitInThePageHeader() throws {
         var config = rm.config
         config.routingMode = .custom
         config.schemaVersion = 2
@@ -160,7 +160,10 @@ final class ReworkFollowupsTests: XCTestCase {
                                             "\(page): no \(name): \(all.compactMap(label))")
                 let frame = try XCTUnwrap(frame(element))
                 let fromTop = window.frame.maxY - frame.midY
-                XCTAssertLessThan(fromTop, 40, "\(page): \(name) sits \(fromTop) pt under the window's top, in the page")
+                let titleBar = window.frame.height - window.contentLayoutRect.height
+                XCTAssertGreaterThan(fromTop, titleBar, "\(page): \(name) sits \(fromTop) pt under the window's top, in the title bar")
+                XCTAssertLessThan(fromTop, titleBar + PageHeader.height,
+                                  "\(page): \(name) sits \(fromTop) pt under the window's top, in the page")
             }
             window.orderOut(nil)
         }

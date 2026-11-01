@@ -26,6 +26,8 @@ struct SettingsView: View {
     @State private var logsFilter = LogFilter()
     /// Bumped when a filter is asked for from outside, so a Logs page already open takes it.
     @State private var logsFilterRequest = 0
+    /// The line the page on screen publishes under its title (`pageSubtitle(_:)`).
+    @State private var pageSubtitle: String?
 
     // MARK: - Page model
 
@@ -67,8 +69,8 @@ struct SettingsView: View {
     private var mode: RoutingMode { routeManager.config.routingMode }
 
     var body: some View {
-        // The title bar's height is the top safe area (28 pt, 32 on macOS 26). The sidebar and
-        // the page header both start in it, level with the traffic lights.
+        // The title bar's height is the top safe area (28 pt, 32 on macOS 26). The sidebar's app
+        // name and the page header both start under it, on one centre line.
         GeometryReader { proxy in
             let titleBar = max(proxy.safeAreaInsets.top, 28)
             HStack(spacing: 0) {
@@ -134,16 +136,16 @@ struct SettingsView: View {
         }
     }
 
-    /// The page: its name, the search field on a list page and the page's own primary actions
-    /// (`pageTitleActions`), all in the title bar row level with the traffic lights, then the
-    /// page itself in the one scroll view of the window.
+    /// The page: under the title bar (which holds only the traffic lights), a header band with
+    /// the page's name and purpose line, the search field on a list page and the page's own
+    /// primary actions (`pageTitleActions`), then the page itself in the one scroll view of the
+    /// window.
     private func detail(titleBar: CGFloat) -> some View {
         VStack(spacing: 0) {
             // The header's room. The header itself is drawn over it, from the actions the page
             // publishes from inside the scroll view.
             Color.clear
-                .frame(height: titleBar)
-                .padding(.bottom, Theme.Space.m)
+                .frame(height: titleBar + PageHeader.height)
 
             Rectangle()
                 .fill(Theme.separator)
@@ -170,20 +172,24 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlayPreferenceValue(PageTitleActionsKey.self) { actions in
-            VStack(spacing: 0) {
-                PageHeader(
-                    title: selectedTab.name,
-                    subtitle: nil,
-                    search: SettingsSidebar.isSearchable(selectedTab) ? $searchText : nil,
-                    actions: actions,
-                    // A page of another mode is read-only, its title bar actions too.
-                    actionsEnabled: !SettingsSidebar.isReadOnly(selectedTab, in: mode)
-                )
-                .padding(.horizontal, Theme.Space.page)
-                .frame(height: titleBar)
-                Spacer(minLength: 0)
-            }
+                VStack(spacing: 0) {
+                    // The title bar row stays clear: only the traffic lights, over the sidebar.
+                    Color.clear.frame(height: titleBar)
+                    PageHeader(
+                        title: selectedTab.name,
+                        subtitle: pageSubtitle,
+                        search: SettingsSidebar.isSearchable(selectedTab) ? $searchText : nil,
+                        searchPrompt: PageHeader.searchPrompt(for: selectedTab.name),
+                        actions: actions,
+                        // A page of another mode is read-only, its header actions too.
+                        actionsEnabled: !SettingsSidebar.isReadOnly(selectedTab, in: mode)
+                    )
+                    .padding(.horizontal, Theme.Space.page)
+                    .frame(height: PageHeader.height)
+                    Spacer(minLength: 0)
+                }
         }
+        .onPreferenceChange(PageSubtitleKey.self) { pageSubtitle = $0 }
         .background(Theme.bgPrimary)
     }
 
@@ -252,7 +258,22 @@ struct PageTitleActionsKey: PreferenceKey {
     }
 }
 
+/// The one line under the page title that says what the page is for, read by the shell's
+/// header. A page publishes it with `pageSubtitle(_:)`; nil leaves the title alone.
+struct PageSubtitleKey: PreferenceKey {
+    static let defaultValue: String? = nil
+
+    static func reduce(value: inout String?, nextValue: () -> String?) {
+        value = nextValue() ?? value
+    }
+}
+
 extension View {
+    /// Puts this line under the page title while the page shows.
+    func pageSubtitle(_ text: String?) -> some View {
+        preference(key: PageSubtitleKey.self, value: text)
+    }
+
     /// Puts these actions in the Settings window's title bar row while the page shows.
     func pageTitleActions(_ actions: [PageTitleAction]) -> some View {
         preference(key: PageTitleActionsKey.self, value: actions)
@@ -679,29 +700,44 @@ struct LogRow: View {
     }
 }
 
-/// A native NSSearchField, with its magnifier and clear button (the Lookups add panel's service search).
+/// A native NSSearchField, with its magnifier and clear button: the Settings page header's search
+/// and the Lookups add panel's service search.
 struct LogSearchField: NSViewRepresentable {
     @Binding var text: String
     let placeholder: String
+    /// A change moves the keyboard focus into the field (the page header search's ⌘F).
+    var focusRequest = 0
 
     func makeNSView(context: Context) -> NSSearchField {
         let field = NSSearchField()
         field.placeholderString = placeholder
+        field.setAccessibilityLabel(placeholder)
         field.sendsSearchStringImmediately = true
         field.delegate = context.coordinator
         field.stringValue = text
+        context.coordinator.focusRequest = focusRequest
         return field
     }
 
     func updateNSView(_ field: NSSearchField, context: Context) {
         context.coordinator.text = $text
         if field.stringValue != text { field.stringValue = text }
+        // The header keeps one field across pages, so the prompt follows the page.
+        if field.placeholderString != placeholder {
+            field.placeholderString = placeholder
+            field.setAccessibilityLabel(placeholder)
+        }
+        if context.coordinator.focusRequest != focusRequest {
+            context.coordinator.focusRequest = focusRequest
+            field.window?.makeFirstResponder(field)
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
 
     final class Coordinator: NSObject, NSSearchFieldDelegate {
         var text: Binding<String>
+        var focusRequest = 0
         init(text: Binding<String>) { self.text = text }
 
         func controlTextDidChange(_ note: Notification) {
