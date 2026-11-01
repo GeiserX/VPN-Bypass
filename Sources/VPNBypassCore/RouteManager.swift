@@ -5926,6 +5926,15 @@ final class RouteManager: ObservableObject {
     /// The follow-ups not finished yet.
     var pendingConfigFollowUps: Int { configFollowUps.count }
 
+    /// Cancels the apply a Resume left scheduled and waits for it, so it cannot apply into
+    /// the next test.
+    func cancelResumeApplyForTests() async {
+        let task = resumeApplyTask
+        resumeApplyTask = nil
+        task?.cancel()
+        await task?.value
+    }
+
     /// Cancels the follow-ups not started yet and waits for the rest to end, so none of them
     /// outlives a test.
     func cancelConfigFollowUps() async {
@@ -6818,12 +6827,20 @@ extension RouteManager {
     /// The network the Mac is on: the physical router's address, its MAC from the ARP table
     /// and the kind of interface it was learned on. Nil while any of them is missing.
     func detectNetworkIdentity() async -> NetworkIdentity? {
-        if let override = detectNetworkIdentityOverrideForTests { return await override() }
+        await readNetworkIdentity().network
+    }
+
+    /// `detectNetworkIdentity` with the interface that read went through. The caller keeps
+    /// the interface of its own read: `currentNetworkInterface` may already hold another
+    /// read's by the time it looks, since this suspends.
+    private func readNetworkIdentity() async -> (network: NetworkIdentity?, interface: String?) {
+        // A test sets the interface itself, with `currentNetworkInterface`.
+        if let override = detectNetworkIdentityOverrideForTests { return (await override(), currentNetworkInterface) }
         guard let gateway = localGateway,
               let result = await runProcessAsync("/usr/sbin/arp", arguments: ["-n", gateway], timeout: 3.0),
               let entry = NetworkIdentity.parseARP(result.output, gateway: gateway) else {
             currentNetworkInterface = nil
-            return nil
+            return (nil, nil)
         }
         currentNetworkInterface = entry.interface
         let kind = await withCheckedContinuation { continuation in
@@ -6831,18 +6848,20 @@ extension RouteManager {
                 continuation.resume(returning: NetworkIdentity.kind(ofInterface: entry.interface))
             }
         }
-        return NetworkIdentity(gateway: gateway, routerMAC: entry.mac, kind: kind)
+        return (NetworkIdentity(gateway: gateway, routerMAC: entry.mac, kind: kind), entry.interface)
     }
 
     /// Reads the network, and switches profile when it belongs to another one. Run on every
     /// status pass, after the gateway is detected.
     func updateNetworkProfile(justConnected: Bool = false) async {
         let previous = currentNetwork
-        let network = await detectNetworkIdentity()
+        let (network, interface) = await readNetworkIdentity()
         if currentNetwork != network { currentNetwork = network }
         if networkChangeNoted {
             networkChangeNoted = false
-            if let network, network == previous { await recheckNetworkWhenARPRefreshes(network) }
+            if let network, network == previous {
+                await recheckNetworkWhenARPRefreshes(network, interface: interface)
+            }
         }
         guard !isConfigLoadFailed, !isShuttingDown,
               let target = NetworkProfiles.switchTarget(for: network, in: config) else { return }
@@ -6859,12 +6878,11 @@ extension RouteManager {
     /// router's ARP entry, still cached, when both networks use one router address: read the
     /// network again as soon as the entry refreshes, so the right profile is in use before the
     /// settle-gated apply after a reconnect runs, instead of on a later 30 s pass.
-    private func recheckNetworkWhenARPRefreshes(_ network: NetworkIdentity) async {
+    private func recheckNetworkWhenARPRefreshes(_ network: NetworkIdentity, interface: String?) async {
         arpRecheckTask?.cancel()
         arpRecheckTask = nil
         // The row of the interface the network was read on: Wi-Fi and Ethernet to one router
         // give two rows with the same address and MAC, and the other one refreshes on its own.
-        let interface = currentNetworkInterface
         guard let snapshot = await readARPTable(gateway: network.gateway)
                 .first(where: { $0.mac == network.routerMAC && (interface == nil || $0.interface == interface) })
         else { return }

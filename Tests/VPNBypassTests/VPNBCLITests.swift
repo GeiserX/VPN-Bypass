@@ -222,9 +222,12 @@ final class VPNBCLITests: XCTestCase {
         let listener = try ListeningSocket(path: path)
         defer { listener.stop() }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        XCTAssertGreaterThanOrEqual(fd, 0)
-        defer { close(fd) }
-        XCTAssertTrue(listener.connect(fd))
+        defer { if fd >= 0 { close(fd) } }
+        // accept() below blocks with no client, so a failed connect must end the test here.
+        guard fd >= 0, listener.connect(fd) else {
+            XCTFail("the client socket could not be created or connected")
+            return
+        }
         listener.acceptAndClose()
         usleep(50_000)
         var on: Int32 = 1

@@ -443,6 +443,8 @@ final class PauseLifecycleTests: XCTestCase {
             // Cancels the settle task a test left scheduled.
             _ = await rm.pause(for: .untilResume)
         }
+        // A Resume schedules an apply 300 ms out; it must not run after the fakes are gone.
+        await rm.cancelResumeApplyForTests()
         rm.endPause(reason: "test over", apply: false)
         FakeKernel.detach(from: rm)
         rm.detectVPNInterfaceOverrideForTests = nil
