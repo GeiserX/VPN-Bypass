@@ -364,6 +364,23 @@ final class NetworkProfileSwitchTests: XCTestCase {
         XCTAssertFalse(kernel.installed.contains("198.51.100.0/24"), "nothing is written before the tunnel settles")
     }
 
+    /// The settled apply after that connect is an auto apply, whose orphan grace keeps routes
+    /// that only rotated out of DNS for 30 minutes. Home's ranges did not rotate out, the
+    /// profile took them off: they go at once, or home's sites skip the VPN at the office.
+    func testTheSettledApplyAfterASwitchKeepsNothingFromTheOldProfile() async {
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.lastUpdate = nil
+        onNetwork = office
+        rm.detectVPNInterfaceOverrideForTests = { (true, "utun4", .wireGuard) }
+        await rm.checkVPNStatus()
+        XCTAssertNotNil(rm.pendingReconnectApply)
+        // What the settle task runs once the tunnel has settled.
+        await rm.applyAllRoutes(orphanGrace: true)
+        XCTAssertEqual(kernel.installed, ["198.51.100.0/24"], "home's range is out, not kept by the grace")
+        XCTAssertEqual(rm.activeRoutes.map(\.destination), ["198.51.100.0/24"])
+    }
+
     /// Paused in the same mode, the switch changes the lists and Resume applies them.
     func testWhilePausedTheSwitchWritesNothing() async {
         await rm.pause(for: .untilResume)

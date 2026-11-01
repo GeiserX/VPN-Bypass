@@ -303,6 +303,10 @@ final class RouteManager: ObservableObject {
     /// First-seen timestamps for routes that dropped out of the desired set during an
     /// auto-triggered apply (DNS rotation, mostly). See `orphanGraceDecision`.
     private var orphanFirstSeen: [String: Date] = [:]
+    /// Set by a profile switch (`NetworkProfiles.swift`) and cleared by the next commit: the
+    /// old profile's routes did not rotate out of DNS, the switch took them off the list, so
+    /// that commit deletes them at once instead of keeping them under orphan grace.
+    var listsSwitchedSinceCommit = false
     
     
     /// Set once in init from the SAME directory as `configURL`, so it follows the under-test
@@ -3416,7 +3420,9 @@ final class RouteManager: ObservableObject {
         // stayed gone for the TTL removes that churn; graced routes keep working meanwhile
         // (they egress the stable local gateway). User-initiated applies pass
         // orphanGrace=false, so an explicit removal still takes effect immediately.
-        if orphanGrace && config.routingMode == .bypass {
+        let graceAllowed = !listsSwitchedSinceCommit
+        listsSwitchedSinceCommit = false
+        if orphanGrace && graceAllowed && config.routingMode == .bypass {
             let outcome = Self.orphanGraceDecision(orphaned: stalePartition.orphaned,
                                                    applied: newDestinations,
                                                    firstSeen: orphanFirstSeen,
@@ -6764,7 +6770,10 @@ extension RouteManager {
         config = next
         let changed = ProfileSettings(capturing: config) != before
         // A warm reconnect re-applies only when the config changed after the last apply.
-        if changed { configChangedAt = Date() }
+        if changed {
+            configChangedAt = Date()
+            listsSwitchedSinceCommit = true
+        }
         saveConfig()   // a mode change ends a pause here; the apply below runs instead
         guard changed else { return }
         log(.info, "Network profile: \(fromName) → \(profileName(config.activeProfileId)), mode \(config.routingMode.displayName)")
