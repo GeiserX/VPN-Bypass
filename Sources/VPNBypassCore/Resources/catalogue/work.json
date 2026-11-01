@@ -21,9 +21,8 @@
         "discordapp.com",
         "discord.media",
         "cdn.discordapp.com",
-        "discordapp.net",
+        "*.discordapp.net",
         "gateway.discord.gg",
-        "router.discordapp.net",
         "media.discordapp.net",
         "images-ext-1.discordapp.net",
         "images-ext-2.discordapp.net"

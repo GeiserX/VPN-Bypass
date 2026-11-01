@@ -55,6 +55,6 @@ A country's pack is every service with its `region`: its public services in `gov
 
 `swift test --filter ServiceCatalogueTests` reads every file with the app's own validators and fails on bad JSON, an unknown field or category, a repeated id or name, an invalid domain, wildcard, range or region, and a service with nothing in it. CI runs it in the `test` job.
 
-`scripts/check-catalogue-resolves.py` asks public DNS about every domain: a plain name must have an IPv4 address, a wildcard's suffix must exist. The `Catalogue domains resolve` workflow runs it every Monday and on demand, never on pull requests, since a site's DNS can change under a pull request that did not touch it. A red run lists the names to look at.
+`scripts/check-catalogue-resolves.py` asks public DNS about every domain: a plain name must have an IPv4 address, a wildcard's suffix must exist. The `Catalogue domains resolve` workflow runs it every Monday and on demand, and on a pull request only when it changes `scripts/check-catalogue-resolves.py` or `.github/workflows/catalogue-resolves.yml`, since a site's DNS can change under a pull request that did not touch it. A red run lists the names to look at.
 
 A merged change ships in the next release: anything under `Sources/` starts one.
