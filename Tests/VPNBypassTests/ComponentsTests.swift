@@ -20,18 +20,46 @@ final class ComponentsTests: XCTestCase {
 
     // MARK: - Tokens
 
+    /// The roles keep their dark values, and the greys and surfaces follow the window into
+    /// light mode instead of staying dark on a light window.
     func testColourRolesKeepTodaysValues() {
-        XCTAssertEqual(Theme.text, Color.white)
+        XCTAssertEqual(hex(Theme.text, .darkAqua), "FFFFFF")
         XCTAssertEqual(Theme.live, Color(hex: "10B981"))
         XCTAssertEqual(Theme.attention, Color(hex: "F59E0B"))
         XCTAssertEqual(Theme.failure, Color(hex: "EF4444"))
         XCTAssertEqual(Theme.accent, Color(hex: "2563EB"))
         XCTAssertEqual(Theme.accentText, Color(hex: "38BDF8"))
-        XCTAssertEqual(Theme.textSecondary, Color(hex: "9CA3AF"))
-        XCTAssertEqual(Theme.textTertiary, Color(hex: "6B7280"))
+        XCTAssertEqual(hex(Theme.textSecondary, .darkAqua), "9CA3AF")
+        XCTAssertEqual(hex(Theme.textTertiary, .darkAqua), "6B7280")
+        XCTAssertEqual(hex(Theme.bgPrimary, .darkAqua), "0F0F14")
         let roles = [Theme.text, Theme.textSecondary, Theme.textTertiary, Theme.live, Theme.attention,
                      Theme.failure, Theme.accent, Theme.accentText]
-        XCTAssertEqual(Set(roles.map { "\($0)" }).count, roles.count, "two roles share a colour")
+        XCTAssertEqual(Set(roles.map { hex($0, .darkAqua) }).count, roles.count, "two roles share a colour")
+    }
+
+    func testTheGreysAndSurfacesFollowLightMode() {
+        XCTAssertEqual(hex(Theme.text, .aqua), "1D1D1F")
+        XCTAssertEqual(hex(Theme.textSecondary, .aqua), "6B7280")
+        XCTAssertEqual(hex(Theme.bgPrimary, .aqua), "F5F5F7")
+        XCTAssertEqual(hex(Theme.bgSecondary, .aqua), "E9E9EE")
+        // Positive control: the dark values are different, so the check can fail.
+        for (name, color) in [("text", Theme.text), ("textSecondary", Theme.textSecondary), ("bgPrimary", Theme.bgPrimary),
+                              ("bgSecondary", Theme.bgSecondary), ("bgCard", Theme.bgCard), ("bgInput", Theme.bgInput),
+                              ("border", Theme.border), ("separator", Theme.separator), ("bgRaised", Theme.bgRaised)] {
+            XCTAssertNotEqual(hex(color, .aqua, alpha: true), hex(color, .darkAqua, alpha: true), "\(name) stays the same in light mode")
+        }
+    }
+
+    /// The colour as drawn under `appearance`, as RRGGBB (and AA with `alpha`).
+    private func hex(_ color: Color, _ appearance: NSAppearance.Name, alpha: Bool = false) -> String {
+        var out = ""
+        NSAppearance(named: appearance)!.performAsCurrentDrawingAppearance {
+            let c = NSColor(color).usingColorSpace(.sRGB)!
+            out = String(format: "%02X%02X%02X", Int(round(c.redComponent * 255)), Int(round(c.greenComponent * 255)),
+                         Int(round(c.blueComponent * 255)))
+            if alpha { out += String(format: "%02X", Int(round(c.alphaComponent * 255))) }
+        }
+        return out
     }
 
     /// The two brand roles are the brand colours, so the mark and the controls match.
@@ -42,6 +70,7 @@ final class ComponentsTests: XCTestCase {
 
     func testTypeScale() {
         XCTAssertEqual(Theme.Font.title, .system(size: 17, weight: .semibold))
+        XCTAssertEqual(Theme.Font.pageTitle, .system(size: 20, weight: .semibold))
         XCTAssertEqual(Theme.Font.body, .system(size: 13))
         XCTAssertEqual(Theme.Font.strong, .system(size: 13, weight: .medium))
         XCTAssertEqual(Theme.Font.section, .system(size: 11, weight: .semibold))

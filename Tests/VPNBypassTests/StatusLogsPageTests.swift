@@ -231,8 +231,10 @@ final class StatusLogsPageViewTests: XCTestCase {
         XCTAssertTrue(texts.contains("Copy"))
         XCTAssertTrue(texts.contains("Clear"))
         let window = try XCTUnwrap(window)
+        // One field: the page header's, named for the page. The page draws none of its own.
         let searchFields = all(in: window.contentView!) { $0 is NSSearchField }
-        XCTAssertTrue(searchFields.isEmpty, "the page still draws its own search field")
+        XCTAssertEqual(searchFields.count, 1, "the page still draws its own search field")
+        XCTAssertEqual((searchFields.first as? NSSearchField)?.placeholderString, "Search Logs")
     }
 
     // MARK: - Helpers

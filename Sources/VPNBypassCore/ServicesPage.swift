@@ -253,13 +253,6 @@ struct ServicesTab: View {
                                            pinned: pinned ?? ServiceSections.pin(routeManager.config.services),
                                            search: "").rows.isEmpty
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            HStack(alignment: .center, spacing: Theme.Space.m) {
-                Text(ServicesPage.purpose())
-                    .font(Theme.Font.detail)
-                    .foregroundColor(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 GroupSection(ServicesPage.listTitle(), trailing: {
                     listTrailing(numberWidth: numberWidth, hasServices: hasServices)
@@ -317,6 +310,7 @@ struct ServicesTab: View {
                 pinned = ServiceSections.pin(routeManager.config.services)
             }
         }
+        .pageSubtitle(ServicesPage.purpose())
         .pageTitleActions([.add(String(localized: "Create Custom Service")) {
             editingService = nil
             showingCustomServiceEditor = true

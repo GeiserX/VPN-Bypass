@@ -177,8 +177,9 @@ final class DropdownStatusBlockTests: XCTestCase {
         XCTAssertEqual(block.components(separatedBy: "Text(status.").count - 1, 3, "three lines")
 
         let mode = try ReworkSource.body(of: "struct DropdownModeRow: View", in: "MenuBarViews.swift")
-        XCTAssertTrue(mode.contains(".pickerStyle(.menu)"), "the mode is a popup")
-        XCTAssertFalse(mode.contains(".segmented"))
+        XCTAssertTrue(mode.contains("ModeControl(current: routeManager.config.routingMode, layout: .track)"),
+                      "the mode is the shared mode control, as a track")
+        XCTAssertFalse(mode.contains(".pickerStyle(.menu)"), "the mode is still a popup")
         XCTAssertFalse(mode.contains("ViewThatFits"), "no stacked fallback for es and fr")
 
         let status = try ReworkSource.read("StatusTab.swift")

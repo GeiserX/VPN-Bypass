@@ -1,11 +1,11 @@
 // DropdownModePickerTests.swift
-// The dropdown's Mode control (proposal 12): one popup with Bypass, VPN Only and
+// The dropdown's Mode control (proposal 12): one track with Bypass, VPN Only and
 // Custom in every mode, behind a confirmation.
 //
 // The problems it locks down: the old control showed only Bypass and VPN Only, and in Custom
 // mode a capsule plus a "Switch to Bypass" link, so Custom could not be picked from the
 // dropdown and VPN Only was out of reach from Custom. A pick must not switch anything until the
-// user confirms, and the popup must not change on Cancel. (A segmented control until rework step 3.)
+// user confirms, and the track must not change on Cancel. (A segmented control until rework step 3.)
 
 import AppKit
 import SwiftUI
@@ -116,8 +116,8 @@ final class DropdownModePickerTests: XCTestCase {
     }
 }
 
-/// The real DropdownModeRow in a window, and the real question: a pick in the popup opens it
-/// and switches nothing while it is open; Cancel leaves the popup where it was; Switch runs
+/// The real DropdownModeRow in a window, and the real question: a pick on the mode track opens
+/// it and switches nothing while it is open; Cancel leaves the track where it was; Switch runs
 /// RouteManager.setRoutingMode, the call the Settings switch makes, so entering Custom migrates
 /// the lists into rules. The question runs app-modal, so a timer in the modal run loop reads it
 /// and presses one of its buttons. The VPN is never connected here, so no route is touched, and
@@ -177,10 +177,27 @@ final class DropdownModeRowViewTests: XCTestCase {
         ((view as? T).map { [$0] } ?? []) + view.subviews.flatMap { all(type, in: $0) }
     }
 
-    private func popup(in view: NSView) throws -> NSPopUpButton {
-        let found = Self.all(NSPopUpButton.self, in: view)
-        XCTAssertEqual(found.count, 1, "one popup")
-        return try XCTUnwrap(found.first)
+    /// The track's three modes as VoiceOver finds them, in their order on the track.
+    private func modes(in view: NSView) throws -> [NSObject] {
+        let all = AccessibilityTree.elements(under: view) { settle(view) }
+        return try DropdownModePicker.modes.map { mode in
+            try XCTUnwrap(all.first { AccessibilityTree.label($0) == DropdownModePicker.label(mode) && AccessibilityTree.hint($0) != nil },
+                          "no \(mode) on the track: \(all.compactMap(AccessibilityTree.label))")
+        }
+    }
+
+    /// The selected index read as it is, with no run loop turn: inside the open question.
+    private static func selectedIndexNow(in view: NSView) -> Int? {
+        let all = AccessibilityTree.elements(under: view) {}
+        let modes = DropdownModePicker.modes.compactMap { mode in
+            all.first { AccessibilityTree.label($0) == DropdownModePicker.label(mode) && AccessibilityTree.hint($0) != nil }
+        }
+        return modes.count == 3 ? modes.firstIndex(where: AccessibilityTree.isSelected) : nil
+    }
+
+    /// The mode the track shows as selected, by its index.
+    private func selectedIndex(in view: NSView) throws -> Int? {
+        try modes(in: view).firstIndex(where: AccessibilityTree.isSelected)
     }
 
     /// What the open question showed, read from inside its modal run loop.
@@ -194,11 +211,10 @@ final class DropdownModeRowViewTests: XCTestCase {
         var mainQueueRanWhileOpen = false, mainActorRanWhileOpen = false
     }
 
-    /// Picks an item the way AppKit delivers it (the popup selects the item, then fires its
-    /// action), then answers the question with `answer`, a button title. Returns nil when no
-    /// question opened.
+    /// Presses a mode on the track the way VoiceOver does (a click runs the same action), then
+    /// answers the question with `answer`, a button title. Returns nil when no question opened.
     private func pick(item: Int, answer: String, in view: NSView) throws -> Question? {
-        let control = try popup(in: view)
+        let control = try modes(in: view)
         final class Seen: @unchecked Sendable { var question: Question?; var queueRan = false; var taskRan = false }
         let seen = Seen()
         let all = { (type: NSView.Type, root: NSView) in Self.all(NSView.self, in: root).filter { $0.isKind(of: type) } }
@@ -216,7 +232,7 @@ final class DropdownModeRowViewTests: XCTestCase {
                     q.iconHidden = icon.isHiddenOrHasHiddenAncestor
                 }
                 q.isSheet = panel.sheetParent != nil
-                q.itemWhileOpen = (all(NSPopUpButton.self, view).first as? NSPopUpButton)?.indexOfSelectedItem
+                q.itemWhileOpen = Self.selectedIndexNow(in: view)
                 q.mainQueueRanWhileOpen = seen.queueRan
                 q.mainActorRanWhileOpen = seen.taskRan
                 seen.question = q
@@ -232,10 +248,8 @@ final class DropdownModeRowViewTests: XCTestCase {
         RunLoop.main.add(guardTimer, forMode: .modalPanel)
         defer { reader.invalidate(); guardTimer.invalidate() }
 
-        // As a click in the open menu delivers it: the item's own action runs.
-        let menu = try XCTUnwrap(control.menu, "the popup has a menu")
-        XCTAssertLessThan(item, menu.numberOfItems, "the popup lists the item")
-        menu.performActionForItem(at: item)
+        XCTAssertLessThan(item, control.count, "the track lists the mode")
+        AccessibilityTree.press(control[item])
         // Queued behind whatever the click queued, the way RouteManager's and the control
         // socket's work reaches the main thread.
         DispatchQueue.main.async { seen.queueRan = true }
@@ -249,10 +263,12 @@ final class DropdownModeRowViewTests: XCTestCase {
             var cfg = rm.config
             cfg.routingMode = mode
             rm.config = cfg
-            let control = try popup(in: host())
-            XCTAssertEqual(control.numberOfItems, 3, "\(mode)")
-            XCTAssertEqual(control.itemTitles, ["Bypass", "VPN Only", "Custom"], "\(mode)")
-            XCTAssertEqual(control.indexOfSelectedItem, DropdownModePicker.modes.firstIndex(of: mode), "\(mode)")
+            let view = host()
+            let control = try modes(in: view)
+            XCTAssertEqual(control.compactMap(AccessibilityTree.label), ["Bypass", "VPN Only", "Custom"], "\(mode)")
+            XCTAssertEqual(control.compactMap(AccessibilityTree.hint), DropdownModePicker.modes.map { ModeControl.meaning($0) }, "\(mode)")
+            XCTAssertEqual(try selectedIndex(in: view), DropdownModePicker.modes.firstIndex(of: mode), "\(mode)")
+            XCTAssertEqual(control.filter(AccessibilityTree.isSelected).count, 1, "\(mode): one mode selected")
             window?.orderOut(nil)
         }
     }
@@ -263,9 +279,9 @@ final class DropdownModeRowViewTests: XCTestCase {
         XCTAssertEqual(q.title, "Switch routing mode?")
         XCTAssertEqual(q.message, "Only the sites you list will use your VPN; everything else goes direct.")
         XCTAssertEqual(q.buttons, ["Switch to VPN Only", "Cancel"])
-        XCTAssertEqual(q.itemWhileOpen, 0, "the popup waits for the answer")
+        XCTAssertEqual(q.itemWhileOpen, 0, "the track waits for the answer")
         XCTAssertEqual(rm.config.routingMode, .bypass, "Cancel switches nothing")
-        XCTAssertEqual(try popup(in: view).indexOfSelectedItem, 0, "Cancel leaves Bypass selected")
+        XCTAssertEqual(try selectedIndex(in: view), 0, "Cancel leaves Bypass selected")
     }
 
     /// Entering Custom from the dropdown runs the migration the Settings switch runs.
@@ -276,7 +292,7 @@ final class DropdownModeRowViewTests: XCTestCase {
         XCTAssertEqual(rm.config.routingMode, .custom)
         XCTAssertEqual(rm.config.schemaVersion, 2, "the Custom migration ran")
         XCTAssertTrue(rm.config.rules.contains { $0.pattern == "a.com" }, "the Bypass domain became a rule")
-        XCTAssertEqual(try popup(in: view).indexOfSelectedItem, 2)
+        XCTAssertEqual(try selectedIndex(in: view), 2)
     }
 
     /// The question shows the app's own icon: the image named NSApplicationIcon, which in the

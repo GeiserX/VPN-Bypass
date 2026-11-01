@@ -2,13 +2,14 @@
 // The app's design tokens: colour roles, type, spacing and radii (rework section 2,
 // docs/design/APP-REWORK-PROPOSALS.md). The shared views built on them are in Components.swift.
 
+import AppKit
 import SwiftUI
 
 enum Theme {
     // MARK: - Colour roles: each colour has one job
 
     /// Names, values, headlines.
-    static let text = Color.white
+    static let text = adaptive(light: Color(hex: "1D1D1F"), dark: .white)
     /// Something is routed right now: the status chip's dot, a passed path check. Nothing else.
     static let live = Color(hex: "10B981")
     /// The user needs to look: the ▲ glyph and its line.
@@ -25,6 +26,8 @@ enum Theme {
     enum Font {
         /// Page and sheet titles: 17 semibold.
         static let title = SwiftUI.Font.system(size: 17, weight: .semibold)
+        /// The page title in the Settings window's header band: 20 semibold.
+        static let pageTitle = SwiftUI.Font.system(size: 20, weight: .semibold)
         /// Names and sentences: 13 regular.
         static let body = SwiftUI.Font.system(size: 13)
         /// Headlines: 13 medium.
@@ -57,24 +60,33 @@ enum Theme {
         static let sheet: CGFloat = 14
     }
 
-    // MARK: - Greys and surfaces (on dark backgrounds ~#0F0F14)
+    // MARK: - Greys and surfaces (dark ground ~#0F0F14, light ground ~#F5F5F7)
 
-    /// Every secondary word, count, label and placeholder: ~7.2:1 contrast.
-    static let textSecondary = Color(hex: "9CA3AF")
-    /// Disabled text and decoration only: ~3.8:1, too faint for words a user must read.
-    static let textTertiary = Color(hex: "6B7280")
+    /// A colour that follows the appearance it is drawn in, light or dark.
+    static func adaptive(light: Color, dark: Color) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(dark) : NSColor(light)
+        })
+    }
 
-    static let bgPrimary = Color(hex: "0F0F14")
-    static let bgSecondary = Color(hex: "1A1B26")
-    static let bgCard = Color.white.opacity(0.05)
-    static let bgInput = Color.white.opacity(0.08)
-    static let bgDisabled = Color.white.opacity(0.10)
-    static let bgHover = Color.white.opacity(0.08)
+    /// Every secondary word, count, label and placeholder: ~7.2:1 contrast on dark, ~4.8:1 on light.
+    static let textSecondary = adaptive(light: Color(hex: "6B7280"), dark: Color(hex: "9CA3AF"))
+    /// Disabled text and decoration only: too faint for words a user must read.
+    static let textTertiary = adaptive(light: Color(hex: "9CA3AF"), dark: Color(hex: "6B7280"))
+
+    static let bgPrimary = adaptive(light: Color(hex: "F5F5F7"), dark: Color(hex: "0F0F14"))
+    static let bgSecondary = adaptive(light: Color(hex: "E9E9EE"), dark: Color(hex: "1A1B26"))
+    static let bgCard = adaptive(light: .white, dark: .white.opacity(0.05))
+    static let bgInput = adaptive(light: .black.opacity(0.05), dark: .white.opacity(0.08))
+    static let bgDisabled = adaptive(light: .black.opacity(0.06), dark: .white.opacity(0.10))
+    static let bgHover = adaptive(light: .black.opacity(0.05), dark: .white.opacity(0.08))
+    /// The raised segment on a track: the mode in use.
+    static let bgRaised = adaptive(light: .white, dark: .white.opacity(0.16))
     /// Lists and log areas.
-    static let bgElevated = Color.white.opacity(0.04)
+    static let bgElevated = adaptive(light: .white.opacity(0.7), dark: .white.opacity(0.04))
 
-    static let border = Color.white.opacity(0.10)
-    static let separator = Color.white.opacity(0.08)
+    static let border = adaptive(light: .black.opacity(0.10), dark: .white.opacity(0.10))
+    static let separator = adaptive(light: .black.opacity(0.08), dark: .white.opacity(0.08))
 
     // MARK: - Brand Identity
 
