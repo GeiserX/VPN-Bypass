@@ -200,7 +200,7 @@ struct BrandedAppName: View {
             // which French translates, so a looked-up Text read "VPN Contournement".
             Text(verbatim: "VPN")
                 .font(.system(size: fontSize, weight: .heavy, design: .rounded))
-                .foregroundColor(Theme.textPrimary)
+                .foregroundColor(Theme.text)
                 .padding(.trailing, fontSize * 0.16)
 
             Text(verbatim: "Bypass")
@@ -603,7 +603,7 @@ struct MenuContent: View {
                 Spacer()
                 Text("\(routesWithRules.count)")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(Theme.success)
+                    .foregroundColor(Theme.live)
             }
 
             if routesWithRules.isEmpty {
@@ -894,7 +894,7 @@ struct BlockedSitesLine: View {
             let count = routeManager.blockedSiteCount
             HStack(spacing: 8) {
                 Image(systemName: "hand.raised.fill")
-                    .foregroundColor(Theme.warning)
+                    .foregroundColor(Theme.attention)
                     .accessibilityHidden(true)
                 Text(routeManager.isVPNConnected
                      ? String(localized: "Waiting for VPN routes: listed addresses blocked for \(count) site(s)")
@@ -913,7 +913,7 @@ struct BlockedSitesLine: View {
                 }
             }
             .padding(10)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.warning.opacity(0.12)))
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.attention.opacity(0.12)))
         }
     }
 }
@@ -1748,9 +1748,9 @@ struct DropdownStatus: Equatable {
 
         var color: Color {
             switch self {
-            case .ok: return Theme.success
-            case .warn: return Theme.warning
-            case .bad: return Theme.error
+            case .ok: return Theme.live
+            case .warn: return Theme.attention
+            case .bad: return Theme.failure
             case .idle: return Theme.textSecondary
             }
         }
@@ -2408,7 +2408,7 @@ struct FirstRunSetupView: View {
                 .padding(.horizontal, 10)
             }
             .overlay(RoundedRectangle(cornerRadius: 8)
-                .stroke(feedback?.isError == true ? Theme.error.opacity(0.8) : Color.clear, lineWidth: 1))
+                .stroke(feedback?.isError == true ? Theme.failure.opacity(0.8) : Color.clear, lineWidth: 1))
             .padding(.top, 8)
             // Editing the text the line talks about makes it stale.
             .onChange(of: site) { text in
@@ -2471,7 +2471,7 @@ struct FirstRunSetupView: View {
                 }
             ))
             .toggleStyle(.switch)
-            .tint(Theme.success)
+            .tint(Theme.live)
             .labelsHidden()
             .controlSize(.small)
             .disabled(routeManager.isApplyingRoutes || switchLocked(service))
@@ -2680,13 +2680,13 @@ struct RouteCheckCard: View {
             if !failures.isEmpty {
                 Text(RouteCheck.notReachable(failures.count))
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(Theme.error)
+                    .foregroundColor(Theme.failure)
                     .padding(.top, 2)
                 ForEach(failures.prefix(RouteCheck.visibleFailures)) { result in
                     HStack(spacing: 6) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 10))
-                            .foregroundColor(Theme.error)
+                            .foregroundColor(Theme.failure)
                         Text(result.destination)
                             .font(.system(size: 10.5, design: .monospaced))
                             .lineLimit(1)
@@ -2701,7 +2701,7 @@ struct RouteCheckCard: View {
                         if let error = result.error {
                             Text(error)
                                 .font(.system(size: 10.5))
-                                .foregroundColor(Theme.error)
+                                .foregroundColor(Theme.failure)
                                 .lineLimit(1)
                         }
                     }
@@ -2716,7 +2716,7 @@ struct RouteCheckCard: View {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 10))
-                            .foregroundColor(Theme.success)
+                            .foregroundColor(Theme.live)
                         Text(RouteCheck.reachable(reachable.count))
                             .font(.system(size: 11))
                             .foregroundColor(Theme.textSecondary)
@@ -2751,13 +2751,13 @@ struct RouteCheckCard: View {
     private var scopeText: Text {
         let scope = RouteCheck.scope(checked: run.results.count, singleAddresses: run.singleAddresses,
                                      routeCount: run.routeCount)
-        var text = Text(scope.main).foregroundColor(Theme.textPrimary)
+        var text = Text(scope.main).foregroundColor(Theme.text)
         if let qualifier = scope.qualifier {
             text = text + Text(" " + qualifier).foregroundColor(Theme.textSecondary)
         }
-        text = text + Text(".").foregroundColor(Theme.textPrimary)
+        text = text + Text(".").foregroundColor(Theme.text)
         if !run.results.isEmpty && run.failures.isEmpty {
-            text = text + Text(" " + RouteCheck.allReachable).foregroundColor(Theme.textPrimary)
+            text = text + Text(" " + RouteCheck.allReachable).foregroundColor(Theme.text)
         }
         return text
     }

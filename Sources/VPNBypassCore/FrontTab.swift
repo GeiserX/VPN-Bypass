@@ -342,7 +342,7 @@ struct FrontTabRow: View {
             HStack(spacing: 0) {
                 Text(verbatim: host)
                     .font(Theme.Font.body)
-                    .foregroundColor(Theme.textPrimary)
+                    .foregroundColor(Theme.text)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .layoutPriority(1)

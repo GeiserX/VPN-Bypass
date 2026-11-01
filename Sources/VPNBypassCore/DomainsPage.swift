@@ -310,7 +310,7 @@ struct DomainsTab: View {
         return HStack(spacing: Theme.Space.s) {
             Image(systemName: "plus")
                 .font(.system(size: 13))
-                .foregroundColor(feedback?.isError == true ? Theme.error : Theme.textSecondary)
+                .foregroundColor(feedback?.isError == true ? Theme.failure : Theme.textSecondary)
                 .frame(width: ListRow.glyphColumn)
                 .accessibilityHidden(true)
             TextField(prompt, text: $newDomain)

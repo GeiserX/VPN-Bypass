@@ -29,8 +29,8 @@ extension Route {
         case .direct:       return Theme.textSecondary
         case .proxyHTTP:    return Theme.blue
         case .proxySOCKS5:  return Theme.purple
-        case .tailscaleExit: return Theme.success
-        case .vpnDefault:   return Theme.warning
+        case .tailscaleExit: return Theme.live
+        case .vpnDefault:   return Theme.attention
         }
     }
 }

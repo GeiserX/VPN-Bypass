@@ -307,7 +307,7 @@ struct AddDomainFeedbackLine: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .font(.system(size: 12))
-        .foregroundColor(feedback.isError ? Theme.error : Theme.success)
+        .foregroundColor(feedback.isError ? Theme.failure : Theme.live)
         .padding(.horizontal, 4)
         .accessibilityElement(children: .combine)
     }
