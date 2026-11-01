@@ -143,6 +143,19 @@ final class RouteManager: ObservableObject {
         }
     }
 
+    /// The lookup record after a pass that looked up every enabled entry of the mode (a full
+    /// apply or a DNS refresh): the names that got no answer, by entry. It replaces the last one.
+    nonisolated static func lookupRecord(unresolved names: [(domain: String, source: String)]) -> [String: Set<String>] {
+        Dictionary(grouping: names, by: \.source).mapValues { Set($0.map(\.domain)) }
+    }
+
+    /// `lookupRecord` after a DNS refresh: each looked-up name with no address in `answers`
+    /// (no answer, or an empty one) did not resolve.
+    nonisolated static func lookupRecord(looked: [(domain: String, source: String)],
+                                         answers: [String: [String]]) -> [String: Set<String>] {
+        lookupRecord(unresolved: looked.filter { answers[$0.domain]?.isEmpty ?? true })
+    }
+
     /// Every DNS failure known for the entries now listed: the names the last lookups got no
     /// answer for, then the listed domains a refresh found no address for (StaleEntries), each
     /// entry once. A problem row's reason reads these before saying no address is routed.
@@ -151,7 +164,7 @@ final class RouteManager: ObservableObject {
             lookups[source, default: []].sorted().map { (domain: $0, source: source) }
         }
         let known = Set(names.map(\.source))
-        for entry in domains where entry.resolveFailures != nil && !known.contains(entry.domain) {
+        for entry in domains where entry.enabled && entry.resolveFailures != nil && !known.contains(entry.domain) {
             names.append((domain: entry.domain, source: entry.domain))
         }
         return RouteFailure.unresolved(names)
@@ -2583,7 +2596,7 @@ final class RouteManager: ObservableObject {
         // Save updated DNS cache to disk
         saveDNSCache()
         // Every enabled entry was looked up: what did not answer replaces the last record.
-        unresolvedLookups = Dictionary(grouping: unresolvedNames, by: \.source).mapValues { Set($0.map(\.domain)) }
+        unresolvedLookups = Self.lookupRecord(unresolved: unresolvedNames)
 
         // Service IP ranges (bypass mode only — services are not used in VPN Only mode)
         var serviceRanges: [(source: String, range: String)] = []
@@ -3702,6 +3715,13 @@ final class RouteManager: ObservableObject {
             return results
         }
         
+        // Every enabled entry was looked up again, as on a full apply.
+        if routeEpoch == epoch {
+            unresolvedLookups = Self.lookupRecord(looked: domainsToResolve,
+                                                  answers: Dictionary(results.compactMap { r in r.2.map { (r.0, $0) } },
+                                                                      uniquingKeysWith: { a, b in a.isEmpty ? b : a }))
+        }
+
         // Update per-domain caches first
         for (domain, _, ips) in results {
             guard let ips = ips, !ips.isEmpty else { continue }
@@ -4129,6 +4149,8 @@ final class RouteManager: ObservableObject {
             if let ips = ips { resolvedDomainIPs[domain] = ips }
         }
         if routeEpoch == epoch {
+            // Every enabled entry was looked up again, as on a full apply.
+            unresolvedLookups = Self.lookupRecord(looked: domainsToResolve, answers: resolvedDomainIPs)
             recordResolveFailures(isInverse: isInverse, attempted: Set(uniqueDomains),
                                   resolved: Set(resolvedDomainIPs.keys),
                                   reconnected: lastVPNConnectAt != connectStamp)

@@ -73,6 +73,46 @@ final class ProblemReasonDNSTests: XCTestCase {
         XCTAssertEqual(RoutedBySource.problemReason(for: row, failures: [refused]), "Not routed: File exists")
         XCTAssertEqual(RoutedBySource.problemReason(for: row, failures: []), "No address is routed for it.")
     }
+
+    /// A disabled entry keeps its old stale count; it is not the reason for a same-named entry
+    /// in the other list.
+    func testADisabledEntrysOldFailureIsNoReason() {
+        var off = staleDomain("shared.example")
+        off.enabled = false
+        XCTAssertEqual(RouteManager.dnsFailures(lookups: [:], domains: [off]), [])
+        XCTAssertEqual(RouteManager.dnsFailures(lookups: [:], domains: [off, staleDomain("old.example")]).map(\.entry),
+                       ["old.example"])
+    }
+
+    /// A route refusal an earlier apply recorded does not hide that the entry's names no longer
+    /// resolve: Problems says what the dropdown's Show says.
+    func testADNSFailureReplacesAnOlderRouteRefusalForAnEmptyEntry() {
+        let change = RouteManager.RouteChangeOutcome(kind: .applied, at: now, routeCount: 60, failedCount: 2, failures: [
+            .init(kind: .notRouted, target: "192.0.2.7", entry: "Zoom", reason: "File exists"),
+            .init(kind: .notRouted, target: "192.0.2.9", entry: "shop.example", reason: "File exists"),
+        ])
+        let dns = RouteManager.dnsFailures(lookups: ["Zoom": ["zoom.us"]], domains: [])
+        let problems = StatusPage.problems(lastChange: change, installed: 60, helperReady: true,
+                                           withoutAddresses: [empty("Zoom", .service(id: "zoom"))], dnsFailures: dns)
+        XCTAssertEqual(problems.map(\.detail), ["Not routed, for shop.example: File exists",
+                                                "Did not resolve, for Zoom: no answer from DNS"])
+        let row = empty("Zoom", .service(id: "zoom"))
+        XCTAssertEqual(RoutedBySource.problemReason(for: row, failures: change.failures + dns),
+                       "Did not resolve: no answer from DNS")
+    }
+
+    /// A DNS refresh looks up every entry again, so it replaces the record as a full apply does:
+    /// a name that answers now is cleared, one that stopped answering is recorded.
+    func testARefreshReplacesTheLookupRecord() {
+        let looked: [(domain: String, source: String)] = [("zoom.us", "Zoom"), ("zoomgov.com", "Zoom"),
+                                                          ("a.example", "a.example"), ("b.example", "b.example")]
+        let record = RouteManager.lookupRecord(looked: looked, answers: ["zoom.us": ["192.0.2.1"], "zoomgov.com": [],
+                                                                          "a.example": ["192.0.2.2"]])
+        XCTAssertEqual(record, ["Zoom": ["zoomgov.com"], "b.example": ["b.example"]])
+        XCTAssertEqual(RouteManager.lookupRecord(looked: looked, answers: ["zoom.us": ["192.0.2.1"], "zoomgov.com": ["192.0.2.3"],
+                                                                            "a.example": ["192.0.2.2"], "b.example": ["192.0.2.4"]]),
+                       [:])
+    }
 }
 
 // MARK: - Against a fake kernel

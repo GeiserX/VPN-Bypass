@@ -50,10 +50,12 @@ struct LookupsTab: View {
     private var isOn: Bool { routeManager.config.dnsLookupsEnabled }
 
     /// The names the page lists: the retries left out unless `showsRetries`, and how many
-    /// there are, for the toggle.
+    /// there are, for the toggle. A search lists every name it matches, retries included,
+    /// since the user is looking for that name.
     static func listed(_ tally: DNSLookupTally, matching query: String, searchDomains: [String],
                        showsRetries: Bool) -> (names: [DNSLookupTally.Entry], retries: Int) {
         let ranked = tally.ranked(matching: query)
+        guard query.trimmingCharacters(in: .whitespaces).isEmpty else { return (ranked, 0) }
         let retries = SearchDomainRetries.retries(among: tally.entries.keys, searchDomains: searchDomains)
         let matched = ranked.filter { retries.contains($0.name) }.count
         return (showsRetries ? ranked : ranked.filter { !retries.contains($0.name) }, matched)
@@ -204,7 +206,7 @@ struct LookupsTab: View {
                 Button(title) { showsRetries.toggle() }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
-                    .help(String(localized: "Names the resolver asked again with a search domain added, after the name itself got no answer"))
+                    .help(String(localized: "Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer"))
                     .accessibilityLabel(title)
                     .padding(.leading, 2)
             }

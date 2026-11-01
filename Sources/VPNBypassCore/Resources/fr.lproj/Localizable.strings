@@ -1046,5 +1046,5 @@
 "Hide search-domain retries" = "Masquer les nouvelles tentatives avec domaine de recherche";
 "Show 1 search-domain retry" = "Afficher 1 nouvelle tentative avec domaine de recherche";
 "Show %lld search-domain retries" = "Afficher %lld nouvelles tentatives avec domaine de recherche";
-"Names the resolver asked again with a search domain added, after the name itself got no answer" = "Noms que le système a redemandés en ajoutant un domaine de recherche, après que le nom lui-même n'a reçu aucune réponse";
+"Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer" = "Noms qui reprennent un autre nom de la liste avec un domaine de recherche ajouté, comme le système le demande quand un nom ne reçoit aucune réponse";
 "The names this Mac looks up." = "Les noms que ce Mac recherche.";

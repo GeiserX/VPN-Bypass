@@ -40,6 +40,23 @@ final class SearchDomainRetriesTests: XCTestCase {
         XCTAssertEqual(SearchDomainRetries.searchDomains(fromScutilDNS: "DNS configuration\n\nresolver #1\n  nameserver[0] : 192.0.2.53\n"), [])
     }
 
+    /// A read that fails leaves no search domain, so the last network's domains hide nothing.
+    func testAFailedReadLeavesNoSearchDomain() {
+        XCTAssertEqual(SearchDomainRetries.searchDomains(afterRead: nil), [])
+        XCTAssertEqual(SearchDomainRetries.searchDomains(afterRead: fixture), ["corp.example", "lab.example", "vpn.example"])
+    }
+
+    /// A search lists every name it matches: a retry the user searches for is shown, and the
+    /// page never says no name matches while it holds one.
+    func testASearchListsTheRetriesItMatches() {
+        var tally = DNSLookupTally()
+        tally.record(["host.example.com", "host.example.com.corp.example"], at: Date())
+        let found = LookupsTab.listed(tally, matching: "corp", searchDomains: ["corp.example"], showsRetries: false)
+        XCTAssertEqual(found.names.map(\.name), ["host.example.com.corp.example"])
+        XCTAssertEqual(found.retries, 0)
+        XCTAssertEqual(LookupsTab.Content.resolve(isOn: true, matching: found.names.count, query: "corp"), .names)
+    }
+
     func testANameWithASearchDomainAppendedIsARetry() {
         let domains = SearchDomainRetries.searchDomains(fromScutilDNS: fixture)
         let names = ["host.example.com", "host.example.com.corp.example", "host.example.com.lab.example",

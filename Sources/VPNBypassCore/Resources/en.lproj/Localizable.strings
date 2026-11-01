@@ -1046,5 +1046,5 @@
 "Hide search-domain retries" = "Hide search-domain retries";
 "Show 1 search-domain retry" = "Show 1 search-domain retry";
 "Show %lld search-domain retries" = "Show %lld search-domain retries";
-"Names the resolver asked again with a search domain added, after the name itself got no answer" = "Names the resolver asked again with a search domain added, after the name itself got no answer";
+"Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer" = "Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer";
 "The names this Mac looks up." = "The names this Mac looks up.";

@@ -44,8 +44,8 @@ struct DNSLookupTally: Equatable {
     }
 }
 
-/// The lookups the resolver made by appending a DNS search domain to a name that did not
-/// answer: with search domains `corp.example` and `lab.example`, a failed `host.example.com`
+/// The lookups the resolver made by appending a DNS search domain to a name, as it does when
+/// the name gets no answer: with search domains `corp.example` and `lab.example`, a failed `host.example.com`
 /// is asked again as `host.example.com.corp.example` and `host.example.com.lab.example`, and
 /// each retry is one more row on the page. They are folded under the name they came from.
 /// A single-label name is left alone: `intranet` asked as `intranet.corp.example` is the name
@@ -63,6 +63,12 @@ enum SearchDomainRetries {
             if !domain.isEmpty && !out.contains(domain) { out.append(domain) }
         }
         return out
+    }
+
+    /// The search domains after one read of `scutil --dns`: none when the read failed, so a
+    /// resolver state that cannot be read never hides a name.
+    static func searchDomains(afterRead output: String?) -> [String] {
+        output.map { searchDomains(fromScutilDNS: $0) } ?? []
     }
 
     /// The names that are another of `names`, a name with a dot in it, with one of
@@ -223,9 +229,8 @@ final class DNSLookupsMonitor: ObservableObject {
     private func readSearchDomainsIfDue() async {
         guard readsSearchDomains, searchDomainsReadAt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
         searchDomainsReadAt = Date()
-        guard let result = await RouteManager.shared.runProcessAsync("/usr/sbin/scutil", arguments: ["--dns"], timeout: 3.0),
-              result.exitCode == 0 else { return }
-        let domains = SearchDomainRetries.searchDomains(fromScutilDNS: result.output)
+        let result = await RouteManager.shared.runProcessAsync("/usr/sbin/scutil", arguments: ["--dns"], timeout: 3.0)
+        let domains = SearchDomainRetries.searchDomains(afterRead: result?.exitCode == 0 ? result?.output : nil)
         if domains != searchDomains { searchDomains = domains }
     }
 

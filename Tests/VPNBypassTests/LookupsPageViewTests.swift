@@ -107,7 +107,7 @@ final class LookupsPageViewTests: XCTestCase {
 
     /// One failed name the resolver retried with each search domain appended filled the list
     /// with retries. They are folded under a "Show N search-domain retries" toggle.
-    func testSearchDomainRetriesAreFoldedUnderAToggle() {
+    func testSearchDomainRetriesAreFoldedUnderAToggle() throws {
         var config = rm.config
         config.routingMode = .bypass
         config.dnsLookupsEnabled = true
@@ -122,6 +122,16 @@ final class LookupsPageViewTests: XCTestCase {
         XCTAssertTrue(texts.contains { $0.contains("host.example.com") }, "the name itself is gone: \(texts.sorted())")
         XCTAssertFalse(texts.contains { $0.contains("host.example.com.corp.example") }, "a retry is still listed")
         XCTAssertTrue(texts.contains("Show 2 search-domain retries"), "no toggle for the retries: \(texts.sorted())")
+
+        // Pressed as VoiceOver does, the toggle lists the retries and offers to hide them.
+        let window = try XCTUnwrap(self.window)
+        let toggle = try XCTUnwrap(AccessibilityTree.elements(under: window, settle: { settle(window) })
+            .first { AccessibilityTree.label($0) == "Show 2 search-domain retries" })
+        AccessibilityTree.press(toggle)
+        settle(window)
+        let shown = self.texts(onLookups: window)
+        XCTAssertTrue(shown.contains { $0.contains("host.example.com.corp.example") }, "the retries do not show: \(shown.sorted())")
+        XCTAssertTrue(shown.contains("Hide search-domain retries"), "no way to hide them again: \(shown.sorted())")
     }
 
     private func open() -> NSWindow {

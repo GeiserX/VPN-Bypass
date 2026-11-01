@@ -396,6 +396,9 @@ final class SettingsHeaderTests: XCTestCase {
             XCTAssertEqual(menu.maxX, rightEdge - ListRow.inset, accuracy: 3, "\(page): the ⋯ menu is not at the trailing edge")
             XCTAssertLessThan(label.maxX + Theme.Space.s, menu.minX, "\(page): \"addresses\" runs into the ⋯ menu")
             XCTAssertEqual(label.midY, titleFrame.midY, accuracy: 4, "\(page): the header is not one line")
+            // The number column ends past the switch (44 pt) and one space, left of the menu's end.
+            XCTAssertEqual(label.maxX, menu.maxX - 44 - Theme.Space.s, accuracy: 3,
+                           "\(page): \"addresses\" is not over the number column")
             if let chip {
                 let chipFrame = try frame(chip)
                 XCTAssertLessThan(chipFrame.minX - titleFrame.maxX, Theme.Space.l, "\(page): the chip is not after the title")

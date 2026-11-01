@@ -352,10 +352,16 @@ enum StatusPage {
         // The entries a failure row already names, so an entry is listed once, with the
         // failure's reason, which says more than "no address is routed".
         var explained: Set<String> = []
+        // An entry left with no address whose lookups got no answer: that is why, so a route
+        // refusal an earlier apply recorded for it is not its reason (the dropdown's Show agrees).
+        let unresolvedEmpty = Set(withoutAddresses.filter { row in
+            row.isProblem && dnsFailures.contains { $0.entry == row.id }
+        }.map(\.id))
         let lastChange = lastChange?.outstanding(routedNow: Set(routes.map(\.destination)))
         if let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed, helperReady: helperReady),
            change.failedCount > 0 {
             for failure in change.failures {
+                if failure.kind == .notRouted && unresolvedEmpty.contains(failure.entry) { continue }
                 explained.insert(failure.entry.isEmpty ? failure.target : failure.entry)
                 let kind: Problem.Kind
                 let what: String
