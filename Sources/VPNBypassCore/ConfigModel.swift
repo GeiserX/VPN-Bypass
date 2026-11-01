@@ -138,6 +138,14 @@ struct Config: Codable {
     /// `services` because `mergeBuiltInServices` resets a built-in service's domains to the
     /// shipped list at every launch; it adds these back after the shipped ones.
     var builtInServiceExtras: [String: [String]] = [:]
+    /// Profiles per network (idea 9 of the 6.0 rework, `NetworkProfiles.swift`). The fields
+    /// above are always the settings in use; these hold the ones that are not.
+    var profiles: [NetworkProfile] = []
+    /// The profile in use; nil means "Other networks", the settings used on any network no
+    /// profile claims.
+    var activeProfileId: UUID? = nil
+    /// The Other networks settings while a profile is in use. Nil while Other networks is.
+    var otherNetworksSettings: ProfileSettings? = nil
 
     // Custom decoder for backward compatibility with configs missing new fields
     init(from decoder: Decoder) throws {
@@ -170,6 +178,9 @@ struct Config: Codable {
         pinnedVPNProductHint = try container.decodeIfPresent(String.self, forKey: .pinnedVPNProductHint)
         dnsLookupsEnabled = try container.decodeIfPresent(Bool.self, forKey: .dnsLookupsEnabled) ?? false
         builtInServiceExtras = try container.decodeIfPresent([String: [String]].self, forKey: .builtInServiceExtras) ?? [:]
+        profiles = try container.decodeIfPresent([NetworkProfile].self, forKey: .profiles) ?? []
+        activeProfileId = try container.decodeIfPresent(UUID.self, forKey: .activeProfileId)
+        otherNetworksSettings = try container.decodeIfPresent(ProfileSettings.self, forKey: .otherNetworksSettings)
 
         // One-time migration: derive the routes/rules representation from the
         // legacy bypass list + single proxy so the new model is populated for
@@ -372,6 +383,16 @@ struct Config: Codable {
         // Failed lookups are this Mac's own note; on another Mac they would mark live names.
         for i in copy.domains.indices { copy.domains[i].resolveFailures = nil }
         for i in copy.inverseDomains.indices { copy.inverseDomains[i].resolveFailures = nil }
+        // The same for the settings profiles keep, and the networks they are bound to (a
+        // router's address and MAC) are this Mac's own note too: "Use on This Network" binds
+        // an imported profile again.
+        copy.otherNetworksSettings = copy.otherNetworksSettings?.withoutResolveFailures()
+        copy.profiles = copy.profiles.map { profile in
+            var p = profile
+            p.networks = []
+            p.settings = p.settings.withoutResolveFailures()
+            return p
+        }
         return copy
     }
 

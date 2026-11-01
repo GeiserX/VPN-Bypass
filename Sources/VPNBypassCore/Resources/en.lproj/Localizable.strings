@@ -973,3 +973,30 @@
 "Routes are still being applied. Added %lld of %lld; press Add again when they finish." = "Routes are still being applied. Added %lld of %lld; press Add again when they finish.";
 "A name here is on the list but switched off. Turn it on from the Domains page." = "A name here is on the list but switched off. Turn it on from the Domains page.";
 "Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory." = "Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory.";
+
+/* Profiles per network */
+"Wi-Fi" = "Wi-Fi";
+"Ethernet" = "Ethernet";
+"Other connection" = "Other connection";
+"%@, router %@" = "%@, router %@";
+"Other networks" = "Other networks";
+"No network yet" = "No network yet";
+"1 network" = "1 network";
+"%lld networks" = "%lld networks";
+"Any network without a profile" = "Any network without a profile";
+"Use %@ on this network" = "Use %@ on this network";
+"This network is not identified yet." = "This network is not identified yet.";
+"Delete the profile %@?" = "Delete the profile %@?";
+"Its mode and lists are lost, and its networks use Other networks." = "Its mode and lists are lost, and its networks use Other networks.";
+"Network profiles" = "Network profiles";
+"A profile keeps a mode and its lists. When the Mac joins one of its networks, the profile is put in use. Networks are told apart by their router." = "A profile keeps a mode and its lists. When the Mac joins one of its networks, the profile is put in use. Networks are told apart by their router.";
+"This network" = "This network";
+"Not identified yet" = "Not identified yet";
+"Use on This Network" = "Use on This Network";
+"Save as Profile for This Network…" = "Save as Profile for This Network…";
+"In use" = "In use";
+"New profile" = "New profile";
+"Save" = "Save";
+"Saves the mode and lists in use now for this network. Changes made while the profile is in use stay in it." = "Saves the mode and lists in use now for this network. Changes made while the profile is in use stay in it.";
+"Home, Office…" = "Home, Office…";
+"A profile with this name exists." = "A profile with this name exists.";

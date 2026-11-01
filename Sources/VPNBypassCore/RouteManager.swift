@@ -20,6 +20,9 @@ final class RouteManager: ObservableObject {
     /// none is on or it could not be read. Re-read with every VPN detection.
     @Published var vpnKillSwitch: VPNKillSwitch?
     @Published var localGateway: String?
+    /// The network the Mac is on, as its router identifies it (`NetworkProfiles.swift`); nil
+    /// until the router's ARP entry has been read.
+    @Published var currentNetwork: NetworkIdentity?
     @Published var vpnGateway: String?
     @Published var activeRoutes: [ActiveRoute] = [] {
         // A "removed all routes" footer line is a claim about what is installed. Once the count
@@ -300,6 +303,10 @@ final class RouteManager: ObservableObject {
     /// First-seen timestamps for routes that dropped out of the desired set during an
     /// auto-triggered apply (DNS rotation, mostly). See `orphanGraceDecision`.
     private var orphanFirstSeen: [String: Date] = [:]
+    /// Set by a profile switch (`NetworkProfiles.swift`) and cleared by the next commit: the
+    /// old profile's routes did not rotate out of DNS, the switch took them off the list, so
+    /// that commit deletes them at once instead of keeping them under orphan grace.
+    var listsSwitchedSinceCommit = false
     
     
     /// Set once in init from the SAME directory as `configURL`, so it follows the under-test
@@ -959,6 +966,10 @@ final class RouteManager: ObservableObject {
         
         if isVPNConnected && !wasVPNConnected { lastVPNConnectAt = Date() }
 
+        // Profiles per network: a network that belongs to another profile switches the lists
+        // before anything below applies them. At a connect the settle-gated apply carries them.
+        await updateNetworkProfile(justConnected: isVPNConnected && !wasVPNConnected)
+
         // "Until the VPN reconnects": this is the reconnect. The pause ends here and the apply
         // below goes through the settle gate like any post-reconnect apply, even with
         // auto-apply off, since resuming is what the user asked for.
@@ -977,7 +988,10 @@ final class RouteManager: ObservableObject {
             // Fresh routes = the newer of the last full apply and the last DNS refresh.
             let lastApplyAt = [lastUpdate, lastDNSRefresh].compactMap { $0 }.max()
             // Skip if routes were applied very recently (within 5 seconds) - prevents double-triggering
-            if let lastUpdate = lastUpdate, now.timeIntervalSince(lastUpdate) < 5 {
+            // Not when the config changed since (a profile switch on this pass): that apply is
+            // no duplicate, the lists are new.
+            if let lastUpdate = lastUpdate, now.timeIntervalSince(lastUpdate) < 5,
+               (configChangedAt.map { $0 <= lastUpdate } ?? true) {
                 log(.info, "Skipping duplicate route application (applied \(Int(now.timeIntervalSince(lastUpdate)))s ago)")
             } else if ReconnectSettle.reconnectAction(routingMode: config.routingMode,
                                                      hasInstalledRoutes: !activeRoutes.isEmpty,
@@ -2126,6 +2140,8 @@ final class RouteManager: ObservableObject {
         // Detect local gateway
         localGateway = await detectLocalGateway()
         log(.info, "Gateway detected: \(localGateway ?? "none")")
+        // This network's profile, before the startup apply below puts its lists in.
+        await selectNetworkProfileBeforeStartupApply()
 
         // Detect VPN gateway (needed for VPN Only mode)
         if connected {
@@ -3409,7 +3425,9 @@ final class RouteManager: ObservableObject {
         // stayed gone for the TTL removes that churn; graced routes keep working meanwhile
         // (they egress the stable local gateway). User-initiated applies pass
         // orphanGrace=false, so an explicit removal still takes effect immediately.
-        if orphanGrace && config.routingMode == .bypass {
+        let graceAllowed = !listsSwitchedSinceCommit
+        listsSwitchedSinceCommit = false
+        if orphanGrace && graceAllowed && config.routingMode == .bypass {
             let outcome = Self.orphanGraceDecision(orphaned: stalePartition.orphaned,
                                                    applied: newDestinations,
                                                    firstSeen: orphanFirstSeen,
@@ -3434,6 +3452,9 @@ final class RouteManager: ObservableObject {
         if !trulyOrphanedDests.isEmpty {
             let result = await removeRoutesBatchVia(trulyOrphanedDests)
             if result.failureCount > 0 {
+                // A route the switch took off stays marked, so the next apply's grace does not
+                // keep it either.
+                if !graceAllowed { listsSwitchedSinceCommit = true }
                 log(.warning, "\(logLabel)Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
                 let failedSet = Set(result.failedDestinations)
                 for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
@@ -6086,6 +6107,8 @@ final class RouteManager: ObservableObject {
     /// What `detectVPNInterface` answers, so a test can drive `checkVPNStatus` through a drop
     /// or a flap with no real tunnel.
     var detectVPNInterfaceOverrideForTests: (() async -> (connected: Bool, interface: String?, type: VPNType?))?
+    /// What `detectNetworkIdentity` answers, so a test can move the Mac between networks.
+    var detectNetworkIdentityOverrideForTests: (() async -> NetworkIdentity?)?
     var routeEpochForTests: UInt64 { routeEpoch }
 
     private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil, persistCache: Bool = true) async -> [ActiveRoute]? {
@@ -6689,5 +6712,104 @@ struct RulePlace: Equatable {
             return String(localized: "Added as rule \(number), to the Direct route.", bundle: bundle)
         }
         return String(localized: "Added as rule \(number); rule \(first) matches first.", bundle: bundle)
+    }
+}
+
+// MARK: - Profiles per network
+
+extension RouteManager {
+    /// The network the Mac is on: the physical router's address, its MAC from the ARP table
+    /// and the kind of interface it was learned on. Nil while any of them is missing.
+    func detectNetworkIdentity() async -> NetworkIdentity? {
+        if let override = detectNetworkIdentityOverrideForTests { return await override() }
+        guard let gateway = localGateway,
+              let result = await runProcessAsync("/usr/sbin/arp", arguments: ["-n", gateway], timeout: 3.0),
+              let entry = NetworkIdentity.parseARP(result.output, gateway: gateway) else { return nil }
+        let kind = await withCheckedContinuation { continuation in
+            vpnBypassProcessQueue.async {
+                continuation.resume(returning: NetworkIdentity.kind(ofInterface: entry.interface))
+            }
+        }
+        return NetworkIdentity(gateway: gateway, routerMAC: entry.mac, kind: kind)
+    }
+
+    /// Reads the network, and switches profile when it belongs to another one. Run on every
+    /// status pass, after the gateway is detected.
+    func updateNetworkProfile(justConnected: Bool = false) async {
+        let network = await detectNetworkIdentity()
+        if currentNetwork != network { currentNetwork = network }
+        guard !isConfigLoadFailed, !isShuttingDown,
+              let target = NetworkProfiles.switchTarget(for: network, in: config) else { return }
+        commitProfileChange(NetworkProfiles.switching(config, to: target), justConnected: justConnected)
+    }
+
+    /// At launch: reads the network and puts its profile in use without an apply of its own,
+    /// since the startup apply that follows applies the lists in use.
+    func selectNetworkProfileBeforeStartupApply() async {
+        let network = await detectNetworkIdentity()
+        if currentNetwork != network { currentNetwork = network }
+        guard !isConfigLoadFailed, let target = NetworkProfiles.switchTarget(for: network, in: config) else { return }
+        let fromName = profileName(config.activeProfileId)
+        config = NetworkProfiles.switching(config, to: target)
+        listsSwitchedSinceCommit = true
+        saveConfig()
+        log(.info, "Network profile at launch: \(fromName) → \(profileName(config.activeProfileId)), mode \(config.routingMode.displayName)")
+    }
+
+    /// Saves the settings in use as a new profile for this network. False when the network
+    /// is not identified or the name is taken.
+    @discardableResult
+    func createProfile(named name: String) -> Bool {
+        guard !isConfigLoadFailed, let network = currentNetwork,
+              NetworkProfiles.nameIsFree(name, in: config.profiles) else { return false }
+        commitProfileChange(NetworkProfiles.creatingProfile(named: name, for: network, in: config))
+        log(.success, "Network profile \(name.trimmingCharacters(in: .whitespacesAndNewlines)) saved for this network")
+        return true
+    }
+
+    /// Moves this network to profile `id`, and puts the profile in use.
+    func useProfileOnThisNetwork(_ id: UUID) {
+        guard !isConfigLoadFailed, let network = currentNetwork else { return }
+        var next = NetworkProfiles.addingNetwork(network, to: id, in: config)
+        if let target = NetworkProfiles.switchTarget(for: network, in: next) {
+            next = NetworkProfiles.switching(next, to: target)
+        }
+        commitProfileChange(next)
+    }
+
+    /// Deletes profile `id`; when it is in use, Other networks' settings are put in use.
+    func deleteProfile(_ id: UUID) {
+        guard !isConfigLoadFailed, let name = config.profiles.first(where: { $0.id == id })?.name else { return }
+        commitProfileChange(NetworkProfiles.removingProfile(id, in: config))
+        log(.info, "Network profile \(name) deleted")
+    }
+
+    /// Saves `next` and, when the settings in use changed, applies them the way a mode switch
+    /// does: through the gate, never into a settle wait, never while paused or with no VPN.
+    private func commitProfileChange(_ next: Config, justConnected: Bool = false) {
+        let before = ProfileSettings(capturing: config)
+        let fromName = profileName(config.activeProfileId)
+        config = next
+        let changed = ProfileSettings(capturing: config) != before
+        // A warm reconnect re-applies only when the config changed after the last apply.
+        if changed {
+            configChangedAt = Date()
+            listsSwitchedSinceCommit = true
+        }
+        saveConfig()   // a mode change ends a pause here; the apply below runs instead
+        guard changed else { return }
+        log(.info, "Network profile: \(fromName) → \(profileName(config.activeProfileId)), mode \(config.routingMode.displayName)")
+        Task {
+            await releaseBlocksIfUnwanted()
+            await reconcileProxyListeners()
+        }
+        if NetworkProfiles.applyAction(vpnConnected: isVPNConnected, justConnected: justConnected,
+                                       paused: isPaused, settlePending: reconnectSettleTask != nil) == .now {
+            applyRoutingModeChange()
+        }
+    }
+
+    private func profileName(_ id: UUID?) -> String {
+        id.flatMap { id in config.profiles.first { $0.id == id }?.name } ?? NetworkProfiles.otherNetworksName()
     }
 }

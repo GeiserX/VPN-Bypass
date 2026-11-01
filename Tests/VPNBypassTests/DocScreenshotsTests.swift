@@ -792,6 +792,53 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderSettings(page: .general, height: 1180, to: "general-page-custom.png")
     }
 
+    // MARK: - Profiles per network (idea 9)
+
+    /// General with two profiles: Office in use on this network, Home on another, and Other
+    /// networks for the rest.
+    func testGeneralPageWithNetworkProfiles() throws {
+        seedBypass()
+        GeneralTab.detectedDNSForScreenshots = "192.0.2.53"
+        let savedNetwork = rm.currentNetwork
+        defer {
+            GeneralTab.detectedDNSForScreenshots = nil
+            rm.currentNetwork = savedNetwork
+        }
+        let office = NetworkIdentity(gateway: "192.0.2.1", routerMAC: "02:00:00:00:00:01", kind: .ethernet)
+        let home = NetworkIdentity(gateway: "192.0.2.1", routerMAC: "02:00:00:00:00:02", kind: .wifi)
+        rm.currentNetwork = office
+        var config = NetworkProfiles.creatingProfile(named: "Home", for: home, in: rm.config)
+        config = NetworkProfiles.switching(config, to: .otherNetworks)
+        config = NetworkProfiles.creatingProfile(named: "Office", for: office, in: config)
+        config.routingMode = .vpnOnly
+        rm.config = config
+        _ = try renderSettings(page: .general, height: 1400, to: "general-page-network-profiles.png")
+    }
+
+    /// The same page on a network no profile claims, so Home and Office offer to take it.
+    func testGeneralPageOnANewNetwork() throws {
+        seedBypass()
+        GeneralTab.detectedDNSForScreenshots = "192.0.2.53"
+        let savedNetwork = rm.currentNetwork
+        defer {
+            GeneralTab.detectedDNSForScreenshots = nil
+            rm.currentNetwork = savedNetwork
+        }
+        let office = NetworkIdentity(gateway: "192.0.2.1", routerMAC: "02:00:00:00:00:01", kind: .ethernet)
+        let home = NetworkIdentity(gateway: "192.0.2.1", routerMAC: "02:00:00:00:00:02", kind: .wifi)
+        var config = NetworkProfiles.creatingProfile(named: "Home", for: home, in: rm.config)
+        config = NetworkProfiles.creatingProfile(named: "Office", for: office, in: config)
+        config = NetworkProfiles.switching(config, to: .otherNetworks)
+        rm.config = config
+        rm.currentNetwork = NetworkIdentity(gateway: "198.51.100.1", routerMAC: "02:00:00:00:00:03", kind: .wifi)
+        _ = try renderSettings(page: .general, height: 1400, to: "general-page-network-new.png")
+    }
+
+    func testSheetNewProfile() throws {
+        try renderSheet(NewProfileSheet(profiles: [], name: "Office", onCancel: {}, onSave: { _ in }),
+                        to: "sheet-new-profile.png")
+    }
+
     /// About: the wordmark, one line, three buttons and the Support row.
     func testAboutPage() throws {
         seedBypass()

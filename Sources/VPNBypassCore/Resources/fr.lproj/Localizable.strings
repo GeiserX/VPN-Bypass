@@ -973,3 +973,30 @@
 "Routes are still being applied. Added %lld of %lld; press Add again when they finish." = "Les routes sont encore en cours d’application. %lld sur %lld ajoutés ; appuyez à nouveau sur Ajouter quand elles auront fini.";
 "A name here is on the list but switched off. Turn it on from the Domains page." = "Un nom ici est dans la liste mais désactivé. Activez-le depuis la page Domaines.";
 "Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory." = "Apprendre un site a activé la capture pendant ses 60 secondes seulement, et garde les noms en mémoire.";
+
+/* Profiles per network */
+"Wi-Fi" = "Wi-Fi";
+"Ethernet" = "Ethernet";
+"Other connection" = "Autre connexion";
+"%@, router %@" = "%1$@, routeur %2$@";
+"Other networks" = "Autres réseaux";
+"No network yet" = "Aucun réseau pour l’instant";
+"1 network" = "1 réseau";
+"%lld networks" = "%lld réseaux";
+"Any network without a profile" = "Tout réseau sans profil";
+"Use %@ on this network" = "Utiliser %@ sur ce réseau";
+"This network is not identified yet." = "Ce réseau n’est pas encore identifié.";
+"Delete the profile %@?" = "Supprimer le profil %@ ?";
+"Its mode and lists are lost, and its networks use Other networks." = "Son mode et ses listes sont perdus, et ses réseaux utilisent Autres réseaux.";
+"Network profiles" = "Profils réseau";
+"A profile keeps a mode and its lists. When the Mac joins one of its networks, the profile is put in use. Networks are told apart by their router." = "Un profil garde un mode et ses listes. Quand le Mac rejoint l’un de ses réseaux, le profil est mis en service. Les réseaux se distinguent par leur routeur.";
+"This network" = "Ce réseau";
+"Not identified yet" = "Pas encore identifié";
+"Use on This Network" = "Utiliser sur ce réseau";
+"Save as Profile for This Network…" = "Enregistrer comme profil pour ce réseau…";
+"In use" = "En service";
+"New profile" = "Nouveau profil";
+"Save" = "Enregistrer";
+"Saves the mode and lists in use now for this network. Changes made while the profile is in use stay in it." = "Enregistre le mode et les listes en service maintenant pour ce réseau. Les changements faits pendant que le profil est en service y restent.";
+"Home, Office…" = "Maison, Bureau…";
+"A profile with this name exists." = "Un profil porte déjà ce nom.";
