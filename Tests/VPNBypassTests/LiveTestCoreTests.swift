@@ -235,6 +235,16 @@ final class SiteRoutePausedTests: XCTestCase {
         XCTAssertFalse(answer.summary.contains("follows the VPN"), answer.summary)
     }
 
+    /// A loopback address never takes the VPN, so the paused sentence does not say it does.
+    func testPausedLoopbackDoesNotSayItFollowsTheVPN() {
+        let pause = PauseState(length: .untilResume, since: since, mode: .bypass)
+        let found = SiteRoute.match(host: "localhost", addresses: ["127.0.0.1"], in: snapshot(list: [], pause: pause))
+        XCTAssertEqual(found.expected, .physical)
+        let answer = SiteRoute.answer(host: "localhost", mode: .bypass, addresses: ["127.0.0.1"], found: found,
+                                      probes: [], control: nil, vpnConnected: true)
+        XCTAssertFalse(answer.summary.contains("follows the VPN"), answer.summary)
+    }
+
     /// The VPN is back and the pause holds for the helper: the sentence says so, as `paused` does.
     func testTheHelperWaitIsInTheSentence() {
         var pause = PauseState(length: .untilReconnect, since: since, mode: .bypass)

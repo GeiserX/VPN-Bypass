@@ -90,10 +90,15 @@ enum DNSResolver {
         return (output, process.terminationStatus)
     }
 
+    /// Answers every lookup instead of the network while set, so a test of an apply path that
+    /// resolves through here (the full apply does) never waits on a real resolver.
+    nonisolated(unsafe) static var resolveOverrideForTests: (@Sendable (String) async -> [String]?)?
+
     /// Nonisolated DNS resolution - races dig and DoH in parallel with trust hierarchy.
     /// Dig-based resolvers fire immediately (trusted); DoH fires after a 200ms grace period
     /// so it only wins when VPN blocks UDP DNS. Resolves in ~2s on VPN instead of 8+.
     nonisolated static func resolveIPsParallel(for domain: String, userDNS: String?, fallbackDNS: [String]) async -> [String]? {
+        if let override = resolveOverrideForTests { return await override(domain) }
         let dohGraceNs: UInt64 = 200_000_000 // 200ms head start for trusted dig resolvers
         let hardcodedDoH = ["https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"]
         
