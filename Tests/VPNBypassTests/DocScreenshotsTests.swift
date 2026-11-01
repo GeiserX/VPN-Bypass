@@ -649,6 +649,30 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(try renderSettings(page: .lookups, to: "lookups-learned-noise.png"), Self.settingsSize)
     }
 
+    /// One failed name a VPN client retried with twenty company domains of its own, which no
+    /// resolver lists: the Lookups list, and Learn a Site after a reload, with no search domain
+    /// read. Renders `retry-shape-lookups.png` and `retry-shape-learned.png`.
+    func testRetriesNoResolverLists() throws {
+        seedBypass()
+        seedLookups()
+        DNSLookupsMonitor.shared.readsSearchDomains = false
+        DNSLookupsMonitor.shared.searchDomains = []
+        defer { DNSLookupsMonitor.shared.readsSearchDomains = true }
+        let tails = ["net", "co", "media", "com", "org"]
+        let retries = (1...20).map { "host.example.com.corp\($0).example.\(tails[$0 % 5])" }
+        var tally = DNSLookupsMonitor.shared.tally
+        for _ in 0..<6 { tally.record(["host.example.com"] + retries, at: Date()) }
+        DNSLookupsMonitor.shared.tally = tally
+        _ = try renderSettings(page: .lookups, to: "retry-shape-lookups.png")
+
+        var learning = SiteLearning(started: Date().addingTimeInterval(-60))
+        learning.record(["www.news.example", "img.news.example", "api.news.example", "host.example.com"]
+                        + retries.prefix(8), at: Date().addingTimeInterval(-50))
+        learning.close()
+        DNSLookupsMonitor.shared.learning = learning
+        _ = try renderSettings(page: .lookups, to: "retry-shape-learned.png")
+    }
+
     /// What a news site reload looked up, with the noise around it.
     static let learnedNoiseNames = [
         "www.news.example", "api.music.example", "img.news.example", "metrics.news.example",

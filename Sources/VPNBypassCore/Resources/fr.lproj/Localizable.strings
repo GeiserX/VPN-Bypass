@@ -1050,7 +1050,7 @@
 "Hide search-domain retries" = "Masquer les nouvelles tentatives avec domaine de recherche";
 "Show 1 search-domain retry" = "Afficher 1 nouvelle tentative avec domaine de recherche";
 "Show %lld search-domain retries" = "Afficher %lld nouvelles tentatives avec domaine de recherche";
-"Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer" = "Noms qui reprennent un autre nom de la liste avec un domaine de recherche ajouté, comme le système le demande quand un nom ne reçoit aucune réponse";
+"Names that are another looked-up name with a domain appended, as the resolver or a VPN client asks when a name gets no answer" = "Noms qui reprennent un autre nom consulté avec un domaine ajouté à la fin, comme le système ou un client VPN le demande quand un nom ne reçoit aucune réponse";
 "The names this Mac looks up." = "Les noms que ce Mac recherche.";
 
 /* Learn a site: search-domain retries and sites seen before the window */
