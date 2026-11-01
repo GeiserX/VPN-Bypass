@@ -52,7 +52,7 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 
 ## The menu bar app
 
-Everything lives in the dropdown: the VPN it found, a status chip that says whether routes are enforced, the Mode popup, a field to add a domain, and what is routed, one row per service or domain you added. Settings opens from the gear at its foot. See [Usage](usage.md).
+Everything lives in the dropdown: the VPN it found, a status chip that says whether routes are enforced, the mode, a field to add a domain, and what is routed, one row per service or domain you added. Settings opens from the gear at its foot. See [Usage](usage.md).
 
 <div class="vb-gallery" markdown>
 <figure markdown>
@@ -64,7 +64,7 @@ Everything lives in the dropdown: the VPN it found, a status chip that says whet
 <figcaption>First run</figcaption>
 </figure>
 <figure markdown>
-![The dropdown in VPN Only mode: the Mode popup on VPN Only, the status chip reads On, two domains go through the VPN, and everything else goes direct](images/screenshots/vpn-only.png)
+![The dropdown in VPN Only mode: the mode track on VPN Only, the status chip reads On, two domains go through the VPN, and everything else goes direct](images/screenshots/vpn-only.png)
 <figcaption>VPN Only mode</figcaption>
 </figure>
 </div>

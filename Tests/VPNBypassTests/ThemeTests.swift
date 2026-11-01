@@ -1,5 +1,6 @@
 import XCTest
 @testable import VPNBypassCore
+import AppKit
 import SwiftUI
 
 final class ThemeColorTests: XCTestCase {
@@ -47,7 +48,14 @@ final class ThemeColorTests: XCTestCase {
 
     func testBrandColours() {
         XCTAssertEqual(Theme.Brand.blue, Color(hex: "2563EB"))
-        XCTAssertEqual(Theme.Brand.sky, Color(hex: "38BDF8"))
+        // The art's sky; the app draws a darker one on light grounds (ComponentsTests).
+        var sky = ""
+        NSAppearance(named: .darkAqua)!.performAsCurrentDrawingAppearance {
+            let c = NSColor(Theme.Brand.sky).usingColorSpace(.sRGB)!
+            sky = String(format: "%02X%02X%02X", Int(round(c.redComponent * 255)), Int(round(c.greenComponent * 255)),
+                         Int(round(c.blueComponent * 255)))
+        }
+        XCTAssertEqual(sky, "38BDF8")
     }
 
     // MARK: - The migration is over

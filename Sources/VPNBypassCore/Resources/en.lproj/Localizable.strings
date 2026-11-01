@@ -1027,3 +1027,9 @@
 "Routing is paused until the VPN reconnects." = "Routing is paused until the VPN reconnects.";
 "Routing is paused until you resume." = "Routing is paused until you resume.";
 "Routing is paused until the helper is ready, so %@ follows the VPN until then." = "Routing is paused until the helper is ready, so %@ follows the VPN until then.";
+
+/* The mode control and the page header's search */
+"Your list skips the VPN." = "Your list skips the VPN.";
+"Only your list uses the VPN." = "Only your list uses the VPN.";
+"Your rules pick each route." = "Your rules pick each route.";
+"Search %@" = "Search %@";

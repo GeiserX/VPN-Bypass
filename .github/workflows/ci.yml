@@ -58,6 +58,11 @@ jobs:
         # from the compiler (a separate build of VPNBypassCore in a temp dir, so a cached .build
         # cannot feed it stale keys).
         run: python3 scripts/check-localizations.py
+      - name: Check the release notes
+        # Renders the notes release.yml publishes for a fake version, with and without a
+        # docs/release-notes/<version>.md, and fails unless that file comes first and every
+        # commit is listed.
+        run: scripts/test-release-notes.sh
       - name: Build privileged helper
         # The helper isn't part of the SPM package (it's compiled by the Makefile with
         # a bridging header for the XPC audit token), so `swift test` doesn't cover it.

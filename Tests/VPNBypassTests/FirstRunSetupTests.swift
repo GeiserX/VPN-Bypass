@@ -67,6 +67,26 @@ final class FirstRunSetupTests: XCTestCase {
         XCTAssertEqual(ServiceChip.iconName(for: "no-such-service"), "globe")
     }
 
+    /// Live test: Signal and Netflix drew the globe while Telegram and YouTube had their own
+    /// symbol. Every catalogue service draws a symbol for what it is, never the globe, and
+    /// every symbol exists on this macOS.
+    func testEveryCatalogueServiceHasASymbolOtherThanTheGlobe() {
+        XCTAssertGreaterThan(ServiceCatalogue.shipped.count, 50, "control: the catalogue loaded")
+        for entry in ServiceCatalogue.shipped {
+            let symbol = ServiceChip.iconName(for: entry.service.id)
+            XCTAssertNotEqual(symbol, "globe", "\(entry.service.id) falls back to the globe")
+            XCTAssertNotNil(NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
+                            "\(symbol) for \(entry.service.id) is not an SF Symbol here")
+        }
+        XCTAssertEqual(ServiceChip.iconName(for: "signal"), "bubble.left.fill")
+        XCTAssertEqual(ServiceChip.iconName(for: "netflix"), "film.fill")
+        XCTAssertEqual(ServiceChip.iconName(for: "telegram"), "paperplane.fill", "a service's own symbol wins")
+        // The Services page draws the same symbol as the dropdown.
+        let signal = ServiceEntry(id: "signal", name: "Signal", enabled: true, domains: ["signal.org"], ipRanges: [])
+        XCTAssertEqual(ServicesPage.rows([signal], mode: .bypass, routeSources: [], added: { _ in [] },
+                                         clash: { _ in nil }).first?.glyph, "bubble.left.fill")
+    }
+
     // MARK: The country suggestion (regional packs)
 
     func testTheMacsRegionIsSuggestedWhenTheCatalogueHasItsServices() {

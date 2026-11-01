@@ -336,7 +336,8 @@ enum StatusPage {
     /// Every failure the dropdown's count includes, in the order the apply met them: the
     /// addresses the helper did not route (or remove), with their entry and the reason it gave,
     /// and the names that did not resolve, with their entry and the DNS error. Then the
-    /// entries left with no address, and a last row for failures counted but not itemised.
+    /// entries left with no address that no failure above names, and a last row for failures
+    /// counted but not itemised.
     /// Empty when nothing failed. Shown on the same rule as the dropdown (`shownRouteChange`),
     /// so the page never lists failures the dropdown no longer counts. An address that is
     /// routed by now (a DNS retry or a later add put it in) is left out.
@@ -344,10 +345,14 @@ enum StatusPage {
                          withoutAddresses: [RoutedBySource.Row], routes: [RoutedBySource.InstalledRoute] = [],
                          bundle: Bundle = .main) -> [Problem] {
         var out: [Problem] = []
+        // The entries a failure row already names, so an entry is listed once, with the
+        // failure's reason, which says more than "no address is routed".
+        var explained: Set<String> = []
         let lastChange = lastChange?.outstanding(routedNow: Set(routes.map(\.destination)))
         if let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed, helperReady: helperReady),
            change.failedCount > 0 {
             for failure in change.failures {
+                explained.insert(failure.entry.isEmpty ? failure.target : failure.entry)
                 let kind: Problem.Kind
                 let what: String
                 switch failure.kind {
@@ -379,7 +384,7 @@ enum StatusPage {
         // After Remove All Routes an empty entry is what the user asked for; what it could not
         // remove is listed above.
         let removed = DropdownCopy.removalStands(lastChange, currentRouteCount: installed, helperReady: helperReady)
-        for row in withoutAddresses where row.isProblem && !removed {
+        for row in withoutAddresses where row.isProblem && !removed && !explained.contains(row.id) {
             out.append(Problem(kind: .noAddresses, title: row.name,
                                detail: String(localized: "No address is routed for it.", bundle: bundle)))
         }

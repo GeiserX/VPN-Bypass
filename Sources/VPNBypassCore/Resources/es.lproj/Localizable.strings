@@ -1027,3 +1027,9 @@
 "Routing is paused until the VPN reconnects." = "El enrutamiento está en pausa hasta que la VPN se reconecte.";
 "Routing is paused until you resume." = "El enrutamiento está en pausa hasta que lo reanudes.";
 "Routing is paused until the helper is ready, so %@ follows the VPN until then." = "El enrutamiento está en pausa hasta que el asistente esté listo, así que %@ va por la VPN hasta entonces.";
+
+/* The mode control and the page header's search */
+"Your list skips the VPN." = "Tu lista evita la VPN.";
+"Only your list uses the VPN." = "Solo tu lista usa la VPN.";
+"Your rules pick each route." = "Tus reglas eligen cada ruta.";
+"Search %@" = "Buscar en %@";
