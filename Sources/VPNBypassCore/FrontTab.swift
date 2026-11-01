@@ -119,6 +119,18 @@ enum FrontTabPermission: Equatable {
     /// System Settings > Privacy & Security > Automation, where a browser is switched back on.
     static let automationSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
 
+    /// Opens that pane; a refusal from macOS goes to the log, so a button that did nothing says why.
+    @MainActor static func openAutomationSettings() {
+        openAutomationSettings(open: { NSWorkspace.shared.open($0) }, log: { RouteManager.shared.log($0, $1) })
+    }
+
+    @MainActor static func openAutomationSettings(open: (URL) -> Bool,
+                                                  log: (RouteManager.LogEntry.LogLevel, String) -> Void) {
+        if !open(automationSettingsURL) {
+            log(.warning, "Front tab: macOS did not open Privacy & Security > Automation in System Settings")
+        }
+    }
+
     /// From `AEDeterminePermissionToAutomateTarget`'s result.
     init(status: OSStatus) {
         switch status {
@@ -222,14 +234,15 @@ final class FrontTabWatcher: ObservableObject {
         var permission: @Sendable (_ bundleID: String, _ ask: Bool) -> FrontTabPermission
         /// Runs on the main thread, as NSAppleScript requires.
         var runScript: @MainActor (String) -> FrontTabScriptResult
-        var log: @MainActor (String) -> Void
+        /// One line in the app's log; a failed script is a warning, so the Warnings filter shows it.
+        var log: @MainActor (RouteManager.LogEntry.LogLevel, String) -> Void
 
         static let live = System(
             frontmost: { FrontTabWatcher.describe(NSWorkspace.shared.frontmostApplication) },
             isRunning: FrontTabWatcher.stillRuns,
             permission: { FrontTabPermission.check(bundleID: $0, ask: $1) },
             runScript: FrontTabWatcher.runScript,
-            log: { RouteManager.shared.log(.info, $0) })
+            log: { RouteManager.shared.log($0, $1) })
     }
 
     @Published var suggestion: FrontTabSuggestion?
@@ -310,7 +323,7 @@ final class FrontTabWatcher: ObservableObject {
             // A browser we read that macOS no longer shows running: say so, or a row that never
             // appears leaves nothing to go on.
             if let app = currentApp, let known = FrontTabBrowser.detect(bundleID: app.bundleID, name: app.name) {
-                system.log("Front tab: \(known.name) is not running, nothing read")
+                system.log(.info, "Front tab: \(known.name) is not running, nothing read")
             }
             suggestion = nil
             return
@@ -353,7 +366,7 @@ final class FrontTabWatcher: ObservableObject {
                 readURL: () -> FrontTabScriptResult) {
         let name = browser.name
         guard current == browser else {
-            system.log("Front tab: left \(name) before the read, nothing read")
+            system.log(.info, "Front tab: left \(name) before the read, nothing read")
             suggestion = nil
             return
         }
@@ -362,30 +375,32 @@ final class FrontTabWatcher: ObservableObject {
             let result = readURL()
             suggestion = FrontTabHost.host(fromURL: result.url).map { .site(host: $0, browser: browser) }
             if let number = result.errorNumber {
-                system.log("Front tab: \(name) access on, script error \(number)")
+                system.log(.warning, "Front tab: \(name) access on, script error \(number)")
             } else {
-                system.log("Front tab: \(name) access on, " + (suggestion == nil ? "no site in the front tab" : "site read"))
+                system.log(.info, "Front tab: \(name) access on, " + (suggestion == nil ? "no site in the front tab" : "site read"))
             }
         case .needsConsent:
             suggestion = .needsConsent(browser: browser)
-            system.log("Front tab: \(name) access not asked yet")
+            system.log(.info, "Front tab: \(name) access not asked yet")
         case .denied:
             suggestion = .accessOff(browser: browser)
-            system.log("Front tab: \(name) access is off")
+            system.log(.info, "Front tab: \(name) access is off")
         case .unavailable:
             suggestion = nil
-            system.log("Front tab: \(name) access unknown, nothing read")
+            system.log(.info, "Front tab: \(name) access unknown, nothing read")
         }
     }
 
     /// Runs on the main thread, as NSAppleScript requires; the script's own timeout bounds it.
     private static func runScript(_ source: String) -> FrontTabScriptResult {
+        // A script that cannot even be made is a failed read, not a tab with no site.
+        guard let script = NSAppleScript(source: source) else { return FrontTabScriptResult(url: nil, errorNumber: 0) }
         var error: NSDictionary?
-        let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
+        let result = script.executeAndReturnError(&error)
         if let error {
             return FrontTabScriptResult(url: nil, errorNumber: (error[NSAppleScript.errorNumber] as? NSNumber)?.intValue ?? 0)
         }
-        return FrontTabScriptResult(url: result?.stringValue, errorNumber: nil)
+        return FrontTabScriptResult(url: result.stringValue, errorNumber: nil)
     }
 }
 
@@ -460,7 +475,7 @@ struct FrontTabRow: View {
     let onAdd: (String) -> Void
     let onAllow: (FrontTabBrowser) -> Void
     /// The access-off row's button: the Automation pane of System Settings.
-    var onOpenSettings: () -> Void = { NSWorkspace.shared.open(FrontTabPermission.automationSettingsURL) }
+    var onOpenSettings: () -> Void = FrontTabPermission.openAutomationSettings
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {

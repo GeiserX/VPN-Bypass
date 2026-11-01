@@ -116,7 +116,7 @@ final class FrontTabTests: XCTestCase {
     func testAReadIsDroppedWhenTheUserLeftThatBrowser() {
         let watcher = FrontTabWatcher(system: .init(frontmost: { nil }, isRunning: { _ in true },
                                                     permission: { _, _ in .granted },
-                                                    runScript: { _ in .init() }, log: { _ in }),
+                                                    runScript: { _ in .init() }, log: { _, _ in }),
                                       ownBundleID: "com.example.vpnbypass", readsTabs: false)
         let safari = FrontTabBrowser(bundleID: "com.apple.Safari", name: "Safari", family: .safari)
         let chrome = FrontTabBrowser(bundleID: "com.google.Chrome", name: "Google Chrome", family: .chromium)
@@ -157,6 +157,10 @@ final class FrontTabTests: XCTestCase {
         XCTAssertEqual(FrontTabCopy.openSettingsTitle(in: es), "Abrir Ajustes")
         XCTAssertEqual(FrontTabCopy.openSettingsTitle(in: fr), "Ouvrir les réglages")
         XCTAssertEqual(FrontTabCopy.openSettingsName("Safari", in: fr), "Ouvrir les réglages d’automatisation pour Safari")
+        XCTAssertEqual(FrontTabCopy.openSettingsHelp("Safari", in: es),
+                       "Activa Safari bajo VPN Bypass en Privacidad y seguridad > Automatización para que la app pueda leer la pestaña activa.")
+        XCTAssertEqual(FrontTabCopy.openSettingsHelp("Safari", in: fr),
+                       "Activez Safari sous VPN Bypass dans Confidentialité et sécurité > Automatisation pour que l’app puisse lire l’onglet actif.")
     }
 
     // MARK: - The row
@@ -224,6 +228,16 @@ final class FrontTabTests: XCTestCase {
                                       listing: nil, onAdd: { _ in }, onAllow: { _ in }))
         XCTAssertTrue(read.contains("The site open in Safari"), "read: \(read)")
         XCTAssertTrue(read.contains("Allow Reading the Front Tab in Safari"), "read: \(read)")
+    }
+
+    func testOpenSettingsOpensTheAutomationPaneAndLogsARefusal() {
+        var opened: [URL] = []
+        var logged: [(RouteManager.LogEntry.LogLevel, String)] = []
+        FrontTabPermission.openAutomationSettings(open: { opened.append($0); return true }, log: { logged.append(($0, $1)) })
+        XCTAssertEqual(opened, [FrontTabPermission.automationSettingsURL])
+        XCTAssertTrue(logged.isEmpty, "an opened pane logs nothing")
+        FrontTabPermission.openAutomationSettings(open: { _ in false }, log: { logged.append(($0, $1)) })
+        XCTAssertEqual(logged.map(\.0), [.warning], "a pane macOS would not open is logged")
     }
 
     func testAnAccessSwitchedOffOffersTheAutomationPane() {
@@ -393,6 +407,7 @@ final class FrontTabReadSequenceTests: XCTestCase {
     private let own = "com.example.vpnbypass"
     private var front: FrontAppTracker.App?
     private var logs: [String] = []
+    private var levels: [RouteManager.LogEntry.LogLevel] = []
     private var scripts: [String] = []
     private var script = FrontTabScriptResult(url: "https://example.com/", errorNumber: nil)
     private let answer = PermissionAnswer()
@@ -400,12 +415,12 @@ final class FrontTabReadSequenceTests: XCTestCase {
     /// Safari as macOS 27 hands it over: in the Dock, process id -1, and a handle of a live
     /// process (this test's own, standing in for Safari's).
     private var safari: FrontAppTracker.App {
-        .init(bundleID: "com.apple.Safari", name: "Safari", isRegular: true, pid: -1, process: .current)
+        .init(bundleID: "com.apple.Safari", name: "Safari", isRegular: true, pid: -1, process: StubProcess(terminated: false))
     }
 
     /// This app once its status item is clicked: active, with no Dock icon.
     private var ownMenu: FrontAppTracker.App {
-        .init(bundleID: own, name: "VPN Bypass", isRegular: false, pid: getpid(), process: .current)
+        .init(bundleID: own, name: "VPN Bypass", isRegular: false, pid: getpid(), process: StubProcess(terminated: false))
     }
 
     private let browser = FrontTabBrowser(bundleID: "com.apple.Safari", name: "Safari", family: .safari)
@@ -418,7 +433,7 @@ final class FrontTabReadSequenceTests: XCTestCase {
             isRunning: FrontTabWatcher.stillRuns,
             permission: { bundleID, ask in answer.asked.append((bundleID, ask)); return answer.value },
             runScript: { [unowned self] source in scripts.append(source); return script },
-            log: { [unowned self] line in logs.append(line) })
+            log: { [unowned self] level, line in logs.append(line); levels.append(level) })
         return FrontTabWatcher(system: system, ownBundleID: own, readsTabs: true)
     }
 
@@ -479,6 +494,7 @@ final class FrontTabReadSequenceTests: XCTestCase {
                               "Front tab: Safari access on, no site in the front tab",
                               "Front tab: Safari access not asked yet",
                               "Front tab: Safari access unknown, nothing read"])
+        XCTAssertEqual(levels, [.warning, .info, .info, .info], "a failed script shows under the Warnings filter")
         // A site that was read never reaches the log: hostnames are never logged.
         script = FrontTabScriptResult(url: "https://private.example.org/x", errorNumber: nil)
         answer.value = .granted
@@ -507,7 +523,21 @@ final class FrontTabReadSequenceTests: XCTestCase {
         var gone = safari
         gone.process = nil
         XCTAssertFalse(FrontTabWatcher.stillRuns(gone), "id -1 and no handle: nothing to go on")
+        gone.process = StubProcess(terminated: true)
+        XCTAssertFalse(FrontTabWatcher.stillRuns(gone), "id -1 and a handle that quit: gone")
         let described = FrontTabWatcher.describe(.current)
         XCTAssertNotNil(described?.process, "the app keeps each process's handle")
     }
+}
+
+/// A process handle whose `isTerminated` the test sets. `NSRunningApplication.current` reports
+/// itself terminated in an XCTest run that has not started NSApplication yet (a filtered run),
+/// so a test that leans on it passes or fails by test order.
+final class StubProcess: NSRunningApplication {
+    private let stubTerminated: Bool
+    init(terminated: Bool) {
+        self.stubTerminated = terminated
+        super.init()
+    }
+    override var isTerminated: Bool { stubTerminated }
 }

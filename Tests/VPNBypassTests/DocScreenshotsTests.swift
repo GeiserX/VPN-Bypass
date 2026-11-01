@@ -1489,13 +1489,13 @@ final class DocScreenshotsTests: XCTestCase {
     /// The dropdown draws the row that open published.
     private func driveFrontTab(permission: FrontTabPermission) async {
         let safari = FrontAppTracker.App(bundleID: "com.apple.Safari", name: "Safari", isRegular: true,
-                                         pid: -1, process: .current)
+                                         pid: -1, process: StubProcess(terminated: false))
         let watcher = FrontTabWatcher(system: .init(
             frontmost: { nil },
             isRunning: FrontTabWatcher.stillRuns,
             permission: { _, _ in permission },
             runScript: { _ in FrontTabScriptResult(url: "https://shop.example.com/cart", errorNumber: nil) },
-            log: { _ in }), ownBundleID: "com.example.vpnbypass", readsTabs: true)
+            log: { _, _ in }), ownBundleID: "com.example.vpnbypass", readsTabs: true)
         watcher.activated(safari)
         watcher.refresh()
         await watcher.readTask?.value
