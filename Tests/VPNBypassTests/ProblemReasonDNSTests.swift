@@ -166,6 +166,30 @@ final class UnresolvedLookupsTests: XCTestCase {
         }
     }
 
+    /// A name removed and added again while its lookup cannot run (here, no VPN) does not show
+    /// the removed entry's DNS failure.
+    func testAReAddedEntryDropsTheRemovedEntrysRecord() throws {
+        rm.isVPNConnected = false
+        rm.noteLookups(for: "gone.example.com", unresolved: ["gone.example.com"])
+        _ = try rm.addDomain("gone.example.com").get()
+        XCTAssertNil(rm.unresolvedLookups["gone.example.com"], "the removed entry's failure is still the reason")
+    }
+
+    /// Only the list the mode routes gives a stale reason: the other list keeps the count from
+    /// when it was in use.
+    func testOnlyTheModesListGivesAStaleReason() {
+        var stale = RouteManager.DomainEntry(domain: "shared.example.com")
+        stale.resolveFailures = ResolveFailures(count: StaleEntries.threshold, since: Date())
+        var config = rm.config
+        config.domains = [RouteManager.DomainEntry(domain: "shared.example.com")]
+        config.inverseDomains = [stale]
+        rm.config = config
+        XCTAssertEqual(rm.currentDNSFailures, [], "Bypass took the VPN Only entry's stale count")
+        config.routingMode = .vpnOnly
+        rm.config = config
+        XCTAssertEqual(rm.currentDNSFailures.map(\.entry), ["shared.example.com"])
+    }
+
     /// A domain added on its own that gets no answer: its row says it did not resolve, and the
     /// record goes once the name answers.
     func testAnAddedDomainThatGetsNoAnswerIsRecordedThenClearedWhenItAnswers() async throws {

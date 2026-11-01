@@ -170,9 +170,16 @@ final class RouteManager: ObservableObject {
         return RouteFailure.unresolved(names)
     }
 
-    /// `dnsFailures` for the config and lookups now held.
+    /// `dnsFailures` for the config and lookups now held, from the list the mode routes: an
+    /// entry on the other list keeps the stale count from when its list was in use.
     var currentDNSFailures: [RouteFailure] {
-        Self.dnsFailures(lookups: unresolvedLookups, domains: config.domains + config.inverseDomains)
+        let listed: [DomainEntry]
+        switch config.routingMode {
+        case .bypass: listed = config.domains
+        case .vpnOnly: listed = config.inverseDomains
+        case .custom: listed = []
+        }
+        return Self.dnsFailures(lookups: unresolvedLookups, domains: listed)
     }
 
     /// The last settings change a control-socket request made, for the dropdown footer. A
@@ -3717,9 +3724,8 @@ final class RouteManager: ObservableObject {
         
         // Every enabled entry was looked up again, as on a full apply.
         if routeEpoch == epoch {
-            unresolvedLookups = Self.lookupRecord(looked: domainsToResolve,
-                                                  answers: Dictionary(results.compactMap { r in r.2.map { (r.0, $0) } },
-                                                                      uniquingKeysWith: { a, b in a.isEmpty ? b : a }))
+            unresolvedLookups = Self.lookupRecord(unresolved: results.filter { $0.2?.isEmpty ?? true }
+                                                      .map { (domain: $0.0, source: $0.1) })
         }
 
         // Update per-domain caches first
@@ -4470,6 +4476,11 @@ final class RouteManager: ObservableObject {
     /// `restoreDomain`.
     private func routeNewBypassEntry(_ entry: DomainEntry) {
         let cleaned = entry.domain
+        // A removed entry of this name may have left its lookup record; the lookup below may
+        // not run. The VPN Only entry of the same name shares the record, so it keeps it.
+        if !config.inverseDomains.contains(where: { $0.domain == cleaned }) {
+            noteLookups(for: cleaned, unresolved: [])
+        }
         // Paused: the entry is saved, and Resume applies it.
         if isVPNConnected && bypassListIsLive && !isPaused && acquireRouteOperation() {
             Task {
@@ -4983,6 +4994,10 @@ final class RouteManager: ObservableObject {
     /// or `restoreInverseDomain`.
     private func routeNewInverseEntry(_ inverseEntry: DomainEntry) {
         let cleaned = inverseEntry.domain, cidr = inverseEntry.isCIDR
+        // As on the Bypass list: drop a removed entry's record, unless a Bypass entry shares it.
+        if !config.domains.contains(where: { $0.domain == cleaned }) {
+            noteLookups(for: cleaned, unresolved: [])
+        }
         if isVPNConnected && config.routingMode == .vpnOnly && !isPaused && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }

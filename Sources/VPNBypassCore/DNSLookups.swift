@@ -252,7 +252,9 @@ final class DNSLookupsMonitor: ObservableObject {
         guard wanted, !tickInFlight else { return }
         tickInFlight = true
         defer { tickInFlight = false }
-        await readSearchDomainsIfDue()
+        // Read beside the capture, never before it: `scutil` can take seconds, and the names
+        // looked up while it runs would be missed.
+        Task { await readSearchDomainsIfDue() }
 
         let drainGeneration = generation
         if isCapturing, let names = await HelperManager.shared.drainDNSQueries() {
