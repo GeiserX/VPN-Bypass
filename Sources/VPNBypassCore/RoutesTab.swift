@@ -207,6 +207,7 @@ struct RoutesTab: View {
     private func toggleRoute(_ id: UUID, enabled: Bool) {
         guard let idx = routeManager.config.routes.firstIndex(where: { $0.id == id }) else { return }
         routeManager.config.routes[idx].enabled = enabled
+        settingsUndo.routeSaved(id)
         routeManager.saveConfig()
         // Custom mode: this route may compile to a KERNEL route (a `.vpnDefault`
         // route with an `.interface` selector) — re-apply so it doesn't go stale

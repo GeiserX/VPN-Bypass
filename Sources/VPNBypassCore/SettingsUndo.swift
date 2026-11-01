@@ -135,6 +135,8 @@ final class SettingsUndo: ObservableObject {
     /// Moves on with every recorded or dropped change. An undo waiting for the gate goes
     /// ahead, or puts its line back, only if nothing replaced or dropped it meanwhile.
     private var generation = 0
+    /// The change an undo is waiting to put back, off the line while it waits.
+    private var waiting: UndoableChange?
 
     /// `last` seeds the line, for a rendered screenshot.
     init(routeManager: RouteManager? = nil, last: UndoableChange? = nil) {
@@ -144,6 +146,7 @@ final class SettingsUndo: ObservableObject {
 
     func record(_ change: UndoableChange) {
         generation += 1
+        waiting = nil
         undoManager?.removeAllActions(withTarget: self)
         last = change
         register()
@@ -151,14 +154,16 @@ final class SettingsUndo: ObservableObject {
 
     func clear() {
         generation += 1
+        waiting = nil
         undoManager?.removeAllActions(withTarget: self)
         last = nil
     }
 
-    /// A route was saved from its sheet. Undo of a Duplicate removes the copy by id, so once
-    /// the copy is edited the line goes: Undo would throw the edit away with it.
+    /// A route was edited or switched. Undo of a Duplicate removes the copy by id, so once
+    /// the copy changes the line goes, or the undo waiting for the gate is cancelled: either
+    /// would throw the change away with the copy.
     func routeSaved(_ id: UUID) {
-        if case .routeDuplicated(let copy, _) = last, copy.id == id { clear() }
+        if case .routeDuplicated(let copy, _) = waiting ?? last, copy.id == id { clear() }
     }
 
     /// The line's Undo button.
@@ -186,6 +191,7 @@ final class SettingsUndo: ObservableObject {
             finish(change)
             return
         }
+        waiting = change
         Task { @MainActor in
             var polls = 0
             while routeManager.isApplyingRoutes && polls < gateWaitPolls {
@@ -193,6 +199,7 @@ final class SettingsUndo: ObservableObject {
                 polls += 1
             }
             guard generation == started else { return }
+            waiting = nil
             guard !routeManager.isApplyingRoutes else {
                 last = change
                 register()

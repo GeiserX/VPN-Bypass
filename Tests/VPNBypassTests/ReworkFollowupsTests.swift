@@ -289,6 +289,29 @@ final class ReworkFollowupsTests: XCTestCase {
         XCTAssertNil(undo.last, "Undo would still throw away the edited copy")
     }
 
+    /// An Undo of a Duplicate that waits for a route operation is cancelled by an edit of the
+    /// copy meanwhile; without the edit it goes through once the gate frees (the control).
+    func testEditingTheCopyCancelsAWaitingDuplicateUndo() throws {
+        for edits in [false, true] {
+            var config = rm.config
+            config.routes = [Route(name: "Direct", egress: .direct), Route(name: "wait-probe", egress: .direct)]
+            config.routingMode = .custom
+            config.schemaVersion = 2
+            rm.config = config
+            let copy = try XCTUnwrap(rm.duplicateRoute(config.routes[1].id))
+            let undo = SettingsUndo(routeManager: rm)
+            undo.gateWaitPolls = 20
+            undo.record(.routeDuplicated(copy, original: "wait-probe"))
+            XCTAssertTrue(rm.tryAcquireRouteOperationForTests())
+            undo.undoLast()
+            if edits { undo.routeSaved(copy.id) }
+            rm.releaseRouteOperationForTests()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+            XCTAssertEqual(rm.config.routes.contains { $0.id == copy.id }, edits,
+                           edits ? "the waiting undo removed the edited copy" : "the waiting undo never ran")
+        }
+    }
+
     /// A stored name with spaces around it still takes its name.
     func testAStoredNameWithSpacesIsTaken() {
         let padded = profile("Home ")
