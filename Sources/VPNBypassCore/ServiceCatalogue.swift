@@ -32,7 +32,31 @@ enum ServiceCatalogue {
             case .banks: return String(localized: "catalogue.category.banks", defaultValue: "Banks", bundle: bundle)
             }
         }
+
+        /// The SF Symbol a service of this category draws when it has none of its own
+        /// (`ServiceChip.iconName`).
+        var glyph: String {
+            switch self {
+            case .messaging: return "bubble.left.fill"
+            case .video: return "film.fill"
+            case .music: return "music.note"
+            case .social: return "person.3.fill"
+            case .work: return "briefcase.fill"
+            case .cloud: return "cloud.fill"
+            case .gaming: return "gamecontroller.fill"
+            case .developer: return "chevron.left.forwardslash.chevron.right"
+            case .ai: return "sparkles"
+            case .government: return "building.columns.fill"
+            case .banks: return "banknote.fill"
+            }
+        }
     }
+
+    /// The category a shipped service is in, nil for a custom service or an unknown id.
+    static func category(of serviceID: String) -> Category? { categoryByID[serviceID] }
+
+    private static let categoryByID: [String: Category] =
+        Dictionary(shipped.map { ($0.service.id, $0.category) }, uniquingKeysWith: { first, _ in first })
 
     /// One catalogue service. `service` is off and not custom; `region` is an ISO 3166 code
     /// for a service that belongs to one country, so the sheet can find "France" across

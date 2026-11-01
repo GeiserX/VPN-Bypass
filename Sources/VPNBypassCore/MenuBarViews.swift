@@ -2776,7 +2776,11 @@ struct RouteCheckCard: View {
     }
 }
 
-/// The SF Symbol each service draws in the dropdown's list and in the first-run question.
+/// The SF Symbol each service draws in the dropdown's list, the Services page and the
+/// first-run question. One rule, no brand logos: a symbol says what the service is for. A
+/// service whose main use has a clear symbol of its own (a call, a stream, a chat) keeps it;
+/// every other catalogue service draws its category's symbol. Only a name the catalogue does
+/// not know draws the globe.
 enum ServiceChip {
     static func iconName(for serviceID: String) -> String {
         switch serviceID {
@@ -2790,7 +2794,7 @@ enum ServiceChip {
         case "twitch": return "tv.fill"
         case "zoom": return "video.fill"
         case "teams": return "person.2.fill"
-        default: return "globe"
+        default: return ServiceCatalogue.category(of: serviceID)?.glyph ?? "globe"
         }
     }
 }

@@ -93,15 +93,18 @@ final class DropdownOpenRefreshTests: XCTestCase {
     func testEveryOpenRefreshes() throws {
         var appears = 0
         let window = makeWindow(dropdown(onAppear: { appears += 1 }))
+        let tabReads = FrontTabWatcher.shared.refreshRequests
 
         open(window)
         XCTAssertTrue(window.isKeyWindow, "control: the host makes the window key, as the menu bar does")
         XCTAssertEqual(refreshes, 1, "the first open refreshes")
+        XCTAssertEqual(FrontTabWatcher.shared.refreshRequests, tabReads + 1, "the first open reads the browser tab")
         close(window)
         open(window)
 
         XCTAssertEqual(appears, 1, "control: like the menu bar, the host runs .onAppear on the first open only")
         XCTAssertEqual(refreshes, 2, "the second open refreshes again")
+        XCTAssertEqual(FrontTabWatcher.shared.refreshRequests, tabReads + 2, "the second open reads the browser tab again")
     }
 
     /// Another window taking key focus is not an open of the dropdown.
