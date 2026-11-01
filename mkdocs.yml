@@ -122,12 +122,14 @@ extra_css:
 # listed here. The patterns follow the docs/ contract: a page is a lowercase
 # kebab-case .md file; anything with a capital letter (ROADMAP.md, CHANGELOG.md,
 # GOAL.md, DESIGN.md) is a repo-facing note, and design/, research/ and notes/
-# hold material read on GitHub. Add a line for any other per-repo note.
+# hold material read on GitHub; release-notes/ is the text release.yml puts at the top of a
+# GitHub release. Add a line for any other per-repo note.
 exclude_docs: |
   [A-Z]*.md
   design/
   research/
   notes/
+  release-notes/
   requirements-docs.txt
 
 # Four tabs, each a section. The nav title equals the page's H1.
