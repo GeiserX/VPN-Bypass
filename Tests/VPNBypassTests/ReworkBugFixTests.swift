@@ -477,7 +477,7 @@ final class ReworkViewTests: XCTestCase {
     func testTheGeneralPageHasNoIcons() throws {
         let general = try ReworkSource.body(of: "struct GeneralTab: View", in: "GeneralPage.swift")
         XCTAssertFalse(general.contains("Image(systemName: \"gearshape"), "the page header icon is back")
-        XCTAssertFalse(general.contains("Theme.success"), "a General control is green again")
+        XCTAssertFalse(general.contains("Theme.live"), "a General control is green again")
         let row = try ReworkSource.body(of: "struct GeneralRow<Control: View>: View", in: "GeneralPage.swift")
         XCTAssertFalse(row.contains("Image("), "a General row draws an icon again")
     }

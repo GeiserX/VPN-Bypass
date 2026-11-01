@@ -34,12 +34,8 @@ final class ComponentsTests: XCTestCase {
         XCTAssertEqual(Set(roles.map { "\($0)" }).count, roles.count, "two roles share a colour")
     }
 
-    /// The old names stay, as the same colours, until the last page moves over (step 11).
-    func testOldNamesAreAliasesOfTheRoles() {
-        XCTAssertEqual(Theme.textPrimary, Theme.text)
-        XCTAssertEqual(Theme.success, Theme.live)
-        XCTAssertEqual(Theme.warning, Theme.attention)
-        XCTAssertEqual(Theme.error, Theme.failure)
+    /// The two brand roles are the brand colours, so the mark and the controls match.
+    func testBrandRolesAreTheBrandColours() {
         XCTAssertEqual(Theme.accent, Theme.Brand.blue)
         XCTAssertEqual(Theme.accentText, Theme.Brand.sky)
     }

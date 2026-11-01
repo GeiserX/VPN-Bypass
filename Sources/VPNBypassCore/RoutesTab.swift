@@ -542,7 +542,7 @@ struct RouteEditorSheet: View {
                         ForEach(peers) { peer in
                             HStack(spacing: 6) {
                                 Circle()
-                                    .fill(peer.online ? Theme.success : Theme.textTertiary)
+                                    .fill(peer.online ? Theme.live : Theme.textTertiary)
                                     .frame(width: 6, height: 6)
                                 // An exit-capable peer is usually a small minority
                                 // of a tailnet, and it is the only kind that can

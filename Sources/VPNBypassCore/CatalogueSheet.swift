@@ -358,7 +358,7 @@ struct CatalogueSheet: View {
                 if row.isOn {
                     Text("Already on")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(Theme.success)
+                        .foregroundColor(Theme.live)
                 } else {
                     Text(FirstRunSetup.domainCount(row.service.domains.count))
                         .font(.system(size: 10))
@@ -368,7 +368,7 @@ struct CatalogueSheet: View {
             if let holder = row.heldBy, !row.isOn {
                 Text(ServiceNameClash.builtInOffMessage(custom: holder.name))
                     .font(.system(size: 10))
-                    .foregroundColor(Theme.error)
+                    .foregroundColor(Theme.failure)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, 22)
             }
