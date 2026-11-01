@@ -1463,6 +1463,19 @@ final class DocScreenshotsTests: XCTestCase {
         showFrontTab(host: "shop.example.com", browser: "Safari", id: "com.apple.Safari")
         _ = try renderDropdown(to: "fronttab-disconnected.png")
     }
+
+    // The open as macOS 27 hands it over: Safari with process id -1, access on, then off.
+    func testFrontTabReadWithHiddenProcessID() async throws {
+        seedBypass()
+        await driveFrontTab(permission: .granted)
+        _ = try renderDropdown(to: "fronttab-read-granted.png")
+    }
+
+    func testFrontTabAccessOff() async throws {
+        seedBypass()
+        await driveFrontTab(permission: .denied)
+        _ = try renderDropdown(to: "fronttab-access-off.png")
+    }
     // END FRONT TAB SHOTS
 
     // MARK: - Every catalogue service draws its own symbol (live-test L7), drawn for the pull request
@@ -1496,6 +1509,24 @@ final class DocScreenshotsTests: XCTestCase {
         rm.activeRoutes = routes
         rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-23),
                                    routeCount: counts.values.reduce(0, +), failedCount: 0)
+    }
+
+    /// Runs one dropdown open through a watcher whose macOS is swapped for seams: Safari in front
+    /// with the process id -1 macOS 27 reports, the given permission, a page on shop.example.com.
+    /// The dropdown draws the row that open published.
+    private func driveFrontTab(permission: FrontTabPermission) async {
+        let safari = FrontAppTracker.App(bundleID: "com.apple.Safari", name: "Safari", isRegular: true,
+                                         pid: -1, process: StubProcess(terminated: false))
+        let watcher = FrontTabWatcher(system: .init(
+            frontmost: { nil },
+            isRunning: FrontTabWatcher.stillRuns,
+            permission: { _, _ in permission },
+            runScript: { _ in FrontTabScriptResult(url: "https://shop.example.com/cart", errorNumber: nil) },
+            log: { _, _ in }), ownBundleID: "com.example.vpnbypass", readsTabs: true)
+        watcher.activated(safari)
+        watcher.refresh()
+        await watcher.readTask?.value
+        FrontTabWatcher.shared.suggestion = watcher.suggestion
     }
 
     /// What the front tab row shows; nil `host` is a browser macOS has not been asked about.
