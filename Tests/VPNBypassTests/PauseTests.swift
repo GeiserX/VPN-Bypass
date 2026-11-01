@@ -622,6 +622,21 @@ final class PauseLifecycleTests: XCTestCase {
         XCTAssertEqual(addCalls, [], "nothing is written before the tunnel settles")
     }
 
+    /// The VPN drops again while the pause waits for the helper: it waits for the next
+    /// reconnect again, and no longer says the VPN is back.
+    func testAWaitingPauseGoesBackToWaitingForTheVPNWhenItDrops() async throws {
+        await rm.pause(for: .untilReconnect)
+        HelperManager.shared.helperState = .missing
+        await reconnect()
+        XCTAssertEqual(rm.pauseState?.reconnectedWaiting, true)
+        rm.detectVPNInterfaceOverrideForTests = { (false, nil, nil) }
+        await rm.checkVPNStatus()
+        XCTAssertFalse(rm.isVPNConnected)
+        let pause = try XCTUnwrap(rm.pauseState)
+        XCTAssertFalse(pause.reconnectedWaiting, "the dropdown says the VPN is back while it is down")
+        XCTAssertEqual(DropdownStatus.resumesLine(pause, now: Date()), "Resumes when the VPN reconnects.")
+    }
+
     /// The reconnect lands while an apply or a load runs: the pause ends and its apply waits
     /// for that work and the settle gate, instead of being skipped with the routes left out.
     func testUntilReconnectWaitsOutAnApplyThatIsRunning() async {

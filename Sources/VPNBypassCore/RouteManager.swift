@@ -990,6 +990,11 @@ final class RouteManager: ObservableObject {
                 pauseState = waiting
                 log(.warning, "The VPN reconnected, but the helper is not ready: staying paused until it is")
             }
+        } else if !isVPNConnected, var pause = pauseState, pause.reconnectedWaiting {
+            // The VPN dropped again before the helper was ready: back to waiting for a
+            // reconnect, so the dropdown does not say the VPN is back.
+            pause.reconnectedWaiting = false
+            pauseState = pause
         }
 
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
