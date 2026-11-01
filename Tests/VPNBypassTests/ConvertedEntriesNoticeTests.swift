@@ -91,6 +91,31 @@ final class ConvertedEntriesNoticeTests: RouteManagerTestCase {
         XCTAssertEqual(notified.count, 0)
     }
 
+    /// An import whose save fails is rolled back whole, the note with it.
+    func testAFailedImportLeavesTheNoteAlone() throws {
+        var cfg = RouteManager.Config()
+        cfg.domains = [DomainEntry(domain: ".example.org")]
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("converted-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try JSONEncoder().encode(RouteManager.ExportData(version: "2.0", exportDate: Date(), config: cfg)).write(to: file)
+        let dir = rm.configURL.deletingLastPathComponent()
+        let mode = try XCTUnwrap((try FileManager.default.attributesOfItem(atPath: dir.path)[.posixPermissions] as? NSNumber)?.uint16Value)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.path)
+        defer {
+            do { try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: dir.path) }
+            catch { XCTFail("Could not restore the config directory: \(error.localizedDescription)") }
+        }
+        XCTAssertFalse(rm.importConfig(from: file), "the save cannot land here")
+        XCTAssertEqual(rm.convertedEntries, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rm.convertedEntriesURL.path))
+    }
+
+    func testTheListFileIsOwnerOnly() throws {
+        rm.recordConvertedEntries([".example.net"])
+        let mode = try XCTUnwrap((try FileManager.default.attributesOfItem(atPath: rm.convertedEntriesURL.path)[.posixPermissions] as? NSNumber)?.uint16Value)
+        XCTAssertEqual(mode, 0o600)
+    }
+
     func testStatusCarriesTheListUntilDismissed() async throws {
         rm.recordConvertedEntries([".example.net", ".example.org"])
         let listed = await ControlSurface.handle(ControlRequest(cmd: "status"))

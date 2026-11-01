@@ -798,7 +798,6 @@ final class RouteManager: ObservableObject {
             mergeBuiltInServices(autoSave: false)
             if !migration.migrated.isEmpty {
                 log(.info, "Changed \(migration.migrated.joined(separator: ", ")) to the *.name form, which covers the name and every name under it")
-                recordConvertedEntries(migration.migrated)
             }
 
             // Keep the latch SET across the write. Clearing it here to get past the save guard
@@ -823,6 +822,8 @@ final class RouteManager: ObservableObject {
                 log(.error, "Failed to persist imported config: \(error.localizedDescription)")
                 return false
             }
+            // Listed only once the import is saved: a rejected import leaves the note as it was.
+            recordConvertedEntries(migration.migrated)
 
             // An import replaces what a pause was taken on; the apply below is its own.
             if isPaused { endPause(reason: "a configuration was imported", apply: false) }
@@ -5713,6 +5714,8 @@ final class RouteManager: ObservableObject {
         convertedEntries = ConvertedEntry.merging(convertedEntries, new)
         do {
             try JSONEncoder().encode(convertedEntries).write(to: convertedEntriesURL, options: .atomic)
+            // Owner-only, like config.json: it names the user's entries.
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: convertedEntriesURL.path)
         } catch {
             log(.warning, "Could not save the list of updated entries: \(error.localizedDescription)")
         }
@@ -5722,16 +5725,22 @@ final class RouteManager: ObservableObject {
     /// The user read the note: it goes, and does not come back on the next launch.
     func dismissConvertedEntries() {
         convertedEntries = []
-        try? FileManager.default.removeItem(at: convertedEntriesURL)
+        guard FileManager.default.fileExists(atPath: convertedEntriesURL.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: convertedEntriesURL)
+        } catch {
+            log(.warning, "Could not remove the list of updated entries, so the note may come back on the next launch: \(error.localizedDescription)")
+        }
     }
 
     private func loadConvertedEntries() {
-        guard let data = try? Data(contentsOf: convertedEntriesURL),
-              let saved = try? JSONDecoder().decode([ConvertedEntry].self, from: data) else {
-            convertedEntries = []
-            return
+        convertedEntries = []
+        guard FileManager.default.fileExists(atPath: convertedEntriesURL.path) else { return }
+        do {
+            convertedEntries = try JSONDecoder().decode([ConvertedEntry].self, from: Data(contentsOf: convertedEntriesURL))
+        } catch {
+            log(.warning, "Could not read the list of updated entries: \(error.localizedDescription)")
         }
-        convertedEntries = saved
     }
 
     /// Drops the card, and the result of any check still running.
