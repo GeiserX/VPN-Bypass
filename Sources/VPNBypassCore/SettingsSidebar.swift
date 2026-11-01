@@ -330,8 +330,6 @@ struct WindowTitleSetter: NSViewRepresentable {
 }
 
 private extension View {
-    /// The focused list moves with ↑ and ↓; the selected row shows where it is, so the ring
-    /// macOS draws around a focusable view would only frame the whole sidebar.
     /// The list takes the focus on a click and from code, as a native sidebar does. A plain
     /// `focusable()` on macOS 14 and later takes it only with full keyboard access on.
     @ViewBuilder func sidebarListFocusable() -> some View {
@@ -342,6 +340,8 @@ private extension View {
         }
     }
 
+    /// The focused list moves with ↑ and ↓; the selected row shows where it is, so the ring
+    /// macOS draws around a focusable view would only frame the whole sidebar.
     @ViewBuilder func sidebarFocusRingHidden() -> some View {
         if #available(macOS 14.0, *) {
             focusEffectDisabled()
