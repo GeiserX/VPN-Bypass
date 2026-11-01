@@ -86,7 +86,8 @@ final class SearchDomainRetriesTests: XCTestCase {
     func testACountryOrPublicSuffixTailIsNeverARetry() {
         let names = ["example.com", "example.com.cn", "www.example.com", "www.example.com.cn",
                      "www.example", "www.example.co", "www.example.co.uk", "example.co", "example.co.uk",
-                     "host.example.com", "host.example.com.co.uk"]
+                     "host.example.com", "host.example.com.co.uk",
+                     "host.example.com.github.io", "www.example.com.s3.amazonaws.com"]
         XCTAssertEqual(SearchDomainRetries.retries(among: names, searchDomains: []), [])
     }
 

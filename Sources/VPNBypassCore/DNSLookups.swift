@@ -110,8 +110,9 @@ enum SearchDomainRetries {
 
     /// The names that are another of `names`, N, plus "." plus a suffix S, where N has two
     /// labels or more and ends in a top-level domain (`isTopLevelDomain`), and S has two labels
-    /// or more and is not a public suffix alone (`co.uk`). So `host.example.com.example.net`
-    /// folds under `host.example.com`, while `example.com.cn` (a one-label tail) and
+    /// or more and is neither a public suffix alone (`co.uk`) nor under a hosting domain
+    /// (`github.io`, `amazonaws.com`), where a bucket's `www.example.com.s3.amazonaws.com` is a
+    /// real name. So `host.example.com.example.net` folds under `host.example.com`, while `example.com.cn` (a one-label tail) and
     /// `www.example.co.uk` (no top-level domain before `co.uk`) never do.
     static func retriesByShape(among names: Set<String>) -> Set<String> {
         var out: Set<String> = []
@@ -121,7 +122,9 @@ enum SearchDomainRetries {
             // N is labels[..<cut], S is labels[cut...]; both keep two labels or more.
             for cut in 2...(labels.count - 2) where isTopLevelDomain(labels[cut - 1]) {
                 let suffix = labels[cut...].joined(separator: ".").lowercased()
-                if LookupAddLevels.twoLabelPublicSuffixes.contains(suffix) { continue }
+                if LookupAddLevels.twoLabelPublicSuffixes.contains(suffix)
+                    || LookupAddLevels.hostingSuffixes.contains(suffix)
+                    || LookupAddLevels.hostingSuffixes.contains(where: { suffix.hasSuffix("." + $0) }) { continue }
                 if names.contains(labels[..<cut].joined(separator: ".")) {
                     out.insert(name)
                     break
