@@ -73,8 +73,6 @@ struct RoutesTab: View {
                     .font(Theme.Font.detail)
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: Theme.Space.s)
-                PageAddButton(name: String(localized: "Add Route")) { sheetState = .add }
             }
 
             systemRoutesSection
@@ -91,6 +89,7 @@ struct RoutesTab: View {
                 }
             }
         }
+        .pageTitleActions([.add(String(localized: "Add Route")) { sheetState = .add }])
         .sheet(item: $sheetState) { state in
             RouteEditorSheet(editingRoute: state.route) { route in
                 saveRoute(route)
@@ -175,6 +174,7 @@ struct RoutesTab: View {
     private func saveRoute(_ route: Route) {
         // An edit can rename the route or move its listener, so the copy line may be stale.
         copiedLine = nil
+        settingsUndo.routeSaved(route.id)
         if let idx = routeManager.config.routes.firstIndex(where: { $0.id == route.id }) {
             routeManager.config.routes[idx] = route
         } else {
@@ -196,14 +196,18 @@ struct RoutesTab: View {
         settingsUndo.record(.route(route, index: index))
     }
 
+    /// The copy lands under the route, with the line that says so and can take it back.
     private func duplicateRoute(_ route: Route) {
         copiedLine = nil
-        routeManager.duplicateRoute(route.id)
+        if let copy = routeManager.duplicateRoute(route.id) {
+            settingsUndo.record(.routeDuplicated(copy, original: route.name))
+        }
     }
 
     private func toggleRoute(_ id: UUID, enabled: Bool) {
         guard let idx = routeManager.config.routes.firstIndex(where: { $0.id == id }) else { return }
         routeManager.config.routes[idx].enabled = enabled
+        settingsUndo.routeSaved(id)
         routeManager.saveConfig()
         // Custom mode: this route may compile to a KERNEL route (a `.vpnDefault`
         // route with an `.interface` selector) — re-apply so it doesn't go stale
@@ -394,13 +398,6 @@ struct RouteRow: View {
             monoDetail: true
         )
         .help(Text(verbatim: Self.detail(route, listenerPort: listenerPort)))
-        // The buttons show only under the pointer, and a hidden button is hidden from
-        // VoiceOver too, so the row itself carries every action, the ⋯ menu's included.
-        .accessibilityActions {
-            ForEach(RowAction.flattened(actions)) { action in
-                Button(action.name, action: action.perform)
-            }
-        }
     }
 
     private func copy(_ kind: CopyKind) {

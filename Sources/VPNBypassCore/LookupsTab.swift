@@ -79,10 +79,20 @@ struct LookupsTab: View {
             }
         }
         .onChange(of: routeManager.config.routingMode) { _ in feedback = nil }
+        .pageTitleActions([Self.watchingAction(isOn: isOn) { setWatching(!isOn) }])
     }
 
-    /// The page's subtitle, under the title the title bar shows, and Stop Watching beside it
-    /// while the page is watching. The switch that sat here is gone: off, the empty state starts.
+    /// The title bar's Start Watching or Stop Watching, whichever turns the page the other way.
+    static func watchingAction(isOn: Bool, in bundle: Bundle = .main, perform: @escaping () -> Void) -> PageTitleAction {
+        isOn
+            ? .button(String(localized: "Stop Watching", bundle: bundle),
+                      help: String(localized: "Stop reading DNS lookups, and clear the list", bundle: bundle), perform: perform)
+            : .button(String(localized: "Start Watching", bundle: bundle),
+                      help: String(localized: "Read the DNS lookups this Mac sends, and list the names", bundle: bundle), perform: perform)
+    }
+
+    /// The page's subtitle, under the title the title bar shows, and Learn a Site beside it.
+    /// Start Watching and Stop Watching are in the title bar.
     private var purposeLine: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
             Text("See the names this Mac looks up, and add the ones you need.")
@@ -98,12 +108,6 @@ struct LookupsTab: View {
             .disabled(monitor.learning?.isOpen == true)
             .help(String(localized: "Watch the lookups for 60 seconds while you reload a page, and see the names it needs"))
             .accessibilityLabel(String(localized: "Learn a Site"))
-            if isOn {
-                Button(String(localized: "Stop Watching")) { setWatching(false) }
-                    .controlSize(.small)
-                    .help(String(localized: "Stop reading DNS lookups, and clear the list"))
-                    .accessibilityLabel(String(localized: "Stop Watching"))
-            }
         }
     }
 
@@ -114,7 +118,7 @@ struct LookupsTab: View {
                 .foregroundColor(Theme.textSecondary)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text("Off until you turn it on. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit.")
+                Text("Off until you start watching. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you stop watching or quit.")
                 if !isOn, monitor.learning?.isOpen == true {
                     Text("Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory.")
                 }
@@ -244,6 +248,27 @@ struct LookupRow: View {
 
     static func format(_ count: Int) -> String { count.formatted(.number) }
 
+    /// What VoiceOver says for the count: "18 lookups".
+    static func lookupsLabel(_ count: Int, in bundle: Bundle = .main) -> String {
+        count == 1 ? String(localized: "1 lookup", bundle: bundle) : String(localized: "\(count) lookups", bundle: bundle)
+    }
+
+    /// What VoiceOver says for a site's count on Learn a Site: "3 names".
+    static func namesLabel(_ count: Int, in bundle: Bundle = .main) -> String {
+        count == 1 ? String(localized: "1 name", bundle: bundle) : String(localized: "\(count) names", bundle: bundle)
+    }
+
+    /// The right-click menu's Copy: the name is not selectable on the row.
+    static func copyAction(_ name: String, in bundle: Bundle = .main,
+                           pasteboard: NSPasteboard = .general) -> RowAction {
+        RowAction(kind: .other, name: ControlNames.copy(name, in: bundle), systemImage: "doc.on.doc") {
+            pasteboard.clearContents()
+            pasteboard.setString(name, forType: .string)
+        }
+    }
+
+    private var copyAction: RowAction { Self.copyAction(entry.name) }
+
     /// What a row offers under the pointer, in order. Pure, so the rules are unit-tested.
     enum Offer: Equatable {
         /// The mode's add: Add to Bypass, Add to VPN Only, Send Direct, or Turn on a service.
@@ -316,19 +341,13 @@ struct LookupRow: View {
             detail: Self.detail(for: listing),
             number: Self.format(entry.count),
             numberWidth: numberWidth,
+            numberLabel: Self.lookupsLabel(entry.count),
             actions: actions,
+            menuActions: actions + [copyAction],
             // The panel open keeps the row's actions in view, as the pointer does.
             showsActions: showingPanel || LookupsTab.hoveredForScreenshots == entry.name
         )
         .help(tooltip)
-        // The buttons show only under the pointer, and a hidden button is hidden from VoiceOver
-        // too, so the row itself carries every action, as it did before ListRow.
-        .accessibilityElement(children: .combine)
-        .accessibilityActions {
-            ForEach(actions) { action in
-                Button(action.name, action: action.perform)
-            }
-        }
         .popover(isPresented: $showingPanel, arrowEdge: .bottom) {
             LookupAddPanel(
                 choices: LookupAddChoices(name: entry.name, mode: mode,

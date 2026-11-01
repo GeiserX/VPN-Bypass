@@ -320,7 +320,7 @@ struct MenuContent: View {
                 let status = DropdownStatus.make(statusInput, now: context.date)
                 VStack(alignment: .leading, spacing: 12) {
                     titleHeader(status)
-                    StatusBlock(status: status) { action in
+                    StatusBlock(status: status, profile: NetworkProfiles.inUseName(routeManager.config)) { action in
                         // Both open Status: the helper's row and its Install button, or
                         // Problems with every failure behind the count.
                         switch action {
@@ -1625,14 +1625,27 @@ struct DropdownModeRow: View {
 /// each line as its own element, and the button as a button.
 struct StatusBlock: View {
     let status: DropdownStatus
+    /// The network profile in use, at the end of line 1; nil while no profile exists.
+    var profile: String? = nil
     let onAction: (DropdownStatus.Line3.Action) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(status.headline)
-                .font(Theme.Font.strong)
-                .foregroundColor(Theme.text)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                Text(status.headline)
+                    .font(Theme.Font.strong)
+                    .foregroundColor(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let profile {
+                    Spacer(minLength: 4)
+                    Text(NetworkProfiles.inUseLine(profile))
+                        .font(Theme.Font.detail)
+                        .foregroundColor(Theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(String(localized: "The network profile in use. Profiles are on the General page."))
+                }
+            }
             Text(status.sentence)
                 .font(Theme.Font.body)
                 .foregroundColor(Theme.text)
@@ -2585,9 +2598,8 @@ struct RoutedBySourceCard: View {
 
             if summary.everythingElseDirect {
                 ListRow(glyph: "arrow.turn.down.right", name: RoutedBySource.everythingElse,
-                        number: RoutedBySource.direct, numberWidth: ListRow.numberColumnWidth(for: [RoutedBySource.direct]))
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(RoutedBySource.everythingElse), \(RoutedBySource.direct)")
+                        number: RoutedBySource.direct, numberWidth: ListRow.numberColumnWidth(for: [RoutedBySource.direct]),
+                        spokenLabel: "\(RoutedBySource.everythingElse), \(RoutedBySource.direct)")
             }
         }
         .padding(.horizontal, -ListRow.inset)
@@ -2595,19 +2607,13 @@ struct RoutedBySourceCard: View {
 
     private func rowView(_ row: RoutedBySource.Row, reason: String?, numberWidth: CGFloat) -> some View {
         let offered = actions(row)
+        // One VoiceOver element per row, its actions in the rotor (ListRow's own).
         return ListRow(glyph: Self.symbol(row.icon), name: row.name, detail: reason,
                        needsAttention: row.isProblem, number: row.numberText, numberWidth: numberWidth,
+                       spokenLabel: row.spokenLabel(reason: reason),
                        actions: offered.hover.map { [$0] } ?? [], menuActions: offered.menu,
                        showsActions: Self.hoveredRowForScreenshots == row.name)
             .help(row.tooltip)
-            // One VoiceOver element per row, its actions in the rotor.
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(row.spokenLabel(reason: reason))
-            .accessibilityActions {
-                ForEach(offered.menu) { action in
-                    Button(action.name, action: action.perform)
-                }
-            }
     }
 
     static func symbol(_ icon: RoutedBySource.Icon) -> String {

@@ -579,7 +579,7 @@
 "The privileged helper is not running." = "El asistente con privilegios no está en marcha.";
 "The privileged helper did not answer." = "El asistente con privilegios no respondió.";
 "See the names this Mac looks up, and add the ones you need." = "Mira los nombres que busca este Mac y añade los que necesites.";
-"Off until you turn it on. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit." = "Desactivado hasta que lo actives. Entonces el asistente lee solo las preguntas DNS que envía este Mac, nunca las respuestas ni ningún otro tráfico. La lista se guarda solo en memoria y se borra al desactivarlo o salir.";
+"Off until you start watching. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you stop watching or quit." = "Desactivado hasta que empieces a observar. Entonces el asistente lee solo las preguntas DNS que envía este Mac, nunca las respuestas ni ningún otro tráfico. La lista se guarda solo en memoria y se borra al dejar de observar o salir.";
 "%lld names since %@" = "%lld nombres desde las %@";
 "Bypassed" = "Con bypass";
 "Via VPN" = "Por la VPN";
@@ -1000,3 +1000,17 @@
 "Saves the mode and lists in use now for this network. Changes made while the profile is in use stay in it." = "Guarda el modo y las listas en uso ahora para esta red. Los cambios hechos mientras el perfil está en uso se quedan en él.";
 "Home, Office…" = "Casa, Oficina…";
 "A profile with this name exists." = "Ya existe un perfil con este nombre.";
+"1 lookup" = "1 consulta";
+"%lld lookups" = "%lld consultas";
+"1 name" = "1 nombre";
+"%lld names" = "%lld nombres";
+"Copy %@" = "Copiar %@";
+"Duplicated %@ as %@." = "Se duplicó %1$@ como %2$@.";
+"Rename %@" = "Renombrar %@";
+"Profile: %@" = "Perfil: %@";
+"Profile" = "Perfil";
+"Rename profile" = "Renombrar perfil";
+"Rename" = "Renombrar";
+"Only the name changes. Its networks, mode and lists stay." = "Solo cambia el nombre. Sus redes, su modo y sus listas se mantienen.";
+"The network profile in use. Profiles are on the General page." = "El perfil de red en uso. Los perfiles están en la página General.";
+"Read the DNS lookups this Mac sends, and list the names" = "Leer las consultas DNS que envía este Mac y listar los nombres";

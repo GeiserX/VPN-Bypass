@@ -169,6 +169,11 @@ struct ListRow: View {
         needsAttention ? "exclamationmark.triangle.fill" : glyph
     }
 
+    /// What VoiceOver says for a count of addresses in the number column: "18 addresses".
+    static func addressesLabel(_ number: String?) -> String? {
+        number.flatMap { Int($0) }.map(DropdownCopy.addresses)
+    }
+
     let glyph: String
     let name: String
     var detail: String?
@@ -176,10 +181,18 @@ struct ListRow: View {
     var number: String?
     /// From `numberColumnWidth(for:)`, the same on every row of the page.
     var numberWidth: CGFloat = 0
+    /// What VoiceOver says for the number, with its noun: "18 addresses". Nil reads the bare
+    /// number. The column has no heading VoiceOver reads, so a bare number means nothing.
+    var numberLabel: String?
+    /// The whole row read as one line, the number included, in place of the name, the
+    /// detail and the number (the dropdown's rows: "Telegram, 18 addresses").
+    var spokenLabel: String?
     var actions: [RowAction] = []
     /// The right-click menu, when it offers more than the hover actions; nil lists `actions`.
     var menuActions: [RowAction]?
     var isOn: Binding<Bool>?
+    /// The switch shows but cannot be flipped, such as a built-in service a custom one holds off.
+    var isSwitchDisabled = false
     /// A selected row answers Return, ⌘⌫ and Space.
     var isSelected = false
     /// Draws the actions as if the pointer were over the row, for the doc screenshots.
@@ -195,13 +208,24 @@ struct ListRow: View {
 
     private var actionsVisible: Bool { isHovered || isSelected || showsActions }
 
+    /// What VoiceOver offers in the row's Actions rotor: the right-click menu's items, which
+    /// hold every hover action, the ⋯ menu's items in its place.
+    var spokenActions: [RowAction] { menuActions ?? RowAction.flattened(actions) }
+
+    /// The value VoiceOver reads after the row's name: the number with its noun.
+    var spokenNumber: String? {
+        guard spokenLabel == nil, let number, !number.isEmpty else { return nil }
+        return numberLabel ?? number
+    }
+
     var body: some View {
         HStack(spacing: Theme.Space.s) {
             Image(systemName: Self.leadingGlyph(glyph, needsAttention: needsAttention))
                 .font(.system(size: 13))
                 .foregroundColor(needsAttention ? Theme.attention : Theme.textSecondary)
                 .frame(width: Self.glyphColumn)
-                .accessibilityHidden(!needsAttention)
+                // A row read as one line says its problem in that line.
+                .accessibilityHidden(!needsAttention || spokenLabel != nil)
                 .accessibilityLabel(String(localized: "Needs attention"))
 
             VStack(alignment: .leading, spacing: 1) {
@@ -220,7 +244,16 @@ struct ListRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .combine)
+            // One element for the row: its name and detail, the number as its value, and every
+            // action in the rotor. The hover buttons are hidden from VoiceOver while the pointer
+            // is elsewhere (opacity 0), so the row carries them instead, on every page.
+            .rowElement(spokenLabel: spokenLabel)
+            .accessibilityValueIfSet(spokenNumber)
+            .accessibilityActions {
+                ForEach(spokenActions) { action in
+                    Button(action.name, action: action.perform)
+                }
+            }
 
             if !actions.isEmpty {
                 HStack(spacing: 2) {
@@ -251,6 +284,8 @@ struct ListRow: View {
                 }
                 .opacity(actionsVisible ? 1 : 0)
                 .animation(.easeOut(duration: 0.15), value: actionsVisible)
+                // The row's rotor has them all; shown here too they would be read twice.
+                .accessibilityHidden(true)
             }
 
             if let accessory {
@@ -263,6 +298,8 @@ struct ListRow: View {
                     .foregroundColor(Theme.textSecondary)
                     .lineLimit(1)
                     .frame(width: numberWidth, alignment: .trailing)
+                    // Read with the row, as its value.
+                    .accessibilityHidden(true)
             }
 
             if let isOn {
@@ -271,6 +308,7 @@ struct ListRow: View {
                     .controlSize(.small)
                     .labelsHidden()
                     .tint(Theme.accent)
+                    .disabled(isSwitchDisabled)
             }
         }
         .padding(.horizontal, Self.inset)
@@ -308,13 +346,31 @@ struct ListRow: View {
             ForEach(actions.filter { $0.shortcut != nil }) { action in
                 Button("", action: action.perform).keyboardShortcut(action.shortcut!)
             }
-            if let isOn {
+            if let isOn, !isSwitchDisabled {
                 Button("") { isOn.wrappedValue.toggle() }.keyboardShortcut(.space, modifiers: [])
             }
         }
         .opacity(0)
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    /// A row's one element: its texts combined, or the line given in their place. Given, the
+    /// texts are ignored rather than combined, so the line is the element's label and not
+    /// the value of a static text.
+    @ViewBuilder fileprivate func rowElement(spokenLabel: String?) -> some View {
+        if let spokenLabel {
+            accessibilityElement(children: .ignore).accessibilityLabel(spokenLabel)
+        } else {
+            accessibilityElement(children: .combine)
+        }
+    }
+
+    /// The value VoiceOver reads after the label, when there is one.
+    @ViewBuilder func accessibilityValueIfSet(_ value: String?) -> some View {
+        if let value { accessibilityValue(value) } else { self }
     }
 }
 
@@ -330,6 +386,10 @@ struct PageHeader: View {
     /// The + button's spoken name ("Add Route"); the button shows only with `onAdd`.
     var addName: String = ""
     var onAdd: (() -> Void)?
+    /// The page's own primary actions (`PageTitleAction`), after the search.
+    var actions: [PageTitleAction] = []
+    /// False greys `actions` out, on a page of another mode.
+    var actionsEnabled = true
 
     /// The + button's spoken name: the page's own, or "Add" when the page gave none, never empty.
     static func addButtonName(_ addName: String, in bundle: Bundle = .main) -> String {
@@ -378,6 +438,7 @@ struct PageHeader: View {
                             .accessibilityHidden(true)
                     }
                 }
+                pageActions
                 if let onAdd {
                     PageAddButton(name: Self.addButtonName(addName), action: onAdd)
                 }
@@ -388,6 +449,34 @@ struct PageHeader: View {
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+}
+
+extension PageHeader {
+    /// The words first, then the +; an add without a button still answers ⌘N.
+    @ViewBuilder fileprivate var pageActions: some View {
+        ForEach(actions.filter { $0.kind == .button }) { action in
+            Button(action.name, action: action.perform)
+                .controlSize(.small)
+                .disabled(!action.isEnabled)
+                .help(action.help ?? action.name)
+                .accessibilityLabel(action.name)
+        }
+        .disabled(!actionsEnabled)
+        if let add = actions.first(where: { $0.kind == .add }) {
+            Group {
+                if add.showsButton {
+                    PageAddButton(name: Self.addButtonName(add.name), action: add.perform)
+                } else {
+                    Button("", action: add.perform)
+                        .keyboardShortcut("n", modifiers: .command)
+                        .opacity(0)
+                        .frame(width: 0, height: 0)
+                        .accessibilityHidden(true)
+                }
+            }
+            .disabled(!actionsEnabled || !add.isEnabled)
         }
     }
 }
@@ -551,6 +640,9 @@ struct RouteChip: View {
         }
     }
 
+    /// The widest a chip gets in a row; a longer route name truncates in the middle.
+    static let rowMaxWidth: CGFloat = 180
+
     /// The spoken name: "Route: Direct".
     static func spokenName(_ name: String, in bundle: Bundle = .main) -> String {
         String(localized: "Route: \(name)", bundle: bundle)
@@ -596,6 +688,25 @@ struct RouteChip: View {
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Self.spokenName(name))
+    }
+}
+
+/// Gives its view the width it asks for, up to `max`, and less when less is offered: a long
+/// route name truncates inside the chip instead of taking the row's width from its name.
+struct CappedWidth: Layout {
+    let max: CGFloat
+
+    private func proposal(_ proposal: ProposedViewSize) -> ProposedViewSize {
+        ProposedViewSize(width: min(proposal.width ?? max, max), height: proposal.height)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        subviews.first?.sizeThatFits(self.proposal(proposal)) ?? .zero
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
+                              proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
     }
 }
 

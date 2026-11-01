@@ -39,6 +39,10 @@ enum ControlNames {
         String(localized: "Show \(name) in Settings", bundle: bundle)
     }
 
+    static func copy(_ name: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Copy \(name)", bundle: bundle)
+    }
+
     static func copyAddresses(_ name: String, in bundle: Bundle = .main) -> String {
         String(localized: "Copy the Addresses of \(name)", bundle: bundle)
     }

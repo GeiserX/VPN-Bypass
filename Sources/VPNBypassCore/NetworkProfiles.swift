@@ -241,12 +241,32 @@ enum NetworkProfiles {
         return c
     }
 
-    /// A name is free when it is not blank and no profile, nor Other networks, has it.
-    static func nameIsFree(_ name: String, in profiles: [NetworkProfile], bundle: Bundle = .main) -> Bool {
+    /// A name is free when it is not blank and no profile, nor Other networks, has it. A
+    /// rename passes the profile's own id, so its own name (in another case) stays free.
+    static func nameIsFree(_ name: String, in profiles: [NetworkProfile], excluding id: UUID? = nil,
+                           bundle: Bundle = .main) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return false }
-        let taken = profiles.map { $0.name.lowercased() } + [otherNetworksName(in: bundle).lowercased()]
+        let taken = profiles.filter { $0.id != id }.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() } + [otherNetworksName(in: bundle).lowercased()]
         return !taken.contains(trimmed)
+    }
+
+    /// Profile `id` named `name`. Nothing else changes: its networks, settings and whether it
+    /// is in use stay. A taken name or a profile that is gone changes nothing.
+    static func renaming(_ id: UUID, to name: String, in config: Config) -> Config {
+        guard let index = config.profiles.firstIndex(where: { $0.id == id }),
+              nameIsFree(name, in: config.profiles, excluding: id) else { return config }
+        var c = config
+        c.profiles[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return c
+    }
+
+    /// The name of what is in use, for the dropdown and Status: a profile, or Other networks.
+    /// Nil while no profile exists, when there is nothing to tell apart.
+    static func inUseName(_ config: Config, in bundle: Bundle = .main) -> String? {
+        guard !config.profiles.isEmpty else { return nil }
+        return config.activeProfileId.flatMap { id in config.profiles.first { $0.id == id }?.name }
+            ?? otherNetworksName(in: bundle)
     }
 
     /// Whether a switch applies now. Never while the VPN is down (the connect applies), while
@@ -291,6 +311,15 @@ enum NetworkProfiles {
     static func useOnThisNetworkName(_ profile: String, in bundle: Bundle = .main) -> String {
         String(localized: "Use \(profile) on this network", bundle: bundle)
     }
+
+    static func renameName(_ profile: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Rename \(profile)", bundle: bundle)
+    }
+
+    /// The dropdown's and the Status page's words for it: "Profile: Home".
+    static func inUseLine(_ name: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Profile: \(name)", bundle: bundle)
+    }
 }
 
 // MARK: - View
@@ -301,6 +330,8 @@ struct NetworkProfilesGroup: View {
     @EnvironmentObject var routeManager: RouteManager
     @State private var showingNewProfile = false
     @State private var confirmingDelete: NetworkProfile?
+    /// The profile the Rename sheet is open for.
+    @State private var renaming: NetworkProfile?
 
     var body: some View {
         let config = routeManager.config
@@ -339,6 +370,18 @@ struct NetworkProfilesGroup: View {
                             .accessibilityLabel(NetworkProfiles.useOnThisNetworkName(profile.name))
                         }
                         Button {
+                            renaming = profile
+                        } label: {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 12))
+                                .foregroundColor(Theme.textSecondary)
+                                .frame(width: 22, height: 20)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(NetworkProfiles.renameName(profile.name))
+                        .accessibilityLabel(NetworkProfiles.renameName(profile.name))
+                        Button {
                             confirmingDelete = profile
                         } label: {
                             Image(systemName: "trash")
@@ -369,6 +412,13 @@ struct NetworkProfilesGroup: View {
                                 if routeManager.createProfile(named: name) { showingNewProfile = false }
                             })
         }
+        .sheet(item: $renaming) { profile in
+            NewProfileSheet(profiles: config.profiles, renaming: profile,
+                            onCancel: { renaming = nil },
+                            onSave: { name in
+                                if routeManager.renameProfile(profile.id, to: name) { renaming = nil }
+                            })
+        }
         .alert(confirmingDelete.map { NetworkProfiles.deleteQuestion($0.name) } ?? "",
                isPresented: Binding(get: { confirmingDelete != nil }, set: { if !$0 { confirmingDelete = nil } })) {
             Button(String(localized: "Delete"), role: .destructive) {
@@ -396,30 +446,48 @@ struct NetworkProfilesGroup: View {
     }
 }
 
-/// Names a new profile for this network.
+/// Names a new profile for this network, or renames a profile.
 struct NewProfileSheet: View {
     let profiles: [NetworkProfile]
     /// Save needs this network identified; it greys out while it is not.
     var networkKnown = true
+    /// Set, the sheet renames this profile instead of saving a new one.
+    var renaming: NetworkProfile?
     let onCancel: () -> Void
     let onSave: (String) -> Void
     @State private var name: String
 
-    init(profiles: [NetworkProfile], networkKnown: Bool = true, name: String = "", onCancel: @escaping () -> Void, onSave: @escaping (String) -> Void) {
+    init(profiles: [NetworkProfile], networkKnown: Bool = true, renaming: NetworkProfile? = nil, name: String = "",
+         onCancel: @escaping () -> Void, onSave: @escaping (String) -> Void) {
         self.profiles = profiles
         self.networkKnown = networkKnown
+        self.renaming = renaming
         self.onCancel = onCancel
         self.onSave = onSave
-        _name = State(initialValue: name)
+        _name = State(initialValue: renaming?.name ?? name)
+    }
+
+    /// Save is offered for a free name; a rename to the name it has is no change.
+    static func canSave(_ name: String, profiles: [NetworkProfile], renaming: NetworkProfile?, networkKnown: Bool) -> Bool {
+        if let renaming {
+            return NetworkProfiles.nameIsFree(name, in: profiles, excluding: renaming.id)
+                && name.trimmingCharacters(in: .whitespacesAndNewlines) != renaming.name
+        }
+        return NetworkProfiles.nameIsFree(name, in: profiles) && networkKnown
     }
 
     var body: some View {
-        let free = NetworkProfiles.nameIsFree(name, in: profiles) && networkKnown
+        let free = Self.canSave(name, profiles: profiles, renaming: renaming, networkKnown: networkKnown)
+        let taken = !NetworkProfiles.nameIsFree(name, in: profiles, excluding: renaming?.id)
         let blank = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        SheetScaffold(String(localized: "New profile"), confirmTitle: String(localized: "Save"), canConfirm: free,
+        SheetScaffold(renaming == nil ? String(localized: "New profile") : String(localized: "Rename profile"),
+                      confirmTitle: renaming == nil ? String(localized: "Save") : String(localized: "Rename"),
+                      canConfirm: free,
                       onCancel: onCancel, onConfirm: { if free { onSave(name) } }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text("Saves the mode and lists in use now for this network. Changes made while the profile is in use stay in it.")
+                Text(renaming == nil
+                     ? String(localized: "Saves the mode and lists in use now for this network. Changes made while the profile is in use stay in it.")
+                     : String(localized: "Only the name changes. Its networks, mode and lists stay."))
                     .font(Theme.Font.detail)
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -428,9 +496,9 @@ struct NewProfileSheet: View {
                         .textFieldStyle(.roundedBorder)
                         .accessibilityLabel(String(localized: "Name"))
                 }
-                if !networkKnown {
+                if renaming == nil && !networkKnown {
                     SheetError(message: String(localized: "This network is not identified yet."))
-                } else if !blank && !free {
+                } else if !blank && taken {
                     SheetError(message: String(localized: "A profile with this name exists."))
                 }
             }

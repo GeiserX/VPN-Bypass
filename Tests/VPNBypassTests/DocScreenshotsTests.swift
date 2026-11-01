@@ -792,6 +792,85 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderSettings(page: .general, height: 1180, to: "general-page-custom.png")
     }
 
+    // MARK: - Rework follow-ups, drawn for the pull request
+
+    /// A rule whose route has a long name: the chip stops at its cap and truncates the name.
+    func testFollowupRulesWithALongRouteName() throws {
+        seedCustom()
+        if let i = rm.config.routes.firstIndex(where: { $0.name == "office-proxy" }) {
+            rm.config.routes[i].name = "office proxy through the second building, floor 3"
+        }
+        XCTAssertEqual(try renderSettings(page: .rules, to: "followup-rules-long-route.png"), Self.settingsSize)
+    }
+
+    /// Duplicate on office-proxy: the copy under it, and the line that can take it back.
+    func testFollowupRoutesAfterDuplicate() throws {
+        seedCustom()
+        let proxy = try XCTUnwrap(rm.config.routes.first { $0.name == "office-proxy" })
+        let copy = try XCTUnwrap(rm.duplicateRoute(proxy.id))
+        let undo = SettingsUndo(last: .routeDuplicated(copy, original: proxy.name))
+        // Opened on the page it was left on, so no page change drops the line.
+        let savedPage = UserDefaults.standard.string(forKey: SettingsSidebar.lastPageKey)
+        UserDefaults.standard.set(SettingsView.SettingsTab.routes.rawValue, forKey: SettingsSidebar.lastPageKey)
+        defer { UserDefaults.standard.set(savedPage, forKey: SettingsSidebar.lastPageKey) }
+        XCTAssertEqual(try renderSettings(page: .routes, settingsUndo: undo, to: "followup-routes-duplicated.png"),
+                       Self.settingsSize)
+    }
+
+    /// A custom service named Telegram comes in while the page is open (an import, `vpnb`) and
+    /// holds the built-in Telegram off: its row stays, its switch greyed.
+    func testFollowupServicesWithAHeldOffService() throws {
+        seedBypass()
+        SettingsPageRequest.shared.page = .services
+        let window = SettingsWindowController.makeWindow()
+        window.setContentSize(SettingsWindowController.defaultContentSize)
+        window.appearance = NSAppearance(named: .darkAqua)
+        show(window)
+        window.makeFirstResponder(nil)
+        let frame = try XCTUnwrap(window.contentView?.superview, "the window's frame view")
+        settle(frame)
+        if let i = rm.config.services.firstIndex(where: { $0.id == "telegram" }) { rm.config.services[i].enabled = false }
+        rm.config.services.append(ServiceEntry(id: "custom_telegram", name: "Telegram", enabled: true,
+                                               domains: ["t.example"], ipRanges: [], isCustom: true))
+        settle(frame)
+        XCTAssertEqual(try write(frame, cornerRadius: 17, outline: NSColor(white: 1, alpha: 0.2),
+                                 to: "followup-services-held-off.png"), Self.settingsSize)
+    }
+
+    private func seedProfiles() {
+        let office = NetworkIdentity(gateway: "192.0.2.1", routerMAC: "02:00:00:00:00:01", kind: .ethernet)
+        let home = NetworkIdentity(gateway: "192.0.2.1", routerMAC: "02:00:00:00:00:02", kind: .wifi)
+        rm.currentNetwork = office
+        var config = NetworkProfiles.creatingProfile(named: "Home", for: home, in: rm.config)
+        config = NetworkProfiles.switching(config, to: .otherNetworks)
+        config = NetworkProfiles.creatingProfile(named: "Office", for: office, in: config)
+        rm.config = config
+    }
+
+    /// The dropdown names the profile in use at the end of its first line.
+    func testFollowupDropdownWithAProfile() throws {
+        seedBypass()
+        let savedNetwork = rm.currentNetwork
+        defer { rm.currentNetwork = savedNetwork }
+        seedProfiles()
+        _ = try renderDropdown(to: "followup-dropdown-profile.png")
+    }
+
+    /// Status > Connection names it too.
+    func testFollowupStatusWithAProfile() throws {
+        seedBypass()
+        let savedNetwork = rm.currentNetwork
+        defer { rm.currentNetwork = savedNetwork }
+        seedProfiles()
+        _ = try renderSettings(page: .status, height: 1500, to: "followup-status-profile.png")
+    }
+
+    func testFollowupSheetRenameProfile() throws {
+        let home = NetworkProfile(id: UUID(), name: "Home", networks: [], settings: ProfileSettings(capturing: rm.config))
+        try renderSheet(NewProfileSheet(profiles: [home], renaming: home, name: "", onCancel: {}, onSave: { _ in }),
+                        to: "followup-sheet-rename-profile.png")
+    }
+
     // MARK: - Profiles per network (idea 9)
 
     /// General with two profiles: Office in use on this network, Home on another, and Other
@@ -1386,9 +1465,10 @@ final class DocScreenshotsTests: XCTestCase {
         return try write(hosting, cornerRadius: 15, outline: NSColor(white: 0.2, alpha: 1), to: name)
     }
 
-    private func renderSettings(page: SettingsView.SettingsTab, height: CGFloat? = nil, to name: String) throws -> NSSize {
+    private func renderSettings(page: SettingsView.SettingsTab, height: CGFloat? = nil,
+                                settingsUndo: SettingsUndo? = nil, to name: String) throws -> NSSize {
         SettingsPageRequest.shared.page = page
-        let window = SettingsWindowController.makeWindow()
+        let window = SettingsWindowController.makeWindow(settingsUndo: settingsUndo)
         // makeWindow brings back a size saved by an earlier run; the renders use the default,
         // or a taller window to show a whole page.
         var windowSize = SettingsWindowController.defaultContentSize

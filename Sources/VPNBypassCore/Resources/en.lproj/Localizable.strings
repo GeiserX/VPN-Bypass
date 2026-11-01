@@ -579,7 +579,7 @@
 "The privileged helper is not running." = "The privileged helper is not running.";
 "The privileged helper did not answer." = "The privileged helper did not answer.";
 "See the names this Mac looks up, and add the ones you need." = "See the names this Mac looks up, and add the ones you need.";
-"Off until you turn it on. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit." = "Off until you turn it on. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit.";
+"Off until you start watching. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you stop watching or quit." = "Off until you start watching. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you stop watching or quit.";
 "%lld names since %@" = "%lld names since %@";
 "Bypassed" = "Bypassed";
 "Via VPN" = "Via VPN";
@@ -1000,3 +1000,17 @@
 "Saves the mode and lists in use now for this network. Changes made while the profile is in use stay in it." = "Saves the mode and lists in use now for this network. Changes made while the profile is in use stay in it.";
 "Home, Office…" = "Home, Office…";
 "A profile with this name exists." = "A profile with this name exists.";
+"1 lookup" = "1 lookup";
+"%lld lookups" = "%lld lookups";
+"1 name" = "1 name";
+"%lld names" = "%lld names";
+"Copy %@" = "Copy %@";
+"Duplicated %@ as %@." = "Duplicated %1$@ as %2$@.";
+"Rename %@" = "Rename %@";
+"Profile: %@" = "Profile: %@";
+"Profile" = "Profile";
+"Rename profile" = "Rename profile";
+"Rename" = "Rename";
+"Only the name changes. Its networks, mode and lists stay." = "Only the name changes. Its networks, mode and lists stay.";
+"The network profile in use. Profiles are on the General page." = "The network profile in use. Profiles are on the General page.";
+"Read the DNS lookups this Mac sends, and list the names" = "Read the DNS lookups this Mac sends, and list the names";

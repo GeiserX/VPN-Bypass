@@ -755,6 +755,10 @@ struct StatusTab: View {
                           line: StatusPage.normalConnectionLine(gateway: routeManager.localGateway))
             StatusDivider()
             StatusLineRow(label: String(localized: "Default route"), line: StatusPage.defaultRouteLine(snapshot))
+            if let profile = NetworkProfiles.inUseName(routeManager.config) {
+                StatusDivider()
+                StatusLineRow(label: String(localized: "Profile"), line: StatusPage.Line(text: profile))
+            }
         }
     }
 
