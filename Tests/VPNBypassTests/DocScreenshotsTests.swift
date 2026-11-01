@@ -1747,8 +1747,9 @@ final class DocScreenshotsTests: XCTestCase {
                               #selector(Bundle.docScreenshotLocalizedString(forKey:value:table:localizations:))),
                              ("_localizedStringForKey:value:table:localizations:",
                               #selector(Bundle.docScreenshotPrivateLocalizedString(forKey:value:table:localizations:)))] {
-            let original = class_getInstanceMethod(Bundle.self, NSSelectorFromString(name))!
-            let replacement = class_getInstanceMethod(Bundle.self, swap)!
+            // A selector this macOS lacks (the public localizations: one arrived in 15.4) is skipped.
+            guard let original = class_getInstanceMethod(Bundle.self, NSSelectorFromString(name)),
+                  let replacement = class_getInstanceMethod(Bundle.self, swap) else { continue }
             method_exchangeImplementations(original, replacement)
         }
     }

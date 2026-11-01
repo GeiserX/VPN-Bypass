@@ -14,8 +14,9 @@ enum Theme {
     static let live = Color(hex: "10B981")
     /// The user needs to look: the ▲ glyph and its line.
     static let attention = Color(hex: "F59E0B")
-    /// A write that failed; destructive confirm buttons.
-    static let failure = Color(hex: "EF4444")
+    /// A write that failed; destructive confirm buttons. Darker on light grounds, so its text
+    /// keeps 4.5:1 there.
+    static let failure = adaptive(light: Color(hex: "C81E1E"), dark: Color(hex: "EF4444"))
     /// The one primary button, a switch that is on, the selected sidebar row.
     static let accent = Brand.blue
     /// Links, the focus ring, a selected glyph.
@@ -69,8 +70,9 @@ enum Theme {
         })
     }
 
-    /// Every secondary word, count, label and placeholder: ~7.2:1 contrast on dark, ~4.8:1 on light.
-    static let textSecondary = adaptive(light: Color(hex: "6B7280"), dark: Color(hex: "9CA3AF"))
+    /// Every secondary word, count, label and placeholder: ~7.2:1 contrast on dark, at least
+    /// 4.7:1 on the light grounds (bgPrimary and bgSecondary).
+    static let textSecondary = adaptive(light: Color(hex: "5F6673"), dark: Color(hex: "9CA3AF"))
     /// Disabled text and decoration only: too faint for words a user must read.
     static let textTertiary = adaptive(light: Color(hex: "9CA3AF"), dark: Color(hex: "6B7280"))
 
@@ -95,7 +97,8 @@ enum Theme {
     /// values generate the icon, wordmark and banner, so nothing drifts between code and art.
     enum Brand {
         static let blue = Color(hex: "2563EB")        // #2563EB — primary
-        /// The mark's arrow / accent, and the highlight in the icon gradient.
-        static let sky = Color(hex: "38BDF8")         // #38BDF8
+        /// The mark's arrow / accent, and the highlight in the icon gradient. On a light ground
+        /// the app draws it darker (#0369A1), so the wordmark and links stay readable.
+        static let sky = adaptive(light: Color(hex: "0369A1"), dark: Color(hex: "38BDF8"))  // #38BDF8
     }
 }

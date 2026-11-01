@@ -26,9 +26,9 @@ final class ComponentsTests: XCTestCase {
         XCTAssertEqual(hex(Theme.text, .darkAqua), "FFFFFF")
         XCTAssertEqual(Theme.live, Color(hex: "10B981"))
         XCTAssertEqual(Theme.attention, Color(hex: "F59E0B"))
-        XCTAssertEqual(Theme.failure, Color(hex: "EF4444"))
+        XCTAssertEqual(hex(Theme.failure, .darkAqua), "EF4444")
         XCTAssertEqual(Theme.accent, Color(hex: "2563EB"))
-        XCTAssertEqual(Theme.accentText, Color(hex: "38BDF8"))
+        XCTAssertEqual(hex(Theme.accentText, .darkAqua), "38BDF8")
         XCTAssertEqual(hex(Theme.textSecondary, .darkAqua), "9CA3AF")
         XCTAssertEqual(hex(Theme.textTertiary, .darkAqua), "6B7280")
         XCTAssertEqual(hex(Theme.bgPrimary, .darkAqua), "0F0F14")
@@ -39,8 +39,11 @@ final class ComponentsTests: XCTestCase {
 
     func testTheGreysAndSurfacesFollowLightMode() {
         XCTAssertEqual(hex(Theme.text, .aqua), "1D1D1F")
-        XCTAssertEqual(hex(Theme.textSecondary, .aqua), "6B7280")
+        XCTAssertEqual(hex(Theme.textSecondary, .aqua), "5F6673")
         XCTAssertEqual(hex(Theme.bgPrimary, .aqua), "F5F5F7")
+        // Text colours darken on the light grounds, so words keep 4.5:1 there.
+        XCTAssertEqual(hex(Theme.failure, .aqua), "C81E1E")
+        XCTAssertEqual(hex(Theme.accentText, .aqua), "0369A1")
         XCTAssertEqual(hex(Theme.bgSecondary, .aqua), "E9E9EE")
         // Positive control: the dark values are different, so the check can fail.
         for (name, color) in [("text", Theme.text), ("textSecondary", Theme.textSecondary), ("bgPrimary", Theme.bgPrimary),

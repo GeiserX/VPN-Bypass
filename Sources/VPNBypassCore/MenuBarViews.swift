@@ -2445,7 +2445,7 @@ struct FirstRunSetupView: View {
             Spacer(minLength: 4)
             Text(FirstRunSetup.domainCount(service.domains.count))
                 .font(.system(size: 10.5))
-                .foregroundColor(Theme.textTertiary)
+                .foregroundColor(Theme.textSecondary)
             // The Services page's switch (ServiceRow), and the same call behind it.
             Toggle(service.name, isOn: Binding(
                 get: { service.enabled },

@@ -148,49 +148,58 @@ struct SettingsSidebarView: View {
                 .padding(.horizontal, Theme.Space.l)
                 .frame(height: PageHeader.height, alignment: .center)
                 .padding(.top, topInset)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Mode")
-                        .font(Theme.Font.section)
-                        .foregroundColor(Theme.textSecondary)
-                        .padding(.horizontal, Theme.Space.s)
-                        .padding(.top, Theme.Space.xs)
-                        .padding(.bottom, Theme.Space.xs)
-                        .accessibilityHidden(true)
-                    SettingsModeControl()
-                        .padding(.bottom, Theme.Space.xs)
-                    ForEach(SettingsSidebar.groups, id: \.kind) { group in
-                        if let title = group.title() {
-                            Text(title)
-                                .font(Theme.Font.section)
-                                .foregroundColor(Theme.textSecondary)
-                                .padding(.horizontal, Theme.Space.s)
-                                .padding(.top, Theme.Space.m)
-                                .padding(.bottom, Theme.Space.xs)
-                                .accessibilityAddTraits(.isHeader)
-                        }
-                        ForEach(group.pages, id: \.self) { page in
-                            SettingsSidebarRow(page: page,
-                                               isSelected: page == selection,
-                                               isReadOnly: SettingsSidebar.isReadOnly(page, in: mode)) {
-                                selection = page
-                                listFocused = true
+            ScrollViewReader { scroller in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Mode")
+                            .font(Theme.Font.section)
+                            .foregroundColor(Theme.textSecondary)
+                            .padding(.horizontal, Theme.Space.s)
+                            .padding(.top, Theme.Space.xs)
+                            .padding(.bottom, Theme.Space.xs)
+                            .accessibilityHidden(true)
+                        SettingsModeControl()
+                            .padding(.bottom, Theme.Space.xs)
+                        ForEach(SettingsSidebar.groups, id: \.kind) { group in
+                            if let title = group.title() {
+                                Text(title)
+                                    .font(Theme.Font.section)
+                                    .foregroundColor(Theme.textSecondary)
+                                    .padding(.horizontal, Theme.Space.s)
+                                    .padding(.top, Theme.Space.m)
+                                    .padding(.bottom, Theme.Space.xs)
+                                    .accessibilityAddTraits(.isHeader)
+                            }
+                            ForEach(group.pages, id: \.self) { page in
+                                SettingsSidebarRow(page: page,
+                                                   isSelected: page == selection,
+                                                   isReadOnly: SettingsSidebar.isReadOnly(page, in: mode)) {
+                                    selection = page
+                                    listFocused = true
+                                }
+                                .id(page)
                             }
                         }
                     }
-                }
-                .padding(.horizontal, Theme.Space.s)
-                .padding(.bottom, Theme.Space.m)
-                .focusable()
-                .focused($listFocused)
-                .sidebarFocusRingHidden()
-                .onMoveCommand { direction in
-                    switch direction {
-                    case .up: selection = SettingsSidebar.page(after: selection, movingUp: true)
-                    case .down: selection = SettingsSidebar.page(after: selection, movingUp: false)
-                    default: break
+                    .padding(.horizontal, Theme.Space.s)
+                    .padding(.bottom, Theme.Space.m)
+                    .focusable()
+                    .focused($listFocused)
+                    .sidebarFocusRingHidden()
+                    .onMoveCommand { direction in
+                        switch direction {
+                        case .up: selection = SettingsSidebar.page(after: selection, movingUp: true)
+                        case .down: selection = SettingsSidebar.page(after: selection, movingUp: false)
+                        default: break
+                        }
                     }
                 }
+                // On a short window the rows run below the fold: ↑ and ↓ keep the selected one in view.
+                .onChange(of: selection) { page in
+                    withAnimation(.easeOut(duration: 0.15)) { scroller.scrollTo(page) }
+                }
+                // The window can reopen on a page below the fold.
+                .onAppear { scroller.scrollTo(selection) }
             }
         }
         .frame(width: Self.width)

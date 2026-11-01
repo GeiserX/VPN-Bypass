@@ -163,6 +163,31 @@ final class SettingsHeaderTests: XCTestCase {
                        "↓ did not move the sidebar: the list has no focus")
     }
 
+    /// On the smallest window the last rows sit below the sidebar's fold. ↓ down to About keeps
+    /// the selected row on screen, so the selection never moves out of sight.
+    func testTheArrowKeysKeepTheSelectedRowInView() throws {
+        let window = open(.general)
+        window.setContentSize(NSSize(width: 720, height: 480))
+        settle(window)
+        let down = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.function, .numericPad],
+                                                  timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                                  characters: "\u{F701}", charactersIgnoringModifiers: "\u{F701}",
+                                                  isARepeat: false, keyCode: 125))
+        window.sendEvent(down)
+        settle(window)
+        XCTAssertEqual(window.title, SettingsView.SettingsTab.about.name)
+        let all = AccessibilityTree.elements(under: window) { settle(window) }
+        // The row, not the window (whose title is About too): narrower than the sidebar.
+        let rows = all.compactMap { element -> NSRect? in
+            guard AccessibilityTree.label(element) == SettingsView.SettingsTab.about.name,
+                  let frame = AccessibilityTree.frame(element) else { return nil }
+            let local = window.convertFromScreen(frame)
+            return local.width <= SettingsSidebarView.width && local.minX < SettingsSidebarView.width ? local : nil
+        }
+        let row = try XCTUnwrap(rows.first, "no About row in the sidebar")
+        XCTAssertGreaterThanOrEqual(row.minY, -0.5, "the selected About row is below the window's bottom edge")
+    }
+
     // MARK: - The logo
 
     /// The sidebar opens with the app's icon and its name, one header for VoiceOver, on the
