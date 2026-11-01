@@ -818,6 +818,32 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderDropdown(to: "paused-config-unreadable.png")
     }
 
+    /// Bypass with no VPN connected and nothing routed: Pause has nothing to take out.
+    func testDropdownWithNothingRouted() throws {
+        seedConnected(mode: .bypass)
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        rm.activeRoutes = []
+        rm.lastRouteChange = nil
+        _ = try renderDropdown(to: "mactest-nothing-routed.png")
+    }
+
+    /// The Logs page after three detection passes with no VPN connected, on this Mac's own
+    /// interfaces, as the 30 s status timer runs them.
+    func testLogsAfterThreeStatusPassesWithNoVPN() async throws {
+        let savedLogs = rm.recentLogs
+        addTeardownBlock { @MainActor in RouteManager.shared.recentLogs = savedLogs }
+        seedConnected(mode: .bypass)
+        rm.recentLogs = []
+        for _ in 0..<3 { await rm.detectVPNStateOnly() }
+        // That entry point adds a line of its own, which the status timer's pass does not.
+        rm.recentLogs.removeAll { $0.message.hasPrefix("VPN state detected (display only)") }
+        rm.isVPNConnected = false
+        rm.activeRoutes = []
+        XCTAssertEqual(try renderSettings(page: .logs, to: "mactest-logs-three-passes.png"), Self.settingsSize)
+    }
+
     /// A6 and A7: Custom mode with no VPN, and a removal that left an address behind.
     func testReworkDisconnectedCustom() throws {
         seedCustom()
@@ -1357,6 +1383,39 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderDropdown(to: "fronttab-disconnected.png")
     }
     // END FRONT TAB SHOTS
+
+    // MARK: - Every catalogue service draws its own symbol (live-test L7), drawn for the pull request
+
+    // BEGIN SERVICE GLYPH SHOTS
+    func testServiceGlyphsInTheDropdown() throws {
+        seedServiceGlyphs()
+        _ = try renderDropdown(to: "glyphs-dropdown.png")
+    }
+
+    func testServiceGlyphsOnServices() throws {
+        seedServiceGlyphs()
+        _ = try renderSettings(page: .services, to: "glyphs-services.png")
+    }
+    // END SERVICE GLYPH SHOTS
+
+    /// Bypass with a service of each kind on: two that had their own symbol (Telegram,
+    /// YouTube) beside Signal, Netflix, a bank, a public service and an AI service.
+    private func seedServiceGlyphs() {
+        seedConnected(mode: .bypass)
+        let counts = ["telegram": 18, "signal": 6, "youtube": 16, "netflix": 9, "es_bbva": 3, "es_gov": 4, "openai": 5]
+        var routes: [RouteManager.ActiveRoute] = []
+        var found: Set<String> = []
+        for i in rm.config.services.indices {
+            guard let n = counts[rm.config.services[i].id] else { continue }
+            found.insert(rm.config.services[i].id)
+            rm.config.services[i].enabled = true
+            for _ in 0..<n { routes.append(route("192.0.2.\(routes.count + 1)", via: "192.168.1.1", for: rm.config.services[i].name)) }
+        }
+        XCTAssertEqual(found, Set(counts.keys), "every service the glyph shots ask for is in the catalogue")
+        rm.activeRoutes = routes
+        rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-23),
+                                   routeCount: counts.values.reduce(0, +), failedCount: 0)
+    }
 
     /// What the front tab row shows; nil `host` is a browser macOS has not been asked about.
     private func showFrontTab(host: String?, browser: String, id: String) {

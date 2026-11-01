@@ -240,7 +240,7 @@ vpnb pause            # until vpnb resume
 vpnb resume
 ```
 
-`vpnb pause` does what the dropdown's Pause does and is refused the same way, with code `pause_refused` and the reason (in VPN Only, say). While paused, `refresh` and `dns.refresh` answer with code `paused`, and `vpnb status` adds `paused: until 2026-10-31T14:32:00Z` (or `until the VPN reconnects`, `until the helper is ready`, `until resumed`), `runtime.paused` with `--json`.
+`vpnb pause` does what the dropdown's Pause does and is refused the same way, with code `pause_refused` and the reason (in VPN Only, say), or `nothing_to_pause` when no VPN is connected and no route is in. While paused, `refresh` and `dns.refresh` answer with code `paused`, and `vpnb status` adds `paused: until 2026-10-31T14:32:00Z` (or `until the VPN reconnects`, `until the helper is ready`, `until resumed`), `runtime.paused` with `--json`.
 
 ## Shortcuts actions
 

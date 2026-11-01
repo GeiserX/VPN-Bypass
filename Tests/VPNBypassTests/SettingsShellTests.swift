@@ -191,6 +191,48 @@ final class SettingsShellTests: XCTestCase {
         XCTAssertTrue(editor?.delegate === search, "a click on the search left the cursor in \(String(describing: window.firstResponder))")
     }
 
+    /// No page puts the cursor in the title bar search when it opens. On a page of another
+    /// mode (Rules and Routes in Bypass) every control is disabled and nothing held the focus,
+    /// so a key window gave it to the first field it found: the search. Now the sidebar list
+    /// holds it when the window opens and after a page change, even one that takes the focus
+    /// away from a field of the page before. (A window here never becomes key, so the test
+    /// checks who holds the focus, not where AppKit would have moved it.)
+    func testEveryPageOpensWithTheFocusOnTheSidebarNotTheSearch() throws {
+        for mode in [RoutingMode.bypass, .vpnOnly, .custom] {
+            var config = rm.config
+            config.routingMode = mode
+            rm.config = config
+            for page in SettingsView.SettingsTab.allCases {
+                UserDefaults.standard.set(page.rawValue, forKey: SettingsSidebar.lastPageKey)
+                let window = open()
+                XCTAssertFalse(searchHasFocus(in: window), "\(mode) \(page): the window opened with the cursor in the search")
+                XCTAssertTrue(sidebarHasFocus(in: window), "\(mode) \(page): the window opened with the focus on \(String(describing: window.firstResponder))")
+                discard(window)
+            }
+        }
+
+        var config = rm.config
+        config.routingMode = .bypass
+        rm.config = config
+        UserDefaults.standard.set(SettingsView.SettingsTab.domains.rawValue, forKey: SettingsSidebar.lastPageKey)
+        let window = open()
+        for page in [SettingsView.SettingsTab.rules, .routes] {
+            SettingsPageRequest.shared.page = .domains
+            settle(window)
+            let input = try XCTUnwrap(find(in: window.contentView!) {
+                guard let field = $0 as? NSTextField else { return false }
+                return field.isEditable && field.placeholderString != "Search"
+            } as? NSTextField, "the Domains page has no add field")
+            window.makeFirstResponder(input)
+            settle(window)
+            XCTAssertTrue(window.firstResponder is NSTextView, "control: the add field did not take the focus")
+            SettingsPageRequest.shared.page = page
+            settle(window)
+            XCTAssertFalse(searchHasFocus(in: window), "\(page): opening the page put the cursor in the search")
+            XCTAssertTrue(sidebarHasFocus(in: window), "\(page): the focus went to \(String(describing: window.firstResponder))")
+        }
+    }
+
     /// The page scrolls in the window's one scroll view: Services and Logs each nested a second.
     func testNoPageNestsASecondScrollView() {
         var config = rm.config
@@ -212,6 +254,25 @@ final class SettingsShellTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Takes a window this test opened apart, so its page requests and last-page saves stop
+    /// before the next test opens its own.
+    private func discard(_ window: NSWindow) {
+        window.orderOut(nil)
+        window.contentView = nil
+    }
+
+    /// The focus is on a view inside the sidebar, not a field.
+    private func sidebarHasFocus(in window: NSWindow) -> Bool {
+        guard let view = window.firstResponder as? NSView, !(view is NSText), view !== window.contentView else { return false }
+        return view.convert(view.bounds, to: nil).maxX <= SettingsSidebarView.width + 1
+    }
+
+    private func searchHasFocus(in window: NSWindow) -> Bool {
+        let editor = window.firstResponder as? NSTextView
+        return (editor?.delegate as? NSTextField)?.placeholderString == "Search"
+            || (window.firstResponder as? NSTextField)?.placeholderString == "Search"
+    }
 
     private func open() -> NSWindow {
         let window = SettingsWindowController.makeWindow()

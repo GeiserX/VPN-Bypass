@@ -714,7 +714,7 @@ struct MenuContent: View {
     /// Pause, with its four lengths. Greyed when pausing is not safe in this config, with the
     /// one line that says why as the menu's first item, its tooltip and its VoiceOver hint.
     private var pauseMenu: some View {
-        let blocker = PauseGate.blocker(routeManager.config)
+        let blocker = pauseBlocker
         let why = blocker.map { PauseGate.message($0) }
         return Menu {
             if let why {
@@ -750,6 +750,12 @@ struct MenuContent: View {
         .accessibilityHint(why ?? String(localized: "Takes the app's routes out for a while, so traffic follows the VPN's own routes."))
     }
 
+    /// Why Pause is greyed now, as RouteManager.pause would refuse it.
+    private var pauseBlocker: PauseGate.Blocker? {
+        PauseGate.blocker(routeManager.config, isPaused: routeManager.isPaused,
+                          vpnConnected: routeManager.vpnMayBeConnected, routedCount: routeManager.activeRoutes.count)
+    }
+
     private func pause(_ length: PauseLength) {
         Task { await routeManager.pause(for: length) }
     }
@@ -762,7 +768,7 @@ struct MenuContent: View {
     private func pauseShortcut() {
         guard !DropdownShortcut.isKeyRepeat(NSApp.currentEvent) else { return }
         switch PauseShortcut.action(isPaused: routeManager.isPaused,
-                                    blocker: PauseGate.blocker(routeManager.config)) {
+                                    blocker: pauseBlocker) {
         case .resume: resume()
         case .pause(let length): pause(length)
         case .nothing: break
@@ -2748,7 +2754,11 @@ struct RouteCheckCard: View {
     }
 }
 
-/// The SF Symbol each service draws in the dropdown's list and in the first-run question.
+/// The SF Symbol each service draws in the dropdown's list, the Services page and the
+/// first-run question. One rule, no brand logos: a symbol says what the service is for. A
+/// service whose main use has a clear symbol of its own (a call, a stream, a chat) keeps it;
+/// every other catalogue service draws its category's symbol. Only a name the catalogue does
+/// not know draws the globe.
 enum ServiceChip {
     static func iconName(for serviceID: String) -> String {
         switch serviceID {
@@ -2762,7 +2772,7 @@ enum ServiceChip {
         case "twitch": return "tv.fill"
         case "zoom": return "video.fill"
         case "teams": return "person.2.fill"
-        default: return "globe"
+        default: return ServiceCatalogue.category(of: serviceID)?.glyph ?? "globe"
         }
     }
 }
