@@ -1033,3 +1033,10 @@
 "Only your list uses the VPN." = "Only your list uses the VPN.";
 "Your rules pick each route." = "Your rules pick each route.";
 "Search %@" = "Search %@";
+
+/* Entries an older version saved as ".example.com", rewritten as wildcards */
+"%@ is now %@" = "%1$@ is now %2$@";
+"Updated 1 entry to the new wildcard form: %@. It routes the same names as before." = "Updated 1 entry to the new wildcard form: %@. It routes the same names as before.";
+"Updated %lld entries to the new wildcard form: %@. They route the same names as before." = "Updated %lld entries to the new wildcard form: %@. They route the same names as before.";
+"Entries updated to wildcards" = "Entries updated to wildcards";
+"Dismiss the note about updated entries" = "Dismiss the note about updated entries";

@@ -97,7 +97,8 @@ public enum ControlSurface {
                     && rm.vpnKillSwitch == nil,
                 appVersion: appVersion(from: Bundle.main.infoDictionary),
                 killSwitch: rm.vpnKillSwitch?.flagNames,
-                paused: rm.pauseState?.wireDescription
+                paused: rm.pauseState?.wireDescription,
+                convertedEntries: rm.convertedEntries.isEmpty ? nil : rm.convertedEntries
             )
         }
 
