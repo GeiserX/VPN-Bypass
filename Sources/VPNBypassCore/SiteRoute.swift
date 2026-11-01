@@ -159,7 +159,9 @@ enum SiteRoute {
             let loopback = addresses.allSatisfy { $0.hasPrefix("127.") }
             return Found(match: .paused, entry: after.entry,
                          expected: loopback ? .physical : (s.vpnInterface.map { .tunnel($0) } ?? .physical),
-                         pause: pause, matchAfterPause: after.match, vpnUp: s.vpnInterface != nil)
+                         pause: pause, matchAfterPause: after.match,
+                         // Loopback never takes the VPN, so its sentence does not say it does.
+                         vpnUp: s.vpnInterface != nil && !loopback)
         }
         // With no VPN there is one way out, around every tunnel, listed or not.
         let vpnWay: PathCheck.Way = s.vpnInterface.map { .tunnel($0) } ?? .physical

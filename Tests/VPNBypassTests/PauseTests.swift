@@ -793,9 +793,12 @@ final class PauseLifecycleTests: XCTestCase {
         rm.setDNSDiskCacheForTests(["cached.example.com": ["198.51.100.20"]])
         let fakeDNS = rm.resolveIPsOverrideForTests
         rm.resolveIPsOverrideForTests = { _ in ["198.51.100.20"] }
+        // The full apply resolves through DNSResolver, not the RouteManager seam: no network.
+        DNSResolver.resolveOverrideForTests = { _ in ["198.51.100.20"] }
         defer {
             rm.setDNSDiskCacheForTests([:])
             rm.resolveIPsOverrideForTests = fakeDNS
+            DNSResolver.resolveOverrideForTests = nil
         }
         await pauseWithHelperReady()
         var failOnce = true
