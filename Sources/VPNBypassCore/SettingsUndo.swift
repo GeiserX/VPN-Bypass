@@ -155,6 +155,12 @@ final class SettingsUndo: ObservableObject {
         last = nil
     }
 
+    /// A route was saved from its sheet. Undo of a Duplicate removes the copy by id, so once
+    /// the copy is edited the line goes: Undo would throw the edit away with it.
+    func routeSaved(_ id: UUID) {
+        if case .routeDuplicated(let copy, _) = last, copy.id == id { clear() }
+    }
+
     /// The line's Undo button.
     func undoLast() {
         undoManager?.removeAllActions(withTarget: self)

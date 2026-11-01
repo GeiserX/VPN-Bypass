@@ -277,6 +277,25 @@ final class ReworkFollowupsTests: XCTestCase {
         XCTAssertFalse(rm.undo(change), "a second undo removed something")
     }
 
+    /// Undo of a Duplicate removes the copy by id, so editing the copy drops the line; an edit
+    /// of another route keeps it.
+    func testEditingTheCopyDropsTheDuplicateLine() {
+        let copy = Route(name: "office-proxy copy", egress: .direct)
+        let undo = SettingsUndo(routeManager: rm)
+        undo.record(.routeDuplicated(copy, original: "office-proxy"))
+        undo.routeSaved(UUID())
+        XCTAssertNotNil(undo.last, "an edit of another route dropped the line")
+        undo.routeSaved(copy.id)
+        XCTAssertNil(undo.last, "Undo would still throw away the edited copy")
+    }
+
+    /// A stored name with spaces around it still takes its name.
+    func testAStoredNameWithSpacesIsTaken() {
+        let padded = profile("Home ")
+        XCTAssertFalse(NetworkProfiles.nameIsFree("home", in: [padded, profile("Office")]))
+        XCTAssertTrue(NetworkProfiles.nameIsFree("home", in: [padded], excluding: padded.id))
+    }
+
     /// The Routes page's Duplicate, run from the rotor, leaves the line that says what it did
     /// (the line every undoable change leaves, with its Undo).
     func testTheRoutesPageDuplicateLeavesItsLine() throws {

@@ -247,7 +247,7 @@ enum NetworkProfiles {
                            bundle: Bundle = .main) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return false }
-        let taken = profiles.filter { $0.id != id }.map { $0.name.lowercased() } + [otherNetworksName(in: bundle).lowercased()]
+        let taken = profiles.filter { $0.id != id }.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() } + [otherNetworksName(in: bundle).lowercased()]
         return !taken.contains(trimmed)
     }
 
