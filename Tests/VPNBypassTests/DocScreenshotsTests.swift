@@ -748,6 +748,32 @@ final class DocScreenshotsTests: XCTestCase {
         _ = try renderDropdown(to: "paused-config-unreadable.png")
     }
 
+    /// Bypass with no VPN connected and nothing routed: Pause has nothing to take out.
+    func testDropdownWithNothingRouted() throws {
+        seedConnected(mode: .bypass)
+        rm.isVPNConnected = false
+        rm.vpnInterface = nil
+        rm.vpnType = nil
+        rm.activeRoutes = []
+        rm.lastRouteChange = nil
+        _ = try renderDropdown(to: "mactest-nothing-routed.png")
+    }
+
+    /// The Logs page after three detection passes with no VPN connected, on this Mac's own
+    /// interfaces, as the 30 s status timer runs them.
+    func testLogsAfterThreeStatusPassesWithNoVPN() async throws {
+        let savedLogs = rm.recentLogs
+        addTeardownBlock { @MainActor in RouteManager.shared.recentLogs = savedLogs }
+        seedConnected(mode: .bypass)
+        rm.recentLogs = []
+        for _ in 0..<3 { await rm.detectVPNStateOnly() }
+        // That entry point adds a line of its own, which the status timer's pass does not.
+        rm.recentLogs.removeAll { $0.message.hasPrefix("VPN state detected (display only)") }
+        rm.isVPNConnected = false
+        rm.activeRoutes = []
+        XCTAssertEqual(try renderSettings(page: .logs, to: "mactest-logs-three-passes.png"), Self.settingsSize)
+    }
+
     /// A6 and A7: Custom mode with no VPN, and a removal that left an address behind.
     func testReworkDisconnectedCustom() throws {
         seedCustom()
