@@ -1334,11 +1334,14 @@ final class DocScreenshotsTests: XCTestCase {
         seedConnected(mode: .bypass)
         let counts = ["telegram": 18, "signal": 6, "youtube": 16, "netflix": 9, "es_bbva": 3, "es_gov": 4, "openai": 5]
         var routes: [RouteManager.ActiveRoute] = []
+        var found: Set<String> = []
         for i in rm.config.services.indices {
             guard let n = counts[rm.config.services[i].id] else { continue }
+            found.insert(rm.config.services[i].id)
             rm.config.services[i].enabled = true
             for _ in 0..<n { routes.append(route("192.0.2.\(routes.count + 1)", via: "192.168.1.1", for: rm.config.services[i].name)) }
         }
+        XCTAssertEqual(found, Set(counts.keys), "every service the glyph shots ask for is in the catalogue")
         rm.activeRoutes = routes
         rm.lastRouteChange = .init(kind: .applied, at: Date().addingTimeInterval(-23),
                                    routeCount: counts.values.reduce(0, +), failedCount: 0)

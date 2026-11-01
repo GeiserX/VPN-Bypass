@@ -163,6 +163,8 @@ struct FrontAppTracker: Equatable {
         let name: String?
         /// The app shows in the Dock (`NSApplication.ActivationPolicy.regular`).
         let isRegular: Bool
+        /// The process, so a quit browser is not stood in for by another copy with its bundle ID.
+        var pid: pid_t? = nil
     }
 
     let ownBundleID: String?
@@ -224,17 +226,24 @@ final class FrontTabWatcher: ObservableObject {
     }
 
     private static func describe(_ app: NSRunningApplication?) -> FrontAppTracker.App? {
-        app.map { .init(bundleID: $0.bundleIdentifier, name: $0.localizedName, isRegular: $0.activationPolicy == .regular) }
+        app.map { .init(bundleID: $0.bundleIdentifier, name: $0.localizedName,
+                        isRegular: $0.activationPolicy == .regular, pid: $0.processIdentifier) }
     }
 
     /// The browser the user is in, or was last in, or nil when it was another app or has quit.
-    /// The app in front now is read first, so a missed activation cannot leave an old app.
+    /// The app in front now is read first, so a missed activation cannot leave an old app. The
+    /// process the user was in must still run: another copy of the same browser is not it.
     private var lastBrowser: FrontTabBrowser? {
         guard let app = tracker.current(frontmost: Self.describe(NSWorkspace.shared.frontmostApplication)),
-              let bundleID = app.bundleID,
-              !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
+              let bundleID = app.bundleID, Self.stillRuns(app)
         else { return nil }
         return FrontTabBrowser.detect(bundleID: bundleID, name: app.name)
+    }
+
+    /// The very process the user was in is still running, not another copy of its bundle ID.
+    nonisolated static func stillRuns(_ app: FrontAppTracker.App) -> Bool {
+        guard let pid = app.pid, let running = NSRunningApplication(processIdentifier: pid) else { return false }
+        return !running.isTerminated && running.bundleIdentifier == app.bundleID
     }
 
     /// Called on every dropdown open. Never shows the Automation prompt: a browser not yet

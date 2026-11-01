@@ -328,4 +328,23 @@ final class FrontAppTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.current(frontmost: mail), mail, "the user left Safari for Mail: no browser row")
         XCTAssertEqual(tracker.current(frontmost: safari), safari, "the app in front counts even if its activation was missed")
     }
+
+    /// A browser the user was in that has quit is gone, even while another copy with its
+    /// bundle ID runs: only that process counts.
+    func testOnlyTheTrackedProcessCounts() throws {
+        let me = NSRunningApplication.current
+        let running = FrontAppTracker.App(bundleID: me.bundleIdentifier, name: me.localizedName, isRegular: true,
+                                          pid: me.processIdentifier)
+        XCTAssertTrue(FrontTabWatcher.stillRuns(running), "control: this process runs")
+        // A process that has exited: a child that ran and was reaped.
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+        try child.run()
+        child.waitUntilExit()
+        var gone = running
+        gone.pid = child.processIdentifier
+        XCTAssertFalse(FrontTabWatcher.stillRuns(gone), "the tracked process quit, though its bundle ID still runs")
+        gone.pid = nil
+        XCTAssertFalse(FrontTabWatcher.stillRuns(gone), "no process recorded")
+    }
 }
