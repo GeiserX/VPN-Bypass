@@ -29,6 +29,8 @@ final class ReworkFollowupsTests: XCTestCase {
     override func tearDown() async throws {
         window?.orderOut(nil)
         window = nil
+        // A route duplicate starts a reapply; it must end here, not in the next test.
+        await rm.cancelConfigFollowUps()
         rm.config = savedConfig
         rm.recentLogs = savedLogs
         DNSLookupsMonitor.shared.tally = DNSLookupTally()

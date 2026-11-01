@@ -3016,10 +3016,18 @@ final class RouteManager: ObservableObject {
         pauseRemovalRunning = false
     }
 
-    /// Ends the pause and puts the routes back with one apply through the settle gate.
-    func resume() {
-        guard isPaused else { return }
+    /// Ends the pause and puts the routes back with one apply through the settle gate. While
+    /// config.json cannot be read the app enforces nothing, so a Resume would end the pause and
+    /// put nothing back: it stays paused, says why and returns false. True when it resumed.
+    @discardableResult
+    func resume() -> Bool {
+        guard isPaused else { return false }
+        guard !isConfigLoadFailed else {
+            log(.warning, "Resume refused: config.json could not be read, so nothing would be put back. Staying paused.")
+            return false
+        }
         endPause(reason: "resumed", apply: true)
+        return true
     }
 
     /// Clears the pause. With `apply`, runs the normal apply as Resume does; without it the
@@ -5210,7 +5218,7 @@ final class RouteManager: ObservableObject {
     private func rerouteChangedService(_ service: ServiceEntry) {
         guard isVPNConnected, service.enabled else { return }
         if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
-            Task { await reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
+            startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
             return
         }
         guard bypassListIsLive, acquireRouteOperation() else { return }
@@ -5897,6 +5905,38 @@ final class RouteManager: ObservableObject {
         if reapplyRoutes { await detectAndApplyRoutesAsync(sendNotification: sendNotification) }
     }
 
+    /// The reconciles a config change starts without a caller that awaits them: a rule or
+    /// route edit, a quick add, a service edit in Custom mode. Kept so tests can cancel and
+    /// await them (`cancelConfigFollowUps`). Unowned, a test's reapply ran a real VPN and
+    /// gateway check and then applied its rules inside the next test, taking that test's routes.
+    private var configFollowUps: [UUID: Task<Void, Never>] = [:]
+
+    /// `reconcileAfterConfigChange` in a task of its own, for a caller that cannot await it.
+    func startConfigFollowUp(reconcileListeners: Bool, reapplyRoutes: Bool) {
+        let id = UUID()
+        configFollowUps[id] = Task {
+            // Cancelled before it started: nothing to bring in line any more.
+            if !Task.isCancelled {
+                await reconcileAfterConfigChange(reconcileListeners: reconcileListeners, reapplyRoutes: reapplyRoutes)
+            }
+            configFollowUps[id] = nil
+        }
+    }
+
+    /// The follow-ups not finished yet.
+    var pendingConfigFollowUps: Int { configFollowUps.count }
+
+    /// Cancels the follow-ups not started yet and waits for the rest to end, so none of them
+    /// outlives a test.
+    func cancelConfigFollowUps() async {
+        while !configFollowUps.isEmpty {
+            let tasks = Array(configFollowUps.values)
+            configFollowUps = [:]
+            tasks.forEach { $0.cancel() }
+            for task in tasks { await task.value }
+        }
+    }
+
     /// Start/stop proxy-route listeners to match the current config (P1,
     /// VPN-Bypass-3sc.8). Safe to call any time; a no-op when there are no
     /// enabled proxy routes, so it changes nothing for existing users.
@@ -6147,6 +6187,9 @@ final class RouteManager: ObservableObject {
     var readARPTableOverrideForTests: (() async -> String?)?
     /// A path change was seen since the last profile pass.
     private var networkChangeNoted = false
+    /// The interface `currentNetwork` was read on ("en0"), so the ARP re-check watches that
+    /// interface's row. Nil when unknown.
+    var currentNetworkInterface: String?
     private var arpRecheckTask: Task<Void, Never>?
     var routeEpochForTests: UInt64 { routeEpoch }
 
@@ -6778,7 +6821,11 @@ extension RouteManager {
         if let override = detectNetworkIdentityOverrideForTests { return await override() }
         guard let gateway = localGateway,
               let result = await runProcessAsync("/usr/sbin/arp", arguments: ["-n", gateway], timeout: 3.0),
-              let entry = NetworkIdentity.parseARP(result.output, gateway: gateway) else { return nil }
+              let entry = NetworkIdentity.parseARP(result.output, gateway: gateway) else {
+            currentNetworkInterface = nil
+            return nil
+        }
+        currentNetworkInterface = entry.interface
         let kind = await withCheckedContinuation { continuation in
             vpnBypassProcessQueue.async {
                 continuation.resume(returning: NetworkIdentity.kind(ofInterface: entry.interface))
@@ -6815,8 +6862,12 @@ extension RouteManager {
     private func recheckNetworkWhenARPRefreshes(_ network: NetworkIdentity) async {
         arpRecheckTask?.cancel()
         arpRecheckTask = nil
+        // The row of the interface the network was read on: Wi-Fi and Ethernet to one router
+        // give two rows with the same address and MAC, and the other one refreshes on its own.
+        let interface = currentNetworkInterface
         guard let snapshot = await readARPTable(gateway: network.gateway)
-                .first(where: { $0.mac == network.routerMAC }) else { return }
+                .first(where: { $0.mac == network.routerMAC && (interface == nil || $0.interface == interface) })
+        else { return }
         let started = Date()
         log(.info, "Network changed and the router reads as before: reading it again once its ARP entry refreshes")
         arpRecheckTask = Task { [weak self] in

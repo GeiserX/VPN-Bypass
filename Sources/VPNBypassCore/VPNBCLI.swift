@@ -1,10 +1,13 @@
 // VPNBCLI.swift
 // The parts of the `vpnb` command-line client that decide what it sends and what it prints:
-// argv parsing, the text rendering, and the `--json` rendering. They live here, not in the
-// `vpnb` executable target, so the test target can reach them. The executable keeps only the
-// socket I/O and the exit codes.
+// argv parsing, the text rendering, the `--json` rendering and opening the socket. They live
+// here, not in the `vpnb` executable target, so the test target can reach them. The executable
+// keeps the request and reply I/O and the exit codes.
 
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
 public enum VPNBCLI {
 
@@ -200,5 +203,53 @@ public enum VPNBCLI {
         if let listenerPort = result.listenerPort { out.append("listenerPort: \(listenerPort)") }
         if let message = result.message { out.append(message) }
         return out
+    }
+
+    // MARK: - The socket
+
+    /// A UNIX stream socket that returns EPIPE instead of raising SIGPIPE when the app closes
+    /// its end. SO_NOSIGPIPE is set here, before the connect: the kernel refuses it (EINVAL) on
+    /// a socket whose peer has already closed, so set after the connect it was lost whenever
+    /// the app closed first, and the write that followed killed vpnb with SIGPIPE (exit 13
+    /// instead of 2 with "no response", seen once on CI).
+    public static func makeSocket() -> Int32? {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        var on: Int32 = 1
+        guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+            close(fd)
+            return nil
+        }
+        return fd
+    }
+
+    /// Connects to the control socket. Returns nil on ANY failure (bad path, ENOENT because
+    /// the app isn't running, ECONNREFUSED because a stale socket file has nothing listening,
+    /// etc.); the caller prints one clear message whatever the cause.
+    public static func connect(path: String) -> Int32? {
+        guard let fd = makeSocket() else { return nil }
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(path.utf8)
+        guard bytes.count < MemoryLayout.size(ofValue: addr.sun_path) else {
+            close(fd)
+            return nil
+        }
+        withUnsafeMutableBytes(of: &addr.sun_path) { raw in
+            let buf = raw.bindMemory(to: UInt8.self)
+            buf.initialize(repeating: 0)
+            for (i, byte) in bytes.enumerated() { buf[i] = byte }
+        }
+        addr.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        let rc = withUnsafePointer(to: &addr) { rawAddr in
+            rawAddr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+                Darwin.connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard rc == 0 else {
+            close(fd)
+            return nil
+        }
+        return fd
     }
 }

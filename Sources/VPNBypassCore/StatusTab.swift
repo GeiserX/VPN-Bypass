@@ -511,7 +511,8 @@ extension DropdownStatus.Input {
             lastCheckWrongWay: routeManager.lastRouteCheck?.leftWrongWay
                 .filter { routed.contains($0.destination) }.count ?? 0,
             lastCheckBroken: routeManager.lastRouteCheck?.controlBroken ?? false,
-            pause: routeManager.pauseState
+            pause: routeManager.pauseState,
+            configUnreadable: routeManager.isConfigLoadFailed
         )
     }
 }

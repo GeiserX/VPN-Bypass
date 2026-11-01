@@ -211,6 +211,95 @@ final class VPNBCLITests: XCTestCase {
         XCTAssertFalse(decoded.ok)
         XCTAssertEqual(decoded.error?.code, "no_response")
     }
+
+    // MARK: - SIGPIPE
+
+    /// Why the option has to come before the connect: once the app has closed its end, the
+    /// kernel refuses SO_NOSIGPIPE. vpnb set it after connecting, so when the mute listener
+    /// closed first the write raised SIGPIPE and vpnb exited 13 with nothing on stderr.
+    func testTheKernelRefusesSO_NOSIGPIPEOnceThePeerHasClosed() throws {
+        let path = NSTemporaryDirectory() + "vpnb-late-\(UUID().uuidString.prefix(8)).sock"
+        let listener = try ListeningSocket(path: path)
+        defer { listener.stop() }
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(fd, 0)
+        defer { close(fd) }
+        XCTAssertTrue(listener.connect(fd))
+        listener.acceptAndClose()
+        usleep(50_000)
+        var on: Int32 = 1
+        XCTAssertEqual(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size)), -1,
+                       "set after the peer closed, the option is refused")
+        XCTAssertEqual(errno, EINVAL)
+    }
+
+    /// The socket vpnb connects with already refuses SIGPIPE before it connects, so the app
+    /// closing first gives EPIPE and the "no response" exit.
+    func testTheCLISocketRefusesSIGPIPEBeforeItConnects() throws {
+        let fd = try XCTUnwrap(VPNBCLI.makeSocket())
+        defer { close(fd) }
+        XCTAssertEqual(Self.noSigPipe(fd), 1, "set on the unconnected socket")
+
+        let path = NSTemporaryDirectory() + "vpnb-early-\(UUID().uuidString.prefix(8)).sock"
+        let listener = try ListeningSocket(path: path)
+        defer { listener.stop() }
+        let connected = try XCTUnwrap(VPNBCLI.connect(path: path))
+        defer { close(connected) }
+        XCTAssertEqual(Self.noSigPipe(connected), 1)
+        listener.acceptAndClose()
+        usleep(50_000)
+        let n = Array("x\n".utf8).withUnsafeBytes { write(connected, $0.baseAddress, $0.count) }
+        XCTAssertEqual(n, -1)
+        XCTAssertEqual(errno, EPIPE, "a write after the app closed returns EPIPE; the process lives")
+    }
+
+    private static func noSigPipe(_ fd: Int32) -> Int32 {
+        var value: Int32 = 0
+        var length = socklen_t(MemoryLayout<Int32>.size)
+        guard getsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &value, &length) == 0 else { return -1 }
+        return value
+    }
+}
+
+/// An AF_UNIX listener the test accepts on by hand, so the peer closes at a known point.
+private final class ListeningSocket {
+    private let fd: Int32
+    private let path: String
+    private var addr = sockaddr_un()
+
+    init(path: String) throws {
+        self.path = path
+        unlink(path)
+        fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw POSIXError(.EIO) }
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(path.utf8)
+        withUnsafeMutableBytes(of: &addr.sun_path) { raw in
+            for (i, b) in bytes.prefix(raw.count - 1).enumerated() { raw[i] = b }
+        }
+        let bound = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard bound == 0, listen(fd, 4) == 0 else { close(fd); throw POSIXError(.EADDRINUSE) }
+    }
+
+    func connect(_ client: Int32) -> Bool {
+        withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(client, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
+            }
+        }
+    }
+
+    func acceptAndClose() {
+        let client = accept(fd, nil, nil)
+        if client >= 0 { close(client) }
+    }
+
+    func stop() {
+        close(fd)
+        unlink(path)
+    }
 }
 
 /// An AF_UNIX listener that accepts each connection and closes it at once, never replying.

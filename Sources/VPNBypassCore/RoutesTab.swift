@@ -185,7 +185,7 @@ struct RoutesTab: View {
         // route with an `.interface` selector) — re-apply so it doesn't go stale
         // until the next hourly refresh (mirrors ControlSurface.handle).
         let reapply = RouteManager.usesCustomEngine(schemaVersion: routeManager.config.schemaVersion, routingMode: routeManager.config.routingMode)
-        Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: reapply) }
+        routeManager.startConfigFollowUp(reconcileListeners: true, reapplyRoutes: reapply)
     }
 
     private func deleteRoute(_ route: Route) {
@@ -213,7 +213,7 @@ struct RoutesTab: View {
         // route with an `.interface` selector) — re-apply so it doesn't go stale
         // until the next hourly refresh (mirrors ControlSurface.handle).
         let reapply = RouteManager.usesCustomEngine(schemaVersion: routeManager.config.schemaVersion, routingMode: routeManager.config.routingMode)
-        Task { await routeManager.reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: reapply) }
+        routeManager.startConfigFollowUp(reconcileListeners: true, reapplyRoutes: reapply)
     }
 }
 
@@ -264,7 +264,7 @@ extension RouteManager {
         // route with an `.interface` selector) — re-apply so it doesn't go stale
         // until the next hourly refresh (mirrors ControlSurface.handle).
         let reapply = RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
-        Task { await reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: reapply) }
+        startConfigFollowUp(reconcileListeners: true, reapplyRoutes: reapply)
     }
 }
 

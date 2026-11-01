@@ -12,10 +12,23 @@ final class ThemeColorTests: XCTestCase {
         XCTAssertNotEqual(Theme.textTertiary, Theme.textSecondary)
     }
 
-    func testEgressDotHues() {
-        XCTAssertEqual(Theme.blue, Color(hex: "3B82F6"))
-        XCTAssertEqual(Theme.purple, Color(hex: "8B5CF6"))
-        XCTAssertNotEqual(Theme.blue, Theme.purple)
+    /// An egress gets no colour of its own (rework section 2): the dropdown's Custom-mode
+    /// "Routes In Use" summary gave HTTP and SOCKS5 their own blue and purple dots, Tailscale
+    /// the live green and the VPN the attention orange. It shows the grey glyph the Rules and
+    /// Routes pages use.
+    func testAnEgressHasNoColourOfItsOwn() throws {
+        let files = try FileManager.default.contentsOfDirectory(atPath: ReworkSource.core.path)
+            .filter { $0.hasSuffix(".swift") }
+        XCTAssertGreaterThan(files.count, 20)
+        let regex = try NSRegularExpression(pattern: #"Theme\.(blue|purple)\b|\.accentColor\b"#)
+        for file in files {
+            let text = try ReworkSource.read(file)
+            let hits = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+            XCTAssertTrue(hits.isEmpty, "\(file) gives an egress a colour")
+        }
+        let dropdown = try ReworkSource.read("MenuBarViews.swift")
+        XCTAssertTrue(dropdown.contains("Image(systemName: RouteChip.systemImage(for: route.egress))"),
+                      "the summary shows the egress glyph")
     }
 
     // Several surfaces are Color.white at differing opacities, so some share an alpha

@@ -357,7 +357,9 @@ enum ClassicControl {
     private static func resume() -> ControlResponse {
         let rm = RouteManager.shared
         guard rm.isPaused else { return ok(ControlResult(message: "not paused")) }
-        rm.resume()
+        guard rm.resume() else {
+            return fail("config_unreadable", "config.json could not be read, so resuming would put nothing back; still paused. Repair it or import a saved configuration in Settings")
+        }
         return ok(ControlResult(message: rm.isVPNConnected
             ? "resumed; routes are being applied"
             : "resumed; routes come back when a VPN connects"))
