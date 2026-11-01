@@ -289,6 +289,29 @@ final class StatusProblemsTests: XCTestCase {
         XCTAssertEqual(problems.first?.kind, .noAddresses)
     }
 
+    /// Live test with GlobalProtect: a domain that did not resolve was listed twice, once as
+    /// "Did not resolve: no answer from DNS" and again as "No address is routed for it.". One
+    /// row per entry, with the failure's reason; an entry no failure names keeps its row.
+    func testAnEntryWithAFailureIsListedOnceWithTheFailuresReason() {
+        let change = applied(failed: 2, [
+            .init(kind: .notResolved, target: "intranet.example", entry: "intranet.example", reason: "no answer from DNS"),
+            .init(kind: .notResolved, target: "zoom.us", entry: "Zoom", reason: "no answer from DNS"),
+        ])
+        func empty(_ id: String, _ icon: RoutedBySource.Icon) -> RoutedBySource.Row {
+            .init(id: id, name: id, icon: icon, routeCount: 0, isProblem: true, addresses: [], hiddenAddresses: 0)
+        }
+        let problems = StatusPage.problems(lastChange: change, installed: 60, helperReady: true,
+                                           withoutAddresses: [empty("intranet.example", .domain),
+                                                              empty("Zoom", .service(id: "zoom")),
+                                                              empty("b.example", .domain)])
+        XCTAssertEqual(problems.map(\.title), ["intranet.example", "zoom.us", "b.example"])
+        XCTAssertEqual(problems.map(\.detail), [
+            "Did not resolve: no answer from DNS",
+            "Did not resolve, for Zoom: no answer from DNS",
+            "No address is routed for it.",
+        ])
+    }
+
     /// The page lists only what the dropdown still counts.
     func testNothingIsListedThatTheDropdownDoesNotCount() {
         XCTAssertEqual(StatusPage.problems(lastChange: applied(failed: 0, []), installed: 60, helperReady: true,

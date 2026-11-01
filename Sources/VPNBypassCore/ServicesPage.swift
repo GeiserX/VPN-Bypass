@@ -171,7 +171,7 @@ enum ServicesPage {
             let problem = clash(service)
             let routes = service.enabled && mode == .bypass
             return Row(service: service,
-                       glyph: service.isCustom ? "square.and.pencil" : "square.grid.2x2",
+                       glyph: service.isCustom ? "square.and.pencil" : ServiceChip.iconName(for: service.id),
                        detail: problem ?? detail(service, added: extra, in: bundle),
                        needsAttention: problem != nil,
                        number: routes ? String(counts[service.name] ?? 0) : nil,
