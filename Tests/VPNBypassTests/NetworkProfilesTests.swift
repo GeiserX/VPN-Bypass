@@ -108,6 +108,17 @@ final class NetworkProfilesModelTests: XCTestCase {
         XCTAssertEqual(applied.services.map(\.domains), config.services.map(\.domains))
     }
 
+    /// A built-in service a custom service of the same name holds stays off, even when the
+    /// profile was saved with it on: both would route under one name.
+    func testAProfileKeepsAHeldBuiltInServiceOff() {
+        var c = baseConfig()
+        var s = ProfileSettings(capturing: c)
+        s.enabledServiceIds = ["telegram", "netflix", "custom_netflix"]
+        c.services.append(ServiceEntry(id: "custom_netflix", name: "Netflix", enabled: false,
+                                       domains: ["tv.example.com"], ipRanges: [], isCustom: true))
+        XCTAssertEqual(s.applied(to: c).services.filter(\.enabled).map(\.id), ["telegram", "custom_netflix"])
+    }
+
     func testACustomModeProfileTurnsTheRuleEngineOn() {
         var c = baseConfig()
         c.schemaVersion = 1
@@ -227,6 +238,7 @@ final class NetworkProfilesModelTests: XCTestCase {
             XCTAssertNotEqual(NetworkProfiles.otherNetworksName(in: bundle), NetworkProfiles.otherNetworksName(), language)
             XCTAssertNotEqual(NetworkProfiles.networkCount(2, in: bundle), NetworkProfiles.networkCount(2), language)
             XCTAssertNotEqual(NetworkProfiles.useOnThisNetworkName("X", in: bundle), NetworkProfiles.useOnThisNetworkName("X"), language)
+            XCTAssertNotEqual(NetworkProfiles.deleteQuestion("X", in: bundle), NetworkProfiles.deleteQuestion("X"), language)
             XCTAssertNotEqual(GeneralPage.Group.networkProfiles.title(in: bundle), GeneralPage.Group.networkProfiles.title(), language)
         }
         XCTAssertEqual(home.title(), "Wi-Fi, router 192.168.1.1")
@@ -338,6 +350,19 @@ final class NetworkProfileSwitchTests: XCTestCase {
         await waitForApply()
         XCTAssertNil(rm.config.activeProfileId)
         XCTAssertEqual(kernel.installed, ["203.0.113.0/24"])
+    }
+
+    /// Use on This Network at home moves home to the Office profile and puts it in use.
+    func testUseOnThisNetworkMovesThisNetworkToTheProfile() async throws {
+        let officeId = try XCTUnwrap(rm.config.profiles.first?.id)
+        rm.currentNetwork = home
+        rm.useProfileOnThisNetwork(officeId)
+        XCTAssertEqual(rm.config.activeProfileId, officeId)
+        XCTAssertEqual(rm.config.profiles.first?.networks, [office, home])
+        XCTAssertEqual(rm.config.services.filter(\.enabled).map(\.id), ["custom_office"])
+        await Task.yield()
+        await waitForApply()
+        XCTAssertEqual(kernel.installed, ["198.51.100.0/24"])
     }
 
     /// The same network on the next pass switches nothing and writes nothing.

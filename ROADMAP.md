@@ -105,7 +105,7 @@ planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`, with kernel routes kept as
 |---------|-------------|
 | **Custom DNS** | Use specific DNS servers for bypassed traffic (DoH/DoT) |
 | **Blocklists Integration** | Block ads/trackers/malware domains |
-| **Network-based Profiles** | Auto-switch profile based on WiFi SSID |
+| ~~**Network-based Profiles**~~ | ✅ Done in 6.0 by router instead of Wi-Fi name (no Location permission, works on Ethernet); see Connection Profiles |
 | **Bandwidth Monitor** | Track data through VPN vs bypassed |
 | ~~**CLI Interface**~~ | ✅ Done in v3.0 — `vpnb` command-line control over a user-only socket (`status`, `route`/`rule`/`mode`/`default` verbs) for automation. v4.9.0 adds the Bypass and VPN Only verbs (`domain.*`, `service.*`, `routes.active`, `routes.clear`, `refresh`, `dns.refresh`, `logs`), and the [vpn-bypass-mcp](https://github.com/GeiserX/vpn-bypass-mcp) MCP server lets an AI agent drive the same socket |
 | **API/Webhooks** | Integration with other tools |
@@ -200,8 +200,8 @@ planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`, with kernel routes kept as
 3. ✅ **v1.7 - v1.9**: VPN compatibility (Check Point, Zscaler, Tailscale), gateway robustness, auto-merge
 4. ✅ **v2.0**: Inverse mode (VPN Only routing) + custom services
 5. ✅ **v3.0**: Custom routing mode (per-rule multi-route) + `vpnb` CLI + proxy / Tailscale-peer egress + cdhash-pinned helper
-6. 🔲 **v2.5 (deferred)**: Kill switch + leak protection + connection profiles (Premium)
-7. 🔲 **Later**: network profiles + statistics dashboard
+6. 🔲 **v2.5 (deferred)**: Kill switch + leak protection (Premium)
+7. 🔲 **Later**: statistics dashboard
 
 ---
 

@@ -988,7 +988,10 @@ final class RouteManager: ObservableObject {
             // Fresh routes = the newer of the last full apply and the last DNS refresh.
             let lastApplyAt = [lastUpdate, lastDNSRefresh].compactMap { $0 }.max()
             // Skip if routes were applied very recently (within 5 seconds) - prevents double-triggering
-            if let lastUpdate = lastUpdate, now.timeIntervalSince(lastUpdate) < 5 {
+            // Not when the config changed since (a profile switch on this pass): that apply is
+            // no duplicate, the lists are new.
+            if let lastUpdate = lastUpdate, now.timeIntervalSince(lastUpdate) < 5,
+               (configChangedAt.map { $0 <= lastUpdate } ?? true) {
                 log(.info, "Skipping duplicate route application (applied \(Int(now.timeIntervalSince(lastUpdate)))s ago)")
             } else if ReconnectSettle.reconnectAction(routingMode: config.routingMode,
                                                      hasInstalledRoutes: !activeRoutes.isEmpty,
@@ -3447,6 +3450,9 @@ final class RouteManager: ObservableObject {
         if !trulyOrphanedDests.isEmpty {
             let result = await removeRoutesBatchVia(trulyOrphanedDests)
             if result.failureCount > 0 {
+                // A route the switch took off stays marked, so the next apply's grace does not
+                // keep it either.
+                if !graceAllowed { listsSwitchedSinceCommit = true }
                 log(.warning, "\(logLabel)Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
                 let failedSet = Set(result.failedDestinations)
                 for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
@@ -6739,7 +6745,8 @@ extension RouteManager {
     /// is not identified or the name is taken.
     @discardableResult
     func createProfile(named name: String) -> Bool {
-        guard let network = currentNetwork, NetworkProfiles.nameIsFree(name, in: config.profiles) else { return false }
+        guard !isConfigLoadFailed, let network = currentNetwork,
+              NetworkProfiles.nameIsFree(name, in: config.profiles) else { return false }
         commitProfileChange(NetworkProfiles.creatingProfile(named: name, for: network, in: config))
         log(.success, "Network profile \(name.trimmingCharacters(in: .whitespacesAndNewlines)) saved for this network")
         return true
@@ -6747,7 +6754,7 @@ extension RouteManager {
 
     /// Moves this network to profile `id`, and puts the profile in use.
     func useProfileOnThisNetwork(_ id: UUID) {
-        guard let network = currentNetwork else { return }
+        guard !isConfigLoadFailed, let network = currentNetwork else { return }
         var next = NetworkProfiles.addingNetwork(network, to: id, in: config)
         if let target = NetworkProfiles.switchTarget(for: network, in: next) {
             next = NetworkProfiles.switching(next, to: target)
@@ -6757,7 +6764,7 @@ extension RouteManager {
 
     /// Deletes profile `id`; when it is in use, Other networks' settings are put in use.
     func deleteProfile(_ id: UUID) {
-        guard let name = config.profiles.first(where: { $0.id == id })?.name else { return }
+        guard !isConfigLoadFailed, let name = config.profiles.first(where: { $0.id == id })?.name else { return }
         commitProfileChange(NetworkProfiles.removingProfile(id, in: config))
         log(.info, "Network profile \(name) deleted")
     }

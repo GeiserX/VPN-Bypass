@@ -119,7 +119,8 @@ struct ProfileSettings: Codable, Equatable {
 
     /// `config` with these settings in use. The service definitions stay the config's own: an
     /// id this profile names that is no longer listed is skipped, a service it does not name
-    /// is off.
+    /// is off, and a built-in service whose name a custom service holds stays off, as
+    /// `mergeBuiltInServices` keeps it.
     func applied(to config: Config) -> Config {
         var c = config
         c.routingMode = routingMode
@@ -127,6 +128,10 @@ struct ProfileSettings: Codable, Equatable {
         c.inverseDomains = inverseDomains
         let on = Set(enabledServiceIds)
         for i in c.services.indices { c.services[i].enabled = on.contains(c.services[i].id) }
+        for i in c.services.indices where c.services[i].enabled
+            && ServiceNameClash.customServiceHolding(nameOf: c.services[i], in: c.services) != nil {
+            c.services[i].enabled = false
+        }
         c.rules = rules
         c.defaultRouteId = defaultRouteId
         // Custom mode reads its rules only from schema 2 on (`usesCustomEngine`).
@@ -279,6 +284,10 @@ enum NetworkProfiles {
         RoutingModeCopy.name(mode) + " · " + String(localized: "Any network without a profile", bundle: bundle)
     }
 
+    static func deleteQuestion(_ profile: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Delete the profile \(profile)?", bundle: bundle)
+    }
+
     static func useOnThisNetworkName(_ profile: String, in bundle: Bundle = .main) -> String {
         String(localized: "Use \(profile) on this network", bundle: bundle)
     }
@@ -291,6 +300,7 @@ enum NetworkProfiles {
 struct NetworkProfilesGroup: View {
     @EnvironmentObject var routeManager: RouteManager
     @State private var showingNewProfile = false
+    @State private var confirmingDelete: NetworkProfile?
 
     var body: some View {
         let config = routeManager.config
@@ -329,7 +339,7 @@ struct NetworkProfilesGroup: View {
                             .accessibilityLabel(NetworkProfiles.useOnThisNetworkName(profile.name))
                         }
                         Button {
-                            routeManager.deleteProfile(profile.id)
+                            confirmingDelete = profile
                         } label: {
                             Image(systemName: "trash")
                                 .font(.system(size: 12))
@@ -356,9 +366,19 @@ struct NetworkProfilesGroup: View {
             NewProfileSheet(profiles: config.profiles,
                             onCancel: { showingNewProfile = false },
                             onSave: { name in
-                                routeManager.createProfile(named: name)
-                                showingNewProfile = false
+                                if routeManager.createProfile(named: name) { showingNewProfile = false }
                             })
+        }
+        .alert(confirmingDelete.map { NetworkProfiles.deleteQuestion($0.name) } ?? "",
+               isPresented: Binding(get: { confirmingDelete != nil }, set: { if !$0 { confirmingDelete = nil } })) {
+            Button(String(localized: "Delete"), role: .destructive) {
+                if let profile = confirmingDelete { routeManager.deleteProfile(profile.id) }
+                confirmingDelete = nil
+            }
+            Button(String(localized: "Cancel"), role: .cancel) { confirmingDelete = nil }
+                .keyboardShortcut(.defaultAction)
+        } message: {
+            Text("Its mode and lists are lost, and its networks use Other networks.")
         }
     }
 

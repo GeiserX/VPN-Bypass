@@ -985,6 +985,8 @@
 "%lld networks" = "%lld réseaux";
 "Any network without a profile" = "Tout réseau sans profil";
 "Use %@ on this network" = "Utiliser %@ sur ce réseau";
+"Delete the profile %@?" = "Supprimer le profil %@ ?";
+"Its mode and lists are lost, and its networks use Other networks." = "Son mode et ses listes sont perdus, et ses réseaux utilisent Autres réseaux.";
 "Network profiles" = "Profils réseau";
 "A profile keeps a mode and its lists. When the Mac joins one of its networks, the profile is put in use. Networks are told apart by their router." = "Un profil garde un mode et ses listes. Quand le Mac rejoint l’un de ses réseaux, le profil est mis en service. Les réseaux se distinguent par leur routeur.";
 "This network" = "Ce réseau";
