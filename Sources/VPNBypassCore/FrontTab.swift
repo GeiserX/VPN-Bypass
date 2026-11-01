@@ -116,6 +116,9 @@ enum FrontTabPermission: Equatable {
     /// The browser is not running, or the check failed: no row.
     case unavailable
 
+    /// System Settings > Privacy & Security > Automation, where a browser is switched back on.
+    static let automationSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
+
     /// From `AEDeterminePermissionToAutomateTarget`'s result.
     init(status: OSStatus) {
         switch status {
@@ -144,6 +147,8 @@ enum FrontTabSuggestion: Equatable {
     case site(host: String, browser: FrontTabBrowser)
     /// The browser is in front and macOS has not been asked yet: the row offers to ask.
     case needsConsent(browser: FrontTabBrowser)
+    /// The user switched the browser off for this app: the row opens the Automation pane.
+    case accessOff(browser: FrontTabBrowser)
 
     /// The site, once read.
     var host: String? {
@@ -165,6 +170,9 @@ struct FrontAppTracker: Equatable {
         let isRegular: Bool
         /// The process, so a quit browser is not stood in for by another copy with its bundle ID.
         var pid: pid_t? = nil
+        /// The process's own handle. macOS 27 reports some apps, Safari and Preview among them,
+        /// with process id -1, so for those the handle is the only way to tell the process quit.
+        var process: NSRunningApplication? = nil
     }
 
     let ownBundleID: String?
@@ -191,6 +199,12 @@ struct FrontAppTracker: Equatable {
     }
 }
 
+/// What one run of the front tab script gave: the address, or AppleScript's error number.
+struct FrontTabScriptResult: Equatable {
+    var url: String? = nil
+    var errorNumber: Int? = nil
+}
+
 /// Follows the app the user is in (`FrontAppTracker`) and reads its front tab when the
 /// dropdown opens. Reads only that app, and only when it is a browser we know, so a browser in
 /// the background is never asked.
@@ -198,52 +212,93 @@ struct FrontAppTracker: Equatable {
 final class FrontTabWatcher: ObservableObject {
     static let shared = FrontTabWatcher()
 
+    /// Everything the watcher asks of macOS, so a test can drive a whole open without an Apple
+    /// Event: which app is in front, whether a process still runs, the Automation permission,
+    /// the script, and the log.
+    struct System {
+        var frontmost: @MainActor () -> FrontAppTracker.App?
+        var isRunning: @MainActor (FrontAppTracker.App) -> Bool
+        /// Runs off the main thread: with `ask` it may wait for the user's answer.
+        var permission: @Sendable (_ bundleID: String, _ ask: Bool) -> FrontTabPermission
+        /// Runs on the main thread, as NSAppleScript requires.
+        var runScript: @MainActor (String) -> FrontTabScriptResult
+        var log: @MainActor (String) -> Void
+
+        static let live = System(
+            frontmost: { FrontTabWatcher.describe(NSWorkspace.shared.frontmostApplication) },
+            isRunning: FrontTabWatcher.stillRuns,
+            permission: { FrontTabPermission.check(bundleID: $0, ask: $1) },
+            runScript: FrontTabWatcher.runScript,
+            log: { RouteManager.shared.log(.info, $0) })
+    }
+
     @Published var suggestion: FrontTabSuggestion?
 
     /// Off under XCTest, so no test sends a real Apple Event; the screenshot renders set
-    /// `suggestion` themselves.
-    var readsTabs = !(NSClassFromString("XCTestCase") != nil
-                      || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil)
+    /// `suggestion` themselves, and the tests of the read build their own watcher.
+    let readsTabs: Bool
 
-    private var tracker = FrontAppTracker(ownBundleID: Bundle.main.bundleIdentifier)
+    private let system: System
+    private var tracker: FrontAppTracker
     private var observer: NSObjectProtocol?
     private var reading = false
+    /// The read in flight, for the tests to wait on.
+    private(set) var readTask: Task<Void, Never>?
     /// How many times the dropdown asked for a refresh, for the tests of every open.
     private(set) var refreshRequests = 0
 
-    private init() {}
+    init(system: System = .live, ownBundleID: String? = Bundle.main.bundleIdentifier,
+         readsTabs: Bool = !(NSClassFromString("XCTestCase") != nil
+                             || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil)) {
+        self.system = system
+        self.tracker = FrontAppTracker(ownBundleID: ownBundleID)
+        self.readsTabs = readsTabs
+    }
 
     /// Starts following which app is in front. The app calls it once at launch.
     func start() {
         guard observer == nil else { return }
-        tracker.activated(Self.describe(NSWorkspace.shared.frontmostApplication))
+        activated(system.frontmost())
         observer = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            MainActor.assumeIsolated { self?.tracker.activated(Self.describe(app)) }
+            MainActor.assumeIsolated { self?.activated(Self.describe(app)) }
         }
     }
 
-    private static func describe(_ app: NSRunningApplication?) -> FrontAppTracker.App? {
+    /// An app became active.
+    func activated(_ app: FrontAppTracker.App?) {
+        tracker.activated(app)
+    }
+
+    nonisolated static func describe(_ app: NSRunningApplication?) -> FrontAppTracker.App? {
         app.map { .init(bundleID: $0.bundleIdentifier, name: $0.localizedName,
-                        isRegular: $0.activationPolicy == .regular, pid: $0.processIdentifier) }
+                        isRegular: $0.activationPolicy == .regular, pid: $0.processIdentifier, process: $0) }
+    }
+
+    /// The app the user is in, or was last in. The app in front now is read first, so a missed
+    /// activation cannot leave an old app.
+    private var currentApp: FrontAppTracker.App? {
+        tracker.current(frontmost: system.frontmost())
     }
 
     /// The browser the user is in, or was last in, or nil when it was another app or has quit.
-    /// The app in front now is read first, so a missed activation cannot leave an old app. The
-    /// process the user was in must still run: another copy of the same browser is not it.
+    /// The process the user was in must still run: another copy of the same browser is not it.
     private var lastBrowser: FrontTabBrowser? {
-        guard let app = tracker.current(frontmost: Self.describe(NSWorkspace.shared.frontmostApplication)),
-              let bundleID = app.bundleID, Self.stillRuns(app)
-        else { return nil }
-        return FrontTabBrowser.detect(bundleID: bundleID, name: app.name)
+        guard let app = currentApp, system.isRunning(app) else { return nil }
+        return FrontTabBrowser.detect(bundleID: app.bundleID, name: app.name)
     }
 
     /// The very process the user was in is still running, not another copy of its bundle ID.
     nonisolated static func stillRuns(_ app: FrontAppTracker.App) -> Bool {
-        guard let pid = app.pid, let running = NSRunningApplication(processIdentifier: pid) else { return false }
-        return !running.isTerminated && running.bundleIdentifier == app.bundleID
+        if let pid = app.pid, pid > 0 {
+            guard let running = NSRunningApplication(processIdentifier: pid) else { return false }
+            return !running.isTerminated && running.bundleIdentifier == app.bundleID
+        }
+        // No process id from macOS (-1 for Safari on macOS 27): the handle of that process.
+        guard let process = app.process else { return false }
+        return !process.isTerminated
     }
 
     /// Called on every dropdown open. Never shows the Automation prompt: a browser not yet
@@ -252,6 +307,11 @@ final class FrontTabWatcher: ObservableObject {
         refreshRequests += 1
         guard readsTabs, !reading else { return }
         guard let browser = lastBrowser else {
+            // A browser we read that macOS no longer shows running: say so, or a row that never
+            // appears leaves nothing to go on.
+            if let app = currentApp, let known = FrontTabBrowser.detect(bundleID: app.bundleID, name: app.name) {
+                system.log("Front tab: \(known.name) is not running, nothing read")
+            }
             suggestion = nil
             return
         }
@@ -261,7 +321,7 @@ final class FrontTabWatcher: ObservableObject {
         read(browser, ask: false)
     }
 
-    /// The row while a read runs: a site from an earlier read is dropped, the Allow… row stays.
+    /// The row while a read runs: a site from an earlier read is dropped, the other rows stay.
     static func whileReading(_ suggestion: FrontTabSuggestion?) -> FrontTabSuggestion? {
         if case .site = suggestion { return nil }
         return suggestion
@@ -275,42 +335,57 @@ final class FrontTabWatcher: ObservableObject {
 
     private func read(_ browser: FrontTabBrowser, ask: Bool) {
         reading = true
-        Task {
+        let check = system.permission
+        readTask = Task {
             let bundleID = browser.bundleID
-            let permission = await Task.detached { FrontTabPermission.check(bundleID: bundleID, ask: ask) }.value
+            let permission = await Task.detached { check(bundleID, ask) }.value
             reading = false
-            finish(browser, permission: permission, current: lastBrowser) { Self.runScript(browser.scriptSource) }
+            finish(browser, permission: permission, current: lastBrowser) { system.runScript(browser.scriptSource) }
             // The user went to another app while the check ran: read that one instead.
             if lastBrowser != browser, lastBrowser != nil { refresh() }
         }
     }
 
     /// Publishes a read of `browser`, unless the user has left it for `current` meanwhile:
-    /// then the read is dropped and the tab is not read at all.
+    /// then the read is dropped and the tab is not read at all. Logs one line per read: the
+    /// permission and the script's error number, never the address.
     func finish(_ browser: FrontTabBrowser, permission: FrontTabPermission, current: FrontTabBrowser?,
-                readURL: () -> String?) {
+                readURL: () -> FrontTabScriptResult) {
+        let name = browser.name
         guard current == browser else {
+            system.log("Front tab: left \(name) before the read, nothing read")
             suggestion = nil
             return
         }
         switch permission {
         case .granted:
-            suggestion = readURL()
-                .flatMap(FrontTabHost.host(fromURL:))
-                .map { .site(host: $0, browser: browser) }
+            let result = readURL()
+            suggestion = FrontTabHost.host(fromURL: result.url).map { .site(host: $0, browser: browser) }
+            if let number = result.errorNumber {
+                system.log("Front tab: \(name) access on, script error \(number)")
+            } else {
+                system.log("Front tab: \(name) access on, " + (suggestion == nil ? "no site in the front tab" : "site read"))
+            }
         case .needsConsent:
             suggestion = .needsConsent(browser: browser)
-        case .denied, .unavailable:
+            system.log("Front tab: \(name) access not asked yet")
+        case .denied:
+            suggestion = .accessOff(browser: browser)
+            system.log("Front tab: \(name) access is off")
+        case .unavailable:
             suggestion = nil
+            system.log("Front tab: \(name) access unknown, nothing read")
         }
     }
 
     /// Runs on the main thread, as NSAppleScript requires; the script's own timeout bounds it.
-    private static func runScript(_ source: String) -> String? {
+    private static func runScript(_ source: String) -> FrontTabScriptResult {
         var error: NSDictionary?
         let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
-        guard error == nil else { return nil }
-        return result?.stringValue
+        if let error {
+            return FrontTabScriptResult(url: nil, errorNumber: (error[NSAppleScript.errorNumber] as? NSNumber)?.intValue ?? 0)
+        }
+        return FrontTabScriptResult(url: result?.stringValue, errorNumber: nil)
     }
 }
 
@@ -342,6 +417,26 @@ enum FrontTabCopy {
         String(localized: "Allow Reading the Front Tab in \(browser)", bundle: bundle)
     }
 
+    /// The row's text when the user has switched the browser off for this app.
+    static func accessOff(_ browser: String, in bundle: Bundle = .main) -> String {
+        String(localized: "\(browser) access is off", bundle: bundle)
+    }
+
+    static func openSettingsTitle(in bundle: Bundle = .main) -> String {
+        String(localized: "Open Settings", bundle: bundle)
+    }
+
+    /// The Open Settings button's spoken name.
+    static func openSettingsName(_ browser: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Open Automation Settings for \(browser)", bundle: bundle)
+    }
+
+    /// The Open Settings button's tooltip and VoiceOver hint.
+    static func openSettingsHelp(_ browser: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Switch on \(browser) under VPN Bypass in Privacy & Security > Automation, so the app can read the front tab.",
+               bundle: bundle)
+    }
+
     /// The add button's spoken name and tooltip, naming the site.
     static func addName(_ host: String, mode: LookupMode, in bundle: Bundle = .main) -> String {
         switch mode {
@@ -364,6 +459,8 @@ struct FrontTabRow: View {
     var isApplying = false
     let onAdd: (String) -> Void
     let onAllow: (FrontTabBrowser) -> Void
+    /// The access-off row's button: the Automation pane of System Settings.
+    var onOpenSettings: () -> Void = { NSWorkspace.shared.open(FrontTabPermission.automationSettingsURL) }
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
@@ -381,7 +478,7 @@ struct FrontTabRow: View {
 
     private var browser: FrontTabBrowser {
         switch suggestion {
-        case .site(_, let browser), .needsConsent(let browser): return browser
+        case .site(_, let browser), .needsConsent(let browser), .accessOff(let browser): return browser
         }
     }
 
@@ -413,6 +510,12 @@ struct FrontTabRow: View {
                 .foregroundColor(Theme.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+        case .accessOff(let browser):
+            Text(verbatim: FrontTabCopy.accessOff(browser.name))
+                .font(Theme.Font.body)
+                .foregroundColor(Theme.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
     }
 
@@ -440,6 +543,13 @@ struct FrontTabRow: View {
                 .help(FrontTabCopy.allowHelp(browser.name))
                 .accessibilityLabel(FrontTabCopy.allowName(browser.name))
                 .accessibilityHint(FrontTabCopy.allowHelp(browser.name))
+        case .accessOff(let browser):
+            Button(FrontTabCopy.openSettingsTitle()) { onOpenSettings() }
+                .controlSize(.small)
+                .fixedSize()
+                .help(FrontTabCopy.openSettingsHelp(browser.name))
+                .accessibilityLabel(FrontTabCopy.openSettingsName(browser.name))
+                .accessibilityHint(FrontTabCopy.openSettingsHelp(browser.name))
         }
     }
 }

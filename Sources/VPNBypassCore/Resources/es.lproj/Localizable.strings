@@ -896,6 +896,10 @@
 "Add %@ to Bypass" = "Añadir %@ a Bypass";
 "Add %@ to VPN Only" = "Añadir %@ a Solo VPN";
 "Send %@ Direct" = "Enviar %@ en Directo";
+"%@ access is off" = "El acceso a %@ está desactivado";
+"Open Settings" = "Abrir Ajustes";
+"Open Automation Settings for %@" = "Abrir los ajustes de Automatización para %@";
+"Switch on %@ under VPN Bypass in Privacy & Security > Automation, so the app can read the front tab." = "Activa %@ bajo VPN Bypass en Privacidad y seguridad > Automatización para que la app pueda leer la pestaña activa.";
 
 "Shared CDN address (%@): other sites on it bypass the VPN too" = "Dirección de CDN compartida (%@): los demás sitios en ella también evitan la VPN";
 "Shared CDN address (%@): other sites on it use the VPN too" = "Dirección de CDN compartida (%@): los demás sitios en ella también usan la VPN";

@@ -114,23 +114,27 @@ final class FrontTabTests: XCTestCase {
     }
 
     func testAReadIsDroppedWhenTheUserLeftThatBrowser() {
-        let watcher = FrontTabWatcher.shared
-        let before = watcher.suggestion
-        defer { watcher.suggestion = before }
+        let watcher = FrontTabWatcher(system: .init(frontmost: { nil }, isRunning: { _ in true },
+                                                    permission: { _, _ in .granted },
+                                                    runScript: { _ in .init() }, log: { _ in }),
+                                      ownBundleID: "com.example.vpnbypass", readsTabs: false)
         let safari = FrontTabBrowser(bundleID: "com.apple.Safari", name: "Safari", family: .safari)
         let chrome = FrontTabBrowser(bundleID: "com.google.Chrome", name: "Google Chrome", family: .chromium)
+        let page = FrontTabScriptResult(url: "https://shop.example.com/")
 
         watcher.suggestion = .site(host: "old.example.com", browser: safari)
         var asked = false
-        watcher.finish(safari, permission: .granted, current: chrome) { asked = true; return "https://shop.example.com/" }
+        watcher.finish(safari, permission: .granted, current: chrome) { asked = true; return page }
         XCTAssertNil(watcher.suggestion, "a read of a browser the user left is not offered")
         XCTAssertFalse(asked, "the tab of a browser the user left is not read")
 
-        watcher.finish(safari, permission: .granted, current: safari) { "https://shop.example.com/" }
+        watcher.finish(safari, permission: .granted, current: safari) { page }
         XCTAssertEqual(watcher.suggestion, .site(host: "shop.example.com", browser: safari))
-        watcher.finish(safari, permission: .needsConsent, current: safari) { nil }
+        watcher.finish(safari, permission: .needsConsent, current: safari) { .init() }
         XCTAssertEqual(watcher.suggestion, .needsConsent(browser: safari))
-        watcher.finish(safari, permission: .denied, current: safari) { "https://shop.example.com/" }
+        watcher.finish(safari, permission: .denied, current: safari) { page }
+        XCTAssertEqual(watcher.suggestion, .accessOff(browser: safari), "access switched off says so")
+        watcher.finish(safari, permission: .unavailable, current: safari) { page }
         XCTAssertNil(watcher.suggestion)
     }
 
@@ -147,6 +151,12 @@ final class FrontTabTests: XCTestCase {
         XCTAssertEqual(FrontTabCopy.addName("a.example", mode: .bypass, in: es), "Añadir a.example a Bypass")
         XCTAssertEqual(FrontTabCopy.allowTitle(in: fr), "Autoriser…")
         XCTAssertEqual(FrontTabCopy.siteOpenIn("Safari", in: es), "El sitio abierto en Safari")
+        XCTAssertEqual(FrontTabCopy.accessOff("Safari"), "Safari access is off")
+        XCTAssertEqual(FrontTabCopy.accessOff("Safari", in: es), "El acceso a Safari está desactivado")
+        XCTAssertEqual(FrontTabCopy.accessOff("Safari", in: fr), "L’accès à Safari est désactivé")
+        XCTAssertEqual(FrontTabCopy.openSettingsTitle(in: es), "Abrir Ajustes")
+        XCTAssertEqual(FrontTabCopy.openSettingsTitle(in: fr), "Ouvrir les réglages")
+        XCTAssertEqual(FrontTabCopy.openSettingsName("Safari", in: fr), "Ouvrir les réglages d’automatisation pour Safari")
     }
 
     // MARK: - The row
@@ -214,6 +224,23 @@ final class FrontTabTests: XCTestCase {
                                       listing: nil, onAdd: { _ in }, onAllow: { _ in }))
         XCTAssertTrue(read.contains("The site open in Safari"), "read: \(read)")
         XCTAssertTrue(read.contains("Allow Reading the Front Tab in Safari"), "read: \(read)")
+    }
+
+    func testAnAccessSwitchedOffOffersTheAutomationPane() {
+        var opened = 0
+        let read = labels(FrontTabRow(suggestion: .accessOff(browser: safari), mode: .bypass, listing: nil,
+                                      onAdd: { _ in }, onAllow: { _ in }, onOpenSettings: { opened += 1 }))
+        XCTAssertTrue(read.contains("Safari access is off"), "read: \(read)")
+        XCTAssertTrue(read.contains("Open Automation Settings for Safari"), "read: \(read)")
+        XCTAssertFalse(read.contains("Allow Reading the Front Tab in Safari"), "read: \(read)")
+        XCTAssertEqual(FrontTabPermission.automationSettingsURL.absoluteString,
+                       "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
+
+        let button = elements(in: window!).first { (get("accessibilityLabel", of: $0) as? String) == "Open Automation Settings for Safari" }
+        XCTAssertNotNil(button)
+        _ = button?.perform(NSSelectorFromString("accessibilityPerformPress"))
+        settle()
+        XCTAssertEqual(opened, 1, "the button opens the pane")
     }
 
     // Outside the first-run screen only: on a fresh install the dropdown shows the first-run
@@ -346,5 +373,141 @@ final class FrontAppTrackerTests: XCTestCase {
         XCTAssertFalse(FrontTabWatcher.stillRuns(gone), "the tracked process quit, though its bundle ID still runs")
         gone.pid = nil
         XCTAssertFalse(FrontTabWatcher.stillRuns(gone), "no process recorded")
+    }
+}
+
+/// Live test on macOS 27: Automation had Safari switched on, Safari was in front on a site,
+/// and the dropdown showed no browser row on any open, neither the site nor Allow…. macOS 27
+/// reports Safari (and Preview) with process id -1, so the check that the browser the user
+/// left still runs looked up process -1, found nothing and dropped the browser before any
+/// read. These tests drive the whole open through the watcher, with macOS swapped for seams.
+@MainActor
+final class FrontTabReadSequenceTests: XCTestCase {
+
+    /// The permission the seam answers; read off the main thread, as the real check is.
+    final class PermissionAnswer: @unchecked Sendable {
+        var value: FrontTabPermission = .granted
+        var asked: [(String, Bool)] = []
+    }
+
+    private let own = "com.example.vpnbypass"
+    private var front: FrontAppTracker.App?
+    private var logs: [String] = []
+    private var scripts: [String] = []
+    private var script = FrontTabScriptResult(url: "https://example.com/", errorNumber: nil)
+    private let answer = PermissionAnswer()
+
+    /// Safari as macOS 27 hands it over: in the Dock, process id -1, and a handle of a live
+    /// process (this test's own, standing in for Safari's).
+    private var safari: FrontAppTracker.App {
+        .init(bundleID: "com.apple.Safari", name: "Safari", isRegular: true, pid: -1, process: .current)
+    }
+
+    /// This app once its status item is clicked: active, with no Dock icon.
+    private var ownMenu: FrontAppTracker.App {
+        .init(bundleID: own, name: "VPN Bypass", isRegular: false, pid: getpid(), process: .current)
+    }
+
+    private let browser = FrontTabBrowser(bundleID: "com.apple.Safari", name: "Safari", family: .safari)
+
+    private func makeWatcher() -> FrontTabWatcher {
+        let answer = self.answer
+        let system = FrontTabWatcher.System(
+            frontmost: { [unowned self] in front },
+            // The real check, so the process id macOS gives is what decides.
+            isRunning: FrontTabWatcher.stillRuns,
+            permission: { bundleID, ask in answer.asked.append((bundleID, ask)); return answer.value },
+            runScript: { [unowned self] source in scripts.append(source); return script },
+            log: { [unowned self] line in logs.append(line) })
+        return FrontTabWatcher(system: system, ownBundleID: own, readsTabs: true)
+    }
+
+    /// One dropdown open: the window's two triggers (already key when the view lands in it, and
+    /// the key notification) both refresh; the second finds the first's read running.
+    private func open(_ watcher: FrontTabWatcher) async {
+        watcher.refresh()
+        watcher.refresh()
+        await watcher.readTask?.value
+    }
+
+    func testTheSiteIsReadOnEveryOpenWhenMacOSHidesSafarisProcessID() async {
+        let watcher = makeWatcher()
+        watcher.activated(safari)       // Safari was activated last,
+        front = ownMenu                 // then the status item was clicked.
+
+        await open(watcher)
+        XCTAssertEqual(watcher.suggestion, .site(host: "example.com", browser: browser), "first open")
+        await open(watcher)
+        XCTAssertEqual(watcher.suggestion, .site(host: "example.com", browser: browser), "second open")
+
+        XCTAssertEqual(scripts.count, 2, "one read per open, not one per trigger")
+        XCTAssertTrue(answer.asked.allSatisfy { $0 == ("com.apple.Safari", false) }, "an open never shows the prompt")
+        XCTAssertEqual(logs, ["Front tab: Safari access on, site read", "Front tab: Safari access on, site read"])
+    }
+
+    func testAnAccessSwitchedOffShowsTheRowThatOpensSettings() async {
+        answer.value = .denied
+        let watcher = makeWatcher()
+        watcher.activated(safari)
+        front = ownMenu
+
+        await open(watcher)
+        XCTAssertEqual(watcher.suggestion, .accessOff(browser: browser))
+        XCTAssertTrue(scripts.isEmpty, "no script runs without access")
+        XCTAssertEqual(logs, ["Front tab: Safari access is off"])
+    }
+
+    func testEachOutcomeLogsOneLineWithoutTheAddress() async {
+        let watcher = makeWatcher()
+        watcher.activated(safari)
+        front = ownMenu
+
+        script = FrontTabScriptResult(url: nil, errorNumber: -1719)
+        await open(watcher)
+        XCTAssertNil(watcher.suggestion, "a failed script offers nothing")
+        script = FrontTabScriptResult(url: "about:blank", errorNumber: nil)
+        await open(watcher)
+        XCTAssertNil(watcher.suggestion)
+        answer.value = .needsConsent
+        await open(watcher)
+        XCTAssertEqual(watcher.suggestion, .needsConsent(browser: browser))
+        answer.value = .unavailable
+        await open(watcher)
+        XCTAssertNil(watcher.suggestion)
+
+        XCTAssertEqual(logs, ["Front tab: Safari access on, script error -1719",
+                              "Front tab: Safari access on, no site in the front tab",
+                              "Front tab: Safari access not asked yet",
+                              "Front tab: Safari access unknown, nothing read"])
+        // A site that was read never reaches the log: hostnames are never logged.
+        script = FrontTabScriptResult(url: "https://private.example.org/x", errorNumber: nil)
+        answer.value = .granted
+        await open(watcher)
+        XCTAssertEqual(watcher.suggestion?.host, "private.example.org")
+        XCTAssertFalse(logs.joined().contains("example"), "logs: \(logs)")
+    }
+
+    func testABrowserWithNoProcessLeftIsNotRead() async {
+        let watcher = makeWatcher()
+        var gone = safari
+        gone.process = nil
+        watcher.activated(gone)
+        front = ownMenu
+
+        await open(watcher)
+        XCTAssertNil(watcher.suggestion)
+        XCTAssertTrue(answer.asked.isEmpty, "nothing is asked of a browser that is not running")
+        XCTAssertEqual(logs, ["Front tab: Safari is not running, nothing read", "Front tab: Safari is not running, nothing read"],
+                       "both triggers of the open say why there is no row")
+    }
+
+    /// The process handle is what tells a hidden-id browser that quit from one that runs.
+    func testAHiddenProcessIDFallsBackToTheProcessHandle() {
+        XCTAssertTrue(FrontTabWatcher.stillRuns(safari), "id -1, live handle: running")
+        var gone = safari
+        gone.process = nil
+        XCTAssertFalse(FrontTabWatcher.stillRuns(gone), "id -1 and no handle: nothing to go on")
+        let described = FrontTabWatcher.describe(.current)
+        XCTAssertNotNil(described?.process, "the app keeps each process's handle")
     }
 }

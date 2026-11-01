@@ -896,6 +896,10 @@
 "Add %@ to Bypass" = "Add %@ to Bypass";
 "Add %@ to VPN Only" = "Add %@ to VPN Only";
 "Send %@ Direct" = "Send %@ Direct";
+"%@ access is off" = "%@ access is off";
+"Open Settings" = "Open Settings";
+"Open Automation Settings for %@" = "Open Automation Settings for %@";
+"Switch on %@ under VPN Bypass in Privacy & Security > Automation, so the app can read the front tab." = "Switch on %@ under VPN Bypass in Privacy & Security > Automation, so the app can read the front tab.";
 
 "Shared CDN address (%@): other sites on it bypass the VPN too" = "Shared CDN address (%@): other sites on it bypass the VPN too";
 "Shared CDN address (%@): other sites on it use the VPN too" = "Shared CDN address (%@): other sites on it use the VPN too";
