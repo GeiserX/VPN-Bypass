@@ -24,8 +24,6 @@
 /* ===== Ajustes — Pestaña Dominios ===== */
 "VPN Only list" = "Lista Solo VPN";
 "Bypass list" = "Lista Bypass";
-"Only these domains will use the VPN. Everything else bypasses it." = "Solo estos dominios usarán la VPN. Todo lo demás la evita.";
-"Add domains that should bypass VPN and use your regular connection." = "Añade dominios que deben evitar la VPN y usar tu conexión habitual.";
 "Applying..." = "Aplicando...";
 "All" = "Todos";
 "Add a domain above to bypass VPN" = "Añade un dominio arriba para evitar la VPN";
@@ -574,7 +572,6 @@
 "Add to the Bypass list" = "Añadir a la lista Bypass";
 "The privileged helper is not running." = "El asistente con privilegios no está en marcha.";
 "The privileged helper did not answer." = "El asistente con privilegios no respondió.";
-"See the names this Mac looks up, and add the ones you need." = "Mira los nombres que busca este Mac y añade los que necesites.";
 "Off until you start watching. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you stop watching or quit." = "Desactivado hasta que empieces a observar. Entonces el asistente lee solo las preguntas DNS que envía este Mac, nunca las respuestas ni ningún otro tráfico. La lista se guarda solo en memoria y se borra al dejar de observar o salir.";
 "%lld names since %@" = "%lld nombres desde las %@";
 "Bypassed" = "Con bypass";
@@ -1040,3 +1037,14 @@
 "Updated %lld entries to the new wildcard form: %@. They route the same names as before." = "Se han actualizado %lld entradas a la nueva forma de comodín: %@. Enrutan los mismos nombres que antes.";
 "Entries updated to wildcards" = "Entradas actualizadas a comodines";
 "Dismiss the note about updated entries" = "Descartar el aviso sobre las entradas actualizadas";
+"What is routed now, and what needs a look." = "Lo que se enruta ahora y lo que conviene revisar.";
+"How the app starts, looks up names and lets you know." = "Cómo se inicia la app, busca nombres y te avisa.";
+"What the app did, and why." = "Lo que hizo la app, y por qué.";
+"The version, updates and where to get help." = "La versión, las actualizaciones y dónde pedir ayuda.";
+"Only the domains on this list use the VPN." = "Solo los dominios de esta lista usan la VPN.";
+"The domains on this list skip the VPN." = "Los dominios de esta lista evitan la VPN.";
+"Hide search-domain retries" = "Ocultar los reintentos con dominio de búsqueda";
+"Show 1 search-domain retry" = "Mostrar 1 reintento con dominio de búsqueda";
+"Show %lld search-domain retries" = "Mostrar %lld reintentos con dominio de búsqueda";
+"Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer" = "Nombres que son otro nombre de la lista con un dominio de búsqueda añadido, como pregunta el sistema cuando un nombre no obtiene respuesta";
+"The names this Mac looks up." = "Los nombres que busca este Mac.";

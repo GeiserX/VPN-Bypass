@@ -24,8 +24,6 @@
 /* ===== Settings — Domains Tab ===== */
 "VPN Only list" = "VPN Only list";
 "Bypass list" = "Bypass list";
-"Only these domains will use the VPN. Everything else bypasses it." = "Only these domains will use the VPN. Everything else bypasses it.";
-"Add domains that should bypass VPN and use your regular connection." = "Add domains that should bypass VPN and use your regular connection.";
 "Applying..." = "Applying...";
 "All" = "All";
 "Add a domain above to bypass VPN" = "Add a domain above to bypass VPN";
@@ -574,7 +572,6 @@
 "Add to the Bypass list" = "Add to the Bypass list";
 "The privileged helper is not running." = "The privileged helper is not running.";
 "The privileged helper did not answer." = "The privileged helper did not answer.";
-"See the names this Mac looks up, and add the ones you need." = "See the names this Mac looks up, and add the ones you need.";
 "Off until you start watching. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you stop watching or quit." = "Off until you start watching. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you stop watching or quit.";
 "%lld names since %@" = "%lld names since %@";
 "Bypassed" = "Bypassed";
@@ -1040,3 +1037,14 @@
 "Updated %lld entries to the new wildcard form: %@. They route the same names as before." = "Updated %lld entries to the new wildcard form: %@. They route the same names as before.";
 "Entries updated to wildcards" = "Entries updated to wildcards";
 "Dismiss the note about updated entries" = "Dismiss the note about updated entries";
+"What is routed now, and what needs a look." = "What is routed now, and what needs a look.";
+"How the app starts, looks up names and lets you know." = "How the app starts, looks up names and lets you know.";
+"What the app did, and why." = "What the app did, and why.";
+"The version, updates and where to get help." = "The version, updates and where to get help.";
+"Only the domains on this list use the VPN." = "Only the domains on this list use the VPN.";
+"The domains on this list skip the VPN." = "The domains on this list skip the VPN.";
+"Hide search-domain retries" = "Hide search-domain retries";
+"Show 1 search-domain retry" = "Show 1 search-domain retry";
+"Show %lld search-domain retries" = "Show %lld search-domain retries";
+"Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer" = "Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer";
+"The names this Mac looks up." = "The names this Mac looks up.";

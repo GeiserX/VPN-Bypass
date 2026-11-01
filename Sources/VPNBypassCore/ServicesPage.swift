@@ -345,10 +345,10 @@ struct ServicesTab: View {
         }
     }
 
-    /// The spinner while routes are applied, otherwise Turn All On / Off; then the label over
-    /// the number column.
+    /// The label over the number column, and at the trailing edge the spinner while routes
+    /// are applied, otherwise Turn All On / Off.
     private func listTrailing(numberWidth: CGFloat, hasServices: Bool) -> some View {
-        HStack(spacing: Theme.Space.s) {
+        ListSectionTrailing(numberWidth: numberWidth) {
             if routeManager.isApplyingRoutes {
                 ProgressView()
                     .controlSize(.small)
@@ -361,12 +361,6 @@ struct ServicesTab: View {
                     onTurnAllOn: turnAllOn,
                     onTurnAllOff: { switchAll(false) }
                 )
-            }
-            if numberWidth > 0 {
-                Text("addresses")
-                    // Ends over the number column, as on the Domains page: past it come the
-                    // small switch (44 pt), the row's spacing and its inset, less the header's 2 pt.
-                    .padding(.trailing, 44 + Theme.Space.s + ListRow.inset - 2)
             }
         }
     }

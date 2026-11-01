@@ -14,6 +14,8 @@ struct LookupsTab: View {
     @State private var feedback: AddDomainFeedback?
     /// The name the New Service sheet is open for.
     @State private var newServiceFor: NewServiceRequest?
+    /// The search-domain retries (`SearchDomainRetries`) are listed too.
+    @State private var showsRetries = false
 
     /// Rows drawn at once. The line under the list says when there are more, and search
     /// reaches them.
@@ -47,11 +49,34 @@ struct LookupsTab: View {
 
     private var isOn: Bool { routeManager.config.dnsLookupsEnabled }
 
+    /// The names the page lists: the retries left out unless `showsRetries`, and how many
+    /// there are, for the toggle. A search lists every name it matches, retries included,
+    /// since the user is looking for that name.
+    static func listed(_ tally: DNSLookupTally, matching query: String, searchDomains: [String],
+                       showsRetries: Bool) -> (names: [DNSLookupTally.Entry], retries: Int) {
+        let ranked = tally.ranked(matching: query)
+        guard query.trimmingCharacters(in: .whitespaces).isEmpty else { return (ranked, 0) }
+        let retries = SearchDomainRetries.retries(among: tally.entries.keys, searchDomains: searchDomains)
+        let matched = ranked.filter { retries.contains($0.name) }.count
+        return (showsRetries ? ranked : ranked.filter { !retries.contains($0.name) }, matched)
+    }
+
+    /// The toggle under the list: "Show 3 search-domain retries", or Hide once they show.
+    static func retriesToggleTitle(count: Int, showing: Bool, in bundle: Bundle = .main) -> String {
+        showing
+            ? String(localized: "Hide search-domain retries", bundle: bundle)
+            : count == 1
+                ? String(localized: "Show 1 search-domain retry", bundle: bundle)
+                : String(localized: "Show \(count) search-domain retries", bundle: bundle)
+    }
+
     var body: some View {
-        let ranked = monitor.tally.ranked(matching: query)
+        let listed = Self.listed(monitor.tally, matching: query, searchDomains: monitor.searchDomains,
+                                 showsRetries: showsRetries)
+        let ranked = listed.names
         let content = Content.resolve(isOn: isOn, matching: ranked.count, query: query)
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            purposeLine
+            learnSiteRow
             if let learning = monitor.learning {
                 // A new window starts with no wildcard chosen.
                 LearnSiteSection(learning: learning, feedback: $feedback)
@@ -66,7 +91,7 @@ struct LookupsTab: View {
                                primary: .init(title: String(localized: "Start Watching")) { setWatching(true) })
                 }
             } else {
-                lookups(ranked, content: content)
+                lookups(ranked, content: content, retries: listed.retries)
             }
             privacyNote
         }
@@ -91,14 +116,10 @@ struct LookupsTab: View {
                       help: String(localized: "Read the DNS lookups this Mac sends, and list the names", bundle: bundle), perform: perform)
     }
 
-    /// The page's subtitle, under the title the title bar shows, and Learn a Site beside it.
-    /// Start Watching and Stop Watching are in the title bar.
-    private var purposeLine: some View {
+    /// Learn a Site, at the page's trailing edge. The page's purpose line is in the header,
+    /// under its title, and Start Watching and Stop Watching are in the title bar.
+    private var learnSiteRow: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
-            Text("See the names this Mac looks up, and add the ones you need.")
-                .font(Theme.Font.detail)
-                .foregroundColor(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Theme.Space.s)
             Button(String(localized: "Learn a Site…")) {
                 feedback = nil
@@ -132,7 +153,7 @@ struct LookupsTab: View {
     }
 
     @ViewBuilder
-    private func lookups(_ ranked: [DNSLookupTally.Entry], content: Content) -> some View {
+    private func lookups(_ ranked: [DNSLookupTally.Entry], content: Content, retries: Int) -> some View {
         let shown = Array(ranked.prefix(Self.shownLimit))
         let numberWidth = Self.numberWidth(for: shown)
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -177,6 +198,16 @@ struct LookupsTab: View {
                 Text("Showing the top \(Self.shownLimit). Search to find the rest.")
                     .font(Theme.Font.detail)
                     .foregroundColor(Theme.textSecondary)
+                    .padding(.leading, 2)
+            }
+
+            if retries > 0 {
+                let title = Self.retriesToggleTitle(count: retries, showing: showsRetries)
+                Button(title) { showsRetries.toggle() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help(String(localized: "Names that are another listed name with a search domain added, as the resolver asks when a name gets no answer"))
+                    .accessibilityLabel(title)
                     .padding(.leading, 2)
             }
         }

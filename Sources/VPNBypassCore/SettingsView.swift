@@ -51,6 +51,23 @@ struct SettingsView: View {
             }
         }
 
+        /// The page's purpose line, under its title in the header band. Domains and Rules
+        /// publish their own (`pageSubtitle(_:)`), which changes with the mode and the rule
+        /// count; this is what every other page shows, and their line before they publish.
+        func purpose(in bundle: Bundle = .main) -> String {
+            switch self {
+            case .status:   return String(localized: "What is routed now, and what needs a look.", bundle: bundle)
+            case .domains:  return DomainsPage.purpose(isInverse: false, in: bundle)
+            case .services: return ServicesPage.purpose(in: bundle)
+            case .rules:    return RulesTab.purpose(ruleCount: 0, in: bundle)
+            case .routes:   return String(localized: "The ways out a rule can pick.", bundle: bundle)
+            case .lookups:  return String(localized: "The names this Mac looks up.", bundle: bundle)
+            case .general:  return String(localized: "How the app starts, looks up names and lets you know.", bundle: bundle)
+            case .logs:     return String(localized: "What the app did, and why.", bundle: bundle)
+            case .about:    return String(localized: "The version, updates and where to get help.", bundle: bundle)
+            }
+        }
+
         var icon: String {
             switch self {
             case .status:   return "waveform.path.ecg.rectangle"
@@ -177,7 +194,7 @@ struct SettingsView: View {
                     Color.clear.frame(height: titleBar)
                     PageHeader(
                         title: selectedTab.name,
-                        subtitle: pageSubtitle,
+                        subtitle: pageSubtitle ?? selectedTab.purpose(),
                         search: SettingsSidebar.isSearchable(selectedTab) ? $searchText : nil,
                         searchPrompt: PageHeader.searchPrompt(for: selectedTab.name),
                         actions: actions,

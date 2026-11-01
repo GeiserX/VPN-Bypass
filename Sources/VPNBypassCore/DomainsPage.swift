@@ -32,6 +32,14 @@ enum DomainListCopy {
 /// The Domains page as data: one section per list, the one the mode uses first and editable,
 /// then the other one read-only. Kept apart from the view so tests can read it.
 enum DomainsPage {
+    /// The page's purpose line, under its title: short enough for one line at the default
+    /// window size, and at most two at the smallest.
+    static func purpose(isInverse: Bool, in bundle: Bundle = .main) -> String {
+        isInverse
+            ? String(localized: "Only the domains on this list use the VPN.", bundle: bundle)
+            : String(localized: "The domains on this list skip the VPN.", bundle: bundle)
+    }
+
     struct Section: Equatable {
         let list: DomainList
         let title: String
@@ -193,9 +201,7 @@ struct DomainsTab: View {
                 }
             }
         }
-        .pageSubtitle(isInverse
-            ? String(localized: "Only these domains will use the VPN. Everything else bypasses it.")
-            : String(localized: "Add domains that should bypass VPN and use your regular connection."))
+        .pageSubtitle(DomainsPage.purpose(isInverse: isInverse))
         // The field is always open, so the page's add has no + of its own: ⌘N focuses it.
         .pageTitleActions([.add(String(localized: "Add"), showsButton: false) { isInputFocused = true }])
         // Editing the text the line talks about, or switching lists, makes it stale.
@@ -223,8 +229,8 @@ struct DomainsTab: View {
     @ViewBuilder
     private func activeSection(_ section: DomainsPage.Section, numberWidth: CGFloat, pageHasNoMatch: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            GroupSection(section.title, trailing: {
-                activeTrailing(numberWidth: numberWidth, staleCount: section.staleCount)
+            GroupSection(section.title, titleAccessory: staleFilter(count: section.staleCount), trailing: {
+                activeTrailing(numberWidth: numberWidth)
             }) {
                 addRow
                 if section.total == 0 {
@@ -266,21 +272,26 @@ struct DomainsTab: View {
         }
     }
 
-    /// The "Not resolving" filter while an entry has stopped resolving, Turn All On / Off, then
-    /// the label over the number column.
-    private func activeTrailing(numberWidth: CGFloat, staleCount: Int) -> some View {
-        HStack(spacing: Theme.Space.s) {
-            if staleCount > 0 {
-                let title = String(localized: "Not resolving · \(staleCount)")
-                Toggle(title, isOn: $staleOnly)
-                    .toggleStyle(.button)
-                    .controlSize(.small)
-                    .help(String(localized: "Show only the domains that have stopped resolving"))
-                    // VoiceOver names it by its title, count included, and keeps the toggle's
-                    // own on/off value; an explicit value would hide whether the filter is on.
-                    .accessibilityLabel(title)
-                    .accessibilityHint(String(localized: "Show only the domains that have stopped resolving"))
-            }
+    /// The "Not resolving" filter, after the section's title, while an entry has stopped
+    /// resolving.
+    private func staleFilter(count staleCount: Int) -> AnyView? {
+        guard staleCount > 0 else { return nil }
+        let title = String(localized: "Not resolving · \(staleCount)")
+        return AnyView(
+            Toggle(title, isOn: $staleOnly)
+                .toggleStyle(.button)
+                .controlSize(.small)
+                .help(String(localized: "Show only the domains that have stopped resolving"))
+                // VoiceOver names it by its title, count included, and keeps the toggle's
+                // own on/off value; an explicit value would hide whether the filter is on.
+                .accessibilityLabel(title)
+                .accessibilityHint(String(localized: "Show only the domains that have stopped resolving"))
+        )
+    }
+
+    /// The label over the number column, and Turn All On / Off at the trailing edge.
+    private func activeTrailing(numberWidth: CGFloat) -> some View {
+        ListSectionTrailing(numberWidth: numberWidth) {
             if !routeManager.isApplyingRoutes && !activeDomains.isEmpty {
                 BulkSwitchMenu(
                     turnAllOnTitle: String(localized: "Turn All On"),
@@ -289,13 +300,6 @@ struct DomainsTab: View {
                     onTurnAllOn: { switchAll(true) },
                     onTurnAllOff: { switchAll(false) }
                 )
-            }
-            if numberWidth > 0 {
-                Text("addresses")
-                    // Ends over the number column: past it come the small switch (44 pt
-                    // measured on the rendered page), the row's spacing and its inset, less
-                    // the header's own 2 pt.
-                    .padding(.trailing, 44 + Theme.Space.s + ListRow.inset - 2)
             }
         }
     }

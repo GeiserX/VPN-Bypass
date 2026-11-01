@@ -188,6 +188,225 @@ final class SettingsHeaderTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(row.minY, -0.5, "the selected About row is below the window's bottom edge")
     }
 
+    // MARK: - The purpose line
+
+    /// Every page says what it is for, in the header under its title and nowhere else, and in
+    /// every language (#221 left Status, Logs, General and About without one, and Lookups and
+    /// Routes with theirs in the page).
+    func testEveryPageHasOnePurposeLineInTheHeader() throws {
+        for (mode, pages) in Self.pagesByMode {
+            seed(mode)
+            let window = open(.status)
+            for page in pages {
+                let line = expectedPurpose(page, mode: mode)
+                XCTAssertFalse(line.isEmpty, "\(page) has no purpose line")
+                let found = try purposeElements(line, page: page, in: window)
+                XCTAssertEqual(found.inBand, 1, "\(mode) \(page): \"\(line)\" is not under the title")
+                XCTAssertEqual(found.total, 1, "\(mode) \(page): \"\(line)\" shows in the page as well")
+            }
+            window.orderOut(nil)
+        }
+        for language in ["es", "fr"] {
+            let bundle = try lproj(language)
+            for page in SettingsView.SettingsTab.allCases {
+                XCTAssertNotEqual(page.purpose(in: bundle), page.purpose(), "\(language) leaves \(page)'s line in English")
+            }
+            XCTAssertNotEqual(DomainsPage.purpose(isInverse: true, in: bundle), DomainsPage.purpose(isInverse: true))
+            XCTAssertNotEqual(RulesTab.purpose(ruleCount: 3, in: bundle), RulesTab.purpose(ruleCount: 3))
+        }
+    }
+
+    /// No purpose line loses its end, at the default size or the smallest: it fits on one line
+    /// or wraps to a second inside the header band. The Domains line ended "use your regular
+    /// c…" at 860 pt and the Rules line "… Drag to reorder." at 720 pt. The Spanish and French
+    /// lines are measured against the room the English layout gives.
+    func testNoPurposeLineIsCutAtTheDefaultOrTheSmallestWidth() throws {
+        let font = NSFont.systemFont(ofSize: 11)
+        let languages = try ["es", "fr"].map(lproj)
+        for (mode, pages) in Self.pagesByMode {
+            seed(mode)
+            let window = open(.status)
+            // Each header button's width at the default size: the smallest window may not
+            // squeeze one to make room for the line (Start Watching was cut to a sliver).
+            var buttonWidths: [String: CGFloat] = [:]
+            for width in [SettingsWindowController.defaultContentSize.width, SettingsWindowController.minimumContentSize.width] {
+                window.setContentSize(NSSize(width: width, height: SettingsWindowController.defaultContentSize.height))
+                settle(window)
+                let titleBarBottom = window.contentLayoutRect.maxY
+                let bandBottom = titleBarBottom - PageHeader.height
+                for page in pages {
+                    let line = expectedPurpose(page, mode: mode)
+                    let found = try purposeElements(line, page: page, in: window)
+                    let rect = try XCTUnwrap(found.frame, "\(mode) \(page) at \(width): no purpose line")
+                    let label = "\(mode) \(page) at \(Int(width)) pt"
+                    XCTAssertGreaterThanOrEqual(rect.minY, bandBottom - 0.5, "\(label): the line runs below the header band")
+                    XCTAssertLessThanOrEqual(rect.maxY, titleBarBottom + 0.5, "\(label): the line reaches into the title bar")
+                    XCTAssertLessThanOrEqual(Self.height(of: line, font: font, width: rect.width), rect.height + 1,
+                                             "\(label): \"\(line)\" is cut in \(rect.width) × \(rect.height) pt")
+                    for (name, buttonWidth) in headerButtons(in: window) {
+                        let key = "\(page)|\(name)"
+                        if let wide = buttonWidths[key] {
+                            XCTAssertEqual(buttonWidth, wide, accuracy: 1, "\(label): \(name) is squeezed")
+                        } else {
+                            buttonWidths[key] = buttonWidth
+                        }
+                    }
+                    // The other languages get the room up to the controls on the right.
+                    let room = try roomForPurpose(startingAt: rect.minX, page: page, in: window)
+                    for bundle in languages {
+                        let translated = expectedPurpose(page, mode: mode, in: bundle)
+                        XCTAssertLessThanOrEqual(Self.height(of: translated, font: font, width: room),
+                                                 Self.height(of: "A", font: font, width: room) * CGFloat(PageHeader.subtitleLines) + 1,
+                                                 "\(label): \"\(translated)\" needs more than two lines in \(room) pt")
+                    }
+                }
+            }
+            window.orderOut(nil)
+        }
+    }
+
+    /// The pages each mode renders: every page in Bypass, Domains again in VPN Only, Rules
+    /// with its longer line in Custom.
+    private static let pagesByMode: [(RoutingMode, [SettingsView.SettingsTab])] = [
+        (.bypass, SettingsView.SettingsTab.allCases),
+        (.vpnOnly, [.domains]),
+        (.custom, [.rules]),
+    ]
+
+    private func seed(_ mode: RoutingMode) {
+        var config = rm.config
+        config.routingMode = mode
+        if mode == .custom {
+            let direct = Route(name: "Direct", egress: .direct)
+            config.routes = [direct]
+            config.rules = [
+                Rule(matchType: .domain, pattern: "a.example.com", routeId: direct.id, order: 0),
+                Rule(matchType: .suffix, pattern: "example.org", routeId: direct.id, order: 1),
+            ]
+            config.defaultRouteId = direct.id
+        }
+        rm.config = config
+    }
+
+    private func expectedPurpose(_ page: SettingsView.SettingsTab, mode: RoutingMode, in bundle: Bundle = .main) -> String {
+        switch page {
+        case .domains: return DomainsPage.purpose(isInverse: mode == .vpnOnly, in: bundle)
+        case .rules: return RulesTab.purpose(ruleCount: mode == .custom ? rm.config.rules.count : 0, in: bundle)
+        default: return page.purpose(in: bundle)
+        }
+    }
+
+    /// The elements that read `line`: how many in the header band, how many in the window,
+    /// and the band's one's frame in window coordinates.
+    private func purposeElements(_ line: String, page: SettingsView.SettingsTab,
+                                 in window: NSWindow) throws -> (inBand: Int, total: Int, frame: NSRect?) {
+        SettingsPageRequest.shared.page = page
+        settle(window)
+        let titleBarBottom = window.contentLayoutRect.maxY
+        let bandBottom = titleBarBottom - PageHeader.height
+        let all = AccessibilityTree.elements(under: window) { settle(window) }
+        let reading = all.filter {
+            reads($0, line) && AccessibilityTree.role($0) == NSAccessibility.Role.staticText.rawValue
+        }
+        let inBand = reading.compactMap { element -> NSRect? in
+            guard let screen = AccessibilityTree.frame(element) else { return nil }
+            let rect = window.convertFromScreen(screen)
+            return rect.minX >= SettingsSidebarView.width && rect.midY > bandBottom && rect.midY < titleBarBottom ? rect : nil
+        }
+        return (inBand.count, reading.count, inBand.first)
+    }
+
+    /// The width the purpose line may take: from where it starts to the first control on the
+    /// right of the header, less the gap between them, with the search at its narrowest.
+    private func roomForPurpose(startingAt x: CGFloat, page: SettingsView.SettingsTab, in window: NSWindow) throws -> CGFloat {
+        let titleBarBottom = window.contentLayoutRect.maxY
+        let bandBottom = titleBarBottom - PageHeader.height
+        let all = AccessibilityTree.elements(under: window) { settle(window) }
+        var right = window.contentLayoutRect.maxX - Theme.Space.page
+        for element in all {
+            guard let role = AccessibilityTree.role(element),
+                  [NSAccessibility.Role.button.rawValue, NSAccessibility.Role.textField.rawValue,
+                   NSAccessibility.Role.checkBox.rawValue, NSAccessibility.Role.popUpButton.rawValue].contains(role),
+                  let screen = AccessibilityTree.frame(element) else { continue }
+            let rect = window.convertFromScreen(screen)
+            guard rect.midY > bandBottom, rect.midY < titleBarBottom, rect.minX > x + 1 else { continue }
+            right = min(right, rect.minX)
+        }
+        let narrower = searchFields(in: window).first.map { $0.frame.width - PageHeader.searchWidth.lowerBound } ?? 0
+        return right + max(0, narrower) - Theme.Space.m - x
+    }
+
+    /// The header band's buttons on the page shown, by name, with their widths.
+    private func headerButtons(in window: NSWindow) -> [(String, CGFloat)] {
+        let titleBarBottom = window.contentLayoutRect.maxY
+        let bandBottom = titleBarBottom - PageHeader.height
+        return AccessibilityTree.elements(under: window) { settle(window) }.compactMap { element in
+            guard AccessibilityTree.role(element) == NSAccessibility.Role.button.rawValue,
+                  let name = AccessibilityTree.label(element), let screen = AccessibilityTree.frame(element) else { return nil }
+            let rect = window.convertFromScreen(screen)
+            guard rect.minX >= SettingsSidebarView.width, rect.midY > bandBottom, rect.midY < titleBarBottom else { return nil }
+            return (name, rect.width)
+        }
+    }
+
+    /// The height `text` needs, wrapped at `width`.
+    private static func height(of text: String, font: NSFont, width: CGFloat) -> CGFloat {
+        ceil(NSAttributedString(string: text, attributes: [.font: font])
+            .boundingRect(with: NSSize(width: width + 1, height: .greatestFiniteMagnitude),
+                          options: [.usesLineFragmentOrigin, .usesFontLeading]).height)
+    }
+
+    // MARK: - The list headers
+
+    /// The Domains list's header had the "Not resolving" chip, the ⋯ menu and "addresses"
+    /// crammed together at its right end. The chip follows the list's title, the ⋯ menu sits at
+    /// the trailing edge over the switches, and "addresses" ends over the number column; the
+    /// Services list's header is laid out the same way.
+    func testTheListHeadersPutTheChipLeftTheMenuRightAndTheLabelOverTheNumbers() throws {
+        let savedRoutes = rm.activeRoutes
+        defer { rm.activeRoutes = savedRoutes }
+        var config = rm.config
+        var stale = [DomainEntry(domain: "a.example.com"), DomainEntry(domain: "b.example.com")]
+        for i in stale.indices { stale[i].resolveFailures = ResolveFailures(count: StaleEntries.threshold, since: Date()) }
+        config.domains = [DomainEntry(domain: "example.org")] + stale
+        config.services = [ServiceEntry(id: "custom_lab", name: "Lab", enabled: true, domains: [],
+                                        ipRanges: ["203.0.113.0/24"], isCustom: true)]
+        rm.config = config
+        rm.activeRoutes = [
+            .init(destination: "192.0.2.10", gateway: "192.168.1.1", source: "example.org", timestamp: Date()),
+            .init(destination: "203.0.113.0/24", gateway: "192.168.1.1", source: "Lab", timestamp: Date()),
+        ]
+        let window = open(.domains)
+        let domainsTitle = try XCTUnwrap(DomainsPage.sections(mode: .bypass, config: rm.config,
+                                                               routeSources: rm.activeRoutes.map(\.source), search: "").first?.title)
+        for (page, title, chip) in [(SettingsView.SettingsTab.domains, domainsTitle, Optional("Not resolving · 2")),
+                                    (.services, ServicesPage.listTitle(), nil)] {
+            SettingsPageRequest.shared.page = page
+            settle(window)
+            let all = AccessibilityTree.elements(under: window) { settle(window) }
+            func frame(_ label: String) throws -> NSRect {
+                let element = try XCTUnwrap(all.first { reads($0, label) && isInContent($0, window) },
+                                            "\(page): no \(label)")
+                return window.convertFromScreen(try XCTUnwrap(AccessibilityTree.frame(element)))
+            }
+            let titleFrame = try frame(title)
+            let menu = try frame("Turn all on or off")
+            let label = try frame("addresses")
+            let rightEdge = window.contentLayoutRect.maxX - Theme.Space.page
+            XCTAssertEqual(menu.maxX, rightEdge - ListRow.inset, accuracy: 3, "\(page): the ⋯ menu is not at the trailing edge")
+            XCTAssertLessThan(label.maxX + Theme.Space.s, menu.minX, "\(page): \"addresses\" runs into the ⋯ menu")
+            XCTAssertEqual(label.midY, titleFrame.midY, accuracy: 4, "\(page): the header is not one line")
+            // The number column ends past the switch (44 pt) and one space, left of the menu's end.
+            XCTAssertEqual(label.maxX, menu.maxX - 44 - Theme.Space.s, accuracy: 3,
+                           "\(page): \"addresses\" is not over the number column")
+            if let chip {
+                let chipFrame = try frame(chip)
+                XCTAssertLessThan(chipFrame.minX - titleFrame.maxX, Theme.Space.l, "\(page): the chip is not after the title")
+                XCTAssertLessThan(chipFrame.maxX + Theme.Space.s, label.minX, "\(page): the chip runs into \"addresses\"")
+            }
+        }
+    }
+
     // MARK: - The logo
 
     /// The sidebar opens with the app's icon and its name, one header for VoiceOver, on the
@@ -208,6 +427,11 @@ final class SettingsHeaderTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// The element reads `text`: its label, or a static text's value.
+    private func reads(_ element: NSObject, _ text: String) -> Bool {
+        AccessibilityTree.label(element) == text || (AccessibilityTree.get("accessibilityValue", of: element) as? String) == text
+    }
 
     private func sidebarModes(in window: NSWindow) throws -> [RoutingMode: NSObject] {
         let all = AccessibilityTree.elements(under: window) { settle(window) }

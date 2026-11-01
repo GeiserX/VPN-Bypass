@@ -825,7 +825,7 @@ struct MenuContent: View {
 
     private func routedList(_ summary: RoutedBySource.Summary) -> some View {
         let mode = statusInput.mode
-        let failures = routeManager.lastRouteChange?.failures ?? []
+        let failures = (routeManager.lastRouteChange?.failures ?? []) + routeManager.currentDNSFailures
         return RoutedBySourceCard(
             summary: summary,
             reason: { RoutedBySource.problemReason(for: $0, failures: failures) },
@@ -1556,12 +1556,13 @@ enum RoutedBySource {
         return commands.first { if case .turnOff = $0 { return true } else { return false } }
     }
 
-    /// A problem row's reason, under its name: what the last apply said for the entry, or
-    /// that nothing is routed for it.
+    /// A problem row's reason, under its name: what the last apply or lookup said for the
+    /// entry, a DNS failure first since it says what to fix, or that nothing is routed for it.
     static func problemReason(for row: Row, failures: [RouteManager.RouteFailure],
                               in bundle: Bundle = .main) -> String? {
         guard row.isProblem else { return nil }
-        if let failure = failures.first(where: { $0.entry == row.id || ($0.entry.isEmpty && $0.target == row.id) }) {
+        let own = failures.filter { $0.entry == row.id || ($0.entry.isEmpty && $0.target == row.id) }
+        if let failure = own.first(where: { $0.kind == .notResolved }) ?? own.first {
             let what: String
             switch failure.kind {
             case .notResolved: what = String(localized: "Did not resolve", bundle: bundle)

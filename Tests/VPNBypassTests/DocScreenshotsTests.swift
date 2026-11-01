@@ -442,6 +442,60 @@ final class DocScreenshotsTests: XCTestCase {
         }
     }
 
+    // BEGIN POLISH R3 SHOTS
+    /// Every page's header at the default width and at the smallest, for the pull request.
+    func testPolishHeaders() throws {
+        seedBypass()
+        let min = SettingsWindowController.minimumContentSize
+        for page in SettingsView.SettingsTab.allCases {
+            _ = try renderSettings(page: page, to: "polish-header-\(page.rawValue)-860.png")
+            _ = try renderSettings(page: page, height: min.height, width: min.width, to: "polish-header-\(page.rawValue)-720.png")
+        }
+        // Custom mode with rules: the longer Rules line, "… Drag to reorder.".
+        seedCustom()
+        _ = try renderSettings(page: .rules, to: "polish-header-rules-custom-860.png")
+        _ = try renderSettings(page: .rules, height: min.height, width: min.width, to: "polish-header-rules-custom-720.png")
+    }
+
+    /// The Domains list with two names that stopped resolving, and the Services list, whose
+    /// headers hold the chip, the ⋯ menu and "addresses".
+    func testPolishListHeaders() throws {
+        seedStaleDomain()
+        var second = DomainEntry(domain: "old-wiki.example.net", enabled: true)
+        second.resolveFailures = ResolveFailures(count: StaleEntries.threshold, since: Date().addingTimeInterval(-4 * 86_400))
+        rm.config.domains.insert(second, at: 2)
+        let min = SettingsWindowController.minimumContentSize
+        _ = try renderSettings(page: .domains, to: "polish-domains-860.png")
+        _ = try renderSettings(page: .domains, height: min.height, width: min.width, to: "polish-domains-720.png")
+        _ = try renderSettings(page: .services, to: "polish-services-860.png")
+        _ = try renderSettings(page: .services, height: min.height, width: min.width, to: "polish-services-720.png")
+    }
+
+    /// Status > Problems for a listed name that stopped resolving and has no address.
+    func testPolishProblems() throws {
+        seedBypass()
+        var dead = DomainEntry(domain: "old-intranet.example.net", enabled: true)
+        dead.resolveFailures = ResolveFailures(count: StaleEntries.threshold, since: Date().addingTimeInterval(-9 * 86_400))
+        rm.config.domains.append(dead)
+        _ = try renderSettings(page: .status, to: "polish-status-problems.png")
+    }
+
+    /// The Lookups page after one name failed and the resolver retried it with two search domains.
+    func testPolishLookupsRetries() throws {
+        seedBypass()
+        seedLookups()
+        DNSLookupsMonitor.shared.readsSearchDomains = false // POLISH-AFTER-ONLY
+        DNSLookupsMonitor.shared.searchDomains = ["corp.example", "lab.example"] // POLISH-AFTER-ONLY
+        defer { DNSLookupsMonitor.shared.searchDomains = []; DNSLookupsMonitor.shared.readsSearchDomains = true } // POLISH-AFTER-ONLY
+        var tally = DNSLookupsMonitor.shared.tally
+        for _ in 0..<40 {
+            tally.record(["build.example.com", "build.example.com.corp.example", "build.example.com.lab.example"], at: Date())
+        }
+        DNSLookupsMonitor.shared.tally = tally
+        _ = try renderSettings(page: .lookups, to: "polish-lookups.png")
+    }
+    // END POLISH R3 SHOTS
+
     func testHeaderDomains() throws {
         seedDomains(mode: .bypass)
         _ = try renderSettings(page: .domains, to: "header-domains-filled.png")

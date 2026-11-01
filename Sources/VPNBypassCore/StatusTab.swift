@@ -341,17 +341,27 @@ enum StatusPage {
     /// Empty when nothing failed. Shown on the same rule as the dropdown (`shownRouteChange`),
     /// so the page never lists failures the dropdown no longer counts. An address that is
     /// routed by now (a DNS retry or a later add put it in) is left out.
+    /// `dnsFailures` (`RouteManager.currentDNSFailures`) are the lookups known to have failed
+    /// for an entry the last apply does not name: an entry with no address that one names
+    /// says it did not resolve, the reason that tells the user what to fix.
     static func problems(lastChange: RouteManager.RouteChangeOutcome?, installed: Int, helperReady: Bool,
                          withoutAddresses: [RoutedBySource.Row], routes: [RoutedBySource.InstalledRoute] = [],
+                         dnsFailures: [RouteManager.RouteFailure] = [],
                          bundle: Bundle = .main) -> [Problem] {
         var out: [Problem] = []
         // The entries a failure row already names, so an entry is listed once, with the
         // failure's reason, which says more than "no address is routed".
         var explained: Set<String> = []
+        // An entry left with no address whose lookups got no answer: that is why, so a route
+        // refusal an earlier apply recorded for it is not its reason (the dropdown's Show agrees).
+        let unresolvedEmpty = Set(withoutAddresses.filter { row in
+            row.isProblem && dnsFailures.contains { $0.entry == row.id }
+        }.map(\.id))
         let lastChange = lastChange?.outstanding(routedNow: Set(routes.map(\.destination)))
         if let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed, helperReady: helperReady),
            change.failedCount > 0 {
             for failure in change.failures {
+                if failure.kind == .notRouted && unresolvedEmpty.contains(failure.entry) { continue }
                 explained.insert(failure.entry.isEmpty ? failure.target : failure.entry)
                 let kind: Problem.Kind
                 let what: String
@@ -385,8 +395,19 @@ enum StatusPage {
         // remove is listed above.
         let removed = DropdownCopy.removalStands(lastChange, currentRouteCount: installed, helperReady: helperReady)
         for row in withoutAddresses where row.isProblem && !removed && !explained.contains(row.id) {
-            out.append(Problem(kind: .noAddresses, title: row.name,
-                               detail: String(localized: "No address is routed for it.", bundle: bundle)))
+            let lookups = dnsFailures.filter { $0.entry == row.id }
+            guard !lookups.isEmpty else {
+                out.append(Problem(kind: .noAddresses, title: row.name,
+                                   detail: String(localized: "No address is routed for it.", bundle: bundle)))
+                continue
+            }
+            let what = String(localized: "Did not resolve", bundle: bundle)
+            for failure in lookups {
+                let detail = failure.entry == failure.target
+                    ? String(localized: "\(what): \(failure.reason)", bundle: bundle)
+                    : String(localized: "\(what), for \(failure.entry): \(failure.reason)", bundle: bundle)
+                out.append(Problem(kind: .notResolved, title: failure.target, detail: detail))
+            }
         }
         return out
     }
@@ -647,7 +668,8 @@ struct StatusTab: View {
         let problems = StatusPage.problems(lastChange: routeManager.lastRouteChange,
                                            installed: routeManager.routedAddressCount,
                                            helperReady: input.helperReady, withoutAddresses: missing,
-                                           routes: routeManager.installedRoutes)
+                                           routes: routeManager.installedRoutes,
+                                           dnsFailures: routeManager.currentDNSFailures)
         if !problems.isEmpty {
             GroupSection(String(localized: "Problems"), trailing: {
                 let retry = StatusPage.retryAction(lastChange: routeManager.lastRouteChange,
