@@ -116,6 +116,10 @@ enum ServicesPage {
         /// The names the user added to a built-in service, which the row can remove.
         let added: [String]
         var id: String { service.id }
+
+        /// A built-in service a custom one of the same name holds off: its switch is greyed,
+        /// since turning it on would be refused, and the detail line says what to rename.
+        var isHeldOff: Bool { !service.isCustom && needsAttention && !service.enabled }
     }
 
     static func purpose(in bundle: Bundle = .main) -> String {
@@ -254,11 +258,6 @@ struct ServicesTab: View {
                     .font(Theme.Font.detail)
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: Theme.Space.s)
-                PageAddButton(name: String(localized: "Create Custom Service")) {
-                    editingService = nil
-                    showingCustomServiceEditor = true
-                }
             }
 
             VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -318,6 +317,10 @@ struct ServicesTab: View {
                 pinned = ServiceSections.pin(routeManager.config.services)
             }
         }
+        .pageTitleActions([.add(String(localized: "Create Custom Service")) {
+            editingService = nil
+            showingCustomServiceEditor = true
+        }])
         .sheet(isPresented: $showingCustomServiceEditor) {
             CustomServiceEditor(service: editingService)
                 .environmentObject(routeManager)
@@ -466,6 +469,7 @@ struct ServiceRow: View {
             needsAttention: row.needsAttention,
             number: row.number,
             numberWidth: numberWidth,
+            numberLabel: ListRow.addressesLabel(row.number),
             actions: actions,
             // A built-in service a custom one holds off does not turn on: toggleService refuses,
             // and the detail line says which custom service to rename.
@@ -475,16 +479,10 @@ struct ServiceRow: View {
                     if !routeManager.isApplyingRoutes { routeManager.toggleService(service.id) }
                 }
             ),
+            isSwitchDisabled: row.isHeldOff,
             showsActions: showsActions,
             detailLineLimit: row.needsAttention || !row.added.isEmpty ? nil : 1
         )
         .disabled(routeManager.isApplyingRoutes)
-        // The buttons show only under the pointer, and a hidden button is hidden from
-        // VoiceOver too, so the row itself carries every action, the ⋯ menu's included.
-        .accessibilityActions {
-            ForEach(RowAction.flattened(actions)) { action in
-                Button(action.name, action: action.perform)
-            }
-        }
     }
 }

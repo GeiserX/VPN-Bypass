@@ -6767,6 +6767,16 @@ extension RouteManager {
         return true
     }
 
+    /// Renames profile `id`. False when the name is taken or blank, so the sheet stays open.
+    @discardableResult
+    func renameProfile(_ id: UUID, to name: String) -> Bool {
+        guard !isConfigLoadFailed, let old = config.profiles.first(where: { $0.id == id })?.name,
+              NetworkProfiles.nameIsFree(name, in: config.profiles, excluding: id) else { return false }
+        commitProfileChange(NetworkProfiles.renaming(id, to: name, in: config))
+        log(.info, "Network profile \(old) renamed to \(name.trimmingCharacters(in: .whitespacesAndNewlines))")
+        return true
+    }
+
     /// Moves this network to profile `id`, and puts the profile in use.
     func useProfileOnThisNetwork(_ id: UUID) {
         guard !isConfigLoadFailed, let network = currentNetwork else { return }

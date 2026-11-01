@@ -167,7 +167,7 @@ final class DropdownStatusBlockTests: XCTestCase {
                      "actionButtons", "loadingContent", ".frame(width: 340)", "systemImage: \"power\""] {
             XCTAssertFalse(menu.contains(gone), "MenuContent still has \(gone)")
         }
-        XCTAssertTrue(menu.contains("StatusBlock(status: status)"))
+        XCTAssertTrue(menu.contains("StatusBlock(status: status"))
         XCTAssertTrue(menu.contains("StatusChip(state: status.chip)"))
         XCTAssertTrue(menu.contains(".frame(width: DropdownLayout.current)"))
 

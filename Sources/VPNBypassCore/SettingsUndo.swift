@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-/// What the last delete or bulk switch on a Settings page changed, with what it takes to put
+/// What the last delete, duplicate or bulk switch on a Settings page changed, with what it takes to put
 /// it back. Kept pure so its wording and which page shows it are unit-tested.
 enum UndoableChange {
     /// A Bypass or VPN Only entry, and where it sat in its list.
@@ -17,6 +17,8 @@ enum UndoableChange {
     case rule(Rule, label: String)
     /// A route from the Routes page, and where it sat in the routes list.
     case route(Route, index: Int)
+    /// The copy Duplicate added on the Routes page, and the name of the route it copies.
+    case routeDuplicated(Route, original: String)
     /// The domains a Turn All On or Turn All Off switched, and which way.
     case domainsSwitched(ids: [UUID], on: Bool, list: DomainList)
     /// The services a Turn All On or Turn All Off switched, and which way.
@@ -28,7 +30,7 @@ enum UndoableChange {
         case .domain, .domainsSwitched: return .domains
         case .customService, .servicesSwitched: return .services
         case .rule: return .rules
-        case .route: return .routes
+        case .route, .routeDuplicated: return .routes
         }
     }
 
@@ -59,6 +61,8 @@ enum UndoableChange {
             return String(localized: "Removed the rule for \(label).", bundle: bundle)
         case .route(let route, _):
             return String(localized: "Removed the route \(route.friendlyName(vpnName: nil, in: bundle)).", bundle: bundle)
+        case .routeDuplicated(let copy, let original):
+            return String(localized: "Duplicated \(original) as \(copy.name).", bundle: bundle)
         case .domainsSwitched(let ids, let on, _):
             let what = ids.count == 1 ? String(localized: "1 domain", bundle: bundle)
                 : String(localized: "\(ids.count) domains", bundle: bundle)
@@ -94,6 +98,10 @@ extension RouteManager {
             return restoreRule(rule)
         case .route(let route, let index):
             return restoreRoute(route, at: index)
+        case .routeDuplicated(let copy, _):
+            guard config.routes.contains(where: { $0.id == copy.id }) else { return false }
+            removeRoute(copy.id)
+            return true
         case .domainsSwitched(let ids, let on, .bypass):
             return !setDomainsEnabled(Set(ids), !on).isEmpty
         case .domainsSwitched(let ids, let on, .vpnOnly):

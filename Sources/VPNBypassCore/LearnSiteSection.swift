@@ -107,6 +107,7 @@ struct LearnSiteSection: View {
             detail: group.names.joined(separator: ", "),
             number: LookupRow.format(group.names.count),
             numberWidth: numberWidth,
+            numberLabel: LookupRow.namesLabel(group.names.count),
             accessory: group.wildcard.flatMap { wildcard in
                 guard !unlisted.isEmpty, !wildcardListed, !learning.isOpen else { return nil }
                 return AnyView(wildcardToggle(wildcard))

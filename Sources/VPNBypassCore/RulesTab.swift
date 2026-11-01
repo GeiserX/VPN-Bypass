@@ -599,8 +599,6 @@ struct RulesTab: View {
                     .font(Theme.Font.detail)
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: Theme.Space.s)
-                PageAddButton(name: String(localized: "Add Rule")) { sheetState = .add }
             }
 
             VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -622,6 +620,7 @@ struct RulesTab: View {
                 }
             }
         }
+        .pageTitleActions([.add(String(localized: "Add Rule")) { sheetState = .add }])
         .sheet(item: $sheetState) { state in
             RuleEditorSheet(editingRule: state.rule, services: routeManager.config.services) { rule in
                 saveRule(rule)
@@ -830,13 +829,6 @@ struct RuleRow: View {
             ),
             detailLineLimit: nil
         )
-        // The buttons show only under the pointer, and a hidden button is hidden from
-        // VoiceOver too, so the row itself carries them.
-        .accessibilityActions {
-            ForEach(actions) { action in
-                Button(action.name, action: action.perform)
-            }
-        }
     }
 }
 
@@ -888,27 +880,30 @@ struct RulesRouteChipMenu: View {
 
     var body: some View {
         let chip = Self.chip(for: selectedRoute, vpnName: routeManager.vpnType?.knownName)
-        RouteChipMenu(chip, spokenName: rowName.map { Self.spokenName(row: $0, route: chip.name) }) {
-            Section("System") {
-                ForEach(systemRoutes) { route in
-                    routeButton(route)
-                }
-            }
-            if !userRoutes.isEmpty {
-                Section("Your Routes") {
-                    ForEach(userRoutes) { route in
+        // Its own width up to a cap: a long custom route name truncates in the chip, and the
+        // rule's pattern keeps the row's width.
+        CappedWidth(max: RouteChip.rowMaxWidth) {
+            RouteChipMenu(chip, spokenName: rowName.map { Self.spokenName(row: $0, route: chip.name) }) {
+                Section("System") {
+                    ForEach(systemRoutes) { route in
                         routeButton(route)
                     }
                 }
-            }
-            Divider()
-            Button {
-                onNewRoute()
-            } label: {
-                Label("New Route…", systemImage: "plus")
+                if !userRoutes.isEmpty {
+                    Section("Your Routes") {
+                        ForEach(userRoutes) { route in
+                            routeButton(route)
+                        }
+                    }
+                }
+                Divider()
+                Button {
+                    onNewRoute()
+                } label: {
+                    Label("New Route…", systemImage: "plus")
+                }
             }
         }
-        .fixedSize()
     }
 
     @ViewBuilder

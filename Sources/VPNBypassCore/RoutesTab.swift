@@ -73,8 +73,6 @@ struct RoutesTab: View {
                     .font(Theme.Font.detail)
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: Theme.Space.s)
-                PageAddButton(name: String(localized: "Add Route")) { sheetState = .add }
             }
 
             systemRoutesSection
@@ -91,6 +89,7 @@ struct RoutesTab: View {
                 }
             }
         }
+        .pageTitleActions([.add(String(localized: "Add Route")) { sheetState = .add }])
         .sheet(item: $sheetState) { state in
             RouteEditorSheet(editingRoute: state.route) { route in
                 saveRoute(route)
@@ -196,9 +195,12 @@ struct RoutesTab: View {
         settingsUndo.record(.route(route, index: index))
     }
 
+    /// The copy lands under the route, with the line that says so and can take it back.
     private func duplicateRoute(_ route: Route) {
         copiedLine = nil
-        routeManager.duplicateRoute(route.id)
+        if let copy = routeManager.duplicateRoute(route.id) {
+            settingsUndo.record(.routeDuplicated(copy, original: route.name))
+        }
     }
 
     private func toggleRoute(_ id: UUID, enabled: Bool) {
@@ -394,13 +396,6 @@ struct RouteRow: View {
             monoDetail: true
         )
         .help(Text(verbatim: Self.detail(route, listenerPort: listenerPort)))
-        // The buttons show only under the pointer, and a hidden button is hidden from
-        // VoiceOver too, so the row itself carries every action, the ⋯ menu's included.
-        .accessibilityActions {
-            ForEach(RowAction.flattened(actions)) { action in
-                Button(action.name, action: action.perform)
-            }
-        }
     }
 
     private func copy(_ kind: CopyKind) {

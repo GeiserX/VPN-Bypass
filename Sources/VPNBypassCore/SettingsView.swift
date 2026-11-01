@@ -134,18 +134,16 @@ struct SettingsView: View {
         }
     }
 
-    /// The page: its name and, on a list page, the search field, both in the title bar row
-    /// level with the traffic lights, then the page itself in the one scroll view of the window.
+    /// The page: its name, the search field on a list page and the page's own primary actions
+    /// (`pageTitleActions`), all in the title bar row level with the traffic lights, then the
+    /// page itself in the one scroll view of the window.
     private func detail(titleBar: CGFloat) -> some View {
         VStack(spacing: 0) {
-            PageHeader(
-                title: selectedTab.name,
-                subtitle: nil,
-                search: SettingsSidebar.isSearchable(selectedTab) ? $searchText : nil
-            )
-            .padding(.horizontal, Theme.Space.page)
-            .frame(height: titleBar)
-            .padding(.bottom, Theme.Space.m)
+            // The header's room. The header itself is drawn over it, from the actions the page
+            // publishes from inside the scroll view.
+            Color.clear
+                .frame(height: titleBar)
+                .padding(.bottom, Theme.Space.m)
 
             Rectangle()
                 .fill(Theme.separator)
@@ -171,6 +169,21 @@ struct SettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlayPreferenceValue(PageTitleActionsKey.self) { actions in
+            VStack(spacing: 0) {
+                PageHeader(
+                    title: selectedTab.name,
+                    subtitle: nil,
+                    search: SettingsSidebar.isSearchable(selectedTab) ? $searchText : nil,
+                    actions: actions,
+                    // A page of another mode is read-only, its title bar actions too.
+                    actionsEnabled: !SettingsSidebar.isReadOnly(selectedTab, in: mode)
+                )
+                .padding(.horizontal, Theme.Space.page)
+                .frame(height: titleBar)
+                Spacer(minLength: 0)
+            }
+        }
         .background(Theme.bgPrimary)
     }
 
@@ -194,6 +207,55 @@ struct SettingsView: View {
         case .logs:     LogsTab(filter: logsFilter).id(logsFilterRequest)
         case .about:    AboutTab()
         }
+    }
+}
+
+// MARK: - Title bar actions
+
+/// A page's primary action, drawn in the window's title bar row beside the search: the + of a
+/// page that adds through a sheet, or a word such as Stop Watching, Copy or Clear. A page
+/// publishes its actions with `pageTitleActions(_:)` and the shell draws them, so every page
+/// puts them in the same place, and ⌘N runs the page's add.
+struct PageTitleAction: Identifiable {
+    enum Kind { case add, button }
+
+    let kind: Kind
+    /// The button's title and spoken name: "Add Rule", "Stop Watching".
+    let name: String
+    var help: String?
+    var isEnabled = true
+    /// False for an add with no button of its own, such as the Domains page's always-open
+    /// field: ⌘N still runs it.
+    var showsButton = true
+    let perform: () -> Void
+
+    var id: String { name }
+
+    /// The page's add: the + with ⌘N.
+    static func add(_ name: String, showsButton: Bool = true, perform: @escaping () -> Void) -> PageTitleAction {
+        PageTitleAction(kind: .add, name: name, showsButton: showsButton, perform: perform)
+    }
+
+    /// A small button with a word on it.
+    static func button(_ name: String, help: String? = nil, isEnabled: Bool = true,
+                       perform: @escaping () -> Void) -> PageTitleAction {
+        PageTitleAction(kind: .button, name: name, help: help, isEnabled: isEnabled, perform: perform)
+    }
+}
+
+/// The actions of the page on screen, read by the shell's title bar.
+struct PageTitleActionsKey: PreferenceKey {
+    static let defaultValue: [PageTitleAction] = []
+
+    static func reduce(value: inout [PageTitleAction], nextValue: () -> [PageTitleAction]) {
+        value += nextValue()
+    }
+}
+
+extension View {
+    /// Puts these actions in the Settings window's title bar row while the page shows.
+    func pageTitleActions(_ actions: [PageTitleAction]) -> some View {
+        preference(key: PageTitleActionsKey.self, value: actions)
     }
 }
 
@@ -470,6 +532,14 @@ struct LogsTab: View {
                 }
             }
         }
+        .pageTitleActions([
+            .button(String(localized: "Copy"), help: String(localized: "Copy the entries shown"),
+                    isEnabled: !shown.isEmpty) { copyLogsToClipboard(shown) },
+            .button(String(localized: "Clear"), help: String(localized: "Remove every entry, including any the filter hides"),
+                    isEnabled: !routeManager.recentLogs.isEmpty) {
+                withAnimation { routeManager.recentLogs.removeAll() }
+            },
+        ])
     }
 
     /// Shown while only the control socket's lines show (proposal 15 of #119); a click shows
@@ -493,8 +563,8 @@ struct LogsTab: View {
         .help(LogFilter.sourceTokenHelp)
     }
 
-    /// The page's top line: the level filter, how many entries show, and Copy and Clear. The
-    /// search is the title bar's.
+    /// The page's top line: the level filter and how many entries show. The search, Copy and
+    /// Clear are in the title bar.
     private func filterBar(_ filter: LogFilter, shown: [RouteManager.LogEntry]) -> some View {
         HStack(spacing: Theme.Space.m) {
             Picker(LogLevelFilter.controlName, selection: $filter.level) {
@@ -518,17 +588,6 @@ struct LogsTab: View {
             }
 
             Spacer(minLength: 0)
-
-            Button(String(localized: "Copy")) {
-                copyLogsToClipboard(shown)
-            }
-            .disabled(shown.isEmpty)
-            .help(String(localized: "Copy the entries shown"))
-
-            Button(String(localized: "Clear")) {
-                withAnimation { routeManager.recentLogs.removeAll() }
-            }
-            .help(String(localized: "Remove every entry, including any the filter hides"))
         }
         .controlSize(.small)
     }

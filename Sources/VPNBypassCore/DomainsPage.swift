@@ -197,6 +197,8 @@ struct DomainsTab: View {
                 }
             }
         }
+        // The field is always open, so the page's add has no + of its own: ⌘N focuses it.
+        .pageTitleActions([.add(String(localized: "Add"), showsButton: false) { isInputFocused = true }])
         // Editing the text the line talks about, or switching lists, makes it stale.
         .onChange(of: newDomain) { text in
             if text != feedback?.fieldText { feedback = nil }
@@ -238,6 +240,7 @@ struct DomainsTab: View {
                         InsetDivider()
                         ListRow(glyph: glyph(for: row.entry), name: row.entry.domain, detail: row.detail,
                                 needsAttention: row.isStale, number: row.number, numberWidth: numberWidth,
+                                numberLabel: ListRow.addressesLabel(row.number),
                                 actions: [RowAction.delete(row.entry.domain) { removeDomain(row.entry) }],
                                 isOn: switchBinding(for: row.entry),
                                 showsActions: Self.hoveredForScreenshots == row.entry.domain,
