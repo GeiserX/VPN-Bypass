@@ -135,12 +135,15 @@ enum SiteRoute {
         /// paused: the pause, and what would match once it ends (for the Add offer).
         var pause: PauseState? = nil
         var matchAfterPause: SiteRouteAnswer.Match? = nil
+        /// paused: whether a VPN is up, so the sentence says the site follows it or not.
+        var vpnUp: Bool = true
     }
 
     // MARK: - Matching
 
     static func match(host: String, addresses: [String], in s: Snapshot) -> Found {
-        guard !addresses.isEmpty else { return Found(match: .unresolved, expected: nil) }
+        // The pause rides along on every answer, so `paused` is there whatever matched.
+        guard !addresses.isEmpty else { return Found(match: .unresolved, expected: nil, pause: s.pause) }
         // Paused, the app's routes are out (Pause.swift), and Pause runs only where that sends
         // everything through the VPN: an entry's missing route is the pause, not a stale lookup.
         // A route the pause could not remove is still in, so that answer stands.
@@ -148,11 +151,15 @@ enum SiteRoute {
             var lists = s
             lists.pause = nil
             let after = match(host: host, addresses: addresses, in: lists)
-            if after.match == .route { return after }
+            if after.match == .route {
+                var kept = after
+                kept.pause = pause
+                return kept
+            }
             let loopback = addresses.allSatisfy { $0.hasPrefix("127.") }
             return Found(match: .paused, entry: after.entry,
                          expected: loopback ? .physical : (s.vpnInterface.map { .tunnel($0) } ?? .physical),
-                         pause: pause, matchAfterPause: after.match)
+                         pause: pause, matchAfterPause: after.match, vpnUp: s.vpnInterface != nil)
         }
         // With no VPN there is one way out, around every tunnel, listed or not.
         let vpnWay: PathCheck.Way = s.vpnInterface.map { .tunnel($0) } ?? .physical
@@ -327,7 +334,9 @@ enum SiteRoute {
         switch found.match {
         case .paused:
             return pausedSentence(host: host, length: found.pause?.length ?? .untilResume,
-                                  until: found.pause?.until, now: now)
+                                  until: found.pause?.until,
+                                  helperWait: found.pause?.reconnectedWaiting ?? false,
+                                  vpnUp: found.vpnUp, now: now)
         case .unresolved:
             return String(localized: "\(host) did not resolve, so there is nothing to check.")
         case .route:
@@ -357,16 +366,27 @@ enum SiteRoute {
         }
     }
 
-    /// "Routing is paused until 14:32, so example.com follows the VPN until then."
-    static func pausedSentence(host: String, length: PauseLength, until: Date?, now: Date = Date()) -> String {
+    /// "Routing is paused until 14:32, so example.com follows the VPN until then." With no VPN
+    /// up the sentence stops at the pause: the check after it says the site leaves like
+    /// everything else. `helperWait`: the VPN came back, and the pause holds for the helper.
+    static func pausedSentence(host: String, length: PauseLength, until: Date?, helperWait: Bool = false,
+                               vpnUp: Bool = true, now: Date = Date()) -> String {
         switch length {
         case .minutes:
             let when = (until ?? now).formatted(date: .omitted, time: .shortened)
-            return String(localized: "Routing is paused until \(when), so \(host) follows the VPN until then.")
+            return vpnUp
+                ? String(localized: "Routing is paused until \(when), so \(host) follows the VPN until then.")
+                : String(localized: "Routing is paused until \(when).")
+        case .untilReconnect where helperWait && vpnUp:
+            return String(localized: "Routing is paused until the helper is ready, so \(host) follows the VPN until then.")
         case .untilReconnect:
-            return String(localized: "Routing is paused until the VPN reconnects, so \(host) follows the VPN until then.")
+            return vpnUp
+                ? String(localized: "Routing is paused until the VPN reconnects, so \(host) follows the VPN until then.")
+                : String(localized: "Routing is paused until the VPN reconnects.")
         case .untilResume:
-            return String(localized: "Routing is paused until you resume, so \(host) follows the VPN until then.")
+            return vpnUp
+                ? String(localized: "Routing is paused until you resume, so \(host) follows the VPN until then.")
+                : String(localized: "Routing is paused until you resume.")
         }
     }
 

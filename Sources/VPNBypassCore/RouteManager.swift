@@ -750,11 +750,14 @@ final class RouteManager: ObservableObject {
         do {
             let data = try Data(contentsOf: url)
             let exportData = try JSONDecoder().decode(ExportData.self, from: data)
+            // Old ".example.com" entries become "*.example.com" first, so the clash check
+            // below sees the names the routes will carry.
+            let migration = exportData.config.migratingLeadingDotEntries()
 
             // A custom service sharing its name with another service or a Bypass list entry
             // would share its routes too (see ServiceNameClash). Refuse the file whole, before
             // anything changes, rather than load it and guess which one to rename.
-            if let found = ServiceNameClash.firstInImport(exportData.config) {
+            if let found = ServiceNameClash.firstInImport(migration.config) {
                 let refusal = found.clash.importMessage(service: found.service)
                 lastImportRefusal = refusal
                 log(.error, "Config not imported: \(refusal)")
@@ -775,7 +778,6 @@ final class RouteManager: ObservableObject {
                 previousDiskPermissions = nil
             }
 
-            let migration = exportData.config.migratingLeadingDotEntries()
             config = migration.config
             mergeBuiltInServices(autoSave: false)
             if !migration.migrated.isEmpty {
@@ -3304,7 +3306,9 @@ final class RouteManager: ObservableObject {
         } else {
             log(.success, "Applied \(uniqueRouteCount) unique routes from cache")
         }
-        return true
+        // A failed add is not retried by the DNS refresh after it, which adds only addresses
+        // whose answer changed: false sends Resume on to the full apply, which re-adds it.
+        return batchFailureCount == 0
     }
 
     /// Partition the stale kernel routes (active destinations no longer in the new set)

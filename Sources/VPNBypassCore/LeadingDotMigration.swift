@@ -20,7 +20,8 @@ enum LeadingDotMigration {
     /// stays as the user set it. `migrated` names each legacy entry that was rewritten or
     /// dropped.
     static func migrate(_ entries: [DomainEntry]) -> (entries: [DomainEntry], migrated: [String]) {
-        var seen = Set(entries.filter(\.isWildcard).map { $0.domain.lowercased() })
+        // Keyed by the normalized suffix, as routing reads a wildcard ("*.Example.net." too).
+        var seen = Set(entries.compactMap { WildcardDomain.suffix(of: $0.domain) })
         var out: [DomainEntry] = []
         var migrated: [String] = []
         for entry in entries {
@@ -29,8 +30,8 @@ enum LeadingDotMigration {
                 continue
             }
             migrated.append(entry.domain)
+            guard seen.insert(suffix).inserted else { continue }
             let wildcard = WildcardDomain.entry(for: suffix)
-            guard seen.insert(wildcard).inserted else { continue }
             var fixed = entry
             fixed.domain = wildcard
             fixed.isWildcard = true

@@ -1023,3 +1023,7 @@
 "Routing is paused until %@, so %@ follows the VPN until then." = "Le routage est en pause jusqu’à %1$@, donc %2$@ passe par le VPN d’ici là.";
 "Routing is paused until the VPN reconnects, so %@ follows the VPN until then." = "Le routage est en pause jusqu’à la reconnexion du VPN, donc %@ passe par le VPN d’ici là.";
 "Routing is paused until you resume, so %@ follows the VPN until then." = "Le routage est en pause jusqu’à ce que vous le repreniez, donc %@ passe par le VPN d’ici là.";
+"Routing is paused until %@." = "Le routage est en pause jusqu’à %@.";
+"Routing is paused until the VPN reconnects." = "Le routage est en pause jusqu’à la reconnexion du VPN.";
+"Routing is paused until you resume." = "Le routage est en pause jusqu’à ce que vous le repreniez.";
+"Routing is paused until the helper is ready, so %@ follows the VPN until then." = "Le routage est en pause jusqu’à ce que l’assistant soit prêt, donc %@ passe par le VPN d’ici là.";

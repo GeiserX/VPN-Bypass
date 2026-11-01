@@ -36,6 +36,14 @@ final class LeadingDotMigrationTests: XCTestCase {
         XCTAssertEqual(result.migrated.count, 3)
     }
 
+    /// A wildcard saved with a trailing dot or in capitals is the same wildcard to routing.
+    func testTheWildcardAlreadyListedIsFoundByItsSuffix() {
+        let wildcard = DomainEntry(domain: "*.Example.net.", enabled: false)
+        let legacy = DomainEntry(domain: ".example.net")
+        let result = LeadingDotMigration.migrate([wildcard, legacy])
+        XCTAssertEqual(result.entries.map(\.id), [wildcard.id])
+    }
+
     func testOtherEntriesAreLeftAlone() {
         let entries = [DomainEntry(domain: "example.com"), DomainEntry(domain: "*.example.com"),
                        DomainEntry(domain: ".com"), DomainEntry(domain: "10.0.0.0/8", isCIDR: true)]
@@ -135,6 +143,21 @@ final class LeadingDotLoadTests: RouteManagerTestCase {
         XCTAssertTrue(rm.importConfig(from: file))
         XCTAssertEqual(rm.config.domains.map(\.domain), ["*.example.org"])
     }
+
+    /// The clash check sees the migrated names: ".example.net" becomes "*.example.net", the
+    /// name of a custom service in the same file, so both would route under one source.
+    func testImportRefusesAClashTheMigrationMakes() throws {
+        var cfg = RouteManager.Config()
+        cfg.domains = [DomainEntry(domain: ".example.net")]
+        cfg.services.append(ServiceEntry(id: "custom_x", name: "*.example.net", enabled: true,
+                                         domains: ["a.example.com"], ipRanges: [], isCustom: true))
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("leading-dot-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try JSONEncoder().encode(RouteManager.ExportData(version: "2.0", exportDate: Date(), config: cfg)).write(to: file)
+        let before = rm.config.domains
+        XCTAssertFalse(rm.importConfig(from: file))
+        XCTAssertEqual(rm.config.domains, before, "refused whole")
+    }
 }
 
 // MARK: - Where does this site go, while paused
@@ -184,6 +207,44 @@ final class SiteRoutePausedTests: XCTestCase {
         let found = SiteRoute.match(host: "example.com", addresses: ["203.0.113.5"], in: s)
         XCTAssertEqual(found.match, .route)
         XCTAssertEqual(found.expected, .physical)
+    }
+
+    /// `paused` is on every answer while paused: an unremoved route and an unresolved name too.
+    func testEveryAnswerWhilePausedCarriesThePause() {
+        let pause = PauseState(length: .untilResume, since: since, mode: .bypass)
+        var s = snapshot(list: [DomainEntry(domain: "example.com")], pause: pause)
+        s.activeRoutes = [("203.0.113.5", local, "example.com")]
+        for (addresses, match) in [(["203.0.113.5"], SiteRouteAnswer.Match.route), ([], .unresolved)] {
+            let found = SiteRoute.match(host: "example.com", addresses: addresses, in: s)
+            XCTAssertEqual(found.match, match)
+            let answer = SiteRoute.answer(host: "example.com", mode: .bypass, addresses: addresses, found: found,
+                                          probes: [], control: nil, vpnConnected: true)
+            XCTAssertEqual(answer.paused, pause.wireDescription, "\(match)")
+        }
+    }
+
+    /// With no VPN up the pause sentence does not send the site through a VPN.
+    func testPausedWithNoVPNDoesNotSayItFollowsTheVPN() {
+        let pause = PauseState(length: .untilResume, since: since, mode: .bypass)
+        let found = SiteRoute.match(host: "example.com", addresses: ["203.0.113.5"],
+                                    in: snapshot(list: [], pause: pause, vpn: nil))
+        XCTAssertEqual(found.expected, .physical)
+        let answer = SiteRoute.answer(host: "example.com", mode: .bypass, addresses: ["203.0.113.5"], found: found,
+                                      probes: [], control: nil, vpnConnected: false)
+        XCTAssertTrue(answer.summary.hasPrefix("Routing is paused until you resume."), answer.summary)
+        XCTAssertFalse(answer.summary.contains("follows the VPN"), answer.summary)
+    }
+
+    /// The VPN is back and the pause holds for the helper: the sentence says so, as `paused` does.
+    func testTheHelperWaitIsInTheSentence() {
+        var pause = PauseState(length: .untilReconnect, since: since, mode: .bypass)
+        pause.reconnectedWaiting = true
+        let found = SiteRoute.match(host: "example.com", addresses: ["203.0.113.5"], in: snapshot(list: [], pause: pause))
+        let answer = SiteRoute.answer(host: "example.com", mode: .bypass, addresses: ["203.0.113.5"], found: found,
+                                      probes: [], control: nil, vpnConnected: true)
+        XCTAssertTrue(answer.summary.hasPrefix("Routing is paused until the helper is ready, so example.com follows the VPN until then."),
+                      answer.summary)
+        XCTAssertEqual(answer.paused, "until the helper is ready")
     }
 
     func testTheUntimedPausesSayUntilWhat() {
