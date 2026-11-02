@@ -1323,7 +1323,25 @@ final class DocScreenshotsTests: XCTestCase {
         try renderLogs(search: "wiki", to: "logs-search.png")
     }
 
-    private func renderLogs(search: String?, to name: String) throws {
+    /// `*.ts.net` and `*.example-tailnet.ts.net` on the Bypass list with Tailscale up: before,
+    /// the forwarder asked the LAN for tailnet names and nothing said so; after, the log says
+    /// which wildcards leave names to another resolver.
+    func testLogsWithWildcardNamesLeftToTheirResolver() throws {
+        let served: [(TimeInterval, RouteManager.LogEntry.LogLevel, String)] = [
+            (12, .info, "Wildcards: 2 served by the helper's DNS forwarder"),
+            (13, .success, "Routes applied: 62"),
+            (600, .info, "Detected VPN: WireGuard on utun4"),
+        ]
+        let delegated: [(TimeInterval, RouteManager.LogEntry.LogLevel, String)] = [
+            (12, .info, "Wildcard *.example-tailnet.ts.net: 1 domain(s) answered by their own resolver, not routed"),
+            (12, .info, "Wildcard *.ts.net: 1 domain(s) answered by their own resolver, not routed"),
+        ]
+        try renderLogs(search: nil, lines: served, to: "logs-wildcard-delegation-before.png")
+        try renderLogs(search: nil, lines: delegated + served, to: "logs-wildcard-delegation-after.png")
+    }
+
+    private func renderLogs(search: String?, lines: [(TimeInterval, RouteManager.LogEntry.LogLevel, String)]? = nil,
+                            to name: String) throws {
         let savedLogs = rm.recentLogs
         addTeardownBlock { @MainActor in RouteManager.shared.recentLogs = savedLogs }
         seedBypass()
@@ -1331,7 +1349,7 @@ final class DocScreenshotsTests: XCTestCase {
         func line(_ ago: TimeInterval, _ level: RouteManager.LogEntry.LogLevel, _ message: String) -> RouteManager.LogEntry {
             RouteManager.LogEntry(timestamp: now.addingTimeInterval(-ago), level: level, message: message)
         }
-        rm.recentLogs = [
+        rm.recentLogs = lines?.map { line($0.0, $0.1, $0.2) } ?? [
             line(20, .success, "Routes applied: 62"),
             line(64, .warning, "Could not resolve zoom.us: no answer from DNS"),
             line(65, .error, "Route add failed for 192.0.2.240: File exists"),

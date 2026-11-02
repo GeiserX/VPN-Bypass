@@ -7,6 +7,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.7]
+
+### Fixed
+- **Tailnet names resolve again under a `*.ts.net` wildcard.** With `*.ts.net` and `*.example-tailnet.ts.net` on the Bypass list and Tailscale up, every tailnet name came back NXDOMAIN. Our resolver files come before Tailscale's in macOS's order (since 6.0.3), so tailnet lookups reached the wildcard forwarder, which asked the LAN's DNS server, and that server does not know tailnet names. The wildcard could not have routed them anyway: tailnet addresses are in 100.64.0.0/10, which the safety guard never learns. The forwarder now asks the resolver that serves a name, when another program publishes one for its domain (Tailscale's MagicDNS at 100.100.100.100, a VPN's split DNS), passes its answer on unchanged and learns no route from it. The most specific domain wins; the default resolver and our own files never count; a resolver whose servers the wildcard asks anyway keeps its names routed, so VPN Only wildcards over a VPN's split DNS work as before. The list is read from `scutil --dns` on every network change and every 30 seconds. Other names under the wildcard (public `*.ts.net` hosts) are still asked upstream and routed. The 6.0.3 shadow warning is unchanged: it never fired for these domains, and it still fires for a narrower resolver that takes names before our file sees them.
+
 ## [6.0.6]
 
 ### Fixed

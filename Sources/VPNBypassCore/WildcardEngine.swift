@@ -173,6 +173,7 @@ final class WildcardEngine {
             let result = await HelperManager.shared.setWildcards(specs, guard: safetyGuard)
             guard !manager.isShuttingDown else { return }
             if result.ok {
+                logDelegations(specs: specs, before: sentSpecs ?? [])
                 sentSpecs = specs
                 servedSpecs = specs.filter { !result.unserved.contains($0.suffix) }
                 sentGuard = safetyGuard
@@ -222,8 +223,19 @@ final class WildcardEngine {
             vpnInterface: vpnInterface,
             vpnDNS: vpnDNS,
             pinnedGateway: { manager.ifaceGateway(for: $0, links: links) },
-            dnsForInterface: { ScutilDNS.nameservers(forInterface: $0, in: resolvers) }
+            dnsForInterface: { ScutilDNS.nameservers(forInterface: $0, in: resolvers) },
+            resolvers: resolvers
         )
+    }
+
+    /// Names under a wildcard that another resolver serves are answered by it and not routed;
+    /// say so once per change. Count only, as for the shadow warning: the domains are another
+    /// program's (Tailscale's tailnet, a VPN's split DNS), not the user's own entries.
+    private func logDelegations(specs: [WildcardSpec], before: [WildcardSpec]) {
+        let old = Dictionary(before.map { ($0.suffix, $0.delegated.map(\.domain)) }, uniquingKeysWith: { first, _ in first })
+        for spec in specs where !spec.delegated.isEmpty && old[spec.suffix] != spec.delegated.map(\.domain) {
+            manager.log(.info, "Wildcard *.\(spec.suffix): \(spec.delegated.count) domain(s) answered by their own resolver, not routed")
+        }
     }
 
     /// A more specific resolver hides part of a wildcard; say so once per change.
