@@ -117,11 +117,13 @@ final class RouteManager: ObservableObject {
     private var backgroundRefreshTask: Task<Void, Never>?
     /// The route gate is held by `backgroundDNSRefresh`, which a post-connect apply may stop.
     private var backgroundRefreshHoldsGate = false
-    /// The gate is held by a refresh a re-route may stop at once: not in Custom mode, where the
-    /// refresh is a full apply that runs to the end (see performReroute).
+    /// The refresh holding the gate took it in Custom mode, where it is a full apply that runs
+    /// to the end. Recorded when it takes the gate: the mode may change while it runs.
+    private var backgroundRefreshIsCustomApply = false
+    /// The gate is held by a refresh a re-route may stop at once: not one that started in Custom
+    /// mode (see performReroute).
     private var refreshYieldsToReroute: Bool {
-        backgroundRefreshHoldsGate
-            && !Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
+        backgroundRefreshHoldsGate && !backgroundRefreshIsCustomApply
     }
     @Published var lastDNSRefresh: Date?
     @Published var nextDNSRefresh: Date?
@@ -1519,8 +1521,9 @@ final class RouteManager: ObservableObject {
            await applyRoutesFromCache(orphanGrace: true) {
             isLoading = false
             log(.info, "Routes put back from the DNS cache; refreshing DNS in the background")
+            let scheduledEpoch = routeEpoch
             backgroundRefreshTask = Task.detached { [weak self] in
-                await self?.backgroundDNSRefresh(sendNotification: false)
+                await self?.backgroundDNSRefresh(sendNotification: false, scheduledEpoch: scheduledEpoch)
             }
             return
         }
@@ -3680,16 +3683,23 @@ final class RouteManager: ObservableObject {
         }
     }
 
-    private func backgroundDNSRefresh(sendNotification: Bool) async {
+    /// `scheduledEpoch`: the epoch when the apply before it scheduled it. A Remove All (or a quit)
+    /// that ran between the two cleared those routes, and the refresh must not add them back.
+    private func backgroundDNSRefresh(sendNotification: Bool, scheduledEpoch: UInt64? = nil) async {
         let epoch = routeEpoch
         guard !isPaused else { return }
+        // Cancelled before it started (a newer apply replaces it), or the routes it follows up
+        // were removed since it was scheduled: nothing to refresh.
+        guard !Task.isCancelled, scheduledEpoch.map({ $0 == epoch }) ?? true else { return }
         guard acquireRouteOperation() else {
             log(.info, "Background DNS refresh skipped: another route operation is in progress")
             return
         }
         backgroundRefreshHoldsGate = true
+        backgroundRefreshIsCustomApply = Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
         defer {
             backgroundRefreshHoldsGate = false
+            backgroundRefreshIsCustomApply = false
             releaseRouteOperation()
         }
 
@@ -4685,12 +4695,13 @@ final class RouteManager: ObservableObject {
         // resolving, holding the route gate: the deciders let the re-route run anyway. Stop it
         // and wait it out, as the settle-gated apply does: its answers were for the old tunnel,
         // and this re-route starts its own refresh. A cancelled refresh writes nothing and stops
-        // waiting for its lookups at once. In Custom mode it is a full apply that runs to the
-        // end, so it is not waited for here, inside the status pass: the deciders latch the
-        // re-route while it holds the gate, as before.
+        // waiting for its lookups at once (one cancelled before it started returns at once). One
+        // that took the gate in Custom mode is a full apply that runs to the end, so it is not
+        // waited for here, inside the status pass: the deciders latch the re-route while it
+        // holds the gate, as before.
         if let previous = backgroundRefreshTask {
             previous.cancel()
-            if !Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
+            if !(backgroundRefreshHoldsGate && backgroundRefreshIsCustomApply) {
                 await previous.value
                 backgroundRefreshTask = nil
             }
@@ -4801,8 +4812,9 @@ final class RouteManager: ObservableObject {
         // After the gate is released above: the refresh takes it itself. A newer re-route or
         // connect cancels it (backgroundRefreshHoldsGate).
         if refreshAfter && !isShuttingDown {
+            let scheduledEpoch = routeEpoch
             backgroundRefreshTask = Task.detached { [weak self] in
-                await self?.backgroundDNSRefresh(sendNotification: false)
+                await self?.backgroundDNSRefresh(sendNotification: false, scheduledEpoch: scheduledEpoch)
             }
         }
     }

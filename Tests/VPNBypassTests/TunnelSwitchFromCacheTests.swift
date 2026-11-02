@@ -150,6 +150,24 @@ final class TunnelSwitchFromCacheTests: XCTestCase {
         XCTAssertEqual(writes[a], 1, "a Bypass route to the same local gateway was written again")
     }
 
+    /// A cached route the kernel lost (the VPN client or the system deleted it) is written back
+    /// by the switch, not left for the 30-second check.
+    func testASwitchWritesBackACachedRouteMissingFromTheKernel() async throws {
+        try await connectAndSettle(cached: [a])
+        kernel.installed.remove(a)
+        kernel.gateways[a] = nil
+        writes = [:]
+        let slow = SlowDNS(delay: 4)
+        slow.set("listed.example.com", [a])
+        useDNS(slow)
+
+        let took = await switchTunnel(to: "utun5")
+        XCTAssertLessThan(took, 2, "the switch waited for DNS: " + trail)
+        XCTAssertEqual(logs(Self.switchFromCache), 1, trail)
+        XCTAssertTrue(kernel.installed.contains(a), "the missing route was not written back: " + trail)
+        XCTAssertEqual(writes[a], 1)
+    }
+
     /// The refresh after the switch adds an address DNS now gives and removes one it no longer
     /// gives; the cache apply before it changed nothing.
     func testTheRefreshAfterASwitchAddsANewAddressAndRemovesAGoneOne() async throws {
