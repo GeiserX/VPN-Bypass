@@ -21,10 +21,15 @@ private final class SlowDNS: @unchecked Sendable {
         lock.lock(); answers[domain] = ips; lock.unlock()
     }
 
+    private var inFlight = 0
+    private(set) var peakInFlight = 0
+
     var lookupCount: Int { lock.lock(); defer { lock.unlock() }; return lookups }
+    var peak: Int { lock.lock(); defer { lock.unlock() }; return peakInFlight }
 
     func resolve(_ domain: String) async -> [String]? {
-        lock.lock(); lookups += 1; lock.unlock()
+        lock.lock(); lookups += 1; inFlight += 1; peakInFlight = max(peakInFlight, inFlight); lock.unlock()
+        defer { lock.lock(); inFlight -= 1; lock.unlock() }
         // Not Task.sleep: a real lookup is a dig process on a GCD queue and runs out its
         // timeout whatever the caller cancels, so a cancelled refresh must not wait for it.
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
@@ -268,5 +273,22 @@ final class ConnectFromCacheTests: XCTestCase {
         }
         let earlyValue = await early.value
         XCTAssertNil(earlyValue)
+    }
+
+    /// The refresh after a connect looks names up 16 at a time, as the full apply does, not
+    /// all at once into a tunnel that just came up.
+    func testTheRefreshLooksUpSixteenNamesAtATime() async throws {
+        let names = (1...40).map { "n\($0).example.com" }
+        rm.config.domains = names.map { DomainEntry(domain: $0) }
+        let dns = SlowDNS(delay: 0.2)
+        for (i, name) in names.enumerated() { dns.set(name, ["198.51.100.\(i + 1)"]) }
+        useDNS(dns)
+        rm.setDNSDiskCacheForTests(Dictionary(uniqueKeysWithValues: names.enumerated().map { ($1, ["198.51.100.\($0 + 1)"]) }))
+
+        await connect()
+        try await waitUntil(settle + 3) { logs(Self.fromCache) == 1 }
+        await rm.waitForBackgroundRefreshForTests()
+        XCTAssertEqual(dns.lookupCount, 40)
+        XCTAssertLessThanOrEqual(dns.peak, 16, "the refresh started every lookup at once")
     }
 }

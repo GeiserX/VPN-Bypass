@@ -3775,18 +3775,26 @@ final class RouteManager: ObservableObject {
         // The lookups run apart from this task, because a lookup is a dig process on a GCD
         // queue that no cancel stops: a group of them would hold the route gate until the
         // slowest timed out, and the connect that cancelled this refresh would wait it out.
+        // 16 in flight at a time, as the full apply does: this runs right after every connect,
+        // and an unbounded group of ~5 resolver processes per name is a fork storm into a
+        // tunnel that just came up. A cancel stops it starting more.
         let lookups = Task.detached { () -> [(String, String, [String]?)] in
-            await withTaskGroup(of: (String, String, [String]?).self) { group in
-                for (domain, source) in domainsToResolve {
+            let maxConcurrentResolves = 16
+            return await withTaskGroup(of: (String, String, [String]?).self) { group in
+                var next = 0
+                func startNext() {
+                    let (domain, source) = domainsToResolve[next]
+                    next += 1
                     group.addTask {
                         let ips = await DNSResolver.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
                         return (domain, source, ips)
                     }
                 }
-            
+                while next < domainsToResolve.count && next < maxConcurrentResolves { startNext() }
                 var results: [(String, String, [String]?)] = []
-                for await result in group {
+                while let result = await group.next() {
                     results.append(result)
+                    if next < domainsToResolve.count && !Task.isCancelled { startNext() }
                 }
                 return results
             }
