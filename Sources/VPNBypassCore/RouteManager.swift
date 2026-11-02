@@ -1487,6 +1487,7 @@ final class RouteManager: ObservableObject {
         // A refresh an earlier connect (or the startup) started may still be resolving, holding
         // the route gate. It would make this apply skip, and its diff was taken against routes
         // a drop may have torn down since. Stop it and wait it out: this apply starts its own.
+        // In Custom mode the refresh is a full apply with its own lookups and runs to the end.
         if let previous = backgroundRefreshTask {
             previous.cancel()
             await previous.value
@@ -3855,6 +3856,14 @@ final class RouteManager: ObservableObject {
             }
         }
         
+        // The last point where nothing is written yet: a cancel during the hops above stops
+        // here. Past it the route batches run to the end, since the next refresh diffs
+        // against the disk cache and would never redo a change this one skipped.
+        if Task.isCancelled {
+            log(.info, "Background DNS refresh cancelled: a newer apply replaces it")
+            return
+        }
+
         // Update disk cache
         await MainActor.run {
             for (domain, ips) in newIPs {
