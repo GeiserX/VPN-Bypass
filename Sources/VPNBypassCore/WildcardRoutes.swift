@@ -343,9 +343,17 @@ enum ScutilDNS {
     /// file for the same domain comes before (a lower order) hides nothing: macOS picks the
     /// most matching labels, then the lowest order, so those names reach our forwarder.
     /// Sorted, each once.
-    static func shadowing(_ suffix: String, in resolvers: [Resolver]) -> [String] {
+    ///
+    /// `served` are the suffixes the helper says it serves. Its files for them count as ours at
+    /// the order they are written with, even when `resolvers` was read before they existed (a
+    /// VPN connect: the list is read, then the helper writes the files).
+    static func shadowing(_ suffix: String, in resolvers: [Resolver], served: Set<String> = []) -> [String] {
         let suffix = domain(suffix) ?? suffix
-        let live = resolvers.filter { !$0.scoped }
+        let ours = served.compactMap(domain).map {
+            Resolver(domain: $0, nameservers: ["127.0.0.1"], port: Int(WildcardResolverFile.port),
+                     order: WildcardResolverFile.searchOrder)
+        }
+        let live = resolvers.filter { !$0.scoped } + ours
         let domains = live.compactMap { r -> String? in
             guard !r.isWildcardForwarder, let d = r.domain, d != suffix,
                   WildcardDomain.matches(d, suffix: suffix) else { return nil }
