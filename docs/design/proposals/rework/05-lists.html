@@ -1,0 +1,59 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../ui/mock.css"><link rel="stylesheet" href="rework.css">
+<style> .shot { background-size: 580px auto; width: 580px; } .pg { width: 580px; border-radius:12px; border:1px solid #2C2C2C; background:linear-gradient(var(--win),var(--win2)); overflow:hidden; } </style>
+</head><body>
+<div class="head"><span class="num">5</span><span class="title">List pages: one row, one header, actions on hover</span></div>
+<p class="caption">Before: Domains puts a green dot next to a green switch on the right, with an always-visible red trash; Routes puts the switch on the left, boxes its edit and delete in grey and red, colours the listening address green, and opens with a three-line paragraph. After: both pages use the row from section 2. The switch is the last column on every page, edit and delete appear on hover, and the paragraph becomes a hover action that copies what it described. Shown at the content width of the pane; the sidebar is as in section 4.</p>
+<div class="rows">
+  <div class="cols" style="gap:20px">
+    <div class="col">
+      <div class="label">Before · Domains (real render at 4a45639)</div>
+      <div class="shot" style="height:300px;background-image:url(before/domains.png);background-position:0 -98px"></div>
+    </div>
+    <div class="col">
+      <div class="label after">After · Domains</div>
+      <div class="pg">
+        <div class="tbar"><span class="ty-title">Domains</span><span class="fill"></span><span class="field" style="width:130px"><i data-g="search"></i>Search</span></div>
+        <div class="pane">
+          <div class="ty-body" style="color:var(--t2);margin:-2px 0 12px">These sites skip the VPN over IPv4. Their IPv6 traffic, and apps that do their own DNS, can still take the VPN.</div>
+          <div class="r sec"><span class="ty-section fill">Bypass list</span><span class="ty-detail" style="margin-right:58px">addresses</span></div>
+          <div class="box">
+            <div class="row2"><span class="lead"><i data-g="plus"></i></span><span class="name fill" style="color:var(--t2)">Add a domain or *.wildcard…</span></div>
+            <div class="row2 hov"><span class="lead"><i data-g="globe"></i></span><span class="name fill ell">en.wikipedia.org</span><span class="acts"><span><i data-g="trash"></i></span><span><i data-g="more"></i></span></span><span class="val" style="width:24px">4</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+            <div class="row2"><span class="lead"><i data-g="globe"></i></span><span class="name fill ell">news.ycombinator.com</span><span class="val" style="width:24px">4</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+            <div class="row2"><span class="lead"><i data-g="globe"></i></span><span class="name fill ell">*.example.com <span class="ty-detail">· learned as you browse</span></span><span class="val" style="width:24px">11</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+          </div>
+          <div class="r sec" style="margin-top:16px"><span class="ty-section fill">VPN Only list · used in VPN Only mode</span></div>
+          <div class="box" style="opacity:.55"><div class="row2"><span class="lead"><i data-g="globe"></i></span><span class="name fill">intranet.example.org</span><span class="val">–</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="cols" style="gap:20px">
+    <div class="col">
+      <div class="label">Before · Routes in Custom mode (real render at 4a45639)</div>
+      <div class="shot" style="height:480px;background-image:url(before/routes.png);background-position:0 -98px"></div>
+    </div>
+    <div class="col">
+      <div class="label after">After · Routes</div>
+      <div class="pg">
+        <div class="tbar"><span class="ty-title">Routes</span><span class="fill"></span><span class="btn icon"><i data-g="plus" style="color:#fff"></i></span></div>
+        <div class="pane">
+          <div class="ty-body" style="color:var(--t2);margin:-2px 0 12px">The ways out a rule can pick.</div>
+          <div class="r sec"><span class="ty-section fill">Always there</span></div>
+          <div class="box">
+            <div class="row2 two"><span class="lead"><i data-g="out"></i></span><div class="fill"><div class="name">Direct</div><div class="det">Your physical connection</div></div><span class="rchip"><i data-g="out"></i>Direct</span><span style="width:38px"></span></div>
+            <div class="row2 two"><span class="lead"><i data-g="key"></i></span><div class="fill"><div class="name">WireGuard</div><div class="det">Whatever tunnel is up, detected automatically</div></div><span class="rchip"><i data-g="key"></i>WireGuard</span><span style="width:38px"></span></div>
+          </div>
+          <div class="r sec" style="margin-top:16px"><span class="ty-section fill">Your routes</span></div>
+          <div class="box">
+            <div class="row2 two hov"><span class="lead"><i data-g="branch"></i></span><div class="fill"><div class="name">office-proxy</div><div class="det" style="white-space:nowrap;overflow:hidden;margin-right:12px"><span class="ty-mono" style="font-size:11px">127.0.0.1:18168 → 198.…:1080</span></div></div><span class="acts"><span style="width:auto;padding:0 6px;font:400 11px -apple-system,system-ui;color:var(--accentText)">Copy proxy URL</span><span><i data-g="pencil"></i></span><span><i data-g="more"></i></span></span><span class="rchip"><i data-g="branch"></i>SOCKS5</span><span class="sw on" role="img" aria-label="On" style="margin-left:12px"></span></div>
+          </div>
+          <div class="ty-detail" style="margin-top:8px;line-height:1.5">⋯ holds Copy Shell Exports, Duplicate and Delete. The sign-in hint (user vpnb, password from the URL) shows once, in the confirmation after a copy.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="glyphs.js"></script>
+</body></html>

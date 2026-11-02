@@ -112,6 +112,15 @@ final class TunnelOwnershipTests: XCTestCase {
         }
     }
 
+    /// Proton's tunnel extension carries the protocol's name, and must still read as Proton.
+    func testProtonsWireGuardExtensionReadsAsProton() {
+        XCTAssertEqual(TunnelOwnership.productLabel(
+            processName: "ch.protonvpn.mac.WireGuard-Extension",
+            executablePath: "/Library/SystemExtensions/X/ch.protonvpn.mac.WireGuard-Extension.systemextension"),
+            "Proton VPN")
+        XCTAssertEqual(RouteManager.VPNType(rawValue: "Proton VPN"), .protonVPN)
+    }
+
     /// The real NetBird daemon on the mini reported exactly this.
     func testTheRealNetBirdDaemonIsRecognised() {
         XCTAssertEqual(

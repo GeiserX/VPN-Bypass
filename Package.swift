@@ -22,6 +22,7 @@ let package = Package(
             name: "VPNBypassCore",
             dependencies: ["VPNBypassPeerAuth"],
             path: "Sources/VPNBypassCore",
+            exclude: ["Resources/catalogue/README.md"],
             resources: [
                 .process("Resources")
             ]

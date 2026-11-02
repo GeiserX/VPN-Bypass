@@ -143,23 +143,6 @@ final class NamedControlsTests: XCTestCase {
         XCTAssertFalse(DropdownShortcut.isKeyRepeat(nil))
     }
 
-    func testCommandFPutsTheCursorInTheServicesSearch() {
-        let rm = RouteManager.shared
-        let saved = rm.config
-        defer { rm.config = saved }
-        var cfg = RouteManager.Config()
-        cfg.routingMode = .bypass
-        rm.config = cfg
-
-        let window = host(ServicesTab().environmentObject(rm).environmentObject(SettingsUndo()).frame(width: 640, height: 720))
-        window.makeFirstResponder(nil)
-        XCTAssertFalse(window.firstResponder is NSTextView, "the field had the cursor before ⌘F")
-        XCTAssertTrue(press("f", in: window))
-        let editor = window.firstResponder as? NSTextView
-        XCTAssertNotNil(editor, "⌘F left the cursor in \(String(describing: window.firstResponder))")
-        XCTAssertEqual((editor?.delegate as? NSTextField)?.placeholderString, "Search services...")
-    }
-
     /// SwiftUI draws a `.switch` Toggle as an AppKit NSSwitch, so the size it got is readable.
     /// `scaleEffect` left it at the regular size and shrank only the drawing.
     func testTheServicesSwitchesAreTheSmallNativeSwitch() {
@@ -168,12 +151,14 @@ final class NamedControlsTests: XCTestCase {
         defer { rm.config = saved }
         var cfg = RouteManager.Config()
         cfg.routingMode = .bypass
+        // The page lists the services that are on; the rest wait in the catalogue.
+        for i in cfg.services.indices.prefix(8) { cfg.services[i].enabled = true }
         rm.config = cfg
 
         let window = host(ServicesTab().environmentObject(rm).environmentObject(SettingsUndo()).frame(width: 640, height: 720))
         func switches(in view: NSView) -> [NSSwitch] { ((view as? NSSwitch).map { [$0] } ?? []) + view.subviews.flatMap(switches) }
         let found = switches(in: window.contentView!)
-        XCTAssertGreaterThan(found.count, 5, "control: the page shows the catalogue's switches")
+        XCTAssertGreaterThan(found.count, 5, "control: the page shows the switches of the services that are on")
         XCTAssertEqual(found.filter { $0.controlSize != .small }.count, 0, "a switch is not the small size")
     }
 
@@ -201,26 +186,29 @@ final class NamedControlsTests: XCTestCase {
                 XCTAssertFalse(modifiers.contains(".scaleEffect"), "\(name):\(i + 1) is scaled")
             }
         }
-        XCTAssertGreaterThanOrEqual(switches, 6, "the scan found too few switches; the style moved")
+        // Pages on the shared rows draw ListRow's one switch, so the count falls as they move
+        // over (Rules and Routes in rework step 8, Services in step 7); the floor still catches a style
+        // that moved.
+        XCTAssertGreaterThanOrEqual(switches, 3, "the scan found too few switches; the style moved")
     }
 
-    /// The dropdown puts each shortcut on the visible button and lists it in the "…" menu.
+    /// The dropdown puts each shortcut on a control that is always there, since a closed menu
+    /// answers no key: ⌘R on Refresh, ⌘, on the gear, ⌘Q on a hidden button. The "…" menu does
+    /// not repeat Refresh or Settings, which the footer shows; it lists ⌘Q on its Quit item.
     func testTheDropdownCarriesEveryShortcut() throws {
         let menu = try XCTUnwrap(try sources().first { $0.name == "MenuBarViews.swift" }?.text)
-        XCTAssertEqual(menu.components(separatedBy: ".keyboardShortcut(.refreshRoutes)").count - 1, 2,
-                       "Refresh Routes and its menu item")
-        // Both Refresh Routes controls go through refresh(), which drops a held key's repeats.
+        XCTAssertEqual(menu.components(separatedBy: ".keyboardShortcut(.refreshRoutes)").count - 1, 1,
+                       "Refresh in the footer")
         XCTAssertEqual(menu.components(separatedBy: "routeManager.refreshRoutes()").count - 1, 1,
                        "Refresh Routes runs from one place")
         XCTAssertTrue(menu.contains("""
                 guard !DropdownShortcut.isKeyRepeat(NSApp.currentEvent) else { return }
                 routeManager.refreshRoutes()
         """), "refresh() drops a held ⌘R's repeats")
-        XCTAssertEqual(menu.components(separatedBy: "refresh()\n").count - 1 + menu.components(separatedBy: "{ refresh() }").count - 1, 2,
-                       "the button and the menu item both call refresh()")
-        for shortcut in ["settings", "quit"] {
-            XCTAssertTrue(menu.contains("shortcut: .\(shortcut))"), "the footer button for \(shortcut)")
-            XCTAssertTrue(menu.contains(".keyboardShortcut(.\(shortcut))"), "the menu item for \(shortcut)")
-        }
+        XCTAssertTrue(menu.contains("shortcut: .settings)"), "the gear carries ⌘,")
+        XCTAssertFalse(menu.contains(".keyboardShortcut(.settings)"), "the … menu does not repeat Settings")
+        XCTAssertEqual(menu.components(separatedBy: ".keyboardShortcut(.quit)").count - 1, 2,
+                       "the hidden ⌘Q button and the menu's Quit item")
+        XCTAssertFalse(menu.contains("systemImage: \"power\""), "the power button is gone")
     }
 }

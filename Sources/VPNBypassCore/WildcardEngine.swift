@@ -73,6 +73,8 @@ final class WildcardEngine {
 
     /// An apply committed: routes are live again.
     func routesApplied() {
+        // Paused, nothing applies; a commit that raced the pause must not start learning.
+        guard !manager.isPaused else { return }
         if suspended {
             suspended = false
             adoptedLedger = false
@@ -123,7 +125,8 @@ final class WildcardEngine {
         let configured = Set(WildcardPlanner.configuredSuffixes(config))
         // A wildcard added while routes are live works at once, as a listed name does, even
         // when no apply has run since launch (auto-apply off) or since Remove All Routes.
-        if suspended, manager.isVPNConnected, let before = lastConfigured, !configured.subtracting(before).isEmpty {
+        // Not while paused: a wildcard added then is saved, and Resume starts it.
+        if suspended, !manager.isPaused, manager.isVPNConnected, let before = lastConfigured, !configured.subtracting(before).isEmpty {
             suspended = false
             adoptedLedger = false
         }

@@ -1,5 +1,7 @@
 # UI and UX proposals: menu bar dropdown and Settings window
 
+The second round, one visual system for the whole app plus new ideas, is in [`APP-REWORK-PROPOSALS.md`](APP-REWORK-PROPOSALS.md).
+
 These are proposals. Where they stand:
 
 - **1, 3, 4 and 5** are built and merged (#127, #125, #124, #126).

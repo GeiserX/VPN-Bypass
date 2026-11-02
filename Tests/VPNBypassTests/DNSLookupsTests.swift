@@ -164,6 +164,19 @@ final class LookupListingTests: RouteManagerTestCase {
         XCTAssertEqual(rm.lookupListing("api.example.com"), .listedOff)
     }
 
+    /// Learn a Site's one Add puts each entry on the mode's list, and adds nothing when the
+    /// mode changed since the click.
+    func testAddLearnedAddsEachEntryOnlyInTheModeOfTheClick() async {
+        let none = await rm.addLearned(["a.learn.test", "*.learn.test"], mode: .vpnOnly)
+        XCTAssertNil(none)
+        XCTAssertEqual(rm.config.domains.map(\.domain), [])
+        XCTAssertEqual(rm.config.inverseDomains.map(\.domain), [])
+
+        let feedback = await rm.addLearned(["a.learn.test", "*.learn.test"], mode: .bypass)
+        XCTAssertNotNil(feedback)
+        XCTAssertEqual(rm.config.domains.map(\.domain), ["a.learn.test", "*.learn.test"])
+    }
+
     /// A switched-off wildcard neither hides an enabled entry or service nor blocks adding
     /// the name itself.
     func testASwitchedOffWildcardIsNotAListing() {

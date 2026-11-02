@@ -1,0 +1,33 @@
+{
+  "category": "music",
+  "services": [
+    {
+      "id": "spotify",
+      "name": "Spotify",
+      "domains": [
+        "spotify.com",
+        "www.spotify.com",
+        "open.spotify.com",
+        "i.scdn.co"
+      ]
+    },
+    {
+      "id": "applemusic",
+      "name": "Apple Music",
+      "domains": [
+        "music.apple.com",
+        "itunes.apple.com",
+        "amp-api.music.apple.com"
+      ]
+    },
+    {
+      "id": "soundcloud",
+      "name": "SoundCloud",
+      "domains": [
+        "soundcloud.com",
+        "www.soundcloud.com",
+        "api.soundcloud.com"
+      ]
+    }
+  ]
+}

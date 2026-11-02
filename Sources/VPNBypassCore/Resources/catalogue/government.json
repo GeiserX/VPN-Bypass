@@ -1,0 +1,71 @@
+{
+  "category": "government",
+  "services": [
+    {
+      "id": "fr_gov",
+      "name": "French government",
+      "region": "FR",
+      "domains": [
+        "*.gouv.fr",
+        "*.service-public.fr",
+        "*.ameli.fr",
+        "*.caf.fr",
+        "*.francetravail.fr",
+        "*.pole-emploi.fr",
+        "*.lassuranceretraite.fr"
+      ]
+    },
+    {
+      "id": "es_gov",
+      "name": "Spanish government",
+      "region": "ES",
+      "domains": [
+        "*.agenciatributaria.gob.es",
+        "*.seg-social.es",
+        "*.sepe.es",
+        "*.dgt.es"
+      ]
+    },
+    {
+      "id": "de_gov",
+      "name": "German government",
+      "region": "DE",
+      "domains": [
+        "*.bund.de",
+        "*.elster.de",
+        "*.arbeitsagentur.de",
+        "*.deutsche-rentenversicherung.de"
+      ]
+    },
+    {
+      "id": "it_gov",
+      "name": "Italian government",
+      "region": "IT",
+      "domains": [
+        "*.agenziaentrate.gov.it",
+        "*.inps.it"
+      ]
+    },
+    {
+      "id": "gb_gov",
+      "name": "UK government",
+      "region": "GB",
+      "domains": [
+        "www.gov.uk",
+        "*.tax.service.gov.uk",
+        "*.hmrc.gov.uk"
+      ]
+    },
+    {
+      "id": "us_gov",
+      "name": "US government",
+      "region": "US",
+      "domains": [
+        "*.irs.gov",
+        "*.ssa.gov",
+        "*.login.gov",
+        "*.usps.com"
+      ]
+    }
+  ]
+}

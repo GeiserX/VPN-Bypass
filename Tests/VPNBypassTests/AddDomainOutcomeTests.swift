@@ -209,16 +209,20 @@ final class AddDomainOutcomeTests: XCTestCase {
 
     // MARK: - The menu bar quick-add
 
-    func testQuickAddStaysOpenOnARefusalAndClosesOnASave() {
+    /// The field is always open now (flow fix 4): a refusal keeps the text and says why, a
+    /// save empties the field and says where the entry went, instead of closing in silence.
+    func testQuickAddKeepsARefusalAndSaysWhereASaveWent() {
         let refused = MenuContent.quickAdd(after: .failure(.rangeOnBypassList(input: "10.0.0.0/24")), typed: "10.0.0.0/24")
-        XCTAssertTrue(refused.isOpen, "closing would look like it worked")
         XCTAssertEqual(refused.text, "10.0.0.0/24")
-        XCTAssertEqual(refused.error?.message, AddDomainError.rangeOnBypassList(input: "10.0.0.0/24").message)
+        XCTAssertEqual(refused.feedback?.isError, true)
+        XCTAssertEqual(refused.feedback?.message, AddDomainError.rangeOnBypassList(input: "10.0.0.0/24").message)
 
         let saved = MenuContent.quickAdd(after: .success(AddedDomain(entry: DomainEntry(domain: "example.com"), list: .bypass,
                                                                     typed: "example.com")), typed: "example.com")
-        XCTAssertEqual(saved, .closed)
-        XCTAssertEqual(MenuContent.quickAdd(after: nil, typed: "example.com"), .closed, "Custom mode's rule add")
+        XCTAssertEqual(saved.text, "")
+        XCTAssertEqual(saved.feedback?.isError, false)
+        XCTAssertEqual(saved.feedback?.message, "Added example.com to your Bypass list.")
+        XCTAssertEqual(MenuContent.quickAdd(after: nil, typed: "example.com"), .empty, "Custom mode's rule add")
     }
 
     // MARK: - Custom mode's quick-add
@@ -297,9 +301,9 @@ final class AddDomainOutcomeTests: XCTestCase {
         let refusal = rm.addDirectRule("10.0.0.0/33")
         guard case .failure(let error)? = refusal else { return XCTFail("not refused: \(String(describing: refusal))") }
         let state = MenuContent.quickAdd(after: .failure(error), typed: "10.0.0.0/33")
-        XCTAssertTrue(state.isOpen)
+        XCTAssertEqual(state.feedback?.isError, true)
         XCTAssertEqual(state.text, "10.0.0.0/33")
-        XCTAssertEqual(state.error?.message, AddDomainError.malformedRange(input: "10.0.0.0/33").message)
+        XCTAssertEqual(state.feedback?.message, AddDomainError.malformedRange(input: "10.0.0.0/33").message)
     }
 
     /// A repeat used to close the field as if it had saved.
@@ -311,7 +315,7 @@ final class AddDomainOutcomeTests: XCTestCase {
         XCTAssertEqual(rm.config.rules.map(\.pattern), ["10.0.0.0/24"])
         XCTAssertEqual(error.message, "10.0.0.0/24 already has a rule on the Direct route.")
         let state = MenuContent.quickAdd(after: .failure(error), typed: "10.0.0.0/24")
-        XCTAssertTrue(state.isOpen, "closing would look like it saved")
+        XCTAssertEqual(state.feedback?.isError, true, "an empty field would look like it saved")
         XCTAssertEqual(state.text, "10.0.0.0/24")
     }
 
@@ -334,7 +338,7 @@ final class AddDomainOutcomeTests: XCTestCase {
 
         guard case .failure(let error)? = link else { return XCTFail("not refused") }
         XCTAssertEqual(error.message, "example.com already has a rule on the Work Proxy route, and the first matching rule wins. To send it direct, change that rule's route on the Rules page.")
-        XCTAssertTrue(MenuContent.quickAdd(after: .failure(error), typed: "https://example.com/page").isOpen)
+        XCTAssertEqual(MenuContent.quickAdd(after: .failure(error), typed: "https://example.com/page").feedback?.isError, true)
     }
 
     /// A rule whose route was deleted matches nothing, so it does not block the add.

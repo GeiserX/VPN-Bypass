@@ -11,6 +11,8 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
+    base_branches:
+      - "release/.*"
     ignore_title_keywords:
       - "WIP"
       - "DO NOT REVIEW"

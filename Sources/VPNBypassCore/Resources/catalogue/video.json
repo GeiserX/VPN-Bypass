@@ -1,0 +1,72 @@
+{
+  "category": "video",
+  "services": [
+    {
+      "id": "youtube",
+      "name": "YouTube",
+      "domains": [
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "youtu.be",
+        "youtube-nocookie.com",
+        "www.googlevideo.com",
+        "i.ytimg.com",
+        "s.ytimg.com"
+      ]
+    },
+    {
+      "id": "netflix",
+      "name": "Netflix",
+      "domains": [
+        "netflix.com",
+        "www.netflix.com",
+        "assets.nflxext.com",
+        "api-global.netflix.com"
+      ]
+    },
+    {
+      "id": "primevideo",
+      "name": "Amazon Prime Video",
+      "domains": [
+        "primevideo.com",
+        "www.primevideo.com",
+        "amazon.com",
+        "www.amazon.com",
+        "atv-ps.amazon.com"
+      ]
+    },
+    {
+      "id": "disneyplus",
+      "name": "Disney+",
+      "domains": [
+        "disneyplus.com",
+        "www.disneyplus.com",
+        "*.disney-plus.net",
+        "*.bamgrid.com",
+        "dssott.com"
+      ]
+    },
+    {
+      "id": "hbomax",
+      "name": "HBO Max",
+      "domains": [
+        "max.com",
+        "www.max.com",
+        "hbomax.com",
+        "www.hbomax.com"
+      ]
+    },
+    {
+      "id": "twitch",
+      "name": "Twitch",
+      "domains": [
+        "twitch.tv",
+        "www.twitch.tv",
+        "static.twitchcdn.net",
+        "vod-secure.twitch.tv",
+        "usher.ttvnw.net"
+      ]
+    }
+  ]
+}

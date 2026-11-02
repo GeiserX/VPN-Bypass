@@ -23,7 +23,7 @@ final class UnknownVPNRenderTests: XCTestCase {
     /// Whether the app was already set up as an assistive client, put back in `tearDown`.
     private var wasAccessibilityClient = false
     private var saved: (config: RouteManager.Config, connected: Bool, iface: String?, type: VPNType?,
-                        gateway: String?, ssid: String?, routes: [RouteManager.ActiveRoute], update: Date?,
+                        gateway: String?, routes: [RouteManager.ActiveRoute], update: Date?,
                         loading: Bool, change: RouteManager.RouteChangeOutcome?, dns: Date?,
                         logs: [RouteManager.LogEntry], helper: HelperState, helperVersion: String?, helperError: String?)!
 
@@ -32,7 +32,7 @@ final class UnknownVPNRenderTests: XCTestCase {
 
     override func setUp() async throws {
         let helper = HelperManager.shared
-        saved = (rm.config, rm.isVPNConnected, rm.vpnInterface, rm.vpnType, rm.localGateway, rm.currentNetworkSSID,
+        saved = (rm.config, rm.isVPNConnected, rm.vpnInterface, rm.vpnType, rm.localGateway,
                  rm.activeRoutes, rm.lastUpdate, rm.isLoading, rm.lastRouteChange, rm.lastDNSRefresh,
                  rm.recentLogs, helper.helperState, helper.helperVersion, helper.installationError)
         rm.refreshStatusOverrideForTests = {}
@@ -46,7 +46,6 @@ final class UnknownVPNRenderTests: XCTestCase {
         rm.vpnInterface = "utun7"
         rm.vpnType = .unknown
         rm.localGateway = "192.168.1.1"
-        rm.currentNetworkSSID = nil
         rm.activeRoutes = []
         rm.lastUpdate = Date().addingTimeInterval(-23)
         rm.isLoading = false
@@ -76,7 +75,6 @@ final class UnknownVPNRenderTests: XCTestCase {
         rm.vpnInterface = saved.iface
         rm.vpnType = saved.type
         rm.localGateway = saved.gateway
-        rm.currentNetworkSSID = saved.ssid
         rm.activeRoutes = saved.routes
         rm.lastUpdate = saved.update
         rm.isLoading = saved.loading
@@ -152,13 +150,13 @@ final class UnknownVPNRenderTests: XCTestCase {
         }
     }
 
-    func testTheGeneralPageNamesTheRefreshIntervalMenu() throws {
+    func testTheGeneralPageNamesTheLookUpAgainMenu() throws {
         for language in Self.languages {
             let shown = try render(GeneralTab().environmentObject(rm).environmentObject(NotificationManager.shared)
                                        .environmentObject(LaunchAtLoginManager.shared).frame(width: 532).padding(24)
                                        .background(Theme.bgPrimary),
                                    language: language, name: "general-\(language).png")
-            XCTAssertTrue(shown.controlNames.contains(Self.word("Refresh Interval", language)),
+            XCTAssertTrue(shown.controlNames.contains(Self.word("Look up addresses again", language)),
                           "\(language): the DNS refresh menu's name, in \(shown.controlNames)")
             XCTAssertFalse(shown.controlNames.contains(""), "\(language): an unnamed control in \(shown.controlNames)")
         }

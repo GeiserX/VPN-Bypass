@@ -1,0 +1,5 @@
+.build/
+build/
+*.provisionprofile
+*.p8
+*.p12

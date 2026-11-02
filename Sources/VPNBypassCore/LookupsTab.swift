@@ -1,5 +1,7 @@
 // LookupsTab.swift
-// The DNS Lookups page (#176): turn the capture on, then add any name this Mac looks up.
+// The DNS Lookups page (#176): start watching, then add any name this Mac looks up. Built on the
+// shared views of Components.swift. The window's title bar names the page and holds its search
+// (⌘F), so the page itself opens with the line that says what it is for.
 
 import AppKit
 import SwiftUI
@@ -7,26 +9,91 @@ import SwiftUI
 struct LookupsTab: View {
     @EnvironmentObject var routeManager: RouteManager
     @ObservedObject private var monitor = DNSLookupsMonitor.shared
-    @State private var query = ""
+    /// The title bar search (⌘F), which the window owns.
+    @Environment(\.settingsSearch) private var query
     @State private var feedback: AddDomainFeedback?
     /// The name the New Service sheet is open for.
     @State private var newServiceFor: NewServiceRequest?
+    /// The search-domain retries (`SearchDomainRetries`) are listed too.
+    @State private var showsRetries = false
 
-    /// Rows drawn at once. The line under the table says when there are more, and search
+    /// Rows drawn at once. The line under the list says when there are more, and search
     /// reaches them.
     static let shownLimit = 300
     /// The doc screenshots draw this name's row as if the pointer were on it.
     static var hoveredForScreenshots: String?
 
+    /// What the page shows under its first line. Pure, so each state is unit-tested.
+    enum Content: Equatable {
+        /// Not watching: an empty state whose button is Start Watching.
+        case off
+        /// Watching, and no name counted yet.
+        case waiting
+        /// Watching, and the search matches no name.
+        case noMatch
+        /// The names, most looked up first.
+        case names
+
+        static func resolve(isOn: Bool, matching: Int, query: String) -> Content {
+            guard isOn else { return .off }
+            guard matching == 0 else { return .names }
+            return query.trimmingCharacters(in: .whitespaces).isEmpty ? .waiting : .noMatch
+        }
+    }
+
+    /// The number column for the names shown: as wide as the widest count, the same on every
+    /// row (the #183 rule, now `ListRow`'s).
+    static func numberWidth(for entries: [DNSLookupTally.Entry]) -> CGFloat {
+        ListRow.numberColumnWidth(for: entries.map { LookupRow.format($0.count) })
+    }
+
     private var isOn: Bool { routeManager.config.dnsLookupsEnabled }
 
+    /// The names the page lists: the retries left out unless `showsRetries`, and how many
+    /// there are, for the toggle. A search lists every name it matches, retries included,
+    /// since the user is looking for that name.
+    static func listed(_ tally: DNSLookupTally, matching query: String, searchDomains: [String],
+                       showsRetries: Bool) -> (names: [DNSLookupTally.Entry], retries: Int) {
+        let ranked = tally.ranked(matching: query)
+        guard query.trimmingCharacters(in: .whitespaces).isEmpty else { return (ranked, 0) }
+        let retries = SearchDomainRetries.retries(among: tally.entries.keys, searchDomains: searchDomains)
+        let matched = ranked.filter { retries.contains($0.name) }.count
+        return (showsRetries ? ranked : ranked.filter { !retries.contains($0.name) }, matched)
+    }
+
+    /// The toggle under the list: "Show 3 search-domain retries", or Hide once they show.
+    static func retriesToggleTitle(count: Int, showing: Bool, in bundle: Bundle = .main) -> String {
+        showing
+            ? String(localized: "Hide search-domain retries", bundle: bundle)
+            : count == 1
+                ? String(localized: "Show 1 search-domain retry", bundle: bundle)
+                : String(localized: "Show \(count) search-domain retries", bundle: bundle)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            header
-            privacyNote
-            if isOn {
-                lookups
+        let listed = Self.listed(monitor.tally, matching: query, searchDomains: monitor.searchDomains,
+                                 showsRetries: showsRetries)
+        let ranked = listed.names
+        let content = Content.resolve(isOn: isOn, matching: ranked.count, query: query)
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            learnSiteRow
+            if let learning = monitor.learning {
+                // A new window starts with no wildcard chosen.
+                LearnSiteSection(learning: learning, feedback: $feedback)
+                    .id(learning.started)
             }
+            if content == .off {
+                // Learn a site adds from here too while the page is not watching.
+                if let feedback { AddDomainFeedbackLine(feedback: feedback) }
+                GroupSection {
+                    EmptyState(systemImage: "magnifyingglass",
+                               title: String(localized: "DNS lookups are not being watched"),
+                               primary: .init(title: String(localized: "Start Watching")) { setWatching(true) })
+                }
+            } else {
+                lookups(ranked, content: content, retries: listed.retries)
+            }
+            privacyNote
         }
         .sheet(item: $newServiceFor) { request in
             NewServiceSheet(domain: request.domain) { serviceName in
@@ -37,159 +104,144 @@ struct LookupsTab: View {
             }
         }
         .onChange(of: routeManager.config.routingMode) { _ in feedback = nil }
+        .pageTitleActions([Self.watchingAction(isOn: isOn) { setWatching(!isOn) }])
     }
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Image(systemName: "magnifyingglass.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Theme.blueGradient)
-                    Text("DNS Lookups")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
-                Text("See the names this Mac looks up, and add the ones you need.")
-                    .font(.system(size: 13))
-                    .foregroundColor(Theme.textSecondary)
+    /// The title bar's Start Watching or Stop Watching, whichever turns the page the other way.
+    static func watchingAction(isOn: Bool, in bundle: Bundle = .main, perform: @escaping () -> Void) -> PageTitleAction {
+        isOn
+            ? .button(String(localized: "Stop Watching", bundle: bundle),
+                      help: String(localized: "Stop reading DNS lookups, and clear the list", bundle: bundle), perform: perform)
+            : .button(String(localized: "Start Watching", bundle: bundle),
+                      help: String(localized: "Read the DNS lookups this Mac sends, and list the names", bundle: bundle), perform: perform)
+    }
+
+    /// Learn a Site, at the page's trailing edge. The page's purpose line is in the header,
+    /// under its title, and Start Watching and Stop Watching are in the title bar.
+    private var learnSiteRow: some View {
+        HStack(alignment: .center, spacing: Theme.Space.m) {
+            Spacer(minLength: Theme.Space.s)
+            Button(String(localized: "Learn a Site…")) {
+                feedback = nil
+                Task { await monitor.startLearning() }
             }
-            Spacer(minLength: 8)
-            Toggle("Watch DNS Lookups", isOn: Binding(
-                get: { isOn },
-                set: { on in
-                    feedback = nil
-                    monitor.setEnabled(on)
-                }
-            ))
-            .toggleStyle(.switch)
             .controlSize(.small)
-            .tint(Theme.success)
-            .labelsHidden()
-            .help(String(localized: "Watch DNS Lookups"))
-            .padding(.top, 2)
+            .disabled(monitor.learning?.isOpen == true)
+            .help(String(localized: "Watch the lookups for 60 seconds while you reload a page, and see the names it needs"))
+            .accessibilityLabel(String(localized: "Learn a Site"))
         }
     }
 
     private var privacyNote: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: Theme.Space.s) {
             Image(systemName: "lock.shield")
-                .font(.system(size: 13))
+                .font(.system(size: 12))
                 .foregroundColor(Theme.textSecondary)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Off until you turn it on. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you turn this off or quit.")
-                    .foregroundColor(Theme.textSecondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                Text("Off until you start watching. Then the helper reads only the DNS questions this Mac sends, never the answers or any other traffic. The list stays in memory and is cleared when you stop watching or quit.")
+                if !isOn, monitor.learning?.isOpen == true {
+                    Text("Learn a Site has turned the capture on for its 60 seconds only, and keeps the names in memory.")
+                }
                 Text("Lookups a browser sends over encrypted DNS (Secure DNS, DNS over HTTPS) never show here. To see them, turn Secure DNS off in the browser's settings.")
-                    .foregroundColor(Theme.textTertiary)
             }
-            .font(.system(size: 11))
+            .font(Theme.Font.detail)
+            .foregroundColor(Theme.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Theme.bgElevated)
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.bgCardBorder, lineWidth: 1))
-        )
+        .padding(.horizontal, 2)
     }
 
     @ViewBuilder
-    private var lookups: some View {
-        let ranked = monitor.tally.ranked(matching: query)
-        let top = ranked.first?.count ?? 1
-        // Sized from the biggest count shown: every number fits, and none sits far from its bar.
-        let countColumn = LookupRow.countColumnWidth(top: top, header: String(localized: "LOOKUPS"))
-        VStack(alignment: .leading, spacing: 10) {
+    private func lookups(_ ranked: [DNSLookupTally.Entry], content: Content, retries: Int) -> some View {
+        let shown = Array(ranked.prefix(Self.shownLimit))
+        let numberWidth = Self.numberWidth(for: shown)
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
             if let problem = monitor.problem {
                 Label(problem, systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.warning)
-            }
-
-            HStack(spacing: 10) {
-                LogSearchField(text: $query, placeholder: String(localized: "Search"))
-                    .frame(minWidth: 110, maxWidth: 240)
-                if let since = monitor.since {
-                    Text("\(monitor.tally.entries.count) names since \(since.formatted(date: .omitted, time: .shortened))")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textTertiary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                Button("Clear") {
-                    feedback = nil
-                    monitor.clear()
-                }
-                .disabled(monitor.tally.entries.isEmpty)
-                .help(String(localized: "Start counting again from now"))
+                    .font(Theme.Font.body)
+                    .foregroundColor(Theme.attention)
             }
 
             if let feedback {
                 AddDomainFeedbackLine(feedback: feedback)
             }
 
-            VStack(spacing: 0) {
-                tableHeader(countColumn: countColumn.column)
-                Rectangle().fill(Theme.divider).frame(height: 1)
-                if ranked.isEmpty {
-                    Text(query.isEmpty ? String(localized: "Waiting for lookups…") : String(localized: "No name matches \"\(query)\""))
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 28)
-                } else {
+            GroupSection(sectionTitle, trailing: {
+                Button(String(localized: "Clear")) {
+                    feedback = nil
+                    monitor.clear()
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .disabled(monitor.tally.entries.isEmpty)
+                .help(String(localized: "Start counting again from now"))
+            }) {
+                switch content {
+                case .off, .waiting:
+                    EmptyState(systemImage: "hourglass", title: String(localized: "Waiting for lookups…"))
+                case .noMatch:
+                    EmptyState(systemImage: "magnifyingglass", title: String(localized: "No name matches \"\(query)\""))
+                case .names:
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(ranked.prefix(Self.shownLimit).enumerated()), id: \.element.id) { index, entry in
-                            LookupRow(
-                                entry: entry,
-                                share: Double(entry.count) / Double(max(top, 1)),
-                                countColumn: countColumn,
-                                striped: index % 2 == 1,
-                                listing: routeManager.lookupListing(entry.name),
-                                removal: routeManager.lookupRemoval(entry.name),
-                                onAdd: add,
-                                onRemove: { removal in feedback = routeManager.removeLookup(removal, for: entry.name) },
-                                onTurnOn: { name, serviceId in feedback = routeManager.turnOnLookupService(serviceId, for: name) },
-                                onAddChoice: { value, target in
-                                    if target == .newService {
-                                        newServiceFor = NewServiceRequest(domain: value)
-                                    } else {
-                                        feedback = routeManager.addLookup(value, to: target)
-                                    }
-                                }
-                            )
+                        ForEach(Array(shown.enumerated()), id: \.element.id) { index, entry in
+                            VStack(spacing: 0) {
+                                if index > 0 { InsetDivider() }
+                                row(entry, numberWidth: numberWidth)
+                            }
                         }
                     }
                 }
             }
-            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.bgElevated))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.bgCardBorder, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
 
             if ranked.count > Self.shownLimit {
                 Text("Showing the top \(Self.shownLimit). Search to find the rest.")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textTertiary)
+                    .font(Theme.Font.detail)
+                    .foregroundColor(Theme.textSecondary)
+                    .padding(.leading, 2)
+            }
+
+            if retries > 0 {
+                let title = Self.retriesToggleTitle(count: retries, showing: showsRetries)
+                Button(title) { showsRetries.toggle() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help(String(localized: "Names that are another looked-up name with a domain appended, as the resolver or a VPN client asks when a name gets no answer"))
+                    .accessibilityLabel(title)
                     .padding(.leading, 2)
             }
         }
     }
 
-    private func tableHeader(countColumn: CGFloat) -> some View {
-        HStack(spacing: 12) {
-            Text("LOOKUPS")
-                .frame(width: countColumn, alignment: .trailing)
-            Text("NAME")
-            Spacer(minLength: 8)
-            Text(LookupRow.statusHeader(routeManager))
+    /// The section label: how many names, counted since when.
+    private var sectionTitle: String? {
+        monitor.since.map { since in
+            String(localized: "\(monitor.tally.entries.count) names since \(since.formatted(date: .omitted, time: .shortened))")
         }
-        .font(.system(size: 10, weight: .bold, design: .rounded))
-        .tracking(1)
-        .foregroundColor(Theme.textSecondary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+    }
+
+    private func row(_ entry: DNSLookupTally.Entry, numberWidth: CGFloat) -> some View {
+        LookupRow(
+            entry: entry,
+            numberWidth: numberWidth,
+            listing: routeManager.lookupListing(entry.name),
+            removal: routeManager.lookupRemoval(entry.name),
+            onAdd: add,
+            onRemove: { removal in feedback = routeManager.removeLookup(removal, for: entry.name) },
+            onTurnOn: { name, serviceId in feedback = routeManager.turnOnLookupService(serviceId, for: name) },
+            onAddChoice: { value, target in
+                if target == .newService {
+                    newServiceFor = NewServiceRequest(domain: value)
+                } else {
+                    feedback = routeManager.addLookup(value, to: target)
+                }
+            }
+        )
+    }
+
+    private func setWatching(_ on: Bool) {
+        feedback = nil
+        monitor.setEnabled(on)
     }
 
     private func add(_ name: String) {
@@ -202,33 +254,13 @@ private struct NewServiceRequest: Identifiable {
     var id: String { domain }
 }
 
-/// What a row shows at its right end. Pure, so the rest and hover rules are unit-tested.
-enum LookupRowTrailing: Equatable {
-    /// Nothing: an unlisted name at rest gives the whole row to the name.
-    case none
-    /// The quiet word for where the name is listed.
-    case status
-    /// The add action and its chevron.
-    case add
-    /// The remove action.
-    case remove
-
-    /// `active` is the pointer on the row or its add panel open.
-    static func resolve(listed: Bool, canRemove: Bool, active: Bool) -> LookupRowTrailing {
-        guard listed else { return active ? .add : .none }
-        return active && canRemove ? .remove : .status
-    }
-}
-
-/// One looked-up name: how often, the name, and what the current mode can do with it.
+/// One looked-up name, as a `ListRow`: a glyph that says whether the mode routes it, the name,
+/// where it is listed in the detail line, the actions under the pointer, and the count.
 struct LookupRow: View {
     @EnvironmentObject var routeManager: RouteManager
     let entry: DNSLookupTally.Entry
-    /// This name's count over the top count, for the bar beside the number.
-    let share: Double
-    /// The count column's width and the number's, the same on every row.
-    let countColumn: (column: CGFloat, number: CGFloat)
-    let striped: Bool
+    /// The number column's width, the same on every row.
+    let numberWidth: CGFloat
     let listing: LookupListing?
     /// What un-routes a listed name, or nil when the page offers nothing for it.
     let removal: LookupRemoval?
@@ -238,102 +270,115 @@ struct LookupRow: View {
     let onTurnOn: (String, String) -> Void
     /// What the add panel chose to add (the name or a wildcard over it), then where.
     let onAddChoice: (String, LookupAddTarget) -> Void
-    @State private var isHovered = false
     @State private var showingPanel = false
     /// The mode the panel was opened in. A choice made for one mode is never added in another.
     @State private var panelMode: LookupMode?
 
-    static let barWidth: CGFloat = 30
-    static let barGap: CGFloat = 8
-    static let countFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-    /// The header's font as SwiftUI draws it (10 pt bold rounded), to measure the title.
-    static let headerFont: NSFont = {
-        let bold = NSFont.systemFont(ofSize: 10, weight: .bold)
-        return bold.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 10) } ?? bold
-    }()
-
-    /// The count column for a list whose biggest count is `top`. The number is as wide as
-    /// `top` printed, so it fits every row and no row's number sits far from its bar; the
-    /// column is at least as wide as its header. Every row uses the same widths, and rows
-    /// align to the right, so all bars start at the same x.
-    static func countColumnWidth(top: Int, header: String) -> (column: CGFloat, number: CGFloat) {
-        let number = ceil((format(top) as NSString).size(withAttributes: [.font: countFont]).width) + 1
-        let title = ceil(NSAttributedString(string: header, attributes: [.font: headerFont, .kern: 1]).size().width) + 2
-        return (max(barWidth + barGap + number, title), number)
-    }
-
-    static func format(_ count: Int) -> String { count.formatted(.number) }
-    /// The most a listed row's service name takes beside its status.
-    static let statusDetailWidth: CGFloat = 120
     /// How long, in tenths of a second, a panel add waits for a running apply.
     static let applyWaitPolls = 300
+
+    static func format(_ count: Int) -> String { count.formatted(.number) }
+
+    /// What VoiceOver says for the count: "18 lookups".
+    static func lookupsLabel(_ count: Int, in bundle: Bundle = .main) -> String {
+        count == 1 ? String(localized: "1 lookup", bundle: bundle) : String(localized: "\(count) lookups", bundle: bundle)
+    }
+
+    /// What VoiceOver says for a site's count on Learn a Site: "3 names".
+    static func namesLabel(_ count: Int, in bundle: Bundle = .main) -> String {
+        count == 1 ? String(localized: "1 name", bundle: bundle) : String(localized: "\(count) names", bundle: bundle)
+    }
+
+    /// The right-click menu's Copy: the name is not selectable on the row.
+    static func copyAction(_ name: String, in bundle: Bundle = .main,
+                           pasteboard: NSPasteboard = .general) -> RowAction {
+        RowAction(kind: .other, name: ControlNames.copy(name, in: bundle), systemImage: "doc.on.doc") {
+            pasteboard.clearContents()
+            pasteboard.setString(name, forType: .string)
+        }
+    }
+
+    private var copyAction: RowAction { Self.copyAction(entry.name) }
+
+    /// What a row offers under the pointer, in order. Pure, so the rules are unit-tested.
+    enum Offer: Equatable {
+        /// The mode's add: Add to Bypass, Add to VPN Only, Send Direct, or Turn on a service.
+        case add
+        /// The add panel: a wildcard, or another place.
+        case moreWays
+        /// Takes the name out of what lists it.
+        case remove
+    }
+
+    /// An unlisted name offers its add and the panel; a listed one its remove, when the page has
+    /// one. Nothing while routes are being applied: each action would change them meanwhile.
+    static func offers(listed: Bool, canRemove: Bool, isApplying: Bool) -> [Offer] {
+        guard !isApplying else { return [] }
+        guard listed else { return [.add, .moreWays] }
+        return canRemove ? [.remove] : []
+    }
+
+    /// The leading glyph: a check when the mode routes the name, a pause when its entry is off.
+    static func glyph(for listing: LookupListing?) -> String {
+        switch listing {
+        case nil: return "globe"
+        case .listedOff: return "pause.circle"
+        default: return "checkmark.circle"
+        }
+    }
+
+    /// Where the name is listed, as the row's detail line: "Bypassed · Meetings". Nil for a
+    /// name the mode does not route, so the row is one line.
+    static func detail(for listing: LookupListing?) -> String? {
+        guard let listing else { return nil }
+        let (title, detail, _) = describe(listing)
+        return detail.map { "\(title) · \($0)" } ?? title
+    }
+
     private var mode: LookupMode { LookupMode(routeManager) }
-    private var modeColor: Color { mode == .vpnOnly ? Theme.warning : Theme.success }
     /// A switched-off service that lists the name is what the add turns on (Bypass mode).
     private var offService: ServiceEntry? { mode == .bypass ? routeManager.lookupServiceToTurnOn(entry.name) : nil }
     private var addTitle: String { offService.map { String(localized: "Turn on \($0.name)") } ?? mode.addTitle }
-    /// The pointer on the row, or its add panel open.
-    private var isActive: Bool { isHovered || showingPanel || LookupsTab.hoveredForScreenshots == entry.name }
-    private var trailing: LookupRowTrailing {
-        LookupRowTrailing.resolve(listed: listing != nil, canRemove: removal != nil, active: isActive)
+
+    /// The row's tooltip: where the name is listed and what the remove takes out, or what the
+    /// add does in this mode.
+    private var tooltip: String {
+        if let listing {
+            return removal?.help(for: entry.name) ?? Self.describe(listing).2
+        }
+        return offService.map { String(localized: "\($0.name) on the Services page lists this name and is off. Turn it on to bypass it.") } ?? mode.addHelp
+    }
+
+    private var actions: [RowAction] {
+        Self.offers(listed: listing != nil, canRemove: removal != nil, isApplying: routeManager.isApplyingRoutes).map { offer in
+            switch offer {
+            case .add:
+                return RowAction(kind: .other, name: addTitle, systemImage: offService == nil ? "plus" : "power", perform: add)
+            case .moreWays:
+                return RowAction(kind: .more, name: String(localized: "More ways to add \(entry.name)"),
+                                 systemImage: "ellipsis", perform: openPanel)
+            case .remove:
+                let turnsOff = { if case .turnOffService = removal { return true } else { return false } }()
+                return RowAction(kind: .other, name: removal?.title(for: entry.name) ?? "",
+                                 systemImage: turnsOff ? "power" : "minus.circle") { if let removal { onRemove(removal) } }
+            }
+        }
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: Self.barGap) {
-                Capsule()
-                    .fill(Theme.cyan.opacity(0.18))
-                    .frame(width: Self.barWidth, height: 4)
-                    .overlay(alignment: .leading) {
-                        Capsule().fill(Theme.cyan.opacity(0.8)).frame(width: max(3, Self.barWidth * share), height: 4)
-                    }
-                Text(Self.format(entry.count))
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(Theme.textSecondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .frame(width: countColumn.number, alignment: .trailing)
-            }
-            .frame(width: countColumn.column, alignment: .trailing)
-            .help(String(localized: "Times looked up"))
-
-            // The name takes every point the right end does not use right now.
-            Text(entry.name)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(listing == nil ? .white : Theme.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            switch trailing {
-            case .none:
-                EmptyView()
-            case .status:
-                if let listing { status(listing) }
-            case .add:
-                addAction
-            case .remove:
-                if let removal { removeAction(removal) }
-            }
-        }
-        .frame(height: 30)
-        .padding(.horizontal, 14)
-        .background(isActive ? Theme.bgHover : (striped ? Color.white.opacity(0.025) : Color.clear))
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
-        // The actions show only under the pointer, so VoiceOver reaches them on the row itself.
-        .accessibilityElement(children: .combine)
-        .accessibilityActions {
-            if routeManager.isApplyingRoutes {
-                EmptyView()
-            } else if listing == nil {
-                Button(addTitle, action: add)
-                Button(String(localized: "More ways to add \(entry.name)"), action: openPanel)
-            } else if let removal {
-                Button(removal.title(for: entry.name)) { onRemove(removal) }
-            }
-        }
+        ListRow(
+            glyph: Self.glyph(for: listing),
+            name: entry.name,
+            detail: Self.detail(for: listing),
+            number: Self.format(entry.count),
+            numberWidth: numberWidth,
+            numberLabel: Self.lookupsLabel(entry.count),
+            actions: actions,
+            menuActions: actions + [copyAction],
+            // The panel open keeps the row's actions in view, as the pointer does.
+            showsActions: showingPanel || LookupsTab.hoveredForScreenshots == entry.name
+        )
+        .help(tooltip)
         .popover(isPresented: $showingPanel, arrowEdge: .bottom) {
             LookupAddPanel(
                 choices: LookupAddChoices(name: entry.name, mode: mode,
@@ -359,32 +404,6 @@ struct LookupRow: View {
         }
     }
 
-    /// Where the name is listed, small and grey: the content is the name, not the status.
-    private func status(_ listing: LookupListing) -> some View {
-        let (title, detail, help) = Self.describe(listing)
-        let isOff = listing == .listedOff
-        return HStack(spacing: 4) {
-            Image(systemName: isOff ? "pause.circle" : "checkmark.circle")
-                .font(.system(size: 10))
-            // Capped like the detail: in Custom mode the title is a route name of any length.
-            Text(title)
-                .truncationMode(.tail)
-                .frame(maxWidth: Self.statusDetailWidth, alignment: .leading)
-            if let detail {
-                // Capped, so a long service name truncates instead of squeezing the domain.
-                Text(detail)
-                    .foregroundColor(Theme.textTertiary)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: Self.statusDetailWidth, alignment: .leading)
-            }
-        }
-        .font(.system(size: 11))
-        .lineLimit(1)
-        .foregroundColor(Theme.textSecondary)
-        .fixedSize()
-        .help(help)
-    }
-
     private func add() {
         if let offService {
             onTurnOn(entry.name, offService.id)
@@ -396,60 +415,6 @@ struct LookupRow: View {
     private func openPanel() {
         panelMode = mode
         showingPanel = true
-    }
-
-    /// The row's button, which adds the name as it always has, and the chevron beside it,
-    /// which opens the add panel for a wildcard or another place.
-    private var addAction: some View {
-        HStack(spacing: 2) {
-            Button(action: add) {
-                Label(addTitle, systemImage: offService == nil ? "plus" : "power")
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
-            }
-            .buttonStyle(.borderless)
-            .help(offService.map { String(localized: "\($0.name) on the Services page lists this name and is off. Turn it on to bypass it.") } ?? mode.addHelp)
-
-            Button(action: openPanel) {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .frame(width: 16, height: 18)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            // Only Bypass mode offers other places (a new service, any service).
-            .help(mode == .bypass ? String(localized: "Add a wildcard, or add it somewhere else")
-                                  : String(localized: "Add a wildcard instead"))
-        }
-        .foregroundColor(modeColor)
-        .fixedSize()
-        .disabled(routeManager.isApplyingRoutes)
-    }
-
-    /// Takes the name out of what lists it, saying which: the list, a wildcard, a service.
-    private func removeAction(_ removal: LookupRemoval) -> some View {
-        let turnsOff = { if case .turnOffService = removal { return true } else { return false } }()
-        return Button {
-            onRemove(removal)
-        } label: {
-            Label(removal.title(for: entry.name), systemImage: turnsOff ? "power" : "minus.circle")
-                .font(.system(size: 11, weight: .medium))
-                .lineLimit(1)
-        }
-        .buttonStyle(.borderless)
-        .foregroundColor(.white)
-        .fixedSize()
-        .help(removal.help(for: entry.name))
-        .disabled(routeManager.isApplyingRoutes)
-    }
-
-    /// The column title over the status and action column.
-    static func statusHeader(_ routeManager: RouteManager) -> String {
-        switch LookupMode(routeManager) {
-        case .bypass: return String(localized: "BYPASS")
-        case .vpnOnly: return String(localized: "VPN ONLY")
-        case .custom: return String(localized: "RULE")
-        }
     }
 
     /// The word for a listed name, the service or route beside it, and the tooltip.
@@ -468,6 +433,7 @@ struct LookupRow: View {
         }
     }
 }
+
 
 /// Names a new custom service whose first domain is the looked-up name.
 struct NewServiceSheet: View {
@@ -492,27 +458,17 @@ struct NewServiceSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("New Service")
-                .font(.system(size: 15, weight: .bold, design: .rounded))
+        SheetScaffold(String(localized: "New Service"), confirmTitle: String(localized: "Create"),
+                      canConfirm: !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      onCancel: onCancel, onConfirm: create) {
             Text("This adds a custom service to the Services page, with \(domain) as its first domain. You can add more domains to it later.")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
+                .font(Theme.Font.body)
+                .foregroundColor(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextField(String(localized: "Service name"), text: $name)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(create)
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel, action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                Button("Create", action: create)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
         }
-        .padding(20)
-        .frame(width: 380)
     }
 
     private func create() {

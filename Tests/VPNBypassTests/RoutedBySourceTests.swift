@@ -52,7 +52,6 @@ final class RoutedBySourceTests: XCTestCase {
         XCTAssertEqual(s.rows.map(\.icon), [.service(id: "telegram"), .service(id: "youtube"), .domain])
         XCTAssertFalse(s.rows.contains(where: \.isProblem))
         XCTAssertFalse(s.everythingElseDirect, "Bypass has no catch-alls")
-        XCTAssertEqual(s.hiddenRows, 0)
     }
 
     /// The app records a destination once per source that wants it, and can record the same
@@ -147,14 +146,18 @@ final class RoutedBySourceTests: XCTestCase {
         XCTAssertNil(RoutedBySource.make(mode: .custom, config: c, routes: [], busy: false))
     }
 
-    /// A long list shows the first rows and says how many more.
-    func testALongListIsCapped() throws {
+    /// A long list keeps every row and scrolls past eight, instead of a "+ 3 more" nobody
+    /// can open.
+    func testALongListKeepsEveryRowAndScrolls() throws {
         let c = config { $0.domains = (1...11).map { DomainEntry(domain: "d\($0).example") } }
         let routes = (1...11).map { route("10.0.0.\($0)", "d\($0).example") }
         let s = try XCTUnwrap(RoutedBySource.make(mode: .bypass, config: c, routes: routes, busy: false))
-        XCTAssertEqual(s.rows.count, RoutedBySource.visibleRows)
-        XCTAssertEqual(s.hiddenRows, 11 - RoutedBySource.visibleRows)
+        XCTAssertEqual(s.rows.count, 11)
         XCTAssertEqual(s.routeCount, 11)
+        XCTAssertEqual(RoutedBySourceCard.scrollHeight(s.rows, reasons: s.rows.map { _ in nil }),
+                       CGFloat(RoutedBySource.visibleRows) * ListRow.singleLineHeight)
+        XCTAssertNil(RoutedBySourceCard.scrollHeight(Array(s.rows.prefix(8)), reasons: Array(repeating: nil, count: 8)),
+                     "eight rows fit without scrolling")
     }
 
     /// The addresses stay one hover away: the row's tooltip lists them, capped.

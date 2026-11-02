@@ -9,9 +9,10 @@ each domain/service/CIDR to a named route). Custom-mode egresses include the loc
 interface (multi-VPN), an HTTP/SOCKS5 proxy via a local `127.0.0.1` listener, and a Tailscale-peer exit
 (proxy-over-tailnet). A bundled **`vpnb` CLI** scripts it all over a user-only socket (on `PATH` via the tap
 cask since 3.1.2), and the privileged helper accepts only the app signed by our Developer ID team (since 2.3.0; it was cdhash-pinned
-before) and is audit-token-verified (since 1.7.0). Releases are signed and notarized since 5.1.0. The whole
-engine stays **entitlement-free** — kernel routes + `/etc/hosts` + local proxy listeners + a PF/local-CA
-path, **no Network Extension** — so signing needs no restricted entitlements.
+before) and is audit-token-verified (since 1.7.0). Releases are signed and notarized since 5.1.0. The default
+engine is **entitlement-free**: kernel routes + `/etc/hosts` + local proxy listeners. Since 2026-10-30
+Network Extension entitlements are allowed: an opt-in transparent-proxy engine for per-app routing is
+planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`, with kernel routes kept as the default and the fallback.
 
 ### ✅ Phase 1 Complete - Core & Polish (v1.0 - v1.2)
 
@@ -20,7 +21,7 @@ path, **no Network Extension** — so signing needs no restricted entitlements.
 | **Menu Bar App** | ✅ Done | Real-time VPN status, route count, quick controls |
 | **Domain-based Bypass** | ✅ Done | Custom domains + 37+ pre-configured services |
 | **Route Management** | ✅ Done | Kernel routing table + `/etc/hosts` DNS bypass |
-| **VPN Detection** | ✅ Done | GlobalProtect, Cisco, OpenVPN, WireGuard, Fortinet, Zscaler, WARP, Tailscale, Check Point |
+| **VPN Detection** | ✅ Done | GlobalProtect, Cisco, OpenVPN, WireGuard, Fortinet, Zscaler, WARP, Tailscale, Check Point, Proton VPN |
 | **Network Change Handling** | ✅ Done | NWPathMonitor + debouncing, auto-refresh on wake |
 | **Notifications** | ✅ Done | Per-event toggles, silent mode, System Settings integration |
 | **Route Verification** | ✅ Done | Ping test (disabled by default - many servers block ICMP) |
@@ -82,7 +83,7 @@ path, **no Network Extension** — so signing needs no restricted entitlements.
 |-------|-------------|
 | **P0 — Model** ✅ shipped v3.0 | `Config` → `routes[] + rules[]` (named routes + per-destination selector); back-compat migration of the current bypass-list + single SOCKS5 proxy |
 | **P1 — Proxy routes + hooks** ✅ shipped v3.0 | generalize the one proxy into N proxy routes, each a `127.0.0.1:PORT` local listener (auth-injecting, VPN-escaping); `route-on <name>` shell hook + PAC for browsers — delivers the proven VPN / proxy / direct 3-way, generically |
-| **P2 — App-agnostic capture** 🔲 future | **entitlement-free PF + local-CA** transparent path (system HTTP/HTTPS proxy + PAC, or a PF rule steering matched flows into a local TLS-terminating proxy that reads the SNI/hostname) for apps that ignore `HTTPS_PROXY`; **per-route DNS**; health-check + failover selectors. **No Network Extension** — NE is explicitly out of scope so the app stays ad-hoc-signable (no Developer-ID / notarization / system-extension approval, no NE entitlement) |
+| **P2 — App-agnostic capture** 🔲 planned | opt-in **`NETransparentProxyProvider` system extension** (design: `docs/design/NETWORK-EXTENSION-DESIGN.md`): per-app bypass first, then proxy and Tailscale-peer routes for apps that ignore `HTTPS_PROXY`, then UDP and hostname rules; **per-route DNS**; health-check + failover selectors. Replaces the old PF + local-CA idea now that NE entitlements are allowed (2026-10-30); kernel routes stay the default engine |
 | **P3 — Providers** 🔲 partial (Tailscale-peer egress + routes/rules UI shipped v3.0) | WireGuard / OpenVPN / native Tailscale-exit route types; residential-proxy sticky sessions; routes+rules UI |
 
 ### Phase 2: Advanced Routing (v2.0 - v2.5)
@@ -94,8 +95,8 @@ path, **no Network Extension** — so signing needs no restricted entitlements.
 | **Kill Switch** | Block all traffic if VPN disconnects unexpectedly |
 | **DNS Leak Protection** | Ensure DNS queries don't leak through VPN |
 | **IPv6 Leak Protection** | Block IPv6 to prevent leaks |
-| **Connection Profiles** | Different configs for "Home", "Work", "Travel" |
-| **Scheduled Rules** | Auto-enable/disable bypasses based on time |
+| ~~**Connection Profiles**~~ | ✅ Done in 6.0 as network profiles on the General page: a mode and its lists per network, told apart by the router (address, MAC, Wi-Fi or Ethernet) |
+| ~~**Scheduled Rules**~~ | ✅ Done in 6.0 through Shortcuts actions (Set Routing Mode, Add Domain, Turn Service On or Off, Get Status), which Shortcuts automations run at a time, on a Focus or on a network |
 | **Local DNS Proxy** | Run local DNS that uses ISP DNS for bypass domains |
 
 ### Phase 3: Power Features (v3.0+)
@@ -104,7 +105,7 @@ path, **no Network Extension** — so signing needs no restricted entitlements.
 |---------|-------------|
 | **Custom DNS** | Use specific DNS servers for bypassed traffic (DoH/DoT) |
 | **Blocklists Integration** | Block ads/trackers/malware domains |
-| **Network-based Profiles** | Auto-switch profile based on WiFi SSID |
+| ~~**Network-based Profiles**~~ | ✅ Done in 6.0 by router instead of Wi-Fi name (no Location permission, works on Ethernet); see Connection Profiles |
 | **Bandwidth Monitor** | Track data through VPN vs bypassed |
 | ~~**CLI Interface**~~ | ✅ Done in v3.0 — `vpnb` command-line control over a user-only socket (`status`, `route`/`rule`/`mode`/`default` verbs) for automation. v4.9.0 adds the Bypass and VPN Only verbs (`domain.*`, `service.*`, `routes.active`, `routes.clear`, `refresh`, `dns.refresh`, `logs`), and the [vpn-bypass-mcp](https://github.com/GeiserX/vpn-bypass-mcp) MCP server lets an AI agent drive the same socket |
 | **API/Webhooks** | Integration with other tools |
@@ -199,8 +200,8 @@ path, **no Network Extension** — so signing needs no restricted entitlements.
 3. ✅ **v1.7 - v1.9**: VPN compatibility (Check Point, Zscaler, Tailscale), gateway robustness, auto-merge
 4. ✅ **v2.0**: Inverse mode (VPN Only routing) + custom services
 5. ✅ **v3.0**: Custom routing mode (per-rule multi-route) + `vpnb` CLI + proxy / Tailscale-peer egress + cdhash-pinned helper
-6. 🔲 **v2.5 (deferred)**: Kill switch + leak protection + connection profiles (Premium)
-7. 🔲 **Later**: network profiles + statistics dashboard
+6. 🔲 **v2.5 (deferred)**: Kill switch + leak protection (Premium)
+7. 🔲 **Later**: statistics dashboard
 
 ---
 

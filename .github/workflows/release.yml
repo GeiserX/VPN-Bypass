@@ -168,69 +168,16 @@ jobs:
           echo "sha256=$SHA256" >> $GITHUB_OUTPUT
           echo "📝 SHA256: $SHA256"
 
+      # docs/release-notes/<version>.md, when it exists, goes first (what changes for people
+      # upgrading), then every commit subject since the previous tag, uncapped.
+      # scripts/test-release-notes.sh (run by CI) checks both.
       - name: Generate changelog
         id: changelog
         env:
           VERSION_NUMBER: ${{ steps.version.outputs.version }}
           SHA256: ${{ steps.sha.outputs.sha256 }}
         run: |
-          VERSION="v$VERSION_NUMBER"
-          PREV_TAG=$(git tag -l "v*" --sort=-version:refname | sed -n '2p')
-          
-          if [ -z "$PREV_TAG" ]; then
-            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
-          fi
-          
-          echo "📝 Generating changelog from $PREV_TAG to $VERSION"
-          
-          {
-            echo "## What's Changed"
-            echo ""
-            
-            # Features
-            FEATURES=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --grep="^feat" 2>/dev/null || true)
-            if [ -n "$FEATURES" ]; then
-              echo "### ✨ Features"
-              echo "$FEATURES" | head -20
-              echo ""
-            fi
-            
-            # Fixes
-            FIXES=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --grep="^fix" 2>/dev/null || true)
-            if [ -n "$FIXES" ]; then
-              echo "### 🐛 Bug Fixes"
-              echo "$FIXES" | head -20
-              echo ""
-            fi
-            
-            # Other changes
-            OTHERS=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --invert-grep --grep="^feat" --invert-grep --grep="^fix" 2>/dev/null | head -10 || true)
-            if [ -n "$OTHERS" ]; then
-              echo "### 🔧 Other Changes"
-              echo "$OTHERS"
-              echo ""
-            fi
-            
-            echo "---"
-            echo ""
-            echo "## Installation"
-            echo ""
-            echo "### Homebrew (recommended)"
-            echo '```bash'
-            echo "brew tap GeiserX/vpn-bypass"
-            echo "brew install --cask vpn-bypass"
-            echo '```'
-            echo ""
-            echo "### Manual Download"
-            echo "Download \`VPN-Bypass-$VERSION_NUMBER.dmg\` from the assets below."
-            echo ""
-            echo "---"
-            echo ""
-            echo "**SHA256:** \`$SHA256\`"
-            echo ""
-            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREV_TAG...$VERSION"
-          } > changelog.md
-          
+          scripts/release-notes.sh "$VERSION_NUMBER" "$SHA256" > changelog.md
           cat changelog.md
 
       - name: Create GitHub Release

@@ -1,0 +1,52 @@
+{
+  "category": "messaging",
+  "services": [
+    {
+      "id": "telegram",
+      "name": "Telegram",
+      "domains": [
+        "telegram.org",
+        "t.me",
+        "telegram.me",
+        "core.telegram.org",
+        "api.telegram.org",
+        "web.telegram.org"
+      ],
+      "ipRanges": [
+        "91.108.56.0/22",
+        "91.108.4.0/22",
+        "91.108.8.0/22",
+        "91.108.16.0/22",
+        "91.108.12.0/22",
+        "149.154.160.0/20",
+        "91.105.192.0/23",
+        "185.76.151.0/24"
+      ]
+    },
+    {
+      "id": "whatsapp",
+      "name": "WhatsApp",
+      "domains": [
+        "whatsapp.com",
+        "web.whatsapp.com",
+        "whatsapp.net",
+        "wa.me"
+      ],
+      "ipRanges": [
+        "3.33.221.0/24",
+        "15.197.206.0/24",
+        "52.26.198.0/24"
+      ]
+    },
+    {
+      "id": "signal",
+      "name": "Signal",
+      "domains": [
+        "signal.org",
+        "www.signal.org",
+        "updates.signal.org",
+        "chat.signal.org"
+      ]
+    }
+  ]
+}

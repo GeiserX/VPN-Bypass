@@ -1,6 +1,6 @@
 // LookupRemovalTests.swift
 // The Lookups page's remove action for a listed name: what it takes away for each way a name
-// can be listed, what the button says, and the row's rest and hover states.
+// can be listed, what the button says, and what a row offers.
 
 import XCTest
 @testable import VPNBypassCore
@@ -189,18 +189,21 @@ final class LookupRemovalDecisionTests: XCTestCase {
                        "Remove *.example.com")
     }
 
-    // MARK: - Rest and hover
+    // MARK: - What a row offers
 
-    func testUnlistedRowsAreEmptyAtRestAndOfferAddOnHover() {
-        XCTAssertEqual(LookupRowTrailing.resolve(listed: false, canRemove: false, active: false), .none)
-        XCTAssertEqual(LookupRowTrailing.resolve(listed: false, canRemove: false, active: true), .add)
+    func testUnlistedRowsOfferTheAddAndTheAddPanel() {
+        XCTAssertEqual(LookupRow.offers(listed: false, canRemove: false, isApplying: false), [.add, .moreWays])
     }
 
-    func testListedRowsShowTheStatusAndOfferRemoveOnHover() {
-        XCTAssertEqual(LookupRowTrailing.resolve(listed: true, canRemove: true, active: false), .status)
-        XCTAssertEqual(LookupRowTrailing.resolve(listed: true, canRemove: true, active: true), .remove)
-        XCTAssertEqual(LookupRowTrailing.resolve(listed: true, canRemove: false, active: true), .status,
-                       "nothing to remove: the status stays")
+    func testListedRowsOfferRemoveOnlyWhenThePageHasOne() {
+        XCTAssertEqual(LookupRow.offers(listed: true, canRemove: true, isApplying: false), [.remove])
+        XCTAssertEqual(LookupRow.offers(listed: true, canRemove: false, isApplying: false), [],
+                       "nothing to remove: the row offers nothing, its detail line still says where it is listed")
+    }
+
+    func testNoRowOffersAnythingWhileRoutesAreApplied() {
+        XCTAssertEqual(LookupRow.offers(listed: false, canRemove: false, isApplying: true), [])
+        XCTAssertEqual(LookupRow.offers(listed: true, canRemove: true, isApplying: true), [])
     }
 }
 

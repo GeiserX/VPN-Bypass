@@ -37,33 +37,33 @@ final class DropdownCopyTests: XCTestCase {
     // MARK: result line
 
     func testCleanApplySaysNoneFailed() {
-        let line = DropdownCopy.routeChangeLine(applied(62), now: now)
-        XCTAssertEqual(line.text, "62 addresses routed 23 s ago, none failed.")
+        let line = DropdownCopy.routeChangeLine(applied(62), installed: 62, now: now)
+        XCTAssertEqual(line.text, "62 addresses routed now, applied 23 s ago, none failed.")
         XCTAssertFalse(line.isProblem)
     }
 
     func testOneRouteIsSingular() {
-        XCTAssertEqual(DropdownCopy.routeChangeLine(applied(1), now: now).text,
-                       "1 address routed 23 s ago, none failed.")
+        XCTAssertEqual(DropdownCopy.routeChangeLine(applied(1), installed: 1, now: now).text,
+                       "1 address routed now, applied 23 s ago, none failed.")
     }
 
     func testFailuresAreCountedAndFlagged() {
-        let line = DropdownCopy.routeChangeLine(applied(60, failed: 2), now: now)
-        XCTAssertEqual(line.text, "60 addresses routed 23 s ago, 2 failed.")
+        let line = DropdownCopy.routeChangeLine(applied(60, failed: 2), installed: 60, now: now)
+        XCTAssertEqual(line.text, "60 addresses routed now, applied 23 s ago, 2 failed.")
         XCTAssertTrue(line.isProblem)
     }
 
     /// Custom mode with only proxy rules installs no kernel route, and that is not a failure.
     func testNothingToInstallIsNotAFailure() {
-        let line = DropdownCopy.routeChangeLine(applied(0), now: now)
+        let line = DropdownCopy.routeChangeLine(applied(0), installed: 0, now: now)
         XCTAssertEqual(line.text, "No addresses to route, checked 23 s ago.")
         XCTAssertFalse(line.isProblem)
     }
 
     /// Every domain failing to resolve is zero routes AND a failure: it must say so.
     func testZeroRoutesWithFailuresIsAProblem() {
-        let line = DropdownCopy.routeChangeLine(applied(0, failed: 3), now: now)
-        XCTAssertEqual(line.text, "0 addresses routed 23 s ago, 3 failed.")
+        let line = DropdownCopy.routeChangeLine(applied(0, failed: 3), installed: 0, now: now)
+        XCTAssertEqual(line.text, "0 addresses routed now, applied 23 s ago, 3 failed.")
         XCTAssertTrue(line.isProblem)
     }
 
@@ -71,7 +71,7 @@ final class DropdownCopyTests: XCTestCase {
     func testRemovalSaysRoutesAreGone() {
         let outcome = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now.addingTimeInterval(-3),
                                                       routeCount: 0, failedCount: 0)
-        let line = DropdownCopy.routeChangeLine(outcome, now: now)
+        let line = DropdownCopy.routeChangeLine(outcome, installed: outcome.routeCount, now: now)
         XCTAssertEqual(line.text, "Removed all routed addresses just now.")
         XCTAssertTrue(line.isProblem)
     }
@@ -79,7 +79,7 @@ final class DropdownCopyTests: XCTestCase {
     func testRemovalWithFailuresCountsThem() {
         let outcome = RouteManager.RouteChangeOutcome(kind: .removedAll, at: now.addingTimeInterval(-90),
                                                       routeCount: 3, failedCount: 3)
-        XCTAssertEqual(DropdownCopy.routeChangeLine(outcome, now: now).text,
+        XCTAssertEqual(DropdownCopy.routeChangeLine(outcome, installed: outcome.routeCount, now: now).text,
                        "Removed routed addresses 1 min ago, 3 could not be removed.")
     }
 

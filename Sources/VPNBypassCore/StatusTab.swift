@@ -49,10 +49,25 @@ enum StatusPage {
         let status = DropdownStatus.make(input, now: now)
         let title: String
         var sentence = status.sentence
-        if !input.isVPNConnected {
+        var note = status.note
+        var tone = status.tone
+        if status.chip == .paused {
+            title = String(localized: "Paused", bundle: bundle)
+        } else if input.pause != nil && status.line3.action == .retryPause {
+            title = String(localized: "Pause incomplete", bundle: bundle)
+        } else if !input.isStarting && !input.isVPNConnected && !input.helperReady {
+            // The real blocker first: connecting the VPN would route nothing while the helper
+            // is down, so the helper is the verdict and the no-VPN sentence the note under it.
+            title = String(localized: "Not working", bundle: bundle)
+            sentence = String(localized: "The helper is not running, so no route can change.", bundle: bundle)
+            note = status.sentence
+            tone = .warn
+        } else if input.isStarting || !input.isVPNConnected {
             title = status.headline
         } else if !input.helperReady {
             title = String(localized: "Not working", bundle: bundle)
+        } else if input.killSwitch != nil {
+            title = String(localized: "No effect", bundle: bundle)
         } else if isWaiting(input) {
             // WAITING or HELD BACK: the dropdown's headline already says what the tunnel did.
             title = status.headline
@@ -61,14 +76,16 @@ enum StatusPage {
         } else if input.installedRoutes == 0 && !input.everythingElseDirect {
             title = String(localized: "Nothing routed", bundle: bundle)
         } else {
-            title = String(localized: "Working", bundle: bundle)
+            title = status.isPartial
+                ? String(localized: "Partly working", bundle: bundle)
+                : String(localized: "Working", bundle: bundle)
             if let change = DropdownCopy.shownRouteChange(input.lastRouteChange,
                                                           currentRouteCount: input.installedRoutes),
                change.kind == .applied {
-                sentence += " " + DropdownCopy.routeChangeLine(change, now: now).text
+                sentence += " " + DropdownCopy.routeChangeLine(change, installed: input.installedRoutes, now: now).text
             }
         }
-        return Summary(title: title, sentence: sentence, note: status.note, tone: status.tone)
+        return Summary(title: title, sentence: sentence, note: note, tone: tone)
     }
 
     /// The same test `DropdownStatus.make` makes before it shows WAITING or HELD BACK: a
@@ -77,6 +94,60 @@ enum StatusPage {
         guard let pending = input.pending else { return false }
         if let change = input.lastRouteChange, change.at > pending.connectedAt { return false }
         return true
+    }
+
+    // MARK: Order
+
+    /// The page's sections, top to bottom.
+    enum Section: Equatable {
+        case helper, problems, routeCheck, siteCheck, connection, addresses, dns, tunnels, warnings
+    }
+
+    /// A helper that is not ready is why nothing routes, so its section comes first, before the
+    /// problems it causes; a ready helper sits with the other facts.
+    static func sections(helperReady: Bool) -> [Section] {
+        let rest: [Section] = [.connection, .addresses, .dns, .tunnels, .warnings]
+        return helperReady
+            ? [.problems, .routeCheck, .siteCheck, .helper] + rest
+            : [.helper, .problems, .routeCheck, .siteCheck] + rest
+    }
+
+    // MARK: Where does this site go?
+
+    /// The answer's leading glyph: ▲ when the check found something wrong or the name did not
+    /// resolve, a tick when it left the way it should and answered, a plain glyph otherwise.
+    static func siteGlyph(_ verdict: SiteRouteAnswer.Verdict) -> (glyph: String, needsAttention: Bool) {
+        switch verdict {
+        case .ok: return ("checkmark.circle", false)
+        case .noVPN: return ("circle", false)
+        case .notChecked: return ("arrow.triangle.branch", false)
+        case .noAnswer, .wrongWay, .unknown, .checkBroken, .unresolved: return ("globe", true)
+        }
+    }
+
+    /// The Add button beside an answer: shown only when nothing lists the site, titled for what
+    /// it does in this mode (the Lookups page's words), with its tooltip as the spoken name.
+    static func siteAdd(_ answer: SiteRouteAnswer, mode: LookupMode) -> (title: String, help: String)? {
+        answer.canAdd ? (mode.addTitle, mode.addHelp) : nil
+    }
+
+    /// Waits for the routes an add started: a moment for an apply the add queued in a task
+    /// (Custom mode's reconcile) to begin, then until none runs, at most `limit` seconds. The
+    /// caller counts detection as running (`isLoading`): Custom mode's reconcile detects the
+    /// VPN before it takes the route gate.
+    @MainActor
+    static func waitForRouteApply(start: Duration = .milliseconds(300), poll: Duration = .milliseconds(200),
+                                  limit: Duration = .seconds(30), isApplying: () -> Bool) async {
+        try? await Task.sleep(for: start)
+        let clock = ContinuousClock(), deadline = clock.now + limit
+        while isApplying() && clock.now < deadline {
+            try? await Task.sleep(for: poll)
+        }
+    }
+
+    /// What the field says after a check of text that holds no host.
+    static func siteNoHost(bundle: Bundle = .main) -> String {
+        String(localized: "That is not a name, a link or an address.", bundle: bundle)
     }
 
     // MARK: Helper
@@ -128,14 +199,11 @@ enum StatusPage {
         }
     }
 
-    /// The connection traffic takes when it skips the VPN.
-    static func normalConnectionLine(ssid: String?, gateway: String?, bundle: Bundle = .main) -> Line {
-        switch (ssid, gateway) {
-        case let (ssid?, gateway?): return Line(text: String(localized: "Wi-Fi “\(ssid)”, gateway \(gateway)", bundle: bundle))
-        case let (nil, gateway?): return Line(text: String(localized: "Gateway \(gateway)", bundle: bundle))
-        case let (ssid?, nil): return Line(text: String(localized: "Wi-Fi “\(ssid)”, no gateway found", bundle: bundle), tone: .warn)
-        case (nil, nil): return Line(text: String(localized: "No gateway found", bundle: bundle), tone: .warn)
-        }
+    /// The connection traffic takes when it skips the VPN. No Wi-Fi name: the app read it from
+    /// `airport -I`, which current macOS no longer has, so it never showed.
+    static func normalConnectionLine(gateway: String?, bundle: Bundle = .main) -> Line {
+        guard let gateway else { return Line(text: String(localized: "No gateway found", bundle: bundle), tone: .warn) }
+        return Line(text: String(localized: "Gateway \(gateway)", bundle: bundle))
     }
 
     /// Which interface carries the default route, and what it is to this app. Nil
@@ -164,9 +232,11 @@ enum StatusPage {
 
     /// The Applied row: what the last apply or removal did, or what is installed.
     static func appliedLine(installed: Int, lastChange: RouteManager.RouteChangeOutcome?, now: Date,
-                            bundle: Bundle = .main) -> Line {
-        // Same rule as the dropdown: a removal stops being reported once routes are back.
-        guard let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed) else {
+                            helperReady: Bool = true, bundle: Bundle = .main) -> Line {
+        // Same rule as the dropdown: a removal stops being reported once routes are back, and
+        // with the helper not ready a past apply is not reported over a "Not working" title.
+        guard let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed,
+                                                         helperReady: helperReady) else {
             return installed > 0
                 ? Line(text: routes(installed, bundle: bundle))
                 : Line(text: String(localized: "None yet", bundle: bundle))
@@ -174,10 +244,12 @@ enum StatusPage {
         let when = DropdownCopy.age(since: change.at, now: now)
         switch change.kind {
         case .applied:
-            let count = routes(change.routeCount, bundle: bundle)
+            // The addresses routed now, as the dropdown counts them; the apply's own count
+            // falls behind once a wildcard lookup or a DNS refresh adds a route.
+            let count = routes(installed, bundle: bundle)
             return change.failedCount == 0
-                ? Line(text: String(localized: "\(count), \(when), none failed", bundle: bundle))
-                : Line(text: String(localized: "\(count), \(when), \(change.failedCount) failed", bundle: bundle), tone: .warn)
+                ? Line(text: String(localized: "\(count), applied \(when), none failed", bundle: bundle))
+                : Line(text: String(localized: "\(count), applied \(when), \(change.failedCount) failed", bundle: bundle), tone: .warn)
         case .removedAll:
             return change.failedCount == 0
                 ? Line(text: String(localized: "All removed \(when)", bundle: bundle), tone: .warn)
@@ -243,6 +315,111 @@ enum StatusPage {
         return failed == 0
             ? Line(text: String(localized: "\(checked) of \(total) checked, all reachable, \(when)", bundle: bundle))
             : Line(text: String(localized: "\(checked) of \(total) checked, \(failed) not reachable, \(when)", bundle: bundle), tone: .warn)
+    }
+
+    // MARK: Problems
+
+    /// One row of Problems: what failed, and why.
+    struct Problem: Equatable, Identifiable {
+        enum Kind: Equatable {
+            case notRouted, notResolved, notRemoved, noAddresses, unlisted
+        }
+        let kind: Kind
+        /// The address, the name, or the entry.
+        let title: String
+        /// What it was for and the reason.
+        let detail: String
+
+        var id: String { "\(kind)|\(title)|\(detail)" }
+    }
+
+    /// Every failure the dropdown's count includes, in the order the apply met them: the
+    /// addresses the helper did not route (or remove), with their entry and the reason it gave,
+    /// and the names that did not resolve, with their entry and the DNS error. Then the
+    /// entries left with no address that no failure above names, and a last row for failures
+    /// counted but not itemised.
+    /// Empty when nothing failed. Shown on the same rule as the dropdown (`shownRouteChange`),
+    /// so the page never lists failures the dropdown no longer counts. An address that is
+    /// routed by now (a DNS retry or a later add put it in) is left out.
+    /// `dnsFailures` (`RouteManager.currentDNSFailures`) are the lookups known to have failed
+    /// for an entry the last apply does not name: an entry with no address that one names
+    /// says it did not resolve, the reason that tells the user what to fix.
+    static func problems(lastChange: RouteManager.RouteChangeOutcome?, installed: Int, helperReady: Bool,
+                         withoutAddresses: [RoutedBySource.Row], routes: [RoutedBySource.InstalledRoute] = [],
+                         dnsFailures: [RouteManager.RouteFailure] = [],
+                         bundle: Bundle = .main) -> [Problem] {
+        var out: [Problem] = []
+        // The entries a failure row already names, so an entry is listed once, with the
+        // failure's reason, which says more than "no address is routed".
+        var explained: Set<String> = []
+        // An entry left with no address whose lookups got no answer: that is why, so a route
+        // refusal an earlier apply recorded for it is not its reason (the dropdown's Show agrees).
+        let unresolvedEmpty = Set(withoutAddresses.filter { row in
+            row.isProblem && dnsFailures.contains { $0.entry == row.id }
+        }.map(\.id))
+        let lastChange = lastChange?.outstanding(routedNow: Set(routes.map(\.destination)))
+        if let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed, helperReady: helperReady),
+           change.failedCount > 0 {
+            for failure in change.failures {
+                if failure.kind == .notRouted && unresolvedEmpty.contains(failure.entry) { continue }
+                explained.insert(failure.entry.isEmpty ? failure.target : failure.entry)
+                let kind: Problem.Kind
+                let what: String
+                switch failure.kind {
+                case .notRouted:
+                    kind = .notRouted
+                    what = String(localized: "Not routed", bundle: bundle)
+                case .notResolved:
+                    kind = .notResolved
+                    what = String(localized: "Did not resolve", bundle: bundle)
+                case .notRemoved:
+                    kind = .notRemoved
+                    what = String(localized: "Not removed", bundle: bundle)
+                }
+                // A domain listed on its own is its own entry: say it once.
+                let detail = failure.entry.isEmpty || failure.entry == failure.target
+                    ? String(localized: "\(what): \(failure.reason)", bundle: bundle)
+                    : String(localized: "\(what), for \(failure.entry): \(failure.reason)", bundle: bundle)
+                out.append(Problem(kind: kind, title: failure.target, detail: detail))
+            }
+            let unlisted = change.failedCount - change.failures.count
+            if unlisted > 0 {
+                out.append(Problem(kind: .unlisted,
+                                   title: unlisted == 1
+                                       ? String(localized: "1 more failure", bundle: bundle)
+                                       : String(localized: "\(unlisted) more failures", bundle: bundle),
+                                   detail: String(localized: "Settings > Logs has the details.", bundle: bundle)))
+            }
+        }
+        // After Remove All Routes an empty entry is what the user asked for; what it could not
+        // remove is listed above.
+        let removed = DropdownCopy.removalStands(lastChange, currentRouteCount: installed, helperReady: helperReady)
+        for row in withoutAddresses where row.isProblem && !removed && !explained.contains(row.id) {
+            let lookups = dnsFailures.filter { $0.entry == row.id }
+            guard !lookups.isEmpty else {
+                out.append(Problem(kind: .noAddresses, title: row.name,
+                                   detail: String(localized: "No address is routed for it.", bundle: bundle)))
+                continue
+            }
+            let what = String(localized: "Did not resolve", bundle: bundle)
+            for failure in lookups {
+                let detail = failure.entry == failure.target
+                    ? String(localized: "\(what): \(failure.reason)", bundle: bundle)
+                    : String(localized: "\(what), for \(failure.entry): \(failure.reason)", bundle: bundle)
+                out.append(Problem(kind: .notResolved, title: failure.target, detail: detail))
+            }
+        }
+        return out
+    }
+
+    /// What Problems' Retry does: after a Remove All Routes that left routes behind it removes
+    /// them again, since applying would put back every route the user just took away.
+    enum RetryAction: Equatable { case apply, remove }
+
+    static func retryAction(lastChange: RouteManager.RouteChangeOutcome?, installed: Int,
+                            helperReady: Bool) -> RetryAction {
+        let change = DropdownCopy.shownRouteChange(lastChange, currentRouteCount: installed, helperReady: helperReady)
+        return change?.kind == .removedAll && (change?.failedCount ?? 0) > 0 ? .remove : .apply
     }
 
     // MARK: DNS
@@ -325,6 +502,7 @@ extension DropdownStatus.Input {
         let mode: DropdownCopy.Mode = RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
             ? .custom
             : (config.routingMode == .vpnOnly ? .vpnOnly : .bypass)
+        let routed = Set(routeManager.activeRoutes.map(\.destination))
         return DropdownStatus.Input(
             isVPNConnected: routeManager.isVPNConnected,
             vpnName: routeManager.vpnType.flatMap { $0 == .unknown ? nil : $0.rawValue },
@@ -337,7 +515,8 @@ extension DropdownStatus.Input {
             enabledRules: config.rules.filter { $0.enabled }.count,
             installedRoutes: routeManager.routedAddressCount,
             pending: routeManager.pendingReconnectApply,
-            lastRouteChange: routeManager.lastRouteChange,
+            // Without the failed addresses routed since, as Problems lists them.
+            lastRouteChange: routeManager.lastRouteChange?.outstanding(routedNow: routed),
             lastDNSRefresh: routeManager.lastDNSRefresh,
             nextDNSRefresh: routeManager.nextDNSRefresh,
             autoDNSRefresh: config.autoDNSRefresh,
@@ -345,7 +524,23 @@ extension DropdownStatus.Input {
                                                      domains: config.domains,
                                                      services: config.services,
                                                      installedRoutes: routeManager.routedAddressCount),
-            everythingElseDirect: routeManager.everythingElseDirect
+            everythingElseDirect: routeManager.everythingElseDirect,
+            killSwitch: routeManager.vpnKillSwitch,
+            isStarting: routeManager.isLoading && routeManager.lastUpdate == nil,
+            // After Remove All Routes an empty entry is what the user asked for.
+            entriesWithoutAddresses: DropdownCopy.removalStands(routeManager.lastRouteChange,
+                                                                currentRouteCount: routeManager.routedAddressCount,
+                                                                helperReady: helperReady) ? 0 : RoutedBySource.make(
+                mode: mode, config: config, routes: routeManager.installedRoutes,
+                busy: RoutedBySource.mayStillAddRoutes(running: routeManager.isLoading || routeManager.isApplyingRoutes,
+                                                       pending: routeManager.pendingReconnectApply))?.problemCount ?? 0,
+            lastCheckCount: routeManager.lastRouteCheck?.results.count ?? 0,
+            // Only addresses still routed: one removed since the check is no longer a fault.
+            lastCheckWrongWay: routeManager.lastRouteCheck?.leftWrongWay
+                .filter { routed.contains($0.destination) }.count ?? 0,
+            lastCheckBroken: routeManager.lastRouteCheck?.controlBroken ?? false,
+            pause: routeManager.pauseState,
+            configUnreadable: routeManager.isConfigLoadFailed
         )
     }
 }
@@ -357,17 +552,29 @@ struct StatusTab: View {
     @ObservedObject private var helperManager = HelperManager.shared
     /// Opens the Logs page with Warnings selected.
     private let onShowWarnings: () -> Void
+    /// Opens the Logs page on every line, for the route check's results.
+    private let onShowLogs: () -> Void
     /// False when a snapshot was handed in: the page shows it as given, so a test or a render
     /// can show any tunnel state, until Refresh reads the real one.
     private let readsTunnelsOnChange: Bool
 
     @State private var snapshot: RouteManager.CoexistenceSnapshot?
     @State private var isReadingTunnels = false
+    /// "Where does this site go?": the field, the check and its answer.
+    @StateObject private var siteRoute: SiteRouteModel
+    /// What the last Add from the answer saved, or why it saved nothing.
+    @State private var siteAddFeedback: AddDomainFeedback?
+    /// The doc screenshots open the page with this in the field and its answer under it.
+    static var siteCheckForScreenshots: (query: String, answer: SiteRouteAnswer)?
 
-    init(onShowWarnings: @escaping () -> Void = {}, snapshot: RouteManager.CoexistenceSnapshot? = nil) {
+    init(onShowWarnings: @escaping () -> Void = {}, onShowLogs: @escaping () -> Void = {},
+         snapshot: RouteManager.CoexistenceSnapshot? = nil) {
         self.onShowWarnings = onShowWarnings
+        self.onShowLogs = onShowLogs
         _snapshot = State(initialValue: snapshot)
         readsTunnelsOnChange = snapshot == nil
+        let seed = Self.siteCheckForScreenshots
+        _siteRoute = StateObject(wrappedValue: SiteRouteModel(query: seed?.query ?? "", answer: seed?.answer))
     }
 
     var body: some View {
@@ -376,6 +583,7 @@ struct StatusTab: View {
             content(now: context.date)
         }
         .task { if readsTunnelsOnChange { await readTunnels() } }
+        .onAppear(perform: MenuBarIconHiddenNote.refreshOnAppear)
         .onChange(of: StatusPage.TunnelReadKey.current(routeManager)) { _ in
             if readsTunnelsOnChange { Task { await readTunnels() } }
         }
@@ -383,14 +591,26 @@ struct StatusTab: View {
 
     private func content(now: Date) -> some View {
         let input = DropdownStatus.Input.current(routeManager, helperReady: helperManager.helperState.isReady)
-        return VStack(alignment: .leading, spacing: 18) {
+        return VStack(alignment: .leading, spacing: Theme.Space.l + 2) {
+            MenuBarIconHiddenNote()
+            if !routeManager.convertedEntries.isEmpty {
+                ConvertedEntriesNote(changes: routeManager.convertedEntries,
+                                     onDismiss: { routeManager.dismissConvertedEntries() })
+            }
             summaryView(StatusPage.summary(input, now: now))
-            helperSection
-            connectionSection
-            routesSection(input, now: now)
-            dnsSection(now: now)
-            tunnelsSection
-            warningsSection
+            ForEach(StatusPage.sections(helperReady: helperManager.helperState.isReady), id: \.self) { section in
+                switch section {
+                case .helper: helperSection
+                case .problems: problemsSection(input)
+                case .routeCheck: routeCheckSection
+                case .siteCheck: siteCheckSection
+                case .connection: connectionSection
+                case .addresses: routesSection(input, now: now)
+                case .dns: dnsSection(now: now)
+                case .tunnels: tunnelsSection
+                case .warnings: warningsSection
+                }
+            }
         }
     }
 
@@ -408,16 +628,16 @@ struct StatusTab: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(summary.title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(Theme.textPrimary)
+                    .font(Theme.Font.title)
+                    .foregroundColor(Theme.text)
                 Text(summary.sentence)
-                    .font(.system(size: 12))
+                    .font(Theme.Font.body)
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let note = summary.note {
                     Text(note)
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textTertiary)
+                        .font(Theme.Font.detail)
+                        .foregroundColor(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -437,11 +657,111 @@ struct StatusTab: View {
 
     // MARK: Sections
 
+    /// Where the dropdown's "Show" lands: every failure behind its count, with Retry.
+    @ViewBuilder
+    private func problemsSection(_ input: DropdownStatus.Input) -> some View {
+        // With no VPN an entry without addresses is expected, as in the dropdown's list.
+        let missing = !input.isVPNConnected ? [] : RoutedBySource.make(
+            mode: input.mode, config: routeManager.config, routes: routeManager.installedRoutes,
+            busy: RoutedBySource.mayStillAddRoutes(running: routeManager.isLoading || routeManager.isApplyingRoutes,
+                                                   pending: routeManager.pendingReconnectApply))?.problemRows ?? []
+        let problems = StatusPage.problems(lastChange: routeManager.lastRouteChange,
+                                           installed: routeManager.routedAddressCount,
+                                           helperReady: input.helperReady, withoutAddresses: missing,
+                                           routes: routeManager.installedRoutes,
+                                           dnsFailures: routeManager.currentDNSFailures)
+        if !problems.isEmpty {
+            GroupSection(String(localized: "Problems"), trailing: {
+                let retry = StatusPage.retryAction(lastChange: routeManager.lastRouteChange,
+                                                   installed: routeManager.routedAddressCount,
+                                                   helperReady: input.helperReady)
+                Button(String(localized: "Retry")) {
+                    switch retry {
+                    case .apply: routeManager.refreshRoutes()
+                    case .remove: Task { await routeManager.removeAllRoutes() }
+                    }
+                }
+                    .controlSize(.small)
+                    .disabled(routeManager.isLoading || routeManager.isApplyingRoutes || !input.helperReady
+                              || (retry == .apply && !routeManager.isVPNConnected))
+                    .help(retry == .apply ? String(localized: "Apply the routes again")
+                                          : String(localized: "Remove the routes again"))
+                    .accessibilityLabel(retry == .apply ? String(localized: "Retry: apply the routes again")
+                                                        : String(localized: "Retry: remove the routes again"))
+            }) {
+                ForEach(Array(problems.enumerated()), id: \.element.id) { index, problem in
+                    if index > 0 { InsetDivider() }
+                    ListRow(glyph: "exclamationmark.triangle.fill", name: problem.title,
+                            detail: problem.detail, needsAttention: true)
+                        .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+
+    /// The last Verify Routes, moved here from the dropdown; Dismiss takes it away.
+    @ViewBuilder
+    private var routeCheckSection: some View {
+        if let run = routeManager.lastRouteCheck {
+            RouteCheckCard(run: run,
+                           logsHoldResults: run.logsHoldResults(oldestLogAt: routeManager.recentLogs.last?.timestamp),
+                           onShowLogs: onShowLogs,
+                           onDismiss: { routeManager.clearRouteCheck() })
+        }
+    }
+
+    /// "Where does this site go?": a name, a link or an address in, one answer out, with Add
+    /// when nothing lists the site. The same model as `vpnb why`.
+    private var siteCheckSection: some View {
+        GroupSection(String(localized: "Where does this site go?")) {
+            HStack(spacing: Theme.Space.s) {
+                TextField(String(localized: "A name, a link or an address"), text: $siteRoute.query)
+                    .textFieldStyle(.roundedBorder)
+                    .font(Theme.Font.body)
+                    .onSubmit(checkSite)
+                    .accessibilityLabel(String(localized: "Site to check"))
+                if siteRoute.isChecking {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .frame(width: 16, height: 16)
+                        .accessibilityLabel(String(localized: "Checking now…"))
+                }
+                Button(String(localized: "Check"), action: checkSite)
+                    .disabled(siteRoute.isChecking || siteRoute.query.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .help(String(localized: "Say which entry routes this site, and check the way it leaves"))
+                    .accessibilityLabel(String(localized: "Check the site"))
+            }
+            .padding(.horizontal, ListRow.inset)
+            .padding(.vertical, Theme.Space.s)
+            if let answer = siteRoute.answer, siteRoute.answersQuery {
+                InsetDivider()
+                let look = StatusPage.siteGlyph(answer.verdict)
+                ListRow(glyph: look.glyph, name: answer.host, detail: answer.summary,
+                        needsAttention: look.needsAttention,
+                        accessory: StatusPage.siteAdd(answer, mode: LookupMode(routeManager)).map { add in
+                            AnyView(Button(add.title) { addSite(answer.host) }
+                                .controlSize(.small)
+                                .disabled(routeManager.isApplyingRoutes)
+                                .help(add.help)
+                                .accessibilityLabel(add.help))
+                        },
+                        detailLineLimit: nil)
+            } else if siteRoute.checkedQuery != nil, siteRoute.answersQuery, !siteRoute.isChecking {
+                StatusNote(text: StatusPage.siteNoHost())
+            }
+            if let feedback = siteAddFeedback {
+                AddDomainFeedbackLine(feedback: feedback)
+                    .padding(.horizontal, ListRow.inset)
+                    .padding(.bottom, Theme.Space.s)
+            }
+        }
+    }
+
     private var helperSection: some View {
         let state = helperManager.helperState
         let line = StatusPage.helperLine(state, version: helperManager.helperVersion)
-        // A helper that is not ready is why nothing is routed: its box turns red.
-        return StatusSection(String(localized: "Helper"), isAlert: !state.isReady) {
+        // A helper that is not ready is why nothing is routed: its section comes first.
+        return GroupSection(String(localized: "Helper")) {
             StatusLineRow(label: String(localized: "Privileged helper"), line: line) {
                 if let action = StatusPage.helperAction(state, isInstalling: helperManager.isInstalling) {
                     Button(action) { installHelper() }
@@ -453,31 +773,35 @@ struct StatusTab: View {
                 StatusNote(text: hint)
             }
             if let error = helperManager.installationError {
-                StatusNote(text: error, color: Theme.warning)
+                StatusNote(text: error, color: Theme.attention)
             }
         }
     }
 
     private var connectionSection: some View {
-        StatusSection(String(localized: "Connection")) {
+        GroupSection(String(localized: "Connection")) {
             StatusLineRow(label: String(localized: "VPN"),
                           line: StatusPage.vpnLine(isConnected: routeManager.isVPNConnected,
                                                    name: routeManager.vpnType.flatMap { $0 == .unknown ? nil : $0.rawValue },
                                                    interface: routeManager.vpnInterface))
             StatusDivider()
             StatusLineRow(label: String(localized: "Normal connection"),
-                          line: StatusPage.normalConnectionLine(ssid: routeManager.currentNetworkSSID,
-                                                                gateway: routeManager.localGateway))
+                          line: StatusPage.normalConnectionLine(gateway: routeManager.localGateway))
             StatusDivider()
             StatusLineRow(label: String(localized: "Default route"), line: StatusPage.defaultRouteLine(snapshot))
+            if let profile = NetworkProfiles.inUseName(routeManager.config) {
+                StatusDivider()
+                StatusLineRow(label: String(localized: "Profile"), line: StatusPage.Line(text: profile))
+            }
         }
     }
 
     private func routesSection(_ input: DropdownStatus.Input, now: Date) -> some View {
-        StatusSection(String(localized: "Addresses")) {
+        GroupSection(String(localized: "Addresses")) {
             StatusLineRow(label: String(localized: "Routed"),
                           line: StatusPage.appliedLine(installed: routeManager.routedAddressCount,
-                                                       lastChange: routeManager.lastRouteChange, now: now))
+                                                       lastChange: input.lastRouteChange, now: now,
+                                                       helperReady: input.helperReady))
             StatusDivider()
             StatusLineRow(label: String(localized: "From"), line: StatusPage.fromLine(input))
             StatusDivider()
@@ -497,7 +821,7 @@ struct StatusTab: View {
     }
 
     private func dnsSection(now: Date) -> some View {
-        StatusSection(String(localized: "DNS")) {
+        GroupSection(String(localized: "DNS")) {
             StatusLineRow(label: String(localized: "Resolver"),
                           line: StatusPage.resolverLine(routeManager.detectedDNSServerDisplay))
             StatusDivider()
@@ -507,16 +831,17 @@ struct StatusTab: View {
                                                          automatic: routeManager.config.autoDNSRefresh,
                                                          now: now)) {
                 Button(String(localized: "Refresh Now")) { routeManager.forceDNSRefresh() }
-                    .disabled(routeManager.isApplyingRoutes)
+                    .disabled(routeManager.isApplyingRoutes || routeManager.isPaused)
             }
         }
     }
 
     private var tunnelsSection: some View {
-        StatusSection(String(localized: "Tunnels"), trailing: {
+        GroupSection(String(localized: "Tunnels"), trailing: {
             Button(String(localized: "Refresh")) { Task { await readTunnels() } }
-                .buttonStyle(.link)
+                .controlSize(.small)
                 .disabled(isReadingTunnels)
+                .help(String(localized: "Read the tunnels again"))
         }) {
             if let snapshot {
                 if snapshot.links.isEmpty {
@@ -525,20 +850,20 @@ struct StatusTab: View {
                     ForEach(snapshot.links) { link in
                         HStack(spacing: 10) {
                             Text(link.interface)
-                                .font(.system(size: 13, design: .monospaced))
-                                .foregroundColor(Theme.textPrimary)
+                                .font(Theme.Font.mono)
+                                .foregroundColor(Theme.text)
                             Text(VPNType.displayLabel(link.label))
-                                .font(.system(size: 13))
-                                .foregroundColor(Theme.textPrimary)
+                                .font(Theme.Font.body)
+                                .foregroundColor(Theme.text)
                                 .lineLimit(1)
-                            Spacer(minLength: 12)
+                            Spacer(minLength: Theme.Space.m)
                             Text(StatusPage.tunnelLine(link, snapshot: snapshot))
-                                .font(.system(size: 13))
+                                .font(Theme.Font.body)
                                 .foregroundColor(Theme.textSecondary)
                                 .multilineTextAlignment(.trailing)
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
+                        .padding(.horizontal, ListRow.inset)
+                        .frame(minHeight: ListRow.singleLineHeight)
                         StatusDivider()
                     }
                 }
@@ -546,7 +871,7 @@ struct StatusTab: View {
                 if let pinned = routeManager.config.pinnedVPNInterface,
                    let selected = snapshot.selectedInterface, pinned != selected {
                     StatusNote(text: String(localized: "Pinned tunnel \(pinned) is not eligible right now — acting on \(selected) automatically."),
-                               color: Theme.warning)
+                               color: Theme.attention)
                 }
                 StatusDivider()
                 StatusLineRow(label: String(localized: "Addresses owned (kernel-tagged)"),
@@ -564,8 +889,8 @@ struct StatusTab: View {
     private func actOnRow(_ snapshot: RouteManager.CoexistenceSnapshot) -> some View {
         HStack {
             Text(String(localized: "Act on"))
-                .font(.system(size: 13))
-                .foregroundColor(Theme.textPrimary)
+                .font(Theme.Font.body)
+                .foregroundColor(Theme.text)
             Spacer()
             Picker(String(localized: "Act on"), selection: Binding(
                 get: { routeManager.config.pinnedVPNInterface ?? "" },
@@ -589,13 +914,13 @@ struct StatusTab: View {
             .labelsHidden()
             .fixedSize()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
+        .padding(.horizontal, ListRow.inset)
+        .frame(minHeight: ListRow.singleLineHeight)
     }
 
     private var warningsSection: some View {
         let warnings = StatusPage.recentWarnings(routeManager.recentLogs)
-        return StatusSection(String(localized: "Recent warnings"), trailing: {
+        return GroupSection(String(localized: "Recent warnings"), trailing: {
             Button(String(localized: "Show in Log")) { onShowWarnings() }
                 .buttonStyle(.link)
         }) {
@@ -604,28 +929,51 @@ struct StatusTab: View {
             } else {
                 ForEach(Array(warnings.enumerated()), id: \.element.id) { index, entry in
                     if index > 0 { StatusDivider() }
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                         Image(systemName: entry.level == .error ? "xmark.circle.fill" : "exclamationmark.triangle.fill")
                             .font(.system(size: 11))
-                            .foregroundColor(entry.level == .error ? Theme.error : Theme.warning)
+                            .foregroundColor(entry.level == .error ? Theme.failure : Theme.attention)
                         Text(entry.timestamp, format: .dateTime.hour().minute())
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(Theme.textTertiary)
+                            .font(Theme.Font.mono)
+                            .monospacedDigit()
+                            .foregroundColor(Theme.textSecondary)
                         Text(entry.message)
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.textPrimary)
+                            .font(Theme.Font.body)
+                            .foregroundColor(Theme.text)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
+                    .padding(.horizontal, ListRow.inset)
+                    .padding(.vertical, Theme.Space.s)
                 }
             }
         }
     }
 
     // MARK: Actions
+
+    private func checkSite() {
+        guard !siteRoute.isChecking, !siteRoute.query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        siteAddFeedback = nil
+        Task { await siteRoute.check(routeManager) }
+    }
+
+    /// Adds the site as the current mode adds a name, then checks it again so the answer says
+    /// what the entry changed.
+    private func addSite(_ host: String) {
+        guard let result = routeManager.addForCurrentMode(host) else { return }
+        siteAddFeedback = AddDomainFeedback(result, typed: host)
+        if case .success = result {
+            siteRoute.query = host
+            Task {
+                // The add routes the entry in a task of its own: checking before it finishes
+                // would see the site listed but leaving the old way, and mark it wrong.
+                await StatusPage.waitForRouteApply { routeManager.isApplyingRoutes || routeManager.isLoading }
+                await siteRoute.check(routeManager)
+            }
+        }
+    }
 
     /// On appear, on a `TunnelReadKey` change and on Refresh only: the read spawns `ifconfig`
     /// and `tailscale status`, which must never sit on a timer.
@@ -658,55 +1006,6 @@ struct StatusTab: View {
 
 // MARK: - Building blocks
 
-/// A heading and a rounded box of rows, laid out like a grouped form in System Settings.
-struct StatusSection<Content: View, Trailing: View>: View {
-    let title: String
-    /// Outlines the box in red, for the row that explains why nothing works.
-    let isAlert: Bool
-    let trailing: Trailing
-    let content: Content
-
-    init(_ title: String, isAlert: Bool = false, @ViewBuilder trailing: () -> Trailing,
-         @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.isAlert = isAlert
-        self.trailing = trailing()
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(Theme.textSecondary)
-                Spacer()
-                trailing
-                    .font(.system(size: 12))
-            }
-            .frame(minHeight: 16)
-            VStack(alignment: .leading, spacing: 0) {
-                content
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Theme.bgCard)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(isAlert ? Theme.error.opacity(0.7) : Theme.bgCardBorder, lineWidth: 1)
-                    )
-            )
-        }
-    }
-}
-
-extension StatusSection where Trailing == EmptyView {
-    init(_ title: String, isAlert: Bool = false, @ViewBuilder content: () -> Content) {
-        self.init(title, isAlert: isAlert, trailing: { EmptyView() }, content: content)
-    }
-}
-
 /// A label on the left, a value on the right with an optional dot, and an optional button.
 struct StatusLineRow<Accessory: View>: View {
     let label: String
@@ -720,13 +1019,13 @@ struct StatusLineRow<Accessory: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Theme.Space.s) {
             Text(label)
-                .font(.system(size: 13))
-                .foregroundColor(Theme.textPrimary)
+                .font(Theme.Font.body)
+                .foregroundColor(Theme.text)
                 .lineLimit(1)
                 .fixedSize()
-            Spacer(minLength: 12)
+            Spacer(minLength: Theme.Space.m)
             HStack(spacing: 6) {
                 if let tone = line.tone {
                     Circle()
@@ -734,7 +1033,7 @@ struct StatusLineRow<Accessory: View>: View {
                         .frame(width: 7, height: 7)
                 }
                 Text(line.text)
-                    .font(.system(size: 13))
+                    .font(Theme.Font.body)
                     // A fault reads in its colour; a healthy value stays grey beside its green dot.
                     .foregroundColor(line.tone.flatMap { $0 == .warn || $0 == .bad ? $0.color : nil } ?? Theme.textSecondary)
                     .multilineTextAlignment(.trailing)
@@ -743,8 +1042,9 @@ struct StatusLineRow<Accessory: View>: View {
             accessory
                 .controlSize(.small)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+        .padding(.horizontal, ListRow.inset)
+        .padding(.vertical, Theme.Space.xs)
+        .frame(minHeight: ListRow.singleLineHeight)
         .accessibilityElement(children: .combine)
     }
 }
@@ -761,11 +1061,10 @@ struct StatusPlainRow: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 13))
+            .font(Theme.Font.body)
             .foregroundColor(Theme.textSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, minHeight: ListRow.singleLineHeight, alignment: .leading)
+            .padding(.horizontal, ListRow.inset)
     }
 }
 
@@ -776,20 +1075,47 @@ struct StatusNote: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11))
+            .font(Theme.Font.detail)
             .foregroundColor(color)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.bottom, 9)
+            .padding(.horizontal, ListRow.inset)
+            .padding(.bottom, Theme.Space.s)
     }
 }
 
+/// Which entries saved as ".example.com" this version rewrote as wildcards, until Dismiss.
+struct ConvertedEntriesNote: View {
+    let changes: [ConvertedEntry]
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Theme.Space.s) {
+            Image(systemName: "info.circle")
+                .foregroundColor(Theme.textSecondary)
+                .accessibilityHidden(true)
+            Text(ConvertedEntry.sentence(changes))
+                .font(Theme.Font.body)
+                .foregroundColor(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: Theme.Space.s)
+            Button(String(localized: "Dismiss"), action: onDismiss)
+                .accessibilityLabel(String(localized: "Dismiss the note about updated entries"))
+        }
+        .padding(Theme.Space.m)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.group).fill(Theme.bgCard))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.group).strokeBorder(Theme.border, lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// The hairline between two label rows, which have no glyph column: from the row inset.
 struct StatusDivider: View {
     var body: some View {
         Rectangle()
-            .fill(Theme.divider)
-            .frame(height: 1)
-            .padding(.leading, 14)
+            .fill(Theme.separator)
+            .frame(height: 0.5)
+            .padding(.horizontal, ListRow.inset)
+            .accessibilityHidden(true)
     }
 }

@@ -48,12 +48,25 @@ public enum RouteKernel {
         public let destination: String   // "1.2.3.4" or "10.0.0.0/8" when isNetwork
         public let gateway: Gateway
         public let isNetwork: Bool
+        /// A block (`RTF_REJECT`): a packet to the destination fails at once with "no route to
+        /// host" instead of leaving. VPN Only holds its listed addresses this way while the VPN
+        /// is down (`blockSpec`).
+        public let reject: Bool
 
-        public init(destination: String, gateway: Gateway, isNetwork: Bool) {
+        public init(destination: String, gateway: Gateway, isNetwork: Bool, reject: Bool = false) {
             self.destination = destination
             self.gateway = gateway
             self.isNetwork = isNetwork
+            self.reject = reject
         }
+    }
+
+    /// The block for `destination`: a reject route to 127.0.0.1, which is what
+    /// `route add -host <dest> 127.0.0.1 -reject` writes (flags UGHRS). A network form takes
+    /// the same "/32 is a host" reading as the helper's delete.
+    public static func blockSpec(destination: String) -> Spec {
+        let isNetwork = destination.contains("/") && !destination.hasSuffix("/32")
+        return Spec(destination: destination, gateway: .address("127.0.0.1"), isNetwork: isNetwork, reject: true)
     }
 
     // MARK: - Message construction
@@ -88,6 +101,7 @@ public enum RouteKernel {
         }
 
         var flags: Int32 = RTF_UP | RTF_STATIC | RTF_PROTO1
+        if spec.reject { flags |= RTF_REJECT }
         var addrs: Int32 = RTA_DST | RTA_GATEWAY
         var gatewayData: Data
 
@@ -148,6 +162,8 @@ public enum RouteKernel {
 
         public var isOurs: Bool { flags & RTF_PROTO1 != 0 }
         public var isHost: Bool { prefix == nil }
+        /// One of our VPN Only blocks (`blockSpec`): tagged by us and rejecting.
+        public var isOurBlock: Bool { isOurs && flags & RTF_REJECT != 0 }
 
         /// Dotted-quad plus optional /prefix, matching the app's destination strings.
         public var destinationString: String {
@@ -248,6 +264,68 @@ public enum RouteKernel {
             && flags & RTF_IFSCOPE == 0
             && flags & RTF_REJECT == 0
             && flags & RTF_BLACKHOLE == 0
+    }
+
+    /// The helper's index of the live table by destination string, for deciding how to install
+    /// a route (`installStep`): every comparable entry, plus our own blocks.
+    ///
+    /// The blocks have to be in it. `isComparableEntry` leaves reject routes out, so a block was
+    /// invisible here and an install over it went ADD, got EEXIST, and fell back to RTM_CHANGE.
+    /// XNU's RTM_CHANGE rewrites the gateway and keeps the flags: measured on macOS 26.6 with
+    /// `route add -reject` then `route change`, the entry read UGHRS with the new gateway and
+    /// still refused every packet. The VPN Only routes put back when the VPN returns would
+    /// then have stayed blocked, with the apply reporting success.
+    public static func installIndex(_ table: [KernelRoute]) -> [String: KernelRoute] {
+        var index: [String: KernelRoute] = [:]
+        for route in table where isComparableEntry(route.flags) {
+            index[route.destinationString] = route
+        }
+        for route in table where route.isOurBlock && route.flags & RTF_WASCLONED == 0
+            && route.flags & RTF_IFSCOPE == 0 && index[route.destinationString] == nil {
+            index[route.destinationString] = route
+        }
+        return index
+    }
+
+    /// The unscoped, uncloned entry a block at `key` would collide with (an RTM_ADD that got
+    /// EEXIST), and whether the block may take its place: only when the entry is ours. A host
+    /// route someone else wrote is how a VPN client pins its own server to the physical
+    /// interface; replacing that with a block would stop the VPN from ever coming back.
+    public static func blockMayReplace(table: [KernelRoute], key: String) -> Bool {
+        guard let current = table.first(where: {
+            $0.destinationString == key && $0.flags & RTF_WASCLONED == 0 && $0.flags & RTF_IFSCOPE == 0
+        }) else { return true }
+        return current.isOurs
+    }
+
+    /// What one install has to write, given the index entry for its destination.
+    public enum InstallStep: Equatable, Sendable {
+        /// The kernel already has exactly this route: write nothing.
+        case alreadyCorrect
+        /// Another route is there: rewrite it in place, with no gap.
+        case change
+        /// Nothing is there.
+        case add
+        /// Our block is there. RTM_CHANGE would keep its reject flag, so delete it, then add.
+        case replaceBlock
+    }
+
+    public static func installStep(current: KernelRoute?, spec: Spec) -> InstallStep {
+        guard let current else { return .add }
+        if current.isOurBlock { return .replaceBlock }
+        return routeMatches(current, spec: spec) ? .alreadyCorrect : .change
+    }
+
+    /// Whether the kernel entry already IS the route we want: same kind, same egress, and not
+    /// a block.
+    public static func routeMatches(_ kernel: KernelRoute, spec: Spec) -> Bool {
+        guard kernel.isHost == !spec.isNetwork, kernel.flags & RTF_REJECT == 0 else { return false }
+        switch spec.gateway {
+        case .address(let ip):
+            return kernel.gatewayAddress.map(dotted) == ip
+        case .interfaceIndex(let index):
+            return kernel.gatewayInterfaceIndex == index
+        }
     }
 
     /// Reads the live IPv4 routing table via sysctl — silent and unprivileged.

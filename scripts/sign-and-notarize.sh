@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sign VPN Bypass with the Developer ID, notarize it with Apple and staple the ticket.
 #
-#   scripts/sign-and-notarize.sh app "VPN Bypass.app"
+#   scripts/sign-and-notarize.sh app [--entitlements VPNBypass.entitlements] "VPN Bypass.app"
 #   scripts/sign-and-notarize.sh dmg dist/VPN-Bypass-X.Y.Z.dmg
 #
 # Needs SIGN_IDENTITY (the certificate's SHA-1, which works where a name with accents
@@ -9,11 +9,26 @@
 # profile), or APPLE_ID, APPLE_PASSWORD (an app-specific password) and APPLE_TEAM_ID.
 # A missing one is an error, never a fallback to ad-hoc: the helper only accepts an app
 # signed by our team, so an ad-hoc release could not use its own helper.
+#
+# --entitlements signs the app bundle (not the helper or vpnb) with that file. The app needs
+# com.apple.security.automation.apple-events to read the browser's front tab: under the
+# hardened runtime, Apple Events are refused without it. The signed entitlements are read
+# back and must equal the file.
 set -euo pipefail
 
-usage="usage: $0 app|dmg PATH"
+usage="usage: $0 app [--entitlements FILE] PATH | dmg PATH"
 mode="${1:?$usage}"
-target="${2:?$usage}"
+shift
+entitlements=""
+if [ "${1:-}" = "--entitlements" ]; then
+  [ "$mode" = "app" ] || { echo "error: --entitlements is for app only" >&2; exit 1; }
+  entitlements="${2:?$usage}"
+  shift 2
+  [ -f "$entitlements" ] || { echo "error: entitlements file $entitlements does not exist" >&2; exit 1; }
+  plutil -lint -s "$entitlements" || { echo "error: $entitlements is not a valid plist" >&2; exit 1; }
+fi
+target="${1:?$usage}"
+[ "$#" -eq 1 ] || { echo "$usage" >&2; exit 1; }
 [ -e "$target" ] || { echo "error: $target does not exist" >&2; exit 1; }
 
 : "${SIGN_IDENTITY:?SIGN_IDENTITY is not set}"
@@ -52,7 +67,20 @@ case "$mode" in
     # Inside out: the bundle's signature seals the nested executables, so they go first.
     sign --identifier com.geiserx.vpnbypass.helper "$target/Contents/MacOS/com.geiserx.vpnbypass.helper"
     sign --identifier com.geiserx.vpn-bypass.vpnb "$target/Contents/MacOS/vpnb"
-    sign "$target"
+    if [ -n "$entitlements" ]; then
+      sign --entitlements "$entitlements" "$target"
+      # What the signature carries must be the file, key for key.
+      codesign -d --entitlements - --xml "$target" > "$work/signed.plist"
+      plutil -convert json -o "$work/signed.json" "$work/signed.plist"
+      plutil -convert json -o "$work/wanted.json" "$entitlements"
+      if ! python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1])) != json.load(open(sys.argv[2])))' \
+          "$work/signed.json" "$work/wanted.json"; then
+        echo "error: the app's signed entitlements differ from $entitlements" >&2
+        exit 1
+      fi
+    else
+      sign "$target"
+    fi
     codesign --verify --deep --strict --verbose=2 "$target"
     codesign --verify -R="$helper_requirement" "$target"
     ditto -c -k --keepParent "$target" "$work/app.zip"

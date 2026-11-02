@@ -32,6 +32,7 @@ enum VPNType: String, Codable {
     case paloAlto = "Palo Alto"
     case pulseSecure = "Pulse Secure"
     case checkPoint = "Check Point"
+    case protonVPN = "Proton VPN"
     case unknown = "Unknown VPN"
 
     /// The product name to show, or nil for `.unknown`: its raw value is an English
@@ -57,6 +58,7 @@ enum VPNType: String, Codable {
         case .cloudflareWARP: return "cloud.bolt.fill"
         case .pulseSecure: return "bolt.shield.fill"
         case .checkPoint: return "checkmark.shield.fill"
+        case .protonVPN: return "lock.shield.fill"
         case .unknown: return "shield.fill"
         }
     }
@@ -69,6 +71,11 @@ struct RouteVerificationResult: Identifiable {
     let latency: Double? // in milliseconds
     let timestamp: Date
     let error: String?
+    /// What the path check saw for it: the interface, the source address and the answer.
+    var path: PathCheck.Probe? = nil
+    /// The path check saw it leave another way than its route says. Not answering on 443 is
+    /// not this: a site may drop the connection however it is routed.
+    var leftWrongWay: Bool = false
 }
 
 // SOCKS5 Proxy configuration for aggressive VPN bypass (corporate VPNs that block UDP)
@@ -79,6 +86,10 @@ struct ProxyConfig: Codable, Equatable {
     var username: String = ""
     var password: String = ""
     var useForServices: [String] = []  // Service IDs that should use proxy (empty = all enabled services)
+    /// The Proxy route this proxy became (`Config.derive`, `Config.withGlobalProxy`), which the
+    /// settings keep in step. Nil in a config written before it was kept: then the route is
+    /// found by this proxy's address.
+    var routeId: UUID? = nil
     
     var isConfigured: Bool {
         !server.isEmpty && port > 0 && port < 65536
@@ -91,13 +102,16 @@ struct Config: Codable {
     var autoApplyOnVPN: Bool = true
     var manageHostsFile: Bool = true
     var checkInterval: TimeInterval = 300 // 5 minutes
-    var verifyRoutesAfterApply: Bool = false  // Disabled by default - many servers block ping
+    var verifyRoutesAfterApply: Bool = false  // Off by default: a check opens a connection to each sampled address
     var autoDNSRefresh: Bool = true  // Periodically re-resolve DNS and update routes
     var dnsRefreshInterval: TimeInterval = 3600  // 1 hour default
     var fallbackDNS: [String] = ["1.1.1.1", "8.8.8.8"]  // Fallback DNS servers (IP or DoH URL)
     var proxyConfig: ProxyConfig = ProxyConfig()  // SOCKS5 proxy for aggressive bypass mode
     var routingMode: RoutingMode = .bypass  // Bypass = domains bypass VPN, VPN Only = only listed domains use VPN
     var inverseDomains: [DomainEntry] = []  // Domains that should use VPN in VPN Only mode
+    /// VPN Only: while the VPN is down, hold the listed addresses back with blocks (reject
+    /// routes) instead of letting them go out over the normal connection. Off by default.
+    var blockListedWhenVPNDown: Bool = false
 
     // Multi-route model (P0 / VPN-Bypass-3sc.7). Additive + dormant: while
     // schemaVersion == 1 the bypass/vpnOnly engine above stays authoritative;
@@ -128,6 +142,14 @@ struct Config: Codable {
     /// `services` because `mergeBuiltInServices` resets a built-in service's domains to the
     /// shipped list at every launch; it adds these back after the shipped ones.
     var builtInServiceExtras: [String: [String]] = [:]
+    /// Profiles per network (idea 9 of the 6.0 rework, `NetworkProfiles.swift`). The fields
+    /// above are always the settings in use; these hold the ones that are not.
+    var profiles: [NetworkProfile] = []
+    /// The profile in use; nil means "Other networks", the settings used on any network no
+    /// profile claims.
+    var activeProfileId: UUID? = nil
+    /// The Other networks settings while a profile is in use. Nil while Other networks is.
+    var otherNetworksSettings: ProfileSettings? = nil
 
     // Custom decoder for backward compatibility with configs missing new fields
     init(from decoder: Decoder) throws {
@@ -144,6 +166,7 @@ struct Config: Codable {
         proxyConfig = try container.decodeIfPresent(ProxyConfig.self, forKey: .proxyConfig) ?? ProxyConfig()
         routingMode = try container.decodeIfPresent(RoutingMode.self, forKey: .routingMode) ?? .bypass
         inverseDomains = try container.decodeIfPresent([DomainEntry].self, forKey: .inverseDomains) ?? []
+        blockListedWhenVPNDown = try container.decodeIfPresent(Bool.self, forKey: .blockListedWhenVPNDown) ?? false
 
         routes = try container.decodeIfPresent([Route].self, forKey: .routes) ?? []
         rules = try container.decodeIfPresent([Rule].self, forKey: .rules) ?? []
@@ -159,6 +182,9 @@ struct Config: Codable {
         pinnedVPNProductHint = try container.decodeIfPresent(String.self, forKey: .pinnedVPNProductHint)
         dnsLookupsEnabled = try container.decodeIfPresent(Bool.self, forKey: .dnsLookupsEnabled) ?? false
         builtInServiceExtras = try container.decodeIfPresent([String: [String]].self, forKey: .builtInServiceExtras) ?? [:]
+        profiles = try container.decodeIfPresent([NetworkProfile].self, forKey: .profiles) ?? []
+        activeProfileId = try container.decodeIfPresent(UUID.self, forKey: .activeProfileId)
+        otherNetworksSettings = try container.decodeIfPresent(ProfileSettings.self, forKey: .otherNetworksSettings)
 
         // One-time migration: derive the routes/rules representation from the
         // legacy bypass list + single proxy so the new model is populated for
@@ -172,7 +198,57 @@ struct Config: Codable {
             routes = derived.routes
             rules = derived.rules
             defaultRouteId = derived.defaultRouteId
+            proxyConfig.routeId = derived.routes.first { $0.egress == .proxySOCKS5 }?.id
         }
+        if !(dnsRefreshInterval > 0) || !dnsRefreshInterval.isFinite {
+            // Zero, negative or NaN from a hand edit: a repeating timer of that interval fires
+            // without pause. The default instead, as when the key is missing.
+            dnsRefreshInterval = Config.defaultDNSRefreshInterval
+        }
+    }
+
+    static let defaultDNSRefreshInterval: TimeInterval = 3600
+
+    /// `self` with the global SOCKS5 proxy set to `proxy`, and the Proxy route it became kept in
+    /// step: its address and login follow, and it is on while the proxy is. `derive` makes that
+    /// route only for a config with no routes yet, so without this an edit in General reached
+    /// nothing. A proxy turned on with no route of its own gets one (never into an empty route
+    /// list, which `derive` fills, system routes and all). An address being typed that is not
+    /// usable yet leaves the route's address as it was.
+    func withGlobalProxy(_ proxy: ProxyConfig) -> Config {
+        var c = self
+        var next = proxy
+        let old = c.proxyConfig
+        // The linked route counts only while it is still a SOCKS5 route: retyped on the Routes
+        // page, it is the user's now.
+        var index = old.routeId.flatMap { id in c.routes.firstIndex { $0.id == id && $0.egress == .proxySOCKS5 } }
+        if index == nil, old.routeId == nil, old.isConfigured {
+            // A config from before the link: the one SOCKS5 route on the proxy's address. With
+            // two on it, neither is known to be the proxy's, so neither is taken.
+            let matches = c.routes.indices.filter {
+                c.routes[$0].egress == .proxySOCKS5 && c.routes[$0].proxyHost == old.server && c.routes[$0].proxyPort == old.port
+            }
+            if matches.count == 1 { index = matches[0] }
+        }
+        if let i = index {
+            next.routeId = c.routes[i].id
+            // Only what changed in General is written, so an address or login set on the
+            // Routes page stays until General's own changes.
+            if proxy.isConfigured, proxy.server != old.server || proxy.port != old.port {
+                c.routes[i].proxyHost = proxy.server
+                c.routes[i].proxyPort = proxy.port
+            }
+            if proxy.username != old.username { c.routes[i].proxyUser = proxy.username }
+            if proxy.password != old.password { c.routes[i].proxyPass = proxy.password }
+            c.routes[i].enabled = proxy.enabled
+        } else if proxy.enabled && proxy.isConfigured && !c.routes.isEmpty {
+            let route = Route(name: "Proxy", egress: .proxySOCKS5, proxyHost: proxy.server, proxyPort: proxy.port,
+                              proxyUser: proxy.username, proxyPass: proxy.password)
+            c.routes.append(route)
+            next.routeId = route.id
+        }
+        c.proxyConfig = next
+        return c
     }
 
     // Default initializer
@@ -311,6 +387,7 @@ struct Config: Codable {
             c.routes = derived.routes + userRoutes
             c.rules = derived.rules
             c.defaultRouteId = derived.defaultRouteId
+            if let id = derived.routes.first(where: { $0.egress == .proxySOCKS5 })?.id { c.proxyConfig.routeId = id }
             return c
         }
 
@@ -358,6 +435,19 @@ struct Config: Codable {
             r.proxyPass = nil
             return r
         }
+        // Failed lookups are this Mac's own note; on another Mac they would mark live names.
+        for i in copy.domains.indices { copy.domains[i].resolveFailures = nil }
+        for i in copy.inverseDomains.indices { copy.inverseDomains[i].resolveFailures = nil }
+        // The same for the settings profiles keep, and the networks they are bound to (a
+        // router's address and MAC) are this Mac's own note too: "Use on This Network" binds
+        // an imported profile again.
+        copy.otherNetworksSettings = copy.otherNetworksSettings?.withoutResolveFailures()
+        copy.profiles = copy.profiles.map { profile in
+            var p = profile
+            p.networks = []
+            p.settings = p.settings.withoutResolveFailures()
+            return p
+        }
         return copy
     }
 
@@ -365,163 +455,10 @@ struct Config: Codable {
         []  // User adds their own domains in Settings
     }
     
+    /// The built-in services: the service catalogue (`Resources/catalogue/*.json`), every
+    /// one off, in catalogue order. Read once at launch (`ServiceCatalogue.shipped`).
     static var defaultServices: [ServiceEntry] {
-        [
-            // Messaging
-            ServiceEntry(id: "telegram", name: "Telegram", enabled: false, domains: [
-                "telegram.org", "t.me", "telegram.me", "core.telegram.org", "api.telegram.org", "web.telegram.org"
-            ], ipRanges: ["91.108.56.0/22", "91.108.4.0/22", "91.108.8.0/22", "91.108.16.0/22", "91.108.12.0/22", "149.154.160.0/20", "91.105.192.0/23", "185.76.151.0/24"]),
-            ServiceEntry(id: "whatsapp", name: "WhatsApp", enabled: false, domains: [
-                "whatsapp.com", "web.whatsapp.com", "whatsapp.net", "wa.me"
-            ], ipRanges: ["3.33.221.0/24", "15.197.206.0/24", "52.26.198.0/24"]),
-            ServiceEntry(id: "signal", name: "Signal", enabled: false, domains: [
-                "signal.org", "www.signal.org", "updates.signal.org", "chat.signal.org"
-            ], ipRanges: []),
-            
-            // Streaming - Video
-            ServiceEntry(id: "youtube", name: "YouTube", enabled: false, domains: [
-                "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "youtube-nocookie.com", "www.googlevideo.com", "i.ytimg.com", "s.ytimg.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "netflix", name: "Netflix", enabled: false, domains: [
-                "netflix.com", "www.netflix.com", "assets.nflxext.com", "api-global.netflix.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "primevideo", name: "Amazon Prime Video", enabled: false, domains: [
-                "primevideo.com", "www.primevideo.com", "amazon.com", "www.amazon.com", "atv-ps.amazon.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "disneyplus", name: "Disney+", enabled: false, domains: [
-                "disneyplus.com", "www.disneyplus.com", "disney-plus.net", "bamgrid.com", "dssott.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "hbomax", name: "HBO Max", enabled: false, domains: [
-                "max.com", "www.max.com", "hbomax.com", "www.hbomax.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "twitch", name: "Twitch", enabled: false, domains: [
-                "twitch.tv", "www.twitch.tv", "static.twitchcdn.net", "vod-secure.twitch.tv", "usher.ttvnw.net"
-            ], ipRanges: []),
-            
-            // Streaming - Music
-            ServiceEntry(id: "spotify", name: "Spotify", enabled: false, domains: [
-                "spotify.com", "www.spotify.com", "open.spotify.com", "i.scdn.co"
-            ], ipRanges: []),
-            ServiceEntry(id: "applemusic", name: "Apple Music", enabled: false, domains: [
-                "music.apple.com", "itunes.apple.com", "amp-api.music.apple.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "soundcloud", name: "SoundCloud", enabled: false, domains: [
-                "soundcloud.com", "www.soundcloud.com", "api.soundcloud.com"
-            ], ipRanges: []),
-            
-            // Social Media
-            ServiceEntry(id: "twitter", name: "X (Twitter)", enabled: false, domains: [
-                "twitter.com", "x.com", "www.twitter.com", "api.twitter.com", "t.co", "pbs.twimg.com", "abs.twimg.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "instagram", name: "Instagram", enabled: false, domains: [
-                "instagram.com", "www.instagram.com", "i.instagram.com", "scontent.cdninstagram.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "tiktok", name: "TikTok", enabled: false, domains: [
-                "tiktok.com", "www.tiktok.com", "vm.tiktok.com", "m.tiktok.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "reddit", name: "Reddit", enabled: false, domains: [
-                "reddit.com", "www.reddit.com", "old.reddit.com", "i.redd.it", "v.redd.it"
-            ], ipRanges: []),
-            ServiceEntry(id: "facebook", name: "Facebook", enabled: false, domains: [
-                "facebook.com", "www.facebook.com", "m.facebook.com", "fb.com", "fbcdn.net"
-            ], ipRanges: []),
-            ServiceEntry(id: "linkedin", name: "LinkedIn", enabled: false, domains: [
-                "linkedin.com", "www.linkedin.com", "media.licdn.com"
-            ], ipRanges: []),
-            
-            // Work & Communication
-            ServiceEntry(id: "slack", name: "Slack", enabled: false, domains: [
-                "slack.com", "www.slack.com", "app.slack.com", "files.slack.com", "a.slack-edge.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "discord", name: "Discord", enabled: false, domains: [
-                // Main domains
-                "discord.com", "discord.gg", "discordapp.com", "discord.media", "cdn.discordapp.com",
-                // Voice/WebRTC specific
-                "discordapp.net", "gateway.discord.gg", "router.discordapp.net",
-                "media.discordapp.net", "images-ext-1.discordapp.net", "images-ext-2.discordapp.net"
-            ], ipRanges: []),
-            ServiceEntry(id: "zoom", name: "Zoom", enabled: false, domains: [
-                "zoom.us", "www.zoom.us", "us02web.zoom.us", "us04web.zoom.us", "us05web.zoom.us"
-            ], ipRanges: []),
-            ServiceEntry(id: "teams", name: "Microsoft Teams", enabled: false, domains: [
-                "teams.microsoft.com", "teams.live.com", "statics.teams.cdn.office.net"
-            ], ipRanges: []),
-            ServiceEntry(id: "googlemeet", name: "Google Meet", enabled: false, domains: [
-                "meet.google.com"
-            ], ipRanges: []),
-            
-            // Cloud & Storage
-            ServiceEntry(id: "dropbox", name: "Dropbox", enabled: false, domains: [
-                "dropbox.com", "www.dropbox.com", "dl.dropboxusercontent.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "gdrive", name: "Google Drive", enabled: false, domains: [
-                "drive.google.com", "docs.google.com", "sheets.google.com", "slides.google.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "icloud", name: "iCloud", enabled: false, domains: [
-                "icloud.com", "www.icloud.com", "apple-cloudkit.com"
-            ], ipRanges: []),
-            
-            // Gaming
-            ServiceEntry(id: "steam", name: "Steam", enabled: false, domains: [
-                "steampowered.com", "store.steampowered.com", "steamcommunity.com", "steamcdn-a.akamaihd.net"
-            ], ipRanges: []),
-            ServiceEntry(id: "epicgames", name: "Epic Games", enabled: false, domains: [
-                "epicgames.com", "www.epicgames.com", "launcher-public-service-prod.ol.epicgames.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "playstation", name: "PlayStation Network", enabled: false, domains: [
-                "playstation.com", "www.playstation.com", "store.playstation.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "xbox", name: "Xbox Live", enabled: false, domains: [
-                "xbox.com", "www.xbox.com", "xboxlive.com"
-            ], ipRanges: []),
-            
-            // Developer & Utilities
-            ServiceEntry(id: "github", name: "GitHub", enabled: false, domains: [
-                "github.com", "www.github.com", "api.github.com", "raw.githubusercontent.com", "gist.github.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "gitlab", name: "GitLab", enabled: false, domains: [
-                "gitlab.com", "www.gitlab.com", "registry.gitlab.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "stackoverflow", name: "Stack Overflow", enabled: false, domains: [
-                "stackoverflow.com", "www.stackoverflow.com", "stackexchange.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "tailscale", name: "Tailscale", enabled: false, domains: [
-                "login.tailscale.com", "controlplane.tailscale.com", "tailscale.com", "pkgs.tailscale.com"
-            ], ipRanges: []),
-            
-            // AI Services
-            ServiceEntry(id: "openai", name: "OpenAI / ChatGPT", enabled: false, domains: [
-                // Core domains
-                "openai.com", "www.openai.com", "chatgpt.com", "www.chatgpt.com", "chat.com", "sora.com", "crixet.com",
-                // OpenAI subdomains
-                "chat.openai.com", "api.openai.com", "platform.openai.com", "platform.api.openai.com",
-                "beta.api.openai.com", "auth.openai.com", "external.auth.openai.com", "auth0.openai.com", "cdn.openai.com",
-                "help.openai.com", "blog.openai.com", "community.openai.com", "labs.openai.com",
-                "arena.openai.com", "beta.openai.com", "sentinel.openai.com", "ab.chatgpt.com", "ws.chatgpt.com", "pay.openai.com",
-                // Static assets and user content CDN
-                "oaistatic.com", "cdn.oaistatic.com", "auth-cdn.oaistatic.com",
-                "oaiusercontent.com", "files.oaiusercontent.com",
-                "openaicom.imgix.net",
-                // Azure CDN infrastructure
-                "openaiapi-site.azureedge.net", "production-openaicom-storage.azureedge.net",
-                "openaicomproductionae4b.blob.core.windows.net",
-                "openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net",
-                // Cloudflare infrastructure
-                "chat.openai.com.cdn.cloudflare.net", "openai.com.cdn.cloudflare.net",
-                // Voice features (LiveKit)
-                "chatgpt.livekit.cloud", "host.livekit.cloud", "turn.livekit.cloud",
-                // Anti-bot (required for login)
-                "openai-api.arkoselabs.com",
-                // Analytics
-                "o33249.ingest.sentry.io"
-            ], ipRanges: []),
-            ServiceEntry(id: "anthropic", name: "Anthropic / Claude", enabled: false, domains: [
-                "anthropic.com", "www.anthropic.com", "claude.ai", "api.anthropic.com"
-            ], ipRanges: []),
-            ServiceEntry(id: "perplexity", name: "Perplexity", enabled: false, domains: [
-                "perplexity.ai", "www.perplexity.ai"
-            ], ipRanges: [])
-        ]
+        ServiceCatalogue.shipped.map(\.service)
     }
 
     /// A fresh 256-bit local-hop secret as lowercase hex. Hex, not base64: the secret is
@@ -541,6 +478,9 @@ struct DomainEntry: Codable, Identifiable, Equatable {
     var lastResolved: Date?
     var isCIDR: Bool
     var isWildcard: Bool
+    /// The refreshes in a row that found no address for the name while the VPN was up, and
+    /// the day the first of them ran; nil while it resolves (see StaleEntries).
+    var resolveFailures: ResolveFailures?
 
     init(domain: String, enabled: Bool = true, isCIDR: Bool = false, isWildcard: Bool = false) {
         self.id = UUID()
@@ -561,6 +501,7 @@ struct DomainEntry: Codable, Identifiable, Equatable {
         isCIDR = try container.decodeIfPresent(Bool.self, forKey: .isCIDR) ?? false
         isWildcard = try container.decodeIfPresent(Bool.self, forKey: .isWildcard) ?? false
             || WildcardDomain.isWildcard(domain)
+        resolveFailures = try container.decodeIfPresent(ResolveFailures.self, forKey: .resolveFailures)
     }
 }
 

@@ -24,7 +24,9 @@ struct MenuBarLabel: View {
     private var currentIcon: NSImage? {
         if helperManager.helperState.isFailed {
             return Self.iconError
-        } else if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty {
+        } else if routeManager.isVPNConnected && !routeManager.activeRoutes.isEmpty
+                    && routeManager.vpnKillSwitch == nil {
+            // No arrow under a kill switch: the routes are in, but none of them takes effect.
             return Self.iconActive
         }
         return Self.iconDefault
@@ -41,8 +43,15 @@ struct MenuBarLabel: View {
         if helperManager.helperState.isFailed {
             return String(localized: "VPN Bypass: helper error, nothing is being routed")
         }
+        // Only once every route is out, as the dropdown says Paused only then.
+        if routeManager.isPaused && routeManager.activeRoutes.isEmpty && routeManager.isVPNConnected {
+            return String(localized: "VPN Bypass: paused, traffic follows the VPN's own routes")
+        }
         guard routeManager.isVPNConnected else {
             return String(localized: "VPN Bypass: no VPN detected, nothing is being routed")
+        }
+        if let killSwitch = routeManager.vpnKillSwitch {
+            return Self.killSwitchAccessibilityLabel(killSwitch)
         }
         let count = routeManager.routedAddressCount
         guard !routeManager.activeRoutes.isEmpty else {
@@ -58,9 +67,25 @@ struct MenuBarLabel: View {
         }
     }
 
+    /// The label while a kill switch is on. Only `includeAllNetworks` takes everything, and
+    /// `excludeLocalNetworks` lets local-network addresses out of that; `enforceRoutes` takes
+    /// only what the VPN's own routes cover, so it never claims that nothing skips the VPN.
+    static func killSwitchAccessibilityLabel(_ killSwitch: VPNKillSwitch) -> String {
+        guard killSwitch.includeAllNetworks else {
+            return String(localized: "VPN Bypass: the VPN's own routes win over this app's, so routes set here have no effect")
+        }
+        return killSwitch.excludeLocalNetworks
+            ? String(localized: "VPN Bypass: the VPN's kill switch sends all traffic through it except local-network addresses")
+            : String(localized: "VPN Bypass: the VPN's kill switch sends all traffic through it, so nothing skips it")
+    }
+
     private var menuBarIcon: some View {
         Group {
-            if let nsImage = currentIcon ?? Self.iconDefault {
+            if routeManager.isPaused && routeManager.activeRoutes.isEmpty && !helperManager.helperState.isFailed {
+                // The paused glyph of the status chip (StatusChip.Kind.paused), as a template.
+                Image(systemName: "pause.circle")
+                    .font(.system(size: 15))
+            } else if let nsImage = currentIcon ?? Self.iconDefault {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -170,12 +195,15 @@ struct BrandedAppName: View {
             //
             // The gap is required: set solid, "VPN"+"Bypass" reads as one word, "VPNBypass".
             // The banner has always had this gap; the SwiftUI lockup was missing it.
-            Text("VPN")
+            //
+            // Verbatim: the product name is never translated. "Bypass" is also the mode's name,
+            // which French translates, so a looked-up Text read "VPN Contournement".
+            Text(verbatim: "VPN")
                 .font(.system(size: fontSize, weight: .heavy, design: .rounded))
-                .foregroundColor(Theme.textPrimary)
+                .foregroundColor(Theme.text)
                 .padding(.trailing, fontSize * 0.16)
 
-            Text("Bypass")
+            Text(verbatim: "Bypass")
                 .font(.system(size: fontSize, weight: .light, design: .rounded))
                 .foregroundColor(Theme.Brand.sky)
         }
@@ -184,58 +212,89 @@ struct BrandedAppName: View {
 
 // MARK: - Quick add
 
-/// The dropdown's quick-add field, with why the last add saved nothing under it.
+/// The dropdown's add field, open in every state (flow fix 4): ⌘N puts the cursor in it,
+/// Return adds, Esc clears it and gives the focus back. Under it, what the last add did: where
+/// it went, or why it saved nothing.
 struct QuickAddField: View {
     @Binding var text: String
-    let error: AddDomainFeedback?
+    /// What the field adds in this mode: "Add a site to bypass…".
+    let placeholder: String
+    /// An apply is running: as on the Domains page, an add now would save the entry without
+    /// routing it, so the field waits.
+    var isApplying = false
+    let feedback: AddDomainFeedback?
     let onAdd: () -> Void
     let onCancel: () -> Void
 
-    private let accentGradient = LinearGradient(
-        colors: [Theme.success, Theme.successDark],
-        startPoint: .leading,
-        endPoint: .trailing
-    )
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                TextField("domain.com", text: $text)
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(Theme.textSecondary)
+                    .accessibilityHidden(true)
+                TextField(placeholder, text: $text)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Color.secondary.opacity(0.12))
-                    .cornerRadius(6)
-                    .onSubmit {
-                        onAdd()
+                    .font(Theme.Font.body)
+                    .focused($isFocused)
+                    .onSubmit(onAdd)
+                    .disabled(isApplying)
+                    .accessibilityLabel(placeholder)
+                    .help(DropdownShortcut.addSite.help(placeholder))
+                if text.isEmpty {
+                    Text(verbatim: DropdownShortcut.addSite.symbol)
+                        .font(Theme.Font.detail)
+                        .foregroundColor(Theme.textSecondary)
+                        .padding(.horizontal, 4)
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.border, lineWidth: 0.5))
+                        .accessibilityHidden(true)
+                } else {
+                    Button(action: onAdd) {
+                        Image(systemName: "return")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Theme.accentText)
+                            .frame(width: 22, height: 18)
+                            .contentShape(Rectangle())
                     }
-
-                Button {
-                    onAdd()
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(accentGradient)
+                    .buttonStyle(.plain)
+                    .disabled(isApplying)
+                    .help(String(localized: "Add"))
+                    .accessibilityLabel(String(localized: "Add"))
                 }
-                .buttonStyle(.plain)
-                .disabled(text.isEmpty)
-                .accessibilityLabel(String(localized: "Add"))
-
-                Button {
-                    onCancel()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(String(localized: "Cancel"))
             }
-            if let error {
-                AddDomainFeedbackLine(feedback: error)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(Theme.bgInput))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.control)
+                    .strokeBorder(isFocused ? Theme.accentText : Theme.border, lineWidth: isFocused ? 1 : 0.5)
+            )
+            .background { keys }
+            if let feedback {
+                AddDomainFeedbackLine(feedback: feedback)
             }
         }
+    }
+
+    /// ⌘N, always; Esc only while the field is in use, so an Esc otherwise still closes the
+    /// dropdown as it always has.
+    @ViewBuilder private var keys: some View {
+        ZStack {
+            Button("") { isFocused = true }
+                .keyboardShortcut(.addSite)
+            if isFocused || !text.isEmpty || feedback != nil {
+                Button("") {
+                    onCancel()
+                    isFocused = false
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 }
 
@@ -247,35 +306,49 @@ struct MenuContent: View {
     @EnvironmentObject var launchAtLoginManager: LaunchAtLoginManager
     @ObservedObject private var helperManager = HelperManager.shared
     @State private var newDomain = ""
-    @State private var isAddingDomain = false
-    /// Why the last quick-add saved nothing, shown under the field, which stays open.
-    @State private var quickAddError: AddDomainFeedback?
+    /// What the last add did, under the field: where the entry went, or why nothing was saved.
+    @State private var quickAddFeedback: AddDomainFeedback?
     /// Remove All Routes… asks first: it sends the listed traffic back through the VPN.
     @State private var confirmingRemoveAll = false
+    /// The front browser tab's site, read on every open.
+    @ObservedObject private var frontTab = FrontTabWatcher.shared
 
-    private let accentGradient = LinearGradient(
-        colors: [Theme.success, Theme.successDark],
-        startPoint: .leading,
-        endPoint: .trailing
-    )
-    
     var body: some View {
         VStack(spacing: 0) {
-            // Ticks once a second so the WAITING countdown and the ages stay true while open.
+            // Ticks once a second so the countdowns and the ages stay true while open.
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let status = DropdownStatus.make(statusInput, now: context.date)
-                VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 12) {
                     titleHeader(status)
-                    helperDownBanner
-                    StatusHeader(status: status, iconName: statusIconName)
+                    StatusBlock(status: status, profile: NetworkProfiles.inUseName(routeManager.config)) { action in
+                        // Both open Status: the helper's row and its Install button, or
+                        // Problems with every failure behind the count.
+                        switch action {
+                        case .fix, .show: openSettings(page: .status)
+                        case .resume: resume()
+                        case .retryPause: Task { await routeManager.retryPauseRemoval() }
+                        }
+                    }
                 }
             }
 
             if showsFirstRun {
                 // A fresh install: ask what should skip the VPN, in place of the mode control
-                // and the route actions, which have nothing to act on yet.
+                // and the route list, which have nothing to show yet.
                 FirstRunSetupView(
-                    onOpenServices: { openSettings(page: .services) },
+                    onOpenServices: {
+                        // A fresh install has no service on, so the page opens on its catalogue,
+                        // on every country even when the country row was used before.
+                        SettingsPageRequest.shared.catalogueRegion = nil
+                        SettingsPageRequest.shared.openCatalogue = true
+                        openSettings(page: .services)
+                    },
+                    onOpenRegion: { region in
+                        // The same page and sheet, on the country's services.
+                        SettingsPageRequest.shared.catalogueRegion = region
+                        SettingsPageRequest.shared.openCatalogue = true
+                        openSettings(page: .services)
+                    },
                     onUseVPNOnly: {
                         // Through the run loop, for the reason given in DropdownModeRow.
                         RunLoop.main.perform(inModes: [.common]) {
@@ -285,31 +358,73 @@ struct MenuContent: View {
                     .padding(.top, 16)
             } else {
                 DropdownModeRow()
+                    .padding(.top, 12)
 
                 Divider()
                     .padding(.vertical, 8)
 
-                // Main content
-                if routeManager.isLoading && routeManager.lastUpdate == nil {
-                    loadingContent
-                } else if routeManager.isVPNConnected {
-                    connectedContent
-                } else {
-                    disconnectedContent
+                // Open in every state, the first detection and no VPN included: an add is
+                // saved either way, and applied when routes can be.
+                QuickAddField(text: $newDomain, placeholder: DropdownCopy.quickAddPlaceholder(statusInput.mode),
+                              isApplying: routeManager.isApplyingRoutes,
+                              feedback: quickAddFeedback, onAdd: addDomain, onCancel: clearQuickAdd)
+                    .onChange(of: newDomain) { text in
+                        if text != quickAddFeedback?.fieldText { quickAddFeedback = nil }
+                    }
+
+                // The site open in the browser the user just left (idea 3), one click to add.
+                if let suggestion = frontTab.suggestion {
+                    let mode = LookupMode(routeManager)
+                    FrontTabRow(suggestion: suggestion, mode: mode,
+                                listing: suggestion.host.flatMap { routeManager.lookupListing($0) },
+                                isApplying: routeManager.isApplyingRoutes,
+                                onAdd: addFrontTabSite,
+                                onAllow: { frontTab.askAndRead($0) })
+                        .padding(.top, 8)
+                }
+
+                // Main content. Nothing while the first detection runs: the block says Starting.
+                if !isStarting {
+                    Group {
+                        if routeManager.isVPNConnected {
+                            connectedContent
+                        } else {
+                            disconnectedContent
+                        }
+                    }
+                    .padding(.top, 12)
                 }
             }
 
             Divider()
                 .padding(.vertical, 8)
-            
-            // Footer actions
+
             footerActions
         }
         .padding(16)
-        .frame(width: 340)
+        .frame(width: DropdownLayout.current)
+        // Here, on the view that holds every state: Remove All Routes… is offered connected
+        // and disconnected alike, from the ⋯ menu in the footer.
+        .alert(removeAllCopy.title, isPresented: $confirmingRemoveAll) {
+            Button(String(localized: "Remove Routes"), role: .destructive) {
+                Task { await routeManager.removeAllRoutes() }
+            }
+            Button(String(localized: "Cancel"), role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+        } message: {
+            Text(removeAllCopy.message)
+        }
         // Refresh the VPN status on every open. Not `.onAppear`: a MenuBarExtra(.window) keeps
         // one window and one view for the app's life, so `.onAppear` runs on the first open only.
-        .background(WindowBecameKeyObserver { routeManager.refreshStatus() })
+        .background(WindowBecameKeyObserver {
+            routeManager.refreshStatus()
+            frontTab.refresh()
+        })
+    }
+
+    /// The app's first detection is still running.
+    private var isStarting: Bool {
+        routeManager.isLoading && routeManager.lastUpdate == nil
     }
 
     /// Nothing configured yet (`FirstRunSetup.isFresh`), read now.
@@ -324,124 +439,53 @@ struct MenuContent: View {
     /// nothing is configured, read live. A MenuBarExtra(.window) runs `.onAppear` on its first
     /// open only and never runs `.onDisappear`, so a value latched on open would never reset.
     private var showsFirstRun: Bool {
-        guard !(routeManager.isLoading && routeManager.lastUpdate == nil) else { return false }
+        guard !isStarting else { return false }
         return isFresh
     }
 
     // MARK: - Title Header
-    
+
+    /// The wordmark, and the status chip: the block's only coloured signal.
     private func titleHeader(_ status: DropdownStatus) -> some View {
         HStack(spacing: 8) {
-            // App name with branded colors
             BrandedAppName(fontSize: 15)
-
             Spacer()
-
-            StatusPill(status: status)
+            StatusChip(state: status.chip)
         }
-        .padding(.bottom, 12)
     }
 
-    /// Everything the status header reads, gathered in one place so the wording lives in the
+    /// Everything the status block reads, gathered in one place so the wording lives in the
     /// pure `DropdownStatus.make`.
     private var statusInput: DropdownStatus.Input {
         DropdownStatus.Input.current(routeManager, helperReady: helperManager.helperState.isReady)
     }
 
-    private var statusIconName: String {
-        routeManager.isVPNConnected ? (routeManager.vpnType?.icon ?? "checkmark.shield.fill") : "shield.slash.fill"
-    }
-
-    /// Shown at the top of the dropdown whenever the helper cannot enforce anything while a
-    /// VPN is connected — the state that used to be one log line nobody saw.
-    @ViewBuilder
-    private var helperDownBanner: some View {
-        if routeManager.isVPNConnected && !helperManager.helperState.isReady {
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(Theme.warning)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(localized: "Helper not running — nothing is being routed"))
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(helperManager.helperState.statusText)
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-                        .lineLimit(2)
-                }
-                Spacer()
-                Button(String(localized: "Fix…")) {
-                    // The Status page holds the helper's row and its Install button.
-                    openSettings(page: .status)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.warning.opacity(0.12)))
-            .padding(.bottom, 8)
-        }
-    }
-    
     // MARK: - Connected Content
-    
+
     private var connectedContent: some View {
         VStack(spacing: 12) {
-            // Quick add domain
-            if isAddingDomain {
-                QuickAddField(text: $newDomain, error: quickAddError, onAdd: addDomainAndClose, onCancel: closeQuickAdd)
-                    .onChange(of: newDomain) { text in
-                        if text != quickAddError?.fieldText { quickAddError = nil }
-                    }
-            } else {
-                Button {
-                    withAnimation(.spring(response: 0.3)) {
-                        isAddingDomain = true
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: "plus.circle")
-                            .font(.system(size: 12))
-                        Text(routeManager.config.routingMode == .vpnOnly ? String(localized: "Add Domain to VPN") : String(localized: "Add Domain to Bypass"))
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.secondary.opacity(0.12))
-                    .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-            }
-            
+            BlockedSitesLine()
+
             // Routes in use (custom mode)
             if routeManager.config.routingMode == .custom {
                 routesInUseSummary
             }
 
-            // What is routed, one row per entry the user added
+            // What is routed, one row per entry the user added. The last route check is not
+            // here: "Show" opens it on the Status page, with every failure behind the count.
+            // Paused, an entry with no addresses is what was asked for: no ▲, no Retry.
             if let routed = RoutedBySource.make(
                 mode: statusInput.mode, config: routeManager.config,
                 routes: routeManager.installedRoutes,
-                busy: RoutedBySource.mayStillAddRoutes(running: isBusy, pending: routeManager.pendingReconnectApply)) {
-                RoutedBySourceCard(summary: routed)
+                busy: RoutedBySource.emptyEntriesAreExpected(
+                    running: isBusy, pending: routeManager.pendingReconnectApply,
+                    lastChange: routeManager.lastRouteChange,
+                    currentRouteCount: routeManager.routedAddressCount,
+                    helperReady: helperManager.helperState.isReady),
+                paused: routeManager.isPaused,
+                title: routeManager.isPaused ? RoutedBySource.pausedTitle(statusInput.mode) : nil) {
+                routedList(routed)
             }
-            
-            // The last Verify Routes: what it checked, failures first
-            if let run = routeManager.lastRouteCheck {
-                RouteCheckCard(run: run,
-                               logsHoldResults: run.logsHoldResults(oldestLogAt: routeManager.recentLogs.last?.timestamp),
-                               onShowLogs: { openSettings(page: .logs) })
-            }
-            
-            actionButtons
-        }
-        .alert(removeAllCopy.title, isPresented: $confirmingRemoveAll) {
-            Button(String(localized: "Remove Routes"), role: .destructive) {
-                Task { await routeManager.removeAllRoutes() }
-            }
-            Button(String(localized: "Cancel"), role: .cancel) {}
-                .keyboardShortcut(.defaultAction)
-        } message: {
-            Text(removeAllCopy.message)
         }
     }
 
@@ -453,118 +497,36 @@ struct MenuContent: View {
         routeManager.isLoading || routeManager.isApplyingRoutes
     }
 
-    /// One primary action. Verify sits next to it as an icon; everything else, and the one
-    /// action that removes every route, lives behind the "…" menu.
-    private var actionButtons: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Button {
-                    refresh()
-                } label: {
-                    HStack(spacing: 6) {
-                        if isBusy {
-                            ProgressView()
-                                .controlSize(.small)
-                                .scaleEffect(0.7)
-                                .frame(width: 12, height: 12)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 11))
-                        }
-                        Text(isBusy ? String(localized: "Refreshing routes…") : String(localized: "Refresh Routes"))
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(accentGradient)
-                    .foregroundColor(.white)
-                    .cornerRadius(6)
-                    .opacity(isBusy ? 0.85 : 1)
-                }
-                .buttonStyle(.plain)
-                .disabled(isBusy)
-                .keyboardShortcut(.refreshRoutes)
-                .help(DropdownShortcut.refreshRoutes.help(String(localized: "Refresh Routes")))
-
-                Button {
-                    verify()
-                } label: {
-                    Group {
-                        if routeManager.isCheckingRoutes {
-                            ProgressView()
-                                .controlSize(.small)
-                                .scaleEffect(0.7)
-                        } else {
-                            Image(systemName: "checkmark.circle")
-                                .font(.system(size: 13))
-                        }
-                    }
-                    .frame(width: 34, height: 30)
-                    .background(Color.secondary.opacity(0.12))
-                    .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-                .disabled(routeManager.isCheckingRoutes || routeManager.activeRoutes.isEmpty)
-                .help(String(localized: "Verify Routes"))
-                .accessibilityLabel(String(localized: "Verify Routes"))
-
-                // The shortcuts here only answer while the menu is open; the buttons that do
-                // the same thing (Refresh Routes, the gear, the power button) carry them too.
-                Menu {
-                    Button(DropdownShortcut.refreshRoutes.title) { refresh() }
-                        .keyboardShortcut(.refreshRoutes)
-                        .disabled(isBusy)
-                    Button(String(localized: "Verify Routes")) { verify() }
-                        .disabled(routeManager.isCheckingRoutes || routeManager.activeRoutes.isEmpty)
-                    Button(String(localized: "Re-resolve DNS Now")) { routeManager.forceDNSRefresh() }
-                        .disabled(isBusy)
-                    Button(String(localized: "Open Logs")) { openSettings(page: .logs) }
-                    Divider()
-                    Button(DropdownShortcut.settings.title) { openSettings() }
-                        .keyboardShortcut(.settings)
-                    Button(DropdownShortcut.quit.title) { quit() }
-                        .keyboardShortcut(.quit)
-                    Divider()
-                    Button(String(localized: "Remove All Routes…")) { confirmingRemoveAll = true }
-                        .disabled(routeManager.activeRoutes.isEmpty)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .frame(width: 34, height: 30)
-                .background(Color.secondary.opacity(0.12))
-                .cornerRadius(6)
-                .help(String(localized: "More actions"))
-                .accessibilityLabel(String(localized: "More actions"))
+    /// The "…" menu: what the footer does not show, and the one action that removes every
+    /// route. It does not repeat the footer's Refresh or Settings. With no VPN connected it
+    /// keeps what still makes sense, Remove All Routes… among it: routes kept for a reconnect,
+    /// or left by a removal that failed, must stay removable (A7).
+    private var moreActionsMenu: some View {
+        Menu {
+            if routeManager.isVPNConnected {
+                Button(String(localized: "Verify Routes")) { verify() }
+                    .disabled(routeManager.isCheckingRoutes || routeManager.activeRoutes.isEmpty)
+                Button(String(localized: "Re-resolve DNS Now")) { routeManager.forceDNSRefresh() }
+                    .disabled(isBusy || routeManager.isPaused)
             }
-
-            routeChangeLine
+            Button(String(localized: "Open Logs")) { openSettings(page: .logs) }
+            Divider()
+            Button(DropdownShortcut.quit.title) { quit() }
+                .keyboardShortcut(.quit)
+            Divider()
+            Button(String(localized: "Remove All Routes…")) { confirmingRemoveAll = true }
+                .disabled(routeManager.activeRoutes.isEmpty)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
         }
-    }
-
-    /// The result of the last apply (or Remove All), under the buttons. Ticks once a second so
-    /// the age stays true while the dropdown is open.
-    @ViewBuilder
-    private var routeChangeLine: some View {
-        if let outcome = DropdownCopy.shownRouteChange(routeManager.lastRouteChange,
-                                                       currentRouteCount: routeManager.routedAddressCount) {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                let line = DropdownCopy.routeChangeLine(outcome, now: context.date)
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: line.isProblem ? "exclamationmark.triangle.fill" : "checkmark")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(line.isProblem ? Theme.warning : Theme.success)
-                    Text(line.text)
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                }
-            }
-            .help(DropdownCopy.routeChangeHelp)
-        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: DropdownIconButton.hitSize, height: DropdownIconButton.hitSize)
+        .contentShape(Rectangle())
+        .help(String(localized: "More actions"))
+        .accessibilityLabel(String(localized: "More actions"))
     }
 
     private var removeAllCopy: (title: String, message: String) {
@@ -585,9 +547,9 @@ struct MenuContent: View {
         NSApplication.shared.terminate(nil)
     }
 
-    /// Refresh Routes, from its button, its menu item or ⌘R. A held ⌘R sends key repeats and
-    /// SwiftUI runs the action for each one; the button turns active again between refreshes,
-    /// so without this a held key would start one refresh after another.
+    /// Refresh, from its button or ⌘R. A held ⌘R sends key repeats and SwiftUI runs the
+    /// action for each one; the button turns active again between refreshes, so without this
+    /// a held key would start one refresh after another.
     private func refresh() {
         guard !DropdownShortcut.isKeyRepeat(NSApp.currentEvent) else { return }
         routeManager.refreshRoutes()
@@ -598,75 +560,25 @@ struct MenuContent: View {
         Task { await routeManager.verifyRoutes() }
     }
 
-    // MARK: - Loading Content
-    
-    private var loadingContent: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .scaleEffect(1.2)
-                .progressViewStyle(CircularProgressViewStyle())
-            
-            VStack(spacing: 4) {
-                Text("Setting Up...")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                
-                Text("Detecting VPN and applying routes")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
-    }
-    
     // MARK: - Disconnected Content
-    
+
+    /// No VPN: the status block says so and what connecting does. Below it, the routes still
+    /// installed: kept for the reconnect in Bypass, or left by a removal that failed. They stay
+    /// listed, and removable from the ⋯ menu (A7).
+    @ViewBuilder
     private var disconnectedContent: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "wifi.slash")
-                .font(.system(size: 36))
-                .foregroundStyle(.secondary)
-            
-            VStack(spacing: 4) {
-                Text("No VPN Connection")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                
-                Text("Connect to a VPN to start bypassing\ntraffic for configured services.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            
-            // Show enabled counts (mode-aware)
-            if routeManager.config.routingMode == .vpnOnly {
-                let enabledDomains = routeManager.config.inverseDomains.filter { $0.enabled }
-                HStack(spacing: 16) {
-                    StatBadge(value: "\(enabledDomains.count)", label: "VPN Entries")
-                }
-            } else {
-                let enabledServices = routeManager.config.services.filter { $0.enabled }
-                let enabledDomains = routeManager.config.domains.filter { $0.enabled }
-                HStack(spacing: 16) {
-                    StatBadge(value: "\(enabledServices.count)", label: "Services")
-                    StatBadge(value: "\(enabledDomains.count)", label: "Domains")
-                }
-            }
-            
-            // Network info
-            if let ssid = routeManager.currentNetworkSSID {
-                HStack(spacing: 6) {
-                    Image(systemName: "wifi")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                    Text(ssid)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
+        let mode = statusInput.mode
+        VStack(spacing: 12) {
+            BlockedSitesLine()
+            if let routed = RoutedBySource.make(mode: mode, config: routeManager.config,
+                                                routes: routeManager.installedRoutes,
+                                                busy: false, routedOnly: true,
+                                                title: RoutedBySource.disconnectedTitle(mode, lastChange: routeManager.lastRouteChange)) {
+                routedList(routed)
             }
         }
-        .padding(.vertical, 8)
     }
-    
+
     // MARK: - Routes In Use Summary (Custom mode)
 
     /// Custom mode: enabled routes that at least one enabled rule actually points at. On screen
@@ -689,9 +601,10 @@ struct MenuContent: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
+                // A count, not live state: green is only for what is routed right now.
                 Text("\(routesWithRules.count)")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(Theme.success)
+                    .foregroundColor(Theme.textSecondary)
             }
 
             if routesWithRules.isEmpty {
@@ -701,9 +614,13 @@ struct MenuContent: View {
             } else {
                 ForEach(visibleRoutes) { route in
                     HStack(spacing: 6) {
-                        Circle()
-                            .fill(route.accentColor)
-                            .frame(width: 4, height: 4)
+                        // The egress is a glyph, grey, as on the Rules and Routes pages: colour
+                        // is for state only (rework section 2).
+                        Image(systemName: RouteChip.systemImage(for: route.egress))
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(Theme.textSecondary)
+                            .frame(width: 10)
+                            .accessibilityHidden(true)
                         Text(route.friendlyName(vpnName: routeManager.vpnType?.knownName))
                             .font(.system(size: 10))
                             .foregroundStyle(.primary)
@@ -725,67 +642,238 @@ struct MenuContent: View {
 
     // MARK: - Footer
 
+    /// Refresh as a plain bordered button, then Settings and ⋯. Quit, Verify, Re-resolve DNS
+    /// and Remove All Routes… are in ⋯. What a script or an agent changed through the control
+    /// socket shows above it (proposal 15 of #119).
     private var footerActions: some View {
-        HStack(spacing: 8) {
-            // No "Updated … ago" here: it did not say what was updated, and Clear stamped it
-            // too, so it read fresh right after every route was removed. The result line under
-            // Refresh Routes says what the last apply did. What a script or an agent changed
-            // through the control socket shows here instead (proposal 15 of #119).
+        VStack(alignment: .leading, spacing: 8) {
             if let change = routeManager.lastOutsideChange,
                change.isShown(currentRouteCount: routeManager.routedAddressCount,
                               everythingElseDirect: routeManager.everythingElseDirect) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     OutsideChangeLine(change: change, now: context.date) {
-                        SettingsPageRequest.shared.logFilter = LogFilter(onlyControlSocket: true)
+                        SettingsPageRequest.shared.logFilter = change.logFilter
                         openSettings(page: .logs)
                     }
                 }
             }
 
-            Spacer(minLength: 0)
-            
-            DropdownIconButton(systemImage: "gearshape.fill", name: String(localized: "Settings"),
-                               shortcut: .settings) { openSettings() }
+            HStack(spacing: 8) {
+                Button {
+                    refresh()
+                } label: {
+                    HStack(spacing: 5) {
+                        if isBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.6)
+                                .frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11))
+                        }
+                        Text(String(localized: "Refresh"))
+                    }
+                }
+                .buttonStyle(.bordered)
+                // Paused, nothing applies: Resume, on line 3, is the way back.
+                .disabled(isBusy || !routeManager.isVPNConnected || !helperManager.helperState.isReady
+                          || routeManager.isPaused)
+                .keyboardShortcut(.refreshRoutes)
+                .help(DropdownShortcut.refreshRoutes.help(String(localized: "Refresh Routes")))
+                .accessibilityLabel(isBusy ? String(localized: "Refreshing routes…") : String(localized: "Refresh Routes"))
 
-            DropdownIconButton(systemImage: "power", name: String(localized: "Quit VPN Bypass"),
-                               shortcut: .quit) { quit() }
+                // While paused, Resume is on line 3 of the status block instead.
+                if !routeManager.isPaused {
+                    pauseMenu
+                }
+
+                Spacer(minLength: 0)
+
+                DropdownIconButton(systemImage: "gearshape", name: String(localized: "Settings"),
+                                   shortcut: .settings) { openSettings() }
+
+                moreActionsMenu
+            }
+        }
+        // ⌘Q while the dropdown is open: the ⋯ menu's Quit item answers only while it is open.
+        // ⌘P likewise, since the Pause menu answers its items' keys only while open.
+        .background {
+            ZStack {
+                Button("") { quit() }
+                    .keyboardShortcut(.quit)
+                Button("") { pauseShortcut() }
+                    .keyboardShortcut(.pause)
+            }
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
         }
     }
-    
-    
+
+    /// Pause, with its four lengths. Greyed when pausing is not safe in this config, with the
+    /// one line that says why as the menu's first item, its tooltip and its VoiceOver hint.
+    private var pauseMenu: some View {
+        let blocker = pauseBlocker
+        let why = blocker.map { PauseGate.message($0) }
+        return Menu {
+            if let why {
+                Text(why)
+                Divider()
+            }
+            ForEach(PauseLength.choices, id: \.self) { length in
+                if length == .oneHour {
+                    Button(length.title()) { pause(length) }
+                        .keyboardShortcut(.pause)
+                        .disabled(blocker != nil)
+                } else {
+                    Button(length.title()) { pause(length) }
+                        .disabled(blocker != nil)
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "pause")
+                    .font(.system(size: 11))
+                Text(String(localized: "Pause"))
+            }
+        }
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        // Greyed, yet it still opens: its first line says why it cannot pause, and the four
+        // lengths are disabled. A disabled control would hide that line.
+        .opacity(blocker == nil ? 1 : 0.45)
+        .help(why ?? DropdownShortcut.pause.help(String(localized: "Pause")))
+        .accessibilityLabel(String(localized: "Pause"))
+        .accessibilityHint(why ?? String(localized: "Takes the app's routes out for a while, so traffic follows the VPN's own routes."))
+    }
+
+    /// Why Pause is greyed now, as RouteManager.pause would refuse it.
+    private var pauseBlocker: PauseGate.Blocker? {
+        PauseGate.blocker(routeManager.config, isPaused: routeManager.isPaused,
+                          vpnConnected: routeManager.vpnMayBeConnected, routedCount: routeManager.activeRoutes.count)
+    }
+
+    private func pause(_ length: PauseLength) {
+        Task { await routeManager.pause(for: length) }
+    }
+
+    private func resume() {
+        routeManager.resume()
+    }
+
+    /// ⌘P: Resume while paused, else pause for an hour when Pause is allowed.
+    private func pauseShortcut() {
+        guard !DropdownShortcut.isKeyRepeat(NSApp.currentEvent) else { return }
+        switch PauseShortcut.action(isPaused: routeManager.isPaused,
+                                    blocker: pauseBlocker) {
+        case .resume: resume()
+        case .pause(let length): pause(length)
+        case .nothing: break
+        }
+    }
+
+
     // MARK: - Helpers
     
-    private func addDomainAndClose() {
-        guard !newDomain.isEmpty else { return }
+    private func addDomain() {
+        guard !newDomain.isEmpty, !routeManager.isApplyingRoutes else { return }
         let result = routeManager.addForCurrentMode(newDomain)
         let next = Self.quickAdd(after: result, typed: newDomain)
         newDomain = next.text
-        quickAddError = next.error
-        isAddingDomain = next.isOpen
+        quickAddFeedback = next.feedback
     }
 
-    /// The quick-add after an add. A refused one stays open with the text and says why,
-    /// as the Domains tab does, because closing would look like it worked. A saved one
-    /// closes. nil is Custom mode's rule add when it saved, which says nothing back, or found
-    /// no Direct route, which it logs.
+    /// The field after an add; it stays open either way. A refused add keeps the text and
+    /// says why, as the Domains tab does. A saved one empties the field and says where the
+    /// entry went: the list, or for Custom mode's rule its place, since it goes last and an
+    /// earlier rule may match first (A5). nil is Custom mode's add when it found no Direct
+    /// route, which it logs.
     static func quickAdd(after result: Result<AddedDomain, AddDomainError>?, typed: String) -> QuickAddState {
-        guard let result else { return .closed }
+        guard let result else { return .empty }
         let shown = AddDomainFeedback(result, typed: typed)
-        return shown.isError ? QuickAddState(text: shown.fieldText, isOpen: true, error: shown) : .closed
+        return QuickAddState(text: shown.fieldText, feedback: shown)
     }
 
     struct QuickAddState: Equatable {
         let text: String
-        let isOpen: Bool
-        let error: AddDomainFeedback?
+        let feedback: AddDomainFeedback?
 
-        static let closed = QuickAddState(text: "", isOpen: false, error: nil)
+        static let empty = QuickAddState(text: "", feedback: nil)
     }
 
-    private func closeQuickAdd() {
+    /// The front tab row's add: the same add as the field's, with its line under the field.
+    private func addFrontTabSite(_ host: String) {
+        guard !routeManager.isApplyingRoutes,
+              let result = routeManager.addForCurrentMode(host) else { return }
+        quickAddFeedback = AddDomainFeedback(result, typed: newDomain)
+    }
+
+    private func clearQuickAdd() {
         newDomain = ""
-        quickAddError = nil
-        isAddingDomain = false
+        quickAddFeedback = nil
+    }
+
+    // MARK: - Rows
+
+    /// An apply can run now: what Retry needs.
+    private var canRetry: Bool {
+        routeManager.isVPNConnected && helperManager.helperState.isReady && !isBusy
+    }
+
+    private func routedList(_ summary: RoutedBySource.Summary) -> some View {
+        let mode = statusInput.mode
+        let failures = (routeManager.lastRouteChange?.failures ?? []) + routeManager.currentDNSFailures
+        return RoutedBySourceCard(
+            summary: summary,
+            reason: { RoutedBySource.problemReason(for: $0, failures: failures) },
+            actions: { row in
+                let commands = RoutedBySource.commands(for: row, mode: mode, config: routeManager.config,
+                                                       canRetry: canRetry)
+                let hover = RoutedBySource.hoverCommand(in: commands, isProblem: row.isProblem)
+                return (hover.map { rowAction($0, row: row) }, commands.map { rowAction($0, row: row) })
+            })
+    }
+
+    private func rowAction(_ command: RoutedBySource.Command, row: RoutedBySource.Row) -> RowAction {
+        switch command {
+        case .turnOff(let target):
+            return RowAction(kind: .other, name: ControlNames.turnOff(row.name), systemImage: "minus.circle") {
+                turnOff(target)
+            }
+        case .retry:
+            return RowAction(kind: .other, name: ControlNames.retry(row.name), systemImage: "arrow.clockwise") {
+                refresh()
+            }
+        case .showInSettings(let page):
+            return RowAction(kind: .other, name: ControlNames.showInSettings(row.name), systemImage: "gearshape") {
+                // The page opens filtered to the row; the "Left from earlier" row has no entry.
+                if row.icon != .leftover { SettingsPageRequest.shared.search = row.name }
+                openSettings(page: page)
+            }
+        case .copyAddresses:
+            return RowAction(kind: .other, name: ControlNames.copyAddresses(row.name), systemImage: "doc.on.doc") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(row.allAddresses.joined(separator: "\n"), forType: .string)
+            }
+        }
+    }
+
+    /// Turns the row's entry off the way its Settings page does, so the routes come out the
+    /// same way.
+    private func turnOff(_ target: RoutedBySource.Target) {
+        switch target {
+        case .service(let id): routeManager.toggleService(id)
+        case .domain(let id): routeManager.toggleDomain(id)
+        case .inverseDomain(let id): routeManager.toggleInverseDomain(id)
+        case .rules(let ids):
+            for i in routeManager.config.rules.indices where ids.contains(routeManager.config.rules[i].id) {
+                routeManager.config.rules[i].enabled = false
+            }
+            routeManager.saveRulesAndReapply()
+        }
     }
 
     private func openSettings(page: SettingsView.SettingsTab? = nil) {
@@ -805,6 +893,41 @@ struct MenuContent: View {
 }
 
 // MARK: - Last outside change
+
+/// VPN Only's blocks while the VPN is down (or back, before its routes are): how many listed
+/// entries are held back, and the way out. It says "listed addresses" because that is all it
+/// holds: an IPv6 address or a lookup that skips the app still reaches a listed site.
+struct BlockedSitesLine: View {
+    @EnvironmentObject var routeManager: RouteManager
+
+    var body: some View {
+        if !routeManager.blockedRoutes.isEmpty {
+            let count = routeManager.blockedSiteCount
+            HStack(spacing: 8) {
+                Image(systemName: "hand.raised.fill")
+                    .foregroundColor(Theme.attention)
+                    .accessibilityHidden(true)
+                Text(routeManager.isVPNConnected
+                     ? String(localized: "Waiting for VPN routes: listed addresses blocked for \(count) site(s)")
+                     : String(localized: "VPN down: listed addresses blocked for \(count) site(s)"))
+                    .font(.system(size: 11, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                // Only while the VPN is down: with it up, a release sends the sites wherever the
+                // VPN's own routes point, not outside it, and the waiting apply restores them.
+                if !routeManager.isVPNConnected {
+                    Button(String(localized: "Open them directly")) {
+                        routeManager.openBlockedSitesDirectly()
+                    }
+                    .controlSize(.small)
+                    .accessibilityLabel(String(localized: "Open the blocked sites directly, outside the VPN"))
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.attention.opacity(0.12)))
+        }
+    }
+}
 
 /// The footer's "Last change: added en.wikipedia.org via the command line, 2 min ago". A click
 /// opens Logs at the lines that came through the control socket.
@@ -835,7 +958,7 @@ struct OutsideChangeLine: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(OutsideChange.help)
+        .help(change.logsHelp)
     }
 }
 
@@ -863,34 +986,73 @@ enum DropdownCopy {
         count == 1 ? String(localized: "1 address") : String(localized: "\(count) addresses")
     }
 
+    /// "1 address", "62 addresses".
+    static func addresses(_ count: Int) -> String { routes(count) }
+
     /// The outcome the result line shows, or nil to show none. A removal is a claim about what
     /// is installed now, so it stops showing once the route count moves: a DNS refresh, a new
     /// domain or a newly enabled service brings routes back without a full apply, and the line
     /// would otherwise keep saying "All routes removed" under a list of live routes.
+    ///
+    /// With the helper not ready nothing is enforced, so a past apply's "62 addresses routed"
+    /// would contradict the banner above it saying nothing is routed (A2). A failed removal is
+    /// still shown: those routes did stay.
     static func shownRouteChange(_ outcome: RouteManager.RouteChangeOutcome?,
-                                 currentRouteCount: Int) -> RouteManager.RouteChangeOutcome? {
+                                 currentRouteCount: Int,
+                                 helperReady: Bool = true) -> RouteManager.RouteChangeOutcome? {
         guard let outcome else { return nil }
+        // A removal that failed stays: it says the routes are still in the kernel, which is
+        // true with the helper down, and is why Remove All did nothing.
+        if !helperReady && !(outcome.kind == .removedAll && outcome.failedCount > 0) { return nil }
         if outcome.kind == .removedAll && outcome.routeCount != currentRouteCount { return nil }
         return outcome
     }
 
-    /// The tooltip on the result line. Its failed count counts addresses, so the tooltip says so.
-    static var routeChangeHelp: String {
-        String(localized: "Failures are addresses the system refused and, on an apply that resolved DNS, domains that did not resolve. Settings > Logs has the details.")
+    /// The last change shown is a Remove All Routes: the entries it left empty are what the
+    /// user asked for, not a problem for the dropdown's Show or for Status > Problems.
+    static func removalStands(_ outcome: RouteManager.RouteChangeOutcome?, currentRouteCount: Int,
+                              helperReady: Bool = true) -> Bool {
+        shownRouteChange(outcome, currentRouteCount: currentRouteCount, helperReady: helperReady)?.kind == .removedAll
     }
 
-    /// The line under Refresh Routes. `isProblem` turns its mark amber.
-    static func routeChangeLine(_ outcome: RouteManager.RouteChangeOutcome, now: Date) -> (text: String, isProblem: Bool) {
+    /// Line 3 while no VPN is connected: what connecting does in this mode (A6).
+    static func disconnectedSentence(_ mode: Mode, in bundle: Bundle = .main) -> String {
+        switch mode {
+        case .bypass:
+            return String(localized: "Your list skips the VPN once one connects.", bundle: bundle)
+        case .vpnOnly:
+            return String(localized: "Your list goes through the VPN once one connects.", bundle: bundle)
+        case .custom:
+            return String(localized: "Your rules apply once a VPN connects.", bundle: bundle)
+        }
+    }
+
+    /// The add field's placeholder: the Bypass list, the VPN Only list, or a Custom mode rule
+    /// to the Direct route, which is not a list (A5).
+    static func quickAddPlaceholder(_ mode: Mode, in bundle: Bundle = .main) -> String {
+        switch mode {
+        case .bypass: return String(localized: "Add a site to bypass…", bundle: bundle)
+        case .vpnOnly: return String(localized: "Add a site for the VPN…", bundle: bundle)
+        case .custom: return String(localized: "Add a Direct rule…", bundle: bundle)
+        }
+    }
+
+    /// What the last apply or removal did, as one sentence: the Status page's summary adds it.
+    /// `isProblem` is true when something failed or every route was removed. The count is
+    /// `installed`, the addresses with a route now (`RouteManager.routedAddressCount`), the
+    /// number the dropdown shows: wildcard lookups and DNS refreshes add routes after the apply,
+    /// so the apply's own count (`outcome.routeCount`) falls behind it.
+    static func routeChangeLine(_ outcome: RouteManager.RouteChangeOutcome, installed: Int, now: Date) -> (text: String, isProblem: Bool) {
         let when = age(since: outcome.at, now: now)
         switch outcome.kind {
         case .applied:
-            if outcome.routeCount == 0 && outcome.failedCount == 0 {
+            if installed == 0 && outcome.failedCount == 0 {
                 return (String(localized: "No addresses to route, checked \(when)."), false)
             }
             if outcome.failedCount == 0 {
-                return (String(localized: "\(routes(outcome.routeCount)) routed \(when), none failed."), false)
+                return (String(localized: "\(routes(installed)) routed now, applied \(when), none failed."), false)
             }
-            return (String(localized: "\(routes(outcome.routeCount)) routed \(when), \(outcome.failedCount) failed."), true)
+            return (String(localized: "\(routes(installed)) routed now, applied \(when), \(outcome.failedCount) failed."), true)
         case .removedAll:
             if outcome.failedCount == 0 {
                 // No promise that Refresh brings them back: when the removal came from a mode
@@ -955,18 +1117,19 @@ enum DropdownCopy {
 
 // MARK: - Route check
 
-/// What Verify Routes checks and how its card words the result. Verify pings a sample: single
-/// addresses only, because ping cannot test a range, and at most `sampleSize` of them, the first
-/// in sort order. The card says how many of how many routes that was, lists failures first, and
-/// keeps the order the addresses were pinged in. Pure, so the scope and the wording are tested.
+/// What Verify Routes checks and how its card words the result. Verify path-checks a sample
+/// (PathCheck): single addresses only, because a range has no one address to connect to, and at
+/// most `sampleSize` of them, the first in sort order. The card says how many of how many routes
+/// that was, lists failures first, and keeps the sample's order. Pure, so the scope and the
+/// wording are tested.
 enum RouteCheck {
-    /// Addresses pinged per check, so a check stays short: each ping can wait 4 s.
+    /// Addresses checked per run, so a check stays short: each connection can wait 3 s.
     static let sampleSize = 10
     /// Failures listed in the card before "+ N more".
     static let visibleFailures = 3
 
     struct Plan: Equatable {
-        /// The addresses to ping, in the order they are pinged.
+        /// The addresses to check, in the order they are checked.
         let destinations: [String]
         /// What each of them is routed for: the service, domain or rule that added its route.
         let sources: [String: String]
@@ -978,7 +1141,7 @@ enum RouteCheck {
 
     /// The result of one check, as the card shows it.
     struct Run {
-        /// In the order the addresses were pinged.
+        /// In the order the addresses were checked.
         let results: [RouteVerificationResult]
         let sources: [String: String]
         let singleAddresses: Int
@@ -986,9 +1149,13 @@ enum RouteCheck {
         /// When the check started logging: its result lines are all at or after this.
         let logsFrom: Date
         let at: Date
+        /// The control left the same way as the routed addresses, so the run proves nothing.
+        let controlBroken: Bool
 
-        init(plan: Plan, results: [RouteVerificationResult], logsFrom: Date, at: Date) {
+        init(plan: Plan, results: [RouteVerificationResult], logsFrom: Date, at: Date,
+             controlBroken: Bool = false) {
             self.results = results
+            self.controlBroken = controlBroken
             self.sources = plan.sources
             self.singleAddresses = plan.singleAddresses
             self.routeCount = plan.routeCount
@@ -1006,9 +1173,11 @@ enum RouteCheck {
 
         var failures: [RouteVerificationResult] { results.filter { !$0.isReachable } }
         var reachable: [RouteVerificationResult] { results.filter(\.isReachable) }
+        /// Addresses the path check saw leave another way than their route says.
+        var leftWrongWay: [RouteVerificationResult] { results.filter(\.leftWrongWay) }
     }
 
-    /// What to ping. In VPN Only the app's catch-all ranges are left out of the count, as the
+    /// What to check. In VPN Only the app's catch-all ranges are left out of the count, as the
     /// list above the card leaves them out. A destination recorded under several sources reads
     /// as the first one.
     static func plan(routes: [RoutedBySource.InstalledRoute], vpnOnly: Bool,
@@ -1036,8 +1205,8 @@ enum RouteCheck {
     static func scope(checked: Int, singleAddresses: Int, routeCount: Int) -> Scope {
         if checked == 0 {
             return Scope(main: routeCount == 1
-                ? String(localized: "Nothing to check: the only address is a range, which ping cannot test")
-                : String(localized: "Nothing to check: all \(routeCount) addresses are ranges, which ping cannot test"),
+                ? String(localized: "Nothing to check: the only address is a range, which the path check cannot test")
+                : String(localized: "Nothing to check: all \(routeCount) addresses are ranges, which the path check cannot test"),
                          qualifier: nil)
         }
         if checked >= routeCount {
@@ -1100,9 +1269,20 @@ enum RoutedBySource {
         /// The first destinations behind the row, for its tooltip.
         let addresses: [String]
         let hiddenAddresses: Int
+        /// Every destination behind the row, for Copy Addresses.
+        var allAddresses: [String] = []
 
         var countText: String {
             routeCount == 0 ? String(localized: "no addresses") : routes(routeCount)
+        }
+
+        /// The number in the row's column; the word "addresses" is said once, above the column.
+        var numberText: String { "\(routeCount)" }
+
+        /// What VoiceOver reads for the whole row, as one element: "Telegram, 18 addresses",
+        /// and for a problem row its reason too.
+        func spokenLabel(reason: String? = nil) -> String {
+            ([name, countText] + (reason.map { [$0] } ?? [])).joined(separator: ", ")
         }
 
         var tooltip: String {
@@ -1116,10 +1296,12 @@ enum RoutedBySource {
         /// Unique destinations, without the VPN Only catch-alls.
         let routeCount: Int
         let rows: [Row]
-        /// Rows past `visibleRows`, shown as "+ N more".
-        let hiddenRows: Int
         /// VPN Only's catch-alls are installed: everything not listed goes direct.
         let everythingElseDirect: Bool
+        /// Entries that should have routes and have none, shown or not (`Row.isProblem`).
+        var problemCount: Int { problemRows.count }
+        /// Those entries, every one, for Status > Problems: `rows` stops at `visibleRows`.
+        var problemRows: [Row] = []
 
         var countText: String { routes(routeCount) }
     }
@@ -1129,6 +1311,7 @@ enum RoutedBySource {
         let source: String
     }
 
+    /// The rows shown before the list scrolls.
     static let visibleRows = 8
     static let tooltipAddresses = 10
 
@@ -1178,14 +1361,48 @@ enum RoutedBySource {
         running || pending != nil
     }
 
+    /// The connected dropdown's rows: an entry without routes is not a problem (no ▲, no
+    /// Retry) while an apply may still add them, or after a Remove All Routes that still stands,
+    /// where the empty entry is what the user asked for, as the status line and Status >
+    /// Problems read it.
+    static func emptyEntriesAreExpected(running: Bool, pending: RouteManager.PendingReconnectApply?,
+                                        lastChange: RouteManager.RouteChangeOutcome?,
+                                        currentRouteCount: Int, helperReady: Bool) -> Bool {
+        mayStillAddRoutes(running: running, pending: pending)
+            || DropdownCopy.removalStands(lastChange, currentRouteCount: currentRouteCount, helperReady: helperReady)
+    }
+
+    /// The list's title with no VPN connected: Bypass keeps its routes for the reconnect on
+    /// purpose; in the other modes, or after a Remove All Routes that left some, a route still
+    /// installed is a removal that failed.
+    static func disconnectedTitle(_ mode: DropdownCopy.Mode, lastChange: RouteManager.RouteChangeOutcome? = nil,
+                                  in bundle: Bundle = .main) -> String {
+        let removalFailed = lastChange?.kind == .removedAll && (lastChange?.failedCount ?? 0) > 0
+        return mode == .bypass && !removalFailed ? String(localized: "Kept for when it reconnects", bundle: bundle)
+                                                 : String(localized: "Still routed", bundle: bundle)
+    }
+
+    /// The list's title while paused: what Resume puts back.
+    static func pausedTitle(_ mode: DropdownCopy.Mode, in bundle: Bundle = .main) -> String {
+        switch mode {
+        case .bypass: return String(localized: "Will skip the VPN again", bundle: bundle)
+        case .vpnOnly: return String(localized: "Will go through the VPN again", bundle: bundle)
+        case .custom: return String(localized: "Will be routed by your rules again", bundle: bundle)
+        }
+    }
+
     static var leftoverName: String { String(localized: "Left from earlier") }
     static var everythingElse: String { String(localized: "Everything else") }
     static var direct: String { String(localized: "direct") }
 
     /// nil when there is nothing to list: no entry on and no route installed (the status line
-    /// above already says so).
+    /// above already says so). `routedOnly` lists only entries that have routes, for the
+    /// disconnected dropdown, where an entry without any is expected, not a problem.
+    /// `paused` lists what Resume puts back: every entry that routes, with or without routes
+    /// now, Custom's rules too (which otherwise show only once they have routes).
     static func make(mode: DropdownCopy.Mode, config: RouteManager.Config,
-                     routes: [InstalledRoute], busy: Bool) -> Summary? {
+                     routes: [InstalledRoute], busy: Bool, routedOnly: Bool = false,
+                     paused: Bool = false, title: String? = nil) -> Summary? {
         // Each entry's route `source` (what its routes are recorded under) and how it reads.
         // Custom rules that use a proxy or the primary VPN install no kernel route, so a rule
         // with none is normal and is not listed.
@@ -1198,6 +1415,8 @@ enum RoutedBySource {
             entries += config.inverseDomains.filter(\.enabled).map { ($0.domain, $0.domain, $0.isCIDR ? .ipRange : .domain, true) }
         case .custom:
             for rule in config.rules.filter(\.enabled).sorted(by: { $0.order < $1.order }) {
+                // Paused, a rule whose route is gone or off would route nothing on Resume.
+                if paused, !config.routes.contains(where: { $0.id == rule.routeId && $0.enabled }) { continue }
                 // A service rule's pattern is the service id; show the service's name.
                 if rule.matchType == .service, let service = config.services.first(where: { $0.id == rule.pattern }) {
                     entries.append((rule.pattern, service.name, .service(id: service.id), false))
@@ -1205,6 +1424,22 @@ enum RoutedBySource {
                     entries.append((rule.pattern, rule.pattern, rule.matchType == .cidr ? .ipRange : .rule, false))
                 }
             }
+        }
+
+        // A wildcard gets routes only when a lookup under it learns one, so with none yet it is
+        // idle, not broken: listed, never a problem. Learned routes are recorded under
+        // `*.suffix`, not under a service, so a service of wildcards only is the same.
+        var idleAllowed: Set<String> = []
+        switch mode {
+        case .bypass:
+            idleAllowed.formUnion(config.domains.filter { $0.enabled && $0.isWildcard }.map(\.domain))
+            idleAllowed.formUnion(config.services.filter {
+                $0.enabled && $0.ipRanges.isEmpty && !$0.domains.isEmpty && $0.domains.allSatisfy(WildcardDomain.isWildcard)
+            }.map(\.name))
+        case .vpnOnly:
+            idleAllowed.formUnion(config.inverseDomains.filter { $0.enabled && $0.isWildcard }.map(\.domain))
+        case .custom:
+            break
         }
 
         // Only VPN Only shows its catch-alls, as the "Everything else" line.
@@ -1218,9 +1453,10 @@ enum RoutedBySource {
 
         func row(id: String, name: String, icon: Icon, destinations: [String], expectsRoutes: Bool) -> Row {
             Row(id: id, name: name, icon: icon, routeCount: destinations.count,
-                isProblem: expectsRoutes && destinations.isEmpty && !busy,
+                isProblem: expectsRoutes && destinations.isEmpty && !busy && !paused && !idleAllowed.contains(id),
                 addresses: Array(destinations.prefix(tooltipAddresses)),
-                hiddenAddresses: max(0, destinations.count - tooltipAddresses))
+                hiddenAddresses: max(0, destinations.count - tooltipAddresses),
+                allAddresses: destinations)
         }
 
         var rows: [Row] = []
@@ -1228,7 +1464,7 @@ enum RoutedBySource {
         for entry in entries where !listed.contains(entry.source) {
             listed.insert(entry.source)
             let destinations = bySource[entry.source] ?? []
-            if destinations.isEmpty && !entry.expectsRoutes { continue }
+            if destinations.isEmpty && (!(entry.expectsRoutes || paused) || routedOnly) { continue }
             rows.append(row(id: entry.source, name: entry.name, icon: entry.icon,
                             destinations: destinations, expectsRoutes: entry.expectsRoutes))
         }
@@ -1246,82 +1482,122 @@ enum RoutedBySource {
 
         let everythingElseDirect = Self.everythingElseDirect(routes, vpnOnly: mode == .vpnOnly)
         if rows.isEmpty && !everythingElseDirect { return nil }
-        return Summary(title: title(mode),
+        return Summary(title: title ?? Self.title(mode),
                        routeCount: addressCount(routes, vpnOnly: mode == .vpnOnly),
-                       rows: Array(rows.prefix(visibleRows)),
-                       hiddenRows: max(0, rows.count - visibleRows),
-                       everythingElseDirect: everythingElseDirect)
+                       rows: rows,
+                       everythingElseDirect: everythingElseDirect,
+                       problemRows: rows.filter(\.isProblem))
     }
 
     private static func routes(_ count: Int) -> String {
         count == 1 ? String(localized: "1 address") : String(localized: "\(count) addresses")
     }
+
+    // MARK: Row actions (flow fix 5)
+
+    /// The entry a row's Turn Off switches off. Custom mode can hold several rules with one
+    /// pattern, and the row counts them as one, so it turns them all off.
+    enum Target: Equatable {
+        case service(id: String)
+        case domain(UUID)
+        case inverseDomain(UUID)
+        case rules([UUID])
+    }
+
+    /// What a row offers, in the right-click menu's order.
+    enum Command: Equatable {
+        case turnOff(Target), retry, showInSettings(SettingsView.SettingsTab), copyAddresses
+    }
+
+    /// The entry behind a row that is still on, or nil (the "Left from earlier" row, or an
+    /// entry turned off since).
+    static func target(of row: Row, mode: DropdownCopy.Mode, config: RouteManager.Config) -> Target? {
+        switch (mode, row.icon) {
+        case (_, .leftover):
+            return nil
+        case (.custom, _):
+            let ids = config.rules.filter { $0.enabled && $0.pattern == row.id }.map(\.id)
+            return ids.isEmpty ? nil : .rules(ids)
+        case (.bypass, .service(let id)):
+            return config.services.contains { $0.id == id && $0.enabled } ? .service(id: id) : nil
+        case (.bypass, _):
+            return config.domains.first { $0.domain == row.id && $0.enabled }.map { .domain($0.id) }
+        case (.vpnOnly, _):
+            return config.inverseDomains.first { $0.domain == row.id && $0.enabled }.map { .inverseDomain($0.id) }
+        }
+    }
+
+    /// The Settings page that lists the row's entry.
+    static func settingsPage(for row: Row, mode: DropdownCopy.Mode) -> SettingsView.SettingsTab {
+        switch (mode, row.icon) {
+        case (_, .leftover): return .status
+        case (.custom, _): return .rules
+        case (_, .service): return .services
+        default: return .domains
+        }
+    }
+
+    /// The right-click menu: Turn Off, Retry (a problem row, when an apply can run now), Show
+    /// in Settings, Copy Addresses (when it has any).
+    static func commands(for row: Row, mode: DropdownCopy.Mode, config: RouteManager.Config,
+                         canRetry: Bool) -> [Command] {
+        var out: [Command] = []
+        if let target = target(of: row, mode: mode, config: config) { out.append(.turnOff(target)) }
+        if row.isProblem && canRetry { out.append(.retry) }
+        out.append(.showInSettings(settingsPage(for: row, mode: mode)))
+        if !row.allAddresses.isEmpty { out.append(.copyAddresses) }
+        return out
+    }
+
+    /// The one action shown at the row's end on hover: Retry on a problem row, Turn Off on a
+    /// working one.
+    static func hoverCommand(in commands: [Command], isProblem: Bool) -> Command? {
+        if isProblem, commands.contains(.retry) { return .retry }
+        return commands.first { if case .turnOff = $0 { return true } else { return false } }
+    }
+
+    /// A problem row's reason, under its name: what the last apply or lookup said for the
+    /// entry, a DNS failure first since it says what to fix, or that nothing is routed for it.
+    static func problemReason(for row: Row, failures: [RouteManager.RouteFailure],
+                              in bundle: Bundle = .main) -> String? {
+        guard row.isProblem else { return nil }
+        let own = failures.filter { $0.entry == row.id || ($0.entry.isEmpty && $0.target == row.id) }
+        if let failure = own.first(where: { $0.kind == .notResolved }) ?? own.first {
+            let what: String
+            switch failure.kind {
+            case .notResolved: what = String(localized: "Did not resolve", bundle: bundle)
+            case .notRouted: what = String(localized: "Not routed", bundle: bundle)
+            case .notRemoved: what = String(localized: "Not removed", bundle: bundle)
+            }
+            return String(localized: "\(what): \(failure.reason)", bundle: bundle)
+        }
+        return String(localized: "No address is routed for it.", bundle: bundle)
+    }
 }
 
 // MARK: - Mode control
 
-/// The Mode row under the status header: one native segmented control with all three modes,
-/// the same in every mode. Switching mode changes how all traffic routes, and entering Custom
-/// migrates the lists into rules, so a pick asks first. The selection reads the saved mode: the
-/// segment moves after Switch, and Cancel leaves it where it was.
+/// The mode under the status block: the three modes on one track, the mode in use raised, and
+/// what it does under it; the same control as the Settings sidebar's (`ModeControl`). Switching
+/// mode changes how all traffic routes, and entering Custom migrates the lists into rules, so a
+/// pick asks first. The track reads the saved mode: it changes after Switch, Cancel leaves it.
 struct DropdownModeRow: View {
     @EnvironmentObject var routeManager: RouteManager
     /// The mode a pick is asking about while the question is open.
     @State private var asking: RouteManager.RoutingMode?
-    /// Bumped on every pick. The control selects the clicked segment itself, and SwiftUI does
-    /// not push the unchanged saved mode back into it, so it is rebuilt from the saved mode.
-    @State private var generation = 0
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                modeLabel
-                picker
-                    // A segmented control keeps its own width; line its right edge up with the rows below.
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            // The Spanish and French mode names do not fit beside the label: the control takes
-            // its own line, at the small size.
-            VStack(alignment: .leading, spacing: 6) {
-                modeLabel
-                picker
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity)
-            }
+        ModeControl(current: routeManager.config.routingMode, layout: .track) { picked in
+            guard asking == nil,
+                  let mode = DropdownModePicker.pendingSwitch(picked: picked, current: routeManager.config.routingMode)
+            else { return }
+            asking = mode
+            // After this click is handled. Through the run loop, not DispatchQueue.main: a
+            // modal opened inside a main-queue block holds that serial queue for as long as it
+            // is open, which stops every main-actor task, the control socket and network-change
+            // handling.
+            RunLoop.main.perform(inModes: [.common]) { ask(mode) }
         }
-        .padding(.top, 4)
-    }
-
-    private var modeLabel: some View {
-        Text("Mode")
-            .font(.system(size: 12))
-            .foregroundColor(Theme.textSecondary)
-    }
-
-    private var picker: some View {
-        Picker("Mode", selection: Binding(
-            get: { routeManager.config.routingMode },
-            set: { picked in
-                guard asking == nil,
-                      let mode = DropdownModePicker.pendingSwitch(picked: picked, current: routeManager.config.routingMode)
-                else { return }
-                asking = mode
-                generation += 1
-                // After this click is handled, so the control is rebuilt from the saved mode.
-                // Through the run loop, not DispatchQueue.main: a modal opened inside a
-                // main-queue block holds that serial queue for as long as it is open, which
-                // stops every main-actor task, the control socket and network-change handling.
-                RunLoop.main.perform(inModes: [.common]) { ask(mode) }
-            }
-        )) {
-            ForEach(DropdownModePicker.modes, id: \.self) { mode in
-                Text(DropdownModePicker.label(mode)).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .id(generation)
-        .help(DropdownStatus.modeDescription(DropdownModePicker.copyMode(routeManager.config.routingMode)))
     }
 
     /// While the question is open the run loop is in its modal panel mode, so the app's
@@ -1333,118 +1609,169 @@ struct DropdownModeRow: View {
     }
 }
 
-// MARK: - Status header
+// MARK: - Status block
 
-/// The top of the dropdown: who is connected, one sentence on what is routed, and a short
-/// list of facts. Takes a finished `DropdownStatus`, so any state can be rendered on its own.
-struct StatusHeader: View {
+/// The top of the dropdown: three lines at one left edge, in every state. Line 1 says who is
+/// connected, line 2 what is routed, line 3 the numbers, or the one problem with its one button.
+/// Takes a finished `DropdownStatus`, so any state can be rendered on its own. VoiceOver reads
+/// each line as its own element, and the button as a button.
+struct StatusBlock: View {
     let status: DropdownStatus
-    let iconName: String
+    /// The network profile in use, at the end of line 1; nil while no profile exists.
+    var profile: String? = nil
+    let onAction: (DropdownStatus.Line3.Action) -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(status.headerTone.color.opacity(0.15))
-                    .frame(width: 36, height: 36)
-                Image(systemName: iconName)
-                    .font(.system(size: 16))
-                    .foregroundColor(status.headerTone.color)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                 Text(status.headline)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundColor(status.headerTone.color)
-                Text(status.sentence)
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.textPrimary)
+                    .font(Theme.Font.strong)
+                    .foregroundColor(Theme.text)
                     .fixedSize(horizontal: false, vertical: true)
-                if let note = status.note {
-                    Text(note)
-                        .font(.system(size: 11))
+                if let profile {
+                    Spacer(minLength: 4)
+                    Text(NetworkProfiles.inUseLine(profile))
+                        .font(Theme.Font.detail)
                         .foregroundColor(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if !status.facts.isEmpty {
-                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 2) {
-                        ForEach(status.facts, id: \.label) { fact in
-                            GridRow {
-                                Text(fact.label)
-                                    .foregroundColor(Theme.textTertiary)
-                                Text(fact.value)
-                                    .foregroundColor(Theme.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .font(.system(size: 11))
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(String(localized: "The network profile in use. Profiles are on the General page."))
                 }
             }
-            Spacer(minLength: 0)
+            Text(status.sentence)
+                .font(Theme.Font.body)
+                .foregroundColor(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            line3
         }
-        .accessibilityElement(children: .combine)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var line3: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if status.line3.isProblem {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Theme.attention)
+                    .accessibilityHidden(true)
+            }
+            // A blank line still takes its height, so the block keeps its shape.
+            Text(status.line3.text.isEmpty ? " " : status.line3.text)
+                .font(Theme.Font.detail)
+                .foregroundColor(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(status.line3.isProblem
+                    ? String(localized: "Problem: \(status.line3.text)")
+                    : status.line3.text)
+                .accessibilityHidden(status.line3.text.isEmpty)
+            Spacer(minLength: 4)
+            if let action = status.line3.action {
+                actionButton(action)
+            }
+        }
+        .frame(minHeight: 22)
+    }
+
+    @ViewBuilder
+    private func actionButton(_ action: DropdownStatus.Line3.Action) -> some View {
+        switch action {
+        case .fix:
+            Button(String(localized: "Fix…")) { onAction(.fix) }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .controlSize(.small)
+                .help(DropdownStatus.Line3.spokenName(.fix))
+                .accessibilityLabel(DropdownStatus.Line3.spokenName(.fix))
+        case .show:
+            Button(String(localized: "Show")) { onAction(.show) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(DropdownStatus.Line3.spokenName(.show))
+                .accessibilityLabel(DropdownStatus.Line3.spokenName(.show))
+        case .resume:
+            Button(String(localized: "Resume")) { onAction(.resume) }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .controlSize(.small)
+                .keyboardShortcut(.pause)
+                .help(DropdownShortcut.pause.help(DropdownStatus.Line3.spokenName(.resume)))
+                .accessibilityLabel(DropdownStatus.Line3.spokenName(.resume))
+        case .retryPause:
+            Button(String(localized: "Retry")) { onAction(.retryPause) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(DropdownStatus.Line3.spokenName(.retryPause))
+                .accessibilityLabel(DropdownStatus.Line3.spokenName(.retryPause))
+        }
     }
 }
 
-/// The pill in the title row.
-///
-/// "ON" is a claim about ENFORCEMENT, not about the VPN: with the helper down this app enforces
-/// nothing, and showing a green ON next to "VPN Connected" while zero routes were installed is
-/// exactly how a broken install looked healthy for weeks.
-struct StatusPill: View {
-    let status: DropdownStatus
+/// The dropdown's width: as wide as its language needs, between 340 and 400 pt, so Spanish and
+/// French sit on one line where English does.
+enum DropdownLayout {
+    static let minWidth: CGFloat = 340
+    static let maxWidth: CGFloat = 400
 
-    var body: some View {
-        let color = status.tone.color
-        HStack(spacing: 4) {
-            if status.tone == .idle {
-                Circle()
-                    .strokeBorder(color, lineWidth: 1.3)
-                    .frame(width: 7, height: 7)
-            } else {
-                Circle()
-                    .fill(color)
-                    .frame(width: 6, height: 6)
-                    .shadow(color: color.opacity(0.6), radius: 3)
-            }
-            Text(status.pill)
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .foregroundColor(color)
+    static func width(language: String?) -> CGFloat {
+        let extra: CGFloat
+        switch language.map({ String($0.prefix(2)) }) {
+        case "es": extra = 40
+        case "fr": extra = 60
+        default: extra = 0
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(color.opacity(0.15)))
+        return min(maxWidth, minWidth + extra)
     }
+
+    /// The width for the language the app runs in.
+    static var current: CGFloat { width(language: Bundle.main.preferredLocalizations.first) }
 }
 
-/// What the status header says, as a pure function of the app's state, so every state and its
-/// wording is unit-tested.
+/// What the status block says, as a pure function of the app's state, so every state and its
+/// wording is unit-tested. The one place that decides the chip, the sentence and line 3.
 struct DropdownStatus: Equatable {
     enum Tone: Equatable {
-        /// `idle` is NOT SET UP: nothing is wrong, nothing is configured yet.
+        /// `idle` is NOT SET UP or no VPN: nothing is wrong.
         case ok, warn, bad, idle
 
         var color: Color {
             switch self {
-            case .ok: return Theme.success
-            case .warn: return Theme.warning
-            case .bad: return Theme.error
+            case .ok: return Theme.live
+            case .warn: return Theme.attention
+            case .bad: return Theme.failure
             case .idle: return Theme.textSecondary
             }
         }
     }
 
-    /// The header's colour. NOT SET UP is about the lists, not the connection: the VPN is up
-    /// and fine, so the header stays green and only the pill goes grey.
-    var headerTone: Tone { tone == .idle ? .ok : tone }
+    /// The block's third line: the numbers when all is well, or the one problem and the one
+    /// button that deals with it.
+    struct Line3: Equatable {
+        enum Action: Equatable {
+            /// Open Status, where the helper's row and its Install button are.
+            case fix
+            /// Open Status, where Problems lists every failure behind the count.
+            case show
+            /// End the pause and put the routes back.
+            case resume
+            /// Try again to remove the routes a pause could not remove.
+            case retryPause
+        }
 
-    struct Fact: Equatable {
-        let label: String
-        let value: String
+        let text: String
+        var isProblem = false
+        var action: Action?
+
+        static let blank = Line3(text: "")
+
+        /// The button's name for VoiceOver and its tooltip.
+        static func spokenName(_ action: Action, in bundle: Bundle = .main) -> String {
+            switch action {
+            case .fix: return String(localized: "Fix the helper in Settings > Status", bundle: bundle)
+            case .show: return String(localized: "Show the problems in Settings > Status", bundle: bundle)
+            case .resume: return String(localized: "Resume: put the routes back", bundle: bundle)
+            case .retryPause: return String(localized: "Retry removing the routes", bundle: bundle)
+            }
+        }
     }
 
     struct Input: Equatable {
@@ -1471,17 +1798,76 @@ struct DropdownStatus: Equatable {
         /// VPN Only's catch-alls are installed. They are not counted, but they are routed, so
         /// with them in place the app is routing even when `installedRoutes` is 0.
         var everythingElseDirect: Bool = false
+        /// The connected VPN sends every connection into its tunnel above the routing table
+        /// (`VPNKillSwitchReader`), so no route set here takes effect.
+        var killSwitch: VPNKillSwitch? = nil
+        /// The app's first detection is still running: nothing it would say about the VPN or
+        /// the routes is known yet.
+        var isStarting: Bool = false
+        /// Entries that should have routes and have none, with no apply running or waiting
+        /// that could add them (`RoutedBySource.Summary.problemCount`).
+        var entriesWithoutAddresses: Int = 0
+        /// The last Verify Routes: how many addresses it checked, how many the path check saw
+        /// leave the wrong way, and whether its control was broken. An address that only did
+        /// not answer on 443 is not counted: a site may block that whatever the route.
+        var lastCheckCount: Int = 0
+        var lastCheckWrongWay: Int = 0
+        var lastCheckBroken: Bool = false
+        /// The pause in progress (Pause.swift), nil when not paused.
+        var pause: PauseState? = nil
+        /// config.json could not be read: a Resume would have nothing to put back.
+        var configUnreadable: Bool = false
     }
 
-    let pill: String
+    /// The chip right of the wordmark: the only coloured signal in the block.
+    let chip: StatusChip.Kind
+    /// The Status page's colour for the same state.
     let tone: Tone
+    /// Line 1.
     let headline: String
+    /// Line 2.
     let sentence: String
+    /// The Status page's line under the sentence.
     let note: String?
-    let facts: [Fact]
+    let line3: Line3
+
+    /// Some of it is routed and some is not.
+    var isPartial: Bool { chip == .partlyRouted }
 
     static func make(_ input: Input, now: Date) -> DropdownStatus {
         let name = input.vpnName ?? String(localized: "VPN")
+
+        // Before anything else: at launch the VPN and the routes are not read yet, so "No VPN
+        // connected" or "Not routing" would be a guess (A3).
+        if input.isStarting {
+            return DropdownStatus(chip: .waiting, tone: .idle,
+                                  headline: String(localized: "Starting…"),
+                                  sentence: String(localized: "Detecting the VPN and applying routes."),
+                                  note: nil, line3: .blank)
+        }
+
+        // Paused, and every route is out: the state drawn. When some are still in, the block
+        // says how many with Retry, and never says Paused (flow fix 2).
+        if let pause = input.pause {
+            // A helper that is down with a VPN up is shown as the helper's state, with Fix,
+            // except for a pause the reconnect would have ended: it says it is waiting for the
+            // helper, with Fix.
+            if input.installedRoutes == 0 && !input.everythingElseDirect
+                && (input.helperReady || !input.isVPNConnected || pause.reconnectedWaiting) {
+                return paused(pause, input: input, name: name, now: now)
+            }
+            if input.helperReady {
+                let left = input.installedRoutes == 1
+                    ? String(localized: "1 address is still routed.")
+                    : String(localized: "\(input.installedRoutes) addresses are still routed.")
+                return DropdownStatus(chip: .notRouting, tone: .warn,
+                                      headline: input.isVPNConnected ? String(localized: "\(name) connected")
+                                                                     : String(localized: "No VPN connected"),
+                                      sentence: String(localized: "Pausing could not remove every route."),
+                                      note: left, line3: Line3(text: left, isProblem: true, action: .retryPause))
+            }
+            // The helper is down: its own state below says so, with Fix.
+        }
 
         guard input.isVPNConnected else {
             // Only Bypass keeps its routes across a drop on purpose. VPN Only and Custom tear
@@ -1500,16 +1886,36 @@ struct DropdownStatus: Equatable {
                     ? String(localized: "1 address is still routed: removing it failed.")
                     : String(localized: "\(input.installedRoutes) addresses are still routed: removing them failed.")
             }
-            return DropdownStatus(pill: String(localized: "OFF"), tone: .bad,
+            // An ordinary state, grey: no VPN is not a fault.
+            return DropdownStatus(chip: .off, tone: .idle,
                                   headline: String(localized: "No VPN connected"),
-                                  sentence: sentence, note: nil, facts: [])
+                                  sentence: sentence, note: nil,
+                                  line3: Line3(text: DropdownCopy.disconnectedSentence(input.mode)))
         }
 
         guard input.helperReady else {
-            return DropdownStatus(pill: String(localized: "NOT ENFORCING"), tone: .warn,
+            // Never "nothing is routed": a stopped helper leaves the routes it added in the
+            // kernel, so line 3 says how many are still in place.
+            let left: String
+            switch input.installedRoutes {
+            case 0: left = String(localized: "No address is routed.")
+            case 1: left = String(localized: "1 address from before is still routed.")
+            default: left = String(localized: "\(input.installedRoutes) addresses from before are still routed.")
+            }
+            return DropdownStatus(chip: .notRouting, tone: .warn,
                                   headline: String(localized: "\(name) connected"),
-                                  sentence: String(localized: "Nothing is routed while the privileged helper is not running."),
-                                  note: nil, facts: [])
+                                  sentence: String(localized: "The helper is not running, so no route can change."),
+                                  note: left, line3: Line3(text: left, isProblem: true, action: .fix))
+        }
+
+        // Before WAITING and ON: the routes stay installed, since the kill switch can be turned
+        // off at any time, but while it is on none of them changes where traffic goes.
+        if let killSwitch = input.killSwitch {
+            let note = killSwitchNote(killSwitch)
+            return DropdownStatus(chip: .notRouting, tone: .warn,
+                                  headline: String(localized: "\(name) connected"),
+                                  sentence: killSwitchSentence(killSwitch, fallbackName: name, mode: input.mode),
+                                  note: note, line3: Line3(text: note, isProblem: true))
         }
 
         // Once something applied or removed routes after the reconnect (Refresh Routes, a mode
@@ -1526,12 +1932,12 @@ struct DropdownStatus: Equatable {
             let left = pending.appliesAt.timeIntervalSince(now)
             switch pending.reason {
             case .heldBack(let strikes):
+                let note = String(localized: "Refresh Routes applies now anyway.")
                 return DropdownStatus(
-                    pill: String(localized: "HELD BACK"), tone: .warn,
+                    chip: .waiting, tone: .warn,
                     headline: String(localized: "\(name) keeps dropping"),
                     sentence: String(localized: "It dropped \(strikes) times right after routes were applied, so the app is not applying again until the tunnel has held for \(minutesLeft(left))."),
-                    note: String(localized: "Refresh Routes applies now anyway."),
-                    facts: [])
+                    note: note, line3: Line3(text: note))
             case .settling:
                 let sentence = left > 0
                     ? String(localized: "Waiting for the tunnel to hold before re-applying routes, in \(countdown(left)).")
@@ -1545,34 +1951,176 @@ struct DropdownStatus: Equatable {
                 default: note = String(localized: "The \(input.installedRoutes) addresses routed before the drop stay routed.")
                 }
                 return DropdownStatus(
-                    pill: String(localized: "WAITING"), tone: .warn,
+                    chip: .waiting, tone: .warn,
                     headline: String(localized: "\(name) reconnected \(DropdownCopy.age(since: pending.connectedAt, now: now))"),
-                    sentence: sentence, note: note, facts: [])
+                    sentence: sentence, note: note, line3: Line3(text: note))
             }
         }
 
-        // No Mode fact: the Mode control sits right under the header.
-        let facts = [Fact(label: String(localized: "Addresses"), value: routesFact(input, now: now)),
-                     Fact(label: String(localized: "DNS"), value: dnsFact(input, now: now))]
         if input.installedRoutes == 0 && input.nothingConfigured {
             // Not a fault: nothing has been asked for yet, and the question sits right below.
-            return DropdownStatus(pill: String(localized: "NOT SET UP"), tone: .idle,
+            return DropdownStatus(chip: .off, tone: .idle,
                                   headline: String(localized: "\(name) connected"),
                                   sentence: String(localized: "Nothing skips the VPN yet."),
-                                  note: scheduledNote, facts: [])
+                                  note: scheduledNote, line3: Line3(text: scheduledNote ?? ""))
         }
+        let problems = partialReasons(input)
         if input.installedRoutes == 0 && !input.everythingElseDirect {
-            return DropdownStatus(pill: String(localized: "NOTHING ROUTED"), tone: .warn,
+            return DropdownStatus(chip: .notRouting, tone: .warn,
                                   headline: String(localized: "\(name) connected"),
                                   sentence: String(localized: "Nothing is routed right now."),
-                                  note: scheduledNote, facts: facts)
+                                  note: scheduledNote,
+                                  line3: Line3(text: numbersLine(input, now: now), isProblem: true,
+                                               action: problems.isEmpty ? nil : .show))
         }
-        return DropdownStatus(pill: String(localized: "ON"), tone: .ok,
+        if !problems.isEmpty {
+            // Some of it is routed and some is not: amber, never a green ON (A4).
+            return DropdownStatus(chip: .partlyRouted, tone: .warn,
+                                  headline: String(localized: "\(name) connected"),
+                                  sentence: whatIsRouted(input),
+                                  note: ([scheduledNote].compactMap { $0 } + problems).joined(separator: " "),
+                                  line3: Line3(text: problemLine(input, now: now) ?? problems[0],
+                                               isProblem: true, action: .show))
+        }
+        return DropdownStatus(chip: .on, tone: .ok,
                               headline: String(localized: "\(name) connected"),
-                              sentence: whatIsRouted(input), note: scheduledNote, facts: facts)
+                              sentence: whatIsRouted(input), note: scheduledNote,
+                              line3: Line3(text: numbersLine(input, now: now)))
+    }
+
+    /// Paused with every route out. Bypass and Custom (where it is only offered when every rule
+    /// goes Direct) say the same: traffic follows the VPN's own routes, which never claims that
+    /// everything goes through the VPN, since a split-tunnel VPN sends some of it outside.
+    static func paused(_ pause: PauseState, input: Input, name: String, now: Date) -> DropdownStatus {
+        let headline = input.isVPNConnected ? String(localized: "\(name) connected")
+                                            : String(localized: "No VPN connected")
+        let sentence = input.isVPNConnected
+            ? String(localized: "Paused: traffic follows the VPN's own routes.")
+            : String(localized: "Paused: the app routes nothing.")
+        // A Resume now would end the pause and put nothing back, so it stays paused and says why.
+        if input.configUnreadable {
+            let why = String(localized: "Can't resume: VPN Bypass could not read its configuration file. Repair it or import a saved configuration in Settings.")
+            return DropdownStatus(chip: .paused, tone: .idle, headline: headline, sentence: sentence,
+                                  note: why, line3: Line3(text: why, isProblem: true))
+        }
+        let when = resumesLine(pause, now: now)
+        // Waiting for the helper, Fix is what moves it on; Resume would only end the pause.
+        let action: Line3.Action = pause.reconnectedWaiting && !input.helperReady ? .fix : .resume
+        return DropdownStatus(chip: .paused, tone: .idle, headline: headline, sentence: sentence,
+                              note: when, line3: Line3(text: when, action: action))
+    }
+
+    /// "Resumes at 14:32, in 58 min", "Resumes when the VPN reconnects", "Paused until you resume".
+    static func resumesLine(_ pause: PauseState, now: Date) -> String {
+        switch pause.length {
+        case .minutes:
+            guard let until = pause.until else { return "" }
+            let left = until.timeIntervalSince(now)
+            let when = until.formatted(date: .omitted, time: .shortened)
+            return left > 0
+                ? String(localized: "Resumes at \(when), in \(countdown(left))")
+                : String(localized: "Resuming now.")
+        case .untilReconnect:
+            return pause.reconnectedWaiting
+                ? String(localized: "The VPN is back. Resumes when the helper is ready.")
+                : String(localized: "Resumes when the VPN reconnects.")
+        case .untilResume:
+            return String(localized: "Paused until you resume.")
+        }
+    }
+
+    /// Line 3 when all is well: "62 addresses · applied 24 s ago · DNS again in 18 min". The
+    /// age is left out when no apply or removal is shown, the DNS part when the automatic
+    /// check is off.
+    static func numbersLine(_ input: Input, now: Date) -> String {
+        var parts = [DropdownCopy.addresses(input.installedRoutes)]
+        if let change = DropdownCopy.shownRouteChange(input.lastRouteChange, currentRouteCount: input.installedRoutes) {
+            let when = DropdownCopy.age(since: change.at, now: now)
+            parts.append(change.kind == .applied
+                ? String(localized: "applied \(when)")
+                : String(localized: "removed \(when)"))
+        }
+        if input.autoDNSRefresh, let next = input.nextDNSRefresh {
+            let left = next.timeIntervalSince(now)
+            parts.append(left > 0
+                ? String(localized: "DNS again in \(countdown(left))")
+                : String(localized: "DNS again now"))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Line 3 when the last apply failed in part: "62 addresses, 7 failed · 1 min ago". nil
+    /// when the last apply had no failures.
+    static func problemLine(_ input: Input, now: Date) -> String? {
+        guard let change = DropdownCopy.shownRouteChange(input.lastRouteChange, currentRouteCount: input.installedRoutes),
+              change.kind == .applied, change.failedCount > 0 else { return nil }
+        let routes = DropdownCopy.addresses(input.installedRoutes)
+        let when = DropdownCopy.age(since: change.at, now: now)
+        return String(localized: "\(routes), \(change.failedCount) failed") + " · " + when
+    }
+
+    /// Why ON is only partly true, one sentence per reason: the last apply had failures, an
+    /// entry has no addresses, or the last route check saw addresses leave the wrong way or
+    /// could not tell the ways apart.
+    static func partialReasons(_ input: Input) -> [String] {
+        var reasons: [String] = []
+        if let change = DropdownCopy.shownRouteChange(input.lastRouteChange, currentRouteCount: input.installedRoutes),
+           change.kind == .applied, change.failedCount > 0 {
+            reasons.append(change.failedCount == 1
+                ? String(localized: "1 failed in the last apply.")
+                : String(localized: "\(change.failedCount) failed in the last apply."))
+        }
+        switch input.entriesWithoutAddresses {
+        case 0: break
+        case 1: reasons.append(String(localized: "1 entry has no addresses."))
+        default: reasons.append(String(localized: "\(input.entriesWithoutAddresses) entries have no addresses."))
+        }
+        if input.lastCheckBroken {
+            reasons.append(String(localized: "The last route check is broken: it cannot tell the two ways apart."))
+        } else if input.lastCheckWrongWay > 0 {
+            reasons.append(String(localized: "\(input.lastCheckWrongWay) of \(input.lastCheckCount) checked addresses left the wrong way."))
+        }
+        return reasons
     }
 
     // MARK: Pieces
+
+    /// What a kill switch does to the app's routes: the cause, then what it means in this mode.
+    static func killSwitchSentence(_ killSwitch: VPNKillSwitch, fallbackName: String,
+                                   mode: DropdownCopy.Mode) -> String {
+        guard killSwitch.includeAllNetworks else {
+            // `enforceRoutes` only counts on the tunnel the app acts on, so `fallbackName` is its
+            // VPN. It takes only what its own routes cover, which the app does not read, so the
+            // sentence cannot say that a given site still goes through it.
+            let name = killSwitch.name ?? fallbackName
+            return String(localized: "\(name) makes its own routes win over this app's.") + " "
+                + String(localized: "Anything its routes cover goes through it, whatever is set here.")
+        }
+        // `includeAllNetworks` counts on any connected VPN, so an unnamed one may not be the
+        // VPN the header names.
+        let cause: String
+        if let name = killSwitch.name {
+            cause = String(localized: "\(name)'s kill switch sends all traffic through the VPN.")
+        } else {
+            cause = String(localized: "A connected VPN's kill switch sends all traffic through the VPN.")
+        }
+        let effect: String
+        switch mode {
+        case .bypass: effect = String(localized: "Sites set to skip it still go through it.")
+        case .vpnOnly: effect = String(localized: "Everything meant to skip it still goes through it.")
+        case .custom: effect = String(localized: "Rules set to go direct still go through it.")
+        }
+        return cause + " " + effect
+    }
+
+    /// How to get out of it, and what still skips the VPN.
+    static func killSwitchNote(_ killSwitch: VPNKillSwitch) -> String {
+        let fix = killSwitch.includeAllNetworks
+            ? String(localized: "Turn off its kill switch, or use its own split tunnelling.")
+            : String(localized: "Turn off that setting in the VPN app, or use its own split tunnelling.")
+        guard killSwitch.includeAllNetworks && killSwitch.excludeLocalNetworks else { return fix }
+        return fix + " " + String(localized: "Local-network addresses still skip it.")
+    }
 
     /// What a mode does, in one line. The Mode control shows it as its tooltip.
     static func modeDescription(_ mode: DropdownCopy.Mode) -> String {
@@ -1607,41 +2155,6 @@ struct DropdownStatus: Equatable {
         }
     }
 
-    static func routesFact(_ input: Input, now: Date) -> String {
-        // Same rule as the line under Refresh Routes: a removal stops being reported once
-        // routes are back, so the two never disagree.
-        guard let change = DropdownCopy.shownRouteChange(input.lastRouteChange,
-                                                         currentRouteCount: input.installedRoutes) else {
-            return input.installedRoutes > 0
-                ? String(localized: "\(input.installedRoutes) routed")
-                : String(localized: "none routed yet")
-        }
-        let when = DropdownCopy.age(since: change.at, now: now)
-        switch change.kind {
-        case .applied:
-            return change.failedCount == 0
-                ? String(localized: "\(change.routeCount) routed \(when), none failed")
-                : String(localized: "\(change.routeCount) routed \(when), \(change.failedCount) failed")
-        case .removedAll:
-            return change.failedCount == 0
-                ? String(localized: "all removed \(when)")
-                : String(localized: "removed \(when), \(change.failedCount) could not be")
-        }
-    }
-
-    static func dnsFact(_ input: Input, now: Date) -> String {
-        let checked = input.lastDNSRefresh.map { String(localized: "checked \(DropdownCopy.age(since: $0, now: now))") }
-            ?? String(localized: "not checked yet")
-        guard input.autoDNSRefresh else {
-            return String(localized: "\(checked), automatic check off")
-        }
-        guard let next = input.nextDNSRefresh else { return checked }
-        let left = next.timeIntervalSince(now)
-        return left > 0
-            ? String(localized: "\(checked), next in \(countdown(left))")
-            : String(localized: "\(checked), next one due now")
-    }
-
     /// "38 s", "18 min", "1 h", "1 h 20 min". Minutes round up, so "1 min" never means 1 s.
     static func countdown(_ seconds: TimeInterval) -> String {
         let s = Int(seconds.rounded(.up))
@@ -1660,7 +2173,7 @@ struct DropdownStatus: Equatable {
     }
 }
 
-/// The dropdown's Mode control: one segmented control with all three modes, in every mode.
+/// The dropdown's Mode control: one popup with all three modes, in every mode.
 /// What it shows and asks is pure, so the wording and the pick rule are unit-tested.
 enum DropdownModePicker {
     static let modes: [RouteManager.RoutingMode] = [.bypass, .vpnOnly, .custom]
@@ -1775,25 +2288,53 @@ enum FirstRunSetup {
     static func allServices(_ count: Int) -> String {
         String(localized: "All \(count) services…")
     }
+
+    /// The Mac's region (System Settings > General > Language & Region), read without asking
+    /// for anything, each time, so a change in System Settings shows without a relaunch.
+    static var macRegion: String? { regionOverride ?? Locale.current.region?.identifier }
+
+    /// The region a render or a test uses in place of the Mac's, so the image does not depend
+    /// on the Mac that made it; nil reads the Mac's.
+    static var regionOverride: String?
+
+    /// The country whose services the question suggests: the Mac's region when the catalogue
+    /// has services of its own for it (its banks and public services), otherwise none.
+    static func suggestedRegion(_ region: String? = macRegion,
+                                catalogue: [ServiceCatalogue.Entry] = ServiceCatalogue.shipped) -> String? {
+        guard let region = region?.uppercased(), catalogue.contains(where: { $0.region == region }) else { return nil }
+        return region
+    }
+
+    /// The row that opens the catalogue on the suggested country.
+    static func regionServices(_ region: String, locale: Locale = .current) -> String {
+        let name = CatalogueSelection.regionName(region, locale: locale) ?? region
+        return String(localized: "Services for \(name)…")
+    }
 }
 
 /// The question a fresh install asks, as a grouped list: six common services with the Services
-/// page's own switch, a row that opens that page, a row to add a site, and a line that offers
+/// page's own switch, a row that opens that page on its catalogue, a row to add a site, and a line that offers
 /// VPN Only. Each switch and each add applies at once, through the same RouteManager calls.
 struct FirstRunSetupView: View {
     @EnvironmentObject var routeManager: RouteManager
     let onOpenServices: () -> Void
+    /// Opens the catalogue on one country's services.
+    var onOpenRegion: (String) -> Void = { _ in }
     let onUseVPNOnly: () -> Void
     @State private var site: String
     /// What the last add did, shown under the field (proposal 5's line).
     @State private var feedback: AddDomainFeedback?
+    /// ⌘N puts the cursor in the site field, as in the add field it stands in for.
+    @FocusState private var siteFocused: Bool
 
     /// The arguments seed the field and the line under it, for a rendered screenshot.
     init(site: String = "", feedback: AddDomainFeedback? = nil,
-         onOpenServices: @escaping () -> Void, onUseVPNOnly: @escaping () -> Void) {
+         onOpenServices: @escaping () -> Void, onOpenRegion: @escaping (String) -> Void = { _ in },
+         onUseVPNOnly: @escaping () -> Void) {
         _site = State(initialValue: site)
         _feedback = State(initialValue: feedback)
         self.onOpenServices = onOpenServices
+        self.onOpenRegion = onOpenRegion
         self.onUseVPNOnly = onUseVPNOnly
     }
 
@@ -1817,22 +2358,14 @@ struct FirstRunSetupView: View {
                     serviceRow(service)
                     rowSeparator
                 }
-                Button(action: onOpenServices) {
-                    HStack(spacing: 9) {
-                        tile("magnifyingglass", Self.gray)
-                        Text(FirstRunSetup.allServices(routeManager.config.services.count))
-                            .font(.system(size: 12.5))
-                            .foregroundColor(Theme.textSecondary)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(Theme.textTertiary)
+                if let region = FirstRunSetup.suggestedRegion() {
+                    openRow(FirstRunSetup.regionServices(region), systemImage: "building.columns") {
+                        onOpenRegion(region)
                     }
-                    .frame(height: 34)
-                    .padding(.horizontal, 10)
-                    .contentShape(Rectangle())
+                    rowSeparator
                 }
-                .buttonStyle(.plain)
+                openRow(FirstRunSetup.allServices(Config.defaultServices.count), systemImage: "magnifyingglass",
+                        action: onOpenServices)
             }
 
             group {
@@ -1841,6 +2374,7 @@ struct FirstRunSetupView: View {
                     TextField(FirstRunSetup.sitePlaceholder, text: $site)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12.5))
+                        .focused($siteFocused)
                         .onSubmit(addSite)
                         // As on the Domains page: an add during an apply would save the site
                         // without routing it.
@@ -1858,11 +2392,18 @@ struct FirstRunSetupView: View {
                     .help(FirstRunSetup.addSite)
                     .accessibilityLabel(FirstRunSetup.addSite)
                 }
+                .background {
+                    Button("") { siteFocused = true }
+                        .keyboardShortcut(.addSite)
+                        .opacity(0)
+                        .frame(width: 0, height: 0)
+                        .accessibilityHidden(true)
+                }
                 .frame(height: 34)
                 .padding(.horizontal, 10)
             }
             .overlay(RoundedRectangle(cornerRadius: 8)
-                .stroke(feedback?.isError == true ? Theme.error.opacity(0.8) : Color.clear, lineWidth: 1))
+                .stroke(feedback?.isError == true ? Theme.failure.opacity(0.8) : Color.clear, lineWidth: 1))
             .padding(.top, 8)
             // Editing the text the line talks about makes it stale.
             .onChange(of: site) { text in
@@ -1914,7 +2455,7 @@ struct FirstRunSetupView: View {
             Spacer(minLength: 4)
             Text(FirstRunSetup.domainCount(service.domains.count))
                 .font(.system(size: 10.5))
-                .foregroundColor(Theme.textTertiary)
+                .foregroundColor(Theme.textSecondary)
             // The Services page's switch (ServiceRow), and the same call behind it.
             Toggle(service.name, isOn: Binding(
                 get: { service.enabled },
@@ -1925,7 +2466,7 @@ struct FirstRunSetupView: View {
                 }
             ))
             .toggleStyle(.switch)
-            .tint(Theme.success)
+            .tint(Theme.live)
             .labelsHidden()
             .controlSize(.small)
             .disabled(routeManager.isApplyingRoutes || switchLocked(service))
@@ -1936,9 +2477,30 @@ struct FirstRunSetupView: View {
         .padding(.horizontal, 10)
     }
 
+    /// A row that opens the Services page's catalogue: a grey tile, its words and a chevron.
+    private func openRow(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                tile(systemImage, Self.gray)
+                Text(title)
+                    .font(.system(size: 12.5))
+                    .foregroundColor(Theme.textSecondary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Theme.textTertiary)
+            }
+            .frame(height: 34)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
     private var rowSeparator: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.07))
+            .fill(Theme.bgInput)
             .frame(height: 1)
             .padding(.leading, 39)
     }
@@ -1984,72 +2546,80 @@ struct FirstRunSetupView: View {
 
 // MARK: - Supporting Views
 
-/// The card `RoutedBySource` describes: what the user added, with how many routes each has.
-/// A row's tooltip lists the addresses behind it.
+/// The list `RoutedBySource` describes: what the user added, one `ListRow` each, with its
+/// number of addresses in one column (the word is said once, above it). A problem row has ▲
+/// and its reason under the name. On hover a row shows one action, Retry or Turn Off; its
+/// right-click menu and the VoiceOver rotor have them all. Past eight rows the list scrolls.
 struct RoutedBySourceCard: View {
     let summary: RoutedBySource.Summary
+    /// The reason under a problem row's name.
+    var reason: (RoutedBySource.Row) -> String? = { _ in nil }
+    /// The actions a row offers: the hover one and the full menu.
+    var actions: (RoutedBySource.Row) -> (hover: RowAction?, menu: [RowAction]) = { _ in (nil, []) }
+
+    /// The doc screenshots draw this row's hover action, as if the pointer were on it.
+    static var hoveredRowForScreenshots: String?
+
+    /// The height of the rows shown before the list scrolls.
+    static func scrollHeight(_ rows: [RoutedBySource.Row], reasons: [String?]) -> CGFloat? {
+        guard rows.count > RoutedBySource.visibleRows else { return nil }
+        return zip(rows, reasons).prefix(RoutedBySource.visibleRows).reduce(0) { sum, pair in
+            sum + (pair.1 == nil ? ListRow.singleLineHeight : ListRow.twoLineHeight)
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 10))
+        let reasons = summary.rows.map(reason)
+        let numberWidth = ListRow.numberColumnWidth(for: summary.rows.map(\.numberText) + ["000"])
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack(spacing: Theme.Space.s) {
                 Text(summary.title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Theme.Font.section)
+                    .foregroundColor(Theme.textSecondary)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityLabel("\(summary.title), \(summary.countText)")
                 Spacer()
-                Text(summary.countText)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                if !summary.rows.isEmpty {
+                    Text("Addresses")
+                        .font(Theme.Font.detail)
+                        .foregroundColor(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                }
             }
-            .foregroundStyle(.secondary)
+            .padding(.horizontal, ListRow.inset)
 
             if !summary.rows.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(summary.rows) { row in
-                        HStack(spacing: 8) {
-                            Image(systemName: row.isProblem ? "exclamationmark.triangle.fill" : Self.symbol(row.icon))
-                                .font(.system(size: 11))
-                                .frame(width: 14)
-                                .foregroundColor(row.isProblem ? Theme.warning : .secondary)
-                            Text(row.name)
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(row.icon == .leftover ? .secondary : .primary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer(minLength: 8)
-                            Text(row.countText)
-                                .font(.system(size: 10.5))
-                                .foregroundColor(row.isProblem ? Theme.warning : .secondary)
-                        }
-                        .help(row.tooltip)
+                let list = VStack(spacing: 0) {
+                    ForEach(Array(summary.rows.enumerated()), id: \.element.id) { index, row in
+                        rowView(row, reason: reasons[index], numberWidth: numberWidth)
                     }
-                    if summary.hiddenRows > 0 {
-                        Text("+ \(summary.hiddenRows) more")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                    }
+                }
+                if let height = Self.scrollHeight(summary.rows, reasons: reasons) {
+                    ScrollView { list }
+                        .frame(height: height)
+                } else {
+                    list
                 }
             }
 
             if summary.everythingElseDirect {
-                if !summary.rows.isEmpty { Divider() }
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.turn.down.right")
-                        .font(.system(size: 11))
-                        .frame(width: 14)
-                    Text(RoutedBySource.everythingElse)
-                        .font(.system(size: 11.5))
-                    Spacer(minLength: 8)
-                    Text(RoutedBySource.direct)
-                        .font(.system(size: 10.5))
-                        .foregroundColor(.secondary)
-                }
-                .foregroundStyle(.secondary)
+                ListRow(glyph: "arrow.turn.down.right", name: RoutedBySource.everythingElse,
+                        number: RoutedBySource.direct, numberWidth: ListRow.numberColumnWidth(for: [RoutedBySource.direct]),
+                        spokenLabel: "\(RoutedBySource.everythingElse), \(RoutedBySource.direct)")
             }
         }
-        .padding(10)
-        .background(Color.secondary.opacity(0.08))
-        .cornerRadius(8)
+        .padding(.horizontal, -ListRow.inset)
+    }
+
+    private func rowView(_ row: RoutedBySource.Row, reason: String?, numberWidth: CGFloat) -> some View {
+        let offered = actions(row)
+        // One VoiceOver element per row, its actions in the rotor (ListRow's own).
+        return ListRow(glyph: Self.symbol(row.icon), name: row.name, detail: reason,
+                       needsAttention: row.isProblem, number: row.numberText, numberWidth: numberWidth,
+                       spokenLabel: row.spokenLabel(reason: reason),
+                       actions: offered.hover.map { [$0] } ?? [], menuActions: offered.menu,
+                       showsActions: Self.hoveredRowForScreenshots == row.name)
+            .help(row.tooltip)
     }
 
     static func symbol(_ icon: RoutedBySource.Icon) -> String {
@@ -2063,12 +2633,15 @@ struct RoutedBySourceCard: View {
     }
 }
 
-/// The last Verify Routes: what it checked, the failures first, then one line for the rest.
+/// The last Verify Routes, on the Status page: what it checked, the failures first, then one
+/// line for the rest.
 struct RouteCheckCard: View {
     let run: RouteCheck.Run
     /// False once the log has lost the check's lines, so the link would open a page without them.
     let logsHoldResults: Bool
     let onShowLogs: () -> Void
+    /// Takes the card away; nil draws no Dismiss button.
+    var onDismiss: (() -> Void)?
 
     var body: some View {
         let failures = run.failures
@@ -2086,6 +2659,12 @@ struct RouteCheckCard: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
+                if let onDismiss {
+                    Button(String(localized: "Dismiss"), action: onDismiss)
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .accessibilityLabel(String(localized: "Dismiss the route check"))
+                }
             }
             .foregroundStyle(.secondary)
 
@@ -2096,13 +2675,13 @@ struct RouteCheckCard: View {
             if !failures.isEmpty {
                 Text(RouteCheck.notReachable(failures.count))
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(Theme.error)
+                    .foregroundColor(Theme.failure)
                     .padding(.top, 2)
                 ForEach(failures.prefix(RouteCheck.visibleFailures)) { result in
                     HStack(spacing: 6) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 10))
-                            .foregroundColor(Theme.error)
+                            .foregroundColor(Theme.failure)
                         Text(result.destination)
                             .font(.system(size: 10.5, design: .monospaced))
                             .lineLimit(1)
@@ -2117,7 +2696,7 @@ struct RouteCheckCard: View {
                         if let error = result.error {
                             Text(error)
                                 .font(.system(size: 10.5))
-                                .foregroundColor(Theme.error)
+                                .foregroundColor(Theme.failure)
                                 .lineLimit(1)
                         }
                     }
@@ -2132,7 +2711,7 @@ struct RouteCheckCard: View {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 10))
-                            .foregroundColor(Theme.success)
+                            .foregroundColor(Theme.live)
                         Text(RouteCheck.reachable(reachable.count))
                             .font(.system(size: 11))
                             .foregroundColor(Theme.textSecondary)
@@ -2167,39 +2746,23 @@ struct RouteCheckCard: View {
     private var scopeText: Text {
         let scope = RouteCheck.scope(checked: run.results.count, singleAddresses: run.singleAddresses,
                                      routeCount: run.routeCount)
-        var text = Text(scope.main).foregroundColor(Theme.textPrimary)
+        var text = Text(scope.main).foregroundColor(Theme.text)
         if let qualifier = scope.qualifier {
             text = text + Text(" " + qualifier).foregroundColor(Theme.textSecondary)
         }
-        text = text + Text(".").foregroundColor(Theme.textPrimary)
+        text = text + Text(".").foregroundColor(Theme.text)
         if !run.results.isEmpty && run.failures.isEmpty {
-            text = text + Text(" " + RouteCheck.allReachable).foregroundColor(Theme.textPrimary)
+            text = text + Text(" " + RouteCheck.allReachable).foregroundColor(Theme.text)
         }
         return text
     }
 }
 
-struct StatBadge: View {
-    let value: String
-    let label: LocalizedStringKey
-    
-    var body: some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundColor(Theme.success)
-            Text(label)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.secondary.opacity(0.08))
-        .cornerRadius(8)
-    }
-}
-
-/// The SF Symbol each service draws in the dropdown's list and in the first-run question.
+/// The SF Symbol each service draws in the dropdown's list, the Services page and the
+/// first-run question. One rule, no brand logos: a symbol says what the service is for. A
+/// service whose main use has a clear symbol of its own (a call, a stream, a chat) keeps it;
+/// every other catalogue service draws its category's symbol. Only a name the catalogue does
+/// not know draws the globe.
 enum ServiceChip {
     static func iconName(for serviceID: String) -> String {
         switch serviceID {
@@ -2213,7 +2776,7 @@ enum ServiceChip {
         case "twitch": return "tv.fill"
         case "zoom": return "video.fill"
         case "teams": return "person.2.fill"
-        default: return "globe"
+        default: return ServiceCatalogue.category(of: serviceID)?.glyph ?? "globe"
         }
     }
 }

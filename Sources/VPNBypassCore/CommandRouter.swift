@@ -99,6 +99,8 @@ public struct ControlResult: Codable, Equatable, Sendable {
     public var services: [ControlService]? = nil
     public var activeRoutes: [ControlActiveRoute]? = nil
     public var logs: [ControlLogEntry]? = nil
+    /// `why`: which entry routes a host, and the path check on it.
+    public var why: SiteRouteAnswer? = nil
 }
 
 /// Live enforcement facts for `status` — the answer to "is it actually working?", which the
@@ -115,10 +117,22 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
     public var enforcing: Bool
     /// CFBundleShortVersionString of the running app; nil (omitted) when unknown.
     public var appVersion: String? = nil
+    /// The connected VPN's settings that send every connection into its tunnel, by Apple's
+    /// names (`includeAllNetworks`, `enforceRoutes`, plus `excludeLocalNetworks` when it lets
+    /// local addresses out). Nil (omitted) when none is on; then `enforcing` can be true.
+    public var killSwitch: [String]? = nil
+    /// How long routing is paused: "until 2026-10-31T14:32:00Z", "until the VPN reconnects"
+    /// or "until resumed". Nil (omitted) when not paused.
+    public var paused: String? = nil
+    /// Entries saved as ".example.com" that this version rewrote as "*.example.com", until the
+    /// user dismisses the note on Status. Nil (omitted) when there are none.
+    public var convertedEntries: [ConvertedEntry]? = nil
 
     public init(helperReady: Bool, helperState: String, vpnConnected: Bool,
                 vpnInterface: String? = nil, vpnType: String? = nil,
-                enforcedRouteCount: Int, enforcing: Bool, appVersion: String? = nil) {
+                enforcedRouteCount: Int, enforcing: Bool, appVersion: String? = nil,
+                killSwitch: [String]? = nil, paused: String? = nil,
+                convertedEntries: [ConvertedEntry]? = nil) {
         self.helperReady = helperReady
         self.helperState = helperState
         self.vpnConnected = vpnConnected
@@ -127,6 +141,9 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
         self.enforcedRouteCount = enforcedRouteCount
         self.enforcing = enforcing
         self.appVersion = appVersion
+        self.killSwitch = killSwitch
+        self.paused = paused
+        self.convertedEntries = convertedEntries
     }
 }
 
@@ -243,7 +260,7 @@ enum CommandRouter {
     static func isMutating(_ cmd: String) -> Bool {
         switch cmd {
         case "status", "route.list", "rule.list",
-             "domain.list", "service.list", "routes.active", "logs": return false
+             "domain.list", "service.list", "routes.active", "logs", "why": return false
         default: return true
         }
     }

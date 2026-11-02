@@ -1,8 +1,9 @@
 // RouteRowUpstreamLayoutTests.swift
-// The Routes page's proxy card keeps its upstream address on one line (issue #153). The
-// upstream used to share a line with "Listening on 127.0.0.1:<port>", so one longer than
-// about 17 characters wrapped mid-address. Rows are drawn offscreen at the width the
-// Settings window gives them, with a fixed listener port; nothing is routed or listened on.
+// The Routes page keeps a proxy route's addresses on one line (issue #153). The upstream
+// used to wrap mid-address beside "Listening on 127.0.0.1:<port>"; now the listener and the
+// upstream share one mono detail line, which must neither wrap nor push the switch out. Rows
+// are drawn offscreen at the width the Settings window gives them, with a fixed listener
+// port; nothing is routed or listened on.
 
 import AppKit
 import SwiftUI
@@ -12,14 +13,16 @@ import XCTest
 @MainActor
 final class RouteRowUpstreamLayoutTests: XCTestCase {
 
-    /// The width a route row gets: the 580 pt window, less the page's 24 pt padding and
-    /// the Routes card's 16 pt padding on each side.
-    private static let rowWidth: CGFloat = 580 - 2 * 24 - 2 * 16
+    /// The width a route row gets: the window's default content width, less the sidebar, its
+    /// 1 pt edge and the page's margins.
+    private static let rowWidth: CGFloat = SettingsWindowController.defaultContentSize.width
+        - SettingsSidebarView.width - 1 - 2 * Theme.Space.page
 
     private func row(host: String, port: Int = 1080) -> RouteRow {
         let route = Route(name: "office-proxy", egress: .proxySOCKS5, proxyHost: host, proxyPort: port,
                           localListenPort: 18168)
-        return RouteRow(route: route, listenerPort: 18168, onEdit: {}, onDelete: {}, onToggle: { _ in })
+        return RouteRow(route: route, listenerPort: 18168, onEdit: {}, onDelete: {}, onDuplicate: {},
+                        onToggle: { _ in })
     }
 
     private func settled<V: View>(_ view: V) -> NSHostingView<V> {
@@ -55,10 +58,12 @@ final class RouteRowUpstreamLayoutTests: XCTestCase {
         }
     }
 
-    func testALongUpstreamIsShownWhole() {
-        for host in longHosts {
+    /// The #153 example and a short host name fit beside the listener address whole. Longer
+    /// ones are cut in the middle (the row's tooltip holds all of it), never wrapped.
+    func testATypicalUpstreamIsShownWhole() {
+        for host in ["198.51.100.20", "proxy.example.com"] {
             XCTAssertLessThanOrEqual(idealWidth(host: host), Self.rowWidth,
-                                     "\(host):1080 does not fit the row, so part of it is cut or wrapped")
+                                     "\(host):1080 does not fit the row, so part of it is cut")
         }
     }
 

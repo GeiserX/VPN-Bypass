@@ -120,10 +120,13 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     /// Bypass mode deliberately keeps local-gateway routes on disconnect (a reconnect finds
     /// them already correct — zero churn); reporting that count as "could not be removed"
     /// made the churn fix look like a malfunction.
-    nonisolated static func disconnectedBody(wasInterface: String?, routesKept: Int, routesFailed: Int) -> String {
+    nonisolated static func disconnectedBody(wasInterface: String?, routesKept: Int, routesFailed: Int,
+                                             addressesBlocked: Int = 0) -> String {
         let suffix: String
         if routesFailed > 0 {
             suffix = String(localized: "\(routesFailed) address(es) are still routed: removing them failed.")
+        } else if addressesBlocked > 0 {
+            suffix = String(localized: "\(addressesBlocked) listed address(es) are blocked until the VPN returns.")
         } else if routesKept > 0 {
             suffix = String(localized: "Keeping \(routesKept) address(es) routed around the VPN — they use your normal connection and will be reused on reconnect.")
         } else {
@@ -134,11 +137,13 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             : String(localized: "VPN connection lost. \(suffix)")
     }
 
-    func notifyVPNDisconnected(wasInterface: String?, routesKept: Int = 0, routesFailed: Int = 0) {
+    func notifyVPNDisconnected(wasInterface: String?, routesKept: Int = 0, routesFailed: Int = 0,
+                               addressesBlocked: Int = 0) {
         guard notificationsEnabled && notifyOnVPNDisconnect else { return }
 
         let body = Self.disconnectedBody(wasInterface: wasInterface,
-                                         routesKept: routesKept, routesFailed: routesFailed)
+                                         routesKept: routesKept, routesFailed: routesFailed,
+                                         addressesBlocked: addressesBlocked)
 
         sendNotification(
             title: String(localized: "VPN Disconnected"),
@@ -196,6 +201,18 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         )
     }
     
+    /// A launch rewrote entries saved as ".example.com" to "*.example.com": the one time this
+    /// is said, so it ignores the per-event switches and only follows the master one.
+    func notifyEntriesConverted(_ changes: [ConvertedEntry]) {
+        guard notificationsEnabled, !changes.isEmpty else { return }
+
+        sendNotification(
+            title: String(localized: "Entries updated to wildcards"),
+            body: ConvertedEntry.sentence(changes),
+            identifier: "entries-converted"
+        )
+    }
+
     /// Open System Settings to Notifications pane
     func openNotificationSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {

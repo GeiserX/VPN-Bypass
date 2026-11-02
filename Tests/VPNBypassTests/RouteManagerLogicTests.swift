@@ -98,9 +98,9 @@ final class RouteManagerLogicTests: XCTestCase {
 
     // MARK: - Config.defaultServices Tests
 
-    func testDefaultServicesCountIsAtLeast30() {
+    func testDefaultServicesCountIsAtLeast37() {
         let services = RouteManager.Config.defaultServices
-        XCTAssertGreaterThanOrEqual(services.count, 30)
+        XCTAssertGreaterThanOrEqual(services.count, 37)
     }
 
     func testDefaultServicesHaveUniqueIDs() {

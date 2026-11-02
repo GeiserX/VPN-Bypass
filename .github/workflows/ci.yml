@@ -7,12 +7,12 @@ on:
   # touch files outside any Swift-only filter (Info.plist, Makefile, assets/**), so every
   # commit on main needs its own run.
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   # No paths filter on PRs: `test` is a required status check in the "Protect
   # main" ruleset, so it MUST report on every PR — a path-filtered run that is
   # skipped never reports and blocks the PR forever.
   pull_request:
-    branches: [main]
+    branches: [main, 'release/**']
 
 # Pull requests: one run per PR, a new push cancels the old run. Main: one group per
 # commit, so a quick second merge can never cancel (or replace while pending) the run
@@ -58,6 +58,11 @@ jobs:
         # from the compiler (a separate build of VPNBypassCore in a temp dir, so a cached .build
         # cannot feed it stale keys).
         run: python3 scripts/check-localizations.py
+      - name: Check the release notes
+        # Renders the notes release.yml publishes for a fake version, with and without a
+        # docs/release-notes/<version>.md, and fails unless that file comes first and every
+        # commit is listed.
+        run: scripts/test-release-notes.sh
       - name: Build privileged helper
         # The helper isn't part of the SPM package (it's compiled by the Makefile with
         # a bridging header for the XPC audit token), so `swift test` doesn't cover it.

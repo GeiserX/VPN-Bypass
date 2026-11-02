@@ -175,15 +175,16 @@ final class LookupAddTargetTests: RouteManagerTestCase {
         XCTAssertEqual(rm.lookupListing("jira.corp.example.com"), .vpnOnlyList)
     }
 
-    /// Custom mode: the exact name becomes a domain rule, a wildcard a suffix rule on Direct.
+    /// Custom mode: the exact name becomes a domain rule, a wildcard a suffix rule on Direct,
+    /// and the line says which rule it became.
     func testCustomModeAddsADomainOrASuffixRule() {
         rm.config.schemaVersion = 2
         rm.config.routingMode = .custom
         rm.config.rules = []
         let direct = rm.config.routes.first { $0.egress == .direct }!
 
-        XCTAssertNil(rm.addLookup("api.datadoghq.com", to: .directRule))
-        XCTAssertNil(rm.addLookup("*.us5.datadoghq.com", to: .directRule))
+        XCTAssertEqual(rm.addLookup("api.datadoghq.com", to: .directRule)?.isError, false)
+        XCTAssertEqual(rm.addLookup("*.us5.datadoghq.com", to: .directRule)?.isError, false)
         XCTAssertEqual(rm.config.rules.map(\.matchType), [.domain, .suffix])
         XCTAssertEqual(rm.config.rules.map(\.pattern), ["api.datadoghq.com", "us5.datadoghq.com"])
         XCTAssertTrue(rm.config.rules.allSatisfy { $0.routeId == direct.id })
@@ -208,8 +209,8 @@ final class LookupAddTargetTests: RouteManagerTestCase {
         offRule.enabled = false
         rm.config.rules = [offRule, Rule(matchType: .suffix, pattern: "us5.datadoghq.com", routeId: offRoute.id, order: 1)]
 
-        XCTAssertNil(rm.addLookup("api.datadoghq.com", to: .directRule))
-        XCTAssertNil(rm.addLookup("*.us5.datadoghq.com", to: .directRule))
+        XCTAssertEqual(rm.addLookup("api.datadoghq.com", to: .directRule)?.isError, false)
+        XCTAssertEqual(rm.addLookup("*.us5.datadoghq.com", to: .directRule)?.isError, false)
         XCTAssertEqual(rm.config.rules.count, 4)
         XCTAssertEqual(rm.lookupListing("intake.us5.datadoghq.com"), .rule(routeName: "Direct"))
     }

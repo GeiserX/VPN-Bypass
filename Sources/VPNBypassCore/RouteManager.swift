@@ -12,10 +12,24 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Published State
     
-    @Published var isVPNConnected = false
+    @Published var isVPNConnected = false {
+        didSet { vpnStateKnown = true }
+    }
+    /// False until something sets `isVPNConnected`, the first detection at launch: until then
+    /// its false means "not checked yet", not "no VPN".
+    var vpnStateKnown = false
+    /// What Pause may assume: connected, or not checked yet.
+    var vpnMayBeConnected: Bool { isVPNConnected || !vpnStateKnown }
     @Published var vpnInterface: String?
     @Published var vpnType: VPNType?
+    /// A connected VPN's setting that sends every connection into its tunnel above the routing
+    /// table (Proton VPN's kill switch), so the routes installed here have no effect. Nil when
+    /// none is on or it could not be read. Re-read with every VPN detection.
+    @Published var vpnKillSwitch: VPNKillSwitch?
     @Published var localGateway: String?
+    /// The network the Mac is on, as its router identifies it (`NetworkProfiles.swift`); nil
+    /// until the router's ARP entry has been read.
+    @Published var currentNetwork: NetworkIdentity?
     @Published var vpnGateway: String?
     @Published var activeRoutes: [ActiveRoute] = [] {
         // A "removed all routes" footer line is a claim about what is installed. Once the count
@@ -28,6 +42,13 @@ final class RouteManager: ObservableObject {
             }
         }
     }
+    /// VPN Only's listed addresses held back by blocks (reject routes) while the VPN is down,
+    /// with the entry each came from. Kept apart from `activeRoutes`: nothing routes through
+    /// them, and every apply, count and check reads `activeRoutes` as "what is routed".
+    @Published var blockedRoutes: [ActiveRoute] = []
+    var blockedDestinations: Set<String> { Set(blockedRoutes.map(\.destination)) }
+    /// How many VPN Only entries have addresses blocked, for the dropdown line.
+    var blockedSiteCount: Int { Set(blockedRoutes.map(\.source)).count }
     /// Unique kernel route count (activeRoutes may have multiple entries per destination for multi-source tracking)
     var uniqueRouteCount: Int { Set(activeRoutes.map { $0.destination }).count }
     /// The installed routes as the dropdown's card reads them.
@@ -45,9 +66,13 @@ final class RouteManager: ObservableObject {
         RoutedBySource.everythingElseDirect(installedRoutes, vpnOnly: config.routingMode == .vpnOnly)
     }
     @Published var lastUpdate: Date?
-    @Published var config: Config = Config()
+    @Published var config: Config = Config() {
+        didSet { namesSeenThisSession.formUnion(Diagnostics.names(in: config)) }
+    }
+    /// Every name any config held since launch, so the diagnostics report can take out a name
+    /// that a log line still mentions after it was removed. Memory only, like `recentLogs`.
+    private(set) var namesSeenThisSession = Set<String>()
     @Published var recentLogs: [LogEntry] = []
-    @Published var currentNetworkSSID: String?
     /// The last Verify Routes, or nil before the first one and after routes are removed.
     @Published var lastRouteCheck: RouteCheck.Run?
     /// Bumped when a check starts and when routes are removed, so a check still pinging then
@@ -63,6 +88,9 @@ final class RouteManager: ObservableObject {
     @Published var isLoading = true
     @Published private(set) var isApplyingRoutes = false
     @Published var isConfigLoadFailed = false
+    /// True once `loadConfig` has run. Before that `config` is the default, so a Shortcuts
+    /// action that saved it would overwrite the user's config.json (ShortcutActions.run).
+    var hasLoadedConfig = false
 
     /// Which process owns each `utun`, as the helper last reported it. Cosmetic only: it names
     /// tunnels, and must never decide which one gets routed. Empty when the helper cannot be
@@ -98,6 +126,62 @@ final class RouteManager: ObservableObject {
     /// it to decide routing.
     @Published var lastRouteChange: RouteChangeOutcome?
 
+    /// The names the last lookup for each entry got no answer for, by the entry's route source
+    /// (a domain, or a service's name). An entry with no address that is in here did not
+    /// resolve, which Status > Problems and the dropdown's Show say instead of the vaguer "No
+    /// address is routed for it.": the last apply may not name the failure, when it came from
+    /// the DNS cache, found the routes already current, or added one entry. A live full apply
+    /// replaces it; an entry's own apply updates that entry.
+    @Published private(set) var unresolvedLookups: [String: Set<String>] = [:]
+
+    /// Records one entry's lookups: the names of `source` that got no answer, none when all did.
+    func noteLookups(for source: String, unresolved names: Set<String>) {
+        if names.isEmpty {
+            if unresolvedLookups[source] != nil { unresolvedLookups[source] = nil }
+        } else if unresolvedLookups[source] != names {
+            unresolvedLookups[source] = names
+        }
+    }
+
+    /// The lookup record after a pass that looked up every enabled entry of the mode (a full
+    /// apply or a DNS refresh): the names that got no answer, by entry. It replaces the last one.
+    nonisolated static func lookupRecord(unresolved names: [(domain: String, source: String)]) -> [String: Set<String>] {
+        Dictionary(grouping: names, by: \.source).mapValues { Set($0.map(\.domain)) }
+    }
+
+    /// `lookupRecord` after a DNS refresh: each looked-up name with no address in `answers`
+    /// (no answer, or an empty one) did not resolve.
+    nonisolated static func lookupRecord(looked: [(domain: String, source: String)],
+                                         answers: [String: [String]]) -> [String: Set<String>] {
+        lookupRecord(unresolved: looked.filter { answers[$0.domain]?.isEmpty ?? true })
+    }
+
+    /// Every DNS failure known for the entries now listed: the names the last lookups got no
+    /// answer for, then the listed domains a refresh found no address for (StaleEntries), each
+    /// entry once. A problem row's reason reads these before saying no address is routed.
+    nonisolated static func dnsFailures(lookups: [String: Set<String>], domains: [DomainEntry]) -> [RouteFailure] {
+        var names: [(domain: String, source: String)] = lookups.keys.sorted().flatMap { source in
+            lookups[source, default: []].sorted().map { (domain: $0, source: source) }
+        }
+        let known = Set(names.map(\.source))
+        for entry in domains where entry.enabled && entry.resolveFailures != nil && !known.contains(entry.domain) {
+            names.append((domain: entry.domain, source: entry.domain))
+        }
+        return RouteFailure.unresolved(names)
+    }
+
+    /// `dnsFailures` for the config and lookups now held, from the list the mode routes: an
+    /// entry on the other list keeps the stale count from when its list was in use.
+    var currentDNSFailures: [RouteFailure] {
+        let listed: [DomainEntry]
+        switch config.routingMode {
+        case .bypass: listed = config.domains
+        case .vpnOnly: listed = config.inverseDomains
+        case .custom: listed = []
+        }
+        return Self.dnsFailures(lookups: unresolvedLookups, domains: listed)
+    }
+
     /// The last settings change a control-socket request made, for the dropdown footer. A
     /// save made outside a socket request (the app's own controls) clears it, so the footer
     /// never names a change that a later one in the app has replaced.
@@ -123,13 +207,89 @@ final class RouteManager: ObservableObject {
         /// apply resolved live (an apply from the DNS cache skips uncached domains uncounted);
         /// the same number the "routes applied" notification reports. `.removedAll`: routes
         /// that could not be removed.
-        let failedCount: Int
+        var failedCount: Int
+        /// The failures behind `failedCount`, each with its entry and reason, for Status >
+        /// Problems. It can hold fewer than `failedCount`: the page counts the rest.
+        var failures: [RouteFailure] = []
+
+        /// This outcome without the addresses it failed to route that are routed now (a DNS
+        /// retry or a later add put them in), so the dropdown's count, its Show and Problems
+        /// all leave them out. The kernel route is per address, so any entry's route counts.
+        func outstanding(routedNow: Set<String>) -> RouteChangeOutcome {
+            let fixed = failures.filter { $0.kind == .notRouted && routedNow.contains($0.target) }
+            guard !fixed.isEmpty else { return self }
+            var out = self
+            out.failures = failures.filter { !($0.kind == .notRouted && routedNow.contains($0.target)) }
+            out.failedCount = max(0, failedCount - fixed.count)
+            return out
+        }
+    }
+
+    /// One failure an apply or a removal counted: an address the helper did not route or did
+    /// not remove, or a name that did not resolve. Read by Status > Problems only.
+    struct RouteFailure: Equatable, Identifiable {
+        enum Kind: Equatable {
+            case notRouted, notResolved, notRemoved
+        }
+        let kind: Kind
+        /// The address, or for `notResolved` the name.
+        let target: String
+        /// The service, domain or rule it was routed for.
+        let entry: String
+        /// What the helper or the lookup said.
+        let reason: String
+
+        var id: String { "\(kind)|\(target)|\(entry)" }
+
+        /// The failures for the addresses a helper batch did not route or remove. Each takes
+        /// the first entry it was routed for, and the batch's error, which the helper gives
+        /// once per batch, not per address. The VPN's own gateway, which the app refuses
+        /// before the helper sees the batch, gets that reason instead.
+        static func batch(_ kind: Kind, failed: some Collection<String>,
+                          sources: [(destination: String, source: String)], error: String?,
+                          vpnGateway: String? = nil) -> [RouteFailure] {
+            var entryFor: [String: String] = [:]
+            for item in sources where entryFor[item.destination] == nil {
+                entryFor[item.destination] = item.source
+            }
+            let reason = error.flatMap { $0.isEmpty ? nil : $0 } ?? (kind == .notRemoved
+                ? String(localized: "the system did not remove it")
+                : String(localized: "the system refused the route"))
+            let gateway = vpnGateway.flatMap { $0.hasPrefix("iface:") ? nil : $0 }
+            return failed.sorted().map {
+                let isGateway = kind == .notRouted && gateway != nil && ($0 == gateway || $0 == gateway! + "/32")
+                return RouteFailure(kind: kind, target: $0, entry: entryFor[$0] ?? "",
+                                    reason: isGateway ? String(localized: "it is the VPN's own gateway, which is never rerouted")
+                                                      : reason)
+            }
+        }
+
+        /// The names that resolved to nothing and had no cached answer.
+        static func unresolved(_ names: [(domain: String, source: String)]) -> [RouteFailure] {
+            var seen: Set<String> = []
+            return names.filter { seen.insert("\($0.domain)|\($0.source)").inserted }.map {
+                RouteFailure(kind: .notResolved, target: $0.domain, entry: $0.source,
+                             reason: String(localized: "no answer from DNS"))
+            }
+        }
     }
 
     /// The post-reconnect apply the settle gate is holding, for the dropdown's WAITING and
     /// HELD BACK states. Nil when none is pending. Mirrors `reconnectSettleTask` and never
     /// feeds back into routing.
     @Published private(set) var pendingReconnectApply: PendingReconnectApply?
+
+    /// The pause in progress, nil when not paused (see Pause.swift). Never saved: a quit
+    /// removes the routes as every quit does, and the next launch starts unpaused.
+    @Published private(set) var pauseState: PauseState?
+    var isPaused: Bool { pauseState != nil }
+    /// Ends a timed pause.
+    private var pauseTimerTask: Task<Void, Never>?
+    /// The apply Resume runs when no settle wait applies.
+    private var resumeApplyTask: Task<Void, Never>?
+    /// A pause's removal is running; Resume's apply waits for it, or its later batch could
+    /// delete what the apply just put back.
+    private var pauseRemovalRunning = false
 
     struct PendingReconnectApply: Equatable {
         enum Reason: Equatable {
@@ -154,7 +314,8 @@ final class RouteManager: ObservableObject {
     private var dnsDiskCache: [String: [String]] = [:]  // Persistent cache: domain -> all resolved IPs
     private var orphanedServiceDomains: [String: [String]] = [:]  // Deleted service name -> its domains (for hosts reconstruction)
     private(set) var routeEpoch: UInt64 = 0  // Incremented by removeAllRoutes — lets in-flight applies detect preemption
-    private var gatewayDetectedAt: Date?
+    /// When `localGateway` was last detected; set by tests to stand in for a fresh detection.
+    var gatewayDetectedAt: Date?
     private var lastInterfaceReroute: Date?
     /// A re-route (interface change or Tailscale profile change) that was NEEDED but
     /// couldn't run when it was detected — the route-operation gate was held (e.g. by a
@@ -205,6 +366,10 @@ final class RouteManager: ObservableObject {
     /// First-seen timestamps for routes that dropped out of the desired set during an
     /// auto-triggered apply (DNS rotation, mostly). See `orphanGraceDecision`.
     private var orphanFirstSeen: [String: Date] = [:]
+    /// Set by a profile switch (`NetworkProfiles.swift`) and cleared by the next commit: the
+    /// old profile's routes did not rotate out of DNS, the switch took them off the list, so
+    /// that commit deletes them at once instead of keeping them under orphan grace.
+    var listsSwitchedSinceCommit = false
     
     
     /// Set once in init from the SAME directory as `configURL`, so it follows the under-test
@@ -216,6 +381,16 @@ final class RouteManager: ObservableObject {
 
     /// The wildcard route ledger's file, beside the config (and redirected under tests with it).
     let wildcardLedgerURL: URL
+    /// The entries the leading-dot migration rewrote that Status still lists, beside the config.
+    /// Its own file, so an exported config never carries the note.
+    let convertedEntriesURL: URL
+    /// Entries the leading-dot migration rewrote and the user has not dismissed yet. Status
+    /// shows them in one line, and `vpnb status` carries them.
+    @Published private(set) var convertedEntries: [ConvertedEntry] = []
+    /// Sends the one notification for a launch that rewrote entries; tests count the calls.
+    var notifyConvertedEntries: @MainActor ([ConvertedEntry]) -> Void = {
+        NotificationManager.shared.notifyEntriesConverted($0)
+    }
     /// Always-on wildcard domains (see WildcardEngine).
     private(set) lazy var wildcards = WildcardEngine(manager: self, ledgerURL: wildcardLedgerURL)
     
@@ -295,13 +470,20 @@ final class RouteManager: ObservableObject {
         configURL = appDir.appendingPathComponent("config.json")
         dnsCacheURL = appDir.appendingPathComponent("dns-cache.json")
         wildcardLedgerURL = appDir.appendingPathComponent("wildcard-routes.json")
+        convertedEntriesURL = appDir.appendingPathComponent("converted-entries.json")
     }
     
     // MARK: - Public API
     
     func loadConfig() {
+        hasLoadedConfig = true
         // Load DNS cache for faster startup / fallback
         loadDNSCache()
+        loadConvertedEntries()
+        // A catalogue file CI should have refused; its other services still load.
+        for problem in ServiceCatalogue.problems {
+            log(.error, "Service catalogue: \(problem)")
+        }
         
         guard FileManager.default.fileExists(atPath: configURL.path) else {
             isConfigLoadFailed = false
@@ -319,12 +501,22 @@ final class RouteManager: ObservableObject {
         do {
             let data = try Data(contentsOf: configURL)
             let loaded = try JSONDecoder().decode(Config.self, from: data)
-            config = loaded
+            let migration = loaded.migratingLeadingDotEntries()
+            config = migration.config
             isConfigLoadFailed = false
             seedSystemRoutesIfEmpty()
             ensurePrimaryVPNRoute()
             mergeBuiltInServices()
             log(.info, "Config loaded")
+            if !migration.migrated.isEmpty {
+                // Listed before the config is saved, so a quit between the two cannot lose the
+                // note; a name already listed is not returned again, so it is notified once.
+                let changes = recordConvertedEntries(migration.migrated)
+                // Saved at once, so the next load finds nothing to change and this logs once.
+                saveConfig()
+                log(.info, "Changed \(migration.migrated.joined(separator: ", ")) to the *.name form, which covers the name and every name under it")
+                if !changes.isEmpty { notifyConvertedEntries(changes) }
+            }
         } catch {
             isConfigLoadFailed = true
             log(.error, "Failed to load config from \(configURL.path): \(error.localizedDescription). Preserving file on disk.")
@@ -431,13 +623,16 @@ final class RouteManager: ObservableObject {
         }
         // A wildcard added, removed or switched, or the mode changed: the helper's list follows.
         wildcards.requestSync()
+        endPauseIfConfigForbidsIt()
     }
 
     /// - Parameter recoveringFromLoadFailure: set only by `importConfig`, which is replacing an
     ///   unreadable config.json. It bypasses the save block WITHOUT clearing the latch, so the
     ///   daily backup — which copies FROM the on-disk config.json — still skips itself and does
     ///   not overwrite the last known-good `config.json.bak` with the corruption being escaped.
-    func saveConfigThrowing(recoveringFromLoadFailure: Bool = false) throws {
+    /// - Parameter isBookkeeping: the app noting what it saw (a name's failed refreshes), not a
+    ///   settings change: it leaves the outside-change footer and the reconnect re-apply alone.
+    func saveConfigThrowing(recoveringFromLoadFailure: Bool = false, isBookkeeping: Bool = false) throws {
         guard recoveringFromLoadFailure || !isConfigLoadFailed else {
             log(.warning, "Config save blocked: config.json failed to load and is preserved on disk")
             throw NSError(domain: "VPNBypass", code: 1001, userInfo: [NSLocalizedDescriptionKey: "Configuration save blocked due to load failure"])
@@ -478,6 +673,10 @@ final class RouteManager: ObservableObject {
             try FileManager.default.moveItem(at: tempURL, to: configURL)
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
+        if isBookkeeping {
+            log(.info, "Config saved")
+            return
+        }
         if !isVPNConnected { configChangedAt = Date() }
         if !ControlOrigin.isControlSocket {
             lastOutsideChange = nil
@@ -523,6 +722,7 @@ final class RouteManager: ObservableObject {
         config.routes = derived.routes
         config.rules = derived.rules
         config.defaultRouteId = derived.defaultRouteId
+        config.proxyConfig.routeId = derived.routes.first { $0.egress == .proxySOCKS5 }?.id
     }
     
     private func createDailyBackupIfNeededThrowing() throws {
@@ -622,11 +822,14 @@ final class RouteManager: ObservableObject {
         do {
             let data = try Data(contentsOf: url)
             let exportData = try JSONDecoder().decode(ExportData.self, from: data)
+            // Old ".example.com" entries become "*.example.com" first, so the clash check
+            // below sees the names the routes will carry.
+            let migration = exportData.config.migratingLeadingDotEntries()
 
             // A custom service sharing its name with another service or a Bypass list entry
             // would share its routes too (see ServiceNameClash). Refuse the file whole, before
             // anything changes, rather than load it and guess which one to rename.
-            if let found = ServiceNameClash.firstInImport(exportData.config) {
+            if let found = ServiceNameClash.firstInImport(migration.config) {
                 let refusal = found.clash.importMessage(service: found.service)
                 lastImportRefusal = refusal
                 log(.error, "Config not imported: \(refusal)")
@@ -647,8 +850,11 @@ final class RouteManager: ObservableObject {
                 previousDiskPermissions = nil
             }
 
-            config = exportData.config
+            config = migration.config
             mergeBuiltInServices(autoSave: false)
+            if !migration.migrated.isEmpty {
+                log(.info, "Changed \(migration.migrated.joined(separator: ", ")) to the *.name form, which covers the name and every name under it")
+            }
 
             // Keep the latch SET across the write. Clearing it here to get past the save guard
             // also defeated the backup guard, so recovering from a corrupt config.json copied
@@ -672,6 +878,11 @@ final class RouteManager: ObservableObject {
                 log(.error, "Failed to persist imported config: \(error.localizedDescription)")
                 return false
             }
+            // Listed only once the import is saved: a rejected import leaves the note as it was.
+            recordConvertedEntries(migration.migrated)
+
+            // An import replaces what a pause was taken on; the apply below is its own.
+            if isPaused { endPause(reason: "a configuration was imported", apply: false) }
 
             log(.success, "Config imported: \(exportData.config.domains.count) domains, \(exportData.config.services.filter { $0.enabled }.count) services enabled")
 
@@ -682,6 +893,8 @@ final class RouteManager: ObservableObject {
                     await removeAllRoutes()
                     await applyAllRoutesInternal(sendNotification: false)
                 }
+            } else if !isVPNConnected {
+                Task { await releaseBlocksIfUnwanted() }
             }
             DNSLookupsMonitor.shared.followConfig()
 
@@ -769,41 +982,6 @@ final class RouteManager: ObservableObject {
         }
     }
     
-    // MARK: - Network Status
-
-    func detectCurrentNetwork() async {
-        // Get current WiFi SSID using helper with timeout
-        guard let result = await runProcessAsync(
-            "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport",
-            arguments: ["-I"],
-            timeout: 3.0
-        ) else {
-            return
-        }
-        
-        let output = result.output
-        
-        for line in output.components(separatedBy: "\n") {
-            if line.contains("SSID:") && !line.contains("BSSID") {
-                let ssid = line.components(separatedBy: ":").dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
-                if ssid != currentNetworkSSID {
-                    let oldSSID = currentNetworkSSID
-                    currentNetworkSSID = ssid
-                    if oldSSID != nil {
-                        log(.info, "Network changed: \(oldSSID ?? "none") → \(ssid)")
-                    }
-                }
-                return
-            }
-        }
-        
-        // No WiFi connected
-        if currentNetworkSSID != nil {
-            currentNetworkSSID = nil
-            log(.info, "WiFi disconnected")
-        }
-    }
-    
     /// Single-flight gate for `checkVPNStatusCore`. The core awaits freely (detection passes,
     /// a 1.5s flap recheck, route teardown), and it is triggered from several sources at once
     /// during churn — the path monitor, the process poller, refreshStatus. Overlapping runs
@@ -828,15 +1006,15 @@ final class RouteManager: ObservableObject {
     }
 
     private func checkVPNStatusCore() async {
+        // A timed pause whose time passed while the Mac slept ends here, after this pass has
+        // read the VPN's state, so the Resume apply sees a fresh tunnel and waits as it should.
+        defer { endPauseIfExpired() }
         let wasVPNConnected = isVPNConnected
         let oldInterface = vpnInterface
         // Captured BEFORE re-detection below overwrites it, so a same-interface gateway change is
         // detectable at all — see `gatewayChanged` further down.
         let oldVPNGateway = vpnGateway
         let oldTailscaleFingerprint = lastTailscaleSelfFingerprint
-
-        // Detect current network first
-        await detectCurrentNetwork()
 
         // Use scutil to detect VPN interfaces with IPv4 addresses
         var (connected, interface, detectedType) = await detectVPNInterface()
@@ -882,15 +1060,50 @@ final class RouteManager: ObservableObject {
         
         if isVPNConnected && !wasVPNConnected { lastVPNConnectAt = Date() }
 
+        // Profiles per network: a network that belongs to another profile switches the lists
+        // before anything below applies them. At a connect the settle-gated apply carries them.
+        await updateNetworkProfile(justConnected: isVPNConnected && !wasVPNConnected)
+
+        // "Until the VPN reconnects": this is the reconnect. The pause ends here only when the
+        // routes can come back, and Resume's apply puts them back: through the settle gate,
+        // after any apply or load that is running, even with auto-apply off, since resuming is
+        // what the user asked for. With the helper not ready the pause holds, says why, and
+        // ends on the first status pass that finds it ready.
+        var resumedByReconnect = false
+        if isVPNConnected, let pause = pauseState, pause.length == .untilReconnect,
+           !wasVPNConnected || pause.reconnectedWaiting {
+            if PauseGate.canResume(helperReady: HelperManager.shared.isHelperInstalled,
+                                   configLoadFailed: isConfigLoadFailed) {
+                endPause(reason: pause.reconnectedWaiting ? "the VPN reconnected and the helper is ready"
+                                                          : "the VPN reconnected", apply: true)
+                resumedByReconnect = true
+                if !wasVPNConnected { NotificationManager.shared.notifyVPNConnected(interface: interface ?? "unknown") }
+            } else if !pause.reconnectedWaiting {
+                var waiting = pause
+                waiting.reconnectedWaiting = true
+                pauseState = waiting
+                log(.warning, "The VPN reconnected, but the helper is not ready: staying paused until it is")
+            }
+        } else if !isVPNConnected, var pause = pauseState, pause.reconnectedWaiting {
+            // The VPN dropped again before the helper was ready: back to waiting for a
+            // reconnect, so the dropdown does not say the VPN is back.
+            pause.reconnectedWaiting = false
+            pauseState = pause
+        }
+
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
-        // Also skip if helper is not ready — no point attempting routes that will all fail
-        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled && !isConfigLoadFailed {
+        // Also skip if helper is not ready — no point attempting routes that will all fail.
+        // Never while paused, nor when the reconnect just ended a pause: Resume applies.
+        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !resumedByReconnect && !isPaused && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled && !isConfigLoadFailed {
             let now = Date()
             let vpnLabel = "\(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type"))"
             // Fresh routes = the newer of the last full apply and the last DNS refresh.
             let lastApplyAt = [lastUpdate, lastDNSRefresh].compactMap { $0 }.max()
             // Skip if routes were applied very recently (within 5 seconds) - prevents double-triggering
-            if let lastUpdate = lastUpdate, now.timeIntervalSince(lastUpdate) < 5 {
+            // Not when the config changed since (a profile switch on this pass): that apply is
+            // no duplicate, the lists are new.
+            if let lastUpdate = lastUpdate, now.timeIntervalSince(lastUpdate) < 5,
+               (configChangedAt.map { $0 <= lastUpdate } ?? true) {
                 log(.info, "Skipping duplicate route application (applied \(Int(now.timeIntervalSince(lastUpdate)))s ago)")
             } else if ReconnectSettle.reconnectAction(routingMode: config.routingMode,
                                                      hasInstalledRoutes: !activeRoutes.isEmpty,
@@ -960,7 +1173,8 @@ final class RouteManager: ObservableObject {
         // needed? / run-now? / defer? decision. Guarded by isVPNConnected so a latched
         // re-route is never acted on after the VPN is gone (the disconnect block below
         // clears the latch on the transition).
-        if isVPNConnected {
+        // Paused, nothing is installed to re-point: Resume applies on whatever is current.
+        if isVPNConnected && !isPaused {
             let interfaceChanged = isVPNConnected && wasVPNConnected
                 && interface != oldInterface && oldInterface != nil && interface != nil
             let tailscaleChanged = isVPNConnected && wasVPNConnected
@@ -1095,7 +1309,7 @@ final class RouteManager: ObservableObject {
                     keptCount = activeRoutes.count - failedCount
                 }
             } else {
-                await removeAllRoutes()
+                await tearDownAfterDrop()
                 // Whatever teardown retained is a genuine failed removal (see removeAllRoutes).
                 failedCount = activeRoutes.count
             }
@@ -1106,18 +1320,158 @@ final class RouteManager: ObservableObject {
             // kept-by-design separately from failed-removal.
             NotificationManager.shared.notifyVPNDisconnected(wasInterface: oldInterface,
                                                              routesKept: keptCount,
-                                                             routesFailed: failedCount)
+                                                             routesFailed: failedCount,
+                                                             addressesBlocked: blockedDestinations.count)
         }
+
+        // Blocks wait for the apply that replaces them. When none is coming (auto-apply off, the
+        // apply skipped or refused, or it ran and left some out), they go now: the VPN is up, so
+        // holding them back only keeps the sites unreachable.
+        await releaseBlocksIfNoApplyComing(applyPending: reconnectSettleTask != nil)
+    }
+
+    /// The release above, apart so a test can say whether a settle-gated apply is pending.
+    /// While one is (the settle wait, or an apply held back by apply-kill strikes, #106), the
+    /// blocks stay: releasing them is a write burst into the fragile window the gate protects,
+    /// and the apply replaces them anyway.
+    func releaseBlocksIfNoApplyComing(applyPending: Bool) async {
+        guard isVPNConnected, !blockedRoutes.isEmpty, !applyPending, !isApplyingRoutes, !isLoading else { return }
+        await releaseBlocks(replacedBy: Set(activeRoutes.map(\.destination)),
+                            reason: "the VPN is back and no apply is pending")
+    }
+
+    /// Teardown after a committed VPN drop in VPN Only and Custom. With the block setting on in
+    /// VPN Only, the listed addresses get their blocks FIRST, then everything else goes: the
+    /// catch-alls, and any listed address the helper could not block.
+    func tearDownAfterDrop() async {
+        await blockListedAddresses()
+        await removeAllRoutes(keepingBlocked: true)
+    }
+
+    /// Swaps VPN Only's listed routes for blocks through the helper (idea 7). The listed routes
+    /// point at a tunnel that is gone, so without this their sites load over the normal
+    /// connection, which is what a VPN Only user picked the mode to avoid.
+    ///
+    /// What gets blocked: every tracked address that is not a catch-all, plus anything an
+    /// in-flight apply pushed but has not committed (`pendingKernelAdds`), which teardown would
+    /// otherwise delete by destination. That includes a block an in-flight reconnect apply
+    /// already replaced, so it is blocked again. Learned wildcard routes are left to the
+    /// wildcard engine, which stops with the routes. IPv4 only, and only addresses the app
+    /// resolved: a site reached over IPv6 or through a lookup that skips the app is not held.
+    func blockListedAddresses() async {
+        guard config.routingMode == .vpnOnly, config.blockListedWhenVPNDown, !isShuttingDown,
+              HelperManager.shared.isHelperInstalled || addBlockRoutesBatchOverrideForTests != nil else { return }
+        let catchAlls = RouteCompiler.catchAllDestinations
+        var wanted: [ActiveRoute] = activeRoutes.filter {
+            !catchAlls.contains($0.destination) && !Self.isLearnedWildcardRoute($0)
+        }
+        let tracked = Set(wanted.map(\.destination))
+        for dest in pendingKernelAdds.sorted() where !catchAlls.contains(dest) && !tracked.contains(dest) {
+            let source = blockedRoutes.first { $0.destination == dest }?.source ?? "pending-block"
+            wanted.append(ActiveRoute(destination: dest, gateway: "", source: source, timestamp: Date()))
+        }
+        let destinations = Array(Set(wanted.map(\.destination))).sorted()
+        guard !destinations.isEmpty else { return }
+        let result = await addBlockRoutesBatchVia(destinations)
+        let blocked = Set(destinations).subtracting(result.failedDestinations)
+        let already = blockedDestinations
+        blockedRoutes += wanted.filter { blocked.contains($0.destination) && !already.contains($0.destination) }
+        activeRoutes.removeAll { blocked.contains($0.destination) }
+        pendingKernelAdds.subtract(blocked)
+        if result.failedDestinations.isEmpty {
+            log(.warning, "VPN down: \(blocked.count) listed address(es) blocked until the VPN returns")
+        } else {
+            log(.warning, "VPN down: \(blocked.count) listed address(es) blocked, \(result.failedDestinations.count) could not be blocked and are removed instead (\(result.error ?? "no reason given"))")
+        }
+        // A quit, the setting, the mode or the list can change during the batch above; a
+        // release that ran then found no records, so these would outlive it.
+        if isShuttingDown {
+            await releaseBlocks(reason: "quitting")
+        } else {
+            await releaseBlocksIfUnwanted()
+        }
+    }
+
+    /// Takes blocks out. Those in `replacedBy` are gone already: an install over a block
+    /// replaces it (`RouteKernel.installStep`). The rest are removed; a failed removal keeps
+    /// its record so a later pass, teardown or the startup sweep can still remove it.
+    func releaseBlocks(replacedBy replaced: Set<String> = [], only: Set<String>? = nil, reason: String) async {
+        let candidates = blockedRoutes.filter { only?.contains($0.destination) ?? true }
+        guard !candidates.isEmpty else { return }
+        let toRemove = Array(Set(candidates.map(\.destination)).subtracting(replaced)).sorted()
+        var failed: Set<String> = []
+        if !toRemove.isEmpty {
+            if HelperManager.shared.isHelperInstalled || removeRoutesBatchOverrideForTests != nil {
+                let result = await removeRoutesBatchVia(toRemove)
+                failed = (result.error != nil && result.failedDestinations.isEmpty)
+                    ? Set(toRemove) : Set(result.failedDestinations)
+            } else {
+                failed = Set(toRemove)
+            }
+        }
+        let released = Set(candidates.map(\.destination)).subtracting(failed)
+        blockedRoutes.removeAll { released.contains($0.destination) }
+        if failed.isEmpty {
+            log(.info, "Released \(released.count) block(s): \(reason)")
+        } else {
+            log(.warning, "Released \(released.count) block(s) (\(reason)); \(failed.count) could not be removed and stay listed for the next try")
+        }
+    }
+
+    /// Blocks are only for VPN Only with the setting on, and only for entries still listed
+    /// and enabled. Any change that leaves that state (another mode, the setting off, an entry
+    /// disabled or imported away) releases the blocks it no longer covers, VPN up or down. An
+    /// address another listed entry shares keeps its block.
+    func releaseBlocksIfUnwanted() async {
+        guard !blockedRoutes.isEmpty else { return }
+        guard config.routingMode == .vpnOnly, config.blockListedWhenVPNDown else {
+            await releaseBlocks(reason: config.routingMode != .vpnOnly ? "the mode is no longer VPN Only" : "the block setting is off")
+            return
+        }
+        // The bookkeeping sources (an in-flight or a failed-removal record) name no entry, so
+        // they never count as taken off the list.
+        let listed = Set(config.inverseDomains.filter(\.enabled).map(\.domain))
+            .union(["pending-block", "pending-sweep-retry", "#61 cleanup-retry"])
+        let stillHeld = Set(blockedRoutes.filter { listed.contains($0.source) }.map(\.destination))
+        blockedRoutes.removeAll { !listed.contains($0.source) && stillHeld.contains($0.destination) }
+        let unlisted = Set(blockedRoutes.filter { !listed.contains($0.source) }.map(\.destination))
+        if !unlisted.isEmpty {
+            await releaseBlocks(only: unlisted, reason: "their entries are no longer listed")
+        }
+    }
+
+    /// "Open them directly" in the dropdown: the listed sites go out over the normal connection
+    /// until the VPN returns.
+    func openBlockedSitesDirectly() {
+        Task { await releaseBlocks(reason: "Open them directly") }
+    }
+
+    /// The Settings switch. Turning it off releases any block in place now.
+    func setBlockListedWhenVPNDown(_ on: Bool) {
+        config.blockListedWhenVPNDown = on
+        saveConfig()
+        log(.info, "Block listed sites when the VPN drops: \(on ? "on" : "off")")
+        Task { await releaseBlocksIfUnwanted() }
+    }
+
+    /// Batch block, through the test override when set, else the helper. Stamped as a kernel
+    /// burst like every other batch (see addRoutesBatchTracked).
+    func addBlockRoutesBatchVia(_ destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
+        // Paused: nothing installs a route (VPN Only, which blocks, never pauses; belt and braces).
+        guard !isPaused else { return (0, destinations.count, destinations, "paused") }
+        if let override = addBlockRoutesBatchOverrideForTests { return await override(destinations) }
+        if !destinations.isEmpty { lastKernelBurstAt = Date() }
+        return await HelperManager.shared.addBlockRoutesBatch(destinations: destinations)
     }
     
     /// The settle-gated apply scheduled by checkVPNStatusCore. Every precondition is
     /// re-validated at fire time — the world may have moved during the wait. The cancellation
     /// re-check closes a supersede race: an old task that passed its post-sleep check right as
     /// a disconnect cancelled it must not run, and must not clear a newer task's reference.
-    private func runSettledApply() async {
+    private func runSettledApply(requireAutoApply: Bool = true) async {
         guard !Task.isCancelled else { return }
         reconnectSettleTask = nil
-        guard isVPNConnected, config.autoApplyOnVPN, !isLoading, !isApplyingRoutes,
+        guard isVPNConnected, config.autoApplyOnVPN || !requireAutoApply, !isPaused, !isLoading, !isApplyingRoutes,
               HelperManager.shared.isHelperInstalled else {
             log(.info, "Settle-gated apply skipped — preconditions changed during the wait")
             return
@@ -1129,6 +1483,7 @@ final class RouteManager: ObservableObject {
     }
 
     private func detectVPNInterface() async -> (connected: Bool, interface: String?, type: VPNType?) {
+        if let override = detectVPNInterfaceOverrideForTests { return await override() }
         // Before anything derives a type or a label from the map. This is the one funnel every
         // detection path goes through — the status timer, the startup apply, and the
         // display-only pass — so refreshing here means the first labels after launch are the
@@ -1138,12 +1493,44 @@ final class RouteManager: ObservableObject {
         // First check for specific VPN processes to help identify type
         let runningVPNType = await detectRunningVPNProcess()
 
-        if let hint = runningVPNType {
-            await MainActor.run { log(.info, "VPN process hint: \(hint.rawValue)") }
+        // Every status pass runs this, every 30 s: log the hint only when it changes.
+        await MainActor.run {
+            logWhenChanged(.processHint, runningVPNType.map { "VPN process hint: \($0.rawValue)" })
         }
 
         // Use ifconfig to detect VPN
-        return await detectVPNViaIfconfig(hintType: runningVPNType)
+        let result = await detectVPNViaIfconfig(hintType: runningVPNType)
+        await refreshVPNKillSwitch(connected: result.connected, trackedInterface: result.interface)
+        return result
+    }
+
+    /// Re-reads whether a connected VPN has a kill switch on. Runs on every detection pass,
+    /// which is never a tight loop: one `scutil --nc list`, and the configuration file only
+    /// when a NetworkExtension VPN is connected. A lookup that fails keeps the last reading:
+    /// clearing it would read as "no kill switch" and let a Refresh report success.
+    private func refreshVPNKillSwitch(connected: Bool, trackedInterface: String?) async {
+        var found: VPNKillSwitch?
+        if connected {
+            guard let list = await runProcessAsync("/usr/sbin/scutil", arguments: ["--nc", "list"], timeout: 3.0),
+                  list.exitCode == 0 else { return }
+            let ids = VPNKillSwitchReader.connectedIDs(fromNCList: list.output)
+            if !ids.isEmpty {
+                let reading: VPNKillSwitch?? = await withCheckedContinuation { continuation in
+                    vpnBypassProcessQueue.async {
+                        continuation.resume(returning: VPNKillSwitchReader.read(connected: ids, trackedInterface: trackedInterface))
+                    }
+                }
+                guard let reading else { return }
+                found = reading
+            }
+        }
+        guard found != vpnKillSwitch else { return }
+        if let found {
+            log(.warning, "\(found.name ?? "The VPN") sends every connection into its tunnel (\(found.flagNames.joined(separator: ", "))): routes set here have no effect until that is off")
+        } else if vpnKillSwitch != nil {
+            log(.info, "The VPN no longer forces every connection into its tunnel")
+        }
+        vpnKillSwitch = found
     }
     
     /// Detect which VPN client process is running
@@ -1160,6 +1547,12 @@ final class RouteManager: ObservableObject {
         }
         if output.contains("vpnagent") || output.contains("cisco") || output.contains("anyconnect") || output.contains("secureclient") {
             return .ciscoAnyConnect
+        }
+        // Before OpenVPN and WireGuard: Proton's tunnel extension carries the protocol's name.
+        // Only the extension, which runs while a tunnel is up; the Proton app stays open when
+        // disconnected and must not rename another VPN.
+        if output.split(separator: "\n").contains(where: { $0.contains("protonvpn") && $0.contains("extension") }) {
+            return .protonVPN
         }
         if output.contains("openvpn") {
             return .openVPN
@@ -1307,16 +1700,17 @@ final class RouteManager: ObservableObject {
                 }
             }
             let type = hintType ?? detectVPNTypeFromInterface(selected)
+            // A match ends the run of "none matched": the next miss logs again.
+            await MainActor.run { logWhenChanged(.unmatchedCandidates, nil) }
             return (true, selected, type)
         }
 
-        // Debug: log what we found if no VPN detected
-        if !candidates.isEmpty {
-            let summary = candidates.map {
-                "\($0.interface) up=\($0.isUp) corp=\($0.isCorporateAddress) tailscale=\($0.isTailscale)"
-            }.joined(separator: ", ")
-            await MainActor.run { log(.info, "VPN candidates (none matched): \(summary)") }
-        }
+        // What was found when no VPN is detected. With no VPN this repeats every status pass,
+        // so it is logged only when the candidates change.
+        let summary = candidates.isEmpty ? nil : candidates.map {
+            "\($0.interface) up=\($0.isUp) corp=\($0.isCorporateAddress) tailscale=\($0.isTailscale)"
+        }.joined(separator: ", ")
+        await MainActor.run { logWhenChanged(.unmatchedCandidates, summary.map { "VPN candidates (none matched): \($0)" }) }
 
         return (false, nil, nil)
     }
@@ -1819,7 +2213,6 @@ final class RouteManager: ObservableObject {
     /// The detect sequence below mirrors the one in `detectAndApplyRoutesAsync()`;
     /// keep them in sync if VPN/gateway detection changes.
     func detectVPNStateOnly() async {
-        await detectCurrentNetwork()
         let (connected, interface, detectedType) = await detectVPNInterface()
         isVPNConnected = connected
         vpnInterface = connected ? interface : nil
@@ -1850,9 +2243,6 @@ final class RouteManager: ObservableObject {
         // Detect user's DNS server (respects pre-VPN DNS configuration)
         await detectUserDNSServer()
         
-        // Detect current network
-        await detectCurrentNetwork()
-        
         // Detect VPN interface
         let (connected, interface, detectedType) = await detectVPNInterface()
         isVPNConnected = connected
@@ -1864,6 +2254,8 @@ final class RouteManager: ObservableObject {
         // Detect local gateway
         localGateway = await detectLocalGateway()
         log(.info, "Gateway detected: \(localGateway ?? "none")")
+        // This network's profile, before the startup apply below puts its lists in.
+        await selectNetworkProfileBeforeStartupApply()
 
         // Detect VPN gateway (needed for VPN Only mode)
         if connected {
@@ -2063,6 +2455,10 @@ final class RouteManager: ObservableObject {
     private func applyAllRoutesInternal(sendNotification: Bool, forceReassert: Bool = false,
                                         orphanGrace: Bool = false) async {
         let epoch = routeEpoch
+        guard !isPaused else {
+            log(.info, "Apply skipped: paused")
+            return
+        }
 
         guard let gateway = localGateway else {
             log(.error, "No local gateway available")
@@ -2097,6 +2493,8 @@ final class RouteManager: ObservableObject {
         }
 
         var failedCount = 0
+        /// The names behind `failedCount`, with the entry each was resolved for.
+        var unresolvedNames: [(domain: String, source: String)] = []
 
         // Clear DNS cache for fresh resolution
         dnsCache.removeAll()
@@ -2194,6 +2592,7 @@ final class RouteManager: ObservableObject {
                     resolvedGroups.append(ClassicRouteCompiler.ResolvedGroup(source: item.source, ips: cachedIPs))
                 } else {
                     failedDomains.insert(item.domain)
+                    unresolvedNames.append((item.domain, item.source))
                     failedCount += 1
                 }
             }
@@ -2203,6 +2602,8 @@ final class RouteManager: ObservableObject {
 
         // Save updated DNS cache to disk
         saveDNSCache()
+        // Every enabled entry was looked up: what did not answer replaces the last record.
+        unresolvedLookups = Self.lookupRecord(unresolved: unresolvedNames)
 
         // Service IP ranges (bypass mode only — services are not used in VPN Only mode)
         var serviceRanges: [(source: String, range: String)] = []
@@ -2247,6 +2648,9 @@ final class RouteManager: ObservableObject {
             orphanFirstSeen.removeAll()
             log(.info, "Routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
             lastUpdate = Date()
+            // The routes are live (a skip needs a non-empty desired set), so wildcards learn
+            // again, as after a commit: a Resume whose pause could not remove them lands here.
+            wildcards.routesApplied()
             return
         }
 
@@ -2255,11 +2659,13 @@ final class RouteManager: ObservableObject {
         // Apply all routes in batch (single XPC call for massive speedup)
         var batchFailureCount = 0
         var batchFailedDests: Set<String> = []
+        var batchError: String?
         if HelperManager.shared.isHelperInstalled {
             let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
             let result = await addRoutesBatchTracked(routes: helperRoutes)
             batchFailureCount = result.failureCount
             batchFailedDests = Set(result.failedDestinations)
+            batchError = result.error
 
             if result.failureCount > 0 {
                 log(.warning, "Batch route add: \(result.successCount) succeeded, \(result.failureCount) failed (\(result.failedDestinations.prefix(3).joined(separator: ", "))...)")
@@ -2277,7 +2683,14 @@ final class RouteManager: ObservableObject {
 
         let confirmedUniqueCount = uniqueRouteCount
         let totalFailures = failedCount + batchFailureCount
-        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: totalFailures)
+        let failures = RouteFailure.unresolved(unresolvedNames)
+            + RouteFailure.batch(.notRouted, failed: batchFailedDests,
+                                 sources: routesToAdd.map { ($0.destination, $0.source) }, error: batchError,
+                                 vpnGateway: vpnGateway)
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: totalFailures, failures: failures)
+        // The last check described the routes before this apply; a stale wrong-way or broken
+        // result must not keep the pill amber over routes that were just put back.
+        clearRouteCheck()
 
         if failedCount > 0 {
             log(.warning, "Applied \(confirmedUniqueCount) unique routes (\(failedCount) domains failed DNS)")
@@ -2293,8 +2706,9 @@ final class RouteManager: ObservableObject {
             failedDomains.removeAll()
         }
 
-        // Only send notification when explicitly requested (Refresh button)
-        if sendNotification && routedAddressCount > 0 {
+        // Only send notification when explicitly requested (Refresh button), and not while a
+        // VPN kill switch makes the routes have no effect: the count would read as success.
+        if sendNotification && routedAddressCount > 0 && vpnKillSwitch == nil {
             NotificationManager.shared.notifyRoutesApplied(count: routedAddressCount, failedCount: totalFailures)
         }
 
@@ -2320,6 +2734,7 @@ final class RouteManager: ObservableObject {
     @discardableResult
     private func applyCustomRoutesInternal(useCacheOnly: Bool, sendNotification: Bool, forceReassert: Bool = false) async -> Bool {
         let epoch = routeEpoch
+        guard !isPaused else { return false }
 
         guard let gateway = localGateway else {
             log(.error, "Custom routing: no local gateway available")
@@ -2383,6 +2798,7 @@ final class RouteManager: ObservableObject {
             orphanFirstSeen.removeAll()
             log(.info, "Custom routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
             lastUpdate = Date()
+            wildcards.routesApplied()   // as the classic skip path
             return true
         }
 
@@ -2390,12 +2806,14 @@ final class RouteManager: ObservableObject {
 
         var batchFailureCount = 0
         var batchFailedDests: Set<String> = []
+        var batchError: String?
         if !routesToAdd.isEmpty {
             if HelperManager.shared.isHelperInstalled {
                 let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
                 let result = await addRoutesBatchTracked(routes: helperRoutes)
                 batchFailureCount = result.failureCount
                 batchFailedDests = Set(result.failedDestinations)
+                batchError = result.error
                 if result.failureCount > 0 {
                     log(.warning, "Custom route batch: \(result.successCount) succeeded, \(result.failureCount) failed (\(result.failedDestinations.prefix(3).joined(separator: ", "))...)")
                 }
@@ -2409,14 +2827,27 @@ final class RouteManager: ObservableObject {
         guard committed else { return false }
 
         let confirmedUniqueCount = uniqueRouteCount
-        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount)
+        // A service rule's routes are recorded under the service id; Problems names the service.
+        var serviceRuleNames: [String: String] = [:]
+        for rule in config.rules where rule.matchType == .service {
+            if let service = config.services.first(where: { $0.id == rule.pattern }) {
+                serviceRuleNames[rule.pattern] = service.name
+            }
+        }
+        let failures = RouteFailure.batch(.notRouted, failed: batchFailedDests,
+                                          sources: routesToAdd.map { ($0.destination, serviceRuleNames[$0.source] ?? $0.source) },
+                                          error: batchError, vpnGateway: vpnGateway)
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount, failures: failures)
+        // The last check described the routes before this apply; a stale wrong-way or broken
+        // result must not keep the pill amber over routes that were just put back.
+        clearRouteCheck()
         if batchFailureCount > 0 {
             log(.warning, "Applied custom routes (\(batchFailureCount) kernel failures — counts approximate until verified)")
         } else {
             log(.success, "Applied \(confirmedUniqueCount) unique custom route(s)")
         }
 
-        if sendNotification && routedAddressCount > 0 {
+        if sendNotification && routedAddressCount > 0 && vpnKillSwitch == nil {
             NotificationManager.shared.notifyRoutesApplied(count: routedAddressCount, failedCount: batchFailureCount)
         }
 
@@ -2532,16 +2963,25 @@ final class RouteManager: ObservableObject {
     /// Remove all routes — always proceeds (critical teardown for disconnect/quit/clear).
     /// Does NOT acquire the route operation gate so it cannot be blocked by a running operation.
     /// Increments routeEpoch so in-flight applies detect preemption and abort before committing.
-    func removeAllRoutes() async {
+    /// - Parameter keepingBlocked: leave VPN Only's blocks in place (the drop teardown, which
+    ///   has just put them there). Every other caller (quit, a mode switch, Remove All Routes)
+    ///   takes them out too.
+    func removeAllRoutes(keepingBlocked: Bool = false) async {
         routeEpoch &+= 1
         // Sweep the union of what the model tracks AND what was pushed to the kernel but
         // never committed (pendingKernelAdds) — the latter is invisible to the model by
-        // design of the epoch guard, and was the strand mechanism on 2026-08-07.
-        let destinations = Array(Set(activeRoutes.map { $0.destination }).union(pendingKernelAdds))
+        // design of the epoch guard, and was the strand mechanism on 2026-08-07. A block is
+        // never in it: removal is by destination, so a block's address would lose its block.
+        let destinations = Array(Set(activeRoutes.map { $0.destination }).union(pendingKernelAdds)
+            .subtracting(blockedDestinations))
 
         var failedDests: Set<String> = []
+        // What each address was routed for, read before the model forgets it.
+        let routedFor = activeRoutes.map { (destination: $0.destination, source: $0.source) }
+        /// Each failed address with its own batch's reason, for Status > Problems.
+        var removeFailures: [RouteFailure] = []
         if !destinations.isEmpty {
-            if HelperManager.shared.isHelperInstalled {
+            if HelperManager.shared.isHelperInstalled || removeRoutesBatchOverrideForTests != nil {
                 // Remove the catch-all routes (the bypass-all set, or a custom 0.0.0.0/0)
                 // FIRST, in their own fast batch. If a time-capped quit cuts teardown short,
                 // the full-tunnel-defeating catch-alls are already gone rather than stranded
@@ -2551,10 +2991,14 @@ final class RouteManager: ObservableObject {
                 if !catchAlls.isEmpty {
                     let r = await removeRoutesBatchVia(catchAlls)
                     failedDests.formUnion(r.failedDestinations)
+                    removeFailures += RouteFailure.batch(.notRemoved, failed: Set(r.failedDestinations),
+                                                         sources: routedFor, error: r.error)
                 }
                 if !rest.isEmpty {
                     let result = await removeRoutesBatchVia(rest)
                     failedDests.formUnion(result.failedDestinations)
+                    removeFailures += RouteFailure.batch(.notRemoved, failed: Set(result.failedDestinations),
+                                                         sources: routedFor, error: result.error)
                     if result.failureCount > 0 {
                         log(.warning, "Batch route removal: \(result.successCount) succeeded, \(result.failureCount) failed — retaining failed entries in model")
                     } else {
@@ -2574,8 +3018,12 @@ final class RouteManager: ObservableObject {
                 // the survivors can include the catch-alls, which then steer every connection
                 // around the tunnel with nothing left able to identify or remove them.
                 failedDests.formUnion(destinations)
+                removeFailures = RouteFailure.batch(.notRemoved, failed: Set(destinations), sources: routedFor,
+                                                    error: String(localized: "the helper is not running"))
             }
         }
+        // After the catch-alls: a time-capped quit must spend its first write on them.
+        if !keepingBlocked { await releaseBlocks(reason: "all routes removed") }
 
         cancelAllRetries()
         // A failed removal must keep its record. The retention filter below only keeps entries
@@ -2597,7 +3045,8 @@ final class RouteManager: ObservableObject {
         lastUpdate = Date()
         // A removal with nothing installed is a no-op and must not hide the last apply's result.
         if !destinations.isEmpty {
-            lastRouteChange = RouteChangeOutcome(kind: .removedAll, at: Date(), routeCount: routedAddressCount, failedCount: failedDests.count)
+            lastRouteChange = RouteChangeOutcome(kind: .removedAll, at: Date(), routeCount: routedAddressCount, failedCount: failedDests.count,
+                                                 failures: removeFailures)
         }
 
         if config.manageHostsFile {
@@ -2615,12 +3064,199 @@ final class RouteManager: ObservableObject {
         log(.info, activeRoutes.isEmpty ? "All routes removed" : "Routes removed (\(activeRoutes.count) entries retained from failed kernel removals)")
     }
     
+    // MARK: - Pause
+
+    /// Takes the app's routes out, so traffic follows the VPN's own routes, until `length` is
+    /// up or Resume. Refused when removing the routes is not safe in this config
+    /// (`PauseGate.blocker`). Pausing again while paused replaces the length. Returns how many
+    /// addresses are still routed: a removal that failed keeps them, and the dropdown then says
+    /// so with Retry instead of Paused.
+    @discardableResult
+    func pause(for length: PauseLength) async -> Result<Int, PauseRefusal> {
+        guard !isShuttingDown else { return .failure(.shuttingDown) }
+        guard !isConfigLoadFailed else { return .failure(.configUnreadable) }
+        if let blocker = PauseGate.blocker(config, isPaused: isPaused, vpnConnected: vpnMayBeConnected,
+                                           routedCount: activeRoutes.count) {
+            log(.info, "Pause refused: \(PauseGate.message(blocker))")
+            return .failure(.blocked(blocker))
+        }
+        // The state first: from here every path that would install a route refuses.
+        pauseState = PauseState(length: length, since: Date(), mode: config.routingMode)
+        schedulePauseTimer()
+        // Drop whatever is queued to install routes: a settle-gated apply, a latched re-route,
+        // a deferred DNS refresh, a Resume apply, per-domain DNS retries (removeAllRoutes).
+        reconnectSettleTask?.cancel()
+        reconnectSettleTask = nil
+        resumeApplyTask?.cancel()
+        resumeApplyTask = nil
+        pendingReroute = false
+        pendingRerouteReason = nil
+        rerouteRetryTask?.cancel()
+        rerouteRetryTask = nil
+        dnsRefreshRetryTask?.cancel()
+        dnsRefreshRetryTask = nil
+        log(.info, "Paused \(length.logText): removing the app's routes")
+        pauseRemovalRunning = true
+        await removeAllRoutes()
+        pauseRemovalRunning = false
+        let left = Set(activeRoutes.map(\.destination)).count
+        if left > 0 {
+            log(.warning, "Paused, but \(left) route(s) could not be removed and are still in place")
+        }
+        return .success(left)
+    }
+
+    /// Tries again to remove what a pause could not. Nothing while not paused.
+    func retryPauseRemoval() async {
+        guard isPaused, !pauseRemovalRunning else { return }
+        pauseRemovalRunning = true
+        await removeAllRoutes()
+        pauseRemovalRunning = false
+    }
+
+    /// Ends the pause and puts the routes back with one apply through the settle gate. While
+    /// config.json cannot be read the app enforces nothing, so a Resume would end the pause and
+    /// put nothing back: it stays paused, says why and returns false. True when it resumed.
+    @discardableResult
+    func resume() -> Bool {
+        guard isPaused else { return false }
+        guard !isConfigLoadFailed else {
+            log(.warning, "Resume refused: config.json could not be read, so nothing would be put back. Staying paused.")
+            return false
+        }
+        endPause(reason: "resumed", apply: true)
+        return true
+    }
+
+    /// Clears the pause. With `apply`, runs the normal apply as Resume does; without it the
+    /// caller runs it (a mode switch, the reconnect handling).
+    func endPause(reason: String, apply: Bool) {
+        guard pauseState != nil else { return }
+        pauseState = nil
+        pauseTimerTask?.cancel()
+        pauseTimerTask = nil
+        log(.info, "Pause ended: \(reason)")
+        if apply { applyAfterResume() }
+    }
+
+    /// A save that leaves a config Pause is not allowed in ends the pause: a proxy route
+    /// turned on starts its listener at once, a rule pointed at the VPN must route, and
+    /// another mode runs its own apply.
+    private func endPauseIfConfigForbidsIt() {
+        guard let pause = pauseState else { return }
+        if config.routingMode != pause.mode {
+            // The mode switch that made this save runs the new mode's apply itself.
+            endPause(reason: "the mode changed", apply: false)
+        } else if let blocker = PauseGate.blocker(config) {
+            endPause(reason: PauseGate.message(blocker), apply: true)
+        }
+    }
+
+    private func schedulePauseTimer() {
+        pauseTimerTask?.cancel()
+        pauseTimerTask = nil
+        guard let until = pauseState?.until else { return }
+        pauseTimerTask = Task { [weak self] in
+            // The continuous clock counts while the Mac sleeps; Task.sleep(nanoseconds:) does
+            // not, so a 15-minute pause over a closed lid ran on for the whole nap. The status
+            // pass (`endPauseIfExpired`) catches what the timer still misses.
+            let wait = max(0, until.timeIntervalSinceNow)
+            let clock = ContinuousClock()
+            try? await Task.sleep(until: clock.now.advanced(by: .seconds(wait)), clock: clock)
+            guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
+            self.pauseTimerTask = nil
+            self.endPause(reason: "the pause time is up", apply: true)
+        }
+    }
+
+    /// Waits, up to 30 s, while an apply, a load or a pause's removal runs.
+    private func waitForRouteWorkToSettle() async {
+        var polls = 0
+        while (isApplyingRoutes || isLoading || pauseRemovalRunning) && polls < 120 && !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            polls += 1
+        }
+    }
+
+    /// Ends a timed pause whose time is up. Run on every VPN status pass (the 30 s timer, a
+    /// network change, a wake), so a pause never outlives its length when the timer is late.
+    func endPauseIfExpired(now: Date = Date()) {
+        guard let until = pauseState?.until, now >= until else { return }
+        endPause(reason: "the pause time is up", apply: true)
+    }
+
+    /// Resume's apply: one apply, the same burst as Refresh, held back as a post-reconnect
+    /// apply is when the tunnel just came up or keeps dropping (`PauseGate.resumeAction`).
+    private func applyAfterResume() {
+        let now = Date()
+        let action = PauseGate.resumeAction(
+            vpnConnected: isVPNConnected,
+            canApply: HelperManager.shared.isHelperInstalled && !isConfigLoadFailed && !isShuttingDown,
+            settlePending: reconnectSettleTask != nil,
+            killStrikes: applyKillStrikes, lastStrikeAt: lastApplyKillAt,
+            lastConnectAt: lastVPNConnectAt, now: now)
+        switch action {
+        case .nothing:
+            log(.info, "Resumed: routes come back when a VPN connects and the helper is ready")
+        case .waitForSettle:
+            log(.info, "Resumed: the scheduled post-reconnect apply puts the routes back")
+        case .apply(let delay, let heldBackStrikes) where delay > 0:
+            log(.info, "Resumed: applying routes in \(Int(delay.rounded(.up)))s once the tunnel settles")
+            reconnectSettleTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard !Task.isCancelled, let self else { return }
+                // The pause has already ended, so an apply that skips on a busy gate would
+                // leave the routes out with nothing to bring them back: wait the gate out.
+                await self.waitForRouteWorkToSettle()
+                guard !Task.isCancelled else { return }
+                await self.runSettledApply(requireAutoApply: false)
+            }
+            pendingReconnectApply = PendingReconnectApply(
+                reason: heldBackStrikes.map { .heldBack(strikes: $0) } ?? .settling,
+                connectedAt: lastVPNConnectAt ?? now, appliesAt: now.addingTimeInterval(delay))
+        case .apply:
+            let resumedAt = now
+            resumeApplyTask?.cancel()
+            resumeApplyTask = Task { [weak self] in
+                guard let self else { return }
+                // An edit that ended the pause may run its own apply right after; let it take
+                // the gate first, and wait out any operation already running.
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                await self.waitForRouteWorkToSettle()
+                guard !Task.isCancelled, !self.isPaused, !self.isShuttingDown else { return }
+                self.resumeApplyTask = nil
+                if let applied = self.lastUpdate, applied > resumedAt, !self.activeRoutes.isEmpty {
+                    return   // that apply already put the routes back
+                }
+                // The addresses resolved before the pause, as the startup apply does: a full
+                // apply resolves every name before it writes a route, which left the routes out
+                // for 49 s on a live test (206 names). DNS is refreshed right after, off the gate.
+                self.isLoading = true
+                let fromCache = self.dnsDiskCache.isEmpty ? false : await self.applyRoutesFromCache()
+                if fromCache {
+                    self.isLoading = false
+                    self.log(.info, "Resumed: routes put back from the DNS cache; refreshing DNS in the background")
+                    self.backgroundRefreshTask = Task.detached { [weak self] in
+                        await self?.backgroundDNSRefresh(sendNotification: false)
+                    }
+                    return
+                }
+                await self.applyAllRoutes()
+                self.isLoading = false
+            }
+        }
+    }
+
     // MARK: - Instant Startup (Cache-based)
     
     /// Apply routes using cached IPs only (no DNS resolution) - used for instant startup
     /// Returns false if apply was skipped (no gateway, gate held, preempted, etc.)
     private func applyRoutesFromCache() async -> Bool {
         let epoch = routeEpoch
+        guard !isPaused else {
+            log(.info, "Cache apply skipped: paused")
+            return false
+        }
         guard acquireRouteOperation() else {
             log(.info, "Cache apply skipped: route operation in progress")
             return false
@@ -2714,12 +3350,14 @@ final class RouteManager: ObservableObject {
         // Apply routes in batch via helper
         var batchFailureCount = 0
         var batchFailedDests: Set<String> = []
+        var batchError: String?
         if !routesToAdd.isEmpty {
             if HelperManager.shared.isHelperInstalled {
                 let helperRoutes = routesToAdd.map { (destination: $0.destination, gateway: $0.gateway, isNetwork: $0.isNetwork) }
                 let result = await addRoutesBatchTracked(routes: helperRoutes)
                 batchFailureCount = result.failureCount
                 batchFailedDests = Set(result.failedDestinations)
+                batchError = result.error
                 if result.failureCount > 0 {
                     log(.warning, "Cache route batch: \(result.successCount) succeeded, \(result.failureCount) failed — will reconcile on DNS refresh")
                 }
@@ -2731,14 +3369,22 @@ final class RouteManager: ObservableObject {
 
         let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Cache ")
         guard committed else { return false }
-        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount)
+        let failures = RouteFailure.batch(.notRouted, failed: batchFailedDests,
+                                          sources: routesToAdd.map { ($0.destination, $0.source) }, error: batchError,
+                                          vpnGateway: vpnGateway)
+        lastRouteChange = RouteChangeOutcome(kind: .applied, at: Date(), routeCount: routedAddressCount, failedCount: batchFailureCount, failures: failures)
+        // The last check described the routes before this apply; a stale wrong-way or broken
+        // result must not keep the pill amber over routes that were just put back.
+        clearRouteCheck()
 
         if batchFailureCount > 0 {
             log(.warning, "Applied routes from cache (\(batchFailureCount) kernel failures — counts approximate)")
         } else {
             log(.success, "Applied \(uniqueRouteCount) unique routes from cache")
         }
-        return true
+        // A failed add is not retried by the DNS refresh after it, which adds only addresses
+        // whose answer changed: false sends Resume on to the full apply, which re-adds it.
+        return batchFailureCount == 0
     }
 
     /// Partition the stale kernel routes (active destinations no longer in the new set)
@@ -2789,7 +3435,11 @@ final class RouteManager: ObservableObject {
     /// timeout with no explicit failed list is treated conservatively as "all failed" (over-retaining
     /// is a harmless no-op next teardown; under-retaining would strand).
     private func unstrandRoutes(attempted: Set<String>, addFailed: Set<String>) async {
-        let split = RouteManager.destinationsToUnstrand(attempted: attempted, addFailed: addFailed)
+        // A destination blocked since this apply pushed it holds a block now, not this apply's
+        // route; removing it by destination would open the site (the drop teardown re-blocked it).
+        let blocked = blockedDestinations
+        let split = RouteManager.destinationsToUnstrand(attempted: attempted.subtracting(blocked),
+                                                        addFailed: addFailed)
         if split.catchAlls.isEmpty && split.rest.isEmpty { return }
         guard HelperManager.shared.isHelperInstalled || removeRoutesBatchOverrideForTests != nil else { return }
         log(.warning, "🔧 Apply preempted — removing \(split.catchAlls.count + split.rest.count) route(s) added before preemption to avoid a strand (#61)")
@@ -2914,7 +3564,9 @@ final class RouteManager: ObservableObject {
         // stayed gone for the TTL removes that churn; graced routes keep working meanwhile
         // (they egress the stable local gateway). User-initiated applies pass
         // orphanGrace=false, so an explicit removal still takes effect immediately.
-        if orphanGrace && config.routingMode == .bypass {
+        let graceAllowed = !listsSwitchedSinceCommit
+        listsSwitchedSinceCommit = false
+        if orphanGrace && graceAllowed && config.routingMode == .bypass {
             let outcome = Self.orphanGraceDecision(orphaned: stalePartition.orphaned,
                                                    applied: newDestinations,
                                                    firstSeen: orphanFirstSeen,
@@ -2939,6 +3591,9 @@ final class RouteManager: ObservableObject {
         if !trulyOrphanedDests.isEmpty {
             let result = await removeRoutesBatchVia(trulyOrphanedDests)
             if result.failureCount > 0 {
+                // A route the switch took off stays marked, so the next apply's grace does not
+                // keep it either.
+                if !graceAllowed { listsSwitchedSinceCommit = true }
                 log(.warning, "\(logLabel)Orphan cleanup: \(result.successCount) removed, \(result.failureCount) failed — retaining")
                 let failedSet = Set(result.failedDestinations)
                 for route in activeRoutes where failedSet.contains(route.destination) && !newDestinations.contains(route.destination) {
@@ -2972,6 +3627,12 @@ final class RouteManager: ObservableObject {
         lastUpdate = Date()
         wildcards.routesApplied()
 
+        // The VPN is back and this apply put the listed routes in: each block it installed
+        // over is replaced already, and any block for an address no longer listed goes.
+        if !blockedRoutes.isEmpty && isVPNConnected {
+            await releaseBlocks(replacedBy: newDestinations, reason: "VPN Only routes are back")
+        }
+
         // Manage hosts file if enabled
         if config.manageHostsFile {
             await updateHostsFile()
@@ -2983,6 +3644,7 @@ final class RouteManager: ObservableObject {
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
     private func backgroundDNSRefresh(sendNotification: Bool) async {
         let epoch = routeEpoch
+        guard !isPaused else { return }
         guard acquireRouteOperation() else {
             log(.info, "Background DNS refresh skipped: another route operation is in progress")
             return
@@ -3060,6 +3722,12 @@ final class RouteManager: ObservableObject {
             return results
         }
         
+        // Every enabled entry was looked up again, as on a full apply.
+        if routeEpoch == epoch {
+            unresolvedLookups = Self.lookupRecord(unresolved: results.filter { $0.2?.isEmpty ?? true }
+                                                      .map { (domain: $0.0, source: $0.1) })
+        }
+
         // Update per-domain caches first
         for (domain, _, ips) in results {
             guard let ips = ips, !ips.isEmpty else { continue }
@@ -3308,12 +3976,41 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Counts this refresh's failures on the list it resolved (StaleEntries), so a listed name
+    /// that stopped resolving says so on its Domains row. Read after the lookups: the VPN may
+    /// have dropped, or the mode changed, while they ran. `reconnected`: the VPN dropped and came
+    /// back during the lookups, so a failure may be the outage's; only the answers count then.
+    func recordResolveFailures(isInverse: Bool, attempted: Set<String>, resolved: Set<String>,
+                               reconnected: Bool = false) {
+        guard (config.routingMode == .vpnOnly) == isInverse, config.routingMode != .custom else { return }
+        let entries = isInverse ? config.inverseDomains : config.domains
+        guard let updated = StaleEntries.record(entries, attempted: reconnected ? resolved : attempted,
+                                                resolved: resolved, vpnUp: isVPNConnected, now: Date())
+        else { return }
+        if isInverse { config.inverseDomains = updated } else { config.domains = updated }
+        guard !isConfigLoadFailed else { return }
+        do {
+            try saveConfigThrowing(isBookkeeping: true)
+        } catch {
+            // Keep memory as the disk has it, so the next refresh counts again and retries the
+            // save; a count stuck at the threshold in memory would never be written.
+            if isInverse { config.inverseDomains = entries } else { config.domains = entries }
+            log(.error, "Failed to save configuration: \(error.localizedDescription)")
+        }
+    }
+
     /// Perform DNS refresh - re-resolve all domains and update routes
     ///
     /// `userInitiated` (the Refresh action) skips the calm-tunnel gate: a person asking for it
     /// now gets it now. The periodic timer and its deferred retry go through the gate.
     private func performDNSRefresh(userInitiated: Bool = false) async {
         let epoch = routeEpoch
+        let connectStamp = lastVPNConnectAt
+        guard !isPaused else {
+            log(.info, "DNS refresh skipped: paused")
+            nextDNSRefresh = config.autoDNSRefresh ? Date().addingTimeInterval(config.dnsRefreshInterval) : nil
+            return
+        }
         guard acquireRouteOperation() else {
             log(.info, "DNS refresh skipped: another route operation is in progress")
             return
@@ -3456,6 +4153,13 @@ final class RouteManager: ObservableObject {
         var resolvedDomainIPs: [String: [String]] = [:]
         for (domain, ips) in domainResults {
             if let ips = ips { resolvedDomainIPs[domain] = ips }
+        }
+        if routeEpoch == epoch {
+            // Every enabled entry was looked up again, as on a full apply.
+            unresolvedLookups = Self.lookupRecord(looked: domainsToResolve, answers: resolvedDomainIPs)
+            recordResolveFailures(isInverse: isInverse, attempted: Set(uniqueDomains),
+                                  resolved: Set(resolvedDomainIPs.keys),
+                                  reconnected: lastVPNConnectAt != connectStamp)
         }
 
         // Plan the route delta purely (see DNSRefreshPlanner): which new kernel routes to add,
@@ -3641,6 +4345,21 @@ final class RouteManager: ObservableObject {
         }
     }
     
+    /// Edits the global SOCKS5 proxy (General > Advanced) and keeps its Proxy route in step
+    /// (`Config.withGlobalProxy`), then saves, and restarts or re-points that route's listener.
+    func updateGlobalProxy(_ change: (inout ProxyConfig) -> Void) {
+        guard !isConfigLoadFailed else { return }
+        var next = config.proxyConfig
+        change(&next)
+        guard next != config.proxyConfig else { return }
+        let routesBefore = config.routes
+        config = config.withGlobalProxy(next)
+        saveConfig()
+        if config.routes != routesBefore {
+            Task { await reconcileProxyListeners() }
+        }
+    }
+
     /// Test SOCKS5 proxy connection
     func testProxyConnection() async {
         guard config.proxyConfig.isConfigured else {
@@ -3757,7 +4476,13 @@ final class RouteManager: ObservableObject {
     /// `restoreDomain`.
     private func routeNewBypassEntry(_ entry: DomainEntry) {
         let cleaned = entry.domain
-        if isVPNConnected && bypassListIsLive && acquireRouteOperation() {
+        // A removed entry of this name may have left its lookup record; the lookup below may
+        // not run. The VPN Only entry of the same name shares the record, so it keeps it.
+        if !config.inverseDomains.contains(where: { $0.domain == cleaned }) {
+            noteLookups(for: cleaned, unresolved: [])
+        }
+        // Paused: the entry is saved, and Resume applies it.
+        if isVPNConnected && bypassListIsLive && !isPaused && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 let epoch = routeEpoch
@@ -3783,6 +4508,7 @@ final class RouteManager: ObservableObject {
     }
 
     func scheduleRetry(for domain: String) {
+        guard !isPaused else { return }
         pendingRetryTasks[domain]?.cancel()
         pendingRetryTasks[domain] = Task { [weak self] in
             do {
@@ -3797,6 +4523,7 @@ final class RouteManager: ObservableObject {
     }
     
     private func retryFailedDomain(_ domain: String) async {
+        guard !isPaused else { return }
         // Custom mode: a rule-domain that failed DNS re-triggers a full custom re-apply
         // (re-resolving every rule against live DNS), reusing scheduleRetry's per-domain
         // timer/dedup machinery. applyCustomRoutesInternal is gate-free, so we take the
@@ -3876,6 +4603,12 @@ final class RouteManager: ObservableObject {
     /// Callers must already have decided (via RerouteDecider) that a re-route is warranted
     /// and runnable.
     func performReroute() async {
+        // Paused, nothing is installed to re-point; Resume applies on the current gateway.
+        guard !isPaused else {
+            pendingReroute = false
+            pendingRerouteReason = nil
+            return
+        }
         lastInterfaceReroute = Date()
         if localGateway != nil, acquireRouteOperation() {
             // Clear the latch HERE — at the START of the re-route, synchronously after
@@ -3993,6 +4726,11 @@ final class RouteManager: ObservableObject {
     /// the SAME pure RerouteDecider so the retry and the timer share one decision.
     private func attemptPendingReroute() async -> Bool {
         guard pendingReroute else { return true }   // already handled elsewhere
+        guard !isPaused else {                      // nothing to re-point while paused
+            pendingReroute = false
+            pendingRerouteReason = nil
+            return true
+        }
         guard isVPNConnected else {                 // disconnected during the wait — drop it
             pendingReroute = false
             pendingRerouteReason = nil
@@ -4090,6 +4828,8 @@ final class RouteManager: ObservableObject {
                     if config.manageHostsFile { await updateHostsFile() }
                 }
             }
+        } else if !isVPNConnected {
+            Task { await releaseBlocksIfUnwanted() }
         }
     }
 
@@ -4158,6 +4898,14 @@ final class RouteManager: ObservableObject {
     /// Remove all routes matching a source (domain name or service name)
     /// Only removes kernel routes if no other source shares the same destination
     private func removeRoutesForSource(_ source: String) async {
+        // An entry taken off the list while its addresses are blocked loses its blocks, except
+        // an address another blocked entry shares.
+        let otherBlocked = Set(blockedRoutes.filter { $0.source != source }.map(\.destination))
+        let ownBlocked = Set(blockedRoutes.filter { $0.source == source }.map(\.destination))
+        if !ownBlocked.isEmpty {
+            blockedRoutes.removeAll { $0.source == source && otherBlocked.contains($0.destination) }
+            await releaseBlocks(only: ownBlocked.subtracting(otherBlocked), reason: "\(source) is off the list")
+        }
         let routesToRemove = activeRoutes.filter { $0.source == source }
         let destinationsStillNeeded = Set(activeRoutes.filter { $0.source != source }.map { $0.destination })
 
@@ -4246,7 +4994,11 @@ final class RouteManager: ObservableObject {
     /// or `restoreInverseDomain`.
     private func routeNewInverseEntry(_ inverseEntry: DomainEntry) {
         let cleaned = inverseEntry.domain, cidr = inverseEntry.isCIDR
-        if isVPNConnected && config.routingMode == .vpnOnly && acquireRouteOperation() {
+        // As on the Bypass list: drop a removed entry's record, unless a Bypass entry shares it.
+        if !config.domains.contains(where: { $0.domain == cleaned }) {
+            noteLookups(for: cleaned, unresolved: [])
+        }
+        if isVPNConnected && config.routingMode == .vpnOnly && !isPaused && acquireRouteOperation() {
             Task {
                 defer { releaseRouteOperation() }
                 let epoch = routeEpoch
@@ -4373,6 +5125,8 @@ final class RouteManager: ObservableObject {
                 await applyAllRoutesInternal(sendNotification: false)
                 if config.manageHostsFile { await updateHostsFile() }
             }
+        } else if !isVPNConnected {
+            Task { await releaseBlocksIfUnwanted() }
         }
         return changed
     }
@@ -4380,6 +5134,8 @@ final class RouteManager: ObservableObject {
     /// Switch routing mode and re-apply routes
     func setRoutingMode(_ mode: RoutingMode) {
         guard config.routingMode != mode else { return }
+        // Changing mode ends a pause: the switch below runs the new mode's normal apply.
+        if isPaused { endPause(reason: "the mode changed", apply: false) }
 
         // Entering Custom mode: ensure the routes/rules model exists so the user's
         // bypass/vpnOnly lists keep routing after the switch. This is a pure migration
@@ -4394,6 +5150,8 @@ final class RouteManager: ObservableObject {
         config.routingMode = mode
         saveConfig()
         log(.info, "Routing mode changed to \(mode.displayName)")
+        // With the VPN down the switch below does nothing, so blocks would outlive the mode.
+        if !isVPNConnected { Task { await releaseBlocksIfUnwanted() } }
         applyRoutingModeChange()
     }
 
@@ -4436,9 +5194,15 @@ final class RouteManager: ObservableObject {
     // MARK: - Custom Service Management
 
     /// The service or Bypass list entry a custom service called `name` would share its routes
-    /// with, or nil when the name is free. `excluding` is the service being edited.
-    func customServiceNameClash(_ name: String, excluding id: String? = nil) -> ServiceNameClash? {
-        ServiceNameClash.find(name, excluding: id, services: config.services, domains: config.domains)
+    /// with, or nil when the name is free. `excluding` is the service being edited. A built-in
+    /// service that is off is no clash when the edited service already has `name` (or
+    /// `keepsName` says so, for a service put back by Undo): it holds that built-in off.
+    func customServiceNameClash(_ name: String, excluding id: String? = nil, keepsName: Bool = false) -> ServiceNameClash? {
+        let ownName = id.flatMap { id in config.services.first { $0.id == id }?.name }
+        let keeps = keepsName || ownName.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        } == true
+        return ServiceNameClash.find(name, excluding: id, keepsName: keeps, services: config.services, domains: config.domains)
     }
 
     /// Saves nothing and returns the clash when `name` is taken (see `ServiceNameClash`).
@@ -4467,7 +5231,7 @@ final class RouteManager: ObservableObject {
             log(.warning, "Custom service \(service.name) is still listed, nothing to restore")
             return false
         }
-        if let clash = customServiceNameClash(service.name, excluding: service.id) {
+        if let clash = customServiceNameClash(service.name, excluding: service.id, keepsName: true) {
             log(.warning, "Custom service \(service.name) not restored: \(clash.message)")
             return false
         }
@@ -4583,7 +5347,7 @@ final class RouteManager: ObservableObject {
     private func rerouteChangedService(_ service: ServiceEntry) {
         guard isVPNConnected, service.enabled else { return }
         if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
-            Task { await reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
+            startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
             return
         }
         guard bypassListIsLive, acquireRouteOperation() else { return }
@@ -4670,12 +5434,6 @@ final class RouteManager: ObservableObject {
         ServiceNameClash.customServiceHolding(nameOf: service, in: config.services)
     }
 
-    /// The services Turn All On switches on: the ones off, less those a custom service holds
-    /// off. The Services page counts and names these in its menu and question.
-    var servicesTurnAllOnSwitchesOn: [ServiceEntry] {
-        config.services.filter { !$0.enabled && customServiceHolding(nameOf: $0) == nil }
-    }
-
     func toggleService(_ serviceId: String) {
         guard let index = config.services.firstIndex(where: { $0.id == serviceId }) else { return }
         if !config.services[index].enabled, let custom = customServiceHolding(nameOf: config.services[index]) {
@@ -4708,75 +5466,85 @@ final class RouteManager: ObservableObject {
     
     /// Apply routes for a single service (incremental add) - parallel DNS + batch routes
     private func applyRoutesForService(_ service: ServiceEntry, gateway: String) async {
+        await applyRoutesForServices([service], gateway: gateway)
+    }
+
+    /// Apply routes for several services at once (incremental add): every name is looked up
+    /// once, in parallel, and every new kernel route goes in ONE batch, so switching on ten
+    /// services from the catalogue writes the routing table once instead of ten times while
+    /// a VPN is up. Each service still owns its own addresses (`ActiveRoute.source`).
+    private func applyRoutesForServices(_ services: [ServiceEntry], gateway: String) async {
+        // Paused: a service turned on is saved, and Resume applies it.
+        guard !services.isEmpty, !isPaused else { return }
         let epoch = routeEpoch
         var newRoutes: [ActiveRoute] = []
         var routesToAdd: [(destination: String, gateway: String, isNetwork: Bool)] = []
 
         // Track existing destinations (for kernel-add dedup) and existing ownership (for source dedup)
         let existingDestinations = Set(activeRoutes.map { $0.destination })
-        let existingOwnership = Set(activeRoutes.map { "\($0.source)|\($0.destination)" })
+        var ownership = Set(activeRoutes.map { "\($0.source)|\($0.destination)" })
         var kernelAddedDests: Set<String> = []
 
         // Capture DNS settings for parallel resolution
         let userDNS = detectedDNSServer
         let fallbackDNS = config.fallbackDNS
 
-        // Resolve ALL domains in parallel (not sequentially)
-        let domainResults = await withTaskGroup(of: (String, [String]?).self) { group in
-            for domain in service.resolvableDomains {
+        // Resolve every name of every service in parallel, each name once
+        var names: [String] = []
+        for name in services.flatMap(\.resolvableDomains) where !names.contains(name) { names.append(name) }
+        let resolved = await withTaskGroup(of: (String, [String]?).self) { group in
+            for domain in names {
                 group.addTask {
                     let ips = await DNSResolver.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
                     return (domain, ips)
                 }
             }
 
-            var results: [(String, [String]?)] = []
-            for await result in group {
-                results.append(result)
+            var results: [String: [String]] = [:]
+            for await (domain, ips) in group {
+                if let ips { results[domain] = ips }
             }
             return results
         }
 
-        // Collect routes from resolved domains
-        var cacheUpdated = false
-        for (domain, ips) in domainResults {
-            guard let ips = ips else { continue }
-
-            // Cache all IPs (disk) and first IP (memory) for hosts file and startup
+        // Cache all IPs (disk) and first IP (memory) for hosts file and startup
+        for (domain, ips) in resolved {
             dnsDiskCache[domain] = ips
-            cacheUpdated = true
             if let firstIP = ips.first {
                 dnsCache[domain] = firstIP
             }
+        }
 
-            for ip in ips {
-                // Only add kernel route if destination is new (not already in kernel)
-                if !existingDestinations.contains(ip) && !kernelAddedDests.contains(ip) {
-                    kernelAddedDests.insert(ip)
-                    routesToAdd.append((destination: ip, gateway: gateway, isNetwork: false))
-                }
-                // Always record ownership entry if this service doesn't already own this destination
-                let ownershipKey = "\(service.name)|\(ip)"
-                if !existingOwnership.contains(ownershipKey) {
-                    newRoutes.append(ActiveRoute(destination: ip, gateway: gateway, source: service.name, timestamp: Date()))
-                }
+        /// The new routes of each service, by name, for its log line.
+        var addedFor: [String: Int] = [:]
+        func take(_ destination: String, isNetwork: Bool, for service: ServiceEntry) {
+            // Only add kernel route if destination is new (not already in kernel)
+            if !existingDestinations.contains(destination) && !kernelAddedDests.contains(destination) {
+                kernelAddedDests.insert(destination)
+                routesToAdd.append((destination: destination, gateway: gateway, isNetwork: isNetwork))
+            }
+            // Always record ownership entry if this service doesn't already own this destination
+            let ownershipKey = "\(service.name)|\(destination)"
+            if !ownership.contains(ownershipKey) {
+                ownership.insert(ownershipKey)
+                newRoutes.append(ActiveRoute(destination: destination, gateway: gateway, source: service.name, timestamp: Date()))
             }
         }
 
-        // Add IP ranges (no DNS needed)
-        for range in service.ipRanges {
-            if !existingDestinations.contains(range) && !kernelAddedDests.contains(range) {
-                kernelAddedDests.insert(range)
-                routesToAdd.append((destination: range, gateway: gateway, isNetwork: true))
+        for service in services {
+            for domain in service.resolvableDomains {
+                for ip in resolved[domain] ?? [] { take(ip, isNetwork: false, for: service) }
             }
-            let ownershipKey = "\(service.name)|\(range)"
-            if !existingOwnership.contains(ownershipKey) {
-                newRoutes.append(ActiveRoute(destination: range, gateway: gateway, source: service.name, timestamp: Date()))
-            }
+            noteLookups(for: service.name,
+                        unresolved: Set(service.resolvableDomains.filter { resolved[$0]?.isEmpty ?? true }))
+            // Add IP ranges (no DNS needed)
+            for range in service.ipRanges { take(range, isNetwork: true, for: service) }
         }
 
         // Persist DNS cache so cache-based startup can use these IPs
-        if cacheUpdated { saveDNSCache() }
+        if !resolved.isEmpty { saveDNSCache() }
+
+        let label = services.count == 1 ? services[0].name : "\(services.count) services"
 
         // Apply new kernel routes in single batch, exclude failed destinations from ownership
         var failedDests: Set<String> = []
@@ -4784,7 +5552,7 @@ final class RouteManager: ObservableObject {
             let result = await addRoutesBatchTracked(routes: routesToAdd)
             failedDests = Set(result.failedDestinations)
             if result.failureCount > 0 {
-                log(.warning, "Batch route add for \(service.name): \(result.successCount) succeeded, \(result.failureCount) failed")
+                log(.warning, "Batch route add for \(label): \(result.successCount) succeeded, \(result.failureCount) failed")
             }
         }
 
@@ -4799,7 +5567,7 @@ final class RouteManager: ObservableObject {
 
         // Preemption check before committing
         guard routeEpoch == epoch else {
-            log(.info, "Service apply aborted for \(service.name): routes were cleared during operation")
+            log(.info, "Service apply aborted for \(label): routes were cleared during operation")
             await unstrandRoutes(attempted: Set(routesToAdd.map { $0.destination }), addFailed: failedDests)
             return
         }
@@ -4808,8 +5576,13 @@ final class RouteManager: ObservableObject {
             activeRoutes.append(contentsOf: confirmedRoutes)
         }
 
-        if !confirmedRoutes.isEmpty {
-            log(.success, "Added \(confirmedRoutes.count) route entries for \(service.name) (\(routesToAdd.count - failedDests.count) kernel routes)")
+        for route in confirmedRoutes { addedFor[route.source, default: 0] += 1 }
+        for service in services {
+            guard let count = addedFor[service.name] else { continue }
+            addedFor[service.name] = nil
+            let kernel = Set(confirmedRoutes.filter { $0.source == service.name }.map(\.destination))
+                .intersection(kernelAddedDests).subtracting(failedDests).count
+            log(.success, "Added \(count) route entries for \(service.name) (\(kernel) kernel routes)")
         }
     }
     
@@ -4851,11 +5624,12 @@ final class RouteManager: ObservableObject {
                 log(.error, "Cannot enable services: no local gateway detected")
                 return
             }
-            for service in servicesToChange {
-                guard routeEpoch == epoch else { return }
-                if enabled, let gw = gateway {
-                    await applyRoutesForService(service, gateway: gw)
-                } else if !enabled {
+            if enabled, let gw = gateway {
+                // One lookup pass and one batch of route writes for all of them.
+                await applyRoutesForServices(servicesToChange, gateway: gw)
+            } else if !enabled {
+                for service in servicesToChange {
+                    guard routeEpoch == epoch else { return }
                     await removeRoutesForSource(service.name)
                 }
             }
@@ -4866,8 +5640,10 @@ final class RouteManager: ObservableObject {
     
     // MARK: - Route Verification
     
-    /// Pings a sample of the routed single addresses (`RouteCheck.plan`) and logs one line per
-    /// result, so the card's "Show all results in Logs" has them all.
+    /// Path-checks a sample of the routed single addresses (`RouteCheck.plan`) and logs one line
+    /// per result, so the card's "Show all results in Logs" has them all. Each address must leave
+    /// the way its route sends it and answer on port 443; the run's control, an address the app
+    /// does not route, must leave the other way, or every result reads "check broken".
     func verifyRoutes() async {
         log(.info, "Verifying routes...")
         // Every result line is logged after this, so the card can tell when the log lost them.
@@ -4886,40 +5662,164 @@ final class RouteManager: ObservableObject {
         // A check dropped by a newer one must not turn the newer one's spinner off.
         defer { if generation == routeCheckGeneration { isCheckingRoutes = false } }
 
+        let vpn = isVPNConnected ? vpnInterface : nil
+        let local = localGateway
+        let gateways = Dictionary(activeRoutes.map { ($0.destination, $0.gateway) }, uniquingKeysWith: { first, _ in first })
+        let control = await runPathControl(vpnInterface: vpn)
+        let probes = await probeAll(plan.destinations)
+
         var results: [RouteVerificationResult] = []
-        for destination in plan.destinations {
-            let result = await verifyRoute(destination)
+        // Sent only once the run is known to be current, so a dropped run alerts nobody.
+        var alerts: [(route: String, reason: String)] = []
+        for probe in probes {
+            let destination = probe.address
+            let expected = gateways[destination].flatMap {
+                PathCheck.way(forGateway: $0, localGateway: local, vpnInterface: vpn)
+            }
+            let result = PathCheck.verificationResult(probe, expected: expected, control: control)
             results.append(result)
             let source = plan.sources[destination].map { " (\($0))" } ?? ""
             if result.isReachable {
                 let time = result.latency.map { " in \(Int($0.rounded())) ms" } ?? ""
-                log(.info, "Route check: \(destination)\(source) reachable\(time)")
+                log(.info, "Route check: \(destination)\(source) left through \(probe.interface ?? "?"), answered\(time)")
             } else {
-                log(.warning, "Route check: \(destination)\(source) not reachable: \(result.error ?? "Unreachable")")
-                NotificationManager.shared.notifyRouteVerificationFailed(
-                    route: destination,
-                    reason: result.error ?? "Unreachable"
-                )
+                log(.warning, "Route check: \(destination)\(source) \(Self.pathLogReason(probe, expected: expected, control: control))")
+                if case .broken = control { continue }
+                alerts.append((route: destination, reason: result.error ?? "Unreachable"))
             }
         }
         guard generation == routeCheckGeneration else {
             log(.info, "Route check: result dropped, routes were removed or another check started while it ran")
             return
         }
-        lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: logsFrom, at: Date())
+        for alert in alerts {
+            NotificationManager.shared.notifyRouteVerificationFailed(route: alert.route, reason: alert.reason)
+        }
+        if case .broken(let interface) = control, !results.isEmpty {
+            // One notification for the run, not one per address.
+            NotificationManager.shared.notifyRouteVerificationFailed(route: String(localized: "Route check"),
+                                                                     reason: SiteRoute.checkSentence(.checkBroken, interface: interface, expected: nil) ?? "")
+        }
+        let broken: Bool
+        if case .broken = control { broken = !results.isEmpty } else { broken = false }
+        lastRouteCheck = RouteCheck.Run(plan: plan, results: results, logsFrom: logsFrom, at: Date(),
+                                        controlBroken: broken)
 
         let checked = results.count
         let failedCount = results.filter { !$0.isReachable }.count
         let scope = "checked \(checked) of \(plan.routeCount) routes\(plan.singleAddresses < plan.routeCount ? ", single addresses only" : "")"
         if checked == 0 {
-            log(.info, "Route check: nothing to check, all \(plan.routeCount) routes are address ranges, which ping cannot test")
+            log(.info, "Route check: nothing to check, all \(plan.routeCount) routes are address ranges, which the path check cannot test")
+        } else if case .broken = control {
+            log(.warning, "Route check: check broken, the control left the same way as the routed addresses (\(scope))")
         } else if failedCount > 0 {
-            log(.warning, "Route check: \(failedCount) of \(checked) not reachable (\(scope))")
+            log(.warning, "Route check: \(failedCount) of \(checked) failed (\(scope))")
         } else {
-            log(.success, "Route check: all \(checked) reachable (\(scope))")
+            log(.success, "Route check: all \(checked) left the right way and answered (\(scope))")
         }
     }
+
+    /// The control for a path check: one address no route of the app covers, which must leave
+    /// the way unrouted addresses take in this mode. Logged either way.
+    func runPathControl(vpnInterface vpn: String?) async -> PathCheck.Control {
+        guard let unrouted = SiteRoute.unroutedWay(config: config, vpnInterface: vpn) else {
+            log(.info, "Route check: no control, \(vpn == nil ? "the VPN is not connected, so there is one way out" : "the default route does not use the routing table")")
+            return .notRun
+        }
+        let routed = activeRoutes.filter { $0.source != ClassicRouteCompiler.catchAllSource }.map(\.destination)
+        guard let address = PathCheck.controlAddress(routed: routed) else {
+            log(.info, "Route check: no control, every control address is routed")
+            return .notRun
+        }
+        let probe = await pathProbe(address, waitForAnswer: false)
+        let control = PathCheck.control(probe, unrouted: unrouted)
+        switch control {
+        case .passed:
+            log(.info, "Route check: control \(address) left through \(probe.interface ?? "?"), the way unrouted addresses take")
+        case .broken(let interface):
+            log(.warning, "Route check: control \(address) left through \(interface ?? "no interface"), expected \(unrouted.code): check broken")
+        case .notRun:
+            break
+        }
+        return control
+    }
+
+    /// Tests answer path probes here instead of opening connections.
+    var pathProbeOverrideForTests: ((_ address: String, _ waitForAnswer: Bool) async -> PathCheck.Probe)?
+
+    func pathProbe(_ address: String, waitForAnswer: Bool = true) async -> PathCheck.Probe {
+        if let override = pathProbeOverrideForTests { return await override(address, waitForAnswer) }
+        return await PathCheck.probeAsync(address, waitForAnswer: waitForAnswer)
+    }
+
+    /// Probes every address at once, in their order.
+    func probeAll(_ addresses: [String]) async -> [PathCheck.Probe] {
+        if pathProbeOverrideForTests != nil {
+            var out: [PathCheck.Probe] = []
+            for address in addresses { out.append(await pathProbe(address)) }
+            return out
+        }
+        return await withTaskGroup(of: (Int, PathCheck.Probe).self) { group in
+            for (index, address) in addresses.enumerated() {
+                group.addTask { (index, await PathCheck.probeAsync(address)) }
+            }
+            var out: [(Int, PathCheck.Probe)] = []
+            for await item in group { out.append(item) }
+            return out.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+    }
+
+    /// The log's English reason for a failed path check.
+    nonisolated static func pathLogReason(_ probe: PathCheck.Probe, expected: PathCheck.Way?,
+                                          control: PathCheck.Control) -> String {
+        let via = probe.interface ?? "no interface"
+        if case .broken = control { return "left through \(via), check broken" }
+        if let expected, let interface = probe.interface, !PathCheck.matches(interface, expected) {
+            return "left through \(via), expected \(expected.code)"
+        }
+        if probe.interface == nil { return "the routing table named no interface" }
+        return "left through \(via), \(probe.answer == .failed ? "the connection could not start" : "nothing answered on port 443")"
+    }
     
+    /// Adds the rewritten `names` to the list Status shows and saves it, so it outlives a
+    /// relaunch until dismissed. Returns the changes that were not listed yet.
+    @discardableResult
+    func recordConvertedEntries(_ names: [String]) -> [ConvertedEntry] {
+        let new = names.compactMap(ConvertedEntry.of(legacy:))
+            .filter { change in !convertedEntries.contains { $0.from == change.from } }
+        guard !new.isEmpty else { return [] }
+        convertedEntries = ConvertedEntry.merging(convertedEntries, new)
+        do {
+            try JSONEncoder().encode(convertedEntries).write(to: convertedEntriesURL, options: .atomic)
+            // Owner-only, like config.json: it names the user's entries.
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: convertedEntriesURL.path)
+        } catch {
+            log(.warning, "Could not save the list of updated entries: \(error.localizedDescription)")
+        }
+        return new
+    }
+
+    /// The user read the note: it goes, and does not come back on the next launch.
+    func dismissConvertedEntries() {
+        convertedEntries = []
+        guard FileManager.default.fileExists(atPath: convertedEntriesURL.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: convertedEntriesURL)
+        } catch {
+            log(.warning, "Could not remove the list of updated entries, so the note may come back on the next launch: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadConvertedEntries() {
+        convertedEntries = []
+        guard FileManager.default.fileExists(atPath: convertedEntriesURL.path) else { return }
+        do {
+            convertedEntries = try JSONDecoder().decode([ConvertedEntry].self, from: Data(contentsOf: convertedEntriesURL))
+        } catch {
+            log(.warning, "Could not read the list of updated entries: \(error.localizedDescription)")
+        }
+    }
+
     /// Drops the card, and the result of any check still running.
     func clearRouteCheck() {
         routeCheckGeneration += 1
@@ -4927,44 +5827,6 @@ final class RouteManager: ObservableObject {
         isCheckingRoutes = false
     }
 
-    func verifyRoute(_ destination: String) async -> RouteVerificationResult {
-        let startTime = Date()
-        
-        // Use helper with timeout - ping itself has 3s timeout, we add 1s buffer
-        guard let result = await runProcessAsync("/sbin/ping", arguments: ["-c", "1", "-t", "3", destination], timeout: 4.0) else {
-            return RouteVerificationResult(
-                destination: destination,
-                isReachable: false,
-                latency: nil,
-                timestamp: Date(),
-                error: String(localized: "Ping timed out")
-            )
-        }
-        
-        let elapsed = Date().timeIntervalSince(startTime) * 1000 // Convert to ms
-        let output = result.output
-        
-        // Parse ping output for round-trip time
-        var latency: Double? = nil
-        if let timeRange = output.range(of: "time=") {
-            let timeStr = output[timeRange.upperBound...]
-            if let endRange = timeStr.range(of: " ms") {
-                let msStr = String(timeStr[..<endRange.lowerBound])
-                latency = Double(msStr)
-            }
-        }
-        
-        let isReachable = result.exitCode == 0
-        
-        return RouteVerificationResult(
-            destination: destination,
-            isReachable: isReachable,
-            latency: latency ?? (isReachable ? elapsed : nil),
-            timestamp: Date(),
-            error: isReachable ? nil : String(localized: "Host unreachable")
-        )
-    }
-    
     // MARK: - Private Methods
     
     /// One sweep per launch: has the orphan sweep already run this session?
@@ -5015,7 +5877,7 @@ final class RouteManager: ObservableObject {
     /// run on a timer next to a VPN client that reads its own gateway route. Zero missing routes
     /// means zero writes.
     func reconcileMissingRoutes() async {
-        guard !isShuttingDown, !activeRoutes.isEmpty, HelperManager.shared.isHelperInstalled else { return }
+        guard !isShuttingDown, !isPaused, !activeRoutes.isEmpty, HelperManager.shared.isHelperInstalled else { return }
         guard let table = RouteKernel.currentTable() else { return }
 
         // Deduplicate first: activeRoutes can hold several entries for one destination when
@@ -5095,16 +5957,24 @@ final class RouteManager: ObservableObject {
             log(.warning, "Refusing batch add of \(routes.count) route(s): shutdown in progress")
             return (0, routes.count, routes.map { $0.destination }, "shutdown in progress")
         }
+        // Paused: nothing installs a route, whichever path asks (see Pause.swift).
+        guard !isPaused else {
+            log(.info, "Refusing batch add of \(routes.count) route(s): paused")
+            return (0, routes.count, routes.map { $0.destination }, "paused")
+        }
         // Never touch the route to the VPN's own gateway. Its client keeps the tunnel alive by
         // reaching that address via the PHYSICAL interface; vendor documentation describes
         // connect-then-flap-within-a-minute when that stops being true.
         var routes = routes
+        // Refused gateway destinations count as failed, so callers never record them as owned.
+        var protectedDests: [String] = []
         if let gw = vpnGateway, !gw.hasPrefix("iface:") {
             let protected = routes.filter { $0.destination == gw || $0.destination == gw + "/32" }
             if !protected.isEmpty {
                 log(.warning, "Refusing \(protected.count) route(s) targeting the VPN gateway \(gw) — protected")
                 routes.removeAll { $0.destination == gw || $0.destination == gw + "/32" }
-                if routes.isEmpty { return (0, protected.count, protected.map { $0.destination }, "protected: VPN gateway") }
+                protectedDests = protected.map { $0.destination }
+                if routes.isEmpty { return (0, protected.count, protectedDests, "protected: VPN gateway") }
             }
         }
         pendingKernelAdds.formUnion(routes.map { $0.destination })
@@ -5122,7 +5992,9 @@ final class RouteManager: ObservableObject {
         }
         // Failed destinations never reached the kernel — nothing to sweep for them.
         pendingKernelAdds.subtract(result.failedDestinations)
-        return result
+        guard !protectedDests.isEmpty else { return result }
+        return (result.successCount, result.failureCount + protectedDests.count,
+                result.failedDestinations + protectedDests, result.error)
     }
 
     /// Acquire exclusive route operation lock. Returns false if another operation is running.
@@ -5198,8 +6070,50 @@ final class RouteManager: ObservableObject {
     /// and mutates config BEFORE calling this. Strictly a plumbing dedup of the tail that was
     /// copied across the mutation surfaces — every per-site policy is an explicit argument.
     func reconcileAfterConfigChange(reconcileListeners: Bool, reapplyRoutes: Bool, sendNotification: Bool = false) async {
+        await releaseBlocksIfUnwanted()
         if reconcileListeners { await reconcileProxyListeners() }
         if reapplyRoutes { await detectAndApplyRoutesAsync(sendNotification: sendNotification) }
+    }
+
+    /// The reconciles a config change starts without a caller that awaits them: a rule or
+    /// route edit, a quick add, a service edit in Custom mode. Kept so tests can cancel and
+    /// await them (`cancelConfigFollowUps`). Unowned, a test's reapply ran a real VPN and
+    /// gateway check and then applied its rules inside the next test, taking that test's routes.
+    private var configFollowUps: [UUID: Task<Void, Never>] = [:]
+
+    /// `reconcileAfterConfigChange` in a task of its own, for a caller that cannot await it.
+    func startConfigFollowUp(reconcileListeners: Bool, reapplyRoutes: Bool) {
+        let id = UUID()
+        configFollowUps[id] = Task {
+            // Cancelled before it started: nothing to bring in line any more.
+            if !Task.isCancelled {
+                await reconcileAfterConfigChange(reconcileListeners: reconcileListeners, reapplyRoutes: reapplyRoutes)
+            }
+            configFollowUps[id] = nil
+        }
+    }
+
+    /// The follow-ups not finished yet.
+    var pendingConfigFollowUps: Int { configFollowUps.count }
+
+    /// Cancels the apply a Resume left scheduled and waits for it, so it cannot apply into
+    /// the next test.
+    func cancelResumeApplyForTests() async {
+        let task = resumeApplyTask
+        resumeApplyTask = nil
+        task?.cancel()
+        await task?.value
+    }
+
+    /// Cancels the follow-ups not started yet and waits for the rest to end, so none of them
+    /// outlives a test.
+    func cancelConfigFollowUps() async {
+        while !configFollowUps.isEmpty {
+            let tasks = Array(configFollowUps.values)
+            configFollowUps = [:]
+            tasks.forEach { $0.cancel() }
+            for task in tasks { await task.value }
+        }
     }
 
     /// Start/stop proxy-route listeners to match the current config (P1,
@@ -5441,17 +6355,38 @@ final class RouteManager: ObservableObject {
     var addRouteOverrideForTests: ((_ destination: String, _ gateway: String, _ isNetwork: Bool) async -> Bool)?
     var removeRouteOverrideForTests: ((_ destination: String) async -> Bool)?
     var resolveIPsOverrideForTests: ((_ domain: String) async -> [String]?)?
+    /// The helper's block batch, for the VPN Only block tests.
+    var addBlockRoutesBatchOverrideForTests: (([String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?))?
+    /// What `detectVPNInterface` answers, so a test can drive `checkVPNStatus` through a drop
+    /// or a flap with no real tunnel.
+    var detectVPNInterfaceOverrideForTests: (() async -> (connected: Bool, interface: String?, type: VPNType?))?
+    /// What `detectNetworkIdentity` answers, so a test can move the Mac between networks.
+    var detectNetworkIdentityOverrideForTests: (() async -> NetworkIdentity?)?
+    /// What `arp -a -n -l` prints, for the stale-ARP re-check.
+    var readARPTableOverrideForTests: (() async -> String?)?
+    /// A path change was seen since the last profile pass.
+    private var networkChangeNoted = false
+    /// The interface `currentNetwork` was read on ("en0"), so the ARP re-check watches that
+    /// interface's row. Nil when unknown.
+    var currentNetworkInterface: String?
+    private var arpRecheckTask: Task<Void, Never>?
     var routeEpochForTests: UInt64 { routeEpoch }
 
     private func applyRoutesForDomain(_ domain: String, gateway: String, source: String? = nil, persistCache: Bool = true) async -> [ActiveRoute]? {
+        // Paused: an entry turned on is saved and routed by Resume, not a failure to retry.
+        if isPaused { return [] }
         // A wildcard has nothing to resolve: its names are routed by the helper's forwarder as
         // they are looked up. An empty result is a success, so no DNS retry is scheduled.
         if WildcardDomain.isWildcard(domain) { return [] }
+        let entry = source ?? domain
         guard let ips = await resolveIPs(for: domain) else {
             failedDomains.insert(domain)
+            noteLookups(for: entry, unresolved: unresolvedLookups[entry, default: []].union([domain]))
             return nil
         }
-        
+        let earlier = unresolvedLookups[entry, default: []]
+        noteLookups(for: entry, unresolved: ips.isEmpty ? earlier.union([domain]) : earlier.subtracting([domain]))
+
         if let firstIP = ips.first {
             dnsCache[domain] = firstIP
         }
@@ -5476,7 +6411,7 @@ final class RouteManager: ObservableObject {
         return routes.isEmpty ? nil : routes
     }
     
-    private func resolveIPs(for domain: String) async -> [String]? {
+    func resolveIPs(for domain: String) async -> [String]? {
         if let override = resolveIPsOverrideForTests { return await override(domain) }
         // Use nonisolated static method for true parallelism
         let userDNS = detectedDNSServer
@@ -5485,6 +6420,8 @@ final class RouteManager: ObservableObject {
     }
     
     private func addRoute(_ destination: String, gateway: String, isNetwork: Bool = false) async -> Bool {
+        // Paused: nothing installs a route, whichever path asks (see Pause.swift).
+        guard !isPaused else { return false }
         if let override = addRouteOverrideForTests { return await override(destination, gateway, isNetwork) }
         guard HelperManager.shared.isHelperInstalled else {
             log(.error, "Cannot add route: helper not ready")
@@ -5614,6 +6551,36 @@ final class RouteManager: ObservableObject {
         isShuttingDown = false
     }
 
+    /// Stops a stale-ARP re-check a test left running, so it cannot read the real ARP table
+    /// into the next test.
+    func cancelARPRecheckForTests() {
+        arpRecheckTask?.cancel()
+        arpRecheckTask = nil
+    }
+
+    /// Sets the persistent DNS cache the startup and Resume applies read, without disk.
+    func setDNSDiskCacheForTests(_ cache: [String: [String]]) {
+        dnsDiskCache = cache
+    }
+
+    /// Waits for the background DNS refresh a startup or a Resume started, so none outlives a test.
+    func waitForBackgroundRefreshForTests() async {
+        await backgroundRefreshTask?.value
+    }
+
+    /// Forgets the last connect and every apply-kill strike, which an earlier test's reconnect
+    /// or drop leaves behind: a Resume would otherwise wait out its cold delay or back-off.
+    func resetSettleStateForTests() {
+        lastVPNConnectAt = nil
+        applyKillStrikes = 0
+        lastApplyKillAt = nil
+    }
+
+    /// Sets the pause without touching any route, for renders of the paused dropdown.
+    func setPauseStateForTests(_ state: PauseState?) {
+        pauseState = state
+    }
+
     /// Test-only seams for the operation gate (it is private by design).
     func tryAcquireRouteOperationForTests() -> Bool { acquireRouteOperation() }
     func releaseRouteOperationForTests() { releaseRouteOperation() }
@@ -5622,6 +6589,11 @@ final class RouteManager: ObservableObject {
         guard !isShuttingDown else { return }
         isShuttingDown = true
         backgroundRefreshTask?.cancel()
+        // The pause dies with the app; its timer must not start an apply into the teardown.
+        pauseTimerTask?.cancel()
+        pauseTimerTask = nil
+        resumeApplyTask?.cancel()
+        resumeApplyTask = nil
         rerouteRetryTask?.cancel()
         rerouteRetryTask = nil
         cancelAllRetries()
@@ -5673,7 +6645,10 @@ final class RouteManager: ObservableObject {
         return result.success
     }
     
-    nonisolated func cleanDomain(_ input: String) -> String {
+    nonisolated func cleanDomain(_ input: String) -> String { Self.cleanDomain(input) }
+
+    /// `cleanDomain` without an instance, for code off the main actor (the service catalogue).
+    nonisolated static func cleanDomain(_ input: String) -> String {
         var domain = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Remove any protocol scheme (http, https, ssh, ftp, etc.) using regex
@@ -5701,8 +6676,11 @@ final class RouteManager: ObservableObject {
 
         // A wildcard ("*.example.com") keeps its "*." and is cleaned like a name after it. The
         // suffix needs two labels, so "*.com" cleans to nothing rather than to the TLD.
-        let isWildcard = domain.hasPrefix(WildcardDomain.prefix)
-        if isWildcard { domain.removeFirst(WildcardDomain.prefix.count) }
+        // ".example.com", the form versions before 6.0 took for a name and every name under
+        // it, means the same wildcard (`LeadingDotMigration`); kept as is it would never resolve.
+        let isWildcard = domain.hasPrefix(WildcardDomain.prefix) || domain.hasPrefix(".")
+        if domain.hasPrefix(WildcardDomain.prefix) { domain.removeFirst(WildcardDomain.prefix.count) }
+        else if isWildcard { domain = String(domain.drop { $0 == "." }) }
 
         // Reject characters that are invalid in domain names (prevents shell injection)
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-"))
@@ -5759,7 +6737,9 @@ final class RouteManager: ObservableObject {
         return bits == 0 || bits == 1
     }
 
-    nonisolated func isValidIP(_ string: String) -> Bool {
+    nonisolated func isValidIP(_ string: String) -> Bool { Self.isValidIP(string) }
+
+    nonisolated static func isValidIP(_ string: String) -> Bool {
         let parts = string.components(separatedBy: ".")
         guard parts.count == 4 else { return false }
         return parts.allSatisfy {
@@ -5771,7 +6751,9 @@ final class RouteManager: ObservableObject {
 
     /// Validate CIDR notation (e.g., "192.168.1.0/24")
     /// Rejects /0 and /1, which collide with full-tunnel VPN catch-alls.
-    nonisolated func isValidCIDR(_ string: String) -> Bool {
+    nonisolated func isValidCIDR(_ string: String) -> Bool { Self.isValidCIDR(string) }
+
+    nonisolated static func isValidCIDR(_ string: String) -> Bool {
         let parts = string.components(separatedBy: "/")
         guard parts.count == 2,
               isValidIP(parts[0]),
@@ -5802,8 +6784,33 @@ final class RouteManager: ObservableObject {
     /// Safe to cache: `RouteManager` is `@MainActor`, so `log()` is serialized.
     private var logFileHandle: FileHandle?
 
+    /// A detection line that every status pass would repeat while nothing changes.
+    enum RepeatingLine: Hashable {
+        /// "VPN process hint: …"
+        case processHint
+        /// "VPN candidates (none matched): …"
+        case unmatchedCandidates
+    }
+
+    /// The last line logged for each `RepeatingLine`.
+    private var lastRepeatingLines: [RepeatingLine: String] = [:]
+
+    /// Logs `message` only when it differs from the last one logged for `line`. The status
+    /// timer runs every 30 s, and two such lines a pass pushed every useful line out of the
+    /// 200 kept in about 50 minutes. Nil means the condition is gone: nothing is logged, and
+    /// the next line for `line` logs again even when it is the same as before.
+    func logWhenChanged(_ line: RepeatingLine, _ message: String?) {
+        guard let message else {
+            lastRepeatingLines[line] = nil
+            return
+        }
+        guard lastRepeatingLines[line] != message else { return }
+        lastRepeatingLines[line] = message
+        log(.info, message)
+    }
+
     func log(_ level: LogEntry.LogLevel, _ message: String) {
-        let source: LogSource = ControlOrigin.isControlSocket ? .controlSocket : .app
+        let source: LogSource = ControlOrigin.logSource
         let entry = LogEntry(timestamp: Date(), level: level, message: message, source: source)
         recentLogs.insert(entry, at: 0)
         if recentLogs.count > 200 {
@@ -5874,6 +6881,9 @@ enum AddDomainError: Error, Equatable {
     /// `route`. On another route it matches first, so a Direct rule after it would do nothing.
     /// `vpnName` names the primary-VPN route as the Rules page does.
     case ruleExists(value: String, route: Route, vpnName: String?)
+    /// Custom mode's quick-add: the Direct route is switched off, and the compiler skips rules
+    /// on a route that is off, so a rule there would route nothing.
+    case directRouteOff(value: String)
 
     /// One line for under the add field, in the user's words and the app's language.
     var message: String { message(in: .main) }
@@ -5901,6 +6911,8 @@ enum AddDomainError: Error, Equatable {
             return route.egress == .direct
                 ? String(localized: "\(value) already has a rule on the \(routeName) route.", bundle: bundle)
                 : String(localized: "\(value) already has a rule on the \(routeName) route, and the first matching rule wins. To send it direct, change that rule's route on the Rules page.", bundle: bundle)
+        case .directRouteOff(let value):
+            return String(localized: "The Direct route is off, so a rule for \(value) would route nothing. Turn it on in Routes first.", bundle: bundle)
         }
     }
 }
@@ -5912,17 +6924,29 @@ struct AddedDomain: Equatable {
     /// What the user typed, when cleaning changed more than letter case: a pasted link, a
     /// port, a user name. nil when the entry is what they typed.
     let rewrittenFrom: String?
+    /// Custom mode: where the Direct rule went, in place of a list.
+    let rulePlace: RulePlace?
 
     init(entry: DomainEntry, list: DomainList, typed: String) {
         self.entry = entry
         self.list = list
         rewrittenFrom = typed.lowercased() == entry.domain ? nil : typed
+        rulePlace = nil
+    }
+
+    /// Custom mode's add: a rule to the Direct route, at `place`.
+    init(rule: Rule, typed: String, place: RulePlace) {
+        entry = DomainEntry(domain: rule.pattern)
+        list = .bypass
+        rewrittenFrom = typed.lowercased() == rule.pattern ? nil : typed
+        rulePlace = place
     }
 
     /// One line for under the add field, in the app's language.
     var message: String { message(in: .main) }
 
     func message(in bundle: Bundle) -> String {
+        if let place = rulePlace { return place.message(in: bundle) }
         let listName = list.displayName(in: bundle)
         if entry.isCIDR {
             return String(localized: "Added the range \(entry.domain) to your \(listName) list.", bundle: bundle)
@@ -5937,5 +6961,254 @@ struct AddedDomain: Equatable {
             return String(localized: "Added \(entry.domain), from the link you pasted.", bundle: bundle)
         }
         return String(localized: "Added \(entry.domain), cleaned up from \u{201C}\(typed)\u{201D}.", bundle: bundle)
+    }
+}
+
+/// Where a rule sits among the rules, as the Rules page lists them (by order, from 1), and
+/// the first rule above it that already matches what it matches. The first matching rule
+/// wins, so a rule added last can do nothing for a name an earlier rule claims.
+struct RulePlace: Equatable {
+    let number: Int
+    /// The earlier rule that matches first, nil when none does.
+    let matchedFirstBy: Int?
+
+    init(number: Int, matchedFirstBy: Int?) {
+        self.number = number
+        self.matchedFirstBy = matchedFirstBy
+    }
+
+    /// `rule`'s place in `rules`. Only an earlier rule that routes counts: switched on, on a
+    /// route that is on, as the compiler reads them.
+    init(of rule: Rule, in rules: [Rule], routes: [Route], services: [ServiceEntry]) {
+        let sorted = rules.sorted { $0.order < $1.order }
+        let index = sorted.firstIndex { $0.id == rule.id } ?? sorted.count
+        number = index + 1
+        let routesOn = Set(routes.filter(\.enabled).map(\.id))
+        matchedFirstBy = sorted.prefix(index).firstIndex { earlier in
+            earlier.enabled && routesOn.contains(earlier.routeId)
+                && Self.covers(earlier, rule, services: services)
+        }.map { $0 + 1 }
+    }
+
+    /// `earlier` matches what `rule` matches, all of it, before `rule` is reached.
+    static func covers(_ earlier: Rule, _ rule: Rule, services: [ServiceEntry]) -> Bool {
+        switch (earlier.matchType, rule.matchType) {
+        case (.domain, .domain):
+            return earlier.pattern.caseInsensitiveCompare(rule.pattern) == .orderedSame
+        case (.suffix, .domain), (.suffix, .suffix):
+            return RuleResolver.domainMatchesSuffix(rule.pattern, suffix: earlier.pattern)
+        case (.service, .domain):
+            guard let service = services.first(where: { $0.id == earlier.pattern }) else { return false }
+            return service.domains.contains { RouteManager.entry($0, holds: rule.pattern) }
+        case (.ip, .domain):
+            return earlier.pattern == rule.pattern
+        case (.cidr, .domain):
+            return RuleResolver.ipv4(rule.pattern, inCIDR: earlier.pattern)
+        case (.ip, .cidr):
+            // Only a /32 of the same address: both compile to that one host route.
+            return contains("\(earlier.pattern)/32", rule.pattern)
+        case (.cidr, .cidr):
+            return contains(earlier.pattern, rule.pattern)
+        case (.service, .cidr):
+            // A service rule routes its ranges too, and a range inside one of them is claimed first.
+            guard let service = services.first(where: { $0.id == earlier.pattern }) else { return false }
+            return service.ipRanges.contains { contains($0, rule.pattern) }
+        default:
+            return false
+        }
+    }
+
+    /// Whether the range `outer` holds all of the range `inner`.
+    static func contains(_ outer: String, _ inner: String) -> Bool {
+        let mine = inner.split(separator: "/"), theirs = outer.split(separator: "/")
+        guard mine.count == 2, theirs.count == 2, let bits = Int(mine[1]), let theirBits = Int(theirs[1]) else { return false }
+        return theirBits <= bits && RuleResolver.ipv4(String(mine[0]), inCIDR: outer)
+    }
+
+    func message(in bundle: Bundle = .main) -> String {
+        guard let first = matchedFirstBy else {
+            return String(localized: "Added as rule \(number), to the Direct route.", bundle: bundle)
+        }
+        return String(localized: "Added as rule \(number); rule \(first) matches first.", bundle: bundle)
+    }
+}
+
+// MARK: - Profiles per network
+
+extension RouteManager {
+    /// The network the Mac is on: the physical router's address, its MAC from the ARP table
+    /// and the kind of interface it was learned on. Nil while any of them is missing.
+    func detectNetworkIdentity() async -> NetworkIdentity? {
+        await readNetworkIdentity().network
+    }
+
+    /// `detectNetworkIdentity` with the interface that read went through. The caller keeps
+    /// the interface of its own read: `currentNetworkInterface` may already hold another
+    /// read's by the time it looks, since this suspends.
+    private func readNetworkIdentity() async -> (network: NetworkIdentity?, interface: String?) {
+        // A test sets the interface itself, with `currentNetworkInterface`.
+        if let override = detectNetworkIdentityOverrideForTests { return (await override(), currentNetworkInterface) }
+        guard let gateway = localGateway,
+              let result = await runProcessAsync("/usr/sbin/arp", arguments: ["-n", gateway], timeout: 3.0),
+              let entry = NetworkIdentity.parseARP(result.output, gateway: gateway) else {
+            currentNetworkInterface = nil
+            return (nil, nil)
+        }
+        currentNetworkInterface = entry.interface
+        let kind = await withCheckedContinuation { continuation in
+            vpnBypassProcessQueue.async {
+                continuation.resume(returning: NetworkIdentity.kind(ofInterface: entry.interface))
+            }
+        }
+        return (NetworkIdentity(gateway: gateway, routerMAC: entry.mac, kind: kind), entry.interface)
+    }
+
+    /// Reads the network, and switches profile when it belongs to another one. Run on every
+    /// status pass, after the gateway is detected.
+    func updateNetworkProfile(justConnected: Bool = false) async {
+        let previous = currentNetwork
+        let (network, interface) = await readNetworkIdentity()
+        if currentNetwork != network { currentNetwork = network }
+        if networkChangeNoted {
+            networkChangeNoted = false
+            if let network, network == previous {
+                await recheckNetworkWhenARPRefreshes(network, interface: interface)
+            }
+        }
+        guard !isConfigLoadFailed, !isShuttingDown,
+              let target = NetworkProfiles.switchTarget(for: network, in: config) else { return }
+        commitProfileChange(NetworkProfiles.switching(config, to: target), justConnected: justConnected)
+    }
+
+    /// The path monitor saw the network change: the next profile pass reads the router with
+    /// that in mind (`recheckNetworkWhenARPRefreshes`).
+    func noteNetworkChange() {
+        networkChangeNoted = true
+    }
+
+    /// The network changed but the router reads as before. That reading may be the previous
+    /// router's ARP entry, still cached, when both networks use one router address: read the
+    /// network again as soon as the entry refreshes, so the right profile is in use before the
+    /// settle-gated apply after a reconnect runs, instead of on a later 30 s pass.
+    private func recheckNetworkWhenARPRefreshes(_ network: NetworkIdentity, interface: String?) async {
+        arpRecheckTask?.cancel()
+        arpRecheckTask = nil
+        // The row of the interface the network was read on: Wi-Fi and Ethernet to one router
+        // give two rows with the same address and MAC, and the other one refreshes on its own.
+        guard let snapshot = await readARPTable(gateway: network.gateway)
+                .first(where: { $0.mac == network.routerMAC && (interface == nil || $0.interface == interface) })
+        else { return }
+        let started = Date()
+        log(.info, "Network changed and the router reads as before: reading it again once its ARP entry refreshes")
+        arpRecheckTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(NetworkProfiles.arpRecheckPoll * 1_000_000_000))
+                guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
+                let elapsed = Date().timeIntervalSince(started)
+                let now = await self.readARPTable(gateway: network.gateway)
+                    .first(where: { $0.interface == snapshot.interface })
+                if NetworkProfiles.arpEntryRefreshed(snapshot: snapshot, now: now, elapsed: elapsed) {
+                    self.arpRecheckTask = nil
+                    await self.updateNetworkProfile()
+                    return
+                }
+                if elapsed >= NetworkProfiles.arpRecheckLimit {
+                    self.arpRecheckTask = nil
+                    return
+                }
+            }
+        }
+    }
+
+    /// The gateway's rows of the ARP table, with the time each has left.
+    private func readARPTable(gateway: String) async -> [NetworkIdentity.ARPEntry] {
+        let output: String?
+        if let override = readARPTableOverrideForTests {
+            output = await override()
+        } else {
+            output = await runProcessAsync("/usr/sbin/arp", arguments: ["-a", "-n", "-l"], timeout: 3.0)
+                .flatMap { $0.exitCode == 0 ? $0.output : nil }
+        }
+        return output.map { NetworkIdentity.parseARPTable($0, gateway: gateway) } ?? []
+    }
+
+    /// At launch: reads the network and puts its profile in use without an apply of its own,
+    /// since the startup apply that follows applies the lists in use.
+    func selectNetworkProfileBeforeStartupApply() async {
+        let network = await detectNetworkIdentity()
+        if currentNetwork != network { currentNetwork = network }
+        guard !isConfigLoadFailed, let target = NetworkProfiles.switchTarget(for: network, in: config) else { return }
+        let fromName = profileName(config.activeProfileId)
+        config = NetworkProfiles.switching(config, to: target)
+        listsSwitchedSinceCommit = true
+        saveConfig()
+        log(.info, "Network profile at launch: \(fromName) → \(profileName(config.activeProfileId)), mode \(config.routingMode.displayName)")
+    }
+
+    /// Saves the settings in use as a new profile for this network. False when the network
+    /// is not identified or the name is taken.
+    @discardableResult
+    func createProfile(named name: String) -> Bool {
+        guard !isConfigLoadFailed, let network = currentNetwork,
+              NetworkProfiles.nameIsFree(name, in: config.profiles) else { return false }
+        commitProfileChange(NetworkProfiles.creatingProfile(named: name, for: network, in: config))
+        log(.success, "Network profile \(name.trimmingCharacters(in: .whitespacesAndNewlines)) saved for this network")
+        return true
+    }
+
+    /// Renames profile `id`. False when the name is taken or blank, so the sheet stays open.
+    @discardableResult
+    func renameProfile(_ id: UUID, to name: String) -> Bool {
+        guard !isConfigLoadFailed, let old = config.profiles.first(where: { $0.id == id })?.name,
+              NetworkProfiles.nameIsFree(name, in: config.profiles, excluding: id) else { return false }
+        commitProfileChange(NetworkProfiles.renaming(id, to: name, in: config))
+        log(.info, "Network profile \(old) renamed to \(name.trimmingCharacters(in: .whitespacesAndNewlines))")
+        return true
+    }
+
+    /// Moves this network to profile `id`, and puts the profile in use.
+    func useProfileOnThisNetwork(_ id: UUID) {
+        guard !isConfigLoadFailed, let network = currentNetwork else { return }
+        var next = NetworkProfiles.addingNetwork(network, to: id, in: config)
+        if let target = NetworkProfiles.switchTarget(for: network, in: next) {
+            next = NetworkProfiles.switching(next, to: target)
+        }
+        commitProfileChange(next)
+    }
+
+    /// Deletes profile `id`; when it is in use, Other networks' settings are put in use.
+    func deleteProfile(_ id: UUID) {
+        guard !isConfigLoadFailed, let name = config.profiles.first(where: { $0.id == id })?.name else { return }
+        commitProfileChange(NetworkProfiles.removingProfile(id, in: config))
+        log(.info, "Network profile \(name) deleted")
+    }
+
+    /// Saves `next` and, when the settings in use changed, applies them the way a mode switch
+    /// does: through the gate, never into a settle wait, never while paused or with no VPN.
+    private func commitProfileChange(_ next: Config, justConnected: Bool = false) {
+        let before = ProfileSettings(capturing: config)
+        let fromName = profileName(config.activeProfileId)
+        config = next
+        let changed = ProfileSettings(capturing: config) != before
+        // A warm reconnect re-applies only when the config changed after the last apply.
+        if changed {
+            configChangedAt = Date()
+            listsSwitchedSinceCommit = true
+        }
+        saveConfig()   // a mode change ends a pause here; the apply below runs instead
+        guard changed else { return }
+        log(.info, "Network profile: \(fromName) → \(profileName(config.activeProfileId)), mode \(config.routingMode.displayName)")
+        Task {
+            await releaseBlocksIfUnwanted()
+            await reconcileProxyListeners()
+        }
+        if NetworkProfiles.applyAction(vpnConnected: isVPNConnected, justConnected: justConnected,
+                                       paused: isPaused, settlePending: reconnectSettleTask != nil) == .now {
+            applyRoutingModeChange()
+        }
+    }
+
+    private func profileName(_ id: UUID?) -> String {
+        id.flatMap { id in config.profiles.first { $0.id == id }?.name } ?? NetworkProfiles.otherNetworksName()
     }
 }

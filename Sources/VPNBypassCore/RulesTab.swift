@@ -21,18 +21,6 @@ extension Route {
         case .proxyHTTP, .proxySOCKS5, .tailscaleExit: return name
         }
     }
-
-    /// Accent color by egress type, used for route chips/dots throughout the
-    /// Custom-mode UI (rule rows, the default-route footer, the menu-bar rollup).
-    var accentColor: Color {
-        switch egress {
-        case .direct:       return Theme.textSecondary
-        case .proxyHTTP:    return Theme.blue
-        case .proxySOCKS5:  return Theme.purple
-        case .tailscaleExit: return Theme.success
-        case .vpnDefault:   return Theme.warning
-        }
-    }
 }
 
 extension RouteManager {
@@ -43,7 +31,7 @@ extension RouteManager {
     func addRoute(_ route: Route) {
         config.routes.append(route)
         saveConfig()
-        Task { await reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: false) }
+        startConfigFollowUp(reconcileListeners: true, reapplyRoutes: false)
     }
 
     /// Deletes a rule and re-applies, as the Rules page's trash button does.
@@ -86,7 +74,8 @@ extension RouteManager {
     /// A rule with the same pattern refuses the add, naming its route: on Direct it is a
     /// repeat, and on another route it matches first, so a second rule would do nothing. A
     /// rule whose route is gone matches nothing, so it does not count. Returns the rule
-    /// saved, why the input was refused, or nil when there is no Direct route (logged).
+    /// saved, why the input was refused (a Direct route that is off is refused too: the compiler
+    /// skips rules on a route that is off), or nil when there is no Direct route (logged).
     func addDirectRule(_ input: String) -> Result<Rule, AddDomainError>? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let checked: CheckedDomainInput
@@ -100,7 +89,12 @@ extension RouteManager {
         let suffix = WildcardDomain.suffix(of: checked.value)
         let matchType: MatchType = checked.isCIDR ? .cidr : (suffix == nil ? .domain : .suffix)
         let pattern = suffix ?? checked.value
-        guard let directRouteId = config.routes.first(where: { $0.egress == .direct })?.id else {
+        guard let directRouteId = config.routes.first(where: { $0.egress == .direct && $0.enabled })?.id else {
+            if config.routes.contains(where: { $0.egress == .direct }) {
+                let error = AddDomainError.directRouteOff(value: checked.value)
+                log(.warning, error.message)
+                return .failure(error)
+            }
             log(.error, "Cannot add rule for \(checked.value): no Direct route found")
             return nil
         }
@@ -126,17 +120,20 @@ extension RouteManager {
     /// page: the Bypass list, the VPN Only list, or in Custom mode a rule to the Direct route.
     /// Custom mode routes from `config.rules`, not `config.domains` (see `usesCustomEngine`),
     /// so a Bypass-list add would silently do nothing there; the rule is the same mapping
-    /// `Config.derive()` uses for a bypass-mode domain. nil is Custom mode's add when it saved,
-    /// which says nothing back, or found no Direct route, which it logs.
+    /// `Config.derive()` uses for a bypass-mode domain. A Custom mode add says where the rule
+    /// went: it goes last, where an earlier rule may match first (A5). nil is Custom mode's
+    /// add when it found no Direct route, which it logs.
     func addForCurrentMode(_ input: String) -> Result<AddedDomain, AddDomainError>? {
         if config.routingMode == .vpnOnly { return addInverseDomain(input) }
         guard Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) else {
             return addDomain(input)
         }
         switch addDirectRule(input) {
-        case .success?:
-            Task { await reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
-            return nil
+        case .success(let rule)?:
+            startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
+            return .success(AddedDomain(rule: rule, typed: input,
+                                        place: RulePlace(of: rule, in: config.rules, routes: config.routes,
+                                                         services: config.services)))
         case .failure(let error)?:
             return .failure(error)
         case nil:
@@ -331,10 +328,14 @@ extension RouteManager {
     /// http-intake.logs.datadoghq.com) come first, then the rest, each alphabetical. A service
     /// that already holds `name` is left out. A name added to a built-in service is kept in
     /// `builtInServiceExtras`, so the launch that resets its shipped domains keeps it.
+    ///
+    /// A built-in service the catalogue no longer ships is left out: a saved config can still
+    /// hold one, but `addDomainToBuiltInService` refuses it, so picking it added nothing.
     func lookupServices(for name: String) -> [ServiceEntry] {
         let parent = LookupAddLevels.registrableDomain(name)
+        let shipped = Set(Config.defaultServices.map(\.id))
         let services = config.services
-            .filter { !$0.domains.contains(name) }
+            .filter { ($0.isCustom || shipped.contains($0.id)) && !$0.domains.contains(name) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         guard let parent else { return services }
         let related = services.filter { $0.domains.contains { LookupAddLevels.registrableDomain($0) == parent } }
@@ -356,9 +357,13 @@ extension RouteManager {
         } else if !addDomainToBuiltInService(name, serviceId: service.id) {
             return nil
         }
+        // A catalogue service that is off is not on the Services page: it is added from the
+        // catalogue, which puts it there.
         let message = service.enabled
             ? String(localized: "Added \(name) to \(service.name).")
-            : String(localized: "Added \(name) to \(service.name). The service is off; turn it on from the Services page to bypass it.")
+            : service.isCustom
+            ? String(localized: "Added \(name) to \(service.name). The service is off; turn it on from the Services page to bypass it.")
+            : String(localized: "Added \(name) to \(service.name). The service is off; add it from Browse catalogue on the Services page to bypass it.")
         return AddDomainFeedback(success: message)
     }
 
@@ -386,10 +391,48 @@ extension RouteManager {
         }
     }
 
+    /// Adds what Learn a site chose (`SiteLearning.plan`), one entry at a time through the
+    /// mode's own add, as the row's button does. Each add routes its entry while it holds the
+    /// route lock, and an add made while the lock is held is saved without its routes, so each
+    /// one waits for the one before (up to 30 s). Stops when the mode changes meanwhile: a
+    /// choice made for one mode is never added in another. The line to show.
+    func addLearned(_ entries: [String], mode: LookupMode) async -> AddDomainFeedback? {
+        guard !entries.isEmpty else { return nil }
+        var added = 0
+        var firstRefusal: AddDomainFeedback?
+        for entry in entries {
+            var polls = 0
+            while isApplyingRoutes && polls < LookupRow.applyWaitPolls {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                polls += 1
+            }
+            guard LookupMode(self) == mode else { break }
+            // Still applying after the wait: an add now would be saved without its routes.
+            if isApplyingRoutes {
+                return AddDomainFeedback(refusal: String(localized: "Routes are still being applied. Added \(added) of \(entries.count); press Add again when they finish."),
+                                         typed: entry)
+            }
+            switch addForCurrentMode(entry) {
+            case .success?:
+                added += 1
+            case .failure(let error)?:
+                if firstRefusal == nil { firstRefusal = AddDomainFeedback(.failure(error), typed: entry) }
+            case nil:
+                // Custom mode with no Direct route: every other entry would fail the same way.
+                return AddDomainFeedback(refusal: String(localized: "There is no Direct route to send these names to."), typed: entry)
+            }
+        }
+        if added == 0 { return firstRefusal }
+        if added < entries.count {
+            return AddDomainFeedback(success: String(localized: "Added \(added) of \(entries.count). The others were not added; Logs says why."))
+        }
+        return AddDomainFeedback(success: String(localized: "Added \(added) of \(entries.count)."))
+    }
+
     /// Saves and re-applies after a rule change (RulesTab's `persistAndReapply`).
     func saveRulesAndReapply() {
         saveConfig()
-        Task { await reconcileAfterConfigChange(reconcileListeners: false, reapplyRoutes: true) }
+        startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
     }
 }
 
@@ -463,30 +506,22 @@ enum LookupRemoval: Equatable {
 /// and reach every app, so they get no note.
 struct ProxyReachNote: Equatable {
     let routeName: String
-    /// `127.0.0.1:<port>`, or nil while the route's listener is not up.
-    let address: String?
     /// The route is switched off: no listener runs and the compiler skips the rule.
     var routeOff = false
 
     /// nil for a Direct or VPN route, and for a rule whose route was deleted.
-    static func forRoute(_ route: Route?, listenerPort: UInt16?) -> ProxyReachNote? {
+    static func forRoute(_ route: Route?) -> ProxyReachNote? {
         guard let route, ProxyListenerManager.usesLocalListener(route.egress) else { return nil }
-        guard route.enabled else { return ProxyReachNote(routeName: route.name, address: nil, routeOff: true) }
-        return ProxyReachNote(routeName: route.name,
-                              address: listenerPort.map { LocalListenerAddress.string(port: $0) })
+        return ProxyReachNote(routeName: route.name, routeOff: !route.enabled)
     }
 
-    /// The line under the rule. One catalog sentence per case, with the route name as
-    /// an argument, so a translation can put the name where its grammar wants it.
-    var text: Text {
-        let name = Text(verbatim: routeName).foregroundColor(.white).fontWeight(.medium)
-        if routeOff {
-            return Text("\(name) is off, so this rule does nothing.")
-        }
-        if let address {
-            return Text("Only apps set to use \(name) (\(Text(verbatim: address))) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them.")
-        }
-        return Text("Only apps set to use \(name) go this way. Other apps take the Mac's normal route to these hosts, even if a rule below also matches them.")
+    /// The rule row's detail line. One catalog sentence per case, with the route name as an
+    /// argument, so a translation can put the name where its grammar wants it. The address to
+    /// point an app at is on the Routes page, which copies it.
+    func line(in bundle: Bundle = .main) -> String {
+        routeOff
+            ? String(localized: "\(routeName) is off, so this rule does nothing.", bundle: bundle)
+            : String(localized: "Only apps set to use \(routeName). Other apps take the Mac's normal route, even if a rule below matches.", bundle: bundle)
     }
 }
 
@@ -511,38 +546,63 @@ private enum RuleSheetState: Identifiable {
 
 // MARK: - RulesTab
 
+/// The Rules page on the shared components (section 3.3 of docs/design/APP-REWORK-PROPOSALS.md):
+/// one line on how the order works with the + beside it, then one list whose last row is
+/// "Everything else". The window's title bar names the page, so the page has no heading.
 struct RulesTab: View {
     @EnvironmentObject var routeManager: RouteManager
     @EnvironmentObject var settingsUndo: SettingsUndo
-    @ObservedObject private var listenerManager = ProxyListenerManager.shared
     @State private var sheetState: RuleSheetState?
     @State private var showingNewRouteSheet = false
     @State private var pendingNewRouteCompletion: ((Route) -> Void)?
 
+    /// The doc screenshots draw this pattern's row as if the pointer were on it.
+    static var hoveredForScreenshots: String?
+
     private var sortedRules: [Rule] {
         routeManager.config.rules.sorted { $0.order < $1.order }
     }
+    /// The title bar search (⌘F), which the window owns.
+    @Environment(\.settingsSearch) private var searchText
+    /// False on the read-only page the shell shows in another mode.
+    @Environment(\.isEnabled) private var isEnabled
+    /// The rules the search leaves, in order; every rule with no search. Dragging still moves by
+    /// id, so a filtered list reorders the full one.
+    private var shownRules: [Rule] {
+        let services = routeManager.config.services
+        return sortedRules.filter { SettingsSidebar.matches(RuleRow.patternDisplay($0, services: services), search: searchText) }
+    }
+
+    /// The page's one line: how the order works, and how to change it once there are two rules.
+    static func purpose(ruleCount: Int, in bundle: Bundle = .main) -> String {
+        ruleCount >= 2
+            ? String(localized: "The first rule that matches wins. Drag to reorder.", bundle: bundle)
+            : String(localized: "The first rule that matches wins.", bundle: bundle)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                GroupSection {
+                    if sortedRules.isEmpty {
+                        EmptyState(systemImage: "list.bullet",
+                                   title: String(localized: "No rules yet"),
+                                   message: String(localized: "Add a rule to send a domain, service, or IP range through a specific route."),
+                                   primary: .init(title: String(localized: "Add Rule")) { sheetState = .add })
+                    } else {
+                        ruleRows
+                    }
+                    InsetDivider()
+                    everythingElseRow
+                }
 
-            if sortedRules.count >= 2 {
-                reorderHint
+                if let change = settingsUndo.last, change.page == .rules {
+                    UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
+                }
             }
-
-            if sortedRules.isEmpty {
-                emptyState
-            } else {
-                ruleList
-            }
-
-            if let change = settingsUndo.last, change.page == .rules {
-                UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
-            }
-
-            defaultRouteFooter
         }
+        .pageSubtitle(Self.purpose(ruleCount: sortedRules.count))
+        .pageTitleActions([.add(String(localized: "Add Rule")) { sheetState = .add }])
         .sheet(item: $sheetState) { state in
             RuleEditorSheet(editingRule: state.rule, services: routeManager.config.services) { rule in
                 saveRule(rule)
@@ -564,153 +624,65 @@ struct RulesTab: View {
         }
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                HStack(spacing: 8) {
-                    Image(systemName: "list.bullet.indent")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Theme.blueGradient)
-                    Text("Routing Rules")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
-
-                Spacer()
-
-                Button {
-                    sheetState = .add
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(Theme.blueLight)
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .help("Add Rule")
-                .accessibilityLabel("Add Rule")
-            }
-
-            Text("Send specific destinations through specific routes. Rules are checked in order — the first match wins.")
-                .font(.system(size: 13))
-                .foregroundColor(Theme.textSecondary)
-        }
-    }
-
-    private var reorderHint: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "hand.draw")
-                .font(.system(size: 11))
-                .foregroundColor(Theme.textTertiary)
-            Text("Drag to reorder — earlier rules win.")
-                .font(.system(size: 11))
-                .foregroundColor(Theme.textTertiary)
-        }
-    }
-
-    // MARK: - Empty state
-
-    private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "list.bullet.indent")
-                .font(.system(size: 44))
-                .foregroundColor(Theme.textDisabled)
-            Text("No rules yet")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(Theme.textSecondary)
-            Text("Add a rule to send a domain, service, or IP range through a specific route.")
-                .font(.system(size: 12))
-                .foregroundColor(Theme.textTertiary)
-                .multilineTextAlignment(.center)
-            Button {
-                sheetState = .add
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 13))
-                    Text("Add Rule")
-                        .font(.system(size: 13, weight: .medium))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 9)
-                .background(Theme.blueGradient)
-                .cornerRadius(8)
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 44)
-    }
-
     // MARK: - Rule list
 
-    private var ruleList: some View {
-        SettingsCard(title: "Rules", icon: "list.bullet.indent", iconColor: Theme.blue) {
-            VStack(spacing: 0) {
-                ForEach(Array(sortedRules.enumerated()), id: \.element.id) { idx, rule in
-                    RuleRow(
-                        rule: rule,
-                        listenerPort: listenerManager.port(for: rule.routeId),
-                        showDragHandle: sortedRules.count >= 2,
-                        onEdit: { sheetState = .edit(rule) },
-                        onDelete: { deleteRule(rule) },
-                        onToggle: { enabled in toggleRule(rule.id, enabled: enabled) },
-                        onReassign: { newRouteId in reassignRule(rule.id, to: newRouteId) },
-                        onNewRoute: {
-                            pendingNewRouteCompletion = { newRoute in reassignRule(rule.id, to: newRoute.id) }
-                            showingNewRouteSheet = true
-                        }
-                    )
-                    .draggable(rule.id.uuidString)
-                    .dropDestination(for: String.self) { items, _ in
-                        guard let draggedIdString = items.first, let draggedId = UUID(uuidString: draggedIdString) else { return false }
-                        moveRule(draggedId: draggedId, to: rule.id)
-                        return true
-                    }
-                    if idx < sortedRules.count - 1 {
-                        Divider()
-                            .background(Theme.divider)
-                            .padding(.vertical, 4)
-                    }
-                }
+    @ViewBuilder
+    private var ruleRows: some View {
+        if shownRules.isEmpty {
+            SettingsSearchMiss(search: searchText)
+        }
+        let services = routeManager.config.services
+        ForEach(Array(shownRules.enumerated()), id: \.element.id) { idx, rule in
+            if idx > 0 { InsetDivider() }
+            RuleRow(
+                rule: rule,
+                onEdit: { sheetState = .edit(rule) },
+                onDelete: { deleteRule(rule) },
+                onToggle: { enabled in toggleRule(rule.id, enabled: enabled) },
+                onReassign: { newRouteId in reassignRule(rule.id, to: newRouteId) },
+                onNewRoute: {
+                    pendingNewRouteCompletion = { newRoute in reassignRule(rule.id, to: newRoute.id) }
+                    showingNewRouteSheet = true
+                },
+                showsActions: Self.hoveredForScreenshots == RuleRow.patternDisplay(rule, services: services)
+            )
+            .draggable(rule.id.uuidString)
+            .dropDestination(for: String.self) { items, _ in
+                // A read-only page (another mode) takes no drop: `.disabled` does not stop one.
+                guard isEnabled else { return false }
+                guard let draggedIdString = items.first, let draggedId = UUID(uuidString: draggedIdString) else { return false }
+                moveRule(draggedId: draggedId, to: rule.id)
+                return true
             }
         }
     }
 
-    // MARK: - Default route footer
-
-    private var defaultRouteFooter: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                Text("Everything else")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(Theme.textSecondary)
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 10))
-                    .foregroundColor(Theme.textTertiary)
-                RouteChipMenu(
-                    selectedRouteId: routeManager.config.defaultRouteId,
-                    onSelect: { newId in setDefaultRoute(newId) },
-                    onNewRoute: {
-                        pendingNewRouteCompletion = { newRoute in setDefaultRoute(newRoute.id) }
-                        showingNewRouteSheet = true
-                    }
-                )
-                Spacer()
-            }
-            Text("Destinations that don't match any rule above use this route.")
-                .font(.system(size: 11))
-                .foregroundColor(Theme.textTertiary)
+    /// The pinned last row: where traffic no rule matches goes. No switch, no actions.
+    private var everythingElseRow: some View {
+        HStack(spacing: Theme.Space.s) {
+            Color.clear
+                .frame(width: ListRow.glyphColumn, height: 1)
+                .accessibilityHidden(true)
+            Text("Everything else")
+                .font(Theme.Font.body)
+                .foregroundColor(Theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            RulesRouteChipMenu(
+                selectedRouteId: routeManager.config.defaultRouteId,
+                rowName: String(localized: "Everything else"),
+                onSelect: { newId in setDefaultRoute(newId) },
+                onNewRoute: {
+                    pendingNewRouteCompletion = { newRoute in setDefaultRoute(newRoute.id) }
+                    showingNewRouteSheet = true
+                }
+            )
+            // In the chip column of the rows above: past it come their small switch (44 pt,
+            // as measured for the Domains page) and the row's spacing.
+            .padding(.trailing, 44 + Theme.Space.s)
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Theme.bgCard)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.bgCardBorder, lineWidth: 1))
-        )
+        .padding(.horizontal, ListRow.inset)
+        .frame(minHeight: ListRow.singleLineHeight)
+        .help(String(localized: "Destinations that don't match any rule above use this route."))
     }
 
     // MARK: - Mutations
@@ -774,30 +746,26 @@ struct RulesTab: View {
 
 // MARK: - RuleRow
 
+/// One rule as a `ListRow`: a glyph for what it matches, the pattern, the proxy note as its
+/// detail line, edit and delete under the pointer, the route chip, and the switch last.
 struct RuleRow: View {
     @EnvironmentObject var routeManager: RouteManager
     let rule: Rule
-    /// Port of the assigned route's local listener, if it is up.
-    let listenerPort: UInt16?
-    let showDragHandle: Bool
     let onEdit: () -> Void
     let onDelete: () -> Void
     let onToggle: (Bool) -> Void
     let onReassign: (UUID) -> Void
     let onNewRoute: () -> Void
+    /// Draws the actions as if the pointer were over the row, for the doc screenshots.
+    var showsActions = false
 
-    private var matchLabel: String { Self.matchLabel(rule.matchType, in: .main) }
-
-    /// The badge beside the rule's pattern. Text(String) shows a String as it is, so each
-    /// label is looked up here.
-    static func matchLabel(_ type: MatchType, in bundle: Bundle) -> String {
+    /// The leading glyph says what the rule matches, in place of the old uppercase badge.
+    static func glyph(for type: MatchType) -> String {
         switch type {
-        case .domain:  return String(localized: "DOMAIN", bundle: bundle)
-        case .suffix:  return String(localized: "SUFFIX", bundle: bundle)
-        case .ip:      return String(localized: "IP", bundle: bundle)
-        case .cidr:    return String(localized: "CIDR", bundle: bundle)
-        case .service: return String(localized: "SERVICE", bundle: bundle)
-        case .process: return String(localized: "PROCESS", bundle: bundle)
+        case .domain, .suffix: return "globe"
+        case .service: return "square.grid.2x2"
+        case .ip, .cidr: return "network"
+        case .process: return "app"
         }
     }
 
@@ -805,12 +773,17 @@ struct RuleRow: View {
         Self.patternDisplay(rule, services: routeManager.config.services)
     }
 
-    /// The rule's pattern as its row shows it: a service rule shows the service's name.
+    /// The rule's pattern as its row shows it: a service rule shows the service's name, and a
+    /// suffix rule its wildcard (`*.example.com`), as the Domains page writes one.
     static func patternDisplay(_ rule: Rule, services: [ServiceEntry]) -> String {
-        if rule.matchType == .service {
+        switch rule.matchType {
+        case .service:
             return services.first(where: { $0.id == rule.pattern })?.name ?? rule.pattern
+        case .suffix:
+            return WildcardDomain.isWildcard(rule.pattern) ? rule.pattern : WildcardDomain.entry(for: rule.pattern)
+        case .domain, .ip, .cidr, .process:
+            return rule.pattern
         }
-        return rule.pattern
     }
 
     /// The route this rule is assigned to, resolved live so a rename/edit in the
@@ -820,99 +793,52 @@ struct RuleRow: View {
         routeManager.config.routes.first { $0.id == rule.routeId }
     }
 
-    /// Set when the assigned route is served by a local listener, so the rule only
-    /// reaches apps pointed at that listener. Drawn as a line under the row.
-    private var reachNote: ProxyReachNote? {
-        ProxyReachNote.forRoute(assignedRoute, listenerPort: listenerPort)
+    private var actions: [RowAction] {
+        [.edit(patternDisplay, perform: onEdit), .delete(patternDisplay, perform: onDelete)]
     }
-
-    /// Lines the reach note up with the pattern: drag handle + toggle + spacing.
-    private var noteIndent: CGFloat { showDragHandle ? 68 : 44 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ruleLine
-            if let reachNote {
-                reachNote.text
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, noteIndent)
-                    .padding(.trailing, 36)
-                    .padding(.bottom, 2)
-            }
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-    }
-
-    private var ruleLine: some View {
-        HStack(spacing: 10) {
-            if showDragHandle {
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.textTertiary)
-                    .frame(width: 14)
-            }
-
-            Toggle(patternDisplay, isOn: Binding(
-                get: { rule.enabled },
-                set: onToggle
-            ))
-            .toggleStyle(.switch)
-            .tint(Theme.success)
-            .labelsHidden()
-            .controlSize(.small)
-            .frame(width: 34)
-
-            Button(action: onEdit) {
-                HStack(spacing: 6) {
-                    Text(patternDisplay)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(rule.enabled ? .white : Theme.textSecondary)
-                        .lineLimit(1)
-                    Text(matchLabel)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(Theme.warning)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Theme.warning.opacity(0.15))
-                        .cornerRadius(4)
-                }
-            }
-            .buttonStyle(.plain)
-            .help("Edit rule")
-
-            Image(systemName: "arrow.right")
-                .font(.system(size: 10))
-                .foregroundColor(Theme.textTertiary)
-
-            Spacer()
-
-            RouteChipMenu(selectedRouteId: rule.routeId, onSelect: onReassign, onNewRoute: onNewRoute)
-
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.error)
-                    .frame(width: 26, height: 26)
-                    .background(Theme.error.opacity(0.1))
-                    .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-            .help("Delete rule")
-            .accessibilityLabel(ControlNames.delete(patternDisplay))
-        }
+        ListRow(
+            glyph: Self.glyph(for: rule.matchType),
+            name: patternDisplay,
+            detail: ProxyReachNote.forRoute(assignedRoute)?.line(),
+            actions: actions,
+            isOn: Binding(get: { rule.enabled }, set: onToggle),
+            showsActions: showsActions,
+            accessory: AnyView(
+                RulesRouteChipMenu(selectedRouteId: rule.routeId, rowName: patternDisplay,
+                                   onSelect: onReassign, onNewRoute: onNewRoute)
+            ),
+            detailLineLimit: nil
+        )
     }
 }
 
 // MARK: - Route chip + grouped picker (System / Your Routes / New Route…)
 
-struct RouteChipMenu: View {
+/// The route a rule (or Everything else) goes to, as the shared `RouteChipMenu`: a grey glyph
+/// and the route's name with one chevron, opening System, Your Routes and New Route….
+struct RulesRouteChipMenu: View {
     @EnvironmentObject var routeManager: RouteManager
     let selectedRouteId: UUID?
+    /// The row the chip belongs to, so VoiceOver tells one rule's route from another's.
+    var rowName: String?
     let onSelect: (UUID) -> Void
     let onNewRoute: () -> Void
+
+    /// The chip for `route`: its glyph and name, or "Choose Route" when the rule has none.
+    static func chip(for route: Route?, vpnName: String?, in bundle: Bundle = .main) -> RouteChip {
+        guard let route else {
+            return RouteChip(systemImage: "questionmark", name: String(localized: "Choose Route", bundle: bundle))
+        }
+        return RouteChip(systemImage: RouteChip.systemImage(for: route.egress),
+                         name: route.friendlyName(vpnName: vpnName, in: bundle))
+    }
+
+    /// What VoiceOver says for the chip of a row: "Route for en.wikipedia.org: office-proxy".
+    static func spokenName(row: String, route: String, in bundle: Bundle = .main) -> String {
+        String(localized: "Route for \(row): \(route)", bundle: bundle)
+    }
 
     /// Direct first, then the PRIMARY VPN — the two auto-created system routes. A
     /// VPN route pinned to a specific tunnel is user-created, so it lives in Your Routes.
@@ -935,30 +861,31 @@ struct RouteChipMenu: View {
     }
 
     var body: some View {
-        Menu {
-            Section("System") {
-                ForEach(systemRoutes) { route in
-                    routeButton(route)
-                }
-            }
-            if !userRoutes.isEmpty {
-                Section("Your Routes") {
-                    ForEach(userRoutes) { route in
+        let chip = Self.chip(for: selectedRoute, vpnName: routeManager.vpnType?.knownName)
+        // Its own width up to a cap: a long custom route name truncates in the chip, and the
+        // rule's pattern keeps the row's width.
+        CappedWidth(max: RouteChip.rowMaxWidth) {
+            RouteChipMenu(chip, spokenName: rowName.map { Self.spokenName(row: $0, route: chip.name) }) {
+                Section("System") {
+                    ForEach(systemRoutes) { route in
                         routeButton(route)
                     }
                 }
+                if !userRoutes.isEmpty {
+                    Section("Your Routes") {
+                        ForEach(userRoutes) { route in
+                            routeButton(route)
+                        }
+                    }
+                }
+                Divider()
+                Button {
+                    onNewRoute()
+                } label: {
+                    Label("New Route…", systemImage: "plus")
+                }
             }
-            Divider()
-            Button {
-                onNewRoute()
-            } label: {
-                Label("New Route…", systemImage: "plus")
-            }
-        } label: {
-            RouteChip(route: selectedRoute, vpnName: routeManager.vpnType?.knownName)
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
     }
 
     @ViewBuilder
@@ -972,40 +899,6 @@ struct RouteChipMenu: View {
                 Text(route.friendlyName(vpnName: routeManager.vpnType?.knownName))
             }
         }
-    }
-}
-
-struct RouteChip: View {
-    let route: Route?
-    let vpnName: String?
-
-    private var displayName: String { Self.displayName(route, vpnName: vpnName, in: .main) }
-
-    /// The chip's text: the route's name, or "Choose Route" when the rule has none.
-    static func displayName(_ route: Route?, vpnName: String?, in bundle: Bundle) -> String {
-        route?.friendlyName(vpnName: vpnName, in: bundle) ?? String(localized: "Choose Route", bundle: bundle)
-    }
-
-    private var color: Color {
-        route?.accentColor ?? Theme.textDisabled
-    }
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
-            Text(displayName)
-                .font(.system(size: 11, weight: .semibold))
-                .lineLimit(1)
-            Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .bold))
-        }
-        .foregroundColor(color)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(color.opacity(0.15))
-        .cornerRadius(6)
     }
 }
 
@@ -1054,124 +947,56 @@ struct RuleEditorSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Sheet header
-            HStack {
-                Text(isEditing ? "Edit Rule" : "Add Rule")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white)
-                Spacer()
-                Button(action: onCancel) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(Theme.textSecondary)
+        SheetScaffold(isEditing ? String(localized: "Edit Rule") : String(localized: "Add Rule"),
+                      confirmTitle: isEditing ? String(localized: "Save Changes") : String(localized: "Add Rule"),
+                      onCancel: onCancel, onConfirm: attemptSave) {
+            SheetField(String(localized: "Match"), required: true) {
+                Picker(String(localized: "Match"), selection: $matchType) {
+                    Text("Domain").tag(MatchType.domain)
+                    Text("Service").tag(MatchType.service)
+                    Text("IP").tag(MatchType.ip)
+                    Text("CIDR").tag(MatchType.cidr)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(String(localized: "Cancel"))
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
 
-            Divider().background(Theme.divider)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    formField(label: "Match", required: true) {
-                        Picker(String(localized: "Match"), selection: $matchType) {
-                            Text("Domain").tag(MatchType.domain)
-                            Text("Service").tag(MatchType.service)
-                            Text("IP").tag(MatchType.ip)
-                            Text("CIDR").tag(MatchType.cidr)
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                    }
-
-                    if matchType == .service {
-                        formField(label: "Service", required: true) {
-                            if services.isEmpty {
-                                Text("No services configured. Add one in the Services tab first.")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(Theme.textTertiary)
-                            } else {
-                                Picker(String(localized: "Service"), selection: $selectedServiceId) {
-                                    ForEach(services) { service in
-                                        Text(service.name).tag(service.id)
-                                    }
-                                }
-                                .pickerStyle(.menu)
-                                .labelsHidden()
+            if matchType == .service {
+                SheetField(String(localized: "Service"), required: true) {
+                    if services.isEmpty {
+                        Text("No services configured. Add one in the Services tab first.")
+                            .font(Theme.Font.detail)
+                            .foregroundColor(Theme.textSecondary)
+                    } else {
+                        Picker(String(localized: "Service"), selection: $selectedServiceId) {
+                            ForEach(services) { service in
+                                Text(service.name).tag(service.id)
                             }
                         }
-                    } else {
-                        formField(label: "Pattern", required: true) {
-                            TextField(patternPlaceholder, text: $pattern)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13, design: .monospaced))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(Theme.bgInput)
-                                .cornerRadius(8)
-                        }
-                    }
-
-                    formField(label: "Route", required: true) {
-                        RouteChipMenu(
-                            selectedRouteId: routeId,
-                            onSelect: { routeId = $0 },
-                            onNewRoute: { showingNewRouteSheet = true }
-                        )
-                    }
-
-                    if let error = validationError {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 11))
-                                .foregroundColor(Theme.error)
-                            Text(error)
-                                .font(.system(size: 12))
-                                .foregroundColor(Theme.error)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Theme.error.opacity(0.1))
-                        .cornerRadius(8)
+                        .pickerStyle(.menu)
+                        .labelsHidden()
                     }
                 }
-                .padding(20)
-            }
-
-            Divider().background(Theme.divider)
-
-            // Action buttons
-            HStack {
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.plain)
-                    .foregroundColor(Theme.textSecondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Theme.bgInput)
-                    .cornerRadius(8)
-
-                Spacer()
-
-                Button(isEditing ? "Save Changes" : "Add Rule") {
-                    attemptSave()
+            } else {
+                SheetField(String(localized: "Pattern"), required: true) {
+                    TextField(patternPlaceholder, text: $pattern)
+                        .textFieldStyle(.roundedBorder)
+                        .font(matchType == .ip || matchType == .cidr ? Theme.Font.mono : Theme.Font.body)
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Theme.blueGradient)
-                .cornerRadius(8)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+
+            SheetField(String(localized: "Route"), required: true) {
+                RulesRouteChipMenu(
+                    selectedRouteId: routeId,
+                    onSelect: { routeId = $0 },
+                    onNewRoute: { showingNewRouteSheet = true }
+                )
+            }
+
+            if let error = validationError {
+                SheetError(message: error)
+            }
         }
-        .frame(width: 400)
-        .background(Theme.bgSecondary)
         .sheet(isPresented: $showingNewRouteSheet) {
             RouteEditorSheet(editingRoute: nil) { newRoute in
                 routeManager.addRoute(newRoute)
@@ -1180,27 +1005,6 @@ struct RuleEditorSheet: View {
             } onCancel: {
                 showingNewRouteSheet = false
             }
-        }
-    }
-
-    @ViewBuilder
-    private func formField<F: View>(
-        label: LocalizedStringKey,
-        required: Bool,
-        @ViewBuilder field: () -> F
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 3) {
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(Theme.textSecondary)
-                if required {
-                    Text("*")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(Theme.error)
-                }
-            }
-            field()
         }
     }
 

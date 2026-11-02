@@ -1,0 +1,59 @@
+{
+  "category": "work",
+  "services": [
+    {
+      "id": "slack",
+      "name": "Slack",
+      "domains": [
+        "slack.com",
+        "www.slack.com",
+        "app.slack.com",
+        "files.slack.com",
+        "a.slack-edge.com"
+      ]
+    },
+    {
+      "id": "discord",
+      "name": "Discord",
+      "domains": [
+        "discord.com",
+        "discord.gg",
+        "discordapp.com",
+        "discord.media",
+        "cdn.discordapp.com",
+        "*.discordapp.net",
+        "gateway.discord.gg",
+        "media.discordapp.net",
+        "images-ext-1.discordapp.net",
+        "images-ext-2.discordapp.net"
+      ]
+    },
+    {
+      "id": "zoom",
+      "name": "Zoom",
+      "domains": [
+        "zoom.us",
+        "www.zoom.us",
+        "us02web.zoom.us",
+        "us04web.zoom.us",
+        "us05web.zoom.us"
+      ]
+    },
+    {
+      "id": "teams",
+      "name": "Microsoft Teams",
+      "domains": [
+        "teams.microsoft.com",
+        "teams.live.com",
+        "statics.teams.cdn.office.net"
+      ]
+    },
+    {
+      "id": "googlemeet",
+      "name": "Google Meet",
+      "domains": [
+        "meet.google.com"
+      ]
+    }
+  ]
+}

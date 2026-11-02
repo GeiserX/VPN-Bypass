@@ -1,6 +1,6 @@
 # Wildcard domains and Network Extension: decision document
 
-Research of October 2026. It describes what we decided to build and why; option B below is built (helper 2.5.0); Network Extension is not.
+Research of October 2026. It describes what we decided to build and why; option B below is built (helper 2.5.0); Network Extension is not. Update 2026-10-30: the "no NE" rule is lifted, and the NE engine is planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`.
 
 **Terms used below**
 - **Host route:** a kernel routing-table entry for one IP address (`/32`).
@@ -22,7 +22,7 @@ This is always on while at least one wildcard exists. It does not depend on the 
 On Network Extension: yes, it is worth thinking about, but not for wildcards.
 - A DNS proxy (`NEDNSProxyProvider`) would do the same job the forwarder does. It costs entitlements, two provisioning profiles, hand signing and an approval prompt, and it still can't see DoH. It does **not** need MDM on macOS.
 - The NE option that adds something new is a **transparent proxy (`NETransparentProxyProvider`)**. It gives per-app routing, routing proxy traffic by hostname, and blocking browser DoH. That makes it the right second engine for Custom mode later: opt-in, with the current engine as the fallback.
-- Any NE work is still covered by the 2026-07-03 rule "no NE entitlements, ever" (`docs/MULTI-ROUTE-DESIGN.md:359`). That rule was reopened on 2026-10-05 but not lifted, so NE waits until the owner explicitly says go.
+- The 2026-07-03 rule "no NE entitlements, ever" (`docs/MULTI-ROUTE-DESIGN.md`) was lifted on 2026-10-30. The transparent proxy is planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`, per-app bypass first.
 
 So the answer is: build the forwarder now, and treat NE as a separate per-app feature, not as the wildcard fix.
 
@@ -109,7 +109,7 @@ So the answer is: build the forwarder now, and treat NE as a separate per-app fe
 
 ### C. Network Extension
 
-Bound by `docs/MULTI-ROUTE-DESIGN.md:359` (no NE entitlements) until the owner lifts it.
+The "no NE entitlements" rule that bound this section was lifted on 2026-10-30. The chosen design is in `docs/design/NETWORK-EXTENSION-DESIGN.md`.
 
 | Provider | Wildcards | Per-app | Sees DoH | Fit |
 |---|---|---|---|---|
@@ -205,7 +205,7 @@ Bound by `docs/MULTI-ROUTE-DESIGN.md:359` (no NE entitlements) until the owner l
    - Firefox canary file.
    - Fix CLAUDE.md.
 3. **Watch, then decide.** If shared-IP spill or route-table growth bites in real use, spike D1 (fake IP plus root utun). Still no entitlement.
-4. **Gated on an explicit go, which lifts `MULTI-ROUTE-DESIGN.md:359`:** an NE transparent proxy as an opt-in Custom-mode engine for per-app routing, proxy routing by hostname and DoH blocking, with B as the fallback.
+4. **Go given on 2026-10-30 (design: `docs/design/NETWORK-EXTENSION-DESIGN.md`):** an NE transparent proxy as an opt-in Custom-mode engine for per-app routing, proxy routing by hostname and DoH blocking, with B as the fallback.
    - Spike it first beside endpoint-security agents, Tailscale and GlobalProtect.
    - Ship the profiles and hand signing in `scripts/sign-and-notarize.sh`.
    - Not recommended: an NE DNS proxy just for wildcards, because B already holds the answer until the route is in.

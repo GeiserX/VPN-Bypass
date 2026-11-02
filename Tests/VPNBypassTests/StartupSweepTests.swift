@@ -81,4 +81,29 @@ final class StartupSweepTests: XCTestCase {
         XCTAssertEqual(result.error, "protected: VPN gateway")
         XCTAssertTrue(rm.pendingKernelAdds.isEmpty, "a refused destination must not become pending")
     }
+
+    /// In a mixed batch the gateway is refused and the rest goes through; the gateway must still
+    /// come back as failed, or callers record it as owned and teardown later deletes it.
+    func testMixedBatchReportsVPNGatewayAsFailed() async {
+        let rm = RouteManager.shared
+        let savedGW = rm.vpnGateway
+        defer { rm.vpnGateway = savedGW; rm.addRoutesBatchOverrideForTests = nil }
+        rm.vpnGateway = "198.51.100.44"
+        var submitted: [String] = []
+        rm.addRoutesBatchOverrideForTests = { routes in
+            submitted = routes.map { $0.destination }
+            return (routes.count, 0, [], nil)
+        }
+
+        let result = await rm.addRoutesBatchTracked(routes: [
+            (destination: "198.51.100.44", gateway: "192.168.1.1", isNetwork: false),
+            (destination: "203.0.113.7", gateway: "192.168.1.1", isNetwork: false),
+        ])
+        XCTAssertEqual(submitted, ["203.0.113.7"], "the gateway must never reach the kernel")
+        XCTAssertEqual(result.successCount, 1)
+        XCTAssertEqual(result.failureCount, 1)
+        XCTAssertEqual(result.failedDestinations, ["198.51.100.44"])
+        XCTAssertFalse(rm.pendingKernelAdds.contains("198.51.100.44"), "a refused gateway must not become pending")
+        rm.pendingKernelAdds.remove("203.0.113.7")
+    }
 }

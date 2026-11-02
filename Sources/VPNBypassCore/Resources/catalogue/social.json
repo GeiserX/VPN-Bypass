@@ -1,0 +1,69 @@
+{
+  "category": "social",
+  "services": [
+    {
+      "id": "twitter",
+      "name": "X (Twitter)",
+      "domains": [
+        "twitter.com",
+        "x.com",
+        "www.twitter.com",
+        "api.twitter.com",
+        "t.co",
+        "pbs.twimg.com",
+        "abs.twimg.com"
+      ]
+    },
+    {
+      "id": "instagram",
+      "name": "Instagram",
+      "domains": [
+        "instagram.com",
+        "www.instagram.com",
+        "i.instagram.com",
+        "scontent.cdninstagram.com"
+      ]
+    },
+    {
+      "id": "tiktok",
+      "name": "TikTok",
+      "domains": [
+        "tiktok.com",
+        "www.tiktok.com",
+        "vm.tiktok.com",
+        "m.tiktok.com"
+      ]
+    },
+    {
+      "id": "reddit",
+      "name": "Reddit",
+      "domains": [
+        "reddit.com",
+        "www.reddit.com",
+        "old.reddit.com",
+        "i.redd.it",
+        "v.redd.it"
+      ]
+    },
+    {
+      "id": "facebook",
+      "name": "Facebook",
+      "domains": [
+        "facebook.com",
+        "www.facebook.com",
+        "m.facebook.com",
+        "fb.com",
+        "fbcdn.net"
+      ]
+    },
+    {
+      "id": "linkedin",
+      "name": "LinkedIn",
+      "domains": [
+        "linkedin.com",
+        "www.linkedin.com",
+        "media.licdn.com"
+      ]
+    }
+  ]
+}

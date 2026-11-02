@@ -15,6 +15,14 @@ enum ControlOrigin {
     /// awaits and into the tasks it starts (an apply that `refresh` kicks off), and never leaks
     /// into a button's code that runs on the main actor while the request is suspended.
     @TaskLocal static var isControlSocket = false
+
+    /// Who sent the request: `vpnb` and the MCP server on the socket, or a Shortcuts action
+    /// (ShortcutActions), which runs through the same `ControlSurface.handle`. Read only
+    /// while `isControlSocket` is true.
+    @TaskLocal static var channel: LogSource = .controlSocket
+
+    /// The source a log line written now carries.
+    static var logSource: LogSource { isControlSocket ? channel : .app }
 }
 
 /// Where a log line came from.
@@ -23,6 +31,8 @@ enum LogSource: Equatable {
     case app
     /// A request on the control socket, or work one started.
     case controlSocket
+    /// A Shortcuts action, or work one started.
+    case shortcuts
 
     /// The tag the Logs page shows at the end of a socket line.
     var tag: String? { tag(in: .main) }
@@ -31,8 +41,19 @@ enum LogSource: Equatable {
         switch self {
         case .app: return nil
         case .controlSocket: return String(localized: "via the command line", bundle: bundle)
+        case .shortcuts: return String(localized: "via Shortcuts", bundle: bundle)
         }
     }
+
+    /// This source's tag tooltip.
+    func helpText(in bundle: Bundle) -> String {
+        switch self {
+        case .shortcuts: return String(localized: "Came from a Shortcuts action", bundle: bundle)
+        case .app, .controlSocket: return Self.tagHelp(in: bundle)
+        }
+    }
+
+    var helpText: String { helpText(in: .main) }
 
     /// The tag's tooltip, which names what "the command line" is.
     static var tagHelp: String { tagHelp(in: .main) }
@@ -46,6 +67,7 @@ enum LogSource: Equatable {
         switch self {
         case .app: return ""
         case .controlSocket: return " (via the command line)"
+        case .shortcuts: return " (via Shortcuts)"
         }
     }
 }
@@ -70,6 +92,8 @@ struct OutsideChange: Equatable {
 
     let kind: Kind
     let at: Date
+    /// Where the request came from: the command line, or Shortcuts.
+    var via: LogSource = .controlSocket
 
     /// The change a successful mutating request made, or nil when it changed nothing: a verb
     /// that changes no setting, a setting already as asked (`mode` to the mode in use, enabling
@@ -77,15 +101,15 @@ struct OutsideChange: Equatable {
     static func make(cmd: String, result: ControlResult?,
                      before: RouteManager.Config, after: RouteManager.Config,
                      routesBefore: Int, routesLeft: Int, everythingElseDirect: Bool = false,
-                     at: Date) -> OutsideChange? {
+                     at: Date, via: LogSource = .controlSocket) -> OutsideChange? {
         guard let kind = kind(cmd: cmd, result: result, before: before, after: after,
                               routesLeft: routesLeft, everythingElseDirect: everythingElseDirect) else {
             return nil
         }
         if case .removedAllRoutes = kind {
-            return routesBefore > 0 ? OutsideChange(kind: kind, at: at) : nil
+            return routesBefore > 0 ? OutsideChange(kind: kind, at: at, via: via) : nil
         }
-        return sameSettings(before, after) ? nil : OutsideChange(kind: kind, at: at)
+        return sameSettings(before, after) ? nil : OutsideChange(kind: kind, at: at, via: via)
     }
 
     /// Config is not Equatable; its sorted JSON is, and it holds every setting.
@@ -149,6 +173,7 @@ struct OutsideChange: Equatable {
 
     func line(now: Date, in bundle: Bundle) -> (text: String, subject: String?) {
         let when = DropdownCopy.age(since: at, now: now, in: bundle)
+        if via == .shortcuts, let line = shortcutsLine(when: when, in: bundle) { return line }
         switch kind {
         case .addedDomain(let name):
             return (String(localized: "Last change: added \(name) via the command line, \(when)", bundle: bundle), name)
@@ -176,6 +201,36 @@ struct OutsideChange: Equatable {
         }
     }
 
+    /// The line for a change a Shortcuts action made. Nil for the kinds no Shortcuts action
+    /// makes (route removal, routes, rules), which keep the command-line wording.
+    private func shortcutsLine(when: String, in bundle: Bundle) -> (text: String, subject: String?)? {
+        switch kind {
+        case .addedDomain(let name):
+            return (String(localized: "Last change: added \(name) via Shortcuts, \(when)", bundle: bundle), name)
+        case .turnedOn(let name):
+            return (String(localized: "Last change: turned on \(name) via Shortcuts, \(when)", bundle: bundle), name)
+        case .turnedOff(let name):
+            return (String(localized: "Last change: turned off \(name) via Shortcuts, \(when)", bundle: bundle), name)
+        case .switchedMode(let mode):
+            let name = DropdownModePicker.label(mode, in: bundle)
+            return (String(localized: "Last change: switched to \(name) via Shortcuts, \(when)", bundle: bundle), name)
+        default:
+            return nil
+        }
+    }
+
+    /// What Logs shows when the footer line is clicked: only the lines from where it came.
+    var logFilter: LogFilter { LogFilter(onlySource: via) }
+
+    /// This change's footer tooltip, which names where it came from.
+    var logsHelp: String { logsHelp(in: .main) }
+
+    func logsHelp(in bundle: Bundle) -> String {
+        via == .shortcuts
+            ? String(localized: "Show what came from Shortcuts in Logs", bundle: bundle)
+            : Self.help(in: bundle)
+    }
+
     /// The footer line's tooltip: a click opens the log at what came through the socket.
     static var help: String { help(in: .main) }
 
@@ -189,9 +244,9 @@ extension RouteManager.LogEntry {
     /// applied via the command line" before the tag existed, and the reply keeps that text, so
     /// a script reading `logs` sees what it saw before.
     var socketReplyMessage: String {
-        guard source == .controlSocket, message.hasPrefix("Control: '"), message.hasSuffix("' applied") else {
+        guard source != .app, message.hasPrefix("Control: '"), message.hasSuffix("' applied") else {
             return message
         }
-        return message + " via the command line"
+        return message + (source == .shortcuts ? " via Shortcuts" : " via the command line")
     }
 }

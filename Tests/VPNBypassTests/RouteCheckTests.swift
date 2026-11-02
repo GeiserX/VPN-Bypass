@@ -20,7 +20,7 @@ final class RouteCheckTests: XCTestCase {
 
     private func result(_ destination: String, ok: Bool, ms: Double? = nil) -> RouteVerificationResult {
         RouteVerificationResult(destination: destination, isReachable: ok, latency: ms, timestamp: Date(),
-                                error: ok ? nil : "Ping timed out")
+                                error: ok ? nil : "Left through en0, but nothing answered on port 443")
     }
 
     // MARK: Plan
@@ -96,9 +96,9 @@ final class RouteCheckTests: XCTestCase {
 
     func testOnlyRangesMeansNothingToCheck() {
         XCTAssertEqual(RouteCheck.scope(checked: 0, singleAddresses: 0, routeCount: 3).text,
-                       "Nothing to check: all 3 addresses are ranges, which ping cannot test.")
+                       "Nothing to check: all 3 addresses are ranges, which the path check cannot test.")
         XCTAssertEqual(RouteCheck.scope(checked: 0, singleAddresses: 0, routeCount: 1).text,
-                       "Nothing to check: the only address is a range, which ping cannot test.")
+                       "Nothing to check: the only address is a range, which the path check cannot test.")
     }
 
     // MARK: Results
@@ -172,8 +172,8 @@ final class RouteCheckTests: XCTestCase {
                                                                withTemplate: "%lld"))
         }
         XCTAssertEqual(Set(keys), [
-            "Nothing to check: the only address is a range, which ping cannot test",
-            "Nothing to check: all %lld addresses are ranges, which ping cannot test",
+            "Nothing to check: the only address is a range, which the path check cannot test",
+            "Nothing to check: all %lld addresses are ranges, which the path check cannot test",
             "Checked the only address", "Checked all %lld addresses", "Checked %lld of %lld addresses",
             "Checked 1 of %lld addresses",
             "(single addresses only)", "Route check", "All reachable.",
@@ -202,8 +202,9 @@ final class RouteCheckTests: XCTestCase {
     }
 }
 
-/// `verifyRoutes` on the shared manager: what it publishes and what it logs. It pings only
-/// 127.0.0.1, so it needs no network and fires no failure notification.
+/// `verifyRoutes` on the shared manager: what it publishes and what it logs. Its path probes are
+/// answered by the test (127.0.0.1 answers through lo0 at once; 192.0.2.1 never answers, after
+/// a wait), so it needs no network and no firewall can change the result.
 @MainActor
 final class VerifyRoutesLoggingTests: XCTestCase {
     private var savedRoutes: [RouteManager.ActiveRoute] = []
@@ -215,6 +216,16 @@ final class VerifyRoutesLoggingTests: XCTestCase {
         savedRoutes = rm.activeRoutes
         savedConfig = rm.config
         savedLogs = rm.recentLogs
+        rm.pathProbeOverrideForTests = { address, _ in
+            if address == "192.0.2.1" {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                return PathCheck.Probe(address: address, routeInterface: "en0", answer: .noAnswer)
+            }
+            // A real probe suspends; the spinner tests watch the check while it waits.
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            return PathCheck.Probe(address: address, routeInterface: "lo0", sourceAddress: address,
+                                   sourceInterface: "lo0", answer: .connected, latencyMs: 1)
+        }
     }
 
     override func tearDown() async throws {
@@ -222,6 +233,7 @@ final class VerifyRoutesLoggingTests: XCTestCase {
         rm.activeRoutes = savedRoutes
         rm.config = savedConfig
         rm.recentLogs = savedLogs
+        rm.pathProbeOverrideForTests = nil
         rm.clearRouteCheck()
     }
 
@@ -243,8 +255,8 @@ final class VerifyRoutesLoggingTests: XCTestCase {
         XCTAssertEqual(run?.routeCount, 2)
         XCTAssertEqual(run?.singleAddresses, 1)
         let lines = rm.recentLogs.map(\.message)
-        XCTAssertTrue(lines.contains { $0.hasPrefix("Route check: 127.0.0.1 (Loopback) reachable") }, "\(lines)")
-        XCTAssertEqual(lines.first, "Route check: all 1 reachable (checked 1 of 2 routes, single addresses only)")
+        XCTAssertTrue(lines.contains { $0.hasPrefix("Route check: 127.0.0.1 (Loopback) left through lo0, answered") }, "\(lines)")
+        XCTAssertEqual(lines.first, "Route check: all 1 left the right way and answered (checked 1 of 2 routes, single addresses only)")
 
         // The Logs link holds while the lines are there, and goes once the Logs page empties it.
         XCTAssertEqual(run?.logsHoldResults(oldestLogAt: rm.recentLogs.last?.timestamp), true)
@@ -308,7 +320,7 @@ final class VerifyRoutesLoggingTests: XCTestCase {
     }
 
     /// A check dropped by a newer one must not turn the newer one's spinner off when it ends.
-    /// The newer one pings a TEST-NET address that never answers, so it is still running then.
+    /// The newer one checks a TEST-NET address that never answers, so it is still running then.
     func testADroppedCheckLeavesTheNewerSpinnerOn() async {
         let rm = RouteManager.shared
         rm.config.routingMode = .bypass
@@ -341,7 +353,7 @@ final class VerifyRoutesLoggingTests: XCTestCase {
         XCTAssertEqual(rm.lastRouteCheck?.results.count, 0)
         XCTAssertEqual(rm.lastRouteCheck?.routeCount, 2)
         XCTAssertEqual(rm.recentLogs.first?.message,
-                       "Route check: nothing to check, all 2 routes are address ranges, which ping cannot test")
+                       "Route check: nothing to check, all 2 routes are address ranges, which the path check cannot test")
     }
 
     /// Routes removed while a check is still pinging: the check must not bring the card back.
@@ -369,6 +381,62 @@ final class VerifyRoutesLoggingTests: XCTestCase {
         XCTAssertFalse(rm.isCheckingRoutes)
         XCTAssertEqual(rm.recentLogs.first?.message,
                        "Route check: result dropped, routes were removed or another check started while it ran")
+    }
+
+    /// Bypass with a VPN up: the control, an address the app does not route, must leave through
+    /// the VPN. When it leaves around it too, every result reads "check broken", even the one that
+    /// took the right way; when it goes through the VPN, the same result passes.
+    func testTheControlDecidesWhetherTheRunCanPass() async {
+        let rm = RouteManager.shared
+        let saved = (rm.isVPNConnected, rm.vpnInterface, rm.localGateway)
+        defer { (rm.isVPNConnected, rm.vpnInterface, rm.localGateway) = saved }
+        rm.config.routingMode = .bypass
+        rm.isVPNConnected = true
+        rm.vpnInterface = "utun4"
+        rm.localGateway = "192.168.1.1"
+        rm.activeRoutes = [route("203.0.113.5", "example.com")]
+
+        for (controlVia, passes) in [("en0", false), ("utun4", true)] {
+            rm.recentLogs = []
+            rm.pathProbeOverrideForTests = { address, wait in
+                address == "192.0.2.1"
+                    ? PathCheck.Probe(address: address, routeInterface: controlVia, answer: wait ? .noAnswer : .notTried)
+                    : PathCheck.Probe(address: address, routeInterface: "en0", answer: .connected, latencyMs: 8)
+            }
+            await rm.verifyRoutes()
+            let result = rm.lastRouteCheck?.results.first
+            XCTAssertEqual(result?.isReachable, passes, controlVia)
+            XCTAssertEqual(result?.error?.hasPrefix("Check broken") ?? false, !passes, result?.error ?? "")
+            let lines = rm.recentLogs.map(\.message)
+            XCTAssertTrue(lines.contains { $0.hasPrefix("Route check: control 192.0.2.1 left through \(controlVia)") }, "\(lines)")
+        }
+    }
+
+    /// `vpnb why` end to end on the manager, for an address so no DNS is involved.
+    func testWhereDoesItGoForARoutedAddress() async throws {
+        let rm = RouteManager.shared
+        let saved = (rm.isVPNConnected, rm.vpnInterface, rm.localGateway)
+        defer { (rm.isVPNConnected, rm.vpnInterface, rm.localGateway) = saved }
+        rm.config.routingMode = .bypass
+        rm.config.domains = [DomainEntry(domain: "example.com")]
+        rm.isVPNConnected = true
+        rm.vpnInterface = "utun4"
+        rm.localGateway = "192.168.1.1"
+        rm.activeRoutes = [route("203.0.113.5", "example.com")]
+        rm.pathProbeOverrideForTests = { address, _ in
+            PathCheck.Probe(address: address, routeInterface: address == "192.0.2.1" ? "utun4" : "en0",
+                            answer: address == "192.0.2.1" ? .notTried : .connected, latencyMs: 8)
+        }
+
+        let found = await rm.whereDoesItGo("https://203.0.113.5/path")
+        let answer = try XCTUnwrap(found)
+        XCTAssertEqual(answer.host, "203.0.113.5")
+        XCTAssertEqual(answer.match, .route)
+        XCTAssertEqual(answer.entry, "example.com")
+        XCTAssertEqual(answer.verdict, .ok)
+        XCTAssertEqual(answer.control?.interface, "utun4")
+        let missing = await rm.whereDoesItGo("   ")
+        XCTAssertNil(missing)
     }
 
     /// No routes, no card.

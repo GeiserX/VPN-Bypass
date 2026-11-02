@@ -56,17 +56,18 @@ enum LogLevelFilter: String, CaseIterable, Identifiable {
 struct LogFilter: Equatable {
     var level: LogLevelFilter = .all
     var query: String = ""
-    var onlyControlSocket = false
+    /// Only the lines from this source; nil shows every source.
+    var onlySource: LogSource? = nil
 
     /// The search term without the spaces around it; empty means no search.
     var term: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     /// True when the filter hides anything at all.
-    var isActive: Bool { level != .all || !term.isEmpty || onlyControlSocket }
+    var isActive: Bool { level != .all || !term.isEmpty || onlySource != nil }
 
     func matches(_ entry: RouteManager.LogEntry) -> Bool {
         guard level.admits(entry.level) else { return false }
-        guard !onlyControlSocket || entry.source == .controlSocket else { return false }
+        guard onlySource == nil || entry.source == onlySource else { return false }
         return term.isEmpty || Self.ranges(of: term, in: entry.message).isEmpty == false
     }
 
@@ -92,7 +93,12 @@ struct LogFilter: Equatable {
 
     func emptyLine(shown: Int, in bundle: Bundle) -> String? {
         guard shown == 0, isActive else { return nil }
-        if onlyControlSocket {
+        if onlySource == .shortcuts {
+            return level == .all && term.isEmpty
+                ? String(localized: "Nothing came from Shortcuts.", bundle: bundle)
+                : String(localized: "Nothing from Shortcuts matches this filter.", bundle: bundle)
+        }
+        if onlySource != nil {
             return level == .all && term.isEmpty
                 ? String(localized: "Nothing came through the command line.", bundle: bundle)
                 : String(localized: "Nothing from the command line matches this filter.", bundle: bundle)
@@ -111,12 +117,21 @@ struct LogFilter: Equatable {
         }
     }
 
-    /// The token above the list while only the control socket's lines show; clicking it
-    /// shows every line again.
+    /// The token above the list while only one source's lines show; clicking it shows every
+    /// line again.
     static var sourceTokenTitle: String { sourceTokenTitle(in: .main) }
 
     static func sourceTokenTitle(in bundle: Bundle) -> String {
         String(localized: "From the command line", bundle: bundle)
+    }
+
+    /// The token's title and symbol for the source this filter keeps.
+    var sourceToken: (title: String, symbol: String) { sourceToken(in: .main) }
+
+    func sourceToken(in bundle: Bundle) -> (title: String, symbol: String) {
+        onlySource == .shortcuts
+            ? (String(localized: "From Shortcuts", bundle: bundle), "square.3.layers.3d")
+            : (Self.sourceTokenTitle(in: bundle), "terminal")
     }
 
     static var sourceTokenHelp: String { sourceTokenHelp(in: .main) }

@@ -51,6 +51,17 @@ protocol HelperProtocol {
         withReply reply: @escaping (Int, Int, [String], String?) -> Void
     )
     
+    /// Replace each destination's route with a block (a reject route, `RouteKernel.blockSpec`),
+    /// for VPN Only's listed addresses while the VPN is down. The routes are taken out with
+    /// `removeRoutesBatch`, and an install over a block replaces it.
+    /// - Parameters:
+    ///   - destinations: IP addresses or CIDR ranges the app routed into the VPN
+    ///   - reply: Callback with success count, failure count, failed destinations, and optional error message
+    func addBlockRoutesBatch(
+        destinations: [String],
+        withReply reply: @escaping (Int, Int, [String], String?) -> Void
+    )
+
     /// Update the hosts file with VPN bypass entries
     /// - Parameters:
     ///   - entries: Array of dictionaries with "domain" and "ip" keys
@@ -184,7 +195,11 @@ struct HelperConstants {
     // tcpdump. Bumped so installed 2.3.1 helpers, which have no such methods, reinstall.
     // 2.5.0: always-on wildcard domains: a DNS forwarder on 127.0.0.1:53530, the resolver files
     // that point at it, and set/drain calls for them. Bumped so installed 2.4.0 helpers reinstall.
-    static let helperVersion = "2.5.0"
+    // 2.6.0: VPN Only blocks (addBlockRoutesBatch): reject routes for the listed addresses
+    // while the VPN is down, and an install over one of them deletes it first, because
+    // RTM_CHANGE keeps RTF_REJECT. Bumped so installed 2.5.0 helpers, which have neither,
+    // reinstall.
+    static let helperVersion = "2.6.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

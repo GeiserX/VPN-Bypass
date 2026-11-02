@@ -1,0 +1,68 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../ui/mock.css"><link rel="stylesheet" href="rework.css">
+<style> .shot { background-size: 290px auto; width: 290px; } .pg { width: 520px; border-radius:12px; border:1px solid #2C2C2C; background:linear-gradient(var(--win),var(--win2)); overflow:hidden; }
+ .cb { display:inline-flex; align-items:center; gap:5px; font:400 12px -apple-system,system-ui; margin-right:12px; vertical-align:middle; }
+ .cb b { width:13px; height:13px; border-radius:3.5px; background:var(--accent); display:inline-flex; align-items:center; justify-content:center; font:700 9px system-ui; color:#fff; }
+ .cb b.no { background:rgba(255,255,255,.12); border:.5px solid rgba(255,255,255,.25); } </style>
+</head><body>
+<div class="head"><span class="num">6</span><span class="title">General becomes a grouped form; Info becomes a short About page</span></div>
+<p class="caption">Before: General is eight cards and about 1540 pt in a 680 pt window, each card with an icon in its own colour, a "Settings" title under a "General" tab, every toggle icon green whether the setting is on or off (SettingsView.swift:2042-2044), and a global SOCKS5 proxy that overlaps Custom mode's proxy routes. Info spends about 1025 pt on four brand-coloured donation buttons. After: five native groups with no icons, the proxy behind Advanced, and About in one screen.</p>
+<div class="cols" style="gap:20px">
+  <div class="col">
+    <div class="label">Before · General, whole page at half size</div>
+    <div class="shot" style="height:770px;background-image:url(before/general.png)"></div>
+  </div>
+  <div class="col">
+    <div class="label after">After · General</div>
+    <div class="pg">
+      <div class="tbar"><span class="ty-title">General</span></div>
+      <div class="pane">
+        <div class="sec ty-section">Startup</div>
+        <div class="box">
+          <div class="row2"><span class="name fill">Open at login</span><span class="sw on" role="img" aria-label="On"></span></div>
+          <div class="row2"><span class="name fill">Language</span><span class="pop">System</span></div>
+        </div>
+        <div class="sec ty-section">Routing</div>
+        <div class="box">
+          <div class="row2"><span class="name fill">Apply when a VPN connects</span><span class="sw on" role="img" aria-label="On"></span></div>
+          <div class="row2 two"><div class="fill"><div class="name">Pin listed names in /etc/hosts</div><div class="det">Needs the helper. Covers apps that use the system resolver.</div></div><span class="sw" role="img" aria-label="Off"></span></div>
+          <div class="row2"><span class="name fill">Look up addresses again</span><span class="pop">Every hour</span></div>
+          <div class="row2"><span class="name fill">Check the path after applying</span><span class="sw" role="img" aria-label="Off"></span></div>
+        </div>
+        <div class="sec ty-section">DNS servers</div>
+        <div class="box">
+          <div class="row2"><span class="name fill">Detected</span><span class="ty-mono" style="color:var(--t2)">192.168.1.1</span></div>
+          <div class="row2"><span class="name fill" style="color:var(--t2)">Also asked with the detected server, plus Cloudflare and Google DoH if none returns addresses in 200 ms; first successful answer wins. If all fail, the system resolver (maybe the VPN's DNS)</span></div>
+          <div class="row2 hov"><span class="name fill ty-mono">1.1.1.1</span><span class="acts"><span><i data-g="trash"></i></span></span></div>
+          <div class="row2"><span class="name fill ty-mono">8.8.8.8</span></div>
+          <div class="row2"><span class="name fill" style="color:var(--accentText)">Add Server…</span></div>
+        </div>
+        <div class="sec ty-section">Notifications</div>
+        <div class="box">
+          <div class="row2"><span class="name fill">Send notifications</span><span class="sw on" role="img" aria-label="On"></span></div>
+          <div class="row2 two"><div class="fill"><div class="name">Tell me when</div><div style="margin-top:4px"><span class="cb"><b>✓</b>VPN connects</span><span class="cb"><b>✓</b>VPN drops</span><span class="cb"><b class="no"></b>Addresses change</span><span class="cb"><b>✓</b>Something fails</span></div></div></div>
+          <div class="row2"><span class="name fill">Play a sound</span><span class="sw" role="img" aria-label="Off"></span></div>
+        </div>
+        <div class="sec ty-section">Configuration</div>
+        <div class="box"><div class="row2"><span class="name fill">Domains, services, rules and routes</span><span class="btn">Export…</span><span class="btn">Import…</span></div></div>
+        <div class="r gap4" style="margin-top:16px"><i data-g="chevr"></i><span class="ty-section">Advanced: SOCKS5 for VPNs that block UDP</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="label">Before · Info at quarter size (its "v16.0" is the test runner's version; the app shows its own)</div>
+    <div class="shot" style="height:512px;background-image:url(before/info.png)"></div>
+    <div class="label after" style="margin-top:12px">After · About</div>
+    <div class="pg" style="width:400px">
+      <div class="pane" style="text-align:center;padding:22px 20px">
+        <div class="wm" style="font-size:22px">VPN<b>Bypass</b></div>
+        <div class="ty-detail" style="margin-top:4px">Version 5.5.2 · GPL-3.0 · by GeiserX</div>
+        <div class="r gap8" style="justify-content:center;margin-top:14px"><span class="btn">Website</span><span class="btn">GitHub</span><span class="btn">Report a problem…</span></div>
+        <div class="box" style="margin-top:16px;text-align:left"><div class="row2 two"><div class="fill"><div class="name">Support the project</div><div class="det ell">Four ways to give, in one menu</div></div><span class="pop">Choose…</span></div></div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:6px;max-width:400px">"Report a problem…" copies a diagnostics bundle (versions, VPN type, mode, counts, last errors; no names) and opens a new issue. Licence shown as in the repo's LICENSE.</div>
+  </div>
+</div>
+<script src="glyphs.js"></script>
+</body></html>

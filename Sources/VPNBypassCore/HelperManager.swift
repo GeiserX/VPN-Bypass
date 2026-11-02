@@ -743,6 +743,37 @@ let timeout = xpcTimeout + Double(routes.count) * 0.6
         return result
     }
 
+    /// VPN Only blocks (`HelperProtocol.addBlockRoutesBatch`). Two writes per destination at
+    /// worst (delete, then add), so the add batch's budget. A deadline timeout reached the
+    /// helper, so, as for `addRoutesBatch`, nothing is reported failed: the caller keeps every
+    /// destination on its list of blocks and a later removal clears any that never landed.
+    func addBlockRoutesBatch(destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
+        guard helperState.isReady else {
+            return (0, destinations.count, destinations, "Helper not ready (\(helperState.statusText))")
+        }
+        let timeout = xpcTimeout + Double(destinations.count) * 0.6
+        let fallback = (0, 0, [String](), Optional("XPC timeout"))
+
+        let connection = getOrCreateConnection()
+        let result = await withXPCDeadline(seconds: timeout, fallback: fallback) { once in
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                once.complete((0, destinations.count, destinations, Optional("XPC error: \(error.localizedDescription)")))
+            } as? HelperProtocol
+
+            guard let helper = proxy else {
+                once.complete((0, destinations.count, destinations, Optional("Failed to create XPC proxy")))
+                return
+            }
+
+            helper.addBlockRoutesBatch(destinations: destinations) { successCount, failureCount, failedDestinations, error in
+                once.complete((successCount, failureCount, failedDestinations, error))
+            }
+        }
+
+        if result.3 == "XPC timeout" { dropXPCConnection() }
+        return result
+    }
+
     // MARK: - Hosts File Operations
 
     func updateHostsFile(entries: [(domain: String, ip: String)]) async -> (success: Bool, error: String?) {

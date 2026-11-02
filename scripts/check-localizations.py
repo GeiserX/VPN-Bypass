@@ -104,12 +104,40 @@ def catalog_tables() -> list:
     return sorted({path.stem for path in RESOURCES.glob("*.lproj/*.strings")})
 
 
+# InfoPlist.strings translates Info.plist values (the Automation prompt's text), not source
+# strings, so its keys are checked against Info.plist instead of the compiler's keys.
+INFO_PLIST_TABLE = "InfoPlist"
+INFO_PLIST = ROOT / "Info.plist"
+
+
+def info_plist_problems() -> list:
+    """One line for each InfoPlist.strings key that Info.plist lacks, and each language missing
+    a key the reference has."""
+    result = subprocess.run(
+        ["plutil", "-convert", "json", "-o", "-", str(INFO_PLIST)],
+        check=True, capture_output=True, text=True,
+    )
+    plist_keys = set(json.loads(result.stdout))
+    reference = catalog(REFERENCE, INFO_PLIST_TABLE)
+    problems = []
+    for lang in [REFERENCE] + LANGUAGES:
+        entries = catalog(lang, INFO_PLIST_TABLE)
+        for key in sorted(entries):
+            if key not in plist_keys:
+                problems.append(f"{lang}.lproj/{INFO_PLIST_TABLE}.strings has {json.dumps(key)}, which Info.plist lacks")
+        for key in sorted(set(reference) - set(entries)):
+            problems.append(f"{lang}.lproj/{INFO_PLIST_TABLE}.strings is missing {json.dumps(key)}")
+    return problems
+
+
 def unused_keys(keys: dict) -> list:
     """[(language, table, key)] for each catalog line whose key no source file uses."""
     used = set(keys)
     found = []
     for lang in [REFERENCE] + LANGUAGES:
         for table in catalog_tables():
+            if table == INFO_PLIST_TABLE:
+                continue
             for key in catalog(lang, table):
                 if (table, key) not in used:
                     found.append((lang, table, key))
@@ -170,9 +198,13 @@ def main() -> int:
     # without its catalog line.
     for lang, table, key in unused:
         print(f"{lang}.lproj/{table}.strings has {json.dumps(key, ensure_ascii=False)}, which no source file uses")
-    if missing or mismatched or unused:
+    plist_problems = info_plist_problems()
+    for line in plist_problems:
+        print(line)
+    if missing or mismatched or unused or plist_problems:
         print(f"\n{missing} missing translation(s), {mismatched} with the wrong specifiers, "
-              f"{len(unused)} unused, across {', '.join([REFERENCE] + LANGUAGES)}.", file=sys.stderr)
+              f"{len(unused)} unused, {len(plist_problems)} in {INFO_PLIST_TABLE}.strings, "
+              f"across {', '.join([REFERENCE] + LANGUAGES)}.", file=sys.stderr)
         return 1
     print(f"All {len(keys)} localizable keys in Sources/ have {' and '.join(LANGUAGES)} entries, "
           f"with the same specifiers, and every catalog key is used.")
