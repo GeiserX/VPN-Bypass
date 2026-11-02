@@ -7,6 +7,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.1]
+
+### Fixed
+- **Routes are back within seconds of a VPN connect.** After the VPN connected and the 10-second settle wait ended, the app looked up every listed name before it wrote a route: on a GlobalProtect connect with 204 names that took 62 s, so the listed sites went through the VPN for about 75 s after every connect. Launch and Resume already put the routes back from the addresses resolved before. The connect now does the same: once the tunnel has settled it installs the routes from those addresses, then looks the names up again in the background and adds or removes only the addresses that changed. Routes that are already in place are not written again. The full lookup still runs first when nothing was resolved before, and when a route from the saved addresses fails to install. VPN Only under GlobalProtect stays refused before any lookup, as before. A connect that comes while that background lookup still runs stops it and starts its own, so nothing is written twice; in Custom mode that lookup is a full apply and finishes first. The settle wait and the flap handling are unchanged.
+
 ## [Unreleased]
 
 ### Added
