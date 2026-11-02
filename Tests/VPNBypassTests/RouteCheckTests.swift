@@ -384,8 +384,10 @@ final class VerifyRoutesLoggingTests: XCTestCase {
     }
 
     /// Bypass with a VPN up: the control, an address the app does not route, must leave through
-    /// the VPN. When it leaves around it too, every result reads "check broken", even the one that
-    /// took the right way; when it goes through the VPN, the same result passes.
+    /// the VPN. When it leaves through another tunnel, every result reads "check broken", even the
+    /// one that took the right way; when it goes through the VPN, the same result passes. When it
+    /// leaves around every tunnel the VPN is a split tunnel: not broken, each result is judged by
+    /// its own way.
     func testTheControlDecidesWhetherTheRunCanPass() async {
         let rm = RouteManager.shared
         let saved = (rm.isVPNConnected, rm.vpnInterface, rm.localGateway)
@@ -396,7 +398,7 @@ final class VerifyRoutesLoggingTests: XCTestCase {
         rm.localGateway = "192.168.1.1"
         rm.activeRoutes = [route("203.0.113.5", "example.com")]
 
-        for (controlVia, passes) in [("en0", false), ("utun4", true)] {
+        for (controlVia, passes) in [("utun7", false), ("utun4", true), ("en0", true)] {
             rm.recentLogs = []
             rm.pathProbeOverrideForTests = { address, wait in
                 address == "192.0.2.1"

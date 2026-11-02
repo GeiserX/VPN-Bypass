@@ -285,6 +285,113 @@ final class SiteRouteTests: XCTestCase {
         XCTAssertNil(a.checks.first?.verdict, "a broken control leaves no address judged")
     }
 
+    // MARK: Split-tunnel VPN
+
+    /// The control as the app decides it, for a VPN on utun11 in Bypass or Custom.
+    private func control(via interface: String) -> (probe: PathCheck.Probe, outcome: PathCheck.Control) {
+        let p = probe("192.0.2.1", via: interface, .notTried)
+        return (p, PathCheck.control(p, unrouted: .tunnel("utun11")))
+    }
+
+    /// A route pinned to a tunnel, under a VPN that carries only some networks: the probe left
+    /// through the tunnel and the control around it, so the check told the two ways apart. It
+    /// is judged by its own tunnel, and an unanswered 443 stays its own fact, never "broken".
+    func testSplitTunnelPinnedRouteIsJudgedByItsTunnel() {
+        let found = SiteRoute.Found(match: .route, entry: "rule:198.51.100.20/32", routedDestination: "198.51.100.20/32",
+                                    expected: .tunnel("utun11"))
+        let silent = SiteRoute.answer(host: "198.51.100.20", mode: .custom, addresses: ["198.51.100.20"], found: found,
+                                      probes: [probe("198.51.100.20", via: "utun11", .noAnswer)],
+                                      control: control(via: "en8"), vpnConnected: true)
+        XCTAssertEqual(silent.verdict, .noAnswer)
+        XCTAssertEqual(silent.checks.first?.verdict, .noAnswer)
+        XCTAssertEqual(silent.splitTunnel, true)
+        XCTAssertEqual(silent.summary, "198.51.100.20 uses 198.51.100.20/32, which has a route added for rule:198.51.100.20/32."
+                       + " The check saw it leave through utun11, but nothing answered on port 443.")
+        let answered = SiteRoute.answer(host: "198.51.100.20", mode: .custom, addresses: ["198.51.100.20"], found: found,
+                                        probes: [probe("198.51.100.20", via: "utun11")],
+                                        control: control(via: "en8"), vpnConnected: true)
+        XCTAssertEqual(answered.verdict, .ok)
+        // A pinned route that leaked around the tunnel is still the wrong way.
+        let leaked = SiteRoute.answer(host: "198.51.100.20", mode: .custom, addresses: ["198.51.100.20"], found: found,
+                                      probes: [probe("198.51.100.20", via: "en8")],
+                                      control: control(via: "en8"), vpnConnected: true)
+        XCTAssertEqual(leaked.verdict, .wrongWay)
+    }
+
+    /// A Bypass entry under a split tunnel leaves the right way, but its route is not what makes
+    /// it so: the answer says that instead of calling the check broken.
+    func testSplitTunnelDirectEntrySaysTheRouteChangesNothing() {
+        let found = SiteRoute.Found(match: .route, entry: "example.com", routedDestination: "203.0.113.5", expected: .physical)
+        let a = SiteRoute.answer(host: "example.com", mode: .bypass, addresses: ["203.0.113.5"], found: found,
+                                 probes: [probe("203.0.113.5", via: "en8")],
+                                 control: control(via: "en8"), vpnConnected: true)
+        XCTAssertEqual(a.verdict, .ok)
+        XCTAssertEqual(a.checks.first?.verdict, .ok)
+        XCTAssertEqual(a.splitTunnel, true)
+        XCTAssertEqual(a.summary, "example.com is on your list, and its address 203.0.113.5 has a route."
+                       + " The check saw it leave through en8, and it answered on port 443."
+                       + " This VPN carries only some networks, so an address it does not carry leaves through en8"
+                       + " even without the entry.")
+    }
+
+    /// Custom, no rule matches and the default route is the VPN, under a split tunnel: the name
+    /// leaves through the physical interface, and the answer says so instead of naming the VPN.
+    func testSplitTunnelCustomDefaultRouteSaysItLeavesThePhysicalInterface() {
+        let found = SiteRoute.Found(match: .defaultRoute, routeName: "Corporate VPN", expected: .tunnel("utun11"))
+        let a = SiteRoute.answer(host: "example.org", mode: .custom, addresses: ["203.0.113.7"], found: found,
+                                 probes: [probe("203.0.113.7", via: "en8")],
+                                 control: control(via: "en8"), vpnConnected: true)
+        XCTAssertEqual(a.verdict, .ok)
+        XCTAssertEqual(a.expected, "physical")
+        XCTAssertEqual(a.summary, "example.org matches no rule, so it takes the default route, Corporate VPN,"
+                       + " which leaves it to the system's own routing."
+                       + " The check saw it leave through en8, and it answered on port 443."
+                       + " This VPN carries only some networks, not the default route, so traffic without a route leaves through en8.")
+        // A name in one of the VPN's own networks still goes into it: that is the system's routing too.
+        let inside = SiteRoute.answer(host: "intranet.example", mode: .custom, addresses: ["10.0.0.5"], found: found,
+                                      probes: [probe("10.0.0.5", via: "utun11")],
+                                      control: control(via: "en8"), vpnConnected: true)
+        XCTAssertEqual(inside.verdict, .ok)
+        XCTAssertFalse(inside.summary.contains("only some networks"), inside.summary)
+        // Bypass, not on the list: it is not said to follow the VPN.
+        let none = SiteRoute.Found(match: .none, expected: .tunnel("utun11"))
+        let bypass = SiteRoute.answer(host: "example.org", mode: .bypass, addresses: ["203.0.113.7"], found: none,
+                                      probes: [probe("203.0.113.7", via: "en8")],
+                                      control: control(via: "en8"), vpnConnected: true)
+        XCTAssertEqual(bypass.verdict, .ok)
+        XCTAssertTrue(bypass.summary.hasPrefix("example.org is not on your list, so it follows the system's own routing."),
+                      bypass.summary)
+    }
+
+    /// A full-tunnel VPN keeps today's answers: the control goes through it, nothing mentions a
+    /// split tunnel, and an unlisted name still follows the VPN.
+    func testFullTunnelAnswersAreUnchanged() {
+        let found = SiteRoute.Found(match: .defaultRoute, routeName: "Corporate VPN", expected: .tunnel("utun11"))
+        let a = SiteRoute.answer(host: "example.org", mode: .custom, addresses: ["203.0.113.7"], found: found,
+                                 probes: [probe("203.0.113.7", via: "utun11")],
+                                 control: control(via: "utun11"), vpnConnected: true)
+        XCTAssertEqual(a.verdict, .ok)
+        XCTAssertNil(a.splitTunnel)
+        XCTAssertEqual(a.expected, "tunnel:utun11")
+        XCTAssertEqual(a.summary, "example.org matches no rule, so it takes the default route, Corporate VPN."
+                       + " The check saw it leave through utun11, and it answered on port 443.")
+        let leaked = SiteRoute.answer(host: "example.org", mode: .custom, addresses: ["203.0.113.7"], found: found,
+                                      probes: [probe("203.0.113.7", via: "en8")],
+                                      control: control(via: "utun11"), vpnConnected: true)
+        XCTAssertEqual(leaked.verdict, .wrongWay)
+    }
+
+    /// Genuinely broken: the control left through another tunnel, so the ways cannot be told apart.
+    func testControlThroughAnotherTunnelIsStillBroken() {
+        let found = SiteRoute.Found(match: .route, entry: "example.com", routedDestination: "203.0.113.5", expected: .physical)
+        let a = SiteRoute.answer(host: "example.com", mode: .bypass, addresses: ["203.0.113.5"], found: found,
+                                 probes: [probe("203.0.113.5", via: "en8")],
+                                 control: control(via: "utun7"), vpnConnected: true)
+        XCTAssertEqual(a.verdict, .checkBroken)
+        XCTAssertNil(a.splitTunnel)
+        XCTAssertNil(a.checks.first?.verdict)
+    }
+
     func testAnswerNotListedOffersAdd() {
         let found = SiteRoute.Found(match: .none, expected: .tunnel("utun4"))
         let a = SiteRoute.answer(host: "example.org", mode: .bypass, addresses: ["203.0.113.7"], found: found,

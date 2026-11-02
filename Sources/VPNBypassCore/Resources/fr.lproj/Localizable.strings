@@ -690,6 +690,10 @@
 "%@ is not on your list, so it follows the VPN." = "%@ n’est pas dans votre liste, il suit donc le VPN.";
 "%@ is not on your list, so it goes around the VPN." = "%@ n’est pas dans votre liste, il contourne donc le VPN.";
 "%@ matches no rule, so it follows the system's own routing." = "%@ ne correspond à aucune règle, il suit donc le routage du système.";
+"%@ matches no rule, so it takes the default route, %@, which leaves it to the system's own routing." = "%@ ne correspond à aucune règle, il prend donc la route par défaut, %@, qui le laisse au routage du système.";
+"%@ is not on your list, so it follows the system's own routing." = "%@ n’est pas dans votre liste, il suit donc le routage du système.";
+"This VPN carries only some networks, not the default route, so traffic without a route leaves through %@." = "Ce VPN ne transporte que certains réseaux, pas la route par défaut, donc le trafic sans route sort par %@.";
+"This VPN carries only some networks, so an address it does not carry leaves through %@ even without the entry." = "Ce VPN ne transporte que certains réseaux, donc une adresse qu’il ne transporte pas sort par %@ même sans l’entrée.";
 "The check saw it leave through %@, and it answered on port 443." = "La vérification l’a vu sortir par %@, et il a répondu sur le port 443.";
 "The check saw it leave through %@, but nothing answered on port 443." = "La vérification l’a vu sortir par %@, mais rien n’a répondu sur le port 443.";
 "But the check saw it leave through %@, not through %@." = "Mais la vérification l’a vu sortir par %@, et non par %@.";

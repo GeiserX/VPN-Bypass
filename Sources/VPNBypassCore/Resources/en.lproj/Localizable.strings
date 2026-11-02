@@ -690,6 +690,10 @@
 "%@ is not on your list, so it follows the VPN." = "%@ is not on your list, so it follows the VPN.";
 "%@ is not on your list, so it goes around the VPN." = "%@ is not on your list, so it goes around the VPN.";
 "%@ matches no rule, so it follows the system's own routing." = "%@ matches no rule, so it follows the system's own routing.";
+"%@ matches no rule, so it takes the default route, %@, which leaves it to the system's own routing." = "%@ matches no rule, so it takes the default route, %@, which leaves it to the system's own routing.";
+"%@ is not on your list, so it follows the system's own routing." = "%@ is not on your list, so it follows the system's own routing.";
+"This VPN carries only some networks, not the default route, so traffic without a route leaves through %@." = "This VPN carries only some networks, not the default route, so traffic without a route leaves through %@.";
+"This VPN carries only some networks, so an address it does not carry leaves through %@ even without the entry." = "This VPN carries only some networks, so an address it does not carry leaves through %@ even without the entry.";
 "The check saw it leave through %@, and it answered on port 443." = "The check saw it leave through %@, and it answered on port 443.";
 "The check saw it leave through %@, but nothing answered on port 443." = "The check saw it leave through %@, but nothing answered on port 443.";
 "But the check saw it leave through %@, not through %@." = "But the check saw it leave through %@, not through %@.";

@@ -11,7 +11,10 @@
 // Every run carries a control that must fail: one address the app does not route, which has
 // to come back the other way (through the VPN in Bypass, around it in VPN Only). When it does
 // not, the probe cannot tell the two ways apart, and the run reads "check broken" instead of
-// passing. The decisions are pure and tested; only `probe` touches a socket.
+// passing. One exception: a control that should take the VPN but leaves around every tunnel
+// means a split-tunnel VPN, which carries only some networks. Then each address is still judged
+// by its own way, since a route into a tunnel leaves differently from the control. The
+// decisions are pure and tested; only `probe` touches a socket.
 
 import Foundation
 #if canImport(Darwin)
@@ -109,6 +112,11 @@ public enum PathCheck {
         case passed
         /// It came back another way, through `interface`: the check cannot be trusted.
         case broken(interface: String?)
+        /// It should have gone into the VPN but left around it, through the physical
+        /// `interface`: the VPN carries only some networks (a split tunnel), not the default
+        /// route. An address the VPN does not carry leaves that way with or without a route around
+        /// it, while a route into a tunnel still leaves the other way and is judged.
+        case splitTunnel(interface: String)
         /// Not run: there is only one way out (no VPN), or every candidate is routed.
         case notRun
     }
@@ -139,10 +147,11 @@ public enum PathCheck {
     /// The control has to come back the way an address the app does not route takes.
     public static func control(_ probe: Probe?, unrouted: Way?) -> Control {
         guard let probe, let unrouted else { return .notRun }
-        guard let interface = probe.interface, matches(interface, unrouted) else {
-            return .broken(interface: probe.interface)
-        }
-        return .passed
+        guard let interface = probe.interface else { return .broken(interface: nil) }
+        if matches(interface, unrouted) { return .passed }
+        // Expected the VPN, left around every tunnel: the VPN does not hold the default route.
+        if case .tunnel = unrouted, !isTunnel(interface) { return .splitTunnel(interface: interface) }
+        return .broken(interface: interface)
     }
 
     /// The way an address on the list takes, and the way every other address takes, in Bypass
