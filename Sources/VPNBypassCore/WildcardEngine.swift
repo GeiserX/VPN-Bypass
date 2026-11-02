@@ -189,7 +189,9 @@ final class WildcardEngine {
             }
         }
 
-        warnAboutShadowing(specs: specs, resolvers: resolvers)
+        // The list was read before the helper wrote its files, so the suffixes it serves are
+        // passed as ours: on a VPN connect the list has none of them yet.
+        warnAboutShadowing(specs: specs, served: Set((servedSpecs ?? []).map(\.suffix)), resolvers: resolvers)
         if isServing, let served = servedSpecs {
             await moveLearnedRoutes(to: served)
             startTimer()
@@ -225,18 +227,28 @@ final class WildcardEngine {
     }
 
     /// A more specific resolver hides part of a wildcard; say so once per change.
-    private func warnAboutShadowing(specs: [WildcardSpec], resolvers: [ScutilDNS.Resolver]) {
-        var now: [String: [String]] = [:]
-        for spec in specs {
-            let hidden = ScutilDNS.shadowing(spec.suffix, in: resolvers)
-            if !hidden.isEmpty { now[spec.suffix] = hidden }
-        }
+    private func warnAboutShadowing(specs: [WildcardSpec], served: Set<String>, resolvers: [ScutilDNS.Resolver]) {
+        let pass = Self.shadowWarnings(specs: specs, served: served, resolvers: resolvers, warned: warnedShadows)
         // Count only: the hiding domains are another resolver's (a VPN's split DNS, say), not
         // the user's own entries, so they stay out of the log.
-        for (suffix, hidden) in now.sorted(by: { $0.key < $1.key }) where warnedShadows[suffix] != hidden {
+        for (suffix, hidden) in pass.log {
             manager.log(.warning, "Wildcard *.\(suffix): \(hidden.count) more specific resolver(s) answer part of it, and names there are not routed")
         }
-        if !specs.isEmpty || !resolvers.isEmpty { warnedShadows = now }
+        warnedShadows = pass.warned
+    }
+
+    /// One pass of the shadow check: the wildcards to warn about (new or changed since
+    /// `warned`), sorted, and what to remember for the next pass. A pass with no wildcard and
+    /// no resolver list (VPN down) keeps `warned`, so a reconnect does not repeat a warning.
+    nonisolated static func shadowWarnings(specs: [WildcardSpec], served: Set<String>, resolvers: [ScutilDNS.Resolver],
+                                           warned: [String: [String]]) -> (log: [(suffix: String, hidden: [String])], warned: [String: [String]]) {
+        var now: [String: [String]] = [:]
+        for spec in specs {
+            let hidden = ScutilDNS.shadowing(spec.suffix, in: resolvers, served: served)
+            if !hidden.isEmpty { now[spec.suffix] = hidden }
+        }
+        let log = now.sorted(by: { $0.key < $1.key }).filter { warned[$0.key] != $0.value }.map { (suffix: $0.key, hidden: $0.value) }
+        return (log, specs.isEmpty && resolvers.isEmpty ? warned : now)
     }
 
     // MARK: - Draining

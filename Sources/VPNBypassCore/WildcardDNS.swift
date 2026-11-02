@@ -690,13 +690,15 @@ public enum WildcardResolverFile {
     /// The first line of every file the helper writes. A file in /etc/resolver without it
     /// belongs to someone else (a VPN client, Tailscale, a developer tool) and is never touched.
     public static let marker = "# VPN-BYPASS-MANAGED wildcard resolver"
+    /// The `search_order` every file says; `scutil --dns` shows it as the resolver's order.
+    public static let searchOrder = 1
 
     public static var contents: String {
         """
         \(marker): written by the VPN Bypass helper and removed with the wildcard. Do not edit.
         nameserver 127.0.0.1
         port \(port)
-        search_order 1
+        search_order \(searchOrder)
 
         """
     }

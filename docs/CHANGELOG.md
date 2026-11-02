@@ -7,6 +7,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.3]
+
+### Fixed
+- **No false "names there are not routed" warning for wildcards on every VPN connect.** 6.0.2 taught the check that the app's own resolver file for a domain comes before Tailscale's, but on a connect the log still warned about `*.ts.net`. The app reads macOS's resolver list first and asks the helper to write its `/etc/resolver` files after, and while the VPN was down the helper had removed them, so the list it checked had none of ours. The check now counts every suffix the helper reports it serves as one of our files, at the order the helper writes (1), whether or not the list read before shows it yet. A suffix the helper leaves alone because another program owns its file, a foreign resolver with no order, and a real split DNS for `eu.example.com` under `*.example.com` are still reported, once per change.
+
 ## [6.0.2]
 
 ### Fixed
