@@ -270,6 +270,8 @@ enum ScutilDNS {
         var nameservers: [String] = []
         var interface: String?
         var port: Int?
+        /// macOS's tie-break between resolvers for the same domain: the lowest goes first.
+        var order: Int?
         /// From the "for scoped queries" section.
         var scoped = false
 
@@ -303,17 +305,28 @@ enum ScutilDNS {
             let key = line[..<colon].trimmingCharacters(in: .whitespaces)
             let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
             if key == "domain" {
-                current?.domain = value.lowercased()
+                current?.domain = domain(value)
             } else if key.hasPrefix("nameserver[") {
                 current?.nameservers.append(value)
             } else if key == "if_index", let open = value.firstIndex(of: "("), let close = value.lastIndex(of: ")"), open < close {
                 current?.interface = String(value[value.index(after: open)..<close])
             } else if key == "port" {
                 current?.port = Int(value)
+            } else if key == "order" {
+                current?.order = Int(value)
             }
         }
         finish()
         return resolvers
+    }
+
+    /// A resolver domain as the wildcards write it: lower case, no trailing dot. Tailscale
+    /// publishes its tailnet as "example-tailnet.ts.net." and our file says "example-tailnet.ts.net";
+    /// both are the same domain. Nil for the root.
+    static func domain(_ raw: String) -> String? {
+        var d = raw.lowercased()
+        while d.hasSuffix(".") { d.removeLast() }
+        return d.isEmpty ? nil : d
     }
 
     /// The IPv4 DNS servers macOS has for `interface`, in order, each once.
@@ -326,12 +339,21 @@ enum ScutilDNS {
     }
 
     /// Resolvers for a name below `suffix` that are not ours: they have more matching labels,
-    /// so macOS sends those names to them and the wildcard never sees them. Sorted, each once.
+    /// so macOS sends those names to them and the wildcard never sees them. One that our own
+    /// file for the same domain comes before (a lower order) hides nothing: macOS picks the
+    /// most matching labels, then the lowest order, so those names reach our forwarder.
+    /// Sorted, each once.
     static func shadowing(_ suffix: String, in resolvers: [Resolver]) -> [String] {
-        let domains = resolvers.compactMap { r -> String? in
-            guard !r.scoped, !r.isWildcardForwarder, let d = r.domain, d != suffix,
+        let suffix = domain(suffix) ?? suffix
+        let live = resolvers.filter { !$0.scoped }
+        let domains = live.compactMap { r -> String? in
+            guard !r.isWildcardForwarder, let d = r.domain, d != suffix,
                   WildcardDomain.matches(d, suffix: suffix) else { return nil }
-            return d
+            let oursFirst = live.contains { ours in
+                guard ours.isWildcardForwarder, ours.domain == d, let mine = ours.order, let theirs = r.order else { return false }
+                return mine < theirs
+            }
+            return oursFirst ? nil : d
         }
         return Array(Set(domains)).sorted()
     }

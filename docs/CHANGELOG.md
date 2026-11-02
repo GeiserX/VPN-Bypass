@@ -7,6 +7,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.2]
+
+### Fixed
+- **No false "names there are not routed" warning for wildcards with Tailscale.** With `*.example-tailnet.ts.net` or `*.ts.net` on the list, the log warned that a more specific resolver answered part of the wildcard, yet every name resolved through the app's forwarder and was routed. Two mistakes in the check: Tailscale writes its tailnet domain with a trailing dot ("example-tailnet.ts.net."), which the check took for a narrower domain than the wildcard's own; and it ignored the app's own resolver files, so it missed that ours for the same domain comes first (order 1 against Tailscale's 101001; macOS picks the resolver with the most matching labels, then the lowest order). Resolver domains are now read without the trailing dot, and a resolver only counts as hiding names when no file of ours for the same domain comes before it. A real one, such as a VPN's split DNS for `eu.example.com` under `*.example.com`, is still reported.
+
 ## [6.0.1]
 
 ### Fixed

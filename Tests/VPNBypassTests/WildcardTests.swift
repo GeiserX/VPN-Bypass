@@ -788,6 +788,137 @@ final class WildcardSystemOutputTests: XCTestCase {
         XCTAssertEqual(ScutilDNS.shadowing("example.net", in: r), ["corp.example.net"])
     }
 
+    /// Tailscale with `*.example-tailnet.ts.net` and `*.ts.net` on the Bypass list: our files
+    /// (order 1) and Tailscale's supplemental resolver for the tailnet, written with a trailing
+    /// dot (order 101001). macOS sends tailnet names to our file, so nothing is hidden.
+    private let tailscaleScutil = """
+    DNS configuration
+
+    resolver #1
+      search domain[0] : example-tailnet.ts.net
+      nameserver[0] : 192.168.10.1
+      if_index : 11 (en0)
+      flags    : Request A records
+      reach    : 0x00020002 (Reachable,Directly Reachable Address)
+      order    : 200000
+
+    resolver #2
+      domain   : example-tailnet.ts.net
+      nameserver[0] : 127.0.0.1
+      port     : 53530
+      flags    : Request A records, Request AAAA records
+      reach    : 0x00030002 (Reachable,Local Address,Directly Reachable Address)
+      order    : 1
+
+    resolver #3
+      domain   : ts.net
+      nameserver[0] : 127.0.0.1
+      port     : 53530
+      flags    : Request A records, Request AAAA records
+      reach    : 0x00030002 (Reachable,Local Address,Directly Reachable Address)
+      order    : 1
+
+    resolver #4
+      domain   : example-tailnet.ts.net.
+      nameserver[0] : 100.100.100.100
+      nameserver[1] : fd7a:115c:a1e0::53
+      if_index : 24 (utun10)
+      flags    : Supplemental, Request A records, Request AAAA records
+      reach    : 0x00000003 (Reachable,Transient Connection)
+      order    : 101001
+
+    DNS configuration (for scoped queries)
+
+    resolver #1
+      search domain[0] : example-tailnet.ts.net
+      nameserver[0] : 192.168.10.1
+      if_index : 11 (en0)
+      flags    : Scoped, Request A records
+
+    resolver #2
+      domain   : example-tailnet.ts.net.
+      nameserver[0] : 100.100.100.100
+      if_index : 24 (utun10)
+      flags    : Scoped, Supplemental, Request A records
+    """
+
+    func testReadsADomainWithoutItsTrailingDotAndTheOrder() {
+        let r = ScutilDNS.parse(tailscaleScutil)
+        XCTAssertEqual(r[3].domain, "example-tailnet.ts.net")
+        XCTAssertEqual(r[3].order, 101001)
+        XCTAssertEqual(r[1].order, 1)
+        XCTAssertNil(r[5].order)
+    }
+
+    func testOurOwnFileForTheSameDomainOutranksTailscalesResolver() {
+        let r = ScutilDNS.parse(tailscaleScutil)
+        XCTAssertEqual(ScutilDNS.shadowing("example-tailnet.ts.net", in: r), [], "the same domain with a trailing dot is not narrower")
+        XCTAssertEqual(ScutilDNS.shadowing("ts.net", in: r), [], "our file for the tailnet comes first, so its names reach us")
+    }
+
+    func testAForeignResolverStillHidesPartOfAWildcard() {
+        func resolvers(_ extra: String) -> [ScutilDNS.Resolver] {
+            ScutilDNS.parse("""
+            DNS configuration
+
+            resolver #1
+              domain   : example.com
+              nameserver[0] : 127.0.0.1
+              port     : 53530
+              order    : 1
+
+            resolver #2
+              domain   : eu.example.com
+              nameserver[0] : 10.9.0.53
+              order    : 101000
+            \(extra)
+            """)
+        }
+        XCTAssertEqual(ScutilDNS.shadowing("example.com", in: resolvers("")), ["eu.example.com"], "no file of ours for it")
+        let worse = """
+
+            resolver #3
+              domain   : eu.example.com
+              nameserver[0] : 127.0.0.1
+              port     : 53530
+              order    : 200000
+            """
+        XCTAssertEqual(ScutilDNS.shadowing("example.com", in: resolvers(worse)), ["eu.example.com"], "ours for it comes after the foreign one")
+        let unknown = """
+
+            resolver #3
+              domain   : eu.example.com
+              nameserver[0] : 127.0.0.1
+              port     : 53530
+            """
+        XCTAssertEqual(ScutilDNS.shadowing("example.com", in: resolvers(unknown)), ["eu.example.com"], "no order: we cannot say ours comes first")
+        let narrower = """
+
+            resolver #3
+              domain   : x.eu.example.com
+              nameserver[0] : 127.0.0.1
+              port     : 53530
+              order    : 1
+            """
+        XCTAssertEqual(ScutilDNS.shadowing("example.com", in: resolvers(narrower)), ["eu.example.com"], "ours covers only part of it")
+        let dotted = """
+
+            resolver #3
+              domain   : EU.Example.com.
+              nameserver[0] : 10.9.0.54
+              order    : 101001
+            """
+        XCTAssertEqual(ScutilDNS.shadowing("example.com", in: resolvers(dotted)), ["eu.example.com"], "each domain once, however written")
+        let sameDomain = """
+
+            resolver #3
+              domain   : example.com.
+              nameserver[0] : 10.9.0.54
+              order    : 101001
+            """
+        XCTAssertEqual(ScutilDNS.shadowing("example.com", in: resolvers(sameDomain)), ["eu.example.com"], "the wildcard's own domain with a dot is not narrower")
+    }
+
     func testReadsEstablishedTCPPeers() {
         let netstat = """
         Active Internet connections (including servers)
