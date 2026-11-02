@@ -80,13 +80,16 @@ final class PathCheckTests: XCTestCase {
     // MARK: The control
 
     /// In Bypass an address the app does not route goes through the VPN. If it comes back
-    /// around the VPN too, the check cannot tell the ways apart and must not pass.
+    /// through another tunnel, the check cannot tell the ways apart and must not pass. If it
+    /// comes back around every tunnel, the VPN carries only some networks: a split tunnel.
     func testBypassControlMustComeBackThroughTheVPN() throws {
         let ways = try XCTUnwrap(PathCheck.ways(mode: "bypass", vpnInterface: "utun4"))
         XCTAssertEqual(ways.listed, .physical)
         XCTAssertEqual(PathCheck.control(probe("192.0.2.1", via: "utun4", .notTried), unrouted: ways.unlisted), .passed)
+        XCTAssertEqual(PathCheck.control(probe("192.0.2.1", via: "utun7", .notTried), unrouted: ways.unlisted),
+                       .broken(interface: "utun7"))
         XCTAssertEqual(PathCheck.control(probe("192.0.2.1", via: "en0", .notTried), unrouted: ways.unlisted),
-                       .broken(interface: "en0"))
+                       .splitTunnel(interface: "en0"))
     }
 
     /// VPN Only is the mirror: the control must leave around the VPN, through the catch-alls.

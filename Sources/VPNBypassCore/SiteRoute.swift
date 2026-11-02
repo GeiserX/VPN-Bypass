@@ -89,6 +89,9 @@ public struct SiteRouteAnswer: Codable, Equatable, Sendable {
     public var canAdd: Bool
     /// While routing is paused, how long for (`PauseState.wireDescription`); nil otherwise.
     public var paused: String? = nil
+    /// True when the VPN carries only some networks, not the default route: the control, an
+    /// address the app does not route, left around it. Nil otherwise.
+    public var splitTunnel: Bool? = nil
 }
 
 enum SiteRoute {
@@ -289,12 +292,30 @@ enum SiteRoute {
     static func answer(host: String, mode: RoutingMode, addresses: [String], found: Found,
                        probes: [PathCheck.Probe], control: (probe: PathCheck.Probe, outcome: PathCheck.Control)?,
                        vpnConnected: Bool) -> SiteRouteAnswer {
-        let expected = found.expected
+        // A split-tunnel VPN (the control left around it): an address with no route of ours
+        // follows the system's own routing, which sends it around the VPN unless the VPN
+        // claims its network. So what follows the default is judged against that, not the VPN.
+        var split: String?
+        if case .splitTunnel(let interface) = control?.outcome { split = interface }
+        let followsDefault = split != nil && [.none, .defaultRoute, .paused].contains(found.match)
+        var expected = found.expected
+        var vpnTunnel: PathCheck.Way?
+        if followsDefault, let way = expected {
+            if case .tunnel = way { vpnTunnel = way }
+            expected = .physical
+        }
+        func judge(_ probe: PathCheck.Probe, _ way: PathCheck.Way) -> PathCheck.Verdict {
+            // Into the VPN's own network is the system's routing too.
+            if let vpnTunnel, let interface = probe.interface, PathCheck.matches(interface, vpnTunnel) {
+                return PathCheck.verdict(probe, expected: vpnTunnel)
+            }
+            return PathCheck.verdict(probe, expected: way)
+        }
         // A broken control means no address can be judged, so none carries a verdict.
         var controlBroken = false
         if case .broken = control?.outcome { controlBroken = true }
         let checks = probes.map { probe in
-            SiteRouteCheck(probe, verdict: controlBroken ? nil : expected.map { PathCheck.verdict(probe, expected: $0) })
+            SiteRouteCheck(probe, verdict: controlBroken ? nil : expected.map { judge(probe, $0) })
         }
         let verdict: SiteRouteAnswer.Verdict
         var reported = probes.first
@@ -306,8 +327,8 @@ enum SiteRoute {
             verdict = .checkBroken
             reported = control?.probe
         } else if let expected {
-            let worst = PathCheck.worst(probes.map { PathCheck.verdict($0, expected: expected) }) ?? .unknown
-            reported = probes.first { PathCheck.verdict($0, expected: expected) == worst }
+            let worst = PathCheck.worst(probes.map { judge($0, expected) }) ?? .unknown
+            reported = probes.first { judge($0, expected) == worst }
             switch worst {
             case .ok: verdict = .ok
             case .noAnswer: verdict = .noAnswer
@@ -318,8 +339,18 @@ enum SiteRoute {
             verdict = .notChecked
         }
 
-        let why = whySentence(host: host, mode: mode, found: found)
-        let check = checkSentence(verdict, interface: reported?.interface, expected: expected)
+        let why = whySentence(host: host, mode: mode, found: found, splitTunnel: followsDefault)
+        var check = checkSentence(verdict, interface: reported?.interface, expected: expected)
+        // Left the right way under a split tunnel: say why, since the VPN is not what decides it.
+        if let split, vpnConnected, [.ok, .noAnswer].contains(verdict),
+           let interface = reported?.interface, !PathCheck.isTunnel(interface) {
+            let note = followsDefault
+                ? String(localized: "This VPN carries only some networks, not the default route, so traffic without a route leaves through \(split).")
+                : expected == .physical
+                    ? String(localized: "This VPN carries only some networks, so traffic without a route leaves through \(split) anyway: the entry changes nothing while it is the only VPN up.")
+                    : nil
+            if let note { check = check.map { $0 + " " + note } ?? note }
+        }
         return SiteRouteAnswer(
             host: host, mode: mode.rawValue, addresses: addresses, match: found.match,
             entry: found.entry, routedDestination: found.routedDestination,
@@ -328,17 +359,21 @@ enum SiteRoute {
             control: control.map { SiteRouteCheck($0.probe, verdict: nil) },
             verdict: verdict, summary: check.map { why + " " + $0 } ?? why,
             canAdd: [.none, .defaultRoute].contains(found.matchAfterPause ?? found.match),
-            paused: found.pause?.wireDescription)
+            paused: found.pause?.wireDescription,
+            splitTunnel: split == nil ? nil : true)
     }
 
-    static func whySentence(host: String, mode: RoutingMode, found: Found, now: Date = Date()) -> String {
+    /// `splitTunnel`: the VPN carries only some networks, so what follows the default route is
+    /// not said to follow the VPN.
+    static func whySentence(host: String, mode: RoutingMode, found: Found, splitTunnel: Bool = false,
+                            now: Date = Date()) -> String {
         let entry = found.entry ?? ""
         switch found.match {
         case .paused:
             return pausedSentence(host: host, length: found.pause?.length ?? .untilResume,
                                   until: found.pause?.until,
                                   helperWait: found.pause?.reconnectedWaiting ?? false,
-                                  vpnUp: found.vpnUp, now: now)
+                                  vpnUp: found.vpnUp && !splitTunnel, now: now)
         case .unresolved:
             return String(localized: "\(host) did not resolve, so there is nothing to check.")
         case .route:
@@ -358,9 +393,13 @@ enum SiteRoute {
             let route = found.routeName ?? ""
             return String(localized: "\(host) matches rule \(position), \(kind) \(entry), which sends it to \(route).")
         case .defaultRoute:
-            return String(localized: "\(host) matches no rule, so it takes the default route, \(found.routeName ?? "").")
+            return splitTunnel
+                ? String(localized: "\(host) matches no rule, so it takes the default route, \(found.routeName ?? ""), which leaves it to the system's own routing.")
+                : String(localized: "\(host) matches no rule, so it takes the default route, \(found.routeName ?? "").")
         case .none:
             switch mode {
+            case .bypass where splitTunnel:
+                return String(localized: "\(host) is not on your list, so it follows the system's own routing.")
             case .bypass: return String(localized: "\(host) is not on your list, so it follows the VPN.")
             case .vpnOnly: return String(localized: "\(host) is not on your list, so it goes around the VPN.")
             case .custom: return String(localized: "\(host) matches no rule, so it follows the system's own routing.")
