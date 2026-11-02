@@ -2288,8 +2288,13 @@ final class RouteManager: ObservableObject {
                 // Background refresh: re-resolve DNS and update routes if changed.
                 // The handle is stored so beginShutdown() can cancel it — unowned, this
                 // task once raced quit teardown and re-added 93 routes after removal.
-                backgroundRefreshTask = Task.detached { [weak self] in
-                    await self?.backgroundDNSRefresh(sendNotification: sendNotification)
+                // A refresh already holding the route gate keeps the handle: this one would
+                // only skip, and a re-route or the quit must still reach the one running.
+                if !backgroundRefreshHoldsGate {
+                    let scheduledEpoch = routeEpoch
+                    backgroundRefreshTask = Task.detached { [weak self] in
+                        await self?.backgroundDNSRefresh(sendNotification: sendNotification, scheduledEpoch: scheduledEpoch)
+                    }
                 }
             } else {
                 // No cache: do full DNS resolution (first run)
@@ -3240,8 +3245,9 @@ final class RouteManager: ObservableObject {
                 if fromCache {
                     self.isLoading = false
                     self.log(.info, "Resumed: routes put back from the DNS cache; refreshing DNS in the background")
+                    let scheduledEpoch = self.routeEpoch
                     self.backgroundRefreshTask = Task.detached { [weak self] in
-                        await self?.backgroundDNSRefresh(sendNotification: false)
+                        await self?.backgroundDNSRefresh(sendNotification: false, scheduledEpoch: scheduledEpoch)
                     }
                     return
                 }
