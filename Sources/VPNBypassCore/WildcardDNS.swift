@@ -812,6 +812,8 @@ public enum WildcardLookup {
 
     /// The reply to `bytes`, or nil to send nothing (a message that is not a query).
     /// - `forward`: the upstream's raw answer for the spec, nil when none came.
+    /// - `delegate`: the raw answer of another resolver that serves the name
+    ///   (`WildcardSpec.delegated`), nil when none came.
     /// - `routed`: the addresses that already have our route to the spec's gateway. They are
     ///   answered at once, without the limiter or the route queue.
     /// - `admit`: the addresses the limiter lets the suffix learn.
@@ -820,6 +822,7 @@ public enum WildcardLookup {
         to bytes: [UInt8], overTCP: Bool, specs: [WildcardSpec], guard safetyGuard: WildcardSafetyGuard,
         ttlCap: UInt32,
         forward: (DNSWire.Message, WildcardSpec) -> [UInt8]?,
+        delegate: (DNSWire.Message, WildcardDelegation) -> [UInt8]? = { _, _ in nil },
         routed: ([String], WildcardSpec) -> Set<String> = { _, _ in [] },
         admit: ([String], WildcardSpec) -> [String],
         install: ([String], WildcardSpec) -> Install
@@ -835,15 +838,19 @@ public enum WildcardLookup {
               let spec = specs.first(where: { $0.suffix == suffix }) else {
             return DNSWire.reply(to: query, rcode: DNSWire.rcodeRefused)
         }
-        // An earlier rule sends this name another way: answer it as the upstream does, and
-        // learn nothing.
-        if spec.excludes(name) {
-            guard let raw = forward(query, spec), let upstream = DNSWire.parse(raw) else {
-                return DNSWire.reply(to: query, rcode: DNSWire.rcodeServFail)
-            }
-            if !overTCP && raw.count > query.maxUDPSize { return DNSWire.truncated(upstream) }
+        /// Someone else's answer, passed on as it came, AAAA too; nothing is learned from it.
+        func passedOn(_ raw: [UInt8]?) -> [UInt8] {
+            guard let raw, let answer = DNSWire.parse(raw) else { return DNSWire.reply(to: query, rcode: DNSWire.rcodeServFail) }
+            if !overTCP && raw.count > query.maxUDPSize { return DNSWire.truncated(answer) }
             return raw
         }
+        // Another resolver serves this name (Tailscale's MagicDNS for the tailnet, a VPN's
+        // split DNS): our file only took it because it comes first. Ask that resolver, as
+        // macOS would have without us.
+        if let owner = spec.delegation(for: name) { return passedOn(delegate(query, owner)) }
+        // An earlier rule sends this name another way: answer it as the upstream does, and
+        // learn nothing.
+        if spec.excludes(name) { return passedOn(forward(query, spec)) }
         // The routes are IPv4 only; an IPv6 answer would take the connection past them.
         if question.type == DNSWire.typeAAAA { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNoError) }
 
@@ -945,24 +952,33 @@ public struct WildcardSpec: Equatable, Sendable {
     /// or a narrower wildcard (`*.a.example.com`). They are answered as the upstream says,
     /// with no route learned, because first match sends them another way.
     public let excluded: [String]
+    /// Other resolvers macOS has for a domain at, under or above the suffix (Tailscale's
+    /// MagicDNS for `example-tailnet.ts.net` under `*.ts.net`). A name under one of them is
+    /// asked of that resolver and passed on, with no route learned: our resolver file only got
+    /// the name because it comes first, and the wildcard's upstream does not know it.
+    public let delegated: [WildcardDelegation]
 
     /// At most this many exclusions cross to the helper.
     public static let maxExcluded = 64
+    /// At most this many delegations cross to the helper.
+    public static let maxDelegated = 16
 
     public init(suffix: String, gateway: String, upstream: [String], interface: String, intoTunnel: Bool = false,
-                excluded: [String] = []) {
+                excluded: [String] = [], delegated: [WildcardDelegation] = []) {
         self.suffix = suffix
         self.gateway = gateway
         self.upstream = upstream
         self.interface = interface
         self.intoTunnel = intoTunnel
         self.excluded = excluded
+        self.delegated = delegated
     }
 
     public var dictionary: [String: String] {
         var d = ["suffix": suffix, "gateway": gateway, "upstream": upstream.joined(separator: ","), "interface": interface]
         if intoTunnel { d["tunnel"] = "1" }
         if !excluded.isEmpty { d["excluded"] = excluded.joined(separator: ",") }
+        if !delegated.isEmpty { d["delegated"] = delegated.map(\.encoded).joined(separator: ";") }
         return d
     }
 
@@ -972,6 +988,13 @@ public struct WildcardSpec: Equatable, Sendable {
             if let narrower = WildcardDomain.suffix(of: entry) { return WildcardDomain.matches(name, suffix: narrower) }
             return WildcardDomain.normalizedSuffix(name) == entry
         }
+    }
+
+    /// The resolver that serves `name`, the one with the most specific domain, or nil when
+    /// none does and the name is ours to answer and learn.
+    public func delegation(for name: String) -> WildcardDelegation? {
+        guard let domain = WildcardDomain.mostSpecific(for: name, among: delegated.map(\.domain)) else { return nil }
+        return delegated.first { $0.domain == domain }
     }
 
     /// Nil unless every field is something the helper may act on. The helper re-checks the
@@ -993,8 +1016,13 @@ public struct WildcardSpec: Equatable, Sendable {
             return WildcardDomain.normalizedSuffix(bare) == bare && WildcardDomain.matches(bare, suffix: suffix)
                 && !(narrower && bare == suffix)
         }) else { return nil }
+        let delegatedText = (d["delegated"] ?? "").split(separator: ";").map(String.init)
+        let delegated = delegatedText.compactMap(WildcardDelegation.init(encoded:))
+        // Each one must parse and touch the suffix: a name it holds must be one we are asked.
+        guard delegated.count == delegatedText.count, delegated.count <= Self.maxDelegated,
+              delegated.allSatisfy({ $0.overlaps(suffix) }) else { return nil }
         self.init(suffix: suffix, gateway: gateway, upstream: upstream, interface: interface, intoTunnel: d["tunnel"] == "1",
-                  excluded: excluded)
+                  excluded: excluded, delegated: delegated)
     }
 
     static func isValidGateway(_ g: String) -> Bool {
@@ -1004,6 +1032,52 @@ public struct WildcardSpec: Equatable, Sendable {
 
     static func isValidInterfaceName(_ name: String) -> Bool {
         !name.isEmpty && name.count < 16 && name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+    }
+}
+
+/// Another program's resolver for a domain, as `scutil --dns` lists it: the servers the
+/// forwarder asks for a name under `domain` instead of the wildcard's upstream.
+public struct WildcardDelegation: Equatable, Sendable {
+    public let domain: String
+    /// IPv4 only, as every socket the forwarder opens.
+    public let servers: [String]
+    public let port: UInt16
+    /// The interface the resolver is scoped to, when it is (`if_index` in `scutil --dns`).
+    public let interface: String?
+
+    public init(domain: String, servers: [String], port: UInt16 = 53, interface: String? = nil) {
+        self.domain = domain
+        self.servers = servers
+        self.port = port
+        self.interface = interface
+    }
+
+    /// `domain|server,server|port|interface`, one field per item; the interface may be empty.
+    var encoded: String { [domain, servers.joined(separator: ","), String(port), interface ?? ""].joined(separator: "|") }
+
+    /// Nil unless every field is one the helper may act on. Our own forwarder is never a
+    /// server here: a query sent to it would come straight back.
+    init?(encoded: String) {
+        let f = encoded.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        guard f.count == 4, WildcardDomain.normalizedSuffix(f[0]) == f[0],
+              let port = UInt16(f[2]), port != 0, String(port) == f[2],
+              f[3].isEmpty || WildcardSpec.isValidInterfaceName(f[3]) else { return nil }
+        let servers = f[1].split(separator: ",").map(String.init)
+        guard !servers.isEmpty, servers.count <= 4,
+              servers.allSatisfy({ Self.isUsableServer($0, port: port) }) else { return nil }
+        self.init(domain: f[0], servers: servers, port: port, interface: f[3].isEmpty ? nil : f[3])
+    }
+
+    /// An IPv4 address that is not "this host" and not our own forwarder.
+    static func isUsableServer(_ server: String, port: UInt16) -> Bool {
+        guard let v = WildcardIPv4.parse(server), v >> 24 != 0 else { return false }
+        return !(v >> 24 == 127 && port == WildcardResolverFile.port)
+    }
+
+    /// Whether some name under `suffix` is also under `domain`: the domain is the suffix, one
+    /// below it or one above it.
+    func overlaps(_ suffix: String) -> Bool {
+        WildcardDomain.matches(domain, suffix: suffix) || WildcardDomain.matches(suffix, suffix: domain)
     }
 }
 

@@ -26,6 +26,8 @@ enum WildcardPlanner {
         var pinnedGateway: (Route) -> String? = { _ in nil }
         /// The DNS servers macOS has for an interface.
         var dnsForInterface: (String) -> [String] = { _ in [] }
+        /// `scutil --dns`, for the other resolvers that serve names under a wildcard.
+        var resolvers: [ScutilDNS.Resolver] = []
     }
 
     /// The wildcards the current mode routes, as suffixes, first one first, each once. Whether
@@ -155,7 +157,8 @@ enum WildcardPlanner {
                 continue
             }
             let spec = WildcardSpec(suffix: item.suffix, gateway: gateway, upstream: servers, interface: interface,
-                                    intoTunnel: item.via != .physical, excluded: item.excluded)
+                                    intoTunnel: item.via != .physical, excluded: item.excluded,
+                                    delegated: ScutilDNS.owners(under: item.suffix, asking: servers, in: env.resolvers))
             // Same check the helper makes, so a spec it would refuse is never sent.
             guard WildcardSpec(dictionary: spec.dictionary) != nil else {
                 skipped[item.suffix] = "its gateway or interface is not one the helper accepts"
@@ -336,6 +339,35 @@ enum ScutilDNS {
             for ns in r.nameservers where WildcardIPv4.parse(ns) != nil && !out.contains(ns) { out.append(ns) }
         }
         return out
+    }
+
+    /// The other resolvers that serve names under `suffix`, for the forwarder to ask instead
+    /// of `upstream`: each domain-scoped resolver (never the default one, which would take
+    /// every name) for a domain at, under or above the suffix, that is not our own file. On
+    /// `example-tailnet.ts.net` under `*.ts.net`, Tailscale's 100.100.100.100. Most specific
+    /// first, each domain once, at the order macOS would pick.
+    ///
+    /// A resolver whose servers the wildcard asks anyway is left out: its names already get
+    /// that resolver's answer, and stay routed (a VPN's split DNS under a VPN Only wildcard).
+    static func owners(under suffix: String, asking upstream: [String], in resolvers: [Resolver]) -> [WildcardDelegation] {
+        let suffix = domain(suffix) ?? suffix
+        let byOrder = resolvers.enumerated()
+            .filter { !$0.element.scoped && !$0.element.isWildcardForwarder }
+            .sorted { ($0.element.order ?? Int.max, $0.offset) < ($1.element.order ?? Int.max, $1.offset) }
+            .map(\.element)
+        var seen: Set<String> = []
+        var out: [WildcardDelegation] = []
+        for r in byOrder {
+            guard let d = r.domain, WildcardDomain.normalizedSuffix(d) == d, seen.insert(d).inserted,
+                  let port = UInt16(exactly: r.port ?? 53), port != 0 else { continue }
+            let servers = Array(r.nameservers.filter { WildcardDelegation.isUsableServer($0, port: port) }.prefix(4))
+            let owner = WildcardDelegation(domain: d, servers: servers, port: port,
+                                           interface: r.interface.flatMap { WildcardSpec.isValidInterfaceName($0) ? $0 : nil })
+            guard !servers.isEmpty, owner.overlaps(suffix),
+                  !(port == 53 && servers.contains(where: upstream.contains)) else { continue }
+            out.append(owner)
+        }
+        return Array(out.sorted { $0.domain.count > $1.domain.count }.prefix(WildcardSpec.maxDelegated))
     }
 
     /// Resolvers for a name below `suffix` that are not ours: they have more matching labels,

@@ -335,6 +335,7 @@ final class WildcardForwarder {
         return WildcardLookup.reply(
             to: bytes, overTCP: overTCP, specs: specs, guard: safetyGuard, ttlCap: Self.ttlCap,
             forward: { query, spec in Self.forward(bytes, query: query, spec: spec, overTCP: overTCP) },
+            delegate: { query, owner in Self.forward(bytes, query: query, to: owner, overTCP: overTCP) },
             routed: { candidates, spec in
                 // Already ours, to this gateway: answered now, and reported so the app's
                 // "last seen" moves, without waiting on the route queue.
@@ -430,33 +431,47 @@ final class WildcardForwarder {
     static func forward(_ bytes: [UInt8], query: DNSWire.Message, spec: WildcardSpec, overTCP: Bool) -> [UInt8]? {
         let index = if_nametoindex(spec.interface)
         guard index != 0 else { return nil }
-        for server in spec.upstream {
-            if !overTCP, let reply = udpExchange(bytes, query: query, server: server, ifIndex: index),
+        return exchange(bytes, query: query, servers: spec.upstream, port: 53, ifIndex: index, overTCP: overTCP)
+    }
+
+    /// The answer of the resolver that serves the name: its servers, on its port, out of the
+    /// interface it is scoped to (unbound when it names none, or one that is gone, so the
+    /// routing table picks the way as it does for macOS).
+    static func forward(_ bytes: [UInt8], query: DNSWire.Message, to owner: WildcardDelegation, overTCP: Bool) -> [UInt8]? {
+        let index = owner.interface.map { if_nametoindex($0) } ?? 0
+        return exchange(bytes, query: query, servers: owner.servers, port: owner.port, ifIndex: index == 0 ? nil : index,
+                        overTCP: overTCP)
+    }
+
+    private static func exchange(_ bytes: [UInt8], query: DNSWire.Message, servers: [String], port: UInt16,
+                                 ifIndex: UInt32?, overTCP: Bool) -> [UInt8]? {
+        for server in servers {
+            if !overTCP, let reply = udpExchange(bytes, query: query, server: server, port: port, ifIndex: ifIndex),
                let parsed = DNSWire.parse(reply), !parsed.isTruncated {
                 return reply
             }
-            if let reply = tcpExchange(bytes, query: query, server: server, ifIndex: index) {
+            if let reply = tcpExchange(bytes, query: query, server: server, port: port, ifIndex: ifIndex) {
                 return reply
             }
         }
         return nil
     }
 
-    private static func serverAddress(_ server: String) -> sockaddr_in? {
+    private static func serverAddress(_ server: String, port: UInt16) -> sockaddr_in? {
         var addr = sockaddr_in()
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = UInt16(53).bigEndian
+        addr.sin_port = port.bigEndian
         guard inet_pton(AF_INET, server, &addr.sin_addr) == 1 else { return nil }
         return addr
     }
 
     /// A socket that leaves by `ifIndex` whatever the routing table says: never through the
-    /// forwarder again, and never into a tunnel the wildcard's route avoids.
-    private static func boundSocket(type: Int32, ifIndex: UInt32) -> Int32 {
+    /// forwarder again, and never into a tunnel the wildcard's route avoids. Nil leaves it to
+    /// the routing table.
+    private static func boundSocket(type: Int32, ifIndex: UInt32?) -> Int32 {
         let fd = socket(AF_INET, type, 0)
-        guard fd >= 0 else { return -1 }
-        var index = ifIndex
+        guard fd >= 0, var index = ifIndex else { return fd }
         guard setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &index, socklen_t(MemoryLayout<UInt32>.size)) == 0 else {
             close(fd)
             return -1
@@ -470,8 +485,8 @@ final class WildcardForwarder {
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     }
 
-    private static func connect(_ fd: Int32, to server: String) -> Bool {
-        guard var addr = serverAddress(server) else { return false }
+    private static func connect(_ fd: Int32, to server: String, port: UInt16) -> Bool {
+        guard var addr = serverAddress(server, port: port) else { return false }
         return withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
@@ -479,12 +494,12 @@ final class WildcardForwarder {
         }
     }
 
-    static func udpExchange(_ bytes: [UInt8], query: DNSWire.Message, server: String, ifIndex: UInt32) -> [UInt8]? {
+    static func udpExchange(_ bytes: [UInt8], query: DNSWire.Message, server: String, port: UInt16, ifIndex: UInt32?) -> [UInt8]? {
         let fd = boundSocket(type: SOCK_DGRAM, ifIndex: ifIndex)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
         setTimeouts(fd, seconds: upstreamTimeout)
-        guard connect(fd, to: server), send(fd, bytes, bytes.count, 0) == bytes.count else { return nil }
+        guard connect(fd, to: server, port: port), send(fd, bytes, bytes.count, 0) == bytes.count else { return nil }
         let deadline = DispatchTime.now() + upstreamTimeout
         var buffer = [UInt8](repeating: 0, count: 65535)
         while DispatchTime.now() < deadline {
@@ -496,13 +511,13 @@ final class WildcardForwarder {
         return nil
     }
 
-    static func tcpExchange(_ bytes: [UInt8], query: DNSWire.Message, server: String, ifIndex: UInt32) -> [UInt8]? {
+    static func tcpExchange(_ bytes: [UInt8], query: DNSWire.Message, server: String, port: UInt16, ifIndex: UInt32?) -> [UInt8]? {
         let fd = boundSocket(type: SOCK_STREAM, ifIndex: ifIndex)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
         // SO_SNDTIMEO also bounds a blocking connect on Darwin.
         setTimeouts(fd, seconds: upstreamTimeout)
-        guard connect(fd, to: server), writeFramed(fd, bytes), let reply = readFramed(fd),
+        guard connect(fd, to: server, port: port), writeFramed(fd, bytes), let reply = readFramed(fd),
               let parsed = DNSWire.parse(reply), DNSWire.answers(parsed, query: query) else { return nil }
         return reply
     }
