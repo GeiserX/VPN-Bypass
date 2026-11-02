@@ -5793,7 +5793,7 @@ final class RouteManager: ObservableObject {
         case .broken(let interface):
             log(.warning, "Route check: control \(address) left through \(interface ?? "no interface"), expected \(unrouted.code): check broken")
         case .splitTunnel(let interface):
-            log(.info, "Route check: control \(address) left through \(interface), not \(unrouted.code): the VPN carries only some networks, so an address with no route leaves through \(interface) anyway")
+            log(.info, "Route check: control \(address) left through \(interface), not \(unrouted.code): the VPN carries only some networks, so an address with no app route and outside the VPN's networks leaves through \(interface) anyway")
         case .notRun:
             break
         }

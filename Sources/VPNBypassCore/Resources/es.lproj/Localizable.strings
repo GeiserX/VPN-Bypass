@@ -693,7 +693,7 @@
 "%@ matches no rule, so it takes the default route, %@, which leaves it to the system's own routing." = "%@ no coincide con ninguna regla, así que toma la ruta predeterminada, %@, que lo deja al enrutamiento del propio sistema.";
 "%@ is not on your list, so it follows the system's own routing." = "%@ no está en tu lista, así que sigue el enrutamiento del propio sistema.";
 "This VPN carries only some networks, not the default route, so traffic without a route leaves through %@." = "Esta VPN solo lleva algunas redes, no la ruta predeterminada, así que el tráfico sin ruta sale por %@.";
-"This VPN carries only some networks, so traffic without a route leaves through %@ anyway: the entry changes nothing while it is the only VPN up." = "Esta VPN solo lleva algunas redes, así que el tráfico sin ruta ya sale por %@: la entrada no cambia nada mientras sea la única VPN conectada.";
+"This VPN carries only some networks, so an address it does not carry leaves through %@ even without the entry." = "Esta VPN solo lleva algunas redes, así que una dirección que no lleva sale por %@ incluso sin la entrada.";
 "The check saw it leave through %@, and it answered on port 443." = "La comprobación lo vio salir por %@ y respondió en el puerto 443.";
 "The check saw it leave through %@, but nothing answered on port 443." = "La comprobación lo vio salir por %@, pero nada respondió en el puerto 443.";
 "But the check saw it leave through %@, not through %@." = "Pero la comprobación lo vio salir por %@, no por %@.";

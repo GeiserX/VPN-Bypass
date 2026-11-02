@@ -330,8 +330,8 @@ final class SiteRouteTests: XCTestCase {
         XCTAssertEqual(a.splitTunnel, true)
         XCTAssertEqual(a.summary, "example.com is on your list, and its address 203.0.113.5 has a route."
                        + " The check saw it leave through en8, and it answered on port 443."
-                       + " This VPN carries only some networks, so traffic without a route leaves through en8 anyway:"
-                       + " the entry changes nothing while it is the only VPN up.")
+                       + " This VPN carries only some networks, so an address it does not carry leaves through en8"
+                       + " even without the entry.")
     }
 
     /// Custom, no rule matches and the default route is the VPN, under a split tunnel: the name

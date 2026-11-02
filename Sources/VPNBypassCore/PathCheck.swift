@@ -114,8 +114,8 @@ public enum PathCheck {
         case broken(interface: String?)
         /// It should have gone into the VPN but left around it, through the physical
         /// `interface`: the VPN carries only some networks (a split tunnel), not the default
-        /// route. An address with no route leaves that way anyway, so a route around the VPN
-        /// changes nothing, while a route into a tunnel still leaves the other way and is judged.
+        /// route. An address the VPN does not carry leaves that way with or without a route around
+        /// it, while a route into a tunnel still leaves the other way and is judged.
         case splitTunnel(interface: String)
         /// Not run: there is only one way out (no VPN), or every candidate is routed.
         case notRun

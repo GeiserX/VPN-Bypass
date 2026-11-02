@@ -347,7 +347,7 @@ enum SiteRoute {
             let note = followsDefault
                 ? String(localized: "This VPN carries only some networks, not the default route, so traffic without a route leaves through \(split).")
                 : expected == .physical
-                    ? String(localized: "This VPN carries only some networks, so traffic without a route leaves through \(split) anyway: the entry changes nothing while it is the only VPN up.")
+                    ? String(localized: "This VPN carries only some networks, so an address it does not carry leaves through \(split) even without the entry.")
                     : nil
             if let note { check = check.map { $0 + " " + note } ?? note }
         }
