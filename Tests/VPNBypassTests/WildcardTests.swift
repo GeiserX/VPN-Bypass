@@ -919,6 +919,84 @@ final class WildcardSystemOutputTests: XCTestCase {
         XCTAssertEqual(ScutilDNS.shadowing("example.com", in: resolvers(sameDomain)), ["eu.example.com"], "the wildcard's own domain with a dot is not narrower")
     }
 
+    /// On a VPN connect the resolver list is read before the helper writes its files, so the
+    /// list has Tailscale's resolver for the tailnet and none of ours.
+    private let tailscaleBeforeOurFiles = """
+    DNS configuration
+
+    resolver #1
+      nameserver[0] : 192.168.10.1
+      if_index : 11 (en0)
+      order    : 200000
+
+    resolver #2
+      domain   : example-tailnet.ts.net.
+      nameserver[0] : 100.100.100.100
+      if_index : 24 (utun10)
+      flags    : Supplemental, Request A records, Request AAAA records
+      order    : 100801
+    """
+
+    private func spec(_ suffix: String) -> WildcardSpec {
+        WildcardSpec(suffix: suffix, gateway: "192.168.10.1", upstream: ["192.168.10.1"], interface: "en0")
+    }
+
+    func testSuffixesTheHelperServesCountAsOursBeforeTheirFilesAreListed() {
+        let before = ScutilDNS.parse(tailscaleBeforeOurFiles)
+        let specs = [spec("ts.net"), spec("example-tailnet.ts.net")]
+        let first = WildcardEngine.shadowWarnings(specs: specs, served: ["ts.net", "example-tailnet.ts.net"],
+                                                  resolvers: before, warned: [:])
+        XCTAssertTrue(first.log.isEmpty, "the helper serves the tailnet, so its names reach us")
+        XCTAssertEqual(first.warned, [:])
+
+        // The next pass reads the list with our files in it: still nothing, and no flap.
+        let after = ScutilDNS.parse(tailscaleScutil)
+        let second = WildcardEngine.shadowWarnings(specs: specs, served: ["ts.net", "example-tailnet.ts.net"],
+                                                   resolvers: after, warned: first.warned)
+        XCTAssertTrue(second.log.isEmpty)
+        XCTAssertEqual(second.warned, [:])
+    }
+
+    func testASuffixTheHelperDoesNotServeStillWarnsWhenHidden() {
+        let before = ScutilDNS.parse(tailscaleBeforeOurFiles)
+        let specs = [spec("ts.net"), spec("example-tailnet.ts.net")]
+        // The tailnet's file is another program's, so the helper reports it unserved.
+        let pass = WildcardEngine.shadowWarnings(specs: specs, served: ["ts.net"], resolvers: before, warned: [:])
+        XCTAssertEqual(pass.log.map(\.suffix), ["ts.net"])
+        XCTAssertEqual(pass.log.map(\.hidden), [["example-tailnet.ts.net"]])
+        // Said once: the same layout on the next pass logs nothing more.
+        let again = WildcardEngine.shadowWarnings(specs: specs, served: ["ts.net"], resolvers: before, warned: pass.warned)
+        XCTAssertTrue(again.log.isEmpty)
+        XCTAssertEqual(again.warned, pass.warned)
+    }
+
+    func testAForeignResolverUnderAServedWildcardStillWarns() {
+        let r = ScutilDNS.parse("""
+        DNS configuration
+
+        resolver #1
+          domain   : eu.example.com
+          nameserver[0] : 10.9.0.53
+          order    : 101000
+
+        resolver #2
+          domain   : corp.example.com
+          nameserver[0] : 10.9.0.54
+        """)
+        let pass = WildcardEngine.shadowWarnings(specs: [spec("example.com")], served: ["example.com"], resolvers: r, warned: [:])
+        XCTAssertEqual(pass.log.map(\.suffix), ["example.com"])
+        XCTAssertEqual(pass.log.map(\.hidden), [["corp.example.com", "eu.example.com"]], "no served file for either")
+        XCTAssertEqual(ScutilDNS.shadowing("example.com", in: r, served: ["example.com", "eu.example.com", "corp.example.com"]),
+                       ["corp.example.com"], "ours for eu comes first; corp has no order, so we cannot say ours does")
+    }
+
+    func testAPassWithNothingToCheckKeepsWhatWasWarned() {
+        let warned = ["example.com": ["eu.example.com"]]
+        let pass = WildcardEngine.shadowWarnings(specs: [], served: [], resolvers: [], warned: warned)
+        XCTAssertTrue(pass.log.isEmpty)
+        XCTAssertEqual(pass.warned, warned)
+    }
+
     func testReadsEstablishedTCPPeers() {
         let netstat = """
         Active Internet connections (including servers)
