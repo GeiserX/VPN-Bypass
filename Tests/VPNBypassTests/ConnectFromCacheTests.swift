@@ -8,8 +8,9 @@
 import XCTest
 @testable import VPNBypassCore
 
-/// What the fake DNS answers, readable from the resolver's nonisolated closure.
-private final class SlowDNS: @unchecked Sendable {
+/// What the fake DNS answers, readable from the resolver's nonisolated closure. Shared with
+/// TunnelSwitchFromCacheTests.
+final class SlowDNS: @unchecked Sendable {
     private let lock = NSLock()
     private var answers: [String: [String]] = [:]
     private var lookups = 0

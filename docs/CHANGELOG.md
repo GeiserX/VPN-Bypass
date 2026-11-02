@@ -7,6 +7,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.6]
+
+### Fixed
+- **Routes come back within seconds when the VPN moves to another tunnel.** With two VPNs on one Mac (a split-tunnel client already up, then a full-tunnel client that dropped and came back every minute or two), each switch of the selected tunnel logged "VPN interface changed: utun11 → utun5", then "Resolving 204 domains...", and the routes followed about 50 s later. Meanwhile an address the app had not put back yet left through the full tunnel. 6.0.1 made a fresh connect use the saved addresses; a switch did not. It now does the same: the routes go back from the saved addresses at once, then every name is looked up again in the background and only the addresses that changed are added or removed. In Bypass mode the routes keep the local gateway and nothing is rewritten; in VPN Only and for a Custom route pinned to one VPN every route moves to the new tunnel and none stays on the old one. A switch that comes while that background lookup still runs stops it and starts its own, so nothing is written twice, and no longer waits behind it (in Custom mode, where that lookup is a full apply, it still waits for it to finish). The full lookup still runs first when nothing was resolved before, when a route from the saved addresses fails to install, and in VPN Only under GlobalProtect. The 10-second wait between two switches is unchanged.
+
 ## [6.0.5]
 
 ### Fixed

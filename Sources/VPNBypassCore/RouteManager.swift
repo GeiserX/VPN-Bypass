@@ -117,6 +117,12 @@ final class RouteManager: ObservableObject {
     private var backgroundRefreshTask: Task<Void, Never>?
     /// The route gate is held by `backgroundDNSRefresh`, which a post-connect apply may stop.
     private var backgroundRefreshHoldsGate = false
+    /// The gate is held by a refresh a re-route may stop at once: not in Custom mode, where the
+    /// refresh is a full apply that runs to the end (see performReroute).
+    private var refreshYieldsToReroute: Bool {
+        backgroundRefreshHoldsGate
+            && !Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
+    }
     @Published var lastDNSRefresh: Date?
     @Published var nextDNSRefresh: Date?
     @Published var isTestingProxy = false
@@ -1226,12 +1232,15 @@ final class RouteManager: ObservableObject {
                     ? "VPN gateway changed on \(interface ?? "?"): \(oldVPNGateway ?? "?") → \(vpnGateway ?? "?")"
                     : (tailscaleChanged ? "Tailscale active account changed, refreshing routes" : nil))
 
+            // A background refresh holding the route gate does not hold the re-route back: it
+            // can resolve for a minute, and performReroute stops it before it applies. Custom
+            // mode's refresh cannot be stopped, so there the re-route latches, as before.
             switch RerouteDecider.decide(
                 interfaceChanged: interfaceChanged,
                 tailscaleChanged: tailscaleChanged,
                 pending: pendingReroute,
                 isLoading: isLoading,
-                isApplyingRoutes: isApplyingRoutes,
+                isApplyingRoutes: isApplyingRoutes && !refreshYieldsToReroute,
                 cooldownActive: rerouteCooldownActive(),
                 hasGateway: canApplyRoutes,
                 gatewayChanged: gatewayChanged
@@ -1860,6 +1869,7 @@ final class RouteManager: ObservableObject {
     }
 
     func listVPNLinks() async -> [VPNLink] {
+        if let override = listVPNLinksOverrideForTests { return await override() }
         guard let result = await runProcessAsync("/sbin/ifconfig", timeout: 5.0) else { return [] }
 
         // Pure parse of the ifconfig text (order + UP flag + inet addresses + Tailscale
@@ -3244,7 +3254,6 @@ final class RouteManager: ObservableObject {
     /// Returns false if apply was skipped (no gateway, gate held, preempted, etc.)
     /// `orphanGrace` as on `applyAllRoutes`: the post-connect apply passes it.
     private func applyRoutesFromCache(orphanGrace: Bool = false) async -> Bool {
-        let epoch = routeEpoch
         guard !isPaused else {
             log(.info, "Cache apply skipped: paused")
             return false
@@ -3254,6 +3263,15 @@ final class RouteManager: ObservableObject {
             return false
         }
         defer { releaseRouteOperation() }
+        return await applyRoutesFromCacheInternal(orphanGrace: orphanGrace)
+    }
+
+    /// The cache apply itself. Gate-free: callers hold the route operation lock (the re-route
+    /// after a tunnel switch holds it already). `forceReassert` as on the full apply: the
+    /// re-route sends every route again, and the helper writes only the ones that differ.
+    private func applyRoutesFromCacheInternal(orphanGrace: Bool = false, forceReassert: Bool = false) async -> Bool {
+        let epoch = routeEpoch
+        guard !isPaused else { return false }
 
         guard let gateway = localGateway else {
             log(.error, "Cannot apply cached routes: no local gateway")
@@ -3269,7 +3287,7 @@ final class RouteManager: ObservableObject {
 
         // Custom mode: compile from cached IPs (no live DNS) for instant startup.
         if Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
-            return await applyCustomRoutesInternal(useCacheOnly: true, sendNotification: false, forceReassert: false)
+            return await applyCustomRoutesInternal(useCacheOnly: true, sendNotification: false, forceReassert: forceReassert)
         }
 
         // VPN Only mode needs VPN gateway for domain routes
@@ -3343,7 +3361,7 @@ final class RouteManager: ObservableObject {
         // tracked, so this never skips there.
         let desiredPairs = Set(routesToAdd.map { "\($0.destination)|\($0.gateway)" })
         let activePairs = Set(listedRoutes.map { "\($0.destination)|\($0.gateway)" })
-        if Self.shouldSkipReapply(desiredPairs: desiredPairs, activePairs: activePairs, forceReassert: false) {
+        if Self.shouldSkipReapply(desiredPairs: desiredPairs, activePairs: activePairs, forceReassert: forceReassert) {
             orphanFirstSeen.removeAll()
             log(.info, "Routes already current (\(activePairs.count)) — skipping re-apply from cache")
             lastUpdate = Date()
@@ -4648,7 +4666,7 @@ final class RouteManager: ObservableObject {
     /// deferred (latched), not dropped, and applies as soon as the window elapses.
     private func rerouteCooldownActive() -> Bool {
         guard let last = lastInterfaceReroute else { return false }
-        return Date().timeIntervalSince(last) < 10
+        return Date().timeIntervalSince(last) < (rerouteCooldownOverrideForTests ?? 10)
     }
 
     /// The re-route action itself: RECONCILE the installed routes against the desired set
@@ -4663,7 +4681,22 @@ final class RouteManager: ObservableObject {
             pendingRerouteReason = nil
             return
         }
+        // A background refresh (after a connect, a Resume or the last switch) may still be
+        // resolving, holding the route gate: the deciders let the re-route run anyway. Stop it
+        // and wait it out, as the settle-gated apply does: its answers were for the old tunnel,
+        // and this re-route starts its own refresh. A cancelled refresh writes nothing and stops
+        // waiting for its lookups at once. In Custom mode it is a full apply that runs to the
+        // end, so it is not waited for here, inside the status pass: the deciders latch the
+        // re-route while it holds the gate, as before.
+        if let previous = backgroundRefreshTask {
+            previous.cancel()
+            if !Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) {
+                await previous.value
+                backgroundRefreshTask = nil
+            }
+        }
         lastInterfaceReroute = Date()
+        var refreshAfter = false
         if localGateway != nil, acquireRouteOperation() {
             // Clear the latch HERE — at the START of the re-route, synchronously after
             // acquiring the gate and BEFORE the multi-second apply below. This ordering
@@ -4733,10 +4766,44 @@ final class RouteManager: ObservableObject {
                 // so a fully-correct set costs N reads and zero mutations — no route-change events,
                 // nothing for a coexisting VPN client to react to. This is what makes the 3.1.7 and
                 // 3.1.8 changes compose instead of cancelling each other out.
-                await applyAllRoutesInternal(sendNotification: false, forceReassert: true)
+                //
+                // From the addresses already resolved first, as the connect does (#232): the full
+                // apply looks every name up before it writes a route, ~50 s for 204 names, and a
+                // second VPN that drops and returns every minute or two switched the tunnel that
+                // often. In Bypass the routes keep the local gateway, so this re-sends them and the
+                // helper writes nothing; in VPN Only and on Custom pinned routes the gateway or
+                // tunnel moved, and every route is rewritten to the new one, stale ones removed.
+                // DNS is refreshed after it in the background. The full apply still runs when
+                // nothing was resolved before, when a cached add fails (the refresh adds only
+                // changed answers, so it would never retry it), and in VPN Only under
+                // GlobalProtect, which both paths refuse.
+                let refusedFromCache = config.routingMode == .vpnOnly && vpnType == .globalProtect
+                let epoch = routeEpoch
+                if !dnsDiskCache.isEmpty && !refusedFromCache,
+                   await applyRoutesFromCacheInternal(forceReassert: true) {
+                    log(.info, "Routes put back from the DNS cache after the tunnel switch; refreshing DNS in the background")
+                    refreshAfter = true
+                } else if routeEpoch == epoch {
+                    // Not after a teardown (quit, Remove All) preempted the cache apply: the full
+                    // apply would put back what it just removed.
+                    await applyAllRoutesInternal(sendNotification: false, forceReassert: true)
+                }
             }
         } else if localGateway == nil {
             log(.error, "Re-route needed but no gateway detected")
+        } else if !pendingReroute {
+            // The gate was taken while the refresh above wound down: latch the re-route, never
+            // drop it (see RerouteDecider).
+            pendingReroute = true
+            log(.info, "Re-route deferred (\(pendingRerouteReason ?? "pending")) — route op busy; will retry until applied")
+            scheduleRerouteRetry()
+        }
+        // After the gate is released above: the refresh takes it itself. A newer re-route or
+        // connect cancels it (backgroundRefreshHoldsGate).
+        if refreshAfter && !isShuttingDown {
+            backgroundRefreshTask = Task.detached { [weak self] in
+                await self?.backgroundDNSRefresh(sendNotification: false)
+            }
         }
     }
 
@@ -4798,7 +4865,7 @@ final class RouteManager: ObservableObject {
             tailscaleChanged: false,
             pending: pendingReroute,
             isLoading: isLoading,
-            isApplyingRoutes: isApplyingRoutes,
+            isApplyingRoutes: isApplyingRoutes && !refreshYieldsToReroute,
             cooldownActive: rerouteCooldownActive(),
             hasGateway: canApplyRoutes
         ) {
@@ -6419,6 +6486,12 @@ final class RouteManager: ObservableObject {
     /// The settle wait before a post-connect apply, in place of `ReconnectSettle.delay`, so a
     /// test can drive a connect through to its apply without waiting 10 s. Nil in production.
     var settleDelayOverrideForTests: TimeInterval?
+    /// The re-route cooldown, in place of its 10 s, so a test can switch tunnels back and forth
+    /// without waiting it out. Nil in production.
+    var rerouteCooldownOverrideForTests: TimeInterval?
+    /// The live tunnels `listVPNLinks` answers, so a Custom route pinned to one tunnel can be
+    /// driven through a renumber with no real interface. Nil in production.
+    var listVPNLinksOverrideForTests: (() async -> [VPNLink])?
     /// What `detectNetworkIdentity` answers, so a test can move the Mac between networks.
     var detectNetworkIdentityOverrideForTests: (() async -> NetworkIdentity?)?
     /// What `arp -a -n -l` prints, for the stale-ARP re-check.
@@ -6633,6 +6706,16 @@ final class RouteManager: ObservableObject {
         lastVPNConnectAt = nil
         applyKillStrikes = 0
         lastApplyKillAt = nil
+    }
+
+    /// Forgets the last re-route and any latched one, which an earlier test's tunnel switch
+    /// leaves behind: the next switch would otherwise be held by the cooldown.
+    func resetRerouteStateForTests() {
+        lastInterfaceReroute = nil
+        pendingReroute = false
+        pendingRerouteReason = nil
+        rerouteRetryTask?.cancel()
+        rerouteRetryTask = nil
     }
 
     /// Sets the pause without touching any route, for renders of the paused dropdown.
