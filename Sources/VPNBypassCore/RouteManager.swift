@@ -111,6 +111,8 @@ final class RouteManager: ObservableObject {
 
     /// Handle for the fire-and-forget background DNS refresh, so shutdown can cancel it.
     private var backgroundRefreshTask: Task<Void, Never>?
+    /// The route gate is held by `backgroundDNSRefresh`, which a post-connect apply may stop.
+    private var backgroundRefreshHoldsGate = false
     @Published var lastDNSRefresh: Date?
     @Published var nextDNSRefresh: Date?
     @Published var isTestingProxy = false
@@ -1094,7 +1096,9 @@ final class RouteManager: ObservableObject {
         // Auto-apply routes when VPN connects (skip if already applying or recently applied)
         // Also skip if helper is not ready — no point attempting routes that will all fail.
         // Never while paused, nor when the reconnect just ended a pause: Resume applies.
-        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !resumedByReconnect && !isPaused && !isLoading && !isApplyingRoutes && HelperManager.shared.isHelperInstalled && !isConfigLoadFailed {
+        // A background refresh holding the route gate does not stop the apply: it can take a
+        // minute, and the apply stops it when the settle wait ends (runSettledApply).
+        if isVPNConnected && !wasVPNConnected && config.autoApplyOnVPN && !resumedByReconnect && !isPaused && !isLoading && (!isApplyingRoutes || backgroundRefreshHoldsGate) && HelperManager.shared.isHelperInstalled && !isConfigLoadFailed {
             let now = Date()
             let vpnLabel = "\(interface ?? "unknown") (\(detectedType?.rawValue ?? "unknown type"))"
             // Fresh routes = the newer of the last full apply and the last DNS refresh.
@@ -1142,9 +1146,10 @@ final class RouteManager: ObservableObject {
                     reason = .heldBack(strikes: applyKillStrikes)
                     log(.warning, "VPN connected via \(vpnLabel) — post-reconnect apply withheld: \(applyKillStrikes) suspected apply-kills; applying once the tunnel has held for \(Int(withheld / 60)) more min")
                 } else {
-                    delay = ReconnectSettle.delay(deferrals: reconnectDeferrals,
-                                                  hasInstalledRoutes: !activeRoutes.isEmpty,
-                                                  killStrikes: applyKillStrikes)
+                    delay = settleDelayOverrideForTests
+                        ?? ReconnectSettle.delay(deferrals: reconnectDeferrals,
+                                                 hasInstalledRoutes: !activeRoutes.isEmpty,
+                                                 killStrikes: applyKillStrikes)
                     let backoffNote = applyKillStrikes > 0
                         ? " (backed off — \(applyKillStrikes) suspected apply-kill\(applyKillStrikes == 1 ? "" : "s"))"
                         : ""
@@ -1468,9 +1473,26 @@ final class RouteManager: ObservableObject {
     /// re-validated at fire time — the world may have moved during the wait. The cancellation
     /// re-check closes a supersede race: an old task that passed its post-sleep check right as
     /// a disconnect cancelled it must not run, and must not clear a newer task's reference.
+    ///
+    /// The routes go back from the addresses already resolved (`dnsDiskCache`), as the startup
+    /// and Resume applies do, and DNS is refreshed after it in the background, adding and
+    /// removing only what changed. A full apply resolves every name before it writes a route:
+    /// 62 s for 204 names on a live GlobalProtect connect, with the listed sites in the tunnel
+    /// all that time. The full apply still runs when the cache is empty, when a cached add
+    /// fails (the refresh only adds changed answers, so it would never retry it), and in VPN
+    /// Only under GlobalProtect, which both paths refuse.
     private func runSettledApply(requireAutoApply: Bool = true) async {
         guard !Task.isCancelled else { return }
         reconnectSettleTask = nil
+        // A refresh an earlier connect (or the startup) started may still be resolving, holding
+        // the route gate. It would make this apply skip, and its diff was taken against routes
+        // a drop may have torn down since. Stop it and wait it out: this apply starts its own.
+        if let previous = backgroundRefreshTask {
+            previous.cancel()
+            await previous.value
+            // A newer connect scheduled its own settle during the wait: that one applies.
+            guard reconnectSettleTask == nil else { return }
+        }
         guard isVPNConnected, config.autoApplyOnVPN || !requireAutoApply, !isPaused, !isLoading, !isApplyingRoutes,
               HelperManager.shared.isHelperInstalled else {
             log(.info, "Settle-gated apply skipped — preconditions changed during the wait")
@@ -1478,6 +1500,16 @@ final class RouteManager: ObservableObject {
         }
         reconnectDeferrals = 0
         isLoading = true
+        let refusedFromCache = config.routingMode == .vpnOnly && vpnType == .globalProtect
+        if !dnsDiskCache.isEmpty && !refusedFromCache,
+           await applyRoutesFromCache(orphanGrace: true) {
+            isLoading = false
+            log(.info, "Routes put back from the DNS cache; refreshing DNS in the background")
+            backgroundRefreshTask = Task.detached { [weak self] in
+                await self?.backgroundDNSRefresh(sendNotification: false)
+            }
+            return
+        }
         await applyAllRoutes(orphanGrace: true)
         isLoading = false
     }
@@ -3251,7 +3283,8 @@ final class RouteManager: ObservableObject {
     
     /// Apply routes using cached IPs only (no DNS resolution) - used for instant startup
     /// Returns false if apply was skipped (no gateway, gate held, preempted, etc.)
-    private func applyRoutesFromCache() async -> Bool {
+    /// `orphanGrace` as on `applyAllRoutes`: the post-connect apply passes it.
+    private func applyRoutesFromCache(orphanGrace: Bool = false) async -> Bool {
         let epoch = routeEpoch
         guard !isPaused else {
             log(.info, "Cache apply skipped: paused")
@@ -3345,6 +3378,20 @@ final class RouteManager: ObservableObject {
         // Routes a wildcard learned in the previous run are not leftovers while it is listed.
         await startupSweepIfNeeded(desired: routesToAdd.map { $0.destination } + wildcards.ledgerDestinations(config: config))
 
+        // Same diff-before-mutate as the full apply. A Bypass reconnect keeps its routes across
+        // the drop, and they are what the cache holds, so re-adding them all would be a write
+        // burst into a tunnel that just came up for nothing. At launch and on Resume nothing is
+        // tracked, so this never skips there.
+        let desiredPairs = Set(routesToAdd.map { "\($0.destination)|\($0.gateway)" })
+        let activePairs = Set(listedRoutes.map { "\($0.destination)|\($0.gateway)" })
+        if Self.shouldSkipReapply(desiredPairs: desiredPairs, activePairs: activePairs, forceReassert: false) {
+            orphanFirstSeen.removeAll()
+            log(.info, "Routes already current (\(activePairs.count)) — skipping re-apply from cache")
+            lastUpdate = Date()
+            wildcards.routesApplied()
+            return true
+        }
+
         log(.info, "Applying \(routesToAdd.count) routes from cache (\(isInverse ? "VPN Only" : "Bypass") mode)...")
 
         // Apply routes in batch via helper
@@ -3367,7 +3414,7 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Cache ")
+        let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Cache ", orphanGrace: orphanGrace)
         guard committed else { return false }
         let failures = RouteFailure.batch(.notRouted, failed: batchFailedDests,
                                           sources: routesToAdd.map { ($0.destination, $0.source) }, error: batchError,
@@ -3649,7 +3696,11 @@ final class RouteManager: ObservableObject {
             log(.info, "Background DNS refresh skipped: another route operation is in progress")
             return
         }
-        defer { releaseRouteOperation() }
+        backgroundRefreshHoldsGate = true
+        defer {
+            backgroundRefreshHoldsGate = false
+            releaseRouteOperation()
+        }
 
         guard let gateway = localGateway else {
             log(.warning, "Background DNS refresh skipped: no local gateway")
@@ -3721,7 +3772,15 @@ final class RouteManager: ObservableObject {
             }
             return results
         }
-        
+
+        // Cancelled by a newer apply (a later connect's settle) or the quit: write nothing, so
+        // two refreshes never add the same change, and the cache stays what the newer apply
+        // read. Its own refresh looks every name up again.
+        if Task.isCancelled {
+            log(.info, "Background DNS refresh cancelled: a newer apply replaces it")
+            return
+        }
+
         // Every enabled entry was looked up again, as on a full apply.
         if routeEpoch == epoch {
             unresolvedLookups = Self.lookupRecord(unresolved: results.filter { $0.2?.isEmpty ?? true }
@@ -6360,6 +6419,9 @@ final class RouteManager: ObservableObject {
     /// What `detectVPNInterface` answers, so a test can drive `checkVPNStatus` through a drop
     /// or a flap with no real tunnel.
     var detectVPNInterfaceOverrideForTests: (() async -> (connected: Bool, interface: String?, type: VPNType?))?
+    /// The settle wait before a post-connect apply, in place of `ReconnectSettle.delay`, so a
+    /// test can drive a connect through to its apply without waiting 10 s. Nil in production.
+    var settleDelayOverrideForTests: TimeInterval?
     /// What `detectNetworkIdentity` answers, so a test can move the Mac between networks.
     var detectNetworkIdentityOverrideForTests: (() async -> NetworkIdentity?)?
     /// What `arp -a -n -l` prints, for the stale-ARP re-check.
