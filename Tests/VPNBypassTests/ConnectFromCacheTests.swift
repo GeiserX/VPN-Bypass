@@ -25,7 +25,11 @@ private final class SlowDNS: @unchecked Sendable {
 
     func resolve(_ domain: String) async -> [String]? {
         lock.lock(); lookups += 1; lock.unlock()
-        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        // Not Task.sleep: a real lookup is a dig process on a GCD queue and runs out its
+        // timeout whatever the caller cancels, so a cancelled refresh must not wait for it.
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().asyncAfter(deadline: .now() + delay) { done.resume() }
+        }
         lock.lock(); defer { lock.unlock() }
         return answers[domain]
     }
@@ -223,7 +227,10 @@ final class ConnectFromCacheTests: XCTestCase {
         XCTAssertEqual(kernel.installed, ["198.51.100.20"])
         XCTAssertEqual(logs("Background refresh: 1 routes added, 0 removed"), 0, "the first refresh ended before the reconnect")
         await connect()
+        let resettledAt = Date().addingTimeInterval(settle)
         try await waitUntil(settle + 9) { logs(Self.fromCache) == 2 }
+        // The first refresh's lookups still have seconds to run; the apply must not wait them out.
+        XCTAssertLessThan(Date().timeIntervalSince(resettledAt), 2, "the second connect waited for the cancelled refresh")
         XCTAssertEqual(logs(Self.fromCache), 2, "the second connect did not apply: " + rm.recentLogs.filter { $0.timestamp >= startedAt }.map(\.message).joined(separator: " | "))
         XCTAssertEqual(logs("Settle-gated apply skipped — preconditions changed during the wait"), 0)
         XCTAssertEqual(logs("Background DNS refresh cancelled: a newer apply replaces it"), 1)
@@ -233,5 +240,33 @@ final class ConnectFromCacheTests: XCTestCase {
         XCTAssertEqual(addCalls.filter { $0 == "198.51.100.20" }.count, 1, "the cached address was written twice")
         XCTAssertEqual(addCalls.filter { $0 == "198.51.100.23" }.count, 1, "the new address was added twice")
         XCTAssertEqual(rm.activeRoutes.filter { $0.destination == "198.51.100.23" }.count, 1)
+    }
+
+    /// The wait the refresh uses on its lookups: a value when the work ends, nil at once on a
+    /// cancel, even a cancel that lands before the wait starts.
+    func testValueUnlessCancelledReturnsAtOnceOnCancel() async {
+        let quick = Task<Int, Never> { 7 }
+        let value = await RouteManager.valueUnlessCancelled(quick)
+        XCTAssertEqual(value, 7)
+
+        let slow = Task<Int, Never> {
+            await withCheckedContinuation { (done: CheckedContinuation<Int, Never>) in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 5) { done.resume(returning: 1) }
+            }
+        }
+        let started = Date()
+        let waiter = Task { await RouteManager.valueUnlessCancelled(slow) }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        waiter.cancel()
+        let cancelled = await waiter.value
+        XCTAssertNil(cancelled)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2, "the cancelled wait ran the work out")
+
+        let early = Task { () -> Int? in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await RouteManager.valueUnlessCancelled(slow)
+        }
+        let earlyValue = await early.value
+        XCTAssertNil(earlyValue)
     }
 }

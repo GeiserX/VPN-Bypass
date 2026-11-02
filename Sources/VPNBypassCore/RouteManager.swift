@@ -3689,6 +3689,20 @@ final class RouteManager: ObservableObject {
     }
 
     /// Background DNS refresh - re-resolves all domains and updates routes if IPs changed
+    /// `task`'s value, or nil as soon as the caller is cancelled, without waiting for `task`.
+    nonisolated static func valueUnlessCancelled<T>(_ task: Task<T, Never>) async -> T? {
+        let once = ResumeOnce<T?>()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<T?, Never>) in
+                once.install(continuation)
+                Task { once.resume(await task.value) }
+            }
+        } onCancel: {
+            task.cancel()
+            once.resume(nil)
+        }
+    }
+
     private func backgroundDNSRefresh(sendNotification: Bool) async {
         let epoch = routeEpoch
         guard !isPaused else { return }
@@ -3758,20 +3772,26 @@ final class RouteManager: ObservableObject {
         var newIPs: [String: [String]] = [:]
         var routeChanges: [(add: Bool, destination: String, gateway: String, isNetwork: Bool, source: String)] = []
         
-        let results = await withTaskGroup(of: (String, String, [String]?).self) { group in
-            for (domain, source) in domainsToResolve {
-                group.addTask {
-                    let ips = await DNSResolver.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
-                    return (domain, source, ips)
+        // The lookups run apart from this task, because a lookup is a dig process on a GCD
+        // queue that no cancel stops: a group of them would hold the route gate until the
+        // slowest timed out, and the connect that cancelled this refresh would wait it out.
+        let lookups = Task.detached { () -> [(String, String, [String]?)] in
+            await withTaskGroup(of: (String, String, [String]?).self) { group in
+                for (domain, source) in domainsToResolve {
+                    group.addTask {
+                        let ips = await DNSResolver.resolveIPsParallel(for: domain, userDNS: userDNS, fallbackDNS: fallbackDNS)
+                        return (domain, source, ips)
+                    }
                 }
-            }
             
-            var results: [(String, String, [String]?)] = []
-            for await result in group {
-                results.append(result)
+                var results: [(String, String, [String]?)] = []
+                for await result in group {
+                    results.append(result)
+                }
+                return results
             }
-            return results
         }
+        let results = await Self.valueUnlessCancelled(lookups) ?? []
 
         // Cancelled by a newer apply (a later connect's settle) or the quit: write nothing, so
         // two refreshes never add the same change, and the cache stays what the newer apply
@@ -7272,5 +7292,36 @@ extension RouteManager {
 
     private func profileName(_ id: UUID?) -> String {
         id.flatMap { id in config.profiles.first { $0.id == id }?.name } ?? NetworkProfiles.otherNetworksName()
+    }
+}
+
+/// Resumes a continuation exactly once, whichever of a result and a cancel comes first, and
+/// whether or not the continuation is installed yet.
+private final class ResumeOnce<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Never>?
+    private var early: T?
+    private var done = false
+
+    func install(_ continuation: CheckedContinuation<T, Never>) {
+        lock.lock()
+        if done, let early {
+            self.early = nil
+            lock.unlock()
+            continuation.resume(returning: early)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func resume(_ value: T) {
+        lock.lock()
+        guard !done else { lock.unlock(); return }
+        done = true
+        guard let continuation else { early = value; lock.unlock(); return }
+        self.continuation = nil
+        lock.unlock()
+        continuation.resume(returning: value)
     }
 }
