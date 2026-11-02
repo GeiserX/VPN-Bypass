@@ -435,12 +435,17 @@ final class WildcardForwarder {
     }
 
     /// The answer of the resolver that serves the name: its servers, on its port, out of the
-    /// interface it is scoped to (unbound when it names none, or one that is gone, so the
-    /// routing table picks the way as it does for macOS).
+    /// interface it is scoped to (unbound when it names none, so the routing table picks the
+    /// way as it does for macOS). Nil when that interface is gone, as for the upstream: the
+    /// resolver went with it, and the query must not leave some other way.
     static func forward(_ bytes: [UInt8], query: DNSWire.Message, to owner: WildcardDelegation, overTCP: Bool) -> [UInt8]? {
-        let index = owner.interface.map { if_nametoindex($0) } ?? 0
-        return exchange(bytes, query: query, servers: owner.servers, port: owner.port, ifIndex: index == 0 ? nil : index,
-                        overTCP: overTCP)
+        var index: UInt32?
+        if let name = owner.interface {
+            let i = if_nametoindex(name)
+            guard i != 0 else { return nil }
+            index = i
+        }
+        return exchange(bytes, query: query, servers: owner.servers, port: owner.port, ifIndex: index, overTCP: overTCP)
     }
 
     private static func exchange(_ bytes: [UInt8], query: DNSWire.Message, servers: [String], port: UInt16,

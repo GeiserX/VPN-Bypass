@@ -238,6 +238,25 @@ final class WildcardDelegationTests: XCTestCase {
         XCTAssertEqual(failed?.rcode, DNSWire.rcodeServFail, "no answer from the owner: the client asks again, never the upstream's")
     }
 
+    func testADelegatedNameAnEarlierRuleClaimsGetsItsResolversAnswer() {
+        let spec = WildcardSpec(suffix: "ts.net", gateway: "192.168.10.1", upstream: ["192.168.10.1"], interface: "en0",
+                                excluded: ["box.example-tailnet.ts.net"], delegated: [magicDNS])
+        var forwarded = 0
+        var delegated = 0
+        var learned: [String] = []
+        let out = WildcardLookup.reply(
+            to: query("box.example-tailnet.ts.net"), overTCP: false, specs: [spec], guard: WildcardSafetyGuard(), ttlCap: 300,
+            forward: { _, _ in forwarded += 1; return nil },
+            delegate: { _, _ in delegated += 1; return self.answer("box.example-tailnet.ts.net", [[100, 101, 102, 103]]) },
+            admit: { ips, _ in learned += ips; return ips },
+            install: { ips, _ in learned += ips; return WildcardLookup.Install(installed: ips) })
+        XCTAssertEqual(out.flatMap(DNSWire.parse).map(DNSWire.addresses(in:)), ["100.101.102.103"],
+                       "the resolver that serves it answers, not the upstream that does not know it")
+        XCTAssertEqual(forwarded, 0)
+        XCTAssertEqual(delegated, 1)
+        XCTAssertEqual(learned, [], "nothing learned either way")
+    }
+
     func testAPublicNameUnderTheWildcardIsStillAskedUpstreamAndLearned() {
         let (m, calls) = reply(query("funnel.ts.net"), upstream: answer("funnel.ts.net", [[34, 1, 1, 1]]), owner: nil)
         XCTAssertEqual(m.map(DNSWire.addresses(in:)), ["34.1.1.1"])

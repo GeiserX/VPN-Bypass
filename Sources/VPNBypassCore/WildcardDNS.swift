@@ -849,7 +849,7 @@ public enum WildcardLookup {
         // macOS would have without us.
         if let owner = spec.delegation(for: name) { return passedOn(delegate(query, owner)) }
         // An earlier rule sends this name another way: answer it as the upstream does, and
-        // learn nothing.
+        // learn nothing. A delegated name was answered above: the upstream does not know it.
         if spec.excludes(name) { return passedOn(forward(query, spec)) }
         // The routes are IPv4 only; an IPv6 answer would take the connection past them.
         if question.type == DNSWire.typeAAAA { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNoError) }
@@ -950,7 +950,8 @@ public struct WildcardSpec: Equatable, Sendable {
     public let intoTunnel: Bool
     /// Names under the suffix an earlier Custom rule claims: an exact name (`a.example.com`)
     /// or a narrower wildcard (`*.a.example.com`). They are answered as the upstream says,
-    /// with no route learned, because first match sends them another way.
+    /// with no route learned, because first match sends them another way; one that another
+    /// resolver serves (`delegated`) gets that resolver's answer instead, also unlearned.
     public let excluded: [String]
     /// Other resolvers macOS has for a domain at, under or above the suffix (Tailscale's
     /// MagicDNS for `example-tailnet.ts.net` under `*.ts.net`). A name under one of them is
