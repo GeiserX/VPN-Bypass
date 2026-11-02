@@ -14,12 +14,13 @@
 | Pulse Secure | ✅ Full |
 | Check Point | ✅ Full |
 | Proton VPN | ✅ Full (kill switch on: routes have no effect, see [VPN kill switches](coexistence.md#vpn-kill-switches)) |
+| AWS VPN Client | ✅ Full |
 | Tailscale (exit node) | ✅ Full |
 | Tailscale (mesh only) | ❌ Not VPN |
 
 ## Steps
 
-1. **VPN Detection**: Monitors network interfaces and running processes to detect VPN type
+1. **VPN Detection**: Monitors network interfaces to find the live tunnel, and names its VPN client from the process that owns it (the helper reads which process holds the tunnel). A client that is open but not connected does not name another client's tunnel; when the owner is unknown the tunnel is shown as "VPN"
 2. **Gateway Detection**: Identifies your local gateway (Wi-Fi/Ethernet router)
 3. **Route Management**: A small privileged helper adds/removes host routes to steer traffic per your mode — around the VPN (Bypass), through it (VPN Only), or to the route a rule selects (Custom). The helper is cdhash-pinned to this app and uses no Network Extension entitlements.
 4. **Route Verification**: Path-checks up to 10 routed single addresses (a range has no one address to connect to), after an apply when that option is on or when the apply had failures, or from Verify Routes in the menu. See [Path check](#path-check)

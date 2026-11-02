@@ -482,7 +482,7 @@ final class VPNTypeTests: XCTestCase {
     private static let allCases: [RouteManager.VPNType] = [
         .globalProtect, .ciscoAnyConnect, .openVPN, .wireGuard,
         .tailscale, .fortinet, .zscaler, .cloudflareWARP,
-        .paloAlto, .pulseSecure, .checkPoint, .protonVPN, .unknown
+        .paloAlto, .pulseSecure, .checkPoint, .protonVPN, .awsVPNClient, .unknown
     ]
 
     func testAllCasesHaveUniqueRawValues() {
@@ -508,8 +508,8 @@ final class VPNTypeTests: XCTestCase {
     }
 
     func testExpectedCaseCount() {
-        // 13 cases: 12 named VPN types + unknown
-        XCTAssertEqual(Self.allCases.count, 13)
+        // 14 cases: 13 named VPN types + unknown
+        XCTAssertEqual(Self.allCases.count, 14)
     }
 
     func testCodableRoundTripAllCases() throws {

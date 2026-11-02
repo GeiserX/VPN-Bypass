@@ -44,6 +44,7 @@ body:
         - Fortinet FortiClient
         - Zscaler
         - Cloudflare WARP
+        - AWS VPN Client
         - Other
     validations:
       required: true

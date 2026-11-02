@@ -122,6 +122,10 @@ public enum TunnelOwnership {
             ("cloudflarewarp", "Cloudflare WARP"),
             // Proton's tunnel extension carries the protocol's name, so it goes first.
             ("protonvpn", "Proton VPN"),
+            // OpenVPN-based, so before OpenVPN. Its daemon is `aws-client-vpn-daemon` inside
+            // "/Applications/AWS VPN Client/".
+            ("aws-client-vpn", "AWS VPN Client"),
+            ("aws vpn client", "AWS VPN Client"),
             ("openvpn", "OpenVPN"),
             ("wireguard", "WireGuard"),
             ("wg-go", "WireGuard"),

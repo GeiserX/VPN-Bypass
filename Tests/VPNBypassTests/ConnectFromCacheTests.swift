@@ -111,11 +111,11 @@ final class ConnectFromCacheTests: XCTestCase {
     }
 
     /// The VPN comes up on this status pass.
-    private func connect() async {
+    private func connect(_ iface: String = "utun5", _ type: VPNType = .globalProtect) async {
         rm.lastUpdate = nil   // or the connect is skipped as a duplicate of the last apply
         // A status pass can re-probe the helper, which this machine does not run.
         HelperManager.shared.helperState = .ready
-        rm.detectVPNInterfaceOverrideForTests = { (true, "utun5", .globalProtect) }
+        rm.detectVPNInterfaceOverrideForTests = { (true, iface, type) }
         await rm.checkVPNStatus()
         XCTAssertTrue(rm.isVPNConnected)
     }
@@ -169,6 +169,36 @@ final class ConnectFromCacheTests: XCTestCase {
         XCTAssertEqual(kernel.installed, ["198.51.100.20", "198.51.100.22"])
         XCTAssertEqual(Set(rm.activeRoutes.map(\.destination)), ["198.51.100.20", "198.51.100.22"])
         XCTAssertEqual(addCalls.filter { $0 == "198.51.100.20" }.count, 1, "an unchanged address was written twice")
+    }
+
+    /// VPN Only under GlobalProtect is refused before the cache path, but only when GlobalProtect
+    /// owns the tunnel. Live on 6.0.2 an idle GlobalProtect named AWS VPN Client's tunnel, so the
+    /// log read "VPN connected via utun11 (GlobalProtect)" and VPN Only was refused.
+    func testVPNOnlyIsRefusedOnlyWhenGlobalProtectOwnsTheTunnel() async throws {
+        let ps = VPNClientAttributionTests.idleGlobalProtectAndAWS
+        let running = VPNClientAttribution.runningClients(psOutput: ps)
+        let refusal = "VPN Only mode is disabled under GlobalProtect"
+        func refusals() -> Int {
+            rm.recentLogs.filter { $0.timestamp >= startedAt && $0.message.hasPrefix(refusal) }.count
+        }
+        useDNS(SlowDNS(delay: 0))
+        rm.config.routingMode = .vpnOnly
+
+        let aws = VPNClientAttribution.type(interface: "utun11", owner: VPNClientAttributionTests.awsDaemon,
+                                            ownersKnown: true, runningClients: running)
+        await connect("utun11", aws)
+        XCTAssertEqual(logs("VPN connected via utun11 (AWS VPN Client) — applying routes in 0s once the tunnel settles"), 1)
+        try await Task.sleep(nanoseconds: UInt64((settle + 1.5) * 1_000_000_000))
+        XCTAssertEqual(refusals(), 0, "VPN Only refused under another client's tunnel")
+
+        await rm.waitForBackgroundRefreshForTests()
+        await disconnect()
+        startedAt = Date()
+        let gp = VPNClientAttribution.type(interface: "utun5", owner: VPNClientAttributionTests.globalProtectExtension,
+                                           ownersKnown: true, runningClients: running)
+        await connect("utun5", gp)
+        try await waitUntil(settle + 3) { refusals() > 0 }
+        XCTAssertGreaterThan(refusals(), 0, "VPN Only not refused under GlobalProtect")
     }
 
     /// Nothing resolved before (a first run): the connect resolves every name, as before.

@@ -7,6 +7,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.4]
+
+### Fixed
+- **The VPN is named after the client that owns the tunnel, not the first VPN app that is open.** With AWS VPN Client connected and GlobalProtect open but idle, the log read "VPN connected via utun11 (GlobalProtect)": the app checked the running processes in a fixed order with GlobalProtect first, and a disconnected client keeps its processes running. The name is not only a label: VPN Only is refused, Custom refuses catch-alls and Tailscale peers in 100.112.0.0/12 are paused only under GlobalProtect, so those ran under the wrong VPN. The client is now taken from the process that holds the live tunnel, which the helper already reports. A tunnel with no owner the helper can see takes the one client running, never GlobalProtect, whose rules apply only when its own tunnel is the live one; with several clients running, or an owner the app does not know, the tunnel shows as "VPN" and no GlobalProtect rule applies. A helper too old to report owners keeps the old rule. AWS VPN Client is now a known client.
+
 ## [6.0.3]
 
 ### Fixed
