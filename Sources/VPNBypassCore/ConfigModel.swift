@@ -33,6 +33,7 @@ enum VPNType: String, Codable {
     case pulseSecure = "Pulse Secure"
     case checkPoint = "Check Point"
     case protonVPN = "Proton VPN"
+    case awsVPNClient = "AWS VPN Client"
     case unknown = "Unknown VPN"
 
     /// The product name to show, or nil for `.unknown`: its raw value is an English
@@ -59,6 +60,7 @@ enum VPNType: String, Codable {
         case .pulseSecure: return "bolt.shield.fill"
         case .checkPoint: return "checkmark.shield.fill"
         case .protonVPN: return "lock.shield.fill"
+        case .awsVPNClient: return "lock.icloud.fill"
         case .unknown: return "shield.fill"
         }
     }

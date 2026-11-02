@@ -92,10 +92,14 @@ final class RouteManager: ObservableObject {
     /// action that saved it would overwrite the user's config.json (ShortcutActions.run).
     var hasLoadedConfig = false
 
-    /// Which process owns each `utun`, as the helper last reported it. Cosmetic only: it names
-    /// tunnels, and must never decide which one gets routed. Empty when the helper cannot be
-    /// asked, in which case labelling falls back to the interface-prefix guess.
+    /// Which process owns each `utun`, as the helper last reported it. It names tunnels and
+    /// the client of the one acted on (`vpnType`), and must never decide which one gets
+    /// routed. Empty when the helper cannot be asked, in which case naming falls back to the
+    /// running processes and the interface prefix.
     private(set) var tunnelOwnersByInterface: [String: TunnelOwner] = [:]
+    /// The helper has answered the owner sweep at least once, so a tunnel missing from the
+    /// map really has no owner it can see. An older helper without the call never answers.
+    private(set) var tunnelOwnersAnswered = false
 
     /// True once shutdown has begun. Checked by the operation gate (so no new route
     /// operation can start) and by the tracked batch-add wrapper (so an operation
@@ -1523,16 +1527,18 @@ final class RouteManager: ObservableObject {
         // real ones rather than the interface-name guess.
         await refreshTunnelOwners()
 
-        // First check for specific VPN processes to help identify type
-        let runningVPNType = await detectRunningVPNProcess()
+        // Which VPN clients are running. Only a fallback for naming the tunnel's client: an
+        // idle client keeps its processes running (VPNClientAttribution).
+        let runningClients = await detectRunningVPNClients()
 
         // Every status pass runs this, every 30 s: log the hint only when it changes.
         await MainActor.run {
-            logWhenChanged(.processHint, runningVPNType.map { "VPN process hint: \($0.rawValue)" })
+            logWhenChanged(.processHint, runningClients.isEmpty ? nil
+                           : "VPN process hint: \(runningClients.map(\.rawValue).joined(separator: ", "))")
         }
 
         // Use ifconfig to detect VPN
-        let result = await detectVPNViaIfconfig(hintType: runningVPNType)
+        let result = await detectVPNViaIfconfig(runningClients: runningClients)
         await refreshVPNKillSwitch(connected: result.connected, trackedInterface: result.interface)
         return result
     }
@@ -1566,56 +1572,15 @@ final class RouteManager: ObservableObject {
         vpnKillSwitch = found
     }
     
-    /// Detect which VPN client process is running
-    private func detectRunningVPNProcess() async -> VPNType? {
+    /// Which known VPN clients have a process running.
+    private func detectRunningVPNClients() async -> [VPNType] {
         guard let result = await runProcessAsync("/bin/ps", arguments: ["-eo", "comm"], timeout: 5.0) else {
-            return vpnType  // Keep existing type if command fails
+            return vpnType.map { [$0] } ?? []  // Keep existing type if command fails
         }
-        
-        let output = result.output.lowercased()
-        
-        // Check for known VPN processes
-        if output.contains("globalprotect") || output.contains("pangpa") || output.contains("pangps") {
-            return .globalProtect
-        }
-        if output.contains("vpnagent") || output.contains("cisco") || output.contains("anyconnect") || output.contains("secureclient") {
-            return .ciscoAnyConnect
-        }
-        // Before OpenVPN and WireGuard: Proton's tunnel extension carries the protocol's name.
-        // Only the extension, which runs while a tunnel is up; the Proton app stays open when
-        // disconnected and must not rename another VPN.
-        if output.split(separator: "\n").contains(where: { $0.contains("protonvpn") && $0.contains("extension") }) {
-            return .protonVPN
-        }
-        if output.contains("openvpn") {
-            return .openVPN
-        }
-        if output.contains("wireguard") || output.contains("wg-go") {
-            return .wireGuard
-        }
-        if output.contains("forticlient") || output.contains("fortitray") || output.contains("fctservctl") {
-            return .fortinet
-        }
-        if output.contains("zscaler") || output.contains("zstunnel") || output.contains("zsatunnel") ||
-           output.contains("trptunnel") || output.contains("upmservicecontroller") {
-            return .zscaler
-        }
-        if output.contains("cloudflare") || output.contains("warp-cli") || output.contains("warp-svc") {
-            return .cloudflareWARP
-        }
-        if output.contains("pulsesecure") || output.contains("dsaccessservice") || output.contains("pulseuisvc") {
-            return .pulseSecure
-        }
-        if output.contains("endpoint_security_vpn") || output.contains("tracsrvwrapper") ||
-           output.contains("cpdaapp") || output.contains("cpefrd") {
-            return .checkPoint
-        }
-        // Tailscale is handled separately via exit node detection
-        
-        return nil
+        return VPNClientAttribution.runningClients(psOutput: result.output)
     }
     
-    private func detectVPNViaIfconfig(hintType: VPNType?) async -> (connected: Bool, interface: String?, type: VPNType?) {
+    private func detectVPNViaIfconfig(runningClients: [VPNType]) async -> (connected: Bool, interface: String?, type: VPNType?) {
         guard let result = await runProcessAsync("/sbin/ifconfig", timeout: 5.0) else {
             // Command failed/timed out - don't change VPN status (return current state)
             await MainActor.run { log(.warning, "ifconfig command failed/timed out") }
@@ -1732,7 +1697,14 @@ final class RouteManager: ObservableObject {
                         (defaultRouteInterface == selected ? " (carries the traffic)" : ""))
                 }
             }
-            let type = hintType ?? detectVPNTypeFromInterface(selected)
+            // The owner may be missing only because the tunnel came up after this pass's sweep.
+            if tunnelOwnersAnswered, tunnelOwnersByInterface[selected] == nil, selected.hasPrefix("utun") {
+                await refreshTunnelOwners()
+            }
+            let type = VPNClientAttribution.type(interface: selected,
+                                                 owner: tunnelOwnersByInterface[selected],
+                                                 ownersKnown: tunnelOwnersAnswered,
+                                                 runningClients: runningClients)
             // A match ends the run of "none matched": the next miss logs again.
             await MainActor.run { logWhenChanged(.unmatchedCandidates, nil) }
             return (true, selected, type)
@@ -1794,10 +1766,9 @@ final class RouteManager: ObservableObject {
     /// Try to detect VPN type from interface characteristics
     /// Refresh the tunnel→owner map from the helper.
     private func refreshTunnelOwners() async {
-        tunnelOwnersByInterface = Self.mergedTunnelOwners(
-            previous: tunnelOwnersByInterface,
-            fetched: await HelperManager.shared.tunnelOwners()
-        )
+        let fetched = await HelperManager.shared.tunnelOwners()
+        if fetched != nil { tunnelOwnersAnswered = true }
+        tunnelOwnersByInterface = Self.mergedTunnelOwners(previous: tunnelOwnersByInterface, fetched: fetched)
     }
 
     /// What the map should become after a sweep.
@@ -1813,24 +1784,11 @@ final class RouteManager: ObservableObject {
         return Dictionary(fetched.map { ($0.interface, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
+    /// A tunnel's client from its owner or its name alone, for tunnels other than the one
+    /// acted on: running processes say nothing about which tunnel is whose.
     private func detectVPNTypeFromInterface(_ iface: String) -> VPNType {
-        // Ask the OS who owns the tunnel before guessing from its name. Several product labels
-        // are already VPNType raw values, so a recognised owner names the type outright; the
-        // mesh VPNs have no case and stay .unknown, but their display label is still correct.
-        if let owner = tunnelOwnersByInterface[iface],
-           let label = TunnelOwnership.productLabel(processName: owner.processName,
-                                                    executablePath: owner.executablePath),
-           let known = VPNType(rawValue: label) {
-            return known
-        }
-
-        // GlobalProtect typically uses gpd0 or specific utun
-        if iface.hasPrefix("gpd") {
-            return .globalProtect
-        }
-        
-        // Generic fallback
-        return .unknown
+        VPNClientAttribution.type(interface: iface, owner: tunnelOwnersByInterface[iface],
+                                  ownersKnown: true, runningClients: [])
     }
     
     // MARK: - Multi-VPN link enumeration (Slice 4)
@@ -2461,7 +2419,7 @@ final class RouteManager: ObservableObject {
         log(.error, "VPN Only mode is disabled under GlobalProtect — its catch-all routes would tear down the GP tunnel. Use Bypass mode instead.")
 
         // Refusing to ADD is not enough on its own. GlobalProtect can come up *after* VPN Only has
-        // already installed its catch-alls (vpnType is detected from running processes, so it flips
+        // already installed its catch-alls (vpnType follows the tunnel's owner, so it flips
         // mid-session), and the flap suppressor can turn a VPN swap into "still connected, new
         // interface" so the disconnect teardown never runs. The refusal then returned early and left
         // `0.0.0.0/1` + `128.0.0.0/1` pointing at the LOCAL gateway — more specific than GP's

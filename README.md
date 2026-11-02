@@ -33,7 +33,7 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 - Not sure what to add? Turn on Lookups (off by default) to see the names your Mac looks up, most frequent first, and add any of them with one click.
 - In Custom mode a rule can exit direct, through a specific VPN when several are up, through an HTTP or SOCKS5 proxy, or through a Tailscale peer.
 - Routes come back on their own when the VPN reconnects or the network changes, and domains are re-resolved as their addresses rotate.
-- Detects GlobalProtect, Cisco AnyConnect, OpenVPN, WireGuard, FortiClient, Zscaler, Cloudflare WARP, Pulse Secure, Check Point, Proton VPN and Tailscale exit nodes, and says when a VPN's kill switch leaves routes with no effect.
+- Detects GlobalProtect, Cisco AnyConnect, OpenVPN, WireGuard, FortiClient, Zscaler, Cloudflare WARP, Pulse Secure, Check Point, Proton VPN, AWS VPN Client and Tailscale exit nodes, and says when a VPN's kill switch leaves routes with no effect.
 - Leaves Tailscale's own range, loopback and the other tunnels alone, so a mesh VPN and local proxies keep working next to it.
 - `vpnb` scripts everything the app does over a socket only your account can open, answers in JSON with `--json`, and reads passwords from standard input, never from the command line.
 - Shortcuts actions set the mode, add a domain, turn a service on or off and get the status, so a Focus, a time of day or a Wi-Fi network can drive the app.
