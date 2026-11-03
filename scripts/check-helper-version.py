@@ -14,7 +14,8 @@ file list or a flag) counts as a change too.
 Compares BASE with HEAD and fails when:
   - HelperConstants.helperVersion (Sources/VPNBypassCore/HelperProtocol.swift) and
     Helper/Info.plist CFBundleShortVersionString disagree at HEAD, or
-  - a helper file changed between BASE and HEAD while either version stayed the same.
+  - a helper file changed between BASE and HEAD while either version did not go up
+    (an equal or lower number can match a helper installed from an older release).
 
 BASE defaults to the latest v* tag reachable from HEAD's parent, which is what installed
 helpers were built from; the parent, so a run on a commit auto-tag has just tagged still
@@ -102,6 +103,16 @@ def plist_version(ref):
     return plistlib.loads(show(ref, PLIST_FILE).encode()).get("CFBundleShortVersionString")
 
 
+def newer(head, base):
+    """True when version head is above base, compared number by number."""
+    try:
+        return tuple(map(int, head.split("."))) > tuple(map(int, base.split(".")))
+    except (AttributeError, ValueError):
+        print(f"error: helper versions must be dotted numbers, got {head!r} and {base!r}",
+              file=sys.stderr)
+        sys.exit(2)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--base", help="ref installed helpers come from (default: last v* tag)")
@@ -129,9 +140,11 @@ def main():
     print(f"helper code changed since {base} (helper {base_constant}):")
     for path in sorted(changed):
         print(f"  {path}")
-    if head_constant == base_constant or head_plist == base_plist:
-        print(f"FAIL: the helper changed but its version is still {head_constant}, so installed "
-              f"helpers never reinstall and never get this change. Bump "
+    if not (newer(head_constant, base_constant) and newer(head_plist, base_plist)):
+        print(f"FAIL: the helper changed but its version {head_constant} is not above "
+              f"{base_constant}, so installed helpers at that version never reinstall "
+              f"(an older number may match a helper still installed from an older release) "
+              f"and never get this change. Raise "
               f"HelperConstants.helperVersion in {CONSTANT_FILE} and CFBundleShortVersionString "
               f"in {PLIST_FILE} together, with a comment on the constant saying what it carries.")
         return 1
