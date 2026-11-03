@@ -181,6 +181,18 @@ final class HelperUpdatePendingTests: XCTestCase {
         XCTAssertEqual(hm.installationError, "Bootstrap failed: 5")
     }
 
+    /// The Status page shows a cancel or a timeout in the user's language, never the English
+    /// log text.
+    func testACancelReachesTheStatusPageTranslated() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let file = root.appendingPathComponent("Sources/VPNBypassCore/Resources/es.lproj/Localizable.strings").path
+        let es = try XCTUnwrap(NSDictionary(contentsOfFile: file) as? [String: String])
+        for outcome in [HelperManager.AdminInstallOutcome.cancelled, .timedOut] {
+            XCTAssertNotEqual(outcome.localizedText, outcome.logText, "\(outcome)")
+            XCTAssertNotNil(es[outcome.localizedText], "\(outcome) has a Spanish string")
+        }
+    }
+
     // MARK: - An older helper and the methods it lacks
 
     func testVersionGateComparesNumerically() {

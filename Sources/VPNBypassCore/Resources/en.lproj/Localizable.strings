@@ -443,6 +443,8 @@
 "Not running from app bundle" = "Not running from app bundle";
 "Helper binary not found in app bundle" = "Helper binary not found in app bundle";
 "Helper plist not found in app bundle" = "Helper plist not found in app bundle";
+"The administrator password prompt was cancelled." = "The administrator password prompt was cancelled.";
+"No administrator password was entered in time." = "No administrator password was entered in time.";
 
 /* ===== Routes not applied ===== */
 "VPN Bypass isn't routing anything" = "VPN Bypass isn't routing anything";

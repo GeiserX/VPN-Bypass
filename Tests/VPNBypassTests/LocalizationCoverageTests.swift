@@ -69,6 +69,7 @@ final class LocalizationCoverageTests: XCTestCase {
                     "Helper plist not found in app bundle",
                     "VPN Bypass needs your administrator password to update its helper.",
                     "This needs a newer helper. Update it in Settings → Status.",
+                    "The administrator password prompt was cancelled.", "No administrator password was entered in time.",
                     "Name is required.", "Select a Tailscale peer (or enter its 100.x IP).", "Upstream host is required.",
                     "Port must be a number between 1 and 65535.", "Select a service.", "Pattern is required.",
                     "Enter a valid IPv4 address (e.g. 10.0.0.5).", "Enter a valid IPv4 CIDR range (e.g. 10.0.0.0/8).",

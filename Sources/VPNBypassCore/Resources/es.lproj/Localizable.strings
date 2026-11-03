@@ -443,6 +443,8 @@
 "Not running from app bundle" = "La app no se está ejecutando desde su paquete";
 "Helper binary not found in app bundle" = "No se encuentra el asistente en el paquete de la app";
 "Helper plist not found in app bundle" = "No se encuentra el plist del asistente en el paquete de la app";
+"The administrator password prompt was cancelled." = "Se canceló la solicitud de la contraseña de administrador.";
+"No administrator password was entered in time." = "No se introdujo la contraseña de administrador a tiempo.";
 
 /* ===== Rutas que no se aplicaron ===== */
 "VPN Bypass isn't routing anything" = "VPN Bypass no está enrutando nada";

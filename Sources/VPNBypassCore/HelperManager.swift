@@ -244,8 +244,7 @@ final class HelperManager: ObservableObject {
         case (_, .unreachable), (_, .timedOut):
             // The script stopped the old helper and the new one did not start: nothing routes.
             pendingUpdate = nil
-            let detail: String
-            if case .failed(let message) = outcome { detail = message } else { detail = outcome.logText }
+            let detail = outcome.localizedText
             installationError = detail
             helperState = .failed(String(localized: "Helper update failed: \(detail)"))
             RouteManager.shared.log(.error, "❌ Helper update to v\(expected) failed and no helper answers (\(detail))")
@@ -672,7 +671,7 @@ final class HelperManager: ObservableObject {
             installationError = nil
             return true
         case .cancelled, .timedOut:
-            installationError = outcome.logText
+            installationError = outcome.localizedText
             return false
         case .failed(let message):
             installationError = message
@@ -695,6 +694,16 @@ final class HelperManager: ObservableObject {
             case .installed: return "installed"
             case .cancelled: return "the password prompt was cancelled"
             case .timedOut: return "no password was entered in \(Int(HelperManager.adminPromptTimeout / 60)) minutes"
+            case .failed(let message): return message
+            }
+        }
+
+        /// The same, in the user's language, for the Status page.
+        var localizedText: String {
+            switch self {
+            case .installed: return logText
+            case .cancelled: return String(localized: "The administrator password prompt was cancelled.")
+            case .timedOut: return String(localized: "No administrator password was entered in time.")
             case .failed(let message): return message
             }
         }
