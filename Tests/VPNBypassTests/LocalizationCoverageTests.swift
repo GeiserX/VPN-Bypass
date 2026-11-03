@@ -66,7 +66,9 @@ final class LocalizationCoverageTests: XCTestCase {
     /// validation error, through a String; String(localized:) is what makes them keys.
     func testTheHelperInstallAndEditorErrorsAreTranslated() throws {
         let keys = ["Not running from app bundle", "Helper binary not found in app bundle",
-                    "Helper plist not found in app bundle", "Failed to create AppleScript",
+                    "Helper plist not found in app bundle",
+                    "VPN Bypass needs your administrator password to update its helper.",
+                    "This needs a newer helper. Update it in Settings → Status.",
                     "Name is required.", "Select a Tailscale peer (or enter its 100.x IP).", "Upstream host is required.",
                     "Port must be a number between 1 and 65535.", "Select a service.", "Pattern is required.",
                     "Enter a valid IPv4 address (e.g. 10.0.0.5).", "Enter a valid IPv4 CIDR range (e.g. 10.0.0.0/8).",

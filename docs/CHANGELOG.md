@@ -7,6 +7,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.9]
+
+### Fixed
+- **The app keeps working while a helper update waits for the administrator password.** After the upgrade to 6.0.8 the app found helper 2.6.0, wanted 2.7.0, and opened the password prompt. The prompt ran as an AppleScript on the main thread, so until someone typed the password (six hours later, on a locked screen) the app was frozen: `vpnb status` and `vpnb logs` answered "handler did not respond in time", and nothing re-applied the routes or wildcard resolver files that the previous version had removed when it quit for the upgrade, so about 400 routes were down to 4. The older helper was running and could have served all of it. The prompt now runs in an `osascript` child process off the main thread and closes after 10 minutes. Meanwhile the app uses the older helper for routes, `/etc/hosts`, resolver files and the forwarder; a call that helper does not have (wildcards before 2.5.0, the DNS Lookups capture before 2.4.0, VPN Only blocks before 2.6.0) is answered at once as unavailable instead of waiting for the XPC deadline. Settings > Status says the update is waiting for your password; after a cancel or a timeout it logs one line, keeps the older helper, and offers Update. It asks again on the next launch or on that click, never by itself. When the new helper answers, the app sends it the wildcard list again at once.
+
 ## [6.0.8]
 
 ### Fixed

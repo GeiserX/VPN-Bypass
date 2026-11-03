@@ -88,7 +88,7 @@ public enum ControlSurface {
             let helper = HelperManager.shared
             response.result?.runtime = RuntimeStatus(
                 helperReady: helper.helperState.isReady,
-                helperState: helper.helperState.statusText,
+                helperState: helper.statusSummary,
                 vpnConnected: rm.isVPNConnected,
                 vpnInterface: rm.vpnInterface,
                 vpnType: rm.vpnType?.rawValue,

@@ -108,6 +108,15 @@ final class WildcardEngine {
         }
     }
 
+    /// A new helper started (an update landed) without the old one's wildcard list, and the old
+    /// one removed its resolver files when it stopped: send the list again now, not at the next
+    /// drain. Also the first pass after an update from a helper that had no wildcards.
+    func helperRestarted() {
+        sentSpecs = nil
+        servedSpecs = nil
+        requestSync()
+    }
+
     /// Ledger addresses the startup sweep must keep: a previous run learned them for a
     /// wildcard that is still configured.
     func ledgerDestinations(config: Config) -> Set<String> {
@@ -284,9 +293,7 @@ final class WildcardEngine {
         guard let drained = await HelperManager.shared.drainWildcardRoutes() else { return }
         if !drained.running && isServing {
             // The helper restarted and lost its list (and removed its files): set it again.
-            sentSpecs = nil
-            servedSpecs = nil
-            requestSync()
+            helperRestarted()
         }
         record(drained.routes)
         // A table read that failed at the last pass is tried again here, not only at the next
