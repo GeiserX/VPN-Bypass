@@ -163,7 +163,20 @@ final class HelperManager: ObservableObject {
         }
 
         RouteManager.shared.log(.info, "🔐 Helper version mismatch: installed=\(version), expected=\(expected)")
-        return adoptOlderHelperAndUpdate(installed: version, expected: expected)
+        return await useOrUpdateOlderHelper(installed: version, expected: expected)
+    }
+
+    /// An older helper answered. Route through it while it updates when it has every call that
+    /// keeps VPN Only from leaking; otherwise wait for the update as before, off the main thread.
+    func useOrUpdateOlderHelper(installed: String, expected: String) async -> Bool {
+        guard Self.helper(installed, supports: MethodSince.adoptable) else {
+            helperVersion = installed
+            helperState = .outdated(installed: installed, expected: expected)
+            startPendingUpdate(installed: installed, expected: expected)
+            await updateTask?.value
+            return helperState.isReady
+        }
+        return adoptOlderHelperAndUpdate(installed: installed, expected: expected)
     }
 
     // MARK: - Update while the older helper keeps working
@@ -218,21 +231,36 @@ final class HelperManager: ObservableObject {
         }
     }
 
+    /// Puts back anything the helper switch interrupted (a route batch that reached the old
+    /// helper while the install stopped it). Replaced in tests.
+    var reapplyRoutesAfterUpdate: @MainActor () async -> Void = { await RouteManager.shared.reapplyAfterHelperUpdate() }
+
     private func runPendingUpdate(installed: String, expected: String) async {
+        let wasRouting = helperState.isReady
         NSApp?.activate(ignoringOtherApps: true)
         let outcome = await runAdminInstall()
         // The install script stops the old helper before it starts the new one, and a failed
         // script may have stopped it too: ask whichever helper answers now.
         dropXPCConnection()
-        let probe = await probeVersion()
+        // A freshly started helper can be slow to answer: retry a timeout, as at launch.
+        let probe = await Self.probeVersionRetryingTimeouts(
+            probe: { [weak self] in
+                guard let self else { return .unreachable }
+                return await self.probeVersion()
+            },
+            beforeRetry: { [weak self] in self?.dropXPCConnection() },
+            log: { RouteManager.shared.log(.warning, $0) }
+        )
         switch (outcome, probe) {
         case (_, .version(let answered)) where answered == expected:
             helperVersion = answered
+            helperState = .ready
             pendingUpdate = nil
             installationError = nil
             RouteManager.shared.log(.success, "✅ Helper updated to v\(answered)")
             // The new helper started without the old one's wildcard list or resolver files.
             RouteManager.shared.wildcards.helperRestarted()
+            if wasRouting { await reapplyRoutesAfterUpdate() }
         case (_, .version(let answered)):
             // Still the older helper (cancel, timeout, or an install that changed nothing).
             helperVersion = answered
@@ -254,7 +282,12 @@ final class HelperManager: ObservableObject {
     /// The text `vpnb status` shows for the helper: its state, and an update that waits.
     var statusSummary: String {
         guard helperState.isReady, let pendingUpdate, let helperVersion else { return helperState.statusText }
-        return String(localized: "Helper v\(helperVersion) running, update to v\(pendingUpdate.expected) pending")
+        switch pendingUpdate {
+        case .waiting(_, let expected):
+            return String(localized: "Helper v\(helperVersion) running, update to v\(expected) pending")
+        case .notInstalled(_, let expected, _):
+            return String(localized: "Helper v\(helperVersion) running, update to v\(expected) not installed; click Update in Settings → Status to retry")
+        }
     }
 
     // MARK: - What an older helper can do
@@ -267,6 +300,10 @@ final class HelperManager: ObservableObject {
         static let dnsCapture = "2.4.0"
         static let wildcards = "2.5.0"
         static let blockRoutes = "2.6.0"
+        /// The oldest helper the app routes through while its update waits. Older ones lack
+        /// the VPN Only blocks or the wildcards (a listed name would leave outside the tunnel)
+        /// or the route batches (1.5.0), so the app waits for their update instead.
+        static let adoptable = blockRoutes
     }
 
     /// Whether helper `running` has a method that shipped in `minimum`. An unknown version

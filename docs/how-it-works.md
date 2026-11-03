@@ -32,9 +32,9 @@ On launch the app asks the installed helper for its version. When the helper is 
 
 - The older helper keeps working. Routes, `/etc/hosts`, the wildcard resolver files and the forwarder go through it, and the control socket (`vpnb`), the status passes and the menu answer as usual. Nothing already applied is removed because an update is pending.
 - The prompt runs in an `osascript` child process, off the app's main thread, and closes after 10 minutes without an answer.
-- A feature whose helper call the older helper does not have (wildcards before helper 2.5.0, the DNS Lookups capture before 2.4.0, VPN Only blocks before 2.6.0) is reported as unavailable at once, and starts when the new helper is in. Everything else runs.
+- Only a helper from 2.6.0 on is used this way: it has every call that keeps VPN Only from sending a listed name outside the tunnel (the wildcards and the VPN Only blocks). With an older helper the app waits for the update before it routes, as it always did, but the wait no longer freezes it.
 - Settings > Status shows "Helper update to version X waiting for your password" while the prompt is open. If it is cancelled or times out, the app logs one line, Status says so with an **Update** button, and the app keeps using the older helper. It asks again on the next launch or when you click Update, never by itself. `vpnb status` shows the helper as running with the update pending.
-- When the new helper answers, the app uses it at once and sends it the wildcard list again, since the old helper removed its resolver files when it stopped. Kernel routes stay in place across the switch.
+- When the new helper answers, the app uses it at once and sends it the wildcard list again, since the old helper removed its resolver files when it stopped. Kernel routes stay in place across the switch, and the app applies the routes once more (after any route pass already running) to put back a batch that reached the old helper while it was being replaced.
 
 ### VPN Detection Logic
 

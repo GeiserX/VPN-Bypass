@@ -1011,7 +1011,7 @@ struct StatusTab: View {
     }
 
     private func installHelper() {
-        if helperManager.pendingUpdate != nil {
+        if helperManager.pendingUpdate != nil && helperManager.helperState.isReady {
             // The older helper already routes; only the update is asked for again.
             helperManager.retryPendingUpdate()
             return

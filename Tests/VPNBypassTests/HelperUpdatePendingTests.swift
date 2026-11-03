@@ -16,6 +16,8 @@ final class HelperUpdatePendingTests: XCTestCase {
                         install: @Sendable () -> HelperManager.AdminInstallOutcome,
                         routes: [RouteManager.ActiveRoute], logs: [RouteManager.LogEntry])!
 
+    private var reapplies = 0
+
     /// Counts installer calls from any thread.
     private final class Counter: @unchecked Sendable {
         private let lock = NSLock()
@@ -29,6 +31,8 @@ final class HelperUpdatePendingTests: XCTestCase {
                  rm.activeRoutes, rm.recentLogs)
         hm.pendingUpdate = nil
         hm.helperState = .checking
+        reapplies = 0
+        hm.reapplyRoutesAfterUpdate = { [weak self] in self?.reapplies += 1 }
         rm.recentLogs = []
     }
 
@@ -36,6 +40,7 @@ final class HelperUpdatePendingTests: XCTestCase {
         await hm.updateTask?.value
         HelperManager.adminInstall = saved.install
         hm.versionProbeOverrideForTests = nil
+        hm.reapplyRoutesAfterUpdate = { await RouteManager.shared.reapplyAfterHelperUpdate() }
         hm.helperState = saved.state
         hm.helperVersion = saved.version
         hm.pendingUpdate = saved.pending
@@ -81,6 +86,9 @@ final class HelperUpdatePendingTests: XCTestCase {
         XCTAssertEqual(response?.ok, true)
         XCTAssertEqual(response?.result?.runtime?.helperReady, true, "the older helper counts as ready")
         XCTAssertEqual(response?.result?.runtime?.helperState, "Helper v2.6.0 running, update to v2.7.0 pending")
+        hm.pendingUpdate = .notInstalled(installed: "2.6.0", expected: "2.7.0", reason: .cancelled)
+        XCTAssertEqual(hm.statusSummary, "Helper v2.6.0 running, update to v2.7.0 not installed; click Update in Settings → Status to retry")
+        hm.pendingUpdate = .waiting(installed: "2.6.0", expected: "2.7.0")
     }
 
     /// While the prompt waits, the older helper is the helper: route, resolver and forwarder
@@ -165,6 +173,65 @@ final class HelperUpdatePendingTests: XCTestCase {
         XCTAssertEqual(hm.helperVersion, "2.7.0")
         XCTAssertNil(hm.pendingUpdate)
         XCTAssertNil(hm.installationError)
+        XCTAssertEqual(reapplies, 1, "a batch the helper switch interrupted is applied again")
+    }
+
+    /// A helper without the VPN Only blocks or the wildcards is not routed through: a listed
+    /// name would leave outside the tunnel. The app waits for its update, and a cancel leaves
+    /// it not ready, as before this change.
+    func testAHelperTooOldForVPNOnlyIsNotUsedWhileItUpdates() async throws {
+        let calls = Counter()
+        HelperManager.adminInstall = { calls.increment(); return .cancelled }
+        hm.versionProbeOverrideForTests = { .version("2.4.0") }
+
+        let ready = await hm.useOrUpdateOlderHelper(installed: "2.4.0", expected: "2.7.0")
+
+        XCTAssertFalse(ready)
+        XCTAssertFalse(hm.isHelperInstalled)
+        XCTAssertEqual(hm.helperState, .outdated(installed: "2.4.0", expected: "2.7.0"))
+        XCTAssertEqual(hm.pendingUpdate, .notInstalled(installed: "2.4.0", expected: "2.7.0", reason: .cancelled))
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertFalse(StatusPage.helperHint(hm.helperState, pending: hm.pendingUpdate)?.contains("keeps routing") ?? false,
+                       "the page must not claim the old helper routes")
+
+        HelperManager.adminInstall = { calls.increment(); return .installed }
+        hm.versionProbeOverrideForTests = { .version("2.7.0") }
+        let readyAfter = await hm.useOrUpdateOlderHelper(installed: "2.4.0", expected: "2.7.0")
+        XCTAssertTrue(readyAfter)
+        XCTAssertTrue(hm.isHelperInstalled)
+        XCTAssertEqual(reapplies, 0, "the caller applies the routes; nothing was routed before")
+    }
+
+    func testAHelperWithEveryVPNOnlyCallIsUsedAtOnce() async throws {
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        HelperManager.adminInstall = { entered.signal(); _ = release.wait(timeout: .now() + 3); return .cancelled }
+        hm.versionProbeOverrideForTests = { .version("2.6.0") }
+
+        let ready = await hm.useOrUpdateOlderHelper(installed: "2.6.0", expected: "2.7.0")
+        XCTAssertTrue(ready)
+        XCTAssertTrue(hm.isHelperInstalled)
+        release.signal()
+        _ = await Task.detached { Self.reached(entered) }.value
+    }
+
+    /// The re-apply after an update waits for a running route operation instead of being
+    /// skipped by the gate.
+    func testTheReapplyAfterAnUpdateWaitsForTheRouteGate() async throws {
+        let savedPause = rm.pauseState
+        defer { rm.setPauseStateForTests(savedPause) }
+        // Paused: the apply stops at its first line and logs it, so nothing reaches a helper.
+        rm.setPauseStateForTests(PauseState(length: .untilResume, since: Date(), mode: rm.config.routingMode))
+        XCTAssertTrue(rm.acquireRouteOperation())
+
+        let reapply = Task { await rm.reapplyAfterHelperUpdate() }
+        try await Task.sleep(nanoseconds: 700_000_000)
+        XCTAssertTrue(logLines(containing: "Apply skipped").isEmpty, "it waits while the gate is held")
+        rm.releaseRouteOperationForTests()
+        await reapply.value
+
+        XCTAssertEqual(logLines(containing: "Apply skipped: paused").count, 1, "it applied once the gate was free")
+        XCTAssertTrue(logLines(containing: "route operation in progress").isEmpty)
     }
 
     /// The script stopped the old helper and the new one never answered: nothing routes, and

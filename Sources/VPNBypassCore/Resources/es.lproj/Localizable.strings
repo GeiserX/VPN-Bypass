@@ -56,6 +56,7 @@
 "Please enable VPN Bypass in System Settings → General → Login Items" = "Activa VPN Bypass en Ajustes del Sistema → General → Ítems de inicio";
 "Helper update failed: %@" = "La actualización del asistente falló: %@";
 "Helper v%@ running, update to v%@ pending" = "Asistente v%@ en marcha, actualización a v%@ pendiente";
+"Helper v%@ running, update to v%@ not installed; click Update in Settings → Status to retry" = "Asistente v%@ en marcha, actualización a v%@ sin instalar; pulsa Actualizar en Ajustes → Estado para reintentarlo";
 "This needs a newer helper. Update it in Settings → Status." = "Esto necesita un asistente más reciente. Actualízalo en Ajustes → Estado.";
 "VPN Bypass needs your administrator password to update its helper." = "VPN Bypass necesita tu contraseña de administrador para actualizar su asistente.";
 "Helper update to version %@ waiting for your password. The installed helper keeps routing until then." = "La actualización del asistente a la versión %@ espera tu contraseña. Hasta entonces, el asistente instalado sigue enrutando.";

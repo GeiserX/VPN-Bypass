@@ -56,6 +56,7 @@
 "Please enable VPN Bypass in System Settings → General → Login Items" = "Please enable VPN Bypass in System Settings → General → Login Items";
 "Helper update failed: %@" = "Helper update failed: %@";
 "Helper v%@ running, update to v%@ pending" = "Helper v%@ running, update to v%@ pending";
+"Helper v%@ running, update to v%@ not installed; click Update in Settings → Status to retry" = "Helper v%@ running, update to v%@ not installed; click Update in Settings → Status to retry";
 "This needs a newer helper. Update it in Settings → Status." = "This needs a newer helper. Update it in Settings → Status.";
 "VPN Bypass needs your administrator password to update its helper." = "VPN Bypass needs your administrator password to update its helper.";
 "Helper update to version %@ waiting for your password. The installed helper keeps routing until then." = "Helper update to version %@ waiting for your password. The installed helper keeps routing until then.";
