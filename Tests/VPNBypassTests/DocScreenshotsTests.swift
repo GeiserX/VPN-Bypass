@@ -1325,6 +1325,50 @@ final class DocScreenshotsTests: XCTestCase {
                                       to: "status-helper-update-cancelled.png")
     }
 
+    /// A helper update on the first launch after an upgrade, run through the real update flow
+    /// (only the XPC calls and the installer are stood in for) and shown on Logs. Before: a
+    /// 2.7.0 helper has no self-update, so the password installer runs. After: a 2.8.0 helper
+    /// installs 2.9.0 itself.
+    func testLogsHelperUpdateWithAndWithoutPassword() async throws {
+        let helper = HelperManager.shared
+        let savedInstall = HelperManager.adminInstall
+        let savedPlists = helper.launchdPlists
+        let savedLogs = rm.recentLogs
+        let savedVersion = helper.helperVersion, savedState = helper.helperState, savedPending = helper.pendingUpdate
+        defer {
+            helper.helperVersion = savedVersion
+            helper.helperState = savedState
+            helper.pendingUpdate = savedPending
+            HelperManager.adminInstall = savedInstall
+            helper.launchdPlists = savedPlists
+            helper.versionProbeOverrideForTests = nil
+            helper.selfUpdateOverrideForTests = nil
+            helper.reapplyRoutesAfterUpdate = { await RouteManager.shared.reapplyAfterHelperUpdate() }
+            rm.recentLogs = savedLogs
+        }
+        let plist = Data("<plist/>".utf8)
+        helper.launchdPlists = { (plist, plist) }
+        helper.reapplyRoutesAfterUpdate = { RouteManager.shared.log(.success, "Routes applied: 62") }
+
+        func run(installed: String, expected: String) async throws -> [(TimeInterval, RouteManager.LogEntry.LogLevel, String)] {
+            final class Flag: @unchecked Sendable { var done = false }
+            let flag = Flag()
+            helper.versionProbeOverrideForTests = { .version(flag.done ? expected : installed) }
+            HelperManager.adminInstall = { flag.done = true; return .installed }
+            helper.selfUpdateOverrideForTests = { _ in flag.done = true; return .installing }
+            rm.recentLogs = []
+            _ = helper.adoptOlderHelperAndUpdate(installed: installed, expected: expected)
+            await helper.updateTask?.value
+            // Newest first, as the page lists them, a second apart.
+            return rm.recentLogs.enumerated().map { (TimeInterval(5 + $0.offset), $0.element.level, $0.element.message) }
+        }
+
+        let before = try await run(installed: "2.7.0", expected: "2.8.0")
+        let after = try await run(installed: "2.8.0", expected: "2.9.0")
+        try renderLogs(search: nil, lines: before, to: "logs-helper-update-before.png")
+        try renderLogs(search: nil, lines: after, to: "logs-helper-update-after.png")
+    }
+
     private func renderPendingHelperUpdate(_ pending: HelperManager.PendingUpdate, to name: String) throws {
         seedBypass()
         let helper = HelperManager.shared
