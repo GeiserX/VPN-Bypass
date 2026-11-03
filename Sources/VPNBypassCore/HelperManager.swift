@@ -300,15 +300,49 @@ final class HelperManager: ObservableObject {
             RouteManager.shared.log(.warning, "Helper v\(installed) did not update itself (\(refusal)); asking for the administrator password instead")
             return false
         }
-        // The old helper exits once its reply is out and launchd starts the new file.
+        // The old helper exits once its reply is out and launchd starts the new file. Until then
+        // the old one still answers with its own version, and right after it the job is briefly
+        // unreachable: wait for the new version rather than read either as a failure.
         dropXPCConnection()
-        let probe = await probeAfterInstall()
+        let probe = await Self.awaitVersion(
+            expected,
+            delays: selfUpdateRestartDelays,
+            probe: { [weak self] in
+                guard let self else { return .unreachable }
+                return await self.probeVersion()
+            },
+            beforeRetry: { [weak self] in self?.dropXPCConnection() }
+        )
         guard case .version(let answered) = probe, answered == expected else {
             RouteManager.shared.log(.warning, "The helper updated itself but answers \(probe) instead of v\(expected); asking for the administrator password instead")
             return false
         }
         await settleUpdate(outcome: .installed, probe: probe, expected: expected, wasRouting: wasRouting)
         return true
+    }
+
+    /// Pauses between the version probes that wait for the self-updated helper, about 20 s in
+    /// all: the old helper exits 0.5 s after its reply, later if a route batch is running, and
+    /// launchd then starts the new file. Replaced in tests.
+    var selfUpdateRestartDelays: [TimeInterval] = [0.5, 1, 1, 2, 2, 3, 3, 4, 4]
+
+    /// Probes until the helper answers `expected`, pausing `delays` between probes; returns the
+    /// last answer. The old version, an XPC error and a timeout all mean "not restarted yet".
+    static func awaitVersion(
+        _ expected: String,
+        delays: [TimeInterval],
+        probe: () async -> VersionProbe,
+        beforeRetry: () -> Void = {},
+        sleep: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
+    ) async -> VersionProbe {
+        var result = await probe()
+        for delay in delays {
+            if case .version(let answered) = result, answered == expected { break }
+            await sleep(delay)
+            beforeRetry()
+            result = await probe()
+        }
+        return result
     }
 
     /// Puts back anything the helper switch interrupted (a route batch that reached the old

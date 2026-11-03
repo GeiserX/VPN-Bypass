@@ -137,6 +137,22 @@ final class HelperSelfUpdateInstallTests: XCTestCase {
         assertUntouched()
     }
 
+    /// A FIFO would block a plain read forever and hang the helper; a symlink is not followed.
+    func testAFifoOrASymlinkIsRefusedWithoutBlocking() throws {
+        let fifo = dir.appendingPathComponent("fifo").path
+        XCTAssertEqual(mkfifo(fifo, 0o600), 0)
+        XCTAssertEqual(HelperSelfUpdate.install(from: fifo, over: destination, running: "2.8.0"), .failure(.notARegularFile))
+
+        let target = dir.appendingPathComponent("target").path
+        try Data(repeating: 0xCF, count: 16).write(to: URL(fileURLWithPath: target))
+        let link = dir.appendingPathComponent("link").path
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: target)
+        guard case .failure(.unreadable) = HelperSelfUpdate.install(from: link, over: destination, running: "2.8.0") else {
+            return XCTFail("a symlink must not be followed")
+        }
+        assertUntouched()
+    }
+
     func testAnOversizedFileIsNotRead() throws {
         let source = dir.appendingPathComponent("huge").path
         FileManager.default.createFile(atPath: source, contents: nil)
@@ -161,6 +177,7 @@ final class HelperSelfUpdateFlowTests: XCTestCase {
                         install: @Sendable () -> HelperManager.AdminInstallOutcome,
                         plists: () -> (installed: Data?, bundled: Data?), logs: [RouteManager.LogEntry])!
     private var reapplies = 0
+    private var savedDelays: [TimeInterval] = []
     private var selfUpdateCalls: [String] = []
     private let plist = Data("<plist>shipped</plist>".utf8)
 
@@ -181,6 +198,8 @@ final class HelperSelfUpdateFlowTests: XCTestCase {
         hm.reapplyRoutesAfterUpdate = { [weak self] in self?.reapplies += 1 }
         let shipped = plist
         hm.launchdPlists = { (shipped, shipped) }
+        savedDelays = hm.selfUpdateRestartDelays
+        hm.selfUpdateRestartDelays = [0, 0, 0]
         rm.recentLogs = []
     }
 
@@ -190,6 +209,7 @@ final class HelperSelfUpdateFlowTests: XCTestCase {
         hm.launchdPlists = saved.plists
         hm.versionProbeOverrideForTests = nil
         hm.selfUpdateOverrideForTests = nil
+        hm.selfUpdateRestartDelays = savedDelays
         hm.reapplyRoutesAfterUpdate = { await RouteManager.shared.reapplyAfterHelperUpdate() }
         hm.helperState = saved.state
         hm.helperVersion = saved.version
@@ -228,6 +248,33 @@ final class HelperSelfUpdateFlowTests: XCTestCase {
         XCTAssertNil(hm.installationError)
         XCTAssertEqual(reapplies, 1, "routes are applied again through the new helper")
         XCTAssertEqual(logLines(containing: "no password needed").count, 1)
+    }
+
+    /// The old helper still answers for a moment after its yes (it exits 0.5 s later), then the
+    /// job is unreachable until launchd starts the new file: the app waits for the new version
+    /// instead of reading the old one as a failed update and asking for the password.
+    func testTheOldHelperAnsweringUntilItExitsDoesNotPrompt() async throws {
+        let updated = Counter(), probesAfter = Counter()
+        hm.versionProbeOverrideForTests = {
+            guard updated.count > 0 else { return .version("2.8.0") }
+            probesAfter.increment()
+            switch probesAfter.count {
+            case 1: return .version("2.8.0")
+            case 2: return .unreachable
+            default: return .version("2.9.0")
+            }
+        }
+        let prompts = Counter()
+        HelperManager.adminInstall = { prompts.increment(); return .installed }
+        hm.selfUpdateOverrideForTests = { _ in updated.increment(); return nil }
+
+        _ = hm.adoptOlderHelperAndUpdate(installed: "2.8.0", expected: "2.9.0")
+        await hm.updateTask?.value
+
+        XCTAssertEqual(prompts.count, 0, "no password prompt while the old helper is still exiting")
+        XCTAssertEqual(hm.helperVersion, "2.9.0")
+        XCTAssertTrue(hm.helperState.isReady)
+        XCTAssertEqual(probesAfter.count, 3)
     }
 
     /// The helper refused (a signature or version check, an XPC error): the password installer

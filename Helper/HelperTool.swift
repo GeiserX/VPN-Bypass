@@ -630,15 +630,26 @@ class HelperTool: NSObject, HelperProtocol {
 
     // MARK: - Self-update
 
+    private static let selfUpdateLock = NSLock()
+    private static var selfUpdateInstalled = false
+
     /// Installs the helper from the app's bundle over this one (signature and version checked in
     /// `HelperSelfUpdate.install`), then exits so launchd starts the new file. The exit waits on
     /// the mutation queue, so a route batch already running finishes first; the app applies its
     /// routes again once the new helper answers.
     func updateHelper(fromPath path: String, withReply reply: @escaping (Bool, String?) -> Void) {
+        // One update at a time across connections: two installs would share the staging file.
+        HelperTool.selfUpdateLock.lock()
+        defer { HelperTool.selfUpdateLock.unlock() }
+        guard !HelperTool.selfUpdateInstalled else {
+            reply(false, "an update is already installed; the helper is restarting")
+            return
+        }
         let running = HelperConstants.helperVersion
         switch HelperSelfUpdate.install(from: path, over: HelperSelfUpdate.installedHelperPath, running: running) {
         case .success(let version):
             helperLog.notice("self-update: installed v\(version, privacy: .public) over v\(running, privacy: .public); restarting")
+            HelperTool.selfUpdateInstalled = true
             reply(true, nil)
             HelperTool.routeQueue.asyncAfter(deadline: .now() + 0.5) {
                 WildcardForwarder.shared.shutdown()

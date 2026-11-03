@@ -350,16 +350,23 @@ enum HelperSelfUpdate {
     /// helper; the tests point it at temporary files.
     static func install(from source: String, over destination: String, running: String,
                         requirement: String = candidateRequirement) -> Result<String, Failure> {
-        let attributes: [FileAttributeKey: Any]
-        do { attributes = try FileManager.default.attributesOfItem(atPath: source) } catch {
-            return .failure(.unreadable(error.localizedDescription))
-        }
-        guard attributes[.type] as? FileAttributeType == .typeRegular else { return .failure(.notARegularFile) }
-        let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
-        guard size <= maxCandidateBytes else { return .failure(.tooLarge(size)) }
-        let data: Data
-        do { data = try Data(contentsOf: URL(fileURLWithPath: source)) } catch {
-            return .failure(.unreadable(error.localizedDescription))
+        // One descriptor for the type check, the size check and the read, so the path cannot be
+        // swapped for a FIFO or a device between them (a FIFO would hang the helper). No-follow
+        // on the last component; non-blocking so opening a FIFO returns at once.
+        let sourceFD = open(source, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard sourceFD >= 0 else { return .failure(.unreadable("open \(source): \(String(cString: strerror(errno)))")) }
+        defer { close(sourceFD) }
+        var info = stat()
+        guard fstat(sourceFD, &info) == 0 else { return .failure(.unreadable(String(cString: strerror(errno)))) }
+        guard info.st_mode & S_IFMT == S_IFREG else { return .failure(.notARegularFile) }
+        guard info.st_size <= maxCandidateBytes else { return .failure(.tooLarge(Int(info.st_size))) }
+        var data = Data()
+        var chunk = [UInt8](repeating: 0, count: 1 << 16)
+        while data.count <= maxCandidateBytes {
+            let n = chunk.withUnsafeMutableBytes { read(sourceFD, $0.baseAddress, $0.count) }
+            if n < 0 { return .failure(.unreadable("read \(source): \(String(cString: strerror(errno)))")) }
+            if n == 0 { break }
+            data.append(contentsOf: chunk[0..<n])
         }
         guard data.count <= maxCandidateBytes else { return .failure(.tooLarge(data.count)) }
 
