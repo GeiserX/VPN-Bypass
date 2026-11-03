@@ -199,7 +199,13 @@ struct HelperConstants {
     // while the VPN is down, and an install over one of them deletes it first, because
     // RTM_CHANGE keeps RTF_REJECT. Bumped so installed 2.5.0 helpers, which have neither,
     // reinstall.
-    static let helperVersion = "2.6.0"
+    // 2.7.0: the wildcard forwarder asks the resolver that serves a name under another
+    // program's domain (spec `delegated`: Tailscale's MagicDNS, a VPN's split DNS) and learns
+    // no route from it (6.0.7). That code and 6.0.3/6.0.4's edits to WildcardDNS.swift and
+    // TunnelOwnership.swift shipped with 2.6.0 unchanged, so installed helpers kept the old
+    // forwarder and tailnet names under *.ts.net stayed NXDOMAIN. Bumped so installed 2.6.0
+    // helpers reinstall; scripts/check-helper-version.py now fails CI on a missed bump.
+    static let helperVersion = "2.7.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

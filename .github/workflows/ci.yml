@@ -36,6 +36,20 @@ jobs:
           # Don't leave the GitHub token in local git config while running
           # PR-controlled code (`swift test`) — fork PRs now run here.
           persist-credentials: false
+          # The helper version check compares with the last v* tag.
+          fetch-depth: 0
+      - name: Check the helper version moved with the helper code
+        # Installed helpers are replaced only when their version differs from the app's, so
+        # helper code changed since the last release with the version unchanged never reaches
+        # them (6.0.3 to 6.0.7). The second run proves the check still fails on 6.0.7.
+        run: |
+          python3 scripts/check-helper-version.py
+          status=0
+          python3 scripts/check-helper-version.py --base v6.0.6 --head v6.0.7 > /dev/null || status=$?
+          if [ "$status" -ne 1 ]; then
+            echo "::error::check-helper-version.py passed v6.0.6..v6.0.7 (exit $status), which changed the helper without a bump"
+            exit 1
+          fi
       - name: Select Xcode (latest stable)
         # Full Xcode ships XCTest and a Swift 6 compiler (the code uses `sending`).
         # The action selects reliably across images (no non-portable `sort -V`).

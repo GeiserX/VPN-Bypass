@@ -7,6 +7,12 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.8]
+
+### Fixed
+- **The 6.0.7 tailnet fix now reaches Macs that upgraded.** After the upgrade to 6.0.7, tailnet names under a `*.ts.net` wildcard still came back NXDOMAIN from the forwarder on 127.0.0.1:53530, while the log said the names were "answered by their own resolver, not routed". The fix lives in the privileged helper, and the app replaces an installed helper only when its version differs from the one the app expects. That version stayed 2.6.0 through every 6.0.x release, so upgraded Macs kept running the 6.0.0 helper. The helper goes to 2.7.0. On the first launch after the upgrade the app sees the older helper, asks for your administrator password once and installs the new one, then applies routes as usual. What installed helpers were missing and now receive: 6.0.7's delegation, where a name under a domain another program's resolver serves (Tailscale's MagicDNS, a VPN's split DNS) is asked of that resolver and learns no route. 6.0.3 and 6.0.4 also edited helper-compiled files (`WildcardDNS.swift`, `TunnelOwnership.swift`), but those edits only changed the app's side, so the old helper behaved the same there.
+- **CI fails when helper code changes without a helper version bump.** `scripts/check-helper-version.py` compares the helper's files (`Helper/` and every file the Makefile's helper build compiles) with the last release and fails when they changed while `HelperConstants.helperVersion` and `Helper/Info.plist` did not, or when those two disagree. It fails on v6.0.6..v6.0.7, which is this bug, and CI checks that it still does.
+
 ## [6.0.7]
 
 ### Fixed
