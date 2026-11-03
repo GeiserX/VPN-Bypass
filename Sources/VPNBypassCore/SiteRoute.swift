@@ -59,6 +59,17 @@ public struct SiteRouteAnswer: Codable, Equatable, Sendable {
         case paused
     }
 
+    /// Why a wildcard covering the name learns no route for it, so it is not judged against the
+    /// wildcard's way.
+    public enum NotRouted: String, Codable, Equatable, Sendable {
+        /// Another resolver serves the name's domain (Tailscale's MagicDNS, a VPN's split DNS):
+        /// the forwarder passes that resolver's answer on and learns nothing, by design.
+        case ownResolver
+        /// Every address is one a wildcard never learns (private, shared or reserved space such
+        /// as 100.64.0.0/10, the VPN's server, a DNS server in use).
+        case addressNotRoutable
+    }
+
     /// The whole check, worst address first.
     public enum Verdict: String, Codable, Equatable, Sendable {
         case ok, noAnswer, wrongWay, unknown, checkBroken, notChecked, noVPN, unresolved
@@ -92,6 +103,11 @@ public struct SiteRouteAnswer: Codable, Equatable, Sendable {
     /// True when the VPN carries only some networks, not the default route: the control, an
     /// address the app does not route, left around it. Nil otherwise.
     public var splitTunnel: Bool? = nil
+    /// Set when a wildcard covers the name but learns no route for it; then `expected` is absent
+    /// and an address is right whichever way it leaves, as long as it answers.
+    public var notRouted: NotRouted? = nil
+    /// notRouted `ownResolver`: the domain whose resolver answers the name.
+    public var resolverDomain: String? = nil
 }
 
 enum SiteRoute {
@@ -121,6 +137,10 @@ enum SiteRoute {
         var pinnedInterfaces: [UUID: String] = [:]
         /// The pause in progress, if any: its routes are out, so the lists decide nothing.
         var pause: PauseState? = nil
+        /// The wildcards the helper's forwarder serves now (`WildcardEngine.served`), and the
+        /// guard it was sent: a name under one is answered and learned as the forwarder does.
+        var wildcardSpecs: [WildcardSpec] = []
+        var wildcardGuard = WildcardSafetyGuard()
     }
 
     /// What `match` found, before the check.
@@ -140,6 +160,9 @@ enum SiteRoute {
         var matchAfterPause: SiteRouteAnswer.Match? = nil
         /// paused: whether a VPN is up, so the sentence says the site follows it or not.
         var vpnUp: Bool = true
+        /// wildcard, or a rule with a wildcard pattern: why no route is learned for the name.
+        var notRouted: SiteRouteAnswer.NotRouted? = nil
+        var resolverDomain: String? = nil
     }
 
     // MARK: - Matching
@@ -201,9 +224,17 @@ enum SiteRoute {
                 // WildcardRoutes treat it: the name falls through to a later rule.
                 guard ruleMatches(rule, host: host, addresses: addresses, services: servicesOfHost),
                       let route = byId[rule.routeId], route.enabled else { continue }
-                return Found(match: .rule, entry: rule.pattern, rulePosition: index + 1,
-                             ruleMatchType: rule.matchType.rawValue, routeName: route.name,
-                             expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
+                var found = Found(match: .rule, entry: rule.pattern, rulePosition: index + 1,
+                                  ruleMatchType: rule.matchType.rawValue, routeName: route.name,
+                                  expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
+                // A wildcard rule reaches its names through the forwarder, as a listed wildcard does.
+                let wildcardRule = WildcardDomain.isWildcard(rule.pattern) || rule.matchType == .suffix
+                if wildcardRule, let unrouted = wildcardUnrouted(host: host, addresses: addresses, in: s) {
+                    found.expected = nil
+                    found.notRouted = unrouted.reason
+                    found.resolverDomain = unrouted.resolver
+                }
+                return found
             }
             if let id = s.defaultRouteId, let route = byId[id] {
                 return Found(match: .defaultRoute, routeName: route.name,
@@ -218,6 +249,10 @@ enum SiteRoute {
         if s.mode == .bypass { wildcards += s.services.flatMap(\.domains).filter(WildcardDomain.isWildcard) }
         let suffixes = wildcards.compactMap(WildcardDomain.suffix(of:))
         if let suffix = WildcardDomain.mostSpecific(for: host, among: suffixes) {
+            if let unrouted = wildcardUnrouted(host: host, addresses: addresses, in: s) {
+                return Found(match: .wildcard, entry: WildcardDomain.entry(for: suffix), expected: nil,
+                             notRouted: unrouted.reason, resolverDomain: unrouted.resolver)
+            }
             return Found(match: .wildcard, entry: WildcardDomain.entry(for: suffix), expected: listedWay)
         }
 
@@ -237,6 +272,21 @@ enum SiteRoute {
         }
 
         return Found(match: .none, expected: loopback ? .physical : unlistedWay)
+    }
+
+    /// Why a wildcard over `host` learns no route for it, asked with the calls the helper's
+    /// forwarder makes (`WildcardLookup.reply`): the most specific wildcard it serves takes the
+    /// name, `WildcardSpec.delegation(for:)` hands it to the resolver that owns its domain, and
+    /// `WildcardSafetyGuard.refusal(for:spec:)` keeps an address from being learned. Nil when
+    /// the wildcard routes the name, and while the forwarder serves no wildcard over it.
+    static func wildcardUnrouted(host: String, addresses: [String],
+                                 in s: Snapshot) -> (reason: SiteRouteAnswer.NotRouted, resolver: String?)? {
+        guard let suffix = WildcardDomain.mostSpecific(for: host, among: s.wildcardSpecs.map(\.suffix)),
+              let spec = s.wildcardSpecs.first(where: { $0.suffix == suffix }) else { return nil }
+        if let owner = spec.delegation(for: host) { return (.ownResolver, owner.domain) }
+        guard !addresses.isEmpty,
+              addresses.allSatisfy({ s.wildcardGuard.refusal(for: $0, spec: spec) != nil }) else { return nil }
+        return (.addressNotRoutable, nil)
     }
 
     /// A list or service entry that covers `host`: the same name, or a wildcard above it.
@@ -311,11 +361,18 @@ enum SiteRoute {
             }
             return PathCheck.verdict(probe, expected: way)
         }
+        // A name the app does not route by design is right whichever way it leaves; only the
+        // answer counts, so the control does not matter to it either.
+        let anyWay = found.notRouted != nil
+        func judgeAnyWay(_ probe: PathCheck.Probe) -> PathCheck.Verdict {
+            guard probe.interface != nil else { return .unknown }
+            return probe.answer.answered ? .ok : .noAnswer
+        }
         // A broken control means no address can be judged, so none carries a verdict.
         var controlBroken = false
-        if case .broken = control?.outcome { controlBroken = true }
+        if case .broken = control?.outcome, !anyWay { controlBroken = true }
         let checks = probes.map { probe in
-            SiteRouteCheck(probe, verdict: controlBroken ? nil : expected.map { judge(probe, $0) })
+            SiteRouteCheck(probe, verdict: controlBroken ? nil : anyWay ? judgeAnyWay(probe) : expected.map { judge(probe, $0) })
         }
         let verdict: SiteRouteAnswer.Verdict
         var reported = probes.first
@@ -323,9 +380,18 @@ enum SiteRoute {
             verdict = .unresolved
         } else if !vpnConnected {
             verdict = .noVPN
-        } else if case .broken = control?.outcome {
+        } else if controlBroken {
             verdict = .checkBroken
             reported = control?.probe
+        } else if anyWay {
+            let worst = PathCheck.worst(probes.map(judgeAnyWay)) ?? .unknown
+            reported = probes.first { judgeAnyWay($0) == worst }
+            switch worst {
+            case .ok: verdict = .ok
+            case .noAnswer: verdict = .noAnswer
+            case .wrongWay: verdict = .wrongWay
+            case .unknown: verdict = .unknown
+            }
         } else if let expected {
             let worst = PathCheck.worst(probes.map { judge($0, expected) }) ?? .unknown
             reported = probes.first { judge($0, expected) == worst }
@@ -360,7 +426,8 @@ enum SiteRoute {
             verdict: verdict, summary: check.map { why + " " + $0 } ?? why,
             canAdd: [.none, .defaultRoute].contains(found.matchAfterPause ?? found.match),
             paused: found.pause?.wireDescription,
-            splitTunnel: split == nil ? nil : true)
+            splitTunnel: split == nil ? nil : true,
+            notRouted: found.notRouted, resolverDomain: found.resolverDomain)
     }
 
     /// `splitTunnel`: the VPN carries only some networks, so what follows the default route is
@@ -368,6 +435,14 @@ enum SiteRoute {
     static func whySentence(host: String, mode: RoutingMode, found: Found, splitTunnel: Bool = false,
                             now: Date = Date()) -> String {
         let entry = found.entry ?? ""
+        switch found.notRouted {
+        case .ownResolver:
+            let domain = found.resolverDomain ?? ""
+            return String(localized: "\(host) is covered by \(entry), but \(domain) has its own resolver, which answers it. By design the app does not route such a name, so it leaves the way that network sends it.")
+        case .addressNotRoutable:
+            return String(localized: "\(host) is covered by \(entry), but its addresses are ones a wildcard never routes (private, shared or reserved space), so it follows the system's own routing.")
+        case nil: break
+        }
         switch found.match {
         case .paused:
             return pausedSentence(host: host, length: found.pause?.length ?? .untilResume,
@@ -526,7 +601,7 @@ extension RouteManager {
             rules: config.rules, routes: config.routes, defaultRouteId: config.defaultRouteId,
             activeRoutes: activeRoutes.map { ($0.destination, $0.gateway, $0.source) },
             localGateway: localGateway, vpnInterface: isVPNConnected ? vpnInterface : nil,
-            pause: pauseState)
+            pause: pauseState, wildcardSpecs: wildcards.served, wildcardGuard: wildcards.safetyGuard)
     }
 
     /// "Where does this site go?" for a name, a link or an address. Nil when the input holds

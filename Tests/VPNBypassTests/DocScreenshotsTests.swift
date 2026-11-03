@@ -1440,6 +1440,78 @@ final class DocScreenshotsTests: XCTestCase {
     }
     // END STATUS LOGS SHOTS
 
+    // MARK: - Live follow-ups after 6.0.10, drawn for the pull request
+
+    /// `vpnb why` on the Status page for a tailnet name under `*.ts.net`, which Tailscale's
+    /// MagicDNS answers and which leaves through Tailscale's tunnel (utun4) while the VPN is on
+    /// utun5. Before: judged by the wildcard's way, "wrong way". After: answered by its own
+    /// resolver, not routed by design, and OK.
+    func testStatusPageSiteCheckTailnetName() throws {
+        seedBypass()
+        rm.vpnInterface = "utun5"
+        let host = "host.example-tailnet.ts.net"
+        let owner = WildcardDelegation(domain: "example-tailnet.ts.net", servers: ["100.100.100.100"])
+        var snapshot = SiteRoute.Snapshot(mode: .bypass, custom: false, list: [DomainEntry(domain: "*.ts.net")],
+                                          services: [], rules: [], routes: [], defaultRouteId: nil, activeRoutes: [],
+                                          localGateway: "192.168.1.1", vpnInterface: "utun5")
+        let probe = PathCheck.Probe(address: "100.64.0.10", routeInterface: "utun4", sourceAddress: "100.64.0.2",
+                                    sourceInterface: "utun4", answer: .connected, latencyMs: 31)
+        let control = PathCheck.Probe(address: "192.0.2.1", routeInterface: "utun5", answer: .notTried)
+        func answer(_ found: SiteRoute.Found) -> SiteRouteAnswer {
+            SiteRoute.answer(host: host, mode: .bypass, addresses: [probe.address], found: found, probes: [probe],
+                             control: (control, .passed), vpnConnected: true)
+        }
+        // Before: the forwarder's delegation was not asked, so the name expected the physical way.
+        let before = answer(SiteRoute.Found(match: .wildcard, entry: "*.ts.net", expected: .physical))
+        snapshot.wildcardSpecs = [WildcardSpec(suffix: "ts.net", gateway: "192.168.1.1", upstream: ["192.168.1.53"],
+                                               interface: "en0", delegated: [owner])]
+        let after = answer(SiteRoute.match(host: host, addresses: [probe.address], in: snapshot))
+        XCTAssertEqual(before.verdict, .wrongWay)
+        XCTAssertEqual(after.verdict, .ok)
+        defer { StatusTab.siteCheckForScreenshots = nil }
+        StatusTab.siteCheckForScreenshots = (host, before)
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-site-tailnet-before.png"), Self.settingsSize)
+        StatusTab.siteCheckForScreenshots = (host, after)
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-site-tailnet-after.png"), Self.settingsSize)
+    }
+
+    /// Logs with three tunnels up. Before: the status pass logged the tunnel line every 30
+    /// seconds and it filled the page. After: once, then the lines that matter.
+    func testLogsMultiTunnelLineOnce() throws {
+        let multi = "Multiple tunnels up (utun4, utun5, utun10) — using utun5 (carries the traffic)"
+        var notice = MultiTunnelNotice()
+        var after: [(TimeInterval, RouteManager.LogEntry.LogLevel, String)] = [
+            (20, .success, "Routes applied: 62"),
+            (64, .info, "DNS refresh complete: 2 added, 1 removed"),
+        ]
+        var before = after
+        for pass in 0..<12 {
+            let ago = TimeInterval(30 * pass + 5)
+            before.append((ago, .info, multi))
+            if let line = notice.line(tunnels: ["utun4", "utun5", "utun10"], selected: "utun5", carriesTraffic: true) {
+                after.append((ago, .info, line))
+            }
+        }
+        before.append((600, .info, "Detected VPN: WireGuard on utun5"))
+        after.append((600, .info, "Detected VPN: WireGuard on utun5"))
+        try renderLogs(search: nil, lines: before.sorted { $0.0 < $1.0 }, to: "logs-multi-tunnel-before.png")
+        try renderLogs(search: nil, lines: after.sorted { $0.0 < $1.0 }, to: "logs-multi-tunnel-after.png")
+    }
+
+    /// Logs across a helper update with DNS Lookups on. Before: the capture's start failed while
+    /// the helper restarted and nothing more was said. After: it starts on the new helper.
+    func testLogsDNSLookupsAcrossAHelperUpdate() throws {
+        let before: [(TimeInterval, RouteManager.LogEntry.LogLevel, String)] = [
+            (8, .success, "Routes applied: 62"),
+            (9, .success, "✅ Helper updated to v2.8.0"),
+            (14, .warning, "DNS Lookups could not start: The privileged helper did not answer."),
+            (40, .info, "🔐 Updating the helper to v2.8.0 with the administrator password: v2.7.0 cannot update itself (that needs v2.8.0); v2.7.0 keeps working until the password is entered"),
+        ]
+        let after = [(TimeInterval(8.5), RouteManager.LogEntry.LogLevel.info, "DNS Lookups running again")] + before
+        try renderLogs(search: nil, lines: before, to: "logs-dns-lookups-helper-update-before.png")
+        try renderLogs(search: nil, lines: after.sorted { $0.0 < $1.0 }, to: "logs-dns-lookups-helper-update-after.png")
+    }
+
     // MARK: - Dropdown rows and the add field (step 11), drawn for the pull request
 
     // BEGIN ROWS SHOTS

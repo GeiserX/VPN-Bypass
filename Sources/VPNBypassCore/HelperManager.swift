@@ -79,6 +79,33 @@ final class HelperManager: ObservableObject {
     /// is verified ready. Route application MUST NOT start until this returns true.
     func ensureHelperReady() async -> Bool {
         if helperState.isReady { return true }
+        // A helper that served this run and is ready again (the Install button after a failed
+        // update) is a new process: put back what it lost, as after an update.
+        let recovering = hasBeenReady
+        let ready = await checkAndInstallHelper()
+        if ready {
+            hasBeenReady = true
+            if recovering { await restoreAfterHelperRestart(reapplyRoutes: !RouteManager.shared.activeRoutes.isEmpty) }
+        }
+        return ready
+    }
+
+    /// True once a helper was ready in this run.
+    private var hasBeenReady = false
+
+    /// What a new helper process does not have that the old one had, put back once it answers:
+    /// the wildcard list (it starts with no resolver files and no forwarder) and the DNS Lookups
+    /// capture when the page is on. Kernel routes, VPN Only blocks and `/etc/hosts` outlive the
+    /// helper; the routes are applied again only to put back a batch the old helper dropped as
+    /// it stopped. A helper that crashed and was started again by launchd is noticed by the
+    /// wildcard and capture drains instead (`running` false), which do the same for their part.
+    func restoreAfterHelperRestart(reapplyRoutes: Bool) async {
+        RouteManager.shared.wildcards.helperRestarted()
+        await DNSLookupsMonitor.shared.helperRestarted()
+        if reapplyRoutes { await reapplyRoutesAfterUpdate() }
+    }
+
+    private func checkAndInstallHelper() async -> Bool {
 
         let helperPath = "/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)"
         let plistPath = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
@@ -415,9 +442,9 @@ final class HelperManager: ObservableObject {
             pendingUpdate = nil
             installationError = nil
             RouteManager.shared.log(.success, "✅ Helper updated to v\(answered)")
-            // The new helper started without the old one's wildcard list or resolver files.
-            RouteManager.shared.wildcards.helperRestarted()
-            if wasRouting { await reapplyRoutesAfterUpdate() }
+            // The new helper started without the old one's wildcard list, resolver files or
+            // DNS Lookups capture.
+            await restoreAfterHelperRestart(reapplyRoutes: wasRouting)
         case (_, .version(let answered)):
             // Still the older helper (cancel, timeout, or an install that changed nothing).
             helperVersion = answered
