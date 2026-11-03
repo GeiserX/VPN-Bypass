@@ -158,8 +158,27 @@ final class DNSLookupsMonitor: ObservableObject {
     /// Settable from tests, which seed the doc screenshot with it.
     @Published var learning: SiteLearning?
 
+    /// The helper calls the capture makes. Replaced in tests.
+    struct HelperCalls {
+        var isReady: @MainActor () -> Bool
+        var start: @MainActor () async -> String?
+        var drain: @MainActor () async -> [String]?
+        var stop: @MainActor () async -> Void
+
+        static let live = HelperCalls(
+            isReady: { HelperManager.shared.isHelperInstalled },
+            start: { await HelperManager.shared.startDNSCapture() },
+            drain: { await HelperManager.shared.drainDNSQueries() },
+            stop: { await HelperManager.shared.stopDNSCapture() })
+    }
+
+    var helper = HelperCalls.live
+
     private var timer: Timer?
     private var tickInFlight = false
+    /// Set when the capture has to start again on a helper that is not the one it ran on (an
+    /// update, a reinstall) or after a start that failed, so the start that works says so.
+    private var resuming = false
     /// Bumped by Clear and by turning off, so a drain already on its way is not counted
     /// into the fresh list.
     private var generation = 0
@@ -197,7 +216,7 @@ final class DNSLookupsMonitor: ObservableObject {
         tally = DNSLookupTally()
         since = Date()
         // An open learning window still gets the names this drain takes out.
-        if isCapturing { Task { learnFrom(await HelperManager.shared.drainDNSQueries()) } }
+        if isCapturing { Task { learnFrom(await helper.drain()) } }
     }
 
     /// Opens a learning window of `SiteLearning.duration`. When the page is not watching, the
@@ -239,6 +258,18 @@ final class DNSLookupsMonitor: ObservableObject {
         learnTask = nil
         learning = nil
         followConfig()
+    }
+
+    /// A new helper process answers (an update or a reinstall landed): it runs no capture, so
+    /// start it again now when the page is on or a learning window is open, rather than wait
+    /// for a drain to notice. With the page off this does nothing, and the setting is never
+    /// changed here.
+    func helperRestarted() async {
+        guard wanted else { return }
+        isCapturing = false
+        resuming = true
+        if timer == nil { followConfig() }
+        await drainNow()
     }
 
     /// One drain now, after the one already on its way. The wait outlasts the helper call's
@@ -292,7 +323,10 @@ final class DNSLookupsMonitor: ObservableObject {
         problem = nil
         tally = DNSLookupTally()
         since = nil
-        Task { await HelperManager.shared.stopDNSCapture() }
+        resuming = false
+        // The calls in use now: a test that swaps them back must not reach the real helper.
+        let calls = helper
+        Task { await calls.stop() }
     }
 
     /// Drains the helper; when the capture is not running (first tick, a helper restart, a lease
@@ -306,7 +340,7 @@ final class DNSLookupsMonitor: ObservableObject {
         Task { await readSearchDomainsIfDue() }
 
         let drainGeneration = generation
-        if isCapturing, let names = await HelperManager.shared.drainDNSQueries() {
+        if isCapturing, let names = await helper.drain() {
             guard wanted else { return }
             // Clear and Stop Watching start the count again; the learning window keeps the
             // names, since the helper no longer has them.
@@ -316,15 +350,22 @@ final class DNSLookupsMonitor: ObservableObject {
         }
         // At launch this runs before the helper check finishes: say so on the page, without a
         // warning in the log each launch, and try again next tick.
-        guard HelperManager.shared.isHelperInstalled else {
+        guard helper.isReady() else {
             problem = String(localized: "The privileged helper is not running.")
             isCapturing = false
             return
         }
-        let failure = await HelperManager.shared.startDNSCapture()
+        let failure = await helper.start()
         guard wanted else { return }
         if failure != problem, let failure {
             RouteManager.shared.log(.warning, "DNS Lookups could not start: \(failure)")
+        }
+        // A helper that did not answer (it was restarting) is asked again at the next tick and
+        // when the new one answers (`helperRestarted`); the start that works is logged.
+        if failure != nil { resuming = true }
+        if failure == nil, resuming {
+            resuming = false
+            RouteManager.shared.log(.info, "DNS Lookups running again")
         }
         problem = failure
         isCapturing = failure == nil

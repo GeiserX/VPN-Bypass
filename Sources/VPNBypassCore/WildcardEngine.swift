@@ -52,6 +52,10 @@ final class WildcardEngine {
     }
 
     var isServing: Bool { !(servedSpecs ?? []).isEmpty }
+    /// The wildcards the helper's forwarder serves now, and the guard it was sent, so `vpnb why`
+    /// can ask of a name what the forwarder asks.
+    var served: [WildcardSpec] { servedSpecs ?? [] }
+    var safetyGuard: WildcardSafetyGuard { sentGuard ?? WildcardSafetyGuard() }
 
     // MARK: - Triggers
 

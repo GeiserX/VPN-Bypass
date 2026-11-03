@@ -96,6 +96,9 @@ public enum VPNBCLI {
         if let expected = why.expected { facts += "  expected: \(expected)" }
         facts += "  verdict: \(why.verdict.rawValue)"
         if why.splitTunnel == true { facts += "  vpn: split tunnel" }
+        if let notRouted = why.notRouted {
+            facts += "  not routed: \(notRouted.rawValue)" + (why.resolverDomain.map { " (\($0))" } ?? "")
+        }
         out.append(facts)
         return out
     }

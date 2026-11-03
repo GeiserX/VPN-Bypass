@@ -100,6 +100,8 @@ final class RouteManager: ObservableObject {
     /// The helper has answered the owner sweep at least once, so a tunnel missing from the
     /// map really has no owner it can see. An older helper without the call never answers.
     private(set) var tunnelOwnersAnswered = false
+    /// The last "Multiple tunnels up" line, so the 30-second status pass logs it on a change only.
+    var multiTunnelNotice = MultiTunnelNotice()
 
     /// True once shutdown has begun. Checked by the operation gate (so no new route
     /// operation can start) and by the tracked batch-add wrapper (so an operation
@@ -1701,14 +1703,12 @@ final class RouteManager: ObservableObject {
             }
         }
 
+        let several = candidates.filter({ $0.isUp && $0.isCorporateAddress && !$0.isTailscale }).count > 1
+        if let line = multiTunnelNotice.line(tunnels: several ? candidates.map(\.interface) : [], selected: selected,
+                                             carriesTraffic: defaultRouteInterface == selected) {
+            log(.info, line)
+        }
         if let selected {
-            if candidates.filter({ $0.isUp && $0.isCorporateAddress && !$0.isTailscale }).count > 1 {
-                let all = candidates.map(\.interface).joined(separator: ", ")
-                await MainActor.run {
-                    log(.info, "Multiple tunnels up (\(all)) — using \(selected)" +
-                        (defaultRouteInterface == selected ? " (carries the traffic)" : ""))
-                }
-            }
             // The owner may be missing only because the tunnel came up after this pass's sweep.
             if tunnelOwnersAnswered, tunnelOwnersByInterface[selected] == nil, selected.hasPrefix("utun") {
                 await refreshTunnelOwners()
@@ -7414,5 +7414,26 @@ private final class ResumeOnce<T>: @unchecked Sendable {
         self.continuation = nil
         lock.unlock()
         continuation.resume(returning: value)
+    }
+}
+
+/// The "Multiple tunnels up" line. The status pass runs every 30 seconds, and logging the line
+/// each time filled the log window with it; it is logged when the tunnels, the chosen one or
+/// whether it carries the traffic change, and again after a pass with fewer than two.
+struct MultiTunnelNotice: Equatable {
+    private var last: [String]?
+
+    /// The line to log for this pass, or nil when it says what the last one said. `tunnels`
+    /// is empty when fewer than two are up.
+    mutating func line(tunnels: [String], selected: String?, carriesTraffic: Bool) -> String? {
+        guard let selected, !tunnels.isEmpty else {
+            last = nil
+            return nil
+        }
+        let key = tunnels.sorted() + ["→", selected, carriesTraffic ? "carries" : "-"]
+        guard key != last else { return nil }
+        last = key
+        return "Multiple tunnels up (\(tunnels.joined(separator: ", "))) — using \(selected)"
+            + (carriesTraffic ? " (carries the traffic)" : "")
     }
 }
