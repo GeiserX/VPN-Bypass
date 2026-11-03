@@ -310,10 +310,14 @@ enum HelperSelfUpdate {
     }
 
     /// Whether dotted version `candidate` is strictly newer than `running` (numeric parts,
-    /// missing parts count as 0, so 2.8 equals 2.8.0).
+    /// missing parts count as 0, so 2.8 equals 2.8.0). A part that is not a number (`0-rc`,
+    /// an empty part) makes it not newer: the helper's versions are plain numbers.
     static func isNewer(_ candidate: String, than running: String) -> Bool {
-        let a = candidate.split(separator: ".").map { Int($0) ?? 0 }
-        let b = running.split(separator: ".").map { Int($0) ?? 0 }
+        func parts(_ v: String) -> [Int]? {
+            let p = v.split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
+            return p.contains(where: { $0 == nil || $0! < 0 }) ? nil : p.compactMap { $0 }
+        }
+        guard let a = parts(candidate), let b = parts(running) else { return false }
         for i in 0..<max(a.count, b.count) {
             let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
             if x != y { return x > y }

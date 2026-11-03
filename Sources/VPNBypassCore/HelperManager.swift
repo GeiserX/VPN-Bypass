@@ -231,7 +231,10 @@ final class HelperManager: ObservableObject {
             RouteManager.shared.log(.info, "🔄 Helper v\(installed) installs v\(expected) itself, no password needed")
         case .adminPassword:
             pendingUpdate = .waiting(installed: installed, expected: expected)
-            RouteManager.shared.log(.info, "🔐 Updating the helper to v\(expected); v\(installed) keeps working until the administrator password is entered")
+            let why = Self.helper(installed, supports: MethodSince.selfUpdate)
+                ? "the installed launchd plist differs from this app's or cannot be read"
+                : "v\(installed) cannot update itself (that needs v\(MethodSince.selfUpdate))"
+            RouteManager.shared.log(.info, "🔐 Updating the helper to v\(expected) with the administrator password: \(why); v\(installed) keeps working until the password is entered")
         }
         updateTask = Task { [weak self] in
             await self?.runPendingUpdate(installed: installed, expected: expected, path: path)
@@ -268,43 +271,46 @@ final class HelperManager: ObservableObject {
         return (FileManager.default.contents(atPath: HelperSelfUpdate.installedPlistPath), bundled)
     }
 
-    /// Answers the self-update call instead of XPC, for tests: the path asked for, the error.
-    var selfUpdateOverrideForTests: ((String) async -> String?)?
+    /// What the running helper said to the self-update call.
+    enum SelfUpdateReply: Equatable {
+        /// The new helper is in place and the old one is about to exit.
+        case installing
+        /// The helper refused and changed nothing.
+        case refused(String)
+        /// No answer in time (or the connection broke): the helper may still be installing.
+        case noAnswer(String)
+    }
 
-    /// Asks the running helper to install the helper from this app's bundle. Nil when it did and
-    /// is restarting, otherwise why not.
-    private func requestSelfUpdate() async -> String? {
+    /// Answers the self-update call instead of XPC, for tests: the path asked for, the reply.
+    var selfUpdateOverrideForTests: ((String) async -> SelfUpdateReply)?
+
+    /// Asks the running helper to install the helper from this app's bundle.
+    private func requestSelfUpdate() async -> SelfUpdateReply {
         let bundle = Bundle.main.bundlePath
         let source = "\(bundle)/Contents/MacOS/\(kHelperToolMachServiceName)"
         if let override = selfUpdateOverrideForTests { return await override(source) }
-        guard bundle.hasSuffix(".app") else { return "not running from an app bundle" }
+        guard bundle.hasSuffix(".app") else { return .refused("not running from an app bundle") }
         let connection = getOrCreateConnection()
-        let noAnswer = "the helper did not answer"
-        return await withXPCDeadline(seconds: xpcTimeout + 5, fallback: String?.some(noAnswer)) { once in
+        let noAnswer = SelfUpdateReply.noAnswer("the helper did not answer")
+        return await withXPCDeadline(seconds: xpcTimeout + 5, fallback: noAnswer) { once in
             guard let helper = connection.remoteObjectProxyWithErrorHandler({ error in
-                once.complete("XPC error: \(error.localizedDescription)")
+                once.complete(.noAnswer("XPC error: \(error.localizedDescription)"))
             }) as? HelperProtocol else {
                 once.complete(noAnswer)
                 return
             }
             helper.updateHelper(fromPath: source) { ok, error in
-                once.complete(ok ? nil : (error ?? "the helper refused"))
+                once.complete(ok ? .installing : .refused(error ?? "the helper refused"))
             }
         }
     }
 
-    /// The self-update, start to end. True when the new helper answers with `expected`; false
-    /// leaves the password installer to try, with the reason logged once.
-    private func installWithoutPassword(installed: String, expected: String, wasRouting: Bool) async -> Bool {
-        if let refusal = await requestSelfUpdate() {
-            RouteManager.shared.log(.warning, "Helper v\(installed) did not update itself (\(refusal)); asking for the administrator password instead")
-            return false
-        }
-        // The old helper exits once its reply is out and launchd starts the new file. Until then
-        // the old one still answers with its own version, and right after it the job is briefly
-        // unreachable: wait for the new version rather than read either as a failure.
+    /// Probes until the self-updated helper answers. The old helper still answers with its own
+    /// version until it exits, and right after it the job is briefly unreachable: neither is a
+    /// failure until `selfUpdateRestartDelays` run out.
+    private func waitForRestartedHelper(expected: String) async -> VersionProbe {
         dropXPCConnection()
-        let probe = await Self.awaitVersion(
+        return await Self.awaitVersion(
             expected,
             delays: selfUpdateRestartDelays,
             probe: { [weak self] in
@@ -313,6 +319,29 @@ final class HelperManager: ObservableObject {
             },
             beforeRetry: { [weak self] in self?.dropXPCConnection() }
         )
+    }
+
+    /// The self-update, start to end. True when the new helper answers with `expected`; false
+    /// leaves the password installer to try, with the reason logged once.
+    private func installWithoutPassword(installed: String, expected: String, wasRouting: Bool) async -> Bool {
+        switch await requestSelfUpdate() {
+        case .refused(let why):
+            RouteManager.shared.log(.warning, "Helper v\(installed) did not update itself (\(why)); asking for the administrator password instead")
+            return false
+        case .noAnswer(let why):
+            // The helper may have installed the update and be restarting: look before prompting.
+            let probe = await waitForRestartedHelper(expected: expected)
+            guard case .version(let answered) = probe, answered == expected else {
+                RouteManager.shared.log(.warning, "Helper v\(installed) did not update itself (\(why)); asking for the administrator password instead")
+                return false
+            }
+            await settleUpdate(outcome: .installed, probe: probe, expected: expected, wasRouting: wasRouting)
+            return true
+        case .installing:
+            break
+        }
+        // The old helper exits once its reply is out and launchd starts the new file.
+        let probe = await waitForRestartedHelper(expected: expected)
         guard case .version(let answered) = probe, answered == expected else {
             RouteManager.shared.log(.warning, "The helper updated itself but answers \(probe) instead of v\(expected); asking for the administrator password instead")
             return false

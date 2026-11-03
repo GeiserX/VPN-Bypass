@@ -1334,7 +1334,11 @@ final class DocScreenshotsTests: XCTestCase {
         let savedInstall = HelperManager.adminInstall
         let savedPlists = helper.launchdPlists
         let savedLogs = rm.recentLogs
+        let savedVersion = helper.helperVersion, savedState = helper.helperState, savedPending = helper.pendingUpdate
         defer {
+            helper.helperVersion = savedVersion
+            helper.helperState = savedState
+            helper.pendingUpdate = savedPending
             HelperManager.adminInstall = savedInstall
             helper.launchdPlists = savedPlists
             helper.versionProbeOverrideForTests = nil
@@ -1351,7 +1355,7 @@ final class DocScreenshotsTests: XCTestCase {
             let flag = Flag()
             helper.versionProbeOverrideForTests = { .version(flag.done ? expected : installed) }
             HelperManager.adminInstall = { flag.done = true; return .installed }
-            helper.selfUpdateOverrideForTests = { _ in flag.done = true; return nil }
+            helper.selfUpdateOverrideForTests = { _ in flag.done = true; return .installing }
             rm.recentLogs = []
             _ = helper.adoptOlderHelperAndUpdate(installed: installed, expected: expected)
             await helper.updateTask?.value

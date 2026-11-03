@@ -59,14 +59,19 @@ final class HelperSelfUpdateInstallTests: XCTestCase {
 
     /// An Apple binary that carries a version in its signed Info.plist, present on every macOS
     /// we support. Stands in for a signed helper in the tests that need one.
+    /// Skips only when none of the binaries exists; one that exists but does not verify is a
+    /// failure, so a broken `verifiedVersion` cannot hide behind a skip.
     private func appleBinaryWithVersion() throws -> (path: String, version: String) {
-        for path in ["/usr/libexec/airportd", "/usr/libexec/appleaccountd", "/usr/libexec/asktod"]
-        where FileManager.default.fileExists(atPath: path) {
+        let present = ["/usr/libexec/airportd", "/usr/libexec/appleaccountd", "/usr/libexec/asktod"]
+            .filter { FileManager.default.fileExists(atPath: $0) }
+        guard !present.isEmpty else { throw XCTSkip("no Apple binary found on this machine") }
+        for path in present {
             if case .success(let version) = HelperSelfUpdate.verifiedVersion(at: path, requirement: "anchor apple") {
                 return (path, version)
             }
         }
-        throw XCTSkip("no Apple binary with a versioned Info.plist found")
+        XCTFail("no versioned Apple binary verified among \(present)")
+        throw XCTSkip("fixture failed")
     }
 
     func testTheRequirementNamesTheHelperAndOurTeam() {
@@ -81,6 +86,9 @@ final class HelperSelfUpdateInstallTests: XCTestCase {
         XCTAssertFalse(HelperSelfUpdate.isNewer("2.8.0", than: "2.8.0"), "the same version is not an update")
         XCTAssertFalse(HelperSelfUpdate.isNewer("2.8", than: "2.8.0"))
         XCTAssertFalse(HelperSelfUpdate.isNewer("2.7.9", than: "2.8.0"), "never back to an older helper")
+        XCTAssertFalse(HelperSelfUpdate.isNewer("2.9.0-rc.1", than: "2.8.0"), "a part that is not a number is not newer")
+        XCTAssertFalse(HelperSelfUpdate.isNewer("2..9", than: "2.8.0"))
+        XCTAssertFalse(HelperSelfUpdate.isNewer("2.9.0", than: "2.8.x"))
     }
 
     func testAnUnsignedFileIsRefused() throws {
@@ -233,7 +241,7 @@ final class HelperSelfUpdateFlowTests: XCTestCase {
         let installs = helperAnswers("2.8.0", then: "2.9.0")
         let prompts = Counter()
         HelperManager.adminInstall = { prompts.increment(); return .installed }
-        hm.selfUpdateOverrideForTests = { [weak self] path in self?.selfUpdateCalls.append(path); installs.increment(); return nil }
+        hm.selfUpdateOverrideForTests = { [weak self] path in self?.selfUpdateCalls.append(path); installs.increment(); return .installing }
 
         XCTAssertTrue(hm.adoptOlderHelperAndUpdate(installed: "2.8.0", expected: "2.9.0"))
         XCTAssertNil(hm.pendingUpdate, "no 'waiting for your password' while the helper updates itself")
@@ -266,7 +274,7 @@ final class HelperSelfUpdateFlowTests: XCTestCase {
         }
         let prompts = Counter()
         HelperManager.adminInstall = { prompts.increment(); return .installed }
-        hm.selfUpdateOverrideForTests = { _ in updated.increment(); return nil }
+        hm.selfUpdateOverrideForTests = { _ in updated.increment(); return .installing }
 
         _ = hm.adoptOlderHelperAndUpdate(installed: "2.8.0", expected: "2.9.0")
         await hm.updateTask?.value
@@ -277,13 +285,50 @@ final class HelperSelfUpdateFlowTests: XCTestCase {
         XCTAssertEqual(probesAfter.count, 3)
     }
 
+    /// The call timed out while the helper was still installing: the app sees the new version
+    /// come up and asks for nothing.
+    func testAnUnansweredCallThatStillInstalledDoesNotPrompt() async throws {
+        let asked = Counter(), probesAfter = Counter()
+        hm.versionProbeOverrideForTests = {
+            guard asked.count > 0 else { return .version("2.8.0") }
+            probesAfter.increment()
+            return probesAfter.count < 3 ? .version("2.8.0") : .version("2.9.0")
+        }
+        let prompts = Counter()
+        HelperManager.adminInstall = { prompts.increment(); return .installed }
+        hm.selfUpdateOverrideForTests = { _ in asked.increment(); return .noAnswer("the helper did not answer") }
+
+        _ = hm.adoptOlderHelperAndUpdate(installed: "2.8.0", expected: "2.9.0")
+        await hm.updateTask?.value
+
+        XCTAssertEqual(prompts.count, 0, "the update went through; no password prompt")
+        XCTAssertEqual(hm.helperVersion, "2.9.0")
+        XCTAssertTrue(hm.helperState.isReady)
+    }
+
+    /// A plist mismatch or an old helper logs why the password is needed.
+    func testThePasswordPathLogsWhy() async throws {
+        hm.versionProbeOverrideForTests = { .version("2.7.0") }
+        HelperManager.adminInstall = { .cancelled }
+        _ = hm.adoptOlderHelperAndUpdate(installed: "2.7.0", expected: "2.8.0")
+        await hm.updateTask?.value
+        XCTAssertEqual(logLines(containing: "v2.7.0 cannot update itself").count, 1)
+
+        hm.pendingUpdate = nil
+        hm.versionProbeOverrideForTests = { .version("2.8.0") }
+        hm.launchdPlists = { (Data("<plist>old</plist>".utf8), Data("<plist>new</plist>".utf8)) }
+        _ = hm.adoptOlderHelperAndUpdate(installed: "2.8.0", expected: "2.9.0")
+        await hm.updateTask?.value
+        XCTAssertEqual(logLines(containing: "launchd plist differs").count, 1)
+    }
+
     /// The helper refused (a signature or version check, an XPC error): the password installer
     /// runs once, as before this change, and the reason is logged once.
     func testARefusedSelfUpdateFallsBackToThePasswordOnce() async throws {
         let installs = helperAnswers("2.8.0", then: "2.9.0")
         let prompts = Counter()
         HelperManager.adminInstall = { prompts.increment(); installs.increment(); return .installed }
-        hm.selfUpdateOverrideForTests = { _ in "the new helper is not signed by our team as the helper (OSStatus -67050)" }
+        hm.selfUpdateOverrideForTests = { _ in .refused("the new helper is not signed by our team as the helper (OSStatus -67050)") }
 
         _ = hm.adoptOlderHelperAndUpdate(installed: "2.8.0", expected: "2.9.0")
         await hm.updateTask?.value
@@ -300,7 +345,7 @@ final class HelperSelfUpdateFlowTests: XCTestCase {
         let prompts = Counter()
         hm.versionProbeOverrideForTests = { .version(prompts.count > 0 ? "2.9.0" : "2.8.0") }
         HelperManager.adminInstall = { prompts.increment(); return .installed }
-        hm.selfUpdateOverrideForTests = { _ in nil }
+        hm.selfUpdateOverrideForTests = { _ in .installing }
 
         _ = hm.adoptOlderHelperAndUpdate(installed: "2.8.0", expected: "2.9.0")
         await hm.updateTask?.value
@@ -315,7 +360,7 @@ final class HelperSelfUpdateFlowTests: XCTestCase {
     func testACancelledFallbackKeepsTheOlderHelper() async throws {
         hm.versionProbeOverrideForTests = { .version("2.8.0") }
         HelperManager.adminInstall = { .cancelled }
-        hm.selfUpdateOverrideForTests = { _ in "the helper did not answer" }
+        hm.selfUpdateOverrideForTests = { _ in .noAnswer("the helper did not answer") }
 
         _ = hm.adoptOlderHelperAndUpdate(installed: "2.8.0", expected: "2.9.0")
         await hm.updateTask?.value
@@ -328,7 +373,7 @@ final class HelperSelfUpdateFlowTests: XCTestCase {
         let installs = helperAnswers("2.7.0", then: "2.8.0")
         let prompts = Counter()
         HelperManager.adminInstall = { prompts.increment(); installs.increment(); return .installed }
-        hm.selfUpdateOverrideForTests = { [weak self] path in self?.selfUpdateCalls.append(path); return nil }
+        hm.selfUpdateOverrideForTests = { [weak self] path in self?.selfUpdateCalls.append(path); return .installing }
 
         _ = hm.adoptOlderHelperAndUpdate(installed: "2.7.0", expected: "2.8.0")
         XCTAssertEqual(hm.pendingUpdate, .waiting(installed: "2.7.0", expected: "2.8.0"))
@@ -343,7 +388,7 @@ final class HelperSelfUpdateFlowTests: XCTestCase {
         let installs = helperAnswers("2.8.0", then: "2.9.0")
         let prompts = Counter()
         HelperManager.adminInstall = { prompts.increment(); installs.increment(); return .installed }
-        hm.selfUpdateOverrideForTests = { [weak self] path in self?.selfUpdateCalls.append(path); return nil }
+        hm.selfUpdateOverrideForTests = { [weak self] path in self?.selfUpdateCalls.append(path); return .installing }
         hm.launchdPlists = { (Data("<plist>old</plist>".utf8), Data("<plist>new</plist>".utf8)) }
 
         _ = hm.adoptOlderHelperAndUpdate(installed: "2.8.0", expected: "2.9.0")
