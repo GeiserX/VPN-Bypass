@@ -228,7 +228,7 @@ final class HelperManager: ObservableObject {
         switch path {
         case .selfUpdate:
             // No prompt, so nothing says "waiting for your password" unless this falls back.
-            RouteManager.shared.log(.info, "🔄 Updating the helper to v\(expected): v\(installed) installs it from the app bundle, no password needed")
+            RouteManager.shared.log(.info, "🔄 Helper v\(installed) installs v\(expected) itself, no password needed")
         case .adminPassword:
             pendingUpdate = .waiting(installed: installed, expected: expected)
             RouteManager.shared.log(.info, "🔐 Updating the helper to v\(expected); v\(installed) keeps working until the administrator password is entered")
