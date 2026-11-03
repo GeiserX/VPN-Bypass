@@ -152,11 +152,13 @@ enum StatusPage {
 
     // MARK: Helper
 
-    static func helperLine(_ state: HelperState, version: String?, bundle: Bundle = .main) -> Line {
+    static func helperLine(_ state: HelperState, version: String?, pending: HelperManager.PendingUpdate? = nil,
+                           bundle: Bundle = .main) -> Line {
         switch state {
         case .ready:
             guard let version else { return Line(text: String(localized: "Ready", bundle: bundle), tone: .ok) }
-            return Line(text: String(localized: "Ready, version \(version)", bundle: bundle), tone: .ok)
+            // The older helper routes while its update waits: working, with something to do.
+            return Line(text: String(localized: "Ready, version \(version)", bundle: bundle), tone: pending == nil ? .ok : .warn)
         case .checking, .installing, .outdated:
             return Line(text: state.statusText, tone: .warn)
         case .missing, .failed:
@@ -165,9 +167,20 @@ enum StatusPage {
     }
 
     /// The line under the helper row when it is not ready; nil when it is.
-    static func helperHint(_ state: HelperState, bundle: Bundle = .main) -> String? {
+    static func helperHint(_ state: HelperState, pending: HelperManager.PendingUpdate? = nil, bundle: Bundle = .main) -> String? {
         switch state {
-        case .ready: return nil
+        case .ready:
+            switch pending {
+            case nil: return nil
+            case .waiting(_, let expected)?:
+                return String(localized: "Helper update to version \(expected) waiting for your password. The installed helper keeps routing until then.", bundle: bundle)
+            case .notInstalled(_, let expected, .cancelled)?:
+                return String(localized: "Helper update to version \(expected) was cancelled. The installed helper keeps routing; click Update to try again.", bundle: bundle)
+            case .notInstalled(_, let expected, .timedOut)?:
+                return String(localized: "Helper update to version \(expected) timed out waiting for your password. The installed helper keeps routing; click Update to try again.", bundle: bundle)
+            case .notInstalled(_, let expected, _)?:
+                return String(localized: "Helper update to version \(expected) failed. The installed helper keeps routing; click Update to try again.", bundle: bundle)
+            }
         case .checking: return String(localized: "Verifying helper version...", bundle: bundle)
         case .installing: return String(localized: "Admin authorization required...", bundle: bundle)
         case .outdated: return String(localized: "Helper needs updating for this version", bundle: bundle)
@@ -177,8 +190,14 @@ enum StatusPage {
     }
 
     /// The helper row's button, or nil when there is nothing to do.
-    static func helperAction(_ state: HelperState, isInstalling: Bool, bundle: Bundle = .main) -> String? {
+    static func helperAction(_ state: HelperState, isInstalling: Bool, pending: HelperManager.PendingUpdate? = nil,
+                             bundle: Bundle = .main) -> String? {
         if isInstalling { return String(localized: "Installing...", bundle: bundle) }
+        switch pending {
+        case .waiting?: return nil   // the prompt is open; a second one would only stack
+        case .notInstalled?: return String(localized: "Update", bundle: bundle)
+        case nil: break
+        }
         switch state {
         case .missing: return String(localized: "Install", bundle: bundle)
         case .outdated: return String(localized: "Update", bundle: bundle)
@@ -759,17 +778,18 @@ struct StatusTab: View {
 
     private var helperSection: some View {
         let state = helperManager.helperState
-        let line = StatusPage.helperLine(state, version: helperManager.helperVersion)
+        let pending = helperManager.pendingUpdate
+        let line = StatusPage.helperLine(state, version: helperManager.helperVersion, pending: pending)
         // A helper that is not ready is why nothing is routed: its section comes first.
         return GroupSection(String(localized: "Helper")) {
             StatusLineRow(label: String(localized: "Privileged helper"), line: line) {
-                if let action = StatusPage.helperAction(state, isInstalling: helperManager.isInstalling) {
+                if let action = StatusPage.helperAction(state, isInstalling: helperManager.isInstalling, pending: pending) {
                     Button(action) { installHelper() }
                         .disabled(helperManager.isInstalling)
                 }
             }
             .help(String(localized: "The helper runs as root and handles route/hosts changes without prompting."))
-            if let hint = StatusPage.helperHint(state) {
+            if let hint = StatusPage.helperHint(state, pending: pending) {
                 StatusNote(text: hint)
             }
             if let error = helperManager.installationError {
@@ -991,6 +1011,11 @@ struct StatusTab: View {
     }
 
     private func installHelper() {
+        if helperManager.pendingUpdate != nil && helperManager.helperState.isReady {
+            // The older helper already routes; only the update is asked for again.
+            helperManager.retryPendingUpdate()
+            return
+        }
         Task {
             let ready = await helperManager.ensureHelperReady()
             if ready && routeManager.isVPNConnected && routeManager.activeRoutes.isEmpty {

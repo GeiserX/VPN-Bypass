@@ -1314,6 +1314,28 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(try renderSettings(page: .status, to: "status-helper-down.png"), Self.settingsSize)
     }
 
+    /// A helper update waits for the administrator password; the older helper keeps routing.
+    func testStatusPageHelperUpdateWaiting() throws {
+        try renderPendingHelperUpdate(.waiting(installed: "2.6.0", expected: "2.7.0"), to: "status-helper-update-waiting.png")
+    }
+
+    /// The password prompt was cancelled: still the older helper, and Update asks again.
+    func testStatusPageHelperUpdateCancelled() throws {
+        try renderPendingHelperUpdate(.notInstalled(installed: "2.6.0", expected: "2.7.0", reason: .cancelled),
+                                      to: "status-helper-update-cancelled.png")
+    }
+
+    private func renderPendingHelperUpdate(_ pending: HelperManager.PendingUpdate, to name: String) throws {
+        seedBypass()
+        let helper = HelperManager.shared
+        let saved = (helper.helperVersion, helper.pendingUpdate)
+        defer { (helper.helperVersion, helper.pendingUpdate) = saved }
+        helper.helperState = .ready
+        helper.helperVersion = "2.6.0"
+        helper.pendingUpdate = pending
+        XCTAssertEqual(try renderSettings(page: .status, to: name), Self.settingsSize)
+    }
+
     func testLogsPage() throws {
         try renderLogs(search: nil, to: "logs.png")
     }

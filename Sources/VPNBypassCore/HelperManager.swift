@@ -162,30 +162,165 @@ final class HelperManager: ObservableObject {
             version = installed
         }
 
-        helperVersion = version
-
-        // Version mismatch — update
         RouteManager.shared.log(.info, "🔐 Helper version mismatch: installed=\(version), expected=\(expected)")
-        helperState = .outdated(installed: version, expected: expected)
+        return await useOrUpdateOlderHelper(installed: version, expected: expected)
+    }
 
-        RouteManager.shared.log(.info, "🔐 Auto-updating helper...")
-        let updated = await installHelper()
-        if !updated {
-            helperState = .failed(String(localized: "Helper update failed: \(installationError ?? String(localized: "unknown"))"))
-            return false
+    /// An older helper answered. Route through it while it updates when it has every call that
+    /// keeps VPN Only from leaking; otherwise wait for the update as before, off the main thread.
+    func useOrUpdateOlderHelper(installed: String, expected: String) async -> Bool {
+        guard Self.helper(installed, supports: MethodSince.adoptable) else {
+            helperVersion = installed
+            helperState = .outdated(installed: installed, expected: expected)
+            startPendingUpdate(installed: installed, expected: expected)
+            await updateTask?.value
+            return helperState.isReady
         }
+        return adoptOlderHelperAndUpdate(installed: installed, expected: expected)
+    }
 
-        // Verify the update succeeded
+    // MARK: - Update while the older helper keeps working
+
+    /// A helper update that has not landed yet. The older helper answered the version check,
+    /// so it routes, writes resolver files and runs the forwarder meanwhile.
+    enum PendingUpdate: Equatable {
+        /// The administrator password prompt is open (or about to be).
+        case waiting(installed: String, expected: String)
+        /// The prompt was cancelled, timed out or the install failed; the older helper still
+        /// answers. Tried again on the next launch or when the user clicks Update.
+        case notInstalled(installed: String, expected: String, reason: AdminInstallOutcome)
+
+        var expected: String {
+            switch self {
+            case .waiting(_, let expected), .notInstalled(_, let expected, _): return expected
+            }
+        }
+    }
+
+    @Published var pendingUpdate: PendingUpdate?
+
+    /// The running update (prompt, install, version check); nil when none runs.
+    private(set) var updateTask: Task<Void, Never>?
+
+    /// The older helper answered with `installed`: use it for everything it can do, and install
+    /// the new one in the background. The administrator password prompt can wait for hours (a
+    /// locked screen); routes, resolver files, the forwarder, the control socket and the menu
+    /// must not wait with it. Returns true: the helper is usable now.
+    func adoptOlderHelperAndUpdate(installed: String, expected: String) -> Bool {
+        helperVersion = installed
+        helperState = .ready
+        startPendingUpdate(installed: installed, expected: expected)
+        return true
+    }
+
+    /// Asks for the password again after a cancel, a timeout or a failure (the Update button).
+    /// Does nothing while a prompt is already open, so one click never opens two.
+    func retryPendingUpdate() {
+        guard updateTask == nil, case .notInstalled(let installed, let expected, _)? = pendingUpdate else { return }
+        startPendingUpdate(installed: installed, expected: expected)
+    }
+
+    private func startPendingUpdate(installed: String, expected: String) {
+        guard updateTask == nil else { return }
+        pendingUpdate = .waiting(installed: installed, expected: expected)
+        installationError = nil
+        RouteManager.shared.log(.info, "🔐 Updating the helper to v\(expected); v\(installed) keeps working until the administrator password is entered")
+        updateTask = Task { [weak self] in
+            await self?.runPendingUpdate(installed: installed, expected: expected)
+            self?.updateTask = nil
+        }
+    }
+
+    /// Puts back anything the helper switch interrupted (a route batch that reached the old
+    /// helper while the install stopped it). Replaced in tests.
+    var reapplyRoutesAfterUpdate: @MainActor () async -> Void = { await RouteManager.shared.reapplyAfterHelperUpdate() }
+
+    private func runPendingUpdate(installed: String, expected: String) async {
+        let wasRouting = helperState.isReady
+        NSApp?.activate(ignoringOtherApps: true)
+        let outcome = await runAdminInstall()
+        // The install script stops the old helper before it starts the new one, and a failed
+        // script may have stopped it too: ask whichever helper answers now.
         dropXPCConnection()
-        let newVersion = await getVersionWithTimeout()
-        if newVersion == expected {
-            helperVersion = newVersion
+        // A freshly started helper can be slow to answer: retry a timeout, as at launch.
+        let probe = await Self.probeVersionRetryingTimeouts(
+            probe: { [weak self] in
+                guard let self else { return .unreachable }
+                return await self.probeVersion()
+            },
+            beforeRetry: { [weak self] in self?.dropXPCConnection() },
+            log: { RouteManager.shared.log(.warning, $0) }
+        )
+        switch (outcome, probe) {
+        case (_, .version(let answered)) where answered == expected:
+            helperVersion = answered
             helperState = .ready
-            return true
+            pendingUpdate = nil
+            installationError = nil
+            RouteManager.shared.log(.success, "✅ Helper updated to v\(answered)")
+            // The new helper started without the old one's wildcard list or resolver files.
+            RouteManager.shared.wildcards.helperRestarted()
+            if wasRouting { await reapplyRoutesAfterUpdate() }
+        case (_, .version(let answered)):
+            // Still the older helper (cancel, timeout, or an install that changed nothing).
+            helperVersion = answered
+            let reason: AdminInstallOutcome = outcome == .installed
+                ? .failed("v\(answered) still answers after the install") : outcome
+            pendingUpdate = .notInstalled(installed: answered, expected: expected, reason: reason)
+            if case .failed(let message) = reason { installationError = message }
+            RouteManager.shared.log(.warning, "Helper update to v\(expected) not installed (\(reason.logText)); still using v\(answered). Click Update in Settings → Status to try again.")
+        case (_, .unreachable), (_, .timedOut):
+            // The script stopped the old helper and the new one did not start: nothing routes.
+            pendingUpdate = nil
+            let detail = outcome.localizedText
+            installationError = detail
+            helperState = .failed(String(localized: "Helper update failed: \(detail)"))
+            RouteManager.shared.log(.error, "❌ Helper update to v\(expected) failed and no helper answers (\(detail))")
         }
+    }
 
-        helperState = .failed(String(localized: "Helper update did not take effect (got \(newVersion ?? "nil"), expected \(expected))"))
-        return false
+    /// The text `vpnb status` shows for the helper: its state, and an update that waits.
+    var statusSummary: String {
+        guard helperState.isReady, let pendingUpdate, let helperVersion else { return helperState.statusText }
+        switch pendingUpdate {
+        case .waiting(_, let expected):
+            return String(localized: "Helper v\(helperVersion) running, update to v\(expected) pending")
+        case .notInstalled(_, let expected, _):
+            return String(localized: "Helper v\(helperVersion) running, update to v\(expected) not installed; click Update in Settings → Status to retry")
+        }
+    }
+
+    // MARK: - What an older helper can do
+
+    /// The helper version each XPC method first shipped in. While an update waits, the running
+    /// helper can be older than this app, and a call it does not know never gets a reply, only
+    /// the deadline. Such a call is answered at once as unavailable instead.
+    enum MethodSince {
+        static let listTunnelOwners = "2.2.0"
+        static let dnsCapture = "2.4.0"
+        static let wildcards = "2.5.0"
+        static let blockRoutes = "2.6.0"
+        /// The oldest helper the app routes through while its update waits. Older ones lack
+        /// the VPN Only blocks or the wildcards (a listed name would leave outside the tunnel)
+        /// or the route batches (1.5.0), so the app waits for their update instead.
+        static let adoptable = blockRoutes
+    }
+
+    /// Whether helper `running` has a method that shipped in `minimum`. An unknown version
+    /// counts as new enough: it is only nil before the first version check.
+    nonisolated static func helper(_ running: String?, supports minimum: String) -> Bool {
+        guard let running else { return true }
+        let a = running.split(separator: ".").map { Int($0) ?? 0 }
+        let b = minimum.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return true
+    }
+
+    private func runningHelperSupports(_ minimum: String) -> Bool {
+        Self.helper(helperVersion, supports: minimum)
     }
 
     // MARK: - XPC Connection
@@ -296,7 +431,11 @@ final class HelperManager: ObservableObject {
         return result
     }
 
+    /// Answers the version probe instead of XPC, for tests.
+    var versionProbeOverrideForTests: (() async -> VersionProbe)?
+
     private func probeVersion() async -> VersionProbe {
+        if let override = versionProbeOverrideForTests { return await override() }
         let connection = getOrCreateConnection()
         let result = await withXPCDeadline(seconds: xpcTimeout, fallback: VersionProbe.timedOut) { once in
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
@@ -334,7 +473,7 @@ final class HelperManager: ObservableObject {
     /// eventually apply it to an unrelated tunnel. Cosmetic either way — this never influences
     /// which tunnel gets routed.
     func tunnelOwners() async -> [TunnelOwner]? {
-        guard isHelperInstalled else { return nil }
+        guard isHelperInstalled, runningHelperSupports(MethodSince.listTunnelOwners) else { return nil }
         let connection = getOrCreateConnection()
         return await withXPCDeadline(seconds: xpcTimeout, fallback: [TunnelOwner]?.none) { once in
             let proxy = connection.remoteObjectProxyWithErrorHandler { _ in
@@ -359,6 +498,9 @@ final class HelperManager: ObservableObject {
     /// Starts the helper's DNS capture. `nil` when it runs, otherwise why it does not.
     func startDNSCapture() async -> String? {
         guard isHelperInstalled else { return String(localized: "The privileged helper is not running.") }
+        guard runningHelperSupports(MethodSince.dnsCapture) else {
+            return String(localized: "This needs a newer helper. Update it in Settings → Status.")
+        }
         let connection = getOrCreateConnection()
         return await withXPCDeadline(seconds: xpcTimeout, fallback: String?.some(String(localized: "The privileged helper did not answer."))) { once in
             guard let helper = connection.remoteObjectProxyWithErrorHandler({ _ in
@@ -374,7 +516,7 @@ final class HelperManager: ObservableObject {
     }
 
     func stopDNSCapture() async {
-        guard isHelperInstalled else { return }
+        guard isHelperInstalled, runningHelperSupports(MethodSince.dnsCapture) else { return }
         let connection = getOrCreateConnection()
         await withXPCDeadline(seconds: xpcTimeout, fallback: ()) { once in
             guard let helper = connection.remoteObjectProxyWithErrorHandler({ _ in once.complete(()) }) as? HelperProtocol else {
@@ -388,7 +530,7 @@ final class HelperManager: ObservableObject {
     /// The names queried since the last drain; `nil` when the capture is not running or the
     /// helper could not be asked.
     func drainDNSQueries() async -> [String]? {
-        guard isHelperInstalled else { return nil }
+        guard isHelperInstalled, runningHelperSupports(MethodSince.dnsCapture) else { return nil }
         let connection = getOrCreateConnection()
         return await withXPCDeadline(seconds: xpcTimeout, fallback: [String]?.none) { once in
             guard let helper = connection.remoteObjectProxyWithErrorHandler({ _ in once.complete(nil) }) as? HelperProtocol else {
@@ -406,6 +548,9 @@ final class HelperManager: ObservableObject {
     /// Sets the wildcards the helper's forwarder serves; an empty list stops it.
     func setWildcards(_ specs: [WildcardSpec], guard safetyGuard: WildcardSafetyGuard) async -> (ok: Bool, unserved: [String], error: String?) {
         guard isHelperInstalled else { return (false, [], "the privileged helper is not running") }
+        guard runningHelperSupports(MethodSince.wildcards) else {
+            return (false, [], "helper v\(helperVersion ?? "?") predates wildcards; they start once the helper update is installed")
+        }
         let connection = getOrCreateConnection()
         let failed = (ok: false, unserved: [String](), error: Optional("the privileged helper did not answer"))
         // The helper may flush the resolver caches (two bounded children of 3 s each).
@@ -422,7 +567,7 @@ final class HelperManager: ObservableObject {
 
     /// The routes the forwarder learned since the last drain; nil when the helper could not be asked.
     func drainWildcardRoutes() async -> (running: Bool, routes: [LearnedWildcardRoute])? {
-        guard isHelperInstalled else { return nil }
+        guard isHelperInstalled, runningHelperSupports(MethodSince.wildcards) else { return nil }
         let connection = getOrCreateConnection()
         return await withXPCDeadline(seconds: xpcTimeout, fallback: (running: Bool, routes: [LearnedWildcardRoute])?.none) { once in
             guard let helper = connection.remoteObjectProxyWithErrorHandler({ _ in once.complete(nil) }) as? HelperProtocol else {
@@ -451,7 +596,7 @@ final class HelperManager: ObservableObject {
         if #available(macOS 13.0, *) {
             return await installHelperModern()
         } else {
-            return installHelperLegacy()
+            return await installHelperLegacy()
         }
     }
 
@@ -465,7 +610,7 @@ final class HelperManager: ObservableObject {
         let plistPath = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
         if FileManager.default.fileExists(atPath: helperPath) {
             RouteManager.shared.log(.info, "🔐 Helper exists on disk, using legacy path for update...")
-            return installHelperLegacy()
+            return await installHelperLegacy()
         }
 
         do {
@@ -480,7 +625,7 @@ final class HelperManager: ObservableObject {
             if !FileManager.default.fileExists(atPath: helperPath) ||
                !FileManager.default.fileExists(atPath: plistPath) {
                 RouteManager.shared.log(.warning, "⚠️ SMAppService reported success but helper files missing on disk, falling back to legacy install...")
-                return installHelperLegacy()
+                return await installHelperLegacy()
             }
 
             installationError = nil
@@ -488,19 +633,19 @@ final class HelperManager: ObservableObject {
         } catch {
             RouteManager.shared.log(.warning, "⚠️ SMAppService failed: \(error.localizedDescription)")
             RouteManager.shared.log(.info, "🔐 Falling back to legacy install...")
-            return installHelperLegacy()
+            return await installHelperLegacy()
         }
     }
 
     /// Escape a string for safe inclusion inside a shell single-quoted context (`'…'`):
     /// a literal `'` is closed, backslash-escaped, and reopened (`'\''`).
-    private static func shSingleQuoteEscaped(_ s: String) -> String {
+    private nonisolated static func shSingleQuoteEscaped(_ s: String) -> String {
         s.replacingOccurrences(of: "'", with: "'\\''")
     }
 
     /// Escape a shell command for inclusion inside an AppleScript double-quoted string:
     /// backslashes first (so escapes we add next aren't double-processed), then quotes.
-    private static func appleScriptStringEscaped(_ s: String) -> String {
+    nonisolated static func appleScriptStringEscaped(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
          .replacingOccurrences(of: "\"", with: "\\\"")
     }
@@ -525,7 +670,7 @@ final class HelperManager: ObservableObject {
     /// quote (e.g. /Users/o'brien/…/VPN Bypass.app) would otherwise break out of the 'cp …'
     /// single-quoting and inject commands into this ROOT admin script. Every path is escaped
     /// for the shell layer here; the caller escapes the whole command for AppleScript.
-    static func legacyInstallShellCommand(helperSource: String, plistSource: String) -> String {
+    nonisolated static func legacyInstallShellCommand(helperSource: String, plistSource: String) -> String {
         let hs = shSingleQuoteEscaped(helperSource)
         let ps = shSingleQuoteEscaped(plistSource)
         let hd = shSingleQuoteEscaped("/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)")
@@ -556,51 +701,126 @@ final class HelperManager: ObservableObject {
         """
     }
 
-    private func installHelperLegacy() -> Bool {
-        RouteManager.shared.log(.info, "🔐 Attempting manual helper installation via AppleScript...")
-
-        guard let bundlePath = Bundle.main.bundlePath as String?,
-              bundlePath.hasSuffix(".app") else {
-            installationError = String(localized: "Not running from app bundle")
-            return false
-        }
-
-        let helperSource = "\(bundlePath)/Contents/MacOS/\(kHelperToolMachServiceName)"
-        let plistSource = "\(bundlePath)/Contents/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
-
-        guard FileManager.default.fileExists(atPath: helperSource) else {
-            installationError = String(localized: "Helper binary not found in app bundle")
-            RouteManager.shared.log(.error, "❌ Helper not found at: \(helperSource)")
-            return false
-        }
-
-        guard FileManager.default.fileExists(atPath: plistSource) else {
-            installationError = String(localized: "Helper plist not found in app bundle")
-            RouteManager.shared.log(.error, "❌ Plist not found at: \(plistSource)")
-            return false
-        }
-
-        let shellCommand = Self.legacyInstallShellCommand(helperSource: helperSource, plistSource: plistSource)
-        let script = "do shell script \"\(Self.appleScriptStringEscaped(shellCommand))\" with administrator privileges"
-
-        var error: NSDictionary?
-        if let appleScript = NSAppleScript(source: script) {
-            appleScript.executeAndReturnError(&error)
-
-            if let error = error {
-                let errorMessage = error[NSAppleScript.errorMessage] as? String ?? "Unknown error"
-                installationError = errorMessage
-                RouteManager.shared.log(.error, "❌ AppleScript error: \(errorMessage)")
-                return false
-            }
-
-            RouteManager.shared.log(.success, "✅ Helper installed successfully via AppleScript")
+    private func installHelperLegacy() async -> Bool {
+        let outcome = await runAdminInstall()
+        switch outcome {
+        case .installed:
             installationError = nil
             return true
+        case .cancelled, .timedOut:
+            installationError = outcome.localizedText
+            return false
+        case .failed(let message):
+            installationError = message
+            return false
+        }
+    }
+
+    // MARK: - The administrator password prompt, off the main thread
+
+    /// How the admin-password install ended.
+    enum AdminInstallOutcome: Equatable, Sendable {
+        case installed
+        case cancelled
+        case timedOut
+        case failed(String)
+
+        /// English, for the log and the error line.
+        var logText: String {
+            switch self {
+            case .installed: return "installed"
+            case .cancelled: return "the password prompt was cancelled"
+            case .timedOut: return "no password was entered in \(Int(HelperManager.adminPromptTimeout / 60)) minutes"
+            case .failed(let message): return message
+            }
         }
 
-        installationError = String(localized: "Failed to create AppleScript")
-        return false
+        /// The same, in the user's language, for the Status page.
+        var localizedText: String {
+            switch self {
+            case .installed: return logText
+            case .cancelled: return String(localized: "The administrator password prompt was cancelled.")
+            case .timedOut: return String(localized: "No administrator password was entered in time.")
+            case .failed(let message): return message
+            }
+        }
+    }
+
+    /// How long the password prompt stays open. Past it the prompt closes and the older helper
+    /// keeps working; the next launch or the Update button asks again.
+    nonisolated static let adminPromptTimeout: TimeInterval = 600
+
+    /// Runs the install behind the administrator password prompt. It blocks until the user
+    /// answers, cancels, or the prompt times out, which can be hours on a locked screen, so it
+    /// is only ever called through `runOffMain`. Replaced in tests by an installer that waits.
+    nonisolated(unsafe) static var adminInstall: @Sendable () -> AdminInstallOutcome = { installFromBundleWithPassword() }
+
+    /// Runs blocking `work` on a global queue, so the main thread (the control socket's
+    /// handler, the status passes, the menu) keeps running while it waits.
+    nonisolated static func runOffMain<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async { continuation.resume(returning: work()) }
+        }
+    }
+
+    private func runAdminInstall() async -> AdminInstallOutcome {
+        RouteManager.shared.log(.info, "🔐 Asking for the administrator password to install the helper...")
+        let outcome = await Self.runOffMain(Self.adminInstall)
+        switch outcome {
+        case .installed: RouteManager.shared.log(.success, "✅ Helper files installed")
+        case .cancelled, .timedOut: break   // the caller says what happens next, once
+        case .failed(let message): RouteManager.shared.log(.error, "❌ Helper install failed: \(message)")
+        }
+        return outcome
+    }
+
+    /// The install itself: copy the helper and its launchd plist out of this app bundle as
+    /// root, through `osascript` (NSAppleScript belongs on the main thread, and this waits on
+    /// the password). Blocking.
+    nonisolated static func installFromBundleWithPassword() -> AdminInstallOutcome {
+        let bundlePath = Bundle.main.bundlePath
+        guard bundlePath.hasSuffix(".app") else {
+            return .failed(String(localized: "Not running from app bundle"))
+        }
+        let helperSource = "\(bundlePath)/Contents/MacOS/\(kHelperToolMachServiceName)"
+        let plistSource = "\(bundlePath)/Contents/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
+        guard FileManager.default.fileExists(atPath: helperSource) else {
+            return .failed(String(localized: "Helper binary not found in app bundle"))
+        }
+        guard FileManager.default.fileExists(atPath: plistSource) else {
+            return .failed(String(localized: "Helper plist not found in app bundle"))
+        }
+
+        let shellCommand = legacyInstallShellCommand(helperSource: helperSource, plistSource: plistSource)
+        let prompt = String(localized: "VPN Bypass needs your administrator password to update its helper.")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", adminScript(shellCommand: shellCommand, prompt: prompt)]
+        let stderr = Pipe()
+        process.standardError = stderr
+        process.standardOutput = FileHandle.nullDevice
+        switch ProcessDeadline.run(process, seconds: adminPromptTimeout) {
+        case .failedToStart:
+            return .failed("osascript could not start")
+        case .timedOut:
+            return .timedOut
+        case .exited(let status):
+            let text = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            return adminScriptOutcome(status: status, stderr: text)
+        }
+    }
+
+    /// The AppleScript `osascript` runs: the root shell command behind the password prompt.
+    nonisolated static func adminScript(shellCommand: String, prompt: String) -> String {
+        "do shell script \"\(appleScriptStringEscaped(shellCommand))\" with prompt \"\(appleScriptStringEscaped(prompt))\" with administrator privileges"
+    }
+
+    /// Reads how `osascript` ended. A cancelled prompt is AppleScript error -128.
+    nonisolated static func adminScriptOutcome(status: Int32, stderr: String) -> AdminInstallOutcome {
+        if status == 0 { return .installed }
+        if stderr.contains("(-128)") { return .cancelled }
+        let message = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        return .failed(message.isEmpty ? "osascript exited with \(status)" : message)
     }
 
     // MARK: - Route Operations (all with hard XPC deadline)
@@ -750,6 +970,9 @@ let timeout = xpcTimeout + Double(routes.count) * 0.6
     func addBlockRoutesBatch(destinations: [String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?) {
         guard helperState.isReady else {
             return (0, destinations.count, destinations, "Helper not ready (\(helperState.statusText))")
+        }
+        guard runningHelperSupports(MethodSince.blockRoutes) else {
+            return (0, destinations.count, destinations, "helper v\(helperVersion ?? "?") predates VPN Only blocks; they start once the helper update is installed")
         }
         let timeout = xpcTimeout + Double(destinations.count) * 0.6
         let fallback = (0, 0, [String](), Optional("XPC timeout"))

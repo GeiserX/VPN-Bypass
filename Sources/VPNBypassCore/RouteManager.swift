@@ -2376,6 +2376,19 @@ final class RouteManager: ObservableObject {
         await applyAllRoutesInternal(sendNotification: false, orphanGrace: orphanGrace)
     }
 
+    /// After a helper update: the install stopped the old helper for a moment, so a batch that
+    /// reached it then failed. Apply again once the running operation ends; unlike
+    /// `applyAllRoutes`, a busy gate means wait, not skip (bounded at two minutes).
+    func reapplyAfterHelperUpdate() async {
+        var waits = 0
+        while isApplyingRoutes && !isShuttingDown && waits < 240 {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            waits += 1
+        }
+        guard !isShuttingDown, !isApplyingRoutes else { return }
+        await applyAllRoutes()
+    }
+
     /// Apply all routes and send notification (called from Refresh button)
     func applyAllRoutesWithNotification() async {
         guard acquireRouteOperation() else {

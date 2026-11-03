@@ -55,8 +55,14 @@
 "Cannot connect to helper after reinstall" = "No se puede conectar al asistente tras reinstalar";
 "Please enable VPN Bypass in System Settings → General → Login Items" = "Activa VPN Bypass en Ajustes del Sistema → General → Ítems de inicio";
 "Helper update failed: %@" = "La actualización del asistente falló: %@";
-"Helper update did not take effect (got %@, expected %@)" = "La actualización del asistente no surtió efecto (obtenido %@, esperado %@)";
-"unknown" = "desconocido";
+"Helper v%@ running, update to v%@ pending" = "Asistente v%@ en marcha, actualización a v%@ pendiente";
+"Helper v%@ running, update to v%@ not installed; click Update in Settings → Status to retry" = "Asistente v%@ en marcha, actualización a v%@ sin instalar; pulsa Actualizar en Ajustes → Estado para reintentarlo";
+"This needs a newer helper. Update it in Settings → Status." = "Esto necesita un asistente más reciente. Actualízalo en Ajustes → Estado.";
+"VPN Bypass needs your administrator password to update its helper." = "VPN Bypass necesita tu contraseña de administrador para actualizar su asistente.";
+"Helper update to version %@ waiting for your password. The installed helper keeps routing until then." = "La actualización del asistente a la versión %@ espera tu contraseña. Hasta entonces, el asistente instalado sigue enrutando.";
+"Helper update to version %@ was cancelled. The installed helper keeps routing; click Update to try again." = "Se canceló la actualización del asistente a la versión %@. El asistente instalado sigue enrutando; pulsa Actualizar para intentarlo de nuevo.";
+"Helper update to version %@ timed out waiting for your password. The installed helper keeps routing; click Update to try again." = "La actualización del asistente a la versión %@ caducó esperando tu contraseña. El asistente instalado sigue enrutando; pulsa Actualizar para intentarlo de nuevo.";
+"Helper update to version %@ failed. The installed helper keeps routing; click Update to try again." = "La actualización del asistente a la versión %@ falló. El asistente instalado sigue enrutando; pulsa Actualizar para intentarlo de nuevo.";
 "Verifying helper version..." = "Verificando versión del asistente...";
 "Admin authorization required..." = "Se requiere autorización de administrador...";
 "Helper needs updating for this version" = "El asistente necesita actualizarse para esta versión";
@@ -438,7 +444,8 @@
 "Not running from app bundle" = "La app no se está ejecutando desde su paquete";
 "Helper binary not found in app bundle" = "No se encuentra el asistente en el paquete de la app";
 "Helper plist not found in app bundle" = "No se encuentra el plist del asistente en el paquete de la app";
-"Failed to create AppleScript" = "No se pudo crear el AppleScript";
+"The administrator password prompt was cancelled." = "Se canceló la solicitud de la contraseña de administrador.";
+"No administrator password was entered in time." = "No se introdujo la contraseña de administrador a tiempo.";
 
 /* ===== Rutas que no se aplicaron ===== */
 "VPN Bypass isn't routing anything" = "VPN Bypass no está enrutando nada";
