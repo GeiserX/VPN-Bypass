@@ -222,28 +222,118 @@ final class HelperManager: ObservableObject {
 
     private func startPendingUpdate(installed: String, expected: String) {
         guard updateTask == nil else { return }
-        pendingUpdate = .waiting(installed: installed, expected: expected)
+        let plists = launchdPlists()
+        let path = Self.updatePath(running: installed, installedPlist: plists.installed, bundledPlist: plists.bundled)
         installationError = nil
-        RouteManager.shared.log(.info, "🔐 Updating the helper to v\(expected); v\(installed) keeps working until the administrator password is entered")
+        switch path {
+        case .selfUpdate:
+            // No prompt, so nothing says "waiting for your password" unless this falls back.
+            RouteManager.shared.log(.info, "🔄 Updating the helper to v\(expected): v\(installed) installs it from the app bundle, no password needed")
+        case .adminPassword:
+            pendingUpdate = .waiting(installed: installed, expected: expected)
+            RouteManager.shared.log(.info, "🔐 Updating the helper to v\(expected); v\(installed) keeps working until the administrator password is entered")
+        }
         updateTask = Task { [weak self] in
-            await self?.runPendingUpdate(installed: installed, expected: expected)
+            await self?.runPendingUpdate(installed: installed, expected: expected, path: path)
             self?.updateTask = nil
         }
+    }
+
+    // MARK: - Update without a password
+
+    /// How a helper update is installed.
+    enum UpdatePath: Equatable {
+        /// The running helper copies the new one out of this app's bundle and restarts
+        /// (`HelperProtocol.updateHelper`), no prompt.
+        case selfUpdate
+        /// The administrator password prompt and the install script.
+        case adminPassword
+    }
+
+    /// The running helper updates itself when it has the call (2.8.0 or newer) and runs under
+    /// the launchd plist this app ships. It replaces only its own binary, so a changed or
+    /// unreadable plist still goes through the password installer, which copies both.
+    nonisolated static func updatePath(running: String, installedPlist: Data?, bundledPlist: Data?) -> UpdatePath {
+        guard helper(running, supports: MethodSince.selfUpdate),
+              let installedPlist, let bundledPlist, installedPlist == bundledPlist else { return .adminPassword }
+        return .selfUpdate
+    }
+
+    /// The installed launchd plist and the one in this app's bundle. Replaced in tests.
+    var launchdPlists: () -> (installed: Data?, bundled: Data?) = {
+        let bundle = Bundle.main.bundlePath
+        let bundled = bundle.hasSuffix(".app")
+            ? FileManager.default.contents(atPath: "\(bundle)/Contents/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist")
+            : nil
+        return (FileManager.default.contents(atPath: HelperSelfUpdate.installedPlistPath), bundled)
+    }
+
+    /// Answers the self-update call instead of XPC, for tests: the path asked for, the error.
+    var selfUpdateOverrideForTests: ((String) async -> String?)?
+
+    /// Asks the running helper to install the helper from this app's bundle. Nil when it did and
+    /// is restarting, otherwise why not.
+    private func requestSelfUpdate() async -> String? {
+        let bundle = Bundle.main.bundlePath
+        let source = "\(bundle)/Contents/MacOS/\(kHelperToolMachServiceName)"
+        if let override = selfUpdateOverrideForTests { return await override(source) }
+        guard bundle.hasSuffix(".app") else { return "not running from an app bundle" }
+        let connection = getOrCreateConnection()
+        let noAnswer = "the helper did not answer"
+        return await withXPCDeadline(seconds: xpcTimeout + 5, fallback: String?.some(noAnswer)) { once in
+            guard let helper = connection.remoteObjectProxyWithErrorHandler({ error in
+                once.complete("XPC error: \(error.localizedDescription)")
+            }) as? HelperProtocol else {
+                once.complete(noAnswer)
+                return
+            }
+            helper.updateHelper(fromPath: source) { ok, error in
+                once.complete(ok ? nil : (error ?? "the helper refused"))
+            }
+        }
+    }
+
+    /// The self-update, start to end. True when the new helper answers with `expected`; false
+    /// leaves the password installer to try, with the reason logged once.
+    private func installWithoutPassword(installed: String, expected: String, wasRouting: Bool) async -> Bool {
+        if let refusal = await requestSelfUpdate() {
+            RouteManager.shared.log(.warning, "Helper v\(installed) did not update itself (\(refusal)); asking for the administrator password instead")
+            return false
+        }
+        // The old helper exits once its reply is out and launchd starts the new file.
+        dropXPCConnection()
+        let probe = await probeAfterInstall()
+        guard case .version(let answered) = probe, answered == expected else {
+            RouteManager.shared.log(.warning, "The helper updated itself but answers \(probe) instead of v\(expected); asking for the administrator password instead")
+            return false
+        }
+        await settleUpdate(outcome: .installed, probe: probe, expected: expected, wasRouting: wasRouting)
+        return true
     }
 
     /// Puts back anything the helper switch interrupted (a route batch that reached the old
     /// helper while the install stopped it). Replaced in tests.
     var reapplyRoutesAfterUpdate: @MainActor () async -> Void = { await RouteManager.shared.reapplyAfterHelperUpdate() }
 
-    private func runPendingUpdate(installed: String, expected: String) async {
+    private func runPendingUpdate(installed: String, expected: String, path: UpdatePath) async {
         let wasRouting = helperState.isReady
+        if path == .selfUpdate {
+            if await installWithoutPassword(installed: installed, expected: expected, wasRouting: wasRouting) { return }
+            pendingUpdate = .waiting(installed: installed, expected: expected)
+        }
         NSApp?.activate(ignoringOtherApps: true)
         let outcome = await runAdminInstall()
         // The install script stops the old helper before it starts the new one, and a failed
         // script may have stopped it too: ask whichever helper answers now.
         dropXPCConnection()
-        // A freshly started helper can be slow to answer: retry a timeout, as at launch.
-        let probe = await Self.probeVersionRetryingTimeouts(
+        let probe = await probeAfterInstall()
+        await settleUpdate(outcome: outcome, probe: probe, expected: expected, wasRouting: wasRouting)
+    }
+
+    /// The version check after an install. A freshly started helper can be slow to answer:
+    /// retry a timeout, as at launch.
+    private func probeAfterInstall() async -> VersionProbe {
+        await Self.probeVersionRetryingTimeouts(
             probe: { [weak self] in
                 guard let self else { return .unreachable }
                 return await self.probeVersion()
@@ -251,6 +341,10 @@ final class HelperManager: ObservableObject {
             beforeRetry: { [weak self] in self?.dropXPCConnection() },
             log: { RouteManager.shared.log(.warning, $0) }
         )
+    }
+
+    /// Records how an install ended from what the helper answers afterwards.
+    private func settleUpdate(outcome: AdminInstallOutcome, probe: VersionProbe, expected: String, wasRouting: Bool) async {
         switch (outcome, probe) {
         case (_, .version(let answered)) where answered == expected:
             helperVersion = answered
@@ -300,6 +394,7 @@ final class HelperManager: ObservableObject {
         static let dnsCapture = "2.4.0"
         static let wildcards = "2.5.0"
         static let blockRoutes = "2.6.0"
+        static let selfUpdate = "2.8.0"
         /// The oldest helper the app routes through while its update waits. Older ones lack
         /// the VPN Only blocks or the wildcards (a listed name would leave outside the tunnel)
         /// or the route batches (1.5.0), so the app waits for their update instead.
@@ -606,6 +701,8 @@ final class HelperManager: ObservableObject {
         // installed — it re-registers the service but does NOT replace the on-disk
         // binary. For updates we must always go through the legacy path which does
         // the actual file copy. Only use SMAppService for first-time installs.
+        // (An update a running 2.8.0+ helper can install itself never gets here; see
+        // `installWithoutPassword`.)
         let helperPath = "/Library/PrivilegedHelperTools/\(kHelperToolMachServiceName)"
         let plistPath = "/Library/LaunchDaemons/\(kHelperToolMachServiceName).plist"
         if FileManager.default.fileExists(atPath: helperPath) {

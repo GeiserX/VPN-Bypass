@@ -22,6 +22,7 @@ build-helper:
 	@swiftc -O \
 		-import-objc-header Helper/NSXPCConnection+AuditToken.h \
 		-target arm64-apple-macos13.0 \
+		-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Helper/Info.plist \
 		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-arm64 \
 		Sources/VPNBypassCore/HelperProtocol.swift \
 		Sources/VPNBypassCore/RouteKernel.swift \
@@ -35,6 +36,7 @@ build-helper:
 	@swiftc -O \
 		-import-objc-header Helper/NSXPCConnection+AuditToken.h \
 		-target x86_64-apple-macos13.0 \
+		-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Helper/Info.plist \
 		-o $(HELPER_BUILD_DIR)/$(HELPER_ID)-x86_64 \
 		Sources/VPNBypassCore/HelperProtocol.swift \
 		Sources/VPNBypassCore/RouteKernel.swift \

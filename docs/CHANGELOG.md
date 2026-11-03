@@ -7,6 +7,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.10]
+
+### Fixed
+- **A helper update no longer asks for the administrator password.** Every release that changed the privileged helper (most recently 6.0.8) asked for the password on its first launch, because the app installed the new helper with a root `cp` behind an AppleScript prompt. The helper already runs as root, so from helper 2.8.0 it installs the next one itself: the app sends it the path of the helper in its bundle, the helper copies it into `/Library/PrivilegedHelperTools`, checks that the copy is signed by our team as the helper and is newer than itself, puts it in place and restarts, and the app applies its routes again through the new helper. An unsigned file, one signed by anyone else, or an older helper is refused. **This release still asks once**: the helper installed today (2.7.0) does not have the call, so the update to 2.8.0 goes through the password prompt; the updates after it do not. The prompt is still used when the launchd plist changes or the helper cannot update itself, and the log says why. Moving the helper into the app bundle with `SMAppService` would have needed every Mac to approve it in Login Items with the password, and would have put a root daemon's binary in a folder the user owns; see How it works.
+
 ## [6.0.9]
 
 ### Fixed

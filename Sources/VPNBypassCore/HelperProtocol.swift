@@ -3,6 +3,7 @@
 
 import Darwin
 import Foundation
+import Security
 
 /// The bundle ID for the privileged helper tool
 let kHelperToolMachServiceName = "com.geiserx.vpnbypass.helper"
@@ -124,6 +125,15 @@ protocol HelperProtocol {
     /// stops the forwarder and removes its resolver files by itself.
     /// - Parameter reply: whether the forwarder is running, and the routes.
     func drainWildcardRoutes(withReply reply: @escaping (Bool, [[String: String]]) -> Void)
+
+    /// Replaces this helper with the one at `path` (the copy inside the calling app's bundle),
+    /// then exits so launchd starts the new one. Takes no password: the helper is already root.
+    /// The helper copies the file into its own root-only folder first and installs that copy
+    /// only when it is signed by our team as the helper (`HelperSelfUpdate.candidateRequirement`)
+    /// and carries a newer version than its own. Since 2.8.0.
+    /// - Parameter reply: `(true, nil)` when the new helper is in place and this one is about
+    ///   to exit, `(false, reason)` when nothing changed.
+    func updateHelper(fromPath path: String, withReply reply: @escaping (Bool, String?) -> Void)
 }
 
 // MARK: - Helper Constants
@@ -205,7 +215,12 @@ struct HelperConstants {
     // TunnelOwnership.swift shipped with 2.6.0 unchanged, so installed helpers kept the old
     // forwarder and tailnet names under *.ts.net stayed NXDOMAIN. Bumped so installed 2.6.0
     // helpers reinstall; scripts/check-helper-version.py now fails CI on a missed bump.
-    static let helperVersion = "2.7.0"
+    // 2.8.0: updateHelper(fromPath:) — the running helper installs the copy from a newer app's
+    // bundle over itself and restarts, so a helper update needs no administrator password
+    // (HelperSelfUpdate). The binary now embeds its Info.plist, which carries the version the
+    // next helper checks. Updating TO 2.8.0 still asks for the password once: older helpers
+    // do not have the call.
+    static let helperVersion = "2.8.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"
@@ -239,6 +254,146 @@ enum HelperAuthPolicy {
     static let callerRequirement =
         "anchor apple generic and identifier \"\(HelperConstants.appSigningIdentifier)\" "
         + "and certificate leaf[subject.OU] = \"\(HelperConstants.teamIdentifier)\""
+}
+
+// MARK: - Helper self-update (shared by the helper and the tests)
+
+/// How a running helper replaces itself with the copy shipped in a newer app, with no
+/// administrator password. Before 2.8.0 every helper update went through the password prompt,
+/// even though the old helper, running as root, could do the copy itself. Lives here so the
+/// helper runs this exact code and the test target can exercise it.
+///
+/// What keeps it safe: the helper installs only a file that is signed by our Developer ID team
+/// with the helper's own identifier, and only a newer version than itself, so a caller cannot
+/// swap in an unsigned binary or roll the helper back to an older signed one. The check runs on
+/// a copy in `/Library/PrivilegedHelperTools`, which only root can write, so the file cannot
+/// change between the check and the rename. The installed file stays root-owned, as before.
+enum HelperSelfUpdate {
+
+    /// Where the helper and its launchd plist are installed.
+    static let installedHelperPath = "/Library/PrivilegedHelperTools/\(HelperConstants.bundleID)"
+    static let installedPlistPath = "/Library/LaunchDaemons/\(HelperConstants.bundleID).plist"
+
+    /// The code requirement a replacement must meet: the helper's identifier, on a certificate
+    /// Apple issued to our team (the same shape as `HelperAuthPolicy.callerRequirement`).
+    static let candidateRequirement =
+        "anchor apple generic and identifier \"\(HelperConstants.bundleID)\" "
+        + "and certificate leaf[subject.OU] = \"\(HelperConstants.teamIdentifier)\""
+
+    /// The helper is a few MB; anything far larger is not ours, and is not read into memory.
+    static let maxCandidateBytes = 64 << 20
+
+    /// The status the helper exits with after replacing itself. Not 0: the launchd plist has
+    /// `KeepAlive` `SuccessfulExit` false, so launchd starts the new file at once.
+    static let restartExitStatus: Int32 = 75   // EX_TEMPFAIL
+
+    enum Failure: Error, Equatable {
+        case unreadable(String)
+        case notARegularFile
+        case tooLarge(Int)
+        case badSignature(Int32)
+        case noVersion
+        case notNewer(candidate: String, running: String)
+        case writeFailed(String)
+
+        var message: String {
+            switch self {
+            case .unreadable(let why): return "cannot read the new helper: \(why)"
+            case .notARegularFile: return "the new helper is not a regular file"
+            case .tooLarge(let bytes): return "the new helper is \(bytes) bytes, too large to be ours"
+            case .badSignature(let status): return "the new helper is not signed by our team as the helper (OSStatus \(status))"
+            case .noVersion: return "the new helper carries no version in its signed Info.plist"
+            case .notNewer(let candidate, let running): return "the new helper is v\(candidate), not newer than the running v\(running)"
+            case .writeFailed(let why): return "cannot install the new helper: \(why)"
+            }
+        }
+    }
+
+    /// Whether dotted version `candidate` is strictly newer than `running` (numeric parts,
+    /// missing parts count as 0, so 2.8 equals 2.8.0).
+    static func isNewer(_ candidate: String, than running: String) -> Bool {
+        let a = candidate.split(separator: ".").map { Int($0) ?? 0 }
+        let b = running.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
+
+    /// Checks the signature of the file at `path` against `requirement` (every architecture,
+    /// strict) and returns the version from its signed Info.plist.
+    static func verifiedVersion(at path: String, requirement: String = candidateRequirement) -> Result<String, Failure> {
+        var staticCode: SecStaticCode?
+        var status = SecStaticCodeCreateWithPath(URL(fileURLWithPath: path) as CFURL, [], &staticCode)
+        guard status == errSecSuccess, let code = staticCode else { return .failure(.badSignature(status)) }
+        var secRequirement: SecRequirement?
+        status = SecRequirementCreateWithString(requirement as CFString, [], &secRequirement)
+        guard status == errSecSuccess, let req = secRequirement else { return .failure(.badSignature(status)) }
+        let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate)
+        status = SecStaticCodeCheckValidity(code, flags, req)
+        guard status == errSecSuccess else { return .failure(.badSignature(status)) }
+        var info: CFDictionary?
+        status = SecCodeCopySigningInformation(code, [], &info)
+        guard status == errSecSuccess,
+              let plist = (info as? [String: Any])?[kSecCodeInfoPList as String] as? [String: Any],
+              let version = plist["CFBundleShortVersionString"] as? String, !version.isEmpty else {
+            return .failure(.noVersion)
+        }
+        return .success(version)
+    }
+
+    /// Replaces `destination` with the file at `source` when that file passes
+    /// `verifiedVersion` and is newer than `running`. Copies first, checks the copy, then renames
+    /// it over `destination`, so a running helper keeps its own file until the rename and a
+    /// failure leaves `destination` untouched. Returns the installed version. Root only in the
+    /// helper; the tests point it at temporary files.
+    static func install(from source: String, over destination: String, running: String,
+                        requirement: String = candidateRequirement) -> Result<String, Failure> {
+        let attributes: [FileAttributeKey: Any]
+        do { attributes = try FileManager.default.attributesOfItem(atPath: source) } catch {
+            return .failure(.unreadable(error.localizedDescription))
+        }
+        guard attributes[.type] as? FileAttributeType == .typeRegular else { return .failure(.notARegularFile) }
+        let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
+        guard size <= maxCandidateBytes else { return .failure(.tooLarge(size)) }
+        let data: Data
+        do { data = try Data(contentsOf: URL(fileURLWithPath: source)) } catch {
+            return .failure(.unreadable(error.localizedDescription))
+        }
+        guard data.count <= maxCandidateBytes else { return .failure(.tooLarge(data.count)) }
+
+        let staging = destination + ".update"
+        unlink(staging)
+        let fd = open(staging, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o544)
+        guard fd >= 0 else { return .failure(.writeFailed("open \(staging): \(String(cString: strerror(errno)))")) }
+        let written = data.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        let synced = fsync(fd) == 0
+        close(fd)
+        guard written == data.count, synced else {
+            unlink(staging)
+            return .failure(.writeFailed("write \(staging) failed"))
+        }
+        // open() applied the umask; the helper is 0544 as the password installer leaves it.
+        chmod(staging, 0o544)
+
+        switch verifiedVersion(at: staging, requirement: requirement) {
+        case .failure(let failure):
+            unlink(staging)
+            return .failure(failure)
+        case .success(let version):
+            guard isNewer(version, than: running) else {
+                unlink(staging)
+                return .failure(.notNewer(candidate: version, running: running))
+            }
+            guard rename(staging, destination) == 0 else {
+                let why = String(cString: strerror(errno))
+                unlink(staging)
+                return .failure(.writeFailed("rename onto \(destination): \(why)"))
+            }
+            return .success(version)
+        }
+    }
 }
 
 /// CIDR helpers shared by the app and the privileged helper.

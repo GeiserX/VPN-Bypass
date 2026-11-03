@@ -28,13 +28,27 @@
 
 ### When the helper needs an update
 
-On launch the app asks the installed helper for its version. When the helper is older than the one in the app bundle, the app installs the new one, which needs the administrator password. That prompt can stay open for hours, for example on a locked screen, so the app does not wait for it:
+On launch the app asks the installed helper for its version. When the helper is older than the one in the app bundle, the app installs the new one.
+
+**Without a password (helper 2.8.0 and newer).** The running helper already runs as root, so it installs the new one itself. The app sends it the path of the helper inside its bundle. The helper copies that file into `/Library/PrivilegedHelperTools` (only root can write there), checks the copy, renames it over its own file and exits; launchd starts the new file at once, because the launchd plist restarts the helper after a non-zero exit. The check: the copy is signed by our Developer ID team with the helper's identifier (`com.geiserx.vpnbypass.helper`), for every architecture, and the version in its signed Info.plist is newer than the running helper's. An unsigned file, a file signed by anyone else, another of our binaries, or an older or equal helper is refused and nothing changes. The installed file stays root-owned with mode 0544, as before. Nothing appears on screen and nothing changes in System Settings > Login Items.
+
+The password installer below is still used when the installed helper is older than 2.8.0 (it does not have the call, so the update to 2.8.0 asks once), when the launchd plist in the app differs from the installed one (the helper replaces only its binary), and when the helper refuses or the new helper does not answer with the expected version. Each fallback is logged with its reason.
+
+**With the administrator password.** That prompt can stay open for hours, for example on a locked screen, so the app does not wait for it:
 
 - The older helper keeps working. Routes, `/etc/hosts`, the wildcard resolver files and the forwarder go through it, and the control socket (`vpnb`), the status passes and the menu answer as usual. Nothing already applied is removed because an update is pending.
 - The prompt runs in an `osascript` child process, off the app's main thread, and closes after 10 minutes without an answer.
 - Only a helper from 2.6.0 on is used this way: it has every call that keeps VPN Only from sending a listed name outside the tunnel (the wildcards and the VPN Only blocks). With an older helper the app waits for the update before it routes, as it always did, but the wait no longer freezes it.
 - Settings > Status shows "Helper update to version X waiting for your password" while the prompt is open. If it is cancelled or times out, the app logs one line, Status says so with an **Update** button, and the app keeps using the older helper. It asks again on the next launch or when you click Update, never by itself. `vpnb status` shows the helper as running with the update pending while the prompt is open, and the update as not installed after a cancel or a timeout.
 - When the new helper answers, the app uses it at once and sends it the wildcard list again, since the old helper removed its resolver files when it stopped. Kernel routes stay in place across the switch, and the app applies the routes once more (after any route pass already running) to put back a batch that reached the old helper while it was being replaced.
+
+**Why the helper is not moved into the app bundle (SMAppService).** macOS 13 lets an app register a daemon whose binary stays inside the app (`SMAppService.daemon` with `BundleProgram`), so replacing the app replaces the daemon's binary. We tested it on macOS 26.6 with a notarized, quarantined test app signed by our team, replaced the way `brew upgrade --cask` does it:
+
+- After the bundle is replaced, the running daemon keeps its old binary until it exits. Asked to exit (non-zero), launchd starts the new binary from the bundle with no prompt and no new approval, and the approval survives the replacement. The background-item record holds the bundle id, team and a path relative to the bundle, no hash of the binary.
+- Registering a daemon needs approval in System Settings > General > Login Items, and turning it on there asks for an administrator password. Every Mac that has our helper today would go through that once, and the helper would depend on that switch again, the dependency `RunAtLoad` removed (#25).
+- The binary would live in the app bundle, which a Homebrew install leaves owned by the user, not root. In our test launchd started a replaced agent binary that was ad-hoc signed with another identifier. For daemons, Apple applies a launch constraint (a binary with a changed signing identifier was refused in a report on Apple's developer forums), but we could not confirm it for daemons without the approval click, and the helper's current file is root-owned.
+
+Updating in place from the running helper needs no approval and no password once a helper has the call, keeps the root-owned file, and checks the same team signature the helper already requires of the app.
 
 ### VPN Detection Logic
 
