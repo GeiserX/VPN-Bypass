@@ -101,8 +101,10 @@ final class HelperManager: ObservableObject {
     /// wildcard and capture drains instead (`running` false), which do the same for their part.
     func restoreAfterHelperRestart(reapplyRoutes: Bool) async {
         RouteManager.shared.wildcards.helperRestarted()
-        await DNSLookupsMonitor.shared.helperRestarted()
+        // Routes first: a capture start on a slow helper can take its full deadline, and the
+        // routes must not wait for it.
         if reapplyRoutes { await reapplyRoutesAfterUpdate() }
+        await DNSLookupsMonitor.shared.helperRestarted()
     }
 
     private func checkAndInstallHelper() async -> Bool {

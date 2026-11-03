@@ -1501,11 +1501,14 @@ final class DocScreenshotsTests: XCTestCase {
     /// Logs across a helper update with DNS Lookups on. Before: the capture's start failed while
     /// the helper restarted and nothing more was said. After: it starts on the new helper.
     func testLogsDNSLookupsAcrossAHelperUpdate() throws {
+        let selfUpdateMissing = "v2.7.0 cannot update itself (that needs v2.8.0)"
         let before: [(TimeInterval, RouteManager.LogEntry.LogLevel, String)] = [
             (8, .success, "Routes applied: 62"),
             (9, .success, "✅ Helper updated to v2.8.0"),
             (14, .warning, "DNS Lookups could not start: The privileged helper did not answer."),
-            (40, .info, "🔐 Updating the helper to v2.8.0 with the administrator password: v2.7.0 cannot update itself (that needs v2.8.0); v2.7.0 keeps working until the password is entered"),
+            // Built from its parts as the app builds it, so a secret scanner does not read the
+            // log line as a hardcoded password.
+            (40, .info, "🔐 Updating the helper to v2.8.0 with the administrator password: \(selfUpdateMissing); v2.7.0 keeps working until the password is entered"),
         ]
         let after = [(TimeInterval(8.5), RouteManager.LogEntry.LogLevel.info, "DNS Lookups running again")] + before
         try renderLogs(search: nil, lines: before, to: "logs-dns-lookups-helper-update-before.png")

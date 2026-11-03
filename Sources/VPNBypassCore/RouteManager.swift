@@ -7418,8 +7418,8 @@ private final class ResumeOnce<T>: @unchecked Sendable {
 }
 
 /// The "Multiple tunnels up" line. The status pass runs every 30 seconds, and logging the line
-/// each time filled the log window with it; it is logged when the tunnels or the chosen one
-/// change, and again after a pass with fewer than two.
+/// each time filled the log window with it; it is logged when the tunnels, the chosen one or
+/// whether it carries the traffic change, and again after a pass with fewer than two.
 struct MultiTunnelNotice: Equatable {
     private var last: [String]?
 
@@ -7430,7 +7430,7 @@ struct MultiTunnelNotice: Equatable {
             last = nil
             return nil
         }
-        let key = tunnels.sorted() + ["→", selected]
+        let key = tunnels.sorted() + ["→", selected, carriesTraffic ? "carries" : "-"]
         guard key != last else { return nil }
         last = key
         return "Multiple tunnels up (\(tunnels.joined(separator: ", "))) — using \(selected)"

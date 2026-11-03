@@ -324,7 +324,9 @@ final class DNSLookupsMonitor: ObservableObject {
         tally = DNSLookupTally()
         since = nil
         resuming = false
-        Task { await helper.stop() }
+        // The calls in use now: a test that swaps them back must not reach the real helper.
+        let calls = helper
+        Task { await calls.stop() }
     }
 
     /// Drains the helper; when the capture is not running (first tick, a helper restart, a lease

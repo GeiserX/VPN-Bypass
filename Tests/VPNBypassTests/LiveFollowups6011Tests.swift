@@ -270,4 +270,15 @@ final class MultiTunnelNoticeTests: XCTestCase {
         XCTAssertNil(notice.line(tunnels: [], selected: "utun11", carriesTraffic: true))
         XCTAssertNotNil(notice.line(tunnels: set + ["utun11"], selected: "utun11", carriesTraffic: false))
     }
+
+    /// The chosen tunnel starts or stops carrying the traffic: the line says "(carries the
+    /// traffic)", so it is logged again rather than left saying the old thing.
+    func testTheLineIsLoggedAgainWhenOnlyTheTrafficFlagChanges() {
+        var notice = MultiTunnelNotice()
+        let set = ["utun4", "utun5"]
+        XCTAssertNotNil(notice.line(tunnels: set, selected: "utun5", carriesTraffic: false))
+        XCTAssertEqual(notice.line(tunnels: set, selected: "utun5", carriesTraffic: true),
+                       "Multiple tunnels up (utun4, utun5) — using utun5 (carries the traffic)")
+        XCTAssertNil(notice.line(tunnels: set, selected: "utun5", carriesTraffic: true))
+    }
 }

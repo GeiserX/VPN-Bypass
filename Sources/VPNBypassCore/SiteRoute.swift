@@ -440,7 +440,7 @@ enum SiteRoute {
             let domain = found.resolverDomain ?? ""
             return String(localized: "\(host) is covered by \(entry), but \(domain) has its own resolver, which answers it. By design the app does not route such a name, so it leaves the way that network sends it.")
         case .addressNotRoutable:
-            return String(localized: "\(host) is covered by \(entry), but its addresses are ones a wildcard never routes (private, shared or reserved space), so it follows the system's own routing.")
+            return String(localized: "\(host) is covered by \(entry), but every address it has is one a wildcard never routes (reserved or local space, the VPN's own server, a DNS server in use, or a VPN Only range), so it follows the system's own routing.")
         case nil: break
         }
         switch found.match {
