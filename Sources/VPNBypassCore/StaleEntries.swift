@@ -65,17 +65,32 @@ enum StaleEntries {
     /// sentence comes in (the bundle's), not the system region's, unless `locale` is given.
     static func detail(since: Date, locale: Locale? = nil, bundle: Bundle = .main) -> String {
         let formatter = DateFormatter()
-        formatter.locale = locale ?? Locale(identifier: language(of: bundle))
+        formatter.locale = locale ?? AppLanguage.locale(of: bundle)
         formatter.setLocalizedDateFormatFromTemplate("dMMM")
         let day = formatter.string(from: since)
         return String(localized: "Hasn't resolved since \(day)", bundle: bundle)
     }
 
+}
+
+/// The language the app's sentences come in, which can differ from the system region's (the
+/// app speaks English, French or Spanish only, or the user picked another for it): dates and
+/// lists inside a sentence follow it, never the system locale.
+enum AppLanguage {
     /// The language a bundle's strings come in: an `xx.lproj` bundle's own, otherwise the one
     /// the bundle picks from the user's languages.
-    private static func language(of bundle: Bundle) -> String {
+    static func code(of bundle: Bundle) -> String {
         let url = bundle.bundleURL
         if url.pathExtension == "lproj" { return url.deletingPathExtension().lastPathComponent }
         return bundle.preferredLocalizations.first ?? "en"
+    }
+
+    static func locale(of bundle: Bundle) -> Locale { Locale(identifier: code(of: bundle)) }
+
+    /// "a, b and c" in the bundle's language.
+    static func list(_ items: [String], in bundle: Bundle) -> String {
+        let formatter = ListFormatter()
+        formatter.locale = locale(of: bundle)
+        return formatter.string(from: items) ?? items.joined(separator: ", ")
     }
 }

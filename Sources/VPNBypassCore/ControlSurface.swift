@@ -113,7 +113,8 @@ public enum ControlSurface {
             let byId = Dictionary(newConfig.rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             response.result?.rules = rules.map { sanitized in
                 guard let rule = byId[sanitized.id] else { return sanitized }
-                return SanitizedRule(rule, engine: engineState, routes: newConfig.routes)
+                return SanitizedRule(rule, engine: engineState, routes: newConfig.routes,
+                                     customEngine: ProcessRule.customEngine(newConfig))
             }
         }
 

@@ -45,6 +45,24 @@ enum ProcessRule {
         case routeUnavailable
         /// An entry of Bypass mode's Apps list, while another mode is in use.
         case notInBypassMode
+        /// A process rule while Bypass or VPN Only mode is in use: per-app routing compiles
+        /// process rules in Custom mode only (FlowPolicyCompiler).
+        case notInCustomMode
+        /// The app is VPN Bypass itself or a VPN or network-security app (by its signing team):
+        /// the extension turns its connections down, so it keeps its own path.
+        case vpnClientApp
+
+        /// The rule does nothing until per-app routing serves it: the engine's state, not the
+        /// rule's route or the mode, keeps it out.
+        var waitsForEngine: Bool {
+            switch self {
+            case .perAppRoutingNotAvailable, .perAppRoutingOff, .perAppRoutingWaitingForApproval, .perAppRoutingBlocked,
+                 .perAppRoutingStarting, .perAppRoutingPaused, .perAppRoutingUpdateWaiting, .perAppRoutingFailed:
+                return true
+            case .routeNotSupported, .routeUnavailable, .notInBypassMode, .notInCustomMode, .vpnClientApp:
+                return false
+            }
+        }
     }
 
     /// The engine that serves `rule`, and why none does. A process rule with the Direct route is
@@ -53,11 +71,15 @@ enum ProcessRule {
     /// it). Every other kind is a destination the kernel engine routes. `engine` defaults to the
     /// state of a build without per-app routing, the answer the pure `CommandRouter` gives; the
     /// control surface fills in the live one. A rule turned off is not served and has no reason:
-    /// its own switch says why.
+    /// its own switch says why. `customEngine` is whether Custom mode's rules run now
+    /// (`RouteManager.usesCustomEngine`): in another mode the compiler sends no process rule to
+    /// the extension, so none is served whatever the engine does.
     static func serving(_ rule: Rule, engine: FlowEngineState = .unavailable(.notInThisBuild),
-                        routeIsDirect: Bool = true, routeUsable: Bool = true) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+                        routeIsDirect: Bool = true, routeUsable: Bool = true,
+                        customEngine: Bool = true) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
         guard rule.matchType == .process else { return (.kernel, nil) }
         if case .unavailable = engine { return (.none, .perAppRoutingNotAvailable) }
+        guard customEngine else { return (.none, .notInCustomMode) }
         guard routeUsable else { return (.none, .routeUnavailable) }
         guard routeIsDirect else { return (.none, .routeNotSupported) }
         if let reason = engine.ruleReason { return (.none, reason) }
@@ -66,13 +88,26 @@ enum ProcessRule {
     }
 
     /// `serving` for the rule's route (nil: deleted).
-    static func serving(_ rule: Rule, engine: FlowEngineState, route: Route?) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
-        serving(rule, engine: engine, routeIsDirect: route?.egress == .direct, routeUsable: route?.enabled ?? false)
+    static func serving(_ rule: Rule, engine: FlowEngineState, route: Route?,
+                        customEngine: Bool = true) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        serving(rule, engine: engine, routeIsDirect: route?.egress == .direct, routeUsable: route?.enabled ?? false,
+                customEngine: customEngine)
     }
 
     /// `serving` with the rule's route looked up in `routes`.
-    static func serving(_ rule: Rule, engine: FlowEngineState, routes: [Route]) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
-        serving(rule, engine: engine, route: routes.first { $0.id == rule.routeId })
+    static func serving(_ rule: Rule, engine: FlowEngineState, routes: [Route],
+                        customEngine: Bool = true) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        serving(rule, engine: engine, route: routes.first { $0.id == rule.routeId }, customEngine: customEngine)
+    }
+
+    /// `serving` for a rule of `config`, in the mode it runs now.
+    static func serving(_ rule: Rule, engine: FlowEngineState, config: Config) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        serving(rule, engine: engine, routes: config.routes, customEngine: customEngine(config))
+    }
+
+    /// Whether Custom mode's rules run now, the only mode whose process rules per-app routing serves.
+    static func customEngine(_ config: Config) -> Bool {
+        RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
     }
 
     /// The Rules page's line under a process rule, by why nothing serves it (nil: it is served).
@@ -107,6 +142,10 @@ enum ProcessRule {
             return String(localized: "Inactive: this rule's route was deleted or is turned off.", bundle: bundle)
         case .notInBypassMode:
             return String(localized: "Inactive: the Apps list works in Bypass mode.", bundle: bundle)
+        case .notInCustomMode:
+            return String(localized: "Inactive: rules for apps work in Custom mode.", bundle: bundle)
+        case .vpnClientApp:
+            return String(localized: "Turned down: this is a VPN or network security app, so per-app routing leaves it on its own path.", bundle: bundle)
         }
     }
 
@@ -127,6 +166,8 @@ enum ProcessRule {
         case .routeNotSupported: return "inactive: per-app routing serves the Direct route only"
         case .routeUnavailable: return "inactive: its route was deleted or is turned off"
         case .notInBypassMode: return "inactive: the Apps list works in Bypass mode"
+        case .notInCustomMode: return "inactive: rules for apps work in Custom mode"
+        case .vpnClientApp: return "turned down: a VPN or network security app keeps its own path"
         case nil: return "inactive" + (reason.map { ": \($0)" } ?? "")
         }
     }

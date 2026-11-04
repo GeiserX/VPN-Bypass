@@ -96,7 +96,7 @@ public struct SiteRouteAnswer: Codable, Equatable, Sendable {
     public var verdict: Verdict
     /// One or two sentences in the app's language.
     public var summary: String
-    /// Nothing lists it, so the Status page offers to add it.
+    /// Nothing lists it and it does not go Direct already, so the Status page offers to add it.
     public var canAdd: Bool
     /// While routing is paused, how long for (`PauseState.wireDescription`); nil otherwise.
     public var paused: String? = nil
@@ -168,6 +168,9 @@ enum SiteRoute {
         /// wildcard, or a rule with a wildcard pattern: why no route is learned for the name.
         var notRouted: SiteRouteAnswer.NotRouted? = nil
         var resolverDomain: String? = nil
+        /// defaultRoute: the default route is Direct, so the name already goes direct and
+        /// Send Direct would change nothing.
+        var defaultIsDirect = false
         /// Custom: the enabled process rules, which decide nothing without per-app routing.
         var inactiveAppRules: [String] = []
         /// Per-app routing's state when the rules were read, for the sentence about them.
@@ -206,11 +209,13 @@ enum SiteRoute {
                 return kept
             }
             let loopback = addresses.allSatisfy { $0.hasPrefix("127.") }
-            return Found(match: .paused, entry: after.entry,
-                         expected: loopback ? .physical : (s.vpnInterface.map { .tunnel($0) } ?? .physical),
-                         pause: pause, matchAfterPause: after.match,
-                         // Loopback never takes the VPN, so its sentence does not say it does.
-                         vpnUp: s.vpnInterface != nil && !loopback)
+            var paused = Found(match: .paused, entry: after.entry,
+                               expected: loopback ? .physical : (s.vpnInterface.map { .tunnel($0) } ?? .physical),
+                               pause: pause, matchAfterPause: after.match,
+                               // Loopback never takes the VPN, so its sentence does not say it does.
+                               vpnUp: s.vpnInterface != nil && !loopback)
+            paused.defaultIsDirect = after.defaultIsDirect
+            return paused
         }
         // With no VPN there is one way out, around every tunnel, listed or not.
         let vpnWay: PathCheck.Way = s.vpnInterface.map { .tunnel($0) } ?? .physical
@@ -260,8 +265,10 @@ enum SiteRoute {
                 return found
             }
             if let id = s.defaultRouteId, let route = byId[id] {
-                return Found(match: .defaultRoute, routeName: route.name,
-                             expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
+                var found = Found(match: .defaultRoute, routeName: route.name,
+                                  expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
+                found.defaultIsDirect = route.egress == .direct
+                return found
             }
             return Found(match: .none, expected: loopback ? .physical : s.vpnInterface.map { .tunnel($0) })
         }
@@ -450,7 +457,7 @@ enum SiteRoute {
             expected: expected?.code, checks: checks,
             control: control.map { SiteRouteCheck($0.probe, verdict: nil) },
             verdict: verdict, summary: check.map { why + " " + $0 } ?? why,
-            canAdd: [.none, .defaultRoute].contains(found.matchAfterPause ?? found.match),
+            canAdd: [.none, .defaultRoute].contains(found.matchAfterPause ?? found.match) && !found.defaultIsDirect,
             paused: found.pause?.wireDescription,
             splitTunnel: split == nil ? nil : true,
             notRouted: found.notRouted, resolverDomain: found.resolverDomain,

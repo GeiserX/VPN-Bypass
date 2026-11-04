@@ -208,16 +208,39 @@ public struct SanitizedRule: Codable, Equatable, Sendable {
     /// reason still decodes in an older `vpnb`.
     public var inactiveReason: String? = nil
 
-    init(_ rule: Rule, engine: FlowEngineState = .unavailable(.notInThisBuild), routes: [Route]? = nil) {
+    init(_ rule: Rule, engine: FlowEngineState = .unavailable(.notInThisBuild), routes: [Route]? = nil,
+         customEngine: Bool = true) {
         id = rule.id
         matchType = rule.matchType
         pattern = rule.pattern
         routeId = rule.routeId
         enabled = rule.enabled
         order = rule.order
-        let serving = routes.map { ProcessRule.serving(rule, engine: engine, routes: $0) } ?? ProcessRule.serving(rule, engine: engine)
+        let serving = routes.map { ProcessRule.serving(rule, engine: engine, routes: $0, customEngine: customEngine) }
+            ?? ProcessRule.serving(rule, engine: engine, customEngine: customEngine)
         servedBy = serving.servedBy
         inactiveReason = serving.reason?.rawValue
+    }
+
+    /// A `servedBy` this build does not know (a later engine) decodes as nil, as from an older
+    /// app, instead of failing the whole reply in an older `vpnb`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        matchType = try c.decode(MatchType.self, forKey: .matchType)
+        pattern = try c.decode(String.self, forKey: .pattern)
+        routeId = try c.decode(UUID.self, forKey: .routeId)
+        enabled = try c.decode(Bool.self, forKey: .enabled)
+        order = try c.decode(Int.self, forKey: .order)
+        servedBy = RuleServedBy.lenient(c, forKey: .servedBy)
+        inactiveReason = try c.decodeIfPresent(String.self, forKey: .inactiveReason)
+    }
+}
+
+extension RuleServedBy {
+    /// The value under `key`, nil when it is missing or one this build does not know.
+    static func lenient<K: CodingKey>(_ c: KeyedDecodingContainer<K>, forKey key: K) -> RuleServedBy? {
+        (try? c.decodeIfPresent(String.self, forKey: key)).flatMap(RuleServedBy.init(rawValue:))
     }
 }
 

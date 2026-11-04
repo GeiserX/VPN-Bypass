@@ -802,9 +802,10 @@ struct RuleRow: View {
     /// counts) or why not, which outranks the proxy note (a process rule never reaches a proxy in
     /// this version); otherwise the proxy note.
     static func detail(for rule: Rule, route: Route?, engine: FlowEngineState = .unavailable(.notInThisBuild),
-                       counters: FlowEngineRuleCounters? = nil, in bundle: Bundle = .main) -> String? {
+                       customEngine: Bool = true, counters: FlowEngineRuleCounters? = nil,
+                       in bundle: Bundle = .main) -> String? {
         if rule.matchType == .process {
-            let serving = ProcessRule.serving(rule, engine: engine, route: route)
+            let serving = ProcessRule.serving(rule, engine: engine, route: route, customEngine: customEngine)
             // A rule turned off has no note: its own switch says it does nothing.
             guard serving.servedBy == .perAppEngine || serving.reason != nil else { return nil }
             return ProcessRule.rowNote(serving.reason, claimed: counters?.claimed ?? 0, bound: counters?.bound ?? 0, in: bundle)
@@ -817,6 +818,7 @@ struct RuleRow: View {
             glyph: Self.glyph(for: rule.matchType),
             name: patternDisplay,
             detail: Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
+                                customEngine: ProcessRule.customEngine(routeManager.config),
                                 counters: flowEngine.counters(forRule: rule.id.uuidString)),
             actions: actions,
             isOn: Binding(get: { rule.enabled }, set: onToggle),

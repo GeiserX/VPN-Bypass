@@ -518,6 +518,18 @@ enum StatusPage {
 }
 
 extension DropdownStatus.Input {
+    /// Fills the app-rule counts from `rules` (the enabled process rules among them).
+    mutating func countAppRules(_ rules: [Rule], config: Config, engine: FlowEngineState) {
+        let apps = rules.filter { $0.enabled && $0.matchType == .process }
+        enabledAppRules = apps.count
+        servedAppRules = 0
+        waitingAppRules = 0
+        for rule in apps {
+            let serving = ProcessRule.serving(rule, engine: engine, config: config)
+            if serving.servedBy == .perAppEngine { servedAppRules += 1 } else if serving.reason?.waitsForEngine == true { waitingAppRules += 1 }
+        }
+    }
+
     /// Everything the status sentence reads, from the live app state. The dropdown's header
     /// and the Status page both build their input here, so they read the same facts.
     @MainActor
@@ -527,7 +539,7 @@ extension DropdownStatus.Input {
             ? .custom
             : (config.routingMode == .vpnOnly ? .vpnOnly : .bypass)
         let routed = Set(routeManager.activeRoutes.map(\.destination))
-        return DropdownStatus.Input(
+        var input = DropdownStatus.Input(
             isVPNConnected: routeManager.isVPNConnected,
             vpnName: routeManager.vpnType.flatMap { $0 == .unknown ? nil : $0.rawValue },
             helperReady: helperReady,
@@ -569,6 +581,8 @@ extension DropdownStatus.Input {
             enabledApps: mode == .bypass ? config.bypassApps.filter(\.enabled).count : 0,
             appsServed: FlowEngineManager.shared.state == .active && BypassAppServing.listIsLive(config)
         )
+        if mode == .custom { input.countAppRules(config.rules, config: config, engine: FlowEngineManager.shared.state) }
+        return input
     }
 }
 
