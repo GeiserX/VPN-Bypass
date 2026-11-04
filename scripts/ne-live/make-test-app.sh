@@ -3,7 +3,10 @@
 # ne-driver (main.swift beside this script), signed like a release but not notarized. For a test
 # Mac only (the Mac mini: SIP off, AMFI off); never install it anywhere else.
 #
-#   scripts/ne-live/make-test-app.sh "VPN Bypass.app" "/tmp/out/VPN Bypass NE Test.app" [extension version]
+#   scripts/ne-live/make-test-app.sh "VPN Bypass.app" "/tmp/out/VPN Bypass NE Test.app" [extension version] [--engine]
+#
+# With --engine the executable is engine-main.swift instead: the app's own FlowEngineManager and
+# LiveFlowEngineSystem, compiled as they are, driven like the Settings switch.
 #
 # Signing needs SIGN_IDENTITY (certificate SHA-1), PROVISIONING_PROFILE_APP and
 # PROVISIONING_PROFILE_PROXY. SIGN_KEYCHAIN names an unlocked keychain holding the identity; codesign
@@ -12,8 +15,14 @@
 # extension's Info.plist, so a second bundle with a higher one replaces an activated extension (L9).
 set -euo pipefail
 
-src="${1:?usage: $0 APP OUT [VERSION]}"
-dst="${2:?usage: $0 APP OUT [VERSION]}"
+engine=0
+positional=()
+for a in "$@"; do
+  if [ "$a" = "--engine" ]; then engine=1; else positional+=("$a"); fi
+done
+set -- "${positional[@]}"
+src="${1:?usage: $0 APP OUT [VERSION] [--engine]}"
+dst="${2:?usage: $0 APP OUT [VERSION] [--engine]}"
 version="${3:-}"
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$here/../.."
@@ -30,7 +39,20 @@ if [ -n "$version" ]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$proxy/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" "$proxy/Contents/Info.plist"
 fi
-swiftc -O -swift-version 5 -o "$dst/Contents/MacOS/VPNBypass" "$here/main.swift" "$root"/Sources/VPNBypassPolicy/*.swift
+if [ "$engine" = 1 ]; then
+  build="$(mktemp -d)"
+  trap 'rm -rf "$build"' EXIT
+  swiftc -O -swift-version 5 -parse-as-library -emit-library -static -module-name VPNBypassPolicy \
+    -o "$build/libVPNBypassPolicy.a" -emit-module -emit-module-path "$build/VPNBypassPolicy.swiftmodule" \
+    "$root"/Sources/VPNBypassPolicy/*.swift
+  cp "$here/engine-main.swift" "$build/main.swift"
+  core="$root/Sources/VPNBypassCore"
+  swiftc -O -swift-version 5 -I "$build" -L "$build" -lVPNBypassPolicy -o "$dst/Contents/MacOS/VPNBypass" "$build/main.swift" \
+    "$core/FlowEngineManager.swift" "$core/FlowEngineSystem.swift" "$core/FlowEngineState.swift" \
+    "$core/ProcessRule.swift" "$core/RouteModel.swift"
+else
+  swiftc -O -swift-version 5 -o "$dst/Contents/MacOS/VPNBypass" "$here/main.swift" "$root"/Sources/VPNBypassPolicy/*.swift
+fi
 
 keychain=()
 [ -z "${SIGN_KEYCHAIN:-}" ] || keychain=(--keychain "$SIGN_KEYCHAIN")
