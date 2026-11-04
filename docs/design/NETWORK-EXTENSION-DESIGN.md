@@ -58,8 +58,9 @@ Why this first:
 - It fails safe. If the extension is off, dead or unapproved, the app's traffic stays in the VPN. Nothing
   leaks. The spike confirmed it: after a `kill -9` the claimed app's next requests went into the VPN
   (Part B, B3).
-- It writes no kernel routes, so it adds nothing to the route churn that has troubled GlobalProtect
-  before (#65, #106).
+- It writes no kernel routes per destination, so it adds nothing to the route churn that has troubled
+  GlobalProtect before (#65, #106). Its one route is a scoped default on the physical interface, and
+  only past a VPN that leaves none (R12, 3.5); GlobalProtect leaves one, so it never gets it.
 - It needs no new DNS machinery. The cost of that: a bypassed app still resolves through the VPN's DNS
   (or through our forwarder for a wildcard), so the VPN's resolver sees the names it looks up, and a CDN
   may hand it an address for the VPN's region rather than the user's.
@@ -328,7 +329,35 @@ extension guards the listed app's connection:
   30 s, then one claim tries again (`EgressHealth`). The connects that failed are not handed back: the
   app sees them fail, and its next connection (a retry, or the next address) goes through the VPN, in
   well under a second on the mini.
-Whether the helper adds the scoped default for such VPNs is open (R12).
+The helper adds the scoped default for such VPNs (R12, decided 2026-11-04):
+- **When.** The app asks for it while the engine claims flows (on, session up, a policy with app
+  rules), the VPN is up, and the physical interface and its router are known
+  (`ScopedDefaultRoute.want`). It asks before it pushes a policy that claims, so a listed app's
+  first connect finds the route, and again with every push, which renews it.
+- **What the helper writes** (`ScopedDefaultRoute.plan`, `Helper/ScopedDefaultKeeper.swift`):
+  nothing when the interface already has a scoped default that is not ours (a VPN that became the
+  primary service leaves one); otherwise, and only when the interface carries its unscoped default
+  through that router, the route `route -n add -ifscope <iface> default <router>` writes, through
+  the routing socket, tagged `RTF_PROTO1`. Never the unscoped default, never a VPN's route. The XPC
+  call `setScopedDefaultRoute` (helper 2.9.0) takes an `en` interface and a unicast IPv4 router,
+  checked again in the helper; an empty interface removes ours.
+- **When it goes.** The engine turning off, a policy that claims nothing (Pause, VPN Only, a kill
+  switch), the VPN going down, another interface or router (the next request replaces it), the app
+  quitting, the helper starting or stopping (the app asks again after a helper restart, last in
+  `restoreAfterHelperRestart`), and a lease: no request for 150 s and the helper removes it. One
+  exception: when the interface no longer carries the unscoped default (the VPN became the primary
+  service while ours was there), macOS keeps a scoped default for that interface and may rely on
+  ours, so it stays; the kernel drops it with the interface's address.
+- **The extension.** The policy names the interfaces that have a scoped default, each with a stamp
+  that changes when the route was put in again (`FlowPolicy.egressRoutes`). On a new interface or
+  stamp the extension forgets the failed connects it counted there (`EgressHealth.forget`), so a
+  route that came back (after a helper restart) is used at once instead of after the 30 s cooldown.
+  The two-failure fallback above stays for a helper older than 2.9.0 and a route the helper refused.
+
+Evidence, with a `wg-quick` tunnel on the mini (`NE-ENGINE-LIVE-RESULTS.md`, R12): macOS keeps the
+unscoped default on the primary interface and adds no scoped one; with the route, the listed app
+went around the VPN on its first connect while `curl` stayed in the tunnel; turning the engine off
+removed it.
 
 ### 3.6 UDP
 
@@ -699,7 +728,7 @@ Before L4 is answered, every live step uses one narrow rule: a test binary, neve
 | R9 | Throughput loss through user space | **Hard.** Claim only listed apps' flows; L10 measures |
 | R10 | Known Apple bugs with any transparent proxy installed: FaceTime/AirDrop, captive portals, flows lost after sleep | **Hard**, outside our code. Decline Apple daemons, pause on captive networks, document; L6 |
 | R11 | Homebrew cannot remove the extension | **Hard.** In-app remove plus a documented manual path. Seen in step 5: after `brew uninstall` it runs on and every new TCP connection still passes through it; whether a reboot ends that is untested (L11) |
-| R12 | A route-only full-tunnel VPN leaves the physical interface with no scoped default route, so claimed flows cannot connect (3.5) | **Hard.** The extension stops claiming for that interface after two failures, so the listed app falls back to the VPN. Fix: the helper adds an `-ifscope` default route for such VPNs; a decision for a later step |
+| R12 | A route-only full-tunnel VPN leaves the physical interface with no scoped default route, so claimed flows cannot connect (3.5) | **Closed.** The helper (2.9.0) holds an `-ifscope` default route on the physical interface while the engine claims flows and the VPN is up, only when the interface has none, and removes it with the engine, the VPN, a network change, quit, a helper restart and a 150 s lease (3.5). Proven on the mini with a `wg-quick` tunnel: the listed app's first connect went around the VPN. With an older helper the two-failure fallback still applies |
 
 ## 10. The plan: one PR per step
 

@@ -185,3 +185,59 @@ observer now runs on the posting thread and hops to the main actor.
 Cleanup: configuration removed, extension 6.0.907 deactivated (`terminated waiting to uninstall on
 reboot`), test app, tunnel and signing material deleted, keychain search list as it was, and the
 system extension authorization rule back to `authenticate-admin-nonshared`.
+
+## R12: the helper's scoped default route, live
+
+Run on the same mini on 2026-11-04, macOS 26.6.1, for the step that closes R12.
+
+- **The stand-in VPN:** a throwaway `wg-quick` tunnel (`AllowedIPs = 0.0.0.0/0`, so `0/1` and
+  `128/1` on `utun9`) to a peer on another LAN machine that NATs to a second internet line.
+  `VPN_IP` is that line's address, `HOME_IP` the mini's own.
+- **The bundle:** `make-test-app.sh --engine` (extension 6.0.909, then 6.0.910), with
+  `engine-main.swift` given `--route-driver` and `--gateway`: the app's `FlowEngineManager` decides
+  when to ask for the route (`syncEgressRoute`), and each request runs the helper's own code
+  (`ScopedDefaultKeeper`, `HelperTool`, `ScopedDefaultRoute`) from `scoped-route-main.swift` under
+  `sudo`. The installed helper of the other VPN Bypass on the mini was not replaced, so the XPC hop
+  itself is covered by the unit tests only.
+- **The listed app:** a copy of `curl` named `ne9-fetch`, Custom rule with Direct on `en0`.
+
+### What macOS keeps with the half routes up
+
+```
+0/1                utun9              UScg                utun9
+default            <router>           UGScg                 en0    <- primary: unscoped only
+default            <router>           UGScIg                en1    <- secondary: scoped
+default            link#27            UCSIg               utun4    <- another tunnel's scoped default
+128.0/1            utun9              USc                 utun9
+```
+
+`route -n get 1.1.1.1` named `utun9`; `route -n get -ifscope en0 1.1.1.1` answered "not in table";
+`curl --interface en0` failed in 0.01 s (exit 7), `curl --interface en1` reached `HOME_IP`. macOS
+never adds a scoped default for the primary interface; the half routes win for everything unscoped.
+`route -n add -ifscope en0 default <router>` by hand gave `default <router> UGScIg en0`, after which
+`curl --interface en0` reached `HOME_IP` and plain `curl` still `VPN_IP`; deleting it brought the
+first state back.
+
+### The engine with the helper's route
+
+| Step | Route on `en0` | `ne9-fetch` | `curl` |
+|---|---|---|---|
+| Switch on, both approvals | `route set en0: added` logged before the first push; `UGS1cIg en0` | `HOME_IP` on the first connect (one `Trying`, 0.14 to 0.17 s) | `VPN_IP` |
+| Control: route deleted by hand | none | first two connects fail (exit 7, 4 ms), the third goes to `VPN_IP` (cooldown) | `VPN_IP` |
+| Next heartbeat (30 s) | `added` again | `HOME_IP` | |
+| Route deleted, two failures, then Pause and Resume 2 s later | `absent` at Pause, `added` at Resume, new stamp in the policy | `HOME_IP` 4 s after the failures, inside the 30 s cooldown (the extension forgot them) | |
+| Switch off | `route clear: removed`, table back to the first state | `VPN_IP` | `VPN_IP` |
+
+An earlier build that only named the interface in the policy (no stamp) did not forget the failures
+when the route came back with the same interface named: the listed app went to `VPN_IP` until the
+cooldown ran out. That is why each route the helper puts in again gets a new stamp.
+
+The driver also showed the boundary checks: `set utun9 ...` and `set en0 fe80::1` were refused, a
+router that is not the interface's own default gave `refused`, and a second `set` answered `kept`
+with no write.
+
+Cleanup: configuration removed and extension 6.0.910 deactivated by the switch (`terminated waiting
+to uninstall on reboot`, as were 6.0.909), test app, driver, tunnel, the peer and its NAT rules
+deleted, no scoped default of ours left, signing keychain deleted and the search list as it was, and
+the system extension authorization rule back to `authenticate-admin-nonshared`. The mini was not
+restarted.
