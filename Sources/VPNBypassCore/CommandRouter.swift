@@ -101,7 +101,7 @@ public struct ControlResult: Codable, Equatable, Sendable {
     public var logs: [ControlLogEntry]? = nil
     /// `why`: which entry routes a host, and the path check on it.
     public var why: SiteRouteAnswer? = nil
-    /// `engine.status`, `engine.on`, `engine.off`: per-app routing.
+    /// `engine.status`, `engine.on`, `engine.off`, `engine.remove`: per-app routing.
     public var engine: FlowEngineStatus? = nil
     /// `app.list`, `app.add`: Bypass mode's Apps list.
     public var apps: [ControlApp]? = nil

@@ -41,16 +41,56 @@ final class FakeFlowEngineSystem: FlowEngineSystem {
     var boundByRule: [String: Int] = [:]
     var extensionVersion: String?
 
-    var calls: Int { activationRequests + saves.count + starts + stops + sent.count }
+    /// removeFromPreferences calls, and whether they succeed.
+    var configurationRemovals = 0
+    var removeAnswer = true
+    var deactivationRequests = 0
+    /// Answered at once when set; otherwise `finishDeactivation` answers (the password prompt).
+    var deactivationAnswer: FlowEngineDeactivation? = .removed
+    private var pendingDeactivation: (@MainActor (FlowEngineDeactivation) -> Void)?
+    /// The extension is installed (activated and not yet deactivated).
+    var installed = false
+    /// What happened, in order: "activate", "removeConfiguration", "deactivate".
+    var log: [String] = []
+
+    var calls: Int { activationRequests + saves.count + starts + stops + sent.count + configurationRemovals + deactivationRequests }
+
+    func removeConfiguration() async -> Bool {
+        configurationRemovals += 1
+        log.append("removeConfiguration")
+        guard removeAnswer else { return false }
+        configuration = nil
+        session = .none
+        return true
+    }
+
+    func requestDeactivation(completion: @escaping @MainActor (FlowEngineDeactivation) -> Void) {
+        deactivationRequests += 1
+        log.append("deactivate")
+        if let deactivationAnswer { finish(deactivationAnswer, completion) } else { pendingDeactivation = completion }
+    }
+
+    func finishDeactivation(_ outcome: FlowEngineDeactivation) {
+        if let c = pendingDeactivation { finish(outcome, c) }
+        pendingDeactivation = nil
+    }
+
+    private func finish(_ outcome: FlowEngineDeactivation, _ completion: @MainActor (FlowEngineDeactivation) -> Void) {
+        if outcome == .removed { installed = false }
+        completion(outcome)
+    }
 
     func requestActivation(onNeedsApproval: @escaping @MainActor (_ replacing: Bool) -> Void,
                            completion: @escaping @MainActor (FlowEngineActivation) -> Void) {
         activationRequests += 1
+        log.append("activate")
+        if activationAnswer == .activated { installed = true }
         if asksApproval { onNeedsApproval(replacing) }
         if let activationAnswer { completion(activationAnswer) } else { pendingActivation = completion }
     }
 
     func finishActivation(_ outcome: FlowEngineActivation) {
+        if outcome == .activated { installed = true }
         pendingActivation?(outcome)
         pendingActivation = nil
     }
@@ -260,7 +300,9 @@ final class FlowEngineManagerTests: XCTestCase {
     func testATurnOnRightAfterATurnOffWaitsForTheDisablingSave() async {
         await turnOnToActive()
         system.holdSave = true
-        engine.setEnabled(false)
+        // A config.json that says off (an import): the app's own turn-off only disables.
+        enabled = false
+        engine.followSwitch()
         engine.setEnabled(true)
         try? await Task.sleep(nanoseconds: 30_000_000)
         system.holdSave = false
@@ -306,14 +348,120 @@ final class FlowEngineManagerTests: XCTestCase {
         XCTAssertFalse(engine.wantsOn)
     }
 
-    func testTurningOffStopsTheSessionAndDisablesTheConfiguration() async {
+    /// Off is the old way: turning it off by hand stops the session, removes the configuration
+    /// and files the deactivation request, so nothing of the extension stays on the Mac.
+    func testTurningOffByHandRemovesTheConfigurationAndTheExtension() async {
         await turnOnToActive()
+        system.deactivationAnswer = nil
         engine.setEnabled(false)
         XCTAssertEqual(engine.state, .off)
         XCTAssertFalse(enabled)
         XCTAssertEqual(system.stops, 1)
-        await until("disabled") { system.saves.last == false }
-        XCTAssertEqual(system.configuration, false)
+        XCTAssertEqual(engine.removal, .removing)
+        XCTAssertEqual(engine.status().removal, "removing")
+        await until("deactivation filed") { system.deactivationRequests == 1 }
+        XCTAssertEqual(system.log.suffix(2), ["removeConfiguration", "deactivate"], "the configuration goes first")
+        XCTAssertNil(system.configuration, "removed, not disabled")
+        XCTAssertFalse(system.saves.contains(false), "no disabling save on the way")
+        system.finishDeactivation(.removed)
+        await until("removed") { engine.removal == .removed }
+        XCTAssertFalse(system.installed)
+        XCTAssertFalse(engine.mayBeInstalled)
+        XCTAssertFalse(PerAppRouting.showsRemoveButton(enabled: enabled, state: engine.state,
+                                                       mayBeInstalled: engine.mayBeInstalled, removal: engine.removal))
+        XCTAssertEqual(engine.state, .off)
+    }
+
+    /// A turn-off the app makes by itself never shows a password prompt unasked: it disables
+    /// the configuration, and Remove Extension then takes what is left.
+    func testAnAutomaticTurnOffOnlyDisablesAndRemoveExtensionTakesTheRest() async {
+        await turnOnToActive()
+        system.crash()
+        await until("restarted") { system.starts == 2 && engine.state == .active }
+        system.crash()
+        await until("turned off") { engine.state == .failed(.stoppedTwice) }
+        await until("disabled") { system.configuration == false }
+        XCTAssertEqual(system.deactivationRequests + system.configurationRemovals, 0)
+        XCTAssertTrue(engine.mayBeInstalled)
+        XCTAssertTrue(PerAppRouting.showsRemoveButton(enabled: enabled, state: engine.state,
+                                                      mayBeInstalled: engine.mayBeInstalled, removal: engine.removal))
+
+        engine.removeExtension()
+        await until("removed") { engine.removal == .removed }
+        XCTAssertNil(system.configuration)
+        XCTAssertFalse(system.installed)
+        XCTAssertEqual(system.deactivationRequests, 1)
+        XCTAssertFalse(enabled)
+    }
+
+    /// At launch with the switch off, a configuration left behind shows Remove Extension; with
+    /// none, nothing shows and nothing is asked.
+    func testRemoveExtensionShowsOnlyWhenSomethingMayBeLeft() async {
+        engine.begin()
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertFalse(engine.mayBeInstalled)
+        XCTAssertEqual(system.calls, 0)
+
+        let left = FakeFlowEngineSystem()
+        left.configuration = false
+        let e = makeEngine(left)
+        e.begin()
+        await until("left behind") { e.mayBeInstalled }
+        XCTAssertEqual(left.deactivationRequests, 0, "a launch never asks for a password")
+        XCTAssertFalse(PerAppRouting.showsRemoveButton(enabled: true, state: .active, mayBeInstalled: true, removal: nil),
+                       "never while the switch is on")
+        XCTAssertFalse(PerAppRouting.showsRemoveButton(enabled: false, state: .unavailable(.notInThisBuild), mayBeInstalled: true, removal: nil))
+        XCTAssertFalse(PerAppRouting.showsRemoveButton(enabled: false, state: .off, mayBeInstalled: true, removal: .removing))
+    }
+
+    func testARemovalThatFailsOrWaitsForARestartSaysSo() async {
+        for (answer, removal, left) in [(FlowEngineDeactivation.failed(code: 1), FlowEngineRemoval.failed, true),
+                                        (.willCompleteAfterReboot, .needsRestart, false),
+                                        (.failed(code: 4), .removed, false)] {
+            let s = FakeFlowEngineSystem()
+            s.configuration = false
+            s.deactivationAnswer = answer == .failed(code: 4) ? FlowEngineDeactivation.forError(code: 4) : answer
+            let e = makeEngine(s)
+            e.removeExtension()
+            await until("\(answer)") { e.removal == removal }
+            XCTAssertEqual(e.mayBeInstalled, left, "\(answer)")
+            XCTAssertEqual(e.state, .off)
+        }
+        let s = FakeFlowEngineSystem()
+        s.configuration = false
+        s.removeAnswer = false
+        let e = makeEngine(s)
+        e.removeExtension()
+        await until("a configuration that stays is a failed removal") { e.removal == .failed }
+    }
+
+    /// A turn-on while the removal still waits for its password files the activation request
+    /// only once the removal ended, so the deactivation cannot take away what it installs.
+    func testATurnOnDuringARemovalWaitsForIt() async {
+        await turnOnToActive()
+        system.deactivationAnswer = nil
+        engine.setEnabled(false)
+        await until("deactivation filed") { system.deactivationRequests == 1 }
+        engine.setEnabled(true)
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(system.activationRequests, 1, "nothing filed while the removal waits")
+        XCTAssertNil(engine.removal, "the turn-on reports its own state")
+        system.finishDeactivation(.removed)
+        await until("active again") { engine.state == .active }
+        XCTAssertEqual(system.log.suffix(3), ["removeConfiguration", "deactivate", "activate"])
+        XCTAssertTrue(system.installed)
+        XCTAssertEqual(system.configuration, true)
+        XCTAssertNil(engine.removal)
+    }
+
+    func testRemoveExtensionIsRefusedWhereItCannotRun() async {
+        let unsupported = FakeFlowEngineSystem()
+        unsupported.support = .unavailable(.notInThisBuild)
+        let e = makeEngine(unsupported)
+        e.removeExtension()
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertEqual(unsupported.calls, 0)
+        XCTAssertNil(e.removal)
     }
 
     // MARK: - Pushes
@@ -596,6 +744,7 @@ final class ProcessRuleServingTests: XCTestCase {
         XCTAssertFalse(CommandRouter.isMutating("engine.status"))
         XCTAssertTrue(CommandRouter.isMutating("engine.on"))
         XCTAssertTrue(CommandRouter.isMutating("engine.off"))
+        XCTAssertTrue(CommandRouter.isMutating("engine.remove"))
     }
 
     func testTheNewLinesAreTranslated() throws {
@@ -607,6 +756,9 @@ final class ProcessRuleServingTests: XCTestCase {
         XCTAssertEqual(GeneralPage.Group.perAppRouting.title(in: fr), "Routage par app")
         XCTAssertEqual(ProcessRule.rowNote(.perAppRoutingOff, in: fr), "Inactive : le routage par app est désactivé (Réglages > Général).")
         XCTAssertNotEqual(PerAppRouting.approvals(in: es), PerAppRouting.approvals())
+        XCTAssertEqual(FlowEngineRemoval.removed.line(in: es), "La extensión se quitó de este Mac.")
+        XCTAssertEqual(FlowEngineRemoval.needsRestart.line(in: fr), "macOS retire l'extension au redémarrage du Mac.")
+        XCTAssertNotEqual(PerAppRouting.offNote(in: fr), PerAppRouting.offNote())
     }
 }
 

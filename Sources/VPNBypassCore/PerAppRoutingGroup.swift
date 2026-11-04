@@ -43,6 +43,18 @@ enum PerAppRouting {
         return line
     }
 
+    /// While on: turning it off is the old way, and takes the extension off the Mac.
+    static func offNote(in bundle: Bundle = .main) -> String {
+        String(localized: "Turning it off removes the extension and its configuration from this Mac, so every app follows your routes as before. macOS asks for an administrator password, and turning it on again asks for both approvals again.", bundle: bundle)
+    }
+
+    /// Remove Extension shows while the switch is off and something of it may be left: after
+    /// a turn-off the app made by itself, a declined configuration, or a removal that failed.
+    static func showsRemoveButton(enabled: Bool, state: FlowEngineState, mayBeInstalled: Bool, removal: FlowEngineRemoval?) -> Bool {
+        guard !enabled, switchEnabled(state), removal != .removing else { return false }
+        return mayBeInstalled
+    }
+
     /// The extension runs another version than the app while the state still serves.
     static func updateNote(in bundle: Bundle = .main) -> String {
         String(localized: "An update of the extension is waiting for approval in System Settings.", bundle: bundle)
@@ -88,6 +100,10 @@ struct PerAppRoutingGroup: View {
                     if engine.state == .active, let counts = PerAppRouting.countsLine(engine.reply) { note(counts) }
                     if engine.updateWaiting, engine.state != .updateWaiting { note(PerAppRouting.updateNote()) }
                     note(PerAppRouting.pauseNote())
+                    note(PerAppRouting.offNote())
+                }
+                if !routeManager.config.flowEngine.enabled, let removal = engine.removal {
+                    note(removal.line())
                 }
                 if engine.state.waitsInSystemSettings {
                     Button(String(localized: "Open System Settings")) {
@@ -95,6 +111,14 @@ struct PerAppRoutingGroup: View {
                     }
                     .controlSize(.small)
                     .accessibilityLabel(String(localized: "Open System Settings to allow per-app routing"))
+                }
+                if PerAppRouting.showsRemoveButton(enabled: routeManager.config.flowEngine.enabled, state: engine.state,
+                                                   mayBeInstalled: engine.mayBeInstalled, removal: engine.removal) {
+                    Button(String(localized: "Remove Extension")) {
+                        engine.removeExtension()
+                    }
+                    .controlSize(.small)
+                    .accessibilityLabel(String(localized: "Remove the per-app routing extension from this Mac"))
                 }
             }
             .padding(.horizontal, ListRow.inset)

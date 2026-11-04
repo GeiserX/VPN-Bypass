@@ -147,9 +147,10 @@ public enum ControlSurface {
         return response
     }
 
-    /// `engine.status`, `engine.on`, `engine.off`: per-app routing. `on` can only file the
-    /// activation request: the reply says when the next step waits in System Settings. Nil for
-    /// any other verb.
+    /// `engine.status`, `engine.on`, `engine.off`, `engine.remove`: per-app routing. `on` can only
+    /// file the activation request: the reply says when the next step waits in System Settings.
+    /// `off` (when it was on) and `remove` take the extension off the Mac, which waits for an
+    /// administrator password. Nil for any other verb.
     @MainActor
     static func engine(_ cmd: String) -> ControlResponse? {
         let engine = FlowEngineManager.shared
@@ -164,14 +165,22 @@ public enum ControlSurface {
             engine.setEnabled(true)
         case "engine.off":
             engine.setEnabled(false)
+        case "engine.remove":
+            if case .unavailable = engine.state {
+                return ControlResponse(ok: false, error: ControlError(code: "unavailable",
+                    message: "per-app routing cannot run here, so there is no extension to remove: \(engine.state.reasonCode ?? "unavailable")"))
+            }
+            engine.removeExtension()
         default:
             return nil
         }
         var result = ControlResult(engine: engine.status())
         if cmd == "engine.on" {
             result.message = "per-app routing is turning on; macOS asks to allow the extension in System Settings > General > Login Items & Extensions > Network Extensions, then to allow the proxy configuration. engine.status shows where it is"
-        } else if cmd == "engine.off" {
-            result.message = "per-app routing is off; every app follows the routes"
+        } else if cmd == "engine.off" || cmd == "engine.remove" {
+            result.message = engine.removal == .removing
+                ? "per-app routing is off; every app follows the routes. Its extension is being removed: macOS asks for an administrator password. engine.status shows the removal"
+                : "per-app routing is off; every app follows the routes"
         }
         return ControlResponse(ok: true, result: result)
     }

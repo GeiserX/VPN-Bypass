@@ -172,6 +172,32 @@ public enum FlowEngineState: Equatable, Sendable {
     }
 }
 
+/// Where taking the extension off the Mac stands (turning per-app routing off, or Remove
+/// Extension). Its wire code is the raw value.
+public enum FlowEngineRemoval: String, Codable, Sendable {
+    /// The configuration is being removed, or the deactivation waits for the administrator password.
+    case removing
+    case removed
+    /// macOS removes the extension after a restart.
+    case needsRestart
+    /// The configuration or the extension could not be removed (the code is logged).
+    case failed
+
+    /// One line for the General page's group.
+    func line(in bundle: Bundle = .main) -> String {
+        switch self {
+        case .removing:
+            return String(localized: "Removing the extension from this Mac. macOS asks for an administrator password.", bundle: bundle)
+        case .removed:
+            return String(localized: "The extension is removed from this Mac.", bundle: bundle)
+        case .needsRestart:
+            return String(localized: "macOS removes the extension when you restart the Mac.", bundle: bundle)
+        case .failed:
+            return String(localized: "The extension could not be removed. Try again, or see Troubleshooting for the manual steps.", bundle: bundle)
+        }
+    }
+}
+
 /// Per rule, what the extension did with its app's connections since it started.
 public struct FlowEngineRuleCounters: Codable, Equatable, Sendable {
     /// A rule's UUID, or an Apps list entry's. Never an app name.
@@ -203,9 +229,13 @@ public struct FlowEngineStatus: Codable, Equatable, Sendable {
     public var declined: [String: Int]? = nil
     /// Times the lease ran out without a fresh push.
     public var leaseExpiries: Int? = nil
+    /// `FlowEngineRemoval` code of the last removal, omitted when none ran since launch.
+    public var removal: String? = nil
 
-    public init(enabled: Bool, state: FlowEngineState, reply: FlowEngineReplySummary? = nil, appVersion: String? = nil) {
+    public init(enabled: Bool, state: FlowEngineState, reply: FlowEngineReplySummary? = nil, appVersion: String? = nil,
+                removal: FlowEngineRemoval? = nil) {
         self.enabled = enabled
+        self.removal = removal?.rawValue
         self.state = state.code
         self.reason = state.reasonCode
         // Also with no reply: a replacement waiting for approval has none.
@@ -230,6 +260,7 @@ public struct FlowEngineStatus: Codable, Equatable, Sendable {
         if let policyGeneration { line += "  generation: \(policyGeneration)" }
         if let extensionVersion { line += "  extension: \(extensionVersion)" }
         if updateWaiting == true { line += "  update waiting" }
+        if let removal { line += "  extension removal: \(removal)" }
         var out = [line]
         for r in rules ?? [] {
             out.append("  rule \(r.ruleId): \(r.claimed) around the VPN, \(r.bound) bound to an interface (not served)")
