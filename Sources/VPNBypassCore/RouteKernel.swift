@@ -52,13 +52,24 @@ public enum RouteKernel {
         /// host" instead of leaving. VPN Only holds its listed addresses this way while the VPN
         /// is down (`blockSpec`).
         public let reject: Bool
+        /// The interface index an interface-scoped route (`route add -ifscope`) is bound to,
+        /// nil for an ordinary route. Sets `RTF_IFSCOPE` and `rtm_index`; a delete names it too,
+        /// so it takes the scoped route and leaves the unscoped one with the same destination.
+        public let ifscope: UInt16?
 
-        public init(destination: String, gateway: Gateway, isNetwork: Bool, reject: Bool = false) {
+        public init(destination: String, gateway: Gateway, isNetwork: Bool, reject: Bool = false, ifscope: UInt16? = nil) {
             self.destination = destination
             self.gateway = gateway
             self.isNetwork = isNetwork
             self.reject = reject
+            self.ifscope = ifscope
         }
+    }
+
+    /// The default route scoped to one interface: what `route -n add -ifscope <iface> default
+    /// <gateway>` writes. Per-app routing's scoped default (R12, `ScopedDefaultRoute`).
+    public static func scopedDefaultSpec(interfaceIndex: UInt16, gateway: String) -> Spec {
+        Spec(destination: "0.0.0.0/0", gateway: .address(gateway), isNetwork: true, ifscope: interfaceIndex)
     }
 
     /// The block for `destination`: a reject route to 127.0.0.1, which is what
@@ -102,6 +113,7 @@ public enum RouteKernel {
 
         var flags: Int32 = RTF_UP | RTF_STATIC | RTF_PROTO1
         if spec.reject { flags |= RTF_REJECT }
+        if spec.ifscope != nil { flags |= RTF_IFSCOPE }
         var addrs: Int32 = RTA_DST | RTA_GATEWAY
         var gatewayData: Data
 
@@ -137,7 +149,9 @@ public enum RouteKernel {
         hdr.rtm_flags = flags
         hdr.rtm_addrs = addrs
         hdr.rtm_seq = seq
-        // rtm_pid is stamped by the kernel; rtm_index only matters for RTF_IFSCOPE (unused here).
+        // rtm_pid is stamped by the kernel; rtm_index only matters for RTF_IFSCOPE, where it
+        // names the interface the route is scoped to.
+        if let ifscope = spec.ifscope { hdr.rtm_index = u_short(ifscope) }
 
         var body = Data()
         body.append(paddedSockaddr(sockaddrInData(dstIP)))
@@ -159,8 +173,15 @@ public enum RouteKernel {
         public let gatewayAddress: UInt32?   // set when the gateway is an AF_INET next hop
         public let gatewayInterfaceIndex: UInt16?  // set when the gateway is AF_LINK
         public let flags: Int32
+        /// `rtm_index`: the interface the route leaves on, and for an `RTF_IFSCOPE` route the
+        /// interface it is scoped to. 0 when unknown.
+        public var interfaceIndex: UInt16 = 0
 
         public var isOurs: Bool { flags & RTF_PROTO1 != 0 }
+        /// A default route (0.0.0.0/0), scoped or not. A default can come back from the dump
+        /// with no netmask sockaddr, which the parser reads as a host, so the host flag decides.
+        public var isDefault: Bool { destination == 0 && flags & RTF_HOST == 0 && (prefix ?? 0) == 0 }
+        public var isScoped: Bool { flags & RTF_IFSCOPE != 0 }
         public var isHost: Bool { prefix == nil }
         /// One of our VPN Only blocks (`blockSpec`): tagged by us and rejecting.
         public var isOurBlock: Bool { isOurs && flags & RTF_REJECT != 0 }
@@ -236,7 +257,8 @@ public enum RouteKernel {
                 prefix: isHost ? nil : maskPrefix,
                 gatewayAddress: gwAddr,
                 gatewayInterfaceIndex: gwIndex,
-                flags: hdr.rtm_flags
+                flags: hdr.rtm_flags,
+                interfaceIndex: UInt16(hdr.rtm_index)
             ))
         }
         return routes

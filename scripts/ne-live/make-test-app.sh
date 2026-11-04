@@ -49,7 +49,8 @@ if [ "$engine" = 1 ]; then
   core="$root/Sources/VPNBypassCore"
   swiftc -O -swift-version 5 -I "$build" -L "$build" -lVPNBypassPolicy -o "$dst/Contents/MacOS/VPNBypass" "$build/main.swift" \
     "$core/FlowEngineManager.swift" "$core/FlowEngineSystem.swift" "$core/FlowEngineState.swift" \
-    "$core/ProcessRule.swift" "$core/RouteModel.swift"
+    "$core/ProcessRule.swift" "$core/RouteModel.swift" \
+    "$core/ScopedDefaultRoute.swift" "$core/RouteKernel.swift" "$core/HelperProtocol.swift"
 else
   swiftc -O -swift-version 5 -o "$dst/Contents/MacOS/VPNBypass" "$here/main.swift" "$root"/Sources/VPNBypassPolicy/*.swift
 fi

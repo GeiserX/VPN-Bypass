@@ -134,6 +134,19 @@ protocol HelperProtocol {
     /// - Parameter reply: `(true, nil)` when the new helper is in place and this one is about
     ///   to exit, `(false, reason)` when nothing changed.
     func updateHelper(fromPath path: String, withReply reply: @escaping (Bool, String?) -> Void)
+
+    /// Per-app routing's scoped default route on the physical interface (R12,
+    /// `ScopedDefaultRoute`): `route -n add -ifscope <interface> default <gateway>`, added only
+    /// when the interface has no scoped default and carries its unscoped default through that
+    /// gateway. An empty interface removes ours. The helper tracks what it added and removes it
+    /// by itself when no call renews it for `ScopedDefaultKeeper.leaseSeconds`, at start and on
+    /// SIGTERM. Never touches the unscoped default or a VPN's routes. Since 2.9.0.
+    /// - Parameters:
+    ///   - interface: a physical interface (`en` and digits), or "" to remove ours.
+    ///   - gateway: its router, a dotted IPv4 address ("" with an empty interface).
+    ///   - reply: `(true, ScopedDefaultOutcome raw value)`, or `(false, reason)` for arguments
+    ///     the helper refused.
+    func setScopedDefaultRoute(interface: String, gateway: String, withReply reply: @escaping (Bool, String) -> Void)
 }
 
 // MARK: - Helper Constants
@@ -220,7 +233,11 @@ struct HelperConstants {
     // (HelperSelfUpdate). The binary now embeds its Info.plist, which carries the version the
     // next helper checks. Updating TO 2.8.0 still asks for the password once: older helpers
     // do not have the call.
-    static let helperVersion = "2.8.0"
+    // 2.9.0: setScopedDefaultRoute — per-app routing's scoped default on the physical
+    // interface (R12, ScopedDefaultRoute / Helper/ScopedDefaultKeeper.swift), so listed apps get
+    // around a VPN that covers the internet with 0/1 + 128/1 on their first connect. A 2.8.0
+    // helper installs this one itself (updateHelper), with no password.
+    static let helperVersion = "2.9.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

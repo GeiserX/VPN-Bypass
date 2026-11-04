@@ -77,14 +77,44 @@ public struct FlowPolicy: Codable, Equatable, Sendable {
     /// of the processes that own the live tunnels.
     public var declinedTeams: [String]
     public var leaseSeconds: Int
+    /// The physical interfaces that have a scoped default route now (ours from the helper, or
+    /// the system's), so a scoped connect out of them finds a route (R12, design 3.5). Each maps
+    /// to a stamp the app changes whenever the route was put in again (the generation of the push
+    /// that found it added). When an interface appears here or its stamp changes, the extension
+    /// forgets the failed connects it counted on it while the route was missing
+    /// (`EgressHealth.forget`), so the next claim goes out at once instead of waiting out the
+    /// 30 s cooldown. Absent from the wire before this field existed, read as empty.
+    public var egressRoutes: [String: Int]
 
     public init(version: Int = FlowPolicy.currentVersion, generation: Int, matchers: [AppMatcher],
-                declinedTeams: [String] = [], leaseSeconds: Int = FlowPolicy.defaultLeaseSeconds) {
+                declinedTeams: [String] = [], leaseSeconds: Int = FlowPolicy.defaultLeaseSeconds,
+                egressRoutes: [String: Int] = [:]) {
         self.version = version
         self.generation = generation
         self.matchers = matchers
         self.declinedTeams = declinedTeams
         self.leaseSeconds = leaseSeconds
+        self.egressRoutes = egressRoutes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version, generation, matchers, declinedTeams, leaseSeconds, egressRoutes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decode(Int.self, forKey: .version)
+        generation = try c.decode(Int.self, forKey: .generation)
+        matchers = try c.decode([AppMatcher].self, forKey: .matchers)
+        declinedTeams = try c.decode([String].self, forKey: .declinedTeams)
+        leaseSeconds = try c.decode(Int.self, forKey: .leaseSeconds)
+        egressRoutes = try c.decodeIfPresent([String: Int].self, forKey: .egressRoutes) ?? [:]
+    }
+
+    /// The interfaces whose route is new since `previous`: not there before, or put in again
+    /// (another stamp). Failures counted on them before are stale.
+    public func newEgressRoutes(since previous: FlowPolicy?) -> [String] {
+        egressRoutes.filter { previous?.egressRoutes[$0.key] != $0.value }.map(\.key).sorted()
     }
 
     /// A policy that claims nothing (Pause, VPN Only, a kill switch). The include rule stays

@@ -32,8 +32,10 @@ build-helper:
 		Sources/VPNBypassCore/TunnelOwnership.swift \
 		Sources/VPNBypassCore/DNSQueryLine.swift \
 		Sources/VPNBypassCore/WildcardDNS.swift \
+		Sources/VPNBypassCore/ScopedDefaultRoute.swift \
 		Helper/DNSCapture.swift \
 		Helper/WildcardForwarder.swift \
+		Helper/ScopedDefaultKeeper.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
 	@swiftc -O \
@@ -46,8 +48,10 @@ build-helper:
 		Sources/VPNBypassCore/TunnelOwnership.swift \
 		Sources/VPNBypassCore/DNSQueryLine.swift \
 		Sources/VPNBypassCore/WildcardDNS.swift \
+		Sources/VPNBypassCore/ScopedDefaultRoute.swift \
 		Helper/DNSCapture.swift \
 		Helper/WildcardForwarder.swift \
+		Helper/ScopedDefaultKeeper.swift \
 		Helper/HelperTool.swift \
 		Helper/main.swift
 	@lipo -create \
