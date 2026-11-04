@@ -60,6 +60,12 @@ public struct FlowPolicy: Codable, Equatable, Sendable {
     public static let defaultLeaseSeconds = 120
     /// The longest lease the extension honours, whatever the policy asks for.
     public static let maxLeaseSeconds = 300
+    /// How long the app waits for the extension to echo a push that takes matchers away before it
+    /// stops the session (3.3). Measured on the mini (docs/design/NE-ENGINE-LIVE-RESULTS.md):
+    /// replies took 0 to 3 ms and none went missing (1,600 status requests back to back, and
+    /// every heartbeat of a 10-minute soak), so 10 s is far past any real reply and still well
+    /// inside the lease.
+    public static let echoTimeoutSeconds = 10
 
     public var version: Int
     /// Raised by the app on every push. The extension echoes the generation it holds, and the app
@@ -128,10 +134,20 @@ public struct FlowPolicyReply: Codable, Equatable, Sendable {
     public var claimedByRule: [String: Int]
     /// Per rule id: flows declined because they arrived bound to an interface.
     public var boundByRule: [String: Int]
+    /// Bound flows by the kind of interface they were bound to (`BoundInterface` raw values), so
+    /// a later change can decide whether flows bound to the physical interface may be claimed.
+    public var boundByInterface: [String: Int]
+    /// What happened to claimed flows, by `FlowLedger.Counter` raw value: connects that failed,
+    /// flows open now, bytes carried.
+    public var counters: [String: Int]
+    /// The extension's `CFBundleShortVersionString`, so the app can tell an old extension whose
+    /// replacement is still waiting from a current one (6.4). Nil from builds before step 5.
+    public var extensionVersion: String?
 
     public init(policyGeneration: Int = 0, policyLive: Bool = false, rejectedVersion: Int? = nil,
                 leaseExpiries: Int = 0, declined: [String: Int] = [:], claimedByRule: [String: Int] = [:],
-                boundByRule: [String: Int] = [:]) {
+                boundByRule: [String: Int] = [:], boundByInterface: [String: Int] = [:],
+                counters: [String: Int] = [:], extensionVersion: String? = nil) {
         self.policyGeneration = policyGeneration
         self.policyLive = policyLive
         self.rejectedVersion = rejectedVersion
@@ -139,6 +155,30 @@ public struct FlowPolicyReply: Codable, Equatable, Sendable {
         self.declined = declined
         self.claimedByRule = claimedByRule
         self.boundByRule = boundByRule
+        self.boundByInterface = boundByInterface
+        self.counters = counters
+        self.extensionVersion = extensionVersion
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case policyGeneration, policyLive, rejectedVersion, leaseExpiries, declined, claimedByRule, boundByRule,
+             boundByInterface, counters, extensionVersion
+    }
+
+    /// Every field is optional on the wire: an app reads the reply of an older or newer extension
+    /// (an update whose replacement is still waiting) instead of calling it silent.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        policyGeneration = try c.decodeIfPresent(Int.self, forKey: .policyGeneration) ?? 0
+        policyLive = try c.decodeIfPresent(Bool.self, forKey: .policyLive) ?? false
+        rejectedVersion = try c.decodeIfPresent(Int.self, forKey: .rejectedVersion)
+        leaseExpiries = try c.decodeIfPresent(Int.self, forKey: .leaseExpiries) ?? 0
+        declined = try c.decodeIfPresent([String: Int].self, forKey: .declined) ?? [:]
+        claimedByRule = try c.decodeIfPresent([String: Int].self, forKey: .claimedByRule) ?? [:]
+        boundByRule = try c.decodeIfPresent([String: Int].self, forKey: .boundByRule) ?? [:]
+        boundByInterface = try c.decodeIfPresent([String: Int].self, forKey: .boundByInterface) ?? [:]
+        counters = try c.decodeIfPresent([String: Int].self, forKey: .counters) ?? [:]
+        extensionVersion = try c.decodeIfPresent(String.self, forKey: .extensionVersion)
     }
 
     /// True when this reply shows `policy` live in the extension.
@@ -147,12 +187,19 @@ public struct FlowPolicyReply: Codable, Equatable, Sendable {
     }
 }
 
-/// A policy message as the extension reads it: the version is read first, so a newer app's
-/// policy is reported as a version mismatch instead of a decode failure.
+/// A message as the extension reads it: a status request, or a policy. A policy's version is
+/// read first, so a newer app's policy is reported as a version mismatch instead of a decode
+/// failure.
 public enum FlowPolicyMessage: Equatable, Sendable {
+    /// Asks for the reply only. It changes nothing: it neither renews the lease nor drops the
+    /// policy, so a status read can never stand in for the heartbeat.
+    case status
     case policy(FlowPolicy)
     case unknownVersion(Int)
     case malformed
+
+    /// The bytes of a status request.
+    public static let statusRequest = Data(#"{"request":"status"}"#.utf8)
 
     public static func encode(_ policy: FlowPolicy) throws -> Data {
         let encoder = JSONEncoder()
@@ -161,7 +208,11 @@ public enum FlowPolicyMessage: Equatable, Sendable {
     }
 
     public static func decode(_ data: Data) -> FlowPolicyMessage {
+        struct Request: Decodable { var request: String }
         struct Versioned: Decodable { var version: Int }
+        if let r = try? JSONDecoder().decode(Request.self, from: data) {
+            return r.request == "status" ? .status : .malformed
+        }
         guard let v = try? JSONDecoder().decode(Versioned.self, from: data) else { return .malformed }
         guard v.version == FlowPolicy.currentVersion else { return .unknownVersion(v.version) }
         guard let p = try? JSONDecoder().decode(FlowPolicy.self, from: data) else { return .malformed }
