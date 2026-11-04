@@ -52,8 +52,9 @@ How it behaves:
 ## Build, sign, verify (already done for the current artifact)
 
 Profiles live outside the repo, in `~/DevIDApp-personal-profiles/` (mode 600). They were minted with
-`scripts/asc-profiles.py` (bundle ids `com.geiserx.vpn-bypass.spike` and `.spike.proxy`, capabilities
-Network Extensions and System Extension, `MAC_APP_DIRECT` against the Developer ID G2 certificate).
+the spike's copy of `asc-profiles.py` (bundle ids `com.geiserx.vpn-bypass.spike` and `.spike.proxy`,
+capabilities Network Extensions and System Extension, `MAC_APP_DIRECT` against the Developer ID G2
+certificate). That script now lives in the repository's `scripts/asc-profiles.py`, with the shipping ids.
 
 ```sh
 # build Mac (universal, unsigned; checks SYSX, NEProviderClasses class present, universal, system libs only)

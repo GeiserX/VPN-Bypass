@@ -9,7 +9,10 @@ let package = Package(
     ],
     products: [
         .executable(name: "VPNBypass", targets: ["VPNBypass"]),
-        .executable(name: "vpnb", targets: ["vpnb"])
+        .executable(name: "vpnb", targets: ["vpnb"]),
+        // Per-app routing's system extension. The product name is the bundle's executable name
+        // (Proxy/Info.plist CFBundleExecutable); `make bundle` puts it in the .systemextension.
+        .executable(name: "com.geiserx.vpn-bypass.proxy", targets: ["VPNBypassProxy"])
     ],
     dependencies: [],
     targets: [
@@ -42,6 +45,13 @@ let package = Package(
             name: "vpnb",
             dependencies: ["VPNBypassCore"],
             path: "Sources/vpnb"
+        ),
+        // Links VPNBypassPolicy and the system frameworks only, never VPNBypassCore: that target
+        // has resources, and its Bundle.module accessor would trap inside the extension.
+        .executableTarget(
+            name: "VPNBypassProxy",
+            dependencies: ["VPNBypassPolicy"],
+            path: "Sources/VPNBypassProxy"
         ),
         .testTarget(
             name: "VPNBypassTests",

@@ -1,0 +1,2 @@
+/* The approval alert macOS shows when per-app routing is turned on. */
+"NSSystemExtensionUsageDescription" = "VPN Bypass utilise cette extension pour le routage par app : les apps que vous indiquez se connectent hors du VPN.";

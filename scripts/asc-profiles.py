@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Register the NE spike's bundle ids and mint its Developer ID profiles through the App Store Connect API.
+"""Register VPN Bypass's bundle ids and mint their Developer ID profiles through the App Store Connect API.
 
 Idempotent: an id, capability or ACTIVE profile that already exists is reused, never re-posted
 (re-posting an enabled capability turns the existing profiles INVALID).
@@ -8,8 +8,8 @@ Idempotent: an id, capability or ACTIVE profile that already exists is reused, n
     SIGN_SHA1=<Developer ID Application cert SHA-1> \
       asc-profiles.py [--dry-run] --out ~/DevIDApp-personal-profiles
 
-Writes <out>/vpn-bypass-spike-app.provisionprofile and <out>/vpn-bypass-spike-proxy.provisionprofile,
-mode 600. The output directory must be outside any git checkout. Prints ids and states only, never key
+Writes <out>/vpn-bypass-app.provisionprofile and <out>/vpn-bypass-proxy.provisionprofile, mode 600:
+the profiles scripts/sign-and-notarize.sh embeds in the app and in the per-app routing extension. The output directory must be outside any git checkout. Prints ids and states only, never key
 material or profile content.
 """
 import argparse
@@ -25,10 +25,11 @@ import urllib.request
 
 API = "https://api.appstoreconnect.apple.com/v1"
 
-# bundle id -> (profile file stem, capabilities it needs)
+# bundle id -> (profile file stem, profile name, capabilities it needs)
 IDS = {
-    "com.geiserx.vpn-bypass.spike": ("vpn-bypass-spike-app", ["SYSTEM_EXTENSION_INSTALL", "NETWORK_EXTENSIONS"]),
-    "com.geiserx.vpn-bypass.spike.proxy": ("vpn-bypass-spike-proxy", ["NETWORK_EXTENSIONS"]),
+    "com.geiserx.vpn-bypass": ("vpn-bypass-app", "VPN Bypass app DevID",
+                               ["SYSTEM_EXTENSION_INSTALL", "NETWORK_EXTENSIONS"]),
+    "com.geiserx.vpn-bypass.proxy": ("vpn-bypass-proxy", "VPN Bypass proxy DevID", ["NETWORK_EXTENSIONS"]),
 }
 
 
@@ -94,7 +95,7 @@ def main() -> None:
         sys.exit("error: no certificate on the team matches SIGN_SHA1")
 
     os.makedirs(out, mode=0o700, exist_ok=True)
-    for ident, (stem, caps) in IDS.items():
+    for ident, (stem, name, caps) in IDS.items():
         found = asc.call("GET", f"/bundleIds?limit=200&filter%5Bidentifier%5D={ident}")["data"]
         found = [b for b in found if b["attributes"]["identifier"] == ident]
         if found:
@@ -102,7 +103,7 @@ def main() -> None:
             print(f"{ident}: bundle id {bid} exists ({found[0]['attributes']['platform']})")
         else:
             r = asc.call("POST", "/bundleIds", {"data": {"type": "bundleIds", "attributes": {
-                "identifier": ident, "name": stem.replace("-", " "), "platform": "MAC_OS"}}})
+                "identifier": ident, "name": name.removesuffix(" DevID"), "platform": "MAC_OS"}}})
             if r is None:
                 continue
             bid = r["data"]["id"]
@@ -119,7 +120,6 @@ def main() -> None:
                      "relationships": {"bundleId": {"data": {"type": "bundleIds", "id": bid}}}}})
             print(f"  capability {cap} enabled")
 
-        name = f"VPN Bypass NE spike {stem.rsplit('-', 1)[-1]} DevID"
         profs = asc.call("GET", f"/bundleIds/{bid}/profiles")["data"]
         prof = next((p for p in profs if p["attributes"]["name"] == name
                      and p["attributes"]["profileState"] == "ACTIVE"

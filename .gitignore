@@ -37,6 +37,11 @@ Package.resolved
 *.dSYM.zip
 *.dSYM
 
+# Signing: provisioning profiles and keys live outside the repo, never in git
+*.provisionprofile
+*.p12
+*.p8
+
 # Test output
 .test-*
 dist/
