@@ -37,7 +37,7 @@ Corporate VPN clients send everything through the tunnel, so streaming stalls, A
 - Leaves Tailscale's own range, loopback and the other tunnels alone, so a mesh VPN and local proxies keep working next to it.
 - `vpnb` scripts everything the app does over a socket only your account can open, answers in JSON with `--json`, and reads passwords from standard input, never from the command line.
 - Shortcuts actions set the mode, add a domain, turn a service on or off and get the status, so a Focus, a time of day or a Wi-Fi network can drive the app.
-- Per-app routing, off by default: apps you list reach the internet around the VPN whatever address they connect to, through a Network Extension that macOS asks you to approve. Turning it off removes the extension, and the app works as before. [How it works](https://geiserx.github.io/VPN-Bypass/how-it-works/#per-app-routing).
+- Per-app routing, off by default: the TCP connections of apps you list to public IPv4 addresses go around the VPN, through a Network Extension that macOS asks you to approve. Turning it off removes the extension, and the app works as before. [How it works](https://geiserx.github.io/VPN-Bypass/how-it-works/#per-app-routing).
 - Everything else needs no kernel or system extension: one small root helper does the routing, and only this app can talk to it.
 - Optional `/etc/hosts` DNS bypass, route verification, notifications, launch at login, and config import and export.
 

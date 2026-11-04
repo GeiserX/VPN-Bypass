@@ -48,7 +48,8 @@ final class FlowEngineManager: ObservableObject {
     @Published private(set) var reply: FlowEngineReplySummary?
     /// The last removal since launch (nil: none ran).
     @Published private(set) var removal: FlowEngineRemoval?
-    /// A configuration of ours exists, so the extension may be installed: Remove Extension shows.
+    /// A configuration of ours exists, or an activation completed and no removal since, so the
+    /// extension may be installed: Remove Extension shows.
     @Published private(set) var mayBeInstalled = false
 
     let system: FlowEngineSystem
@@ -59,6 +60,11 @@ final class FlowEngineManager: ObservableObject {
     /// The saved switch, and how to change it (both config.json).
     var isEnabled: @MainActor () -> Bool = { false }
     var saveEnabled: @MainActor (Bool) -> Void = { _ in }
+    /// An activation completed and no removal finished since (UserDefaults): a declined
+    /// configuration leaves the extension installed with no configuration to find at launch.
+    var wasActivated: @MainActor () -> Bool = { UserDefaults.standard.bool(forKey: FlowEngineManager.activatedKey) }
+    var saveActivated: @MainActor (Bool) -> Void = { UserDefaults.standard.set($0, forKey: FlowEngineManager.activatedKey) }
+    nonisolated static let activatedKey = "flowEngineExtensionActivated"
     var log: @MainActor (FlowEngineLogLevel, String) -> Void = { _, _ in }
     var now: () -> Date = Date.init
     var sleep: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
@@ -188,6 +194,7 @@ final class FlowEngineManager: ObservableObject {
             switch outcome {
             case .activated:
                 self.mayBeInstalled = true
+                self.saveActivated(true)
                 Task { await self.configureAndStart(a) }
             case .willCompleteAfterReboot:
                 self.state = .blocked(.needsRestart)
@@ -226,7 +233,7 @@ final class FlowEngineManager: ObservableObject {
     private func disableStaleConfiguration() async {
         guard case .supported = system.support, !wantsOn else { return }
         let existing = await system.loadConfiguration()
-        if existing != nil { mayBeInstalled = true }
+        if existing != nil || wasActivated() { mayBeInstalled = true }
         guard existing == true, !wantsOn else { return }
         log(.info, "Per-app routing is off, so its configuration left enabled is turned off")
         disableConfiguration()
@@ -274,6 +281,7 @@ final class FlowEngineManager: ObservableObject {
         if result != .failed { log(.info, result == .removed
             ? "Per-app routing: the extension and its configuration are removed"
             : "Per-app routing: its configuration is removed; macOS removes the extension at the next restart") }
+        if result != .failed { saveActivated(false) }
         // A turn-on that waited for this removal reports its own state; the removal stays
         // visible only while per-app routing is off.
         guard !wantsOn else { return }

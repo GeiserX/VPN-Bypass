@@ -146,7 +146,7 @@ route -n get 203.0.113.10             # the route and interface macOS would use 
 
 ## Per-app routing
 
-Routes work per destination. Per-app routing works per app: an app on the Apps list (Bypass mode), or named in a `process` rule with the Direct route (Custom mode), reaches the internet around the VPN whatever address it connects to. It is **off by default**, and with it off the app behaves exactly as it does without it. Turn it on in Settings > General > Per-app routing, or with `vpnb engine.on`.
+Routes work per destination. Per-app routing works per app: an app on the Apps list (Bypass mode), or named in a `process` rule with the Direct route (Custom mode), reaches public IPv4 addresses over TCP around the VPN, whatever the destination's routes say. It is **off by default**, and with it off the app behaves exactly as it does without it. Turn it on in Settings > General > Per-app routing, or with `vpnb engine.on`.
 
 It is a second engine beside the routes: a Network Extension, a transparent proxy that runs as a system extension. While it is on, macOS hands it every new outgoing TCP connection. For a connection from a listed app to a public IPv4 address, the extension opens its own connection, tied to the physical interface (Wi-Fi or Ethernet, so it cannot enter the tunnel), and copies the bytes both ways. Every other connection it hands back untouched, and it keeps its normal route, which may be the VPN:
 

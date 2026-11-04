@@ -154,6 +154,7 @@ final class FlowEngineManagerTests: XCTestCase {
     private var system: FakeFlowEngineSystem!
     private var engine: FlowEngineManager!
     private var enabled = false
+    private var activated = false
     private var input = FlowPolicyCompiler.Input(mode: .custom)
     private var clock = Date(timeIntervalSince1970: 2_000_000_000)
     private let ruleID = UUID()
@@ -163,6 +164,7 @@ final class FlowEngineManagerTests: XCTestCase {
     override func setUp() async throws {
         system = FakeFlowEngineSystem()
         enabled = false
+        activated = false
         clock = Date(timeIntervalSince1970: 2_000_000_000)
         input = FlowPolicyCompiler.Input(
             mode: .custom,
@@ -177,6 +179,8 @@ final class FlowEngineManagerTests: XCTestCase {
         e.inputs = { [unowned self] in self.input }
         e.isEnabled = { [unowned self] in self.enabled }
         e.saveEnabled = { [unowned self] in self.enabled = $0 }
+        e.wasActivated = { [unowned self] in self.activated }
+        e.saveActivated = { [unowned self] in self.activated = $0 }
         e.now = { [unowned self] in self.clock }
         e.sleep = { _ in await Task.yield() }
         e.heartbeatWait = { _ in try? await Task.sleep(nanoseconds: 3_600_000_000_000) }
@@ -412,6 +416,29 @@ final class FlowEngineManagerTests: XCTestCase {
                        "never while the switch is on")
         XCTAssertFalse(PerAppRouting.showsRemoveButton(enabled: false, state: .unavailable(.notInThisBuild), mayBeInstalled: true, removal: nil))
         XCTAssertFalse(PerAppRouting.showsRemoveButton(enabled: false, state: .off, mayBeInstalled: true, removal: .removing))
+    }
+
+    /// A declined configuration leaves the activated extension with no configuration: the next
+    /// launch still shows Remove Extension, and a finished removal forgets the activation.
+    func testADeclinedConfigurationStillShowsRemoveExtensionAfterARelaunch() async {
+        system.saveAnswer = .declined
+        engine.setEnabled(true)
+        await until("declined") { engine.state == .failed(.configurationDeclined) }
+        XCTAssertTrue(activated)
+        XCTAssertNil(system.configuration)
+
+        let relaunched = makeEngine(system)
+        relaunched.begin()
+        await until("left behind") { relaunched.mayBeInstalled }
+        XCTAssertEqual(system.deactivationRequests, 0, "a launch never asks for a password")
+        relaunched.removeExtension()
+        await until("removed") { relaunched.removal == .removed }
+        XCTAssertFalse(activated)
+
+        let again = makeEngine(system)
+        again.begin()
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertFalse(again.mayBeInstalled)
     }
 
     func testARemovalThatFailsOrWaitsForARestartSaysSo() async {
