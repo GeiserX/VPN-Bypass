@@ -40,7 +40,10 @@ public enum MatchType: String, Codable, Equatable, Sendable {
     case ip       // a single IP.
     case cidr     // a CIDR block.
     case service  // a built-in ServiceEntry id (a bundle of domains + IP ranges).
-    case process  // a process name — P3, NE-only.
+    /// An app: a bundle id (`com.example.App`, also covering `com.example.App.helper`) or an
+    /// executable's file name (`Example`), never a path (ProcessRule). Only per-app routing can
+    /// serve it; the kernel engine skips it, and every surface says so (`ProcessRule.serving`).
+    case process
 }
 
 /// Which VPN a `.vpnDefault` route targets when several tunnels are up. An OPTIONAL

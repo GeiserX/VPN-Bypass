@@ -108,6 +108,9 @@ public struct SiteRouteAnswer: Codable, Equatable, Sendable {
     public var notRouted: NotRouted? = nil
     /// notRouted `ownResolver`: the domain whose resolver answers the name.
     public var resolverDomain: String? = nil
+    /// Custom mode: the patterns of the enabled process rules, which nothing serves without
+    /// per-app routing, so they change nothing for this name. Nil when there are none.
+    public var inactiveAppRules: [String]? = nil
 }
 
 enum SiteRoute {
@@ -163,11 +166,25 @@ enum SiteRoute {
         /// wildcard, or a rule with a wildcard pattern: why no route is learned for the name.
         var notRouted: SiteRouteAnswer.NotRouted? = nil
         var resolverDomain: String? = nil
+        /// Custom: the enabled process rules, which decide nothing without per-app routing.
+        var inactiveAppRules: [String] = []
     }
 
     // MARK: - Matching
 
     static func match(host: String, addresses: [String], in s: Snapshot) -> Found {
+        var found = matchDestination(host: host, addresses: addresses, in: s)
+        // Custom: a process rule matches an app, never a name, and nothing serves it yet
+        // (ProcessRule.serving). Every answer names them, whatever decided the name (an installed
+        // route, a rule, the default, a pause, no address), so a listed app is not a mystery.
+        if s.custom {
+            found.inactiveAppRules = s.rules.filter(\.enabled).sorted { $0.order < $1.order }
+                .filter { ProcessRule.serving($0).servedBy == RuleServedBy.none }.map(\.pattern)
+        }
+        return found
+    }
+
+    private static func matchDestination(host: String, addresses: [String], in s: Snapshot) -> Found {
         // The pause rides along on every answer, so `paused` is there whatever matched.
         guard !addresses.isEmpty else { return Found(match: .unresolved, expected: nil, pause: s.pause) }
         // Paused, the app's routes are out (Pause.swift), and Pause runs only where that sends
@@ -176,7 +193,7 @@ enum SiteRoute {
         if let pause = s.pause {
             var lists = s
             lists.pause = nil
-            let after = match(host: host, addresses: addresses, in: lists)
+            let after = matchDestination(host: host, addresses: addresses, in: lists)
             if after.match == .route {
                 var kept = after
                 kept.pause = pause
@@ -417,6 +434,9 @@ enum SiteRoute {
                     : nil
             if let note { check = check.map { $0 + " " + note } ?? note }
         }
+        if let note = inactiveAppRulesSentence(found.inactiveAppRules) {
+            check = check.map { $0 + " " + note } ?? note
+        }
         return SiteRouteAnswer(
             host: host, mode: mode.rawValue, addresses: addresses, match: found.match,
             entry: found.entry, routedDestination: found.routedDestination,
@@ -427,7 +447,15 @@ enum SiteRoute {
             canAdd: [.none, .defaultRoute].contains(found.matchAfterPause ?? found.match),
             paused: found.pause?.wireDescription,
             splitTunnel: split == nil ? nil : true,
-            notRouted: found.notRouted, resolverDomain: found.resolverDomain)
+            notRouted: found.notRouted, resolverDomain: found.resolverDomain,
+            inactiveAppRules: found.inactiveAppRules.isEmpty ? nil : found.inactiveAppRules)
+    }
+
+    /// The sentence `why` ends with while process rules wait for per-app routing; nil without any.
+    static func inactiveAppRulesSentence(_ patterns: [String], in bundle: Bundle = .main) -> String? {
+        guard !patterns.isEmpty else { return nil }
+        let apps = patterns.joined(separator: ", ")
+        return String(localized: "Rules for apps (\(apps)) change nothing yet: they need per-app routing, which is not available yet.", bundle: bundle)
     }
 
     /// `splitTunnel`: the VPN carries only some networks, so what follows the default route is

@@ -36,7 +36,9 @@ func printUsage() {
       route.rm id=<uuid>                        Remove a route
       rule.list                                 List all rules
       rule.add match=<domain|suffix|ip|cidr|service|process> pattern=<value> routeId=<uuid>
-                                                 Add a routing rule
+                                                 Add a routing rule (process: a bundle id or an
+                                                 executable name; it routes nothing until per-app
+                                                 routing exists)
       rule.rm id=<uuid>                         Remove a rule
       mode mode=<bypass|vpnOnly|custom>          Set the routing mode (custom carries
                                                  your listed domains into rules)

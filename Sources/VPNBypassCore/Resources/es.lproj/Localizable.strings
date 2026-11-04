@@ -1075,3 +1075,8 @@
 "Add these sites with the rest: leave this off when another app asked for them" = "Añade estos sitios con los demás: déjalo sin marcar si los pidió otra app";
 "Add the sites seen before you started too" = "Añadir también los sitios vistos antes de empezar";
 "Nothing to add from this window. Tick Add these too to add the sites seen before." = "Nada que añadir de esta ventana. Marca Añadir también estos para añadir los sitios vistos antes.";
+
+/* Process rules: nothing serves them until per-app routing exists */
+"Needs per-app routing, which is not available yet, so this rule does nothing." = "Necesita el enrutamiento por app, que aún no está disponible, así que esta regla no hace nada.";
+"Enter an app's bundle ID (com.example.App) or its executable name (Example), with no path or wildcard." = "Escribe el identificador de paquete de una app (com.example.App) o el nombre de su ejecutable (Example), sin ruta ni comodines.";
+"Rules for apps (%@) change nothing yet: they need per-app routing, which is not available yet." = "Las reglas de apps (%@) aún no cambian nada: necesitan el enrutamiento por app, que aún no está disponible.";

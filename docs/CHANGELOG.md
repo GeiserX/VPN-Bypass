@@ -7,6 +7,11 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.12]
+
+### Fixed
+- **A `process` rule says it does nothing instead of looking like a working rule.** A rule that matches an app was accepted by the Rules page and by `vpnb rule.add match=process`, then installed nothing, because the kernel engine routes destinations and cannot tell apps apart. Its row now says it needs per-app routing, which is not available yet. `vpnb rule.list` marks it `inactive` and `--json` gives every rule `servedBy` (`kernel` or `none`) with `inactiveReason` (`perAppRoutingNotAvailable`). `vpnb rule.add match=process` checks the pattern (a bundle id such as `com.example.App` or an executable's name, never a path, a wildcard or an `.app` folder) and its reply says the rule will route nothing until per-app routing exists. `vpnb why` in Custom mode names the enabled process rules (`inactiveAppRules`) so a listed app that still follows the VPN is explained. The new lines are in English, Spanish and French.
+
 ## [6.0.11]
 
 ### Fixed

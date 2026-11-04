@@ -1075,3 +1075,8 @@
 "Add these sites with the rest: leave this off when another app asked for them" = "Add these sites with the rest: leave this off when another app asked for them";
 "Add the sites seen before you started too" = "Add the sites seen before you started too";
 "Nothing to add from this window. Tick Add these too to add the sites seen before." = "Nothing to add from this window. Tick Add these too to add the sites seen before.";
+
+/* Process rules: nothing serves them until per-app routing exists */
+"Needs per-app routing, which is not available yet, so this rule does nothing." = "Needs per-app routing, which is not available yet, so this rule does nothing.";
+"Enter an app's bundle ID (com.example.App) or its executable name (Example), with no path or wildcard." = "Enter an app's bundle ID (com.example.App) or its executable name (Example), with no path or wildcard.";
+"Rules for apps (%@) change nothing yet: they need per-app routing, which is not available yet." = "Rules for apps (%@) change nothing yet: they need per-app routing, which is not available yet.";
