@@ -31,7 +31,7 @@ swiftc -O -swift-version 5 -o "$dst/Contents/MacOS/VPNBypass" "$here/main.swift"
 
 keychain=()
 [ -z "${SIGN_KEYCHAIN:-}" ] || keychain=(--keychain "$SIGN_KEYCHAIN")
-sign() { codesign --force --options runtime --timestamp=none "${keychain[@]}" --sign "$SIGN_IDENTITY" "$@"; }
+sign() { codesign --force --options runtime --timestamp=none ${keychain[@]+"${keychain[@]}"} --sign "$SIGN_IDENTITY" "$@"; }
 sign --identifier com.geiserx.vpnbypass.helper "$dst/Contents/MacOS/com.geiserx.vpnbypass.helper"
 sign --identifier com.geiserx.vpn-bypass.vpnb "$dst/Contents/MacOS/vpnb"
 cp "$PROVISIONING_PROFILE_PROXY" "$proxy/Contents/embedded.provisionprofile"

@@ -51,6 +51,7 @@ final class FlowProxy: NETransparentProxyProvider {
 
     override func stopProxy(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         ProxyLog.event(.stopped, reason.rawValue)
+        lock.lock(); state.sessionStopped(); lock.unlock()
         watchdog?.cancel()
         watchdog = nil
         completionHandler()

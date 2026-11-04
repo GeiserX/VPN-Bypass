@@ -120,6 +120,14 @@ public struct FlowPolicyState: Sendable {
         return true
     }
 
+    /// The session stopped (`stopProxy`): drop the policy, so a session started again in the same
+    /// process declines every flow until the app pushes, instead of claiming with the policy of the
+    /// session that was turned off while its lease still runs. Not a lapse, so not counted.
+    public mutating func sessionStopped() {
+        policy = nil
+        receivedAt = nil
+    }
+
     /// Takes in a pushed message. An unreadable one drops the live policy, so every flow is
     /// declined until the app pushes one this build reads (3.3).
     public mutating func receive(_ message: FlowPolicyMessage, at now: Date) {

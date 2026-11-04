@@ -58,6 +58,20 @@ final class FlowLedgerTests: XCTestCase {
         XCTAssertEqual(s.leaseExpiries, 0)
     }
 
+    func testAStoppedSessionDeclinesEveryFlowUntilTheNextPush() {
+        var s = received(policy())
+        let facts = FlowFacts(signingIdentifier: "com.example.App", remote: .ipv4(ProtectedRanges.parse("93.184.216.34")!))
+        XCTAssertEqual(FlowDecider.decide(facts, state: s, now: t0.addingTimeInterval(1)),
+                       .claim(ruleID: "r1", egress: .direct(interface: "en0")))
+        s.sessionStopped()
+        XCTAssertNil(s.policy)
+        XCTAssertFalse(s.isLeaseLive(at: t0.addingTimeInterval(2)), "the old lease does not carry into a new session")
+        XCTAssertEqual(FlowDecider.decide(facts, state: s, now: t0.addingTimeInterval(2)), .decline(.noPolicy))
+        XCTAssertEqual(s.leaseExpiries, 0, "a stop is not a lapse")
+        s.receive(.policy(policy(generation: 4)), at: t0.addingTimeInterval(3))
+        XCTAssertTrue(s.isLeaseLive(at: t0.addingTimeInterval(4)))
+    }
+
     // MARK: - Status requests
 
     func testAStatusRequestIsReadAsOne() {

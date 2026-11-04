@@ -157,6 +157,7 @@ final class ExtensionPackagingTests: XCTestCase {
         XCTAssertFalse(proxy.contains(".UDP"), "UDP stays out until its own stage (3.6)")
         XCTAssertFalse(proxy.contains(".any, direction"), "no include rule for every protocol")
         XCTAssertTrue(proxy.contains("state.expireLease(at: Date())"), "a dead app's policy is dropped on a timer")
+        XCTAssertTrue(proxy.contains("state.sessionStopped()"), "a stopped session leaves no policy for the next one")
         XCTAssertTrue(proxy.contains("if message != .status { state.receive(message, at: now) }"),
                       "a status read never renews or drops the policy")
         XCTAssertFalse(proxy.contains("providerConfiguration"), "that plist is world-readable (3.3)")
