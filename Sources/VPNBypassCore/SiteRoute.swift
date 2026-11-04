@@ -144,6 +144,8 @@ enum SiteRoute {
         /// guard it was sent: a name under one is answered and learned as the forwarder does.
         var wildcardSpecs: [WildcardSpec] = []
         var wildcardGuard = WildcardSafetyGuard()
+        /// Per-app routing's state: process rules it serves are not named as inactive.
+        var flowEngine: FlowEngineState = .unavailable(.notInThisBuild)
     }
 
     /// What `match` found, before the check.
@@ -168,6 +170,8 @@ enum SiteRoute {
         var resolverDomain: String? = nil
         /// Custom: the enabled process rules, which decide nothing without per-app routing.
         var inactiveAppRules: [String] = []
+        /// Per-app routing's state when the rules were read, for the sentence about them.
+        var appRulesEngine: FlowEngineState = .unavailable(.notInThisBuild)
     }
 
     // MARK: - Matching
@@ -179,7 +183,9 @@ enum SiteRoute {
         // route, a rule, the default, a pause, no address), so a listed app is not a mystery.
         if s.custom {
             found.inactiveAppRules = s.rules.filter(\.enabled).sorted { $0.order < $1.order }
-                .filter { ProcessRule.serving($0).servedBy == RuleServedBy.none }.map(\.pattern)
+                .filter { ProcessRule.serving($0, engine: s.flowEngine, routes: s.routes).servedBy == RuleServedBy.none }
+                .map(\.pattern)
+            found.appRulesEngine = s.flowEngine
         }
         return found
     }
@@ -434,7 +440,7 @@ enum SiteRoute {
                     : nil
             if let note { check = check.map { $0 + " " + note } ?? note }
         }
-        if let note = inactiveAppRulesSentence(found.inactiveAppRules) {
+        if let note = inactiveAppRulesSentence(found.inactiveAppRules, engine: found.appRulesEngine) {
             check = check.map { $0 + " " + note } ?? note
         }
         return SiteRouteAnswer(
@@ -451,11 +457,17 @@ enum SiteRoute {
             inactiveAppRules: found.inactiveAppRules.isEmpty ? nil : found.inactiveAppRules)
     }
 
-    /// The sentence `why` ends with while process rules wait for per-app routing; nil without any.
-    static func inactiveAppRulesSentence(_ patterns: [String], in bundle: Bundle = .main) -> String? {
+    /// The sentence `why` ends with while per-app routing does not serve process rules; nil
+    /// without any. A build that cannot run it says so; otherwise the sentence points at the
+    /// General page, which says why.
+    static func inactiveAppRulesSentence(_ patterns: [String], engine: FlowEngineState = .unavailable(.notInThisBuild),
+                                         in bundle: Bundle = .main) -> String? {
         guard !patterns.isEmpty else { return nil }
         let apps = patterns.joined(separator: ", ")
-        return String(localized: "Rules for apps (\(apps)) change nothing yet: they need per-app routing, which is not available yet.", bundle: bundle)
+        if case .unavailable = engine {
+            return String(localized: "Rules for apps (\(apps)) change nothing yet: they need per-app routing, which is not available yet.", bundle: bundle)
+        }
+        return String(localized: "Rules for apps (\(apps)) change nothing now: per-app routing does not serve them (Settings > General says why).", bundle: bundle)
     }
 
     /// `splitTunnel`: the VPN carries only some networks, so what follows the default route is
@@ -629,7 +641,8 @@ extension RouteManager {
             rules: config.rules, routes: config.routes, defaultRouteId: config.defaultRouteId,
             activeRoutes: activeRoutes.map { ($0.destination, $0.gateway, $0.source) },
             localGateway: localGateway, vpnInterface: isVPNConnected ? vpnInterface : nil,
-            pause: pauseState, wildcardSpecs: wildcards.served, wildcardGuard: wildcards.safetyGuard)
+            pause: pauseState, wildcardSpecs: wildcards.served, wildcardGuard: wildcards.safetyGuard,
+            flowEngine: FlowEngineManager.shared.state)
     }
 
     /// "Where does this site go?" for a name, a link or an address. Nil when the input holds

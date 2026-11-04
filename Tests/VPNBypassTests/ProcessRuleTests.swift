@@ -72,7 +72,7 @@ final class ProcessRuleTests: XCTestCase {
         XCTAssertTrue(response.ok)
         XCTAssertEqual(updated.rules.count, 1)
         XCTAssertEqual(response.result?.message, ProcessRule.savedMessage)
-        XCTAssertTrue(ProcessRule.savedMessage.contains("will not route anything until per-app routing exists"))
+        XCTAssertTrue(ProcessRule.savedMessage.contains("only while per-app routing is on and its route is Direct"))
         let rule = try XCTUnwrap(response.result?.rules?.first)
         XCTAssertEqual(rule.servedBy, RuleServedBy.none)
         XCTAssertEqual(rule.inactiveReason, "perAppRoutingNotAvailable")
@@ -122,7 +122,8 @@ final class ProcessRuleTests: XCTestCase {
     }
 
     func testAnUnknownReasonIsPrintedAsItCame() {
-        XCTAssertEqual(ProcessRule.inactiveNote(reason: "perAppRoutingOff"), "inactive: perAppRoutingOff")
+        XCTAssertEqual(ProcessRule.inactiveNote(reason: "perAppRoutingSomethingNew"), "inactive: perAppRoutingSomethingNew")
+        XCTAssertEqual(ProcessRule.inactiveNote(reason: "perAppRoutingOff"), "inactive: per-app routing is off")
         XCTAssertEqual(ProcessRule.inactiveNote(reason: nil), "inactive")
     }
 
@@ -133,7 +134,7 @@ final class ProcessRuleTests: XCTestCase {
         let app = Rule(matchType: .process, pattern: "com.example.App", routeId: proxy.id, order: 0)
         XCTAssertEqual(RuleRow.detail(for: app, route: Route(name: "Direct", egress: .direct)),
                        "Needs per-app routing, which is not available yet, so this rule does nothing.")
-        XCTAssertEqual(RuleRow.detail(for: app, route: proxy), ProcessRule.rowNote(),
+        XCTAssertEqual(RuleRow.detail(for: app, route: proxy), ProcessRule.rowNote(.perAppRoutingNotAvailable),
                        "a rule that does nothing reaches no app, so the proxy note gives way")
         // Positive controls: a destination rule keeps the proxy note, or no line.
         let domain = Rule(matchType: .domain, pattern: "example.com", routeId: proxy.id, order: 1)
@@ -144,7 +145,7 @@ final class ProcessRuleTests: XCTestCase {
     func testTheNewLinesAreTranslated() throws {
         let es = try XCTUnwrap(Bundle(url: Self.resources.appendingPathComponent("es.lproj")))
         let fr = try XCTUnwrap(Bundle(url: Self.resources.appendingPathComponent("fr.lproj")))
-        XCTAssertEqual(ProcessRule.rowNote(in: es),
+        XCTAssertEqual(ProcessRule.rowNote(.perAppRoutingNotAvailable, in: es),
                        "Necesita el enrutamiento por app, que aún no está disponible, así que esta regla no hace nada.")
         XCTAssertEqual(ProcessRule.localizedMessage(in: fr),
                        "Saisissez l'identifiant de paquet d'une app (com.example.App) ou le nom de son exécutable (Example), sans chemin ni joker.")

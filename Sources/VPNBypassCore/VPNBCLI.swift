@@ -101,7 +101,7 @@ public enum VPNBCLI {
         }
         out.append(facts)
         if let apps = why.inactiveAppRules, !apps.isEmpty {
-            out.append("  inactive app rules: \(apps.joined(separator: ", ")) (need per-app routing, which is not available yet)")
+            out.append("  inactive app rules: \(apps.joined(separator: ", ")) (per-app routing does not serve them now)")
         }
         return out
     }
@@ -142,6 +142,7 @@ public enum VPNBCLI {
                     let state = rule.enabled ? "enabled" : "disabled"
                     var line = "\(rule.order)  \(rule.id)  \(rule.matchType.rawValue):\(rule.pattern) -> \(rule.routeId)  \(state)"
                     if rule.servedBy == RuleServedBy.none { line += "  " + ProcessRule.inactiveNote(reason: rule.inactiveReason) }
+                    if rule.servedBy == .perAppEngine { line += "  served by per-app routing" }
                     out.append(line)
                 }
             }
@@ -201,12 +202,16 @@ public enum VPNBCLI {
             if let killSwitch = runtime.killSwitch { line += "  kill switch: \(killSwitch.joined(separator: ","))" }
             if let paused = runtime.paused { line += "  paused: \(paused)" }
             out.append(line)
+            if let engine = runtime.flowEngine, engine.enabled || engine.state != "unavailable" {
+                out += engine.textLines
+            }
             if let converted = runtime.convertedEntries, !converted.isEmpty {
                 out.append("updated to wildcards: " + converted.map { "\($0.from) is now \($0.to)" }.joined(separator: ", "))
             }
         }
 
         if let why = result.why { out += whyLines(why) }
+        if let engine = result.engine { out += engine.textLines }
 
         if let mode = result.mode { out.append("mode: \(mode)") }
         if let defaultRouteId = result.defaultRouteId { out.append("default route: \(defaultRouteId)") }

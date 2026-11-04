@@ -101,6 +101,8 @@ public struct ControlResult: Codable, Equatable, Sendable {
     public var logs: [ControlLogEntry]? = nil
     /// `why`: which entry routes a host, and the path check on it.
     public var why: SiteRouteAnswer? = nil
+    /// `engine.status`, `engine.on`, `engine.off`: per-app routing.
+    public var engine: FlowEngineStatus? = nil
 }
 
 /// Live enforcement facts for `status` — the answer to "is it actually working?", which the
@@ -127,12 +129,14 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
     /// Entries saved as ".example.com" that this version rewrote as "*.example.com", until the
     /// user dismisses the note on Status. Nil (omitted) when there are none.
     public var convertedEntries: [ConvertedEntry]? = nil
+    /// Per-app routing: its switch, state and counters. Nil (omitted) from an app without it.
+    public var flowEngine: FlowEngineStatus? = nil
 
     public init(helperReady: Bool, helperState: String, vpnConnected: Bool,
                 vpnInterface: String? = nil, vpnType: String? = nil,
                 enforcedRouteCount: Int, enforcing: Bool, appVersion: String? = nil,
                 killSwitch: [String]? = nil, paused: String? = nil,
-                convertedEntries: [ConvertedEntry]? = nil) {
+                convertedEntries: [ConvertedEntry]? = nil, flowEngine: FlowEngineStatus? = nil) {
         self.helperReady = helperReady
         self.helperState = helperState
         self.vpnConnected = vpnConnected
@@ -144,6 +148,7 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
         self.killSwitch = killSwitch
         self.paused = paused
         self.convertedEntries = convertedEntries
+        self.flowEngine = flowEngine
     }
 }
 
@@ -201,14 +206,14 @@ public struct SanitizedRule: Codable, Equatable, Sendable {
     /// reason still decodes in an older `vpnb`.
     public var inactiveReason: String? = nil
 
-    init(_ rule: Rule) {
+    init(_ rule: Rule, engine: FlowEngineState = .unavailable(.notInThisBuild), routes: [Route]? = nil) {
         id = rule.id
         matchType = rule.matchType
         pattern = rule.pattern
         routeId = rule.routeId
         enabled = rule.enabled
         order = rule.order
-        let serving = ProcessRule.serving(rule)
+        let serving = routes.map { ProcessRule.serving(rule, engine: engine, routes: $0) } ?? ProcessRule.serving(rule, engine: engine)
         servedBy = serving.servedBy
         inactiveReason = serving.reason?.rawValue
     }
@@ -270,7 +275,7 @@ enum CommandRouter {
     static func isMutating(_ cmd: String) -> Bool {
         switch cmd {
         case "status", "route.list", "rule.list",
-             "domain.list", "service.list", "routes.active", "logs", "why": return false
+             "domain.list", "service.list", "routes.active", "logs", "why", "engine.status": return false
         default: return true
         }
     }
@@ -300,7 +305,7 @@ enum CommandRouter {
     private static func ruleList(
         _ config: RouteManager.Config
     ) -> (config: RouteManager.Config, response: ControlResponse) {
-        let rules = config.rules.sorted { $0.order < $1.order }.map(SanitizedRule.init)
+        let rules = config.rules.sorted { $0.order < $1.order }.map { SanitizedRule($0) }
         return successResponse(config, result: ControlResult(rules: rules))
     }
 

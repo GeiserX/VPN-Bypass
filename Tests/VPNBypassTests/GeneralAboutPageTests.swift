@@ -15,7 +15,7 @@ final class GeneralAboutModelTests: XCTestCase {
 
     func testGeneralGroupsInOrder() {
         XCTAssertEqual(GeneralPage.Group.allCases.map { $0.title() },
-                       ["Startup", "Routing", "Network profiles", "DNS servers", "Notifications", "Configuration"])
+                       ["Startup", "Routing", "Per-app routing", "Network profiles", "DNS servers", "Notifications", "Configuration"])
     }
 
     /// Auto DNS Refresh and Refresh Interval are one popup, with Never as its last choice.
@@ -221,6 +221,25 @@ final class GeneralAboutViewTests: XCTestCase {
             XCTAssertFalse(texts.contains(gone), "\(gone) is still on General")
         }
         XCTAssertFalse(texts.contains("Enable SOCKS5 Proxy"), "Advanced starts closed when the proxy is off")
+    }
+
+    /// Per-app routing: the group, its named switch, what it does and what macOS will ask
+    /// before anything is turned on, and the System Settings button while approval waits.
+    func testGeneralShowsPerAppRoutingAndNamesItsControls() {
+        setMode(.custom)
+        let engine = FlowEngineManager.shared
+        defer { engine.showForScreenshots(nil) }
+        var texts = texts(on: .general)
+        for name in ["Per-app routing", "Use per-app routing", PerAppRouting.explanation(), PerAppRouting.approvals(),
+                     FlowEngineState.unavailable(.notInThisBuild).line()] {
+            XCTAssertTrue(texts.contains(name), "\(name) missing from General: \(texts.sorted())")
+        }
+        XCTAssertFalse(texts.contains("Open System Settings to allow per-app routing"))
+
+        engine.showForScreenshots(.awaitingExtensionApproval)
+        texts = self.texts(on: .general)
+        XCTAssertTrue(texts.contains(FlowEngineState.awaitingExtensionApproval.line()), "\(texts.sorted())")
+        XCTAssertTrue(texts.contains("Open System Settings to allow per-app routing"), "\(texts.sorted())")
     }
 
     /// Network profiles: this network, Other networks and each profile with its state, and

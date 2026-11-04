@@ -37,8 +37,9 @@ func printUsage() {
       rule.list                                 List all rules
       rule.add match=<domain|suffix|ip|cidr|service|process> pattern=<value> routeId=<uuid>
                                                  Add a routing rule (process: a bundle id or an
-                                                 executable name; it routes nothing until per-app
-                                                 routing exists)
+                                                 executable name; it routes the app's TCP
+                                                 connections only while per-app routing is on and
+                                                 its route is Direct)
       rule.rm id=<uuid>                         Remove a rule
       mode mode=<bypass|vpnOnly|custom>          Set the routing mode (custom carries
                                                  your listed domains into rules)
@@ -79,6 +80,12 @@ func printUsage() {
                                                  unless every enabled rule goes Direct
       resume                                    Put the routes back (one apply, after the
                                                  tunnel settles)
+      engine.status                             Per-app routing: its switch, state, policy
+                                                 generation and per-rule counts
+      engine.on                                 Turn per-app routing on (macOS then asks to allow
+                                                 the extension and its proxy configuration)
+      engine.off                                Turn per-app routing off: every app follows the
+                                                 routes again
 
       help | --help | -h                        Show this help
 

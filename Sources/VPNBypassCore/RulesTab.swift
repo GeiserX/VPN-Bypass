@@ -750,6 +750,7 @@ struct RulesTab: View {
 /// detail line, edit and delete under the pointer, the route chip, and the switch last.
 struct RuleRow: View {
     @EnvironmentObject var routeManager: RouteManager
+    @ObservedObject private var flowEngine = FlowEngineManager.shared
     let rule: Rule
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -797,10 +798,15 @@ struct RuleRow: View {
         [.edit(patternDisplay, perform: onEdit), .delete(patternDisplay, perform: onDelete)]
     }
 
-    /// The line under the rule: a process rule says that nothing serves it yet, which outranks
-    /// the proxy note (a rule that does nothing reaches no app); otherwise the proxy note.
-    static func detail(for rule: Rule, route: Route?, in bundle: Bundle = .main) -> String? {
-        if ProcessRule.serving(rule).servedBy == RuleServedBy.none { return ProcessRule.rowNote(in: bundle) }
+    /// The line under the rule: a process rule says whether per-app routing serves it (with its
+    /// counts) or why not, which outranks the proxy note (a process rule never reaches a proxy in
+    /// this version); otherwise the proxy note.
+    static func detail(for rule: Rule, route: Route?, engine: FlowEngineState = .unavailable(.notInThisBuild),
+                       counters: FlowEngineRuleCounters? = nil, in bundle: Bundle = .main) -> String? {
+        if rule.matchType == .process {
+            let serving = ProcessRule.serving(rule, engine: engine, routeIsDirect: route.map { $0.egress == .direct } ?? true)
+            return ProcessRule.rowNote(serving.reason, claimed: counters?.claimed ?? 0, bound: counters?.bound ?? 0, in: bundle)
+        }
         return ProxyReachNote.forRoute(route)?.line(in: bundle)
     }
 
@@ -808,7 +814,8 @@ struct RuleRow: View {
         ListRow(
             glyph: Self.glyph(for: rule.matchType),
             name: patternDisplay,
-            detail: Self.detail(for: rule, route: assignedRoute),
+            detail: Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
+                                counters: flowEngine.counters(forRule: rule.id.uuidString)),
             actions: actions,
             isOn: Binding(get: { rule.enabled }, set: onToggle),
             showsActions: showsActions,
