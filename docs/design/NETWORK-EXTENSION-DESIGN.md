@@ -494,11 +494,15 @@ Every control has a VoiceOver name, and every string is in English, Spanish and 
 In every state except `active`, the kernel engine runs as today. No process rule is ever a silent
 no-op again: from step 2 on, a process rule says it is inactive and why.
 
-**Remove.** An in-app "Remove per-app routing" does `removeFromPreferences`, then a deactivation request.
-Homebrew cannot do it: a cask cannot launch the app. We expect `brew uninstall` to leave the extension
-active until reboot, but nobody has tested it; L9 checks it. The troubleshooting doc gets a "remove the
-extension" entry with the System Settings switches and `systemextensionsctl` steps (the spike README's
-"If it misbehaves" list is the draft).
+**Remove.** Turning per-app routing off by hand (the switch, `vpnb engine.off`) is the old way: it stops
+the session, does `removeFromPreferences`, then files a deactivation request (one administrator password
+prompt). A turn-off the app makes by itself (a second crash, a declined configuration, a config.json
+switched off) only sets `isEnabled = false`, so no password prompt appears unasked; "Remove Extension",
+shown under the switch while a configuration of ours exists, and `vpnb engine.remove` do the rest. A
+turn-on while a removal waits for its password files its activation request after the removal ends.
+Homebrew cannot do it: a cask cannot launch the app, and `brew uninstall` leaves the extension running
+(L9). The troubleshooting doc has a "Remove the per-app routing extension" entry with the System Settings
+steps.
 
 ## 6. Packaging, CI and the cask
 

@@ -48,3 +48,34 @@ If routes are applied but verification fails, the card says why:
 - "No answer on 443 via en0": the route is right, but nothing answered on port 443. The host may not serve HTTPS on that address; try the service directly.
 - "Check broken": the control address left through another tunnel than the one it should take, so the check could not tell the two ways apart. A split-tunnel VPN, which carries only some networks and leaves the default route on the physical interface, is not reported as broken: each address is judged by its own route, and `vpnb why` says that an address such a VPN does not carry leaves around it even without the entry.
 - `vpnb why <host>` says which entry routes a site and runs the same check on it.
+
+## Per-app routing
+
+What it does and what it leaves to the routes: [How it works](how-it-works.md#per-app-routing). Turning it off in Settings > General (or `vpnb engine.off`) takes it out of the way completely and leaves the app as it is without it, so that is the first step whenever you suspect it.
+
+### A listed app still uses the VPN
+
+Settings > General > Per-app routing says why in its status line, and `vpnb engine.status` gives the same state as a code. The usual reasons:
+
+- it is off, waiting for one of the two approvals, paused, or stopped after a crash: the line says which;
+- you are in VPN Only mode, or the VPN sends every connection into its tunnel (`includeAllNetworks` or `enforceRoutes`), which no app can get around;
+- the app's connection went to an IPv6, local or private address, or used UDP: only TCP to public IPv4 addresses is taken;
+- the app bound its connection to a network interface itself: the group counts those as "bound to a network interface", and they keep their route;
+- in Custom mode, the rule for the app is not the first rule that matches it, or its route is not Direct.
+
+A VPN that sends everything into its tunnel with two routes (`0.0.0.0/1` and `128.0.0.0/1`) without becoming the Mac's main network service, as `wg-quick` does, can leave the physical interface with no route of its own. Connections tied to that interface then cannot connect, so the extension stops taking them for 30 seconds at a time and the app goes through the VPN instead.
+
+### Every new connection hangs for about 5 seconds
+
+That is what macOS does once when the extension crashes: it holds new TCP connections for about 5 seconds, then lets them through without it. The app starts the extension again once; a second crash within 10 minutes turns per-app routing off, and Settings > General says so. If it keeps happening, turn per-app routing off.
+
+### Remove the per-app routing extension
+
+Turning per-app routing off removes its configuration and its extension; macOS asks for your administrator password once. If you cancel that prompt, the configuration is already gone, so no connection passes through the extension any more, and **Remove Extension** in Settings > General (or `vpnb engine.remove`) asks again. When the removal finishes, `systemextensionsctl list` shows `com.geiserx.vpn-bypass.proxy` as `[terminated waiting to uninstall on reboot]`, or no longer lists it.
+
+Homebrew cannot remove a system extension: `brew uninstall` deletes the app and leaves the extension running. Turn per-app routing off first. If the app is already gone, either install it again, open Settings > General and click Remove Extension, or do it by hand:
+
+1. System Settings > Network > Filters & Proxies (VPN & Filters on older versions of macOS; search System Settings for "Filters" if it is elsewhere): select **VPN Bypass per-app routing** and remove it. From then on no connection passes through the extension.
+2. System Settings > General > Login Items & Extensions > Network Extensions: switch **VPN Bypass** off, with your administrator password.
+3. Restart the Mac. `systemextensionsctl list` should no longer show `com.geiserx.vpn-bypass.proxy` as `activated`.
+

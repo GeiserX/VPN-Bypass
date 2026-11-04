@@ -7,6 +7,18 @@ All notable changes to VPN Bypass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.0]
+
+### Added
+- **Per-app routing, off by default.** Routes work per destination, so until now a rule for an app (`process`) did nothing. 6.1 adds a second engine for it: a Network Extension (a transparent proxy, running as a system extension) that takes the new TCP connections of the apps you list to public IPv4 addresses and sends them out on the physical interface, around the VPN. Bypass mode gets an Apps list, with a chooser of the apps installed or running; in Custom mode a `process` rule with the Direct route does the same. Everything else keeps its route: other apps, IPv6, UDP, local and private addresses, connections an app binds to an interface itself, and the VPN client's own traffic, which is recognised by its signing team and never taken. Domain, service, IP and wildcard rules stay on kernel routes for every app. Turn it on in Settings > General > Per-app routing or with `vpnb engine.on`; macOS asks twice, to allow the extension in System Settings and to allow the proxy configuration. With it off the app works exactly as 6.0 did. What it does and what it leaves alone: How it works, Per-app routing.
+- **It fails towards the VPN.** The app renews the extension's policy every 30 seconds and a policy lasts 2 minutes, so if the app quits the listed apps use the VPN again within 2 minutes. A change that takes an app out counts only once the extension confirms it, or its session is stopped within 10 seconds. If the extension crashes (macOS then holds new TCP connections for about 5 seconds), the app starts it once, and turns per-app routing off after a second crash within 10 minutes. Pause, VPN Only and a VPN kill switch (`includeAllNetworks`, `enforceRoutes`) stand it down. A managed Mac whose profile forbids the extension shows it as blocked, and the routes keep working.
+- **Turning it off removes it.** The switch, `vpnb engine.off`, and Remove Extension (shown under the switch while something of it may be left, for example after the app turned it off by itself) remove the proxy configuration and ask macOS to remove the extension, which needs the administrator password once. `vpnb engine.remove` does the same from a script, and `vpnb engine.status` reports `removal`. Homebrew cannot remove a system extension, so Getting started and Troubleshooting say to turn it off before `brew uninstall`, and give the manual steps for a Mac where the app is already gone.
+- **`vpnb engine.status`, `engine.on`, `engine.off`, `engine.remove`, `app.list`, `app.add`, `app.rm`,** and an `engine` field in `vpnb status`: the state, its reason, the policy the extension confirmed, and per rule the connections it carried and those it had to leave because they arrived bound. Counts only: the extension never logs or stores an app name, an address or a host name.
+- **Releases embed both Developer ID provisioning profiles,** and the release launches the signed app once before publishing it, so a profile that would get the app killed at launch stops the release instead of reaching users.
+
+### Changed
+- `process` rules and the Apps list say per row whether per-app routing serves them now, and why not when it does not (off, waiting for approval, blocked, paused, stopped, or a route other than Direct). `vpnb rule.list` gives `servedBy` and `inactiveReason`, and `vpnb why` names the rules for apps it does not serve.
+
 ## [6.0.12]
 
 ### Fixed
