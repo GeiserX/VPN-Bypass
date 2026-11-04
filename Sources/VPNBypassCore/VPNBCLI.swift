@@ -100,6 +100,9 @@ public enum VPNBCLI {
             facts += "  not routed: \(notRouted.rawValue)" + (why.resolverDomain.map { " (\($0))" } ?? "")
         }
         out.append(facts)
+        if let apps = why.inactiveAppRules, !apps.isEmpty {
+            out.append("  inactive app rules: \(apps.joined(separator: ", ")) (need per-app routing, which is not available yet)")
+        }
         return out
     }
 
@@ -137,7 +140,9 @@ public enum VPNBCLI {
             } else {
                 for rule in rules.sorted(by: { $0.order < $1.order }) {
                     let state = rule.enabled ? "enabled" : "disabled"
-                    out.append("\(rule.order)  \(rule.id)  \(rule.matchType.rawValue):\(rule.pattern) -> \(rule.routeId)  \(state)")
+                    var line = "\(rule.order)  \(rule.id)  \(rule.matchType.rawValue):\(rule.pattern) -> \(rule.routeId)  \(state)"
+                    if rule.servedBy == RuleServedBy.none { line += "  " + ProcessRule.inactiveNote(reason: rule.inactiveReason) }
+                    out.append(line)
                 }
             }
         }

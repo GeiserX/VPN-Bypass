@@ -193,6 +193,13 @@ public struct SanitizedRule: Codable, Equatable, Sendable {
     public var routeId: UUID
     public var enabled: Bool
     public var order: Int
+    /// Which engine serves the rule: `kernel` for a destination rule, `none` for a process rule
+    /// while there is no per-app routing (`ProcessRule.serving`). Optional, so a reply from an
+    /// older app still decodes.
+    public var servedBy: RuleServedBy? = nil
+    /// With `servedBy` `none`: why, as a code (`perAppRoutingNotAvailable`). A string, so a later
+    /// reason still decodes in an older `vpnb`.
+    public var inactiveReason: String? = nil
 
     init(_ rule: Rule) {
         id = rule.id
@@ -201,6 +208,9 @@ public struct SanitizedRule: Codable, Equatable, Sendable {
         routeId = rule.routeId
         enabled = rule.enabled
         order = rule.order
+        let serving = ProcessRule.serving(rule)
+        servedBy = serving.servedBy
+        inactiveReason = serving.reason?.rawValue
     }
 }
 
@@ -430,6 +440,11 @@ enum CommandRouter {
                                      message: "CIDR /0 and /1 cannot be installed as routes")
             }
         }
+        // A process rule names an app (design doc 3.4): a bundle id or an executable's name, never
+        // a path or a wildcard, which the per-app engine could never match.
+        if matchType == .process, let invalid = ProcessRule.invalid(pattern) {
+            return errorResponse(config, code: "invalid_args", message: ProcessRule.message(invalid))
+        }
         guard let routeId = uuid(request.args, "routeId"), config.routes.contains(where: { $0.id == routeId }) else {
             return errorResponse(config, code: "not_found", message: "no route with that id")
         }
@@ -437,7 +452,9 @@ enum CommandRouter {
         let rule = Rule(matchType: matchType, pattern: pattern, routeId: routeId, order: nextOrder)
         var updated = config
         updated.rules.append(rule)
-        return successResponse(updated, result: ControlResult(rules: [SanitizedRule(rule)]))
+        // Saved, but nothing serves it yet: the reply says so rather than a bare ok.
+        let message = matchType == .process ? ProcessRule.savedMessage : nil
+        return successResponse(updated, result: ControlResult(rules: [SanitizedRule(rule)], message: message))
     }
 
     private static func ruleRemove(

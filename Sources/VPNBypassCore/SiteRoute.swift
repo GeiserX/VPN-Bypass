@@ -108,6 +108,9 @@ public struct SiteRouteAnswer: Codable, Equatable, Sendable {
     public var notRouted: NotRouted? = nil
     /// notRouted `ownResolver`: the domain whose resolver answers the name.
     public var resolverDomain: String? = nil
+    /// Custom mode: the patterns of the enabled process rules, which nothing serves without
+    /// per-app routing, so they change nothing for this name. Nil when there are none.
+    public var inactiveAppRules: [String]? = nil
 }
 
 enum SiteRoute {
@@ -163,6 +166,8 @@ enum SiteRoute {
         /// wildcard, or a rule with a wildcard pattern: why no route is learned for the name.
         var notRouted: SiteRouteAnswer.NotRouted? = nil
         var resolverDomain: String? = nil
+        /// Custom: the enabled process rules, which decide nothing without per-app routing.
+        var inactiveAppRules: [String] = []
     }
 
     // MARK: - Matching
@@ -219,6 +224,9 @@ enum SiteRoute {
             }.map(\.id))
             let byId = Dictionary(s.routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let ordered = s.rules.filter(\.enabled).sorted { $0.order < $1.order }
+            // A process rule matches an app, never a name, and nothing serves it yet
+            // (ProcessRule.serving): the answer names them so a listed app is not a mystery.
+            let apps = ordered.filter { ProcessRule.serving($0).servedBy == RuleServedBy.none }.map(\.pattern)
             for (index, rule) in ordered.enumerated() {
                 // A rule whose route is gone or turned off is inert, as RouteCompiler and
                 // WildcardRoutes treat it: the name falls through to a later rule.
@@ -234,13 +242,16 @@ enum SiteRoute {
                     found.notRouted = unrouted.reason
                     found.resolverDomain = unrouted.resolver
                 }
+                found.inactiveAppRules = apps
                 return found
             }
             if let id = s.defaultRouteId, let route = byId[id] {
                 return Found(match: .defaultRoute, routeName: route.name,
-                             expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
+                             expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces),
+                             inactiveAppRules: apps)
             }
-            return Found(match: .none, expected: loopback ? .physical : s.vpnInterface.map { .tunnel($0) })
+            return Found(match: .none, expected: loopback ? .physical : s.vpnInterface.map { .tunnel($0) },
+                         inactiveAppRules: apps)
         }
 
         // 2. A listed wildcard (the most specific one, as macOS picks the resolver file).
@@ -417,6 +428,9 @@ enum SiteRoute {
                     : nil
             if let note { check = check.map { $0 + " " + note } ?? note }
         }
+        if let note = inactiveAppRulesSentence(found.inactiveAppRules) {
+            check = check.map { $0 + " " + note } ?? note
+        }
         return SiteRouteAnswer(
             host: host, mode: mode.rawValue, addresses: addresses, match: found.match,
             entry: found.entry, routedDestination: found.routedDestination,
@@ -427,7 +441,15 @@ enum SiteRoute {
             canAdd: [.none, .defaultRoute].contains(found.matchAfterPause ?? found.match),
             paused: found.pause?.wireDescription,
             splitTunnel: split == nil ? nil : true,
-            notRouted: found.notRouted, resolverDomain: found.resolverDomain)
+            notRouted: found.notRouted, resolverDomain: found.resolverDomain,
+            inactiveAppRules: found.inactiveAppRules.isEmpty ? nil : found.inactiveAppRules)
+    }
+
+    /// The sentence `why` ends with while process rules wait for per-app routing; nil without any.
+    static func inactiveAppRulesSentence(_ patterns: [String], in bundle: Bundle = .main) -> String? {
+        guard !patterns.isEmpty else { return nil }
+        let apps = patterns.joined(separator: ", ")
+        return String(localized: "Rules for apps (\(apps)) change nothing yet: they need per-app routing, which is not available yet.", bundle: bundle)
     }
 
     /// `splitTunnel`: the VPN carries only some networks, so what follows the default route is

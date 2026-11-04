@@ -1515,6 +1515,39 @@ final class DocScreenshotsTests: XCTestCase {
         try renderLogs(search: nil, lines: after.sorted { $0.0 < $1.0 }, to: "logs-dns-lookups-helper-update-after.png")
     }
 
+    // MARK: - Process rules say they need per-app routing, drawn for the pull request
+
+    /// The Rules page with a process rule among the destination rules. Before this change its
+    /// row looked like any working rule; it now says that nothing serves it yet.
+    func testRulesPageProcessRule() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        rm.config.rules.append(Rule(matchType: .process, pattern: "com.example.App", routeId: direct.id, order: 3))
+        XCTAssertEqual(try renderSettings(page: .rules, to: "rules-process-rule.png"), Self.settingsSize)
+    }
+
+    /// "Where does this site go?" in Custom mode for a host no destination rule matches while a
+    /// process rule lists an app: the answer names the app rule that changes nothing yet.
+    func testStatusPageSiteCheckProcessRule() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        let vpn = try XCTUnwrap(rm.config.routes.first { $0.egress == .vpnDefault })
+        let rules = [Rule(matchType: .process, pattern: "com.example.App", routeId: direct.id, order: 0)]
+        let snapshot = SiteRoute.Snapshot(mode: .custom, custom: true, list: [], services: [], rules: rules,
+                                          routes: [direct, vpn], defaultRouteId: vpn.id, activeRoutes: [],
+                                          localGateway: "192.168.1.1", vpnInterface: "utun4")
+        let host = "app.example.com"
+        let probe = PathCheck.Probe(address: "203.0.113.7", routeInterface: "utun4", sourceAddress: "10.8.0.2",
+                                    sourceInterface: "utun4", answer: .connected, latencyMs: 24)
+        let control = PathCheck.Probe(address: "192.0.2.1", routeInterface: "utun4", answer: .notTried)
+        let answer = SiteRoute.answer(host: host, mode: .custom, addresses: [probe.address],
+                                      found: SiteRoute.match(host: host, addresses: [probe.address], in: snapshot),
+                                      probes: [probe], control: (control, .passed), vpnConnected: true)
+        defer { StatusTab.siteCheckForScreenshots = nil }
+        StatusTab.siteCheckForScreenshots = (host, answer)
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-site-process-rule.png"), Self.settingsSize)
+    }
+
     // MARK: - Dropdown rows and the add field (step 11), drawn for the pull request
 
     // BEGIN ROWS SHOTS

@@ -797,11 +797,18 @@ struct RuleRow: View {
         [.edit(patternDisplay, perform: onEdit), .delete(patternDisplay, perform: onDelete)]
     }
 
+    /// The line under the rule: a process rule says that nothing serves it yet, which outranks
+    /// the proxy note (a rule that does nothing reaches no app); otherwise the proxy note.
+    static func detail(for rule: Rule, route: Route?, in bundle: Bundle = .main) -> String? {
+        if ProcessRule.serving(rule).servedBy == RuleServedBy.none { return ProcessRule.rowNote(in: bundle) }
+        return ProxyReachNote.forRoute(route)?.line(in: bundle)
+    }
+
     var body: some View {
         ListRow(
             glyph: Self.glyph(for: rule.matchType),
             name: patternDisplay,
-            detail: ProxyReachNote.forRoute(assignedRoute)?.line(),
+            detail: Self.detail(for: rule, route: assignedRoute),
             actions: actions,
             isOn: Binding(get: { rule.enabled }, set: onToggle),
             showsActions: showsActions,
@@ -942,7 +949,8 @@ struct RuleEditorSheet: View {
         case .suffix:  return "*.example.com"
         case .ip:      return "10.0.0.5"
         case .cidr:    return "10.0.0.0/8"
-        case .service, .process: return ""
+        case .process: return "com.example.App"
+        case .service: return ""
         }
     }
 
@@ -1023,6 +1031,11 @@ struct RuleEditorSheet: View {
         }
         guard matchType != .cidr || routeManager.isValidCIDR(effectivePattern) else {
             validationError = String(localized: "Enter a valid IPv4 CIDR range (e.g. 10.0.0.0/8).")
+            return
+        }
+        // Only an existing process rule opens with this match (the picker has no App yet).
+        guard matchType != .process || ProcessRule.invalid(effectivePattern) == nil else {
+            validationError = ProcessRule.localizedMessage()
             return
         }
         guard let routeId else {
