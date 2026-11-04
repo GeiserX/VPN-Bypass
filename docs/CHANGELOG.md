@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `process` rules and the Apps list say per row whether per-app routing serves them now, and why not when it does not (off, waiting for approval, blocked, paused, stopped, or a route other than Direct). `vpnb rule.list` gives `servedBy` and `inactiveReason`, and `vpnb why` names the rules for apps it does not serve.
+- A listed app's connection that reaches the extension as a host name is looked up on the physical interface before anything is dialled; if any answer is a private, link-local, CGNAT, loopback or multicast address, or in a VPN interface's own network, the connection is closed instead of sent past the VPN (counter `nameProtected`).
+- The VPN clients per-app routing never takes, and the Apps list refuses, now also include AWS VPN Client, OpenVPN Connect, Proton VPN, Mullvad, NordVPN, ExpressVPN, Surfshark and Private Internet Access, each recognised by the team id read from its vendor's signed app.
+- An app added by its id (`vpnb app.add`, `vpnb rule.add match=process`, the Rules page) is stored with the identifier its signature carries, so `com.example.app` typed for an installed `com.example.App` still matches its connections.
 
 ## [6.0.12]
 
