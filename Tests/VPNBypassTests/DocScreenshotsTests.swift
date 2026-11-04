@@ -1515,6 +1515,69 @@ final class DocScreenshotsTests: XCTestCase {
         try renderLogs(search: nil, lines: after.sorted { $0.0 < $1.0 }, to: "logs-dns-lookups-helper-update-after.png")
     }
 
+    // MARK: - Per-app routing, drawn for the pull request
+
+    /// General in Custom mode with the Per-app routing group in `state`, its switch as `on`.
+    private func renderPerAppRouting(_ state: FlowEngineState, on: Bool, reply: FlowEngineReplySummary? = nil,
+                                     to name: String) throws {
+        seedCustom()
+        rm.config.flowEngine.enabled = on
+        GeneralTab.detectedDNSForScreenshots = "192.0.2.53"
+        FlowEngineManager.shared.showForScreenshots(state, reply: reply)
+        defer {
+            GeneralTab.detectedDNSForScreenshots = nil
+            FlowEngineManager.shared.showForScreenshots(nil)
+        }
+        _ = try renderSettings(page: .general, height: 1600, to: name)
+    }
+
+    /// Off, as a signed build on macOS 15 shows it before anything is turned on: what it does and
+    /// the two approvals, said before any system prompt.
+    func testGeneralPerAppRoutingOff() throws {
+        try renderPerAppRouting(.off, on: false, to: "general-per-app-off.png")
+    }
+
+    /// Turned on, waiting for the extension to be allowed in System Settings.
+    func testGeneralPerAppRoutingWaitingForApproval() throws {
+        try renderPerAppRouting(.awaitingExtensionApproval, on: true, to: "general-per-app-approval.png")
+    }
+
+    /// Active, with the counts of the last reply.
+    func testGeneralPerAppRoutingActive() throws {
+        let rule = UUID().uuidString
+        try renderPerAppRouting(.active, on: true,
+                                reply: FlowEngineReplySummary(policyGeneration: 1, claimedByRule: [rule: 42], boundByRule: [rule: 3]),
+                                to: "general-per-app-active.png")
+    }
+
+    /// Stopped twice within 10 minutes: turned off, and it says so.
+    func testGeneralPerAppRoutingStoppedTwice() throws {
+        try renderPerAppRouting(.failed(.stoppedTwice), on: false, to: "general-per-app-stopped-twice.png")
+    }
+
+    /// The Rules page while per-app routing serves the process rule, with its counts.
+    func testRulesPageProcessRuleServed() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        let rule = Rule(matchType: .process, pattern: "com.example.App", routeId: direct.id, order: 3)
+        rm.config.rules.append(rule)
+        rm.config.flowEngine.enabled = true
+        FlowEngineManager.shared.showForScreenshots(.active, reply: FlowEngineReplySummary(
+            policyGeneration: 1, claimedByRule: [rule.id.uuidString: 42], boundByRule: [rule.id.uuidString: 3]))
+        defer { FlowEngineManager.shared.showForScreenshots(nil) }
+        XCTAssertEqual(try renderSettings(page: .rules, to: "rules-process-rule-served.png"), Self.settingsSize)
+    }
+
+    /// The Rules page with per-app routing off: the rule says so and where to turn it on.
+    func testRulesPageProcessRuleOff() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        rm.config.rules.append(Rule(matchType: .process, pattern: "com.example.App", routeId: direct.id, order: 3))
+        FlowEngineManager.shared.showForScreenshots(.off)
+        defer { FlowEngineManager.shared.showForScreenshots(nil) }
+        XCTAssertEqual(try renderSettings(page: .rules, to: "rules-process-rule-off.png"), Self.settingsSize)
+    }
+
     // MARK: - Process rules say they need per-app routing, drawn for the pull request
 
     /// The Rules page with a process rule among the destination rules. Before this change its

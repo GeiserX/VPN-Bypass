@@ -4,9 +4,9 @@
 // A process rule matches an app, not a destination. The kernel engine (routes, /etc/hosts, the
 // wildcard forwarder) decides by destination only, so it can never serve one: RuleResolver,
 // RuleDestinationBuilder and WildcardRoutes skip process rules by design. Per-app routing, the
-// opt-in Network Extension engine (docs/design/NETWORK-EXTENSION-DESIGN.md), will serve them.
-// Until it exists every surface says so (the Rules page, `vpnb rule.list`, `rule.add`, `why`)
-// instead of keeping a rule that silently does nothing.
+// opt-in Network Extension engine (docs/design/NETWORK-EXTENSION-DESIGN.md), serves those with
+// the Direct route while it is active. In every other state every surface says why the rule does
+// nothing (the Rules page, `vpnb rule.list`, `rule.add`, `why`) instead of staying silent.
 
 import Foundation
 
@@ -14,7 +14,7 @@ import Foundation
 public enum RuleServedBy: String, Codable, Equatable, Sendable {
     /// The routing table, /etc/hosts and the wildcard forwarder: every destination rule.
     case kernel
-    /// Per-app routing (the Network Extension engine): process rules, once it runs.
+    /// Per-app routing (the Network Extension engine): process rules, while it is active.
     case perAppEngine
     /// Nothing serves the rule; `SanitizedRule.inactiveReason` says why.
     case none
@@ -22,31 +22,106 @@ public enum RuleServedBy: String, Codable, Equatable, Sendable {
 
 enum ProcessRule {
     /// Why nothing serves a rule, as the wire code `SanitizedRule.inactiveReason` carries. A
-    /// string on the wire, so a later reason (per-app routing off, waiting for approval) still
-    /// decodes in an older `vpnb`.
+    /// string on the wire, so a later reason still decodes in an older `vpnb`.
     enum InactiveReason: String {
-        /// This version has no per-app routing engine.
+        /// This Mac or this build cannot run per-app routing (macOS 14 or older, a dev build).
         case perAppRoutingNotAvailable
+        /// The Per-app routing switch is off.
+        case perAppRoutingOff
+        /// macOS is waiting for the user to allow the extension or its configuration.
+        case perAppRoutingWaitingForApproval
+        /// The Mac's administrator forbids it, or the app is not in /Applications.
+        case perAppRoutingBlocked
+        case perAppRoutingStarting
+        /// Pause, a VPN kill switch, or VPN Only mode.
+        case perAppRoutingPaused
+        /// The extension's update waits for approval and it does not read this app's policy.
+        case perAppRoutingUpdateWaiting
+        /// It stopped or would not start.
+        case perAppRoutingFailed
+        /// The rule's route is not Direct: this version carries listed apps around the VPN only.
+        case routeNotSupported
+        /// The rule's route was deleted or is turned off, so the rule matches nothing.
+        case routeUnavailable
     }
 
-    /// The engine that serves `rule`, and why none does. Process rules are served by nothing
-    /// until per-app routing exists; every other kind is a destination the kernel engine routes.
-    static func serving(_ rule: Rule) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
-        rule.matchType == .process ? (.none, .perAppRoutingNotAvailable) : (.kernel, nil)
+    /// The engine that serves `rule`, and why none does. A process rule with the Direct route is
+    /// served while per-app routing is active; with another route, or a route deleted or turned
+    /// off, it is not served in this version, whatever the engine does (FlowPolicyCompiler drops
+    /// it). Every other kind is a destination the kernel engine routes. `engine` defaults to the
+    /// state of a build without per-app routing, the answer the pure `CommandRouter` gives; the
+    /// control surface fills in the live one. A rule turned off is not served and has no reason:
+    /// its own switch says why.
+    static func serving(_ rule: Rule, engine: FlowEngineState = .unavailable(.notInThisBuild),
+                        routeIsDirect: Bool = true, routeUsable: Bool = true) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        guard rule.matchType == .process else { return (.kernel, nil) }
+        if case .unavailable = engine { return (.none, .perAppRoutingNotAvailable) }
+        guard routeUsable else { return (.none, .routeUnavailable) }
+        guard routeIsDirect else { return (.none, .routeNotSupported) }
+        if let reason = engine.ruleReason { return (.none, reason) }
+        guard rule.enabled else { return (.none, nil) }
+        return (.perAppEngine, nil)
     }
 
-    /// The Rules page's line under a process rule.
-    static func rowNote(in bundle: Bundle = .main) -> String {
-        String(localized: "Needs per-app routing, which is not available yet, so this rule does nothing.", bundle: bundle)
+    /// `serving` for the rule's route (nil: deleted).
+    static func serving(_ rule: Rule, engine: FlowEngineState, route: Route?) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        serving(rule, engine: engine, routeIsDirect: route?.egress == .direct, routeUsable: route?.enabled ?? false)
+    }
+
+    /// `serving` with the rule's route looked up in `routes`.
+    static func serving(_ rule: Rule, engine: FlowEngineState, routes: [Route]) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        serving(rule, engine: engine, route: routes.first { $0.id == rule.routeId })
+    }
+
+    /// The Rules page's line under a process rule, by why nothing serves it (nil: it is served).
+    static func rowNote(_ reason: InactiveReason?, claimed: Int = 0, bound: Int = 0, in bundle: Bundle = .main) -> String {
+        guard let reason else {
+            var line = String(localized: "Served by per-app routing: \(claimed) connections went around the VPN.", bundle: bundle)
+            if bound > 0 {
+                line += " " + String(localized: "\(bound) came bound to a network interface, which per-app routing cannot serve.", bundle: bundle)
+            }
+            return line
+        }
+        switch reason {
+        case .perAppRoutingNotAvailable:
+            return String(localized: "Needs per-app routing, which is not available yet, so this rule does nothing.", bundle: bundle)
+        case .perAppRoutingOff:
+            return String(localized: "Inactive: per-app routing is off (Settings > General).", bundle: bundle)
+        case .perAppRoutingWaitingForApproval:
+            return String(localized: "Inactive: per-app routing is waiting for your approval in System Settings.", bundle: bundle)
+        case .perAppRoutingBlocked:
+            return String(localized: "Inactive: per-app routing is blocked on this Mac (Settings > General says why).", bundle: bundle)
+        case .perAppRoutingStarting:
+            return String(localized: "Inactive while per-app routing starts.", bundle: bundle)
+        case .perAppRoutingPaused:
+            return String(localized: "Paused: this app uses the VPN until per-app routing resumes.", bundle: bundle)
+        case .perAppRoutingUpdateWaiting:
+            return String(localized: "Inactive: an update of per-app routing is waiting for approval in System Settings.", bundle: bundle)
+        case .perAppRoutingFailed:
+            return String(localized: "Inactive: per-app routing stopped, so this app uses the VPN (Settings > General says why).", bundle: bundle)
+        case .routeNotSupported:
+            return String(localized: "Inactive: per-app routing sends apps Direct only in this version; pick the Direct route.", bundle: bundle)
+        case .routeUnavailable:
+            return String(localized: "Inactive: this rule's route was deleted or is turned off.", bundle: bundle)
+        }
     }
 
     /// What `rule.add match=process` replies after saving the rule.
-    static let savedMessage = "process rule saved, but it will not route anything until per-app routing exists; this version does not have it yet"
+    static let savedMessage = "process rule saved; it routes the app's connections only while per-app routing is on and its route is Direct"
 
     /// `vpnb rule.list`'s note for a rule nothing serves, by its wire reason.
     static func inactiveNote(reason: String?) -> String {
         switch reason.flatMap(InactiveReason.init(rawValue:)) {
         case .perAppRoutingNotAvailable: return "inactive: needs per-app routing, which is not available yet"
+        case .perAppRoutingOff: return "inactive: per-app routing is off"
+        case .perAppRoutingWaitingForApproval: return "inactive: per-app routing is waiting for approval"
+        case .perAppRoutingBlocked: return "inactive: per-app routing is blocked"
+        case .perAppRoutingStarting: return "inactive: per-app routing is starting"
+        case .perAppRoutingPaused: return "paused: per-app routing stands down"
+        case .perAppRoutingUpdateWaiting: return "inactive: per-app routing update waiting for approval"
+        case .perAppRoutingFailed: return "inactive: per-app routing stopped"
+        case .routeNotSupported: return "inactive: per-app routing serves the Direct route only"
+        case .routeUnavailable: return "inactive: its route was deleted or is turned off"
         case nil: return "inactive" + (reason.map { ": \($0)" } ?? "")
         }
     }

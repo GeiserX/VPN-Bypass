@@ -98,6 +98,18 @@ struct ProxyConfig: Codable, Equatable {
     }
 }
 
+/// The Per-app routing switch as config.json keeps it.
+struct FlowEngineSetting: Codable, Equatable {
+    var enabled: Bool = false
+
+    init(enabled: Bool = false) { self.enabled = enabled }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+    }
+}
+
 struct Config: Codable {
     var domains: [DomainEntry] = defaultDomains
     var services: [ServiceEntry] = defaultServices
@@ -152,6 +164,9 @@ struct Config: Codable {
     var activeProfileId: UUID? = nil
     /// The Other networks settings while a profile is in use. Nil while Other networks is.
     var otherNetworksSettings: ProfileSettings? = nil
+    /// Settings > General > Per-app routing (docs/design/NETWORK-EXTENSION-DESIGN.md, 5). Off
+    /// until the user turns it on; an older build ignores the key.
+    var flowEngine: FlowEngineSetting = FlowEngineSetting()
 
     // Custom decoder for backward compatibility with configs missing new fields
     init(from decoder: Decoder) throws {
@@ -187,6 +202,7 @@ struct Config: Codable {
         profiles = try container.decodeIfPresent([NetworkProfile].self, forKey: .profiles) ?? []
         activeProfileId = try container.decodeIfPresent(UUID.self, forKey: .activeProfileId)
         otherNetworksSettings = try container.decodeIfPresent(ProfileSettings.self, forKey: .otherNetworksSettings)
+        flowEngine = try container.decodeIfPresent(FlowEngineSetting.self, forKey: .flowEngine) ?? FlowEngineSetting()
 
         // One-time migration: derive the routes/rules representation from the
         // legacy bypass list + single proxy so the new model is populated for

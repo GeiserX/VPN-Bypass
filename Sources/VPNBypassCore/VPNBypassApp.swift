@@ -117,6 +117,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // waits for the helper by itself, so it starts here, before the helper check.
             DNSLookupsMonitor.shared.followConfig()
 
+            // Per-app routing, when the user turned it on (off by default). It never waits for
+            // the helper: it writes no route, and the kernel engine does not depend on it.
+            FlowEngineManager.shared.start(observing: RouteManager.shared)
+
             // Ensure helper is installed, running, and at the correct version
             // BEFORE any route application. This prevents the "Setting Up" hang
             // when the helper is outdated after a Homebrew upgrade.
