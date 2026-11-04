@@ -24,10 +24,11 @@ enum PerAppRouting {
         String(localized: "Pause stands it down too, but new connections still pass through the extension; only turning it off takes it out of the way.", bundle: bundle)
     }
 
-    /// Process rules live in Custom mode; Bypass and VPN Only have none to serve yet.
+    /// Process rules live in Custom mode; Bypass and VPN Only have none to serve yet. The Rules
+    /// page has no app match yet, so the note names the command that adds one.
     static func modeNote(_ mode: RouteManager.RoutingMode, in bundle: Bundle = .main) -> String? {
         mode == .custom ? nil
-            : String(localized: "It serves rules for apps, which you add in Custom mode on the Rules page.", bundle: bundle)
+            : String(localized: "It serves rules for apps, which work in Custom mode. Add one with the command vpnb rule.add match=process.", bundle: bundle)
     }
 
     /// The counts since the extension started, nil before the first reply.

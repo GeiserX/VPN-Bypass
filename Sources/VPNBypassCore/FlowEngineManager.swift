@@ -75,6 +75,9 @@ final class FlowEngineManager: ObservableObject {
     private var pushAgain = false
     private var forceNext = false
     private var activity: NSObjectProtocol?
+    /// The disabling save a turn-off started; the next turn-on waits for it, so a late disable
+    /// cannot land after the enabling read.
+    private var pendingDisable: Task<Void, Never>?
     var subscriptions: Set<AnyCancellable> = []
     private(set) var started = false
 
@@ -163,7 +166,7 @@ final class FlowEngineManager: ObservableObject {
         system.stopSession()
         state = .off
         log(.info, "Per-app routing: turned off; every app follows the routes again")
-        if saving { Task { _ = await system.saveConfiguration(enabled: false) } }
+        if saving { disableConfiguration() }
     }
 
     /// With the switch off, a configuration of ours left enabled (a config.json replaced while it
@@ -171,10 +174,21 @@ final class FlowEngineManager: ObservableObject {
     private func disableStaleConfiguration() async {
         guard case .supported = system.support, !wantsOn, await system.loadConfiguration() == true, !wantsOn else { return }
         log(.info, "Per-app routing is off, so its configuration left enabled is turned off")
-        _ = await system.saveConfiguration(enabled: false)
+        disableConfiguration()
+    }
+
+    /// Saves the configuration disabled, after any disable still in flight.
+    private func disableConfiguration() {
+        let previous = pendingDisable
+        pendingDisable = Task { [system] in
+            await previous?.value
+            _ = await system.saveConfiguration(enabled: false)
+        }
     }
 
     private func configureAndStart(_ a: Int) async {
+        await pendingDisable?.value
+        guard attempt == a else { return }
         if await system.loadConfiguration() != true {
             guard attempt == a else { return }
             state = .awaitingConfigApproval
@@ -286,7 +300,6 @@ final class FlowEngineManager: ObservableObject {
             await failed(a)
             return
         }
-        reply = Self.summary(answer)
         if answer.rejectedVersion != nil {
             if state != .updateWaiting { log(.warning, "Per-app routing: the running extension does not read this app's policy; its update waits for approval") }
             state = .updateWaiting
@@ -297,6 +310,8 @@ final class FlowEngineManager: ObservableObject {
             await failed(a)
             return
         }
+        // Published only once confirmed: `policyGeneration` in the status is the confirmed one.
+        reply = Self.summary(answer)
         confirmed = policy
         let next = Self.state(after: input)
         if next != state { log(.info, "Per-app routing: \(next.code)\(next.reasonCode.map { " (\($0))" } ?? ""), policy \(policy.generation), \(policy.matchers.count) app rule(s)") }

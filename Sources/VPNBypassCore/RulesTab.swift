@@ -804,7 +804,9 @@ struct RuleRow: View {
     static func detail(for rule: Rule, route: Route?, engine: FlowEngineState = .unavailable(.notInThisBuild),
                        counters: FlowEngineRuleCounters? = nil, in bundle: Bundle = .main) -> String? {
         if rule.matchType == .process {
-            let serving = ProcessRule.serving(rule, engine: engine, routeIsDirect: route.map { $0.egress == .direct } ?? true)
+            let serving = ProcessRule.serving(rule, engine: engine, route: route)
+            // A rule turned off has no note: its own switch says it does nothing.
+            guard serving.servedBy == .perAppEngine || serving.reason != nil else { return nil }
             return ProcessRule.rowNote(serving.reason, claimed: counters?.claimed ?? 0, bound: counters?.bound ?? 0, in: bundle)
         }
         return ProxyReachNote.forRoute(route)?.line(in: bundle)

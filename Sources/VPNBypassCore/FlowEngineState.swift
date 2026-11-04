@@ -208,11 +208,12 @@ public struct FlowEngineStatus: Codable, Equatable, Sendable {
         self.enabled = enabled
         self.state = state.code
         self.reason = state.reasonCode
+        // Also with no reply: a replacement waiting for approval has none.
+        if state == .updateWaiting { updateWaiting = true }
         guard let reply else { return }
         policyGeneration = reply.policyGeneration
         extensionVersion = reply.extensionVersion
         if let ext = reply.extensionVersion, let appVersion, ext != appVersion { updateWaiting = true }
-        if state == .updateWaiting { updateWaiting = true }
         let ids = Set(reply.claimedByRule.keys).union(reply.boundByRule.keys)
         rules = ids.isEmpty ? nil : ids.sorted().map {
             FlowEngineRuleCounters(ruleId: $0, claimed: reply.claimedByRule[$0] ?? 0, bound: reply.boundByRule[$0] ?? 0)

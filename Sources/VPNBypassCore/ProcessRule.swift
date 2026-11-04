@@ -41,27 +41,36 @@ enum ProcessRule {
         case perAppRoutingFailed
         /// The rule's route is not Direct: this version carries listed apps around the VPN only.
         case routeNotSupported
+        /// The rule's route was deleted or is turned off, so the rule matches nothing.
+        case routeUnavailable
     }
 
     /// The engine that serves `rule`, and why none does. A process rule with the Direct route is
-    /// served while per-app routing is active; with another route it is not served in this
-    /// version, whatever the engine does. Every other kind is a destination the kernel engine
-    /// routes. `engine` defaults to the state of a build without per-app routing, the answer the
-    /// pure `CommandRouter` gives; the control surface fills in the live one.
+    /// served while per-app routing is active; with another route, or a route deleted or turned
+    /// off, it is not served in this version, whatever the engine does (FlowPolicyCompiler drops
+    /// it). Every other kind is a destination the kernel engine routes. `engine` defaults to the
+    /// state of a build without per-app routing, the answer the pure `CommandRouter` gives; the
+    /// control surface fills in the live one. A rule turned off is not served and has no reason:
+    /// its own switch says why.
     static func serving(_ rule: Rule, engine: FlowEngineState = .unavailable(.notInThisBuild),
-                        routeIsDirect: Bool = true) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+                        routeIsDirect: Bool = true, routeUsable: Bool = true) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
         guard rule.matchType == .process else { return (.kernel, nil) }
         if case .unavailable = engine { return (.none, .perAppRoutingNotAvailable) }
+        guard routeUsable else { return (.none, .routeUnavailable) }
         guard routeIsDirect else { return (.none, .routeNotSupported) }
         if let reason = engine.ruleReason { return (.none, reason) }
+        guard rule.enabled else { return (.none, nil) }
         return (.perAppEngine, nil)
     }
 
-    /// `serving` with the rule's route looked up in `routes` (a missing route counts as Direct:
-    /// the rule then matches nothing, which the kernel engine treats the same way).
+    /// `serving` for the rule's route (nil: deleted).
+    static func serving(_ rule: Rule, engine: FlowEngineState, route: Route?) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        serving(rule, engine: engine, routeIsDirect: route?.egress == .direct, routeUsable: route?.enabled ?? false)
+    }
+
+    /// `serving` with the rule's route looked up in `routes`.
     static func serving(_ rule: Rule, engine: FlowEngineState, routes: [Route]) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
-        let route = routes.first { $0.id == rule.routeId }
-        return serving(rule, engine: engine, routeIsDirect: route.map { $0.egress == .direct } ?? true)
+        serving(rule, engine: engine, route: routes.first { $0.id == rule.routeId })
     }
 
     /// The Rules page's line under a process rule, by why nothing serves it (nil: it is served).
@@ -92,6 +101,8 @@ enum ProcessRule {
             return String(localized: "Inactive: per-app routing stopped, so this app uses the VPN (Settings > General says why).", bundle: bundle)
         case .routeNotSupported:
             return String(localized: "Inactive: per-app routing sends apps Direct only in this version; pick the Direct route.", bundle: bundle)
+        case .routeUnavailable:
+            return String(localized: "Inactive: this rule's route was deleted or is turned off.", bundle: bundle)
         }
     }
 
@@ -110,6 +121,7 @@ enum ProcessRule {
         case .perAppRoutingUpdateWaiting: return "inactive: per-app routing update waiting for approval"
         case .perAppRoutingFailed: return "inactive: per-app routing stopped"
         case .routeNotSupported: return "inactive: per-app routing serves the Direct route only"
+        case .routeUnavailable: return "inactive: its route was deleted or is turned off"
         case nil: return "inactive" + (reason.map { ": \($0)" } ?? "")
         }
     }

@@ -235,6 +235,7 @@ final class FlowEngineManagerTests: XCTestCase {
         XCTAssertTrue(engine.state.waitsInSystemSettings)
         XCTAssertEqual(engine.state.ruleReason, .perAppRoutingUpdateWaiting)
         XCTAssertEqual(system.starts + system.sent.count, 0, "the old extension gets no policy")
+        XCTAssertEqual(engine.status().updateWaiting, true, "the status says so before any reply")
         system.finishActivation(.activated)
         await until("active once the update is allowed") { engine.state == .active }
     }
@@ -252,6 +253,21 @@ final class FlowEngineManagerTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 20_000_000)
         system.holdSend = false
         await until("the new attempt's push went out and was confirmed") { engine.state == .active }
+    }
+
+    /// A turn-on right after a turn-off waits for the disabling save, so that save cannot land
+    /// after the turn-on read the configuration and leave it off under a switch that says on.
+    func testATurnOnRightAfterATurnOffWaitsForTheDisablingSave() async {
+        await turnOnToActive()
+        system.holdSave = true
+        engine.setEnabled(false)
+        engine.setEnabled(true)
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        system.holdSave = false
+        await until("active again") { engine.state == .active && system.saves.count == 3 }
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(system.saves, [true, false, true])
+        XCTAssertEqual(system.configuration, true, "the configuration is on, as the switch says")
     }
 
     func testAnAlreadyEnabledConfigurationIsNotSavedAgain() async {
@@ -393,6 +409,8 @@ final class FlowEngineManagerTests: XCTestCase {
         system.replies = [try! JSONEncoder().encode(FlowPolicyReply(rejectedVersion: 1, extensionVersion: "6.0.11"))]
         engine.setEnabled(true)
         await until("update waiting") { engine.state == .updateWaiting }
+        XCTAssertNil(engine.reply, "a reply that confirms nothing is not shown as the extension's state")
+        XCTAssertNil(engine.status().policyGeneration)
         XCTAssertTrue(engine.updateWaiting)
         XCTAssertEqual(engine.state.ruleReason, .perAppRoutingUpdateWaiting)
         XCTAssertEqual(engine.status().updateWaiting, true)
@@ -498,6 +516,21 @@ final class ProcessRuleServingTests: XCTestCase {
         }
         let toVPN = Rule(matchType: .process, pattern: "com.example.App", routeId: vpn.id, order: 0)
         XCTAssertEqual(ProcessRule.serving(toVPN, engine: .active, routes: [vpn]).reason, .routeNotSupported)
+        // A route deleted or turned off matches nothing (FlowPolicyCompiler drops the rule).
+        var directOff = direct
+        directOff.enabled = false
+        XCTAssertEqual(ProcessRule.serving(app, engine: .active, routes: [directOff]).servedBy, RuleServedBy.none)
+        XCTAssertEqual(ProcessRule.serving(app, engine: .active, routes: [directOff]).reason, .routeUnavailable)
+        XCTAssertEqual(ProcessRule.serving(app, engine: .active, routes: []).reason, .routeUnavailable)
+        XCTAssertEqual(ProcessRule.serving(app, engine: .unavailable(.notInThisBuild), routes: []).reason, .perAppRoutingNotAvailable)
+        XCTAssertEqual(RuleRow.detail(for: app, route: nil, engine: .active), "Inactive: this rule's route was deleted or is turned off.")
+        // A rule turned off is not served and gets no note: its switch says it.
+        var appOff = app
+        appOff.enabled = false
+        XCTAssertEqual(ProcessRule.serving(appOff, engine: .active, routes: [direct]).servedBy, RuleServedBy.none)
+        XCTAssertNil(ProcessRule.serving(appOff, engine: .active, routes: [direct]).reason)
+        XCTAssertNil(RuleRow.detail(for: appOff, route: direct, engine: .active))
+        XCTAssertEqual(RuleRow.detail(for: appOff, route: direct, engine: .off), ProcessRule.rowNote(.perAppRoutingOff))
         // A destination rule is the kernel engine's in every state.
         let domain = Rule(matchType: .domain, pattern: "example.com", routeId: direct.id, order: 1)
         XCTAssertEqual(ProcessRule.serving(domain, engine: .active, routes: [direct]).servedBy, .kernel)
@@ -525,6 +558,38 @@ final class ProcessRuleServingTests: XCTestCase {
         XCTAssertEqual(found.inactiveAppRules, ["com.example.App"])
         XCTAssertEqual(SiteRoute.inactiveAppRulesSentence(found.inactiveAppRules, engine: found.appRulesEngine),
                        "Rules for apps (com.example.App) change nothing now: per-app routing does not serve them (Settings > General says why).")
+        // Active: a rule on another route is named with its real reason, the route.
+        let toVPN = Rule(matchType: .process, pattern: "com.example.Other", routeId: vpn.id, order: 1)
+        s.rules = [app, toVPN]
+        s.routes = [direct, vpn]
+        s.flowEngine = .active
+        let active = SiteRoute.match(host: "example.org", addresses: ["203.0.113.9"], in: s)
+        XCTAssertEqual(active.inactiveAppRules, ["com.example.Other"])
+        XCTAssertEqual(SiteRoute.inactiveAppRulesSentence(active.inactiveAppRules, engine: active.appRulesEngine),
+                       "Rules for apps (com.example.Other) change nothing now: per-app routing serves only rules whose route is Direct and turned on.")
+    }
+
+    /// The VPN client's team must reach the policy: a failed signature read is not kept, and a
+    /// binary changed at the same path is read again.
+    @MainActor
+    func testATunnelOwnersTeamIsReadAgainAfterAFailureOrAChange() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir); TunnelOwnerTeams.read = TunnelOwnerTeams.signingTeam; TunnelOwnerTeams.resetCache() }
+        let exe = dir.appendingPathComponent("vpnclient")
+        try Data("a".utf8).write(to: exe)
+        TunnelOwnerTeams.resetCache()
+        var answer: String? = nil
+        var reads = 0
+        TunnelOwnerTeams.read = { _ in reads += 1; return answer }
+        XCTAssertNil(TunnelOwnerTeams.team(ofExecutable: exe.path))
+        answer = "TEAMONE111"
+        XCTAssertEqual(TunnelOwnerTeams.team(ofExecutable: exe.path), "TEAMONE111", "a failed read is tried again")
+        XCTAssertEqual(TunnelOwnerTeams.team(ofExecutable: exe.path), "TEAMONE111")
+        XCTAssertEqual(reads, 2, "a found team is cached")
+        answer = "TEAMTWO222"
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: exe.path)
+        XCTAssertEqual(TunnelOwnerTeams.team(ofExecutable: exe.path), "TEAMTWO222", "a changed binary is read again")
     }
 
     func testEngineStatusIsAReadVerbAndOnOffAreNot() {

@@ -38,8 +38,9 @@ func printUsage() {
       rule.add match=<domain|suffix|ip|cidr|service|process> pattern=<value> routeId=<uuid>
                                                  Add a routing rule (process: a bundle id or an
                                                  executable name; it routes the app's TCP
-                                                 connections only while per-app routing is on and
-                                                 its route is Direct)
+                                                 connections to public IPv4 addresses, unless the
+                                                 app binds them to an interface, only while
+                                                 per-app routing is on and its route is Direct)
       rule.rm id=<uuid>                         Remove a rule
       mode mode=<bypass|vpnOnly|custom>          Set the routing mode (custom carries
                                                  your listed domains into rules)

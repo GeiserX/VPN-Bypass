@@ -114,13 +114,16 @@ final class LiveFlowEngineSystem: FlowEngineSystem {
     }
 
     func loadConfiguration() async -> Bool? {
-        await load()?.isEnabled
+        try? await load()?.isEnabled
     }
 
-    private func load() async -> NETransparentProxyManager? {
-        let managers: [NETransparentProxyManager]? = await withCheckedContinuation { continuation in
-            NETransparentProxyManager.loadAllFromPreferences { managers, _ in continuation.resume(returning: managers) }
+    /// Ours, nil when there is none. Throws when the preferences could not be read, so a failed
+    /// read is never taken for "none" (a save would then add a second configuration).
+    private func load() async throws -> NETransparentProxyManager? {
+        let (managers, error): ([NETransparentProxyManager]?, Error?) = await withCheckedContinuation { continuation in
+            NETransparentProxyManager.loadAllFromPreferences { continuation.resume(returning: ($0, $1)) }
         }
+        if let error { throw error }
         let ours = managers?.first {
             ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == Self.extensionIdentifier
         }
@@ -144,7 +147,12 @@ final class LiveFlowEngineSystem: FlowEngineSystem {
     }
 
     func saveConfiguration(enabled: Bool) async -> FlowEngineSaveResult {
-        let existing = await load()
+        let existing: NETransparentProxyManager?
+        do {
+            existing = try await load()
+        } catch {
+            return .failed(code: (error as NSError).code)
+        }
         if existing == nil && !enabled { return .saved }
         let m = existing ?? NETransparentProxyManager()
         if existing == nil {

@@ -458,14 +458,18 @@ enum SiteRoute {
     }
 
     /// The sentence `why` ends with while per-app routing does not serve process rules; nil
-    /// without any. A build that cannot run it says so; otherwise the sentence points at the
-    /// General page, which says why.
+    /// without any. A build that cannot run it says so; while it is active the rules' routes are
+    /// why; otherwise the sentence points at the General page, which says why.
     static func inactiveAppRulesSentence(_ patterns: [String], engine: FlowEngineState = .unavailable(.notInThisBuild),
                                          in bundle: Bundle = .main) -> String? {
         guard !patterns.isEmpty else { return nil }
         let apps = patterns.joined(separator: ", ")
         if case .unavailable = engine {
             return String(localized: "Rules for apps (\(apps)) change nothing yet: they need per-app routing, which is not available yet.", bundle: bundle)
+        }
+        // Active: what keeps an enabled rule out is its route, not the engine.
+        if engine == .active {
+            return String(localized: "Rules for apps (\(apps)) change nothing now: per-app routing serves only rules whose route is Direct and turned on.", bundle: bundle)
         }
         return String(localized: "Rules for apps (\(apps)) change nothing now: per-app routing does not serve them (Settings > General says why).", bundle: bundle)
     }
