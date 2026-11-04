@@ -433,8 +433,10 @@ Modes:
 ## 5. Opt-in UX and fallbacks
 
 **Settings > General, "Per-app routing" group**, off by default. Before any system prompt it says:
-- what it does: apps you list skip the VPN for all their TCP connections; domain, service and IP rules
-  keep working as before, for every app;
+- what it does: apps you list skip the VPN for their TCP connections to public IPv4 addresses; the
+  extension leaves the rest alone (IPv6, connections the app binds to an interface itself, protected
+  ranges and the VPN client's own traffic), and those keep the normal route, which may be the VPN;
+  domain, service and IP rules keep working as before, for every app;
 - macOS will ask twice: first allow the extension in System Settings, then allow VPN Bypass to add a
   proxy configuration (the exact path and wording come from L0);
 - if you say no, nothing else changes.
