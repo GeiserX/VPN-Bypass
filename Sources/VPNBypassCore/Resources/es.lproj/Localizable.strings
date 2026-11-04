@@ -1109,6 +1109,14 @@
 "An update of the extension is waiting for approval in System Settings." = "Una actualización de la extensión espera tu aprobación en Ajustes del Sistema.";
 "Open System Settings" = "Abrir Ajustes del Sistema";
 "Open System Settings to allow per-app routing" = "Abrir Ajustes del Sistema para permitir el enrutamiento por app";
+/* Per-app routing: turning it off and Remove Extension take the extension off the Mac */
+"Turning it off removes the extension and its configuration from this Mac, so every app follows your routes as before. macOS asks for an administrator password, and turning it on again asks for both approvals again." = "Al desactivarlo se quitan la extensión y su configuración de este Mac, así que todas las apps siguen tus rutas como antes. macOS pide una contraseña de administrador, y al activarlo de nuevo vuelve a pedir las dos aprobaciones.";
+"Remove Extension" = "Quitar extensión";
+"Remove the per-app routing extension from this Mac" = "Quitar de este Mac la extensión del enrutamiento por app";
+"Removing the extension from this Mac. macOS asks for an administrator password." = "Quitando la extensión de este Mac. macOS pide una contraseña de administrador.";
+"The extension is removed from this Mac." = "La extensión se quitó de este Mac.";
+"macOS removes the extension when you restart the Mac." = "macOS quita la extensión cuando reinicies el Mac.";
+"The extension could not be removed. Try again, or see Troubleshooting for the manual steps." = "No se pudo quitar la extensión. Inténtalo de nuevo, o consulta Solución de problemas para los pasos a mano.";
 "Served by per-app routing: %lld connections went around the VPN." = "Servida por el enrutamiento por app: %lld conexiones evitaron la VPN.";
 "Inactive: per-app routing is off (Settings > General)." = "Inactiva: el enrutamiento por app está desactivado (Ajustes > General).";
 "Inactive: per-app routing is waiting for your approval in System Settings." = "Inactiva: el enrutamiento por app espera tu aprobación en Ajustes del Sistema.";

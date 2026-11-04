@@ -14,6 +14,11 @@
 // - A stopped or silent extension is started again once; a second failure within 10 minutes
 //   turns per-app routing off (a crash stalls every new TCP connection for about 5 s, so it
 //   must not loop).
+// - Turning it off by hand (the switch, `vpnb engine.off`) or Remove Extension removes the
+//   configuration and files the deactivation request, so nothing of it stays on the Mac: off is
+//   the old way. A turn-off the app makes by itself (a second failure, a declined
+//   configuration, a config.json switched off) only disables the configuration, so no password
+//   prompt appears unasked; Remove Extension takes what is left.
 
 import Combine
 import Foundation
@@ -41,6 +46,11 @@ final class FlowEngineManager: ObservableObject {
     @Published private(set) var state: FlowEngineState
     /// The extension's last reply (counters, version).
     @Published private(set) var reply: FlowEngineReplySummary?
+    /// The last removal since launch (nil: none ran).
+    @Published private(set) var removal: FlowEngineRemoval?
+    /// A configuration of ours exists, or an activation completed and no removal since, so the
+    /// extension may be installed: Remove Extension shows.
+    @Published private(set) var mayBeInstalled = false
 
     let system: FlowEngineSystem
     /// What the policy is compiled from. Wired to RouteManager by `start(observing:)`
@@ -50,6 +60,11 @@ final class FlowEngineManager: ObservableObject {
     /// The saved switch, and how to change it (both config.json).
     var isEnabled: @MainActor () -> Bool = { false }
     var saveEnabled: @MainActor (Bool) -> Void = { _ in }
+    /// An activation completed and no removal finished since (UserDefaults): a declined
+    /// configuration leaves the extension installed with no configuration to find at launch.
+    var wasActivated: @MainActor () -> Bool = { UserDefaults.standard.bool(forKey: FlowEngineManager.activatedKey) }
+    var saveActivated: @MainActor (Bool) -> Void = { UserDefaults.standard.set($0, forKey: FlowEngineManager.activatedKey) }
+    nonisolated static let activatedKey = "flowEngineExtensionActivated"
     var log: @MainActor (FlowEngineLogLevel, String) -> Void = { _, _ in }
     var now: () -> Date = Date.init
     var sleep: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
@@ -75,9 +90,11 @@ final class FlowEngineManager: ObservableObject {
     private var pushAgain = false
     private var forceNext = false
     private var activity: NSObjectProtocol?
-    /// The disabling save a turn-off started; the next turn-on waits for it, so a late disable
-    /// cannot land after the enabling read.
-    private var pendingDisable: Task<Void, Never>?
+    /// The disable or removal a turn-off started; the next turn-on waits for it, so a late disable
+    /// cannot land after the enabling read, and a removal cannot take away what a turn-on installs.
+    private var pendingTeardown: Task<Void, Never>?
+    /// Removals not finished yet (a deactivation can wait minutes for the password).
+    private var removalsInFlight = 0
     var subscriptions: Set<AnyCancellable> = []
     private(set) var started = false
 
@@ -103,11 +120,28 @@ final class FlowEngineManager: ObservableObject {
     }
 
     /// The switch in Settings or `vpnb engine.on|off`. Turning it on by hand forgets earlier
-    /// failures, so a user who saw "stopped twice" can try again.
+    /// failures, so a user who saw "stopped twice" can try again. Turning it off by hand removes
+    /// the extension too.
     func setEnabled(_ on: Bool) {
         if on { failures.removeAll() }
         if isEnabled() != on { saveEnabled(on) }
+        guard on || !wantsOn else {
+            turnOff(teardown: .remove)
+            return
+        }
         followSwitch()
+    }
+
+    /// Remove Extension and `vpnb engine.remove`: turns per-app routing off if it is on, removes
+    /// its configuration and files the deactivation request.
+    func removeExtension() {
+        guard case .supported = system.support, removalsInFlight == 0 || wantsOn else { return }
+        if isEnabled() { saveEnabled(false) }
+        if wantsOn {
+            turnOff(teardown: .remove)
+        } else {
+            startRemoval()
+        }
     }
 
     /// Starts or stops to match the saved switch (also after an import or a profile switch).
@@ -131,6 +165,21 @@ final class FlowEngineManager: ObservableObject {
         let a = attempt
         beginActivity()
         state = .starting
+        removal = nil
+        // A removal still waiting for its password would take away what this turn-on installs:
+        // the activation request is filed once it ended.
+        if removalsInFlight > 0, let teardown = pendingTeardown {
+            Task { [weak self] in
+                await teardown.value
+                guard let self, self.attempt == a else { return }
+                self.fileActivation(a)
+            }
+        } else {
+            fileActivation(a)
+        }
+    }
+
+    private func fileActivation(_ a: Int) {
         log(.info, "Per-app routing: turning on (activation request filed)")
         system.requestActivation(onNeedsApproval: { [weak self] replacing in
             guard let self, self.attempt == a else { return }
@@ -144,6 +193,8 @@ final class FlowEngineManager: ObservableObject {
             guard let self, self.attempt == a else { return }
             switch outcome {
             case .activated:
+                self.mayBeInstalled = true
+                self.saveActivated(true)
                 Task { await self.configureAndStart(a) }
             case .willCompleteAfterReboot:
                 self.state = .blocked(.needsRestart)
@@ -154,7 +205,11 @@ final class FlowEngineManager: ObservableObject {
         })
     }
 
-    private func turnOff(saving: Bool = true) {
+    /// What a turn-off does to the configuration: nothing (a declined save left none), disable
+    /// it (a turn-off the app makes by itself), or remove it with the extension (by hand).
+    private enum Teardown { case none, disable, remove }
+
+    private func turnOff(teardown: Teardown = .disable) {
         wantsOn = false
         attempt += 1
         established = false
@@ -166,28 +221,76 @@ final class FlowEngineManager: ObservableObject {
         system.stopSession()
         state = .off
         log(.info, "Per-app routing: turned off; every app follows the routes again")
-        if saving { disableConfiguration() }
+        switch teardown {
+        case .none: break
+        case .disable: disableConfiguration()
+        case .remove: startRemoval()
+        }
     }
 
     /// With the switch off, a configuration of ours left enabled (a config.json replaced while it
     /// ran) would keep every new TCP connection passing through the extension: disable it.
     private func disableStaleConfiguration() async {
-        guard case .supported = system.support, !wantsOn, await system.loadConfiguration() == true, !wantsOn else { return }
+        guard case .supported = system.support, !wantsOn else { return }
+        let existing = await system.loadConfiguration()
+        if existing != nil || wasActivated() { mayBeInstalled = true }
+        guard existing == true, !wantsOn else { return }
         log(.info, "Per-app routing is off, so its configuration left enabled is turned off")
         disableConfiguration()
     }
 
     /// Saves the configuration disabled, after any disable still in flight.
     private func disableConfiguration() {
-        let previous = pendingDisable
-        pendingDisable = Task { [system] in
+        let previous = pendingTeardown
+        pendingTeardown = Task { [system] in
             await previous?.value
             _ = await system.saveConfiguration(enabled: false)
         }
     }
 
+    /// Removes the configuration, then files the deactivation request, after any teardown still
+    /// in flight. The session was stopped by the turn-off, or was not running.
+    private func startRemoval() {
+        removal = .removing
+        removalsInFlight += 1
+        log(.info, "Per-app routing: removing its configuration and the extension (macOS asks for an administrator password)")
+        let previous = pendingTeardown
+        pendingTeardown = Task { [weak self, system] in
+            await previous?.value
+            let configurationRemoved = await system.removeConfiguration()
+            let outcome: FlowEngineDeactivation = await withCheckedContinuation { continuation in
+                system.requestDeactivation { continuation.resume(returning: $0) }
+            }
+            self?.finishRemoval(configurationRemoved: configurationRemoved, outcome)
+        }
+    }
+
+    private func finishRemoval(configurationRemoved: Bool, _ outcome: FlowEngineDeactivation) {
+        removalsInFlight -= 1
+        let result: FlowEngineRemoval
+        switch outcome {
+        case .removed:
+            result = configurationRemoved ? .removed : .failed
+        case .willCompleteAfterReboot:
+            result = configurationRemoved ? .needsRestart : .failed
+        case .failed(let code):
+            log(.warning, "Per-app routing: the extension could not be removed (code \(code))")
+            result = .failed
+        }
+        if !configurationRemoved { log(.warning, "Per-app routing: its configuration could not be removed") }
+        if result != .failed { log(.info, result == .removed
+            ? "Per-app routing: the extension and its configuration are removed"
+            : "Per-app routing: its configuration is removed; macOS removes the extension at the next restart") }
+        if result != .failed { saveActivated(false) }
+        // A turn-on that waited for this removal reports its own state; the removal stays
+        // visible only while per-app routing is off.
+        guard !wantsOn else { return }
+        removal = result
+        mayBeInstalled = result == .failed
+    }
+
     private func configureAndStart(_ a: Int) async {
-        await pendingDisable?.value
+        await pendingTeardown?.value
         guard attempt == a else { return }
         if await system.loadConfiguration() != true {
             guard attempt == a else { return }
@@ -199,7 +302,7 @@ final class FlowEngineManager: ObservableObject {
                 break
             case .declined:
                 log(.info, "Per-app routing: the proxy configuration was not allowed, so it is off again")
-                turnOff(saving: false)
+                turnOff(teardown: .none)
                 saveEnabled(false)
                 state = .failed(.configurationDeclined)
                 return
@@ -403,7 +506,7 @@ final class FlowEngineManager: ObservableObject {
 
     /// The `status` and `engine.status` field.
     func status() -> FlowEngineStatus {
-        FlowEngineStatus(enabled: isEnabled(), state: state, reply: reply, appVersion: appVersion)
+        FlowEngineStatus(enabled: isEnabled(), state: state, reply: reply, appVersion: appVersion, removal: removal)
     }
 
     /// An extension of another version than the app answers: its update waits for approval.
@@ -414,7 +517,10 @@ final class FlowEngineManager: ObservableObject {
     }
 
     /// For the doc screenshots: shows a state and counters without an extension.
-    func showForScreenshots(_ state: FlowEngineState?, reply: FlowEngineReplySummary? = nil) {
+    func showForScreenshots(_ state: FlowEngineState?, reply: FlowEngineReplySummary? = nil,
+                            removal: FlowEngineRemoval? = nil, mayBeInstalled: Bool = false) {
+        self.removal = removal
+        self.mayBeInstalled = mayBeInstalled
         if let state {
             self.state = state
         } else if case .unavailable(let why) = system.support {

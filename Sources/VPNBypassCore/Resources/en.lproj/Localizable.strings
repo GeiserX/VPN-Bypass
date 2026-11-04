@@ -1109,6 +1109,14 @@
 "An update of the extension is waiting for approval in System Settings." = "An update of the extension is waiting for approval in System Settings.";
 "Open System Settings" = "Open System Settings";
 "Open System Settings to allow per-app routing" = "Open System Settings to allow per-app routing";
+/* Per-app routing: turning it off and Remove Extension take the extension off the Mac */
+"Turning it off removes the extension and its configuration from this Mac, so every app follows your routes as before. macOS asks for an administrator password, and turning it on again asks for both approvals again." = "Turning it off removes the extension and its configuration from this Mac, so every app follows your routes as before. macOS asks for an administrator password, and turning it on again asks for both approvals again.";
+"Remove Extension" = "Remove Extension";
+"Remove the per-app routing extension from this Mac" = "Remove the per-app routing extension from this Mac";
+"Removing the extension from this Mac. macOS asks for an administrator password." = "Removing the extension from this Mac. macOS asks for an administrator password.";
+"The extension is removed from this Mac." = "The extension is removed from this Mac.";
+"macOS removes the extension when you restart the Mac." = "macOS removes the extension when you restart the Mac.";
+"The extension could not be removed. Try again, or see Troubleshooting for the manual steps." = "The extension could not be removed. Try again, or see Troubleshooting for the manual steps.";
 "Served by per-app routing: %lld connections went around the VPN." = "Served by per-app routing: %lld connections went around the VPN.";
 "Inactive: per-app routing is off (Settings > General)." = "Inactive: per-app routing is off (Settings > General).";
 "Inactive: per-app routing is waiting for your approval in System Settings." = "Inactive: per-app routing is waiting for your approval in System Settings.";

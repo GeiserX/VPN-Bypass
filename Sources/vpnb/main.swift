@@ -92,7 +92,10 @@ func printUsage() {
       engine.on                                 Turn per-app routing on (macOS then asks to allow
                                                  the extension and its proxy configuration)
       engine.off                                Turn per-app routing off: every app follows the
-                                                 routes again
+                                                 routes again, and its extension is removed
+                                                 (macOS asks for an administrator password)
+      engine.remove                             Remove the extension and its configuration, also
+                                                 when per-app routing is already off
 
       help | --help | -h                        Show this help
 

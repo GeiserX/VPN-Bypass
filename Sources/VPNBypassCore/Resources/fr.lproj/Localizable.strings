@@ -1109,6 +1109,14 @@
 "An update of the extension is waiting for approval in System Settings." = "Une mise à jour de l'extension attend votre autorisation dans Réglages Système.";
 "Open System Settings" = "Ouvrir Réglages Système";
 "Open System Settings to allow per-app routing" = "Ouvrir Réglages Système pour autoriser le routage par app";
+/* Per-app routing: turning it off and Remove Extension take the extension off the Mac */
+"Turning it off removes the extension and its configuration from this Mac, so every app follows your routes as before. macOS asks for an administrator password, and turning it on again asks for both approvals again." = "Le désactiver retire l'extension et sa configuration de ce Mac, et toutes les apps suivent vos routes comme avant. macOS demande un mot de passe administrateur, et le réactiver demande de nouveau les deux autorisations.";
+"Remove Extension" = "Retirer l'extension";
+"Remove the per-app routing extension from this Mac" = "Retirer de ce Mac l'extension du routage par app";
+"Removing the extension from this Mac. macOS asks for an administrator password." = "Retrait de l'extension de ce Mac. macOS demande un mot de passe administrateur.";
+"The extension is removed from this Mac." = "L'extension est retirée de ce Mac.";
+"macOS removes the extension when you restart the Mac." = "macOS retire l'extension au redémarrage du Mac.";
+"The extension could not be removed. Try again, or see Troubleshooting for the manual steps." = "L'extension n'a pas pu être retirée. Réessayez, ou consultez Dépannage pour les étapes manuelles.";
 "Served by per-app routing: %lld connections went around the VPN." = "Servie par le routage par app : %lld connexions ont contourné le VPN.";
 "Inactive: per-app routing is off (Settings > General)." = "Inactive : le routage par app est désactivé (Réglages > Général).";
 "Inactive: per-app routing is waiting for your approval in System Settings." = "Inactive : le routage par app attend votre autorisation dans Réglages Système.";

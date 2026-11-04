@@ -36,6 +36,17 @@ enum FlowEngineSession: Equatable {
     case disconnecting
 }
 
+/// How a deactivation request ended (Remove extension, or turning per-app routing off).
+enum FlowEngineDeactivation: Equatable {
+    /// Gone, or there was none to remove.
+    case removed
+    /// macOS removes it after a restart.
+    case willCompleteAfterReboot
+    /// An `OSSystemExtensionError` code; 1 is also what an administrator password left
+    /// unanswered gives.
+    case failed(code: Int)
+}
+
 enum FlowEngineSaveResult: Equatable {
     case saved
     /// The user answered Don't Allow, or a profile refused it.
@@ -63,6 +74,12 @@ protocol FlowEngineSystem: AnyObject {
     func stopSession()
     /// Sends one message to the extension; nil when no reply came within `timeout`.
     func send(_ data: Data, timeout: TimeInterval) async -> Data?
+    /// Removes our proxy configuration from the system's preferences, so no connection passes
+    /// through the extension any more; true when it is gone or there was none.
+    func removeConfiguration() async -> Bool
+    /// Files the deactivation request, which uninstalls the extension (macOS asks for an
+    /// administrator password); `completion` runs once, when the request ends.
+    func requestDeactivation(completion: @escaping @MainActor (FlowEngineDeactivation) -> Void)
 }
 
 // MARK: - The real one
@@ -76,6 +93,7 @@ final class LiveFlowEngineSystem: FlowEngineSystem {
     private var manager: NETransparentProxyManager?
     private var observer: NSObjectProtocol?
     private var requestDelegate: ActivationDelegate?
+    private var deactivationDelegate: DeactivationDelegate?
     var onSessionChange: (@MainActor () -> Void)?
 
     let support: FlowEngineSupport
@@ -207,6 +225,33 @@ final class LiveFlowEngineSystem: FlowEngineSystem {
         manager?.connection.stopVPNTunnel()
     }
 
+    func removeConfiguration() async -> Bool {
+        let existing: NETransparentProxyManager?
+        do {
+            existing = try await load()
+        } catch {
+            return false
+        }
+        guard let m = existing else { return true }
+        let error: Error? = await withCheckedContinuation { continuation in
+            m.removeFromPreferences { continuation.resume(returning: $0) }
+        }
+        guard error == nil else { return false }
+        adopt(nil)
+        return true
+    }
+
+    func requestDeactivation(completion: @escaping @MainActor (FlowEngineDeactivation) -> Void) {
+        let delegate = DeactivationDelegate { [weak self] outcome in
+            self?.deactivationDelegate = nil
+            completion(outcome)
+        }
+        deactivationDelegate = delegate
+        let request = OSSystemExtensionRequest.deactivationRequest(forExtensionWithIdentifier: Self.extensionIdentifier, queue: .main)
+        request.delegate = delegate
+        OSSystemExtensionManager.shared.submitRequest(request)
+    }
+
     func send(_ data: Data, timeout: TimeInterval) async -> Data? {
         guard let session = manager?.connection as? NETunnelProviderSession, session.status == .connected else { return nil }
         return await withCheckedContinuation { continuation in
@@ -269,5 +314,39 @@ private final class ActivationDelegate: NSObject, OSSystemExtensionRequestDelega
     func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
         let code = (error as NSError).code
         Task { @MainActor in self.completion(.failed(code: code)) }
+    }
+}
+
+/// The deactivation request's delegate. macOS calls it on the main queue (the request's queue).
+private final class DeactivationDelegate: NSObject, OSSystemExtensionRequestDelegate {
+    let completion: @MainActor (FlowEngineDeactivation) -> Void
+
+    init(completion: @escaping @MainActor (FlowEngineDeactivation) -> Void) {
+        self.completion = completion
+    }
+
+    func request(_ request: OSSystemExtensionRequest, actionForReplacingExtension existing: OSSystemExtensionProperties,
+                 withExtension ext: OSSystemExtensionProperties) -> OSSystemExtensionRequest.ReplacementAction {
+        .cancel
+    }
+
+    func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {}
+
+    func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
+        let outcome: FlowEngineDeactivation = result == .completed ? .removed : .willCompleteAfterReboot
+        Task { @MainActor in self.completion(outcome) }
+    }
+
+    func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
+        let outcome = FlowEngineDeactivation.forError(code: (error as NSError).code)
+        Task { @MainActor in self.completion(outcome) }
+    }
+}
+
+extension FlowEngineDeactivation {
+    /// `OSSystemExtensionErrorCode` 4, extension not found: nothing was installed, so there is
+    /// nothing left to remove.
+    static func forError(code: Int) -> FlowEngineDeactivation {
+        code == 4 ? .removed : .failed(code: code)
     }
 }

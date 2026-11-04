@@ -1519,11 +1519,12 @@ final class DocScreenshotsTests: XCTestCase {
 
     /// General in Custom mode with the Per-app routing group in `state`, its switch as `on`.
     private func renderPerAppRouting(_ state: FlowEngineState, on: Bool, reply: FlowEngineReplySummary? = nil,
+                                     removal: FlowEngineRemoval? = nil, mayBeInstalled: Bool = false,
                                      to name: String) throws {
         seedCustom()
         rm.config.flowEngine.enabled = on
         GeneralTab.detectedDNSForScreenshots = "192.0.2.53"
-        FlowEngineManager.shared.showForScreenshots(state, reply: reply)
+        FlowEngineManager.shared.showForScreenshots(state, reply: reply, removal: removal, mayBeInstalled: mayBeInstalled)
         defer {
             GeneralTab.detectedDNSForScreenshots = nil
             FlowEngineManager.shared.showForScreenshots(nil)
@@ -1552,7 +1553,22 @@ final class DocScreenshotsTests: XCTestCase {
 
     /// Stopped twice within 10 minutes: turned off, and it says so.
     func testGeneralPerAppRoutingStoppedTwice() throws {
-        try renderPerAppRouting(.failed(.stoppedTwice), on: false, to: "general-per-app-stopped-twice.png")
+        try renderPerAppRouting(.failed(.stoppedTwice), on: false, mayBeInstalled: true, to: "general-per-app-stopped-twice.png")
+    }
+
+    /// Turned off by hand: the extension is being removed, and macOS asks for the password.
+    func testGeneralPerAppRoutingRemoving() throws {
+        try renderPerAppRouting(.off, on: false, removal: .removing, mayBeInstalled: true, to: "general-per-app-removing.png")
+    }
+
+    /// The removal is done: off is the old way, and nothing of the extension is left.
+    func testGeneralPerAppRoutingRemoved() throws {
+        try renderPerAppRouting(.off, on: false, removal: .removed, to: "general-per-app-removed.png")
+    }
+
+    /// The removal failed (the password prompt was cancelled): Remove Extension tries again.
+    func testGeneralPerAppRoutingRemovalFailed() throws {
+        try renderPerAppRouting(.off, on: false, removal: .failed, mayBeInstalled: true, to: "general-per-app-removal-failed.png")
     }
 
     /// The Rules page while per-app routing serves the process rule, with its counts.
