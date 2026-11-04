@@ -27,10 +27,15 @@ public enum BoundInterface: String, CaseIterable, Codable, Sendable {
 
     private static let tunnelPrefixes = ["utun", "ipsec", "ppp", "tun", "tap", "wg", "gif", "stf"]
 
+    /// A VPN or other tunnel interface, by its name.
+    public static func isTunnelName(_ name: String) -> Bool {
+        tunnelPrefixes.contains { name.hasPrefix($0) }
+    }
+
     public static func classify(name: String?, kind: Kind?) -> BoundInterface {
         guard let name, !name.isEmpty else { return .unknown }
         // A tunnel's type is `other`, so the name decides first.
-        if tunnelPrefixes.contains(where: { name.hasPrefix($0) }) { return .tunnel }
+        if isTunnelName(name) { return .tunnel }
         switch kind {
         case .wifi, .wired: return .physical
         default: return .other
@@ -104,6 +109,10 @@ public struct FlowLedger: Sendable {
         case egressFailed
         /// The outbound connection was ready but not on the policy's interface. Should stay 0.
         case egressOffInterface
+        /// A connect-by-name flow whose name resolved, on the physical interface, to a protected
+        /// address (a private, link-local, CGNAT, loopback or multicast one, or one in a tunnel's
+        /// own network). Closed before anything was dialled (`NameAnswer`, design 3.5 step 4).
+        case nameProtected
         /// `flow.open` failed after the outbound connection was ready.
         case flowOpenFailed
         /// A claimed flow whose server side failed after it opened (reset, send or receive error).

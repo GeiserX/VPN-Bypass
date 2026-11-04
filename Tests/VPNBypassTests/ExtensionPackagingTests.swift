@@ -145,10 +145,40 @@ final class ExtensionPackagingTests: XCTestCase {
     func testTheMetadataIsSetBeforeTheConnectionIsMade() throws {
         let proxy = try text("Sources/VPNBypassProxy/FlowProxy.swift")
         let metadata = try XCTUnwrap(proxy.range(of: "flow.setMetadata(params)"))
-        let relay = try XCTUnwrap(proxy.range(of: "TCPRelay(flow: tcp, endpoint: endpoint, parameters: params,"))
+        let relay = try XCTUnwrap(proxy.range(of: "TCPRelay(flow: tcp, target: target, parameters: params,"))
         XCTAssertLessThan(metadata.lowerBound, relay.lowerBound)
         let relaySource = try text("Sources/VPNBypassProxy/TCPRelay.swift")
-        XCTAssertTrue(relaySource.contains("self.connection = nw_connection_create(endpoint, parameters)"))
+        XCTAssertTrue(relaySource.contains("let connection = nw_connection_create(endpoint, parameters)"))
+    }
+
+    /// A connect-by-name flow is looked up on the egress interface and its answers checked
+    /// before anything is dialled (design 3.5 step 4); the name is never handed to Network to
+    /// resolve and dial in one go, which would connect to a protected answer unchecked.
+    func testANameIsCheckedBeforeItIsDialled() throws {
+        let proxy = try text("Sources/VPNBypassProxy/FlowProxy.swift")
+        XCTAssertTrue(proxy.contains("return .name(n, port: p)"))
+        XCTAssertFalse(proxy.contains("nw_endpoint_create_host(n, p)"), "a real name is never dialled as a name")
+        let relay = try text("Sources/VPNBypassProxy/TCPRelay.swift")
+        let index = try XCTUnwrap(relay.range(of: "guard index != 0 else { fail(nil); return }"),
+                                  "index 0 asks every interface's resolvers, the VPN's included")
+        let lookup = try XCTUnwrap(relay.range(of: "NameLookup.start(name, interfaceIndex: index, queue: queue)"))
+        XCTAssertLessThan(index.lowerBound, lookup.lowerBound)
+        let interfaces = try XCTUnwrap(relay.range(of: "guard let addresses = NameLookup.interfaceAddresses() else { self.fail(nil); return }"),
+                                       "no interface list fails the flow closed")
+        let check = try XCTUnwrap(relay.range(of: "switch NameAnswer.check(answers, tunnelNetworks: NameAnswer.tunnelNetworks(addresses))"))
+        XCTAssertLessThan(interfaces.lowerBound, check.lowerBound)
+        let dial = try XCTUnwrap(relay.range(of: "self.connect(nw_endpoint_create_host(ProtectedRanges.dotted(address), port))"))
+        XCTAssertLessThan(lookup.lowerBound, check.lowerBound)
+        XCTAssertLessThan(check.lowerBound, dial.lowerBound)
+        let refused = try XCTUnwrap(relay.range(of: "case .protected:"))
+        let tail = relay[refused.lowerBound...].prefix(400)
+        XCTAssertTrue(tail.contains("self.count(.nameProtected, 1)"), String(tail))
+        XCTAssertTrue(tail.contains("self.closeAll(NSError(domain: NEAppProxyErrorDomain, code: NEAppProxyFlowError.hostUnreachable.rawValue))"),
+                      "a claimed flow cannot be handed back: it is closed")
+        let lookupSource = try text("Sources/VPNBypassProxy/NameLookup.swift")
+        XCTAssertTrue(lookupSource.contains("DNSServiceProtocol(kDNSServiceProtocol_IPv4)"))
+        XCTAssertTrue(lookupSource.contains("guard DNSServiceSetDispatchQueue(ref, queue) == kDNSServiceErr_NoError else {"))
+        XCTAssertFalse(lookupSource.contains("os_log"), "the name is never logged (3.8)")
     }
 
     func testTheExtensionIncludesTCPOnlyAndRunsTheLeaseWatchdog() throws {

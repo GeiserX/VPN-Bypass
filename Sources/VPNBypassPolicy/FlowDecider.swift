@@ -176,17 +176,28 @@ public enum FlowDecider {
     ]
 
     /// VPN and network-security vendors, by team id. A team id, not a signing id: GlobalProtect's
-    /// daemon is signed with the bare identifier `PanGPS`, so only its team identifies it. Each id
-    /// is the vendor's published one (its MDM system-extension docs, or `systemextensionsctl list`).
-    /// A VPN missing here is still declined while it owns a live tunnel: the app adds that owner's
-    /// team to `FlowPolicy.declinedTeams`.
+    /// daemon is signed with the bare identifier `PanGPS`, so only its team identifies it. Every id
+    /// marked "codesign" was read with `codesign -dv` from the vendor's own signed app (the app and
+    /// every bundle and extension inside it carry the same team), downloaded from the vendor's
+    /// site and never installed; the others come from the vendor's published MDM system-extension
+    /// docs, since their installers sit behind a customer login. A VPN missing here is still
+    /// declined while it owns a live tunnel: the app adds that owner's team to
+    /// `FlowPolicy.declinedTeams`.
     public static let protectedTeams: Set<String> = [
-        "PXPZ95SK77", // Palo Alto Networks (GlobalProtect)
-        "W5364U7YZB", // Tailscale
-        "DE8Y96K9QP", // Cisco (Secure Client, AnyConnect)
-        "AH4XFXJ7DK", // Fortinet (FortiClient)
-        "PCBCQZJ7S7", // Zscaler
-        "68WVV388M8", // Cloudflare (WARP)
+        "PXPZ95SK77", // Palo Alto Networks (GlobalProtect): codesign 2026-11-04
+        "W5364U7YZB", // Tailscale: codesign 2026-11-04
+        "94KV3E626L", // AWS VPN Client (AMZN Mobile LLC): codesign 2026-11-04
+        "AH4XFXJ7DK", // Fortinet (FortiClient VPN): codesign 2026-11-04
+        "68WVV388M8", // Cloudflare (WARP): codesign 2026-11-04
+        "ACV7L3WCD8", // OpenVPN Inc. (OpenVPN Connect): codesign 2026-11-04
+        "J6S6Q257EK", // Proton VPN: codesign 2026-11-04
+        "CKG9MXH72F", // Mullvad VPN: codesign 2026-11-04
+        "W5W395V82Y", // NordVPN: codesign 2026-11-04
+        "TC292Y5427", // ExpressVPN: codesign 2026-11-04
+        "YHUG37CKN8", // Surfshark: codesign 2026-11-04
+        "5357M5NW9W", // Private Internet Access: codesign 2026-11-04
+        "DE8Y96K9QP", // Cisco (Secure Client, AnyConnect): vendor docs
+        "PCBCQZJ7S7", // Zscaler: vendor docs
     ]
 
     /// The verdict on one flow, in the order of design 3.4. The matching runs before the team

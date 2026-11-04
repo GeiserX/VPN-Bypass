@@ -19,8 +19,18 @@ final class TCPRelay {
     /// The most one read takes from the server at once.
     static let chunk = 65536
 
+    /// Where the flow goes: an address, or a host name that is looked up on the interface and
+    /// checked first (design 3.5 step 4, `NameAnswer`).
+    enum Target {
+        case endpoint(nw_endpoint_t)
+        case name(String, port: String)
+    }
+
     private let flow: NEAppProxyTCPFlow
-    private let connection: nw_connection_t
+    private let target: Target
+    private let parameters: nw_parameters_t
+    private var connection: nw_connection_t?
+    private var lookup: NameLookup?
     private let queue: DispatchQueue
     private let interfaceName: String
     private let count: Count
@@ -35,10 +45,11 @@ final class TCPRelay {
 
     /// `parameters` must already carry the flow's metadata (`flow.setMetadata`): only a
     /// connection created from them afterwards is attributed to the original app.
-    init(flow: NEAppProxyTCPFlow, endpoint: nw_endpoint_t, parameters: nw_parameters_t, interfaceName: String,
+    init(flow: NEAppProxyTCPFlow, target: Target, parameters: nw_parameters_t, interfaceName: String,
          queue: DispatchQueue, count: @escaping Count, onEgress: @escaping Egress) {
         self.flow = flow
-        self.connection = nw_connection_create(endpoint, parameters)
+        self.target = target
+        self.parameters = parameters
         self.queue = queue
         self.interfaceName = interfaceName
         self.count = count
@@ -53,6 +64,52 @@ final class TCPRelay {
     func start() {
         retainSelf = self
         count(.active, 1)
+        // Waiting (no route, interface down) never turns into failed by itself; a lookup that
+        // hangs is covered too.
+        queue.asyncAfter(deadline: .now() + Self.giveUpSeconds) { [weak self] in
+            guard let self, !self.opened, !self.finished else { return }
+            self.fail(nil)
+        }
+        queue.async {
+            guard !self.finished else { return }
+            switch self.target {
+            case .endpoint(let endpoint): self.connect(endpoint)
+            case .name(let name, let port): self.resolve(name, port: port)
+            }
+        }
+    }
+
+    /// Looks the name up on the egress interface and dials the first answer, unless any answer
+    /// is protected: then the flow is closed, since a claimed flow cannot be handed back, and the
+    /// app sees a failed connect. A name that points into a private network is never reached
+    /// past the VPN: one the app resolves itself arrives by address, which the excluded ranges keep.
+    private func resolve(_ name: String, port: String) {
+        // Index 0 would mean any interface, so the VPN's resolvers: an interface that is gone
+        // fails the connect instead.
+        let index = if_nametoindex(interfaceName)
+        guard index != 0 else { fail(nil); return }
+        lookup = NameLookup.start(name, interfaceIndex: index, queue: queue) { [weak self] answers in
+            guard let self, !self.finished else { return }
+            self.lookup = nil
+            // Without the interfaces a tunnel's own network cannot be checked: fail, never dial.
+            guard let addresses = NameLookup.interfaceAddresses() else { self.fail(nil); return }
+            switch NameAnswer.check(answers, tunnelNetworks: NameAnswer.tunnelNetworks(addresses)) {
+            case .dial(let address):
+                self.connect(nw_endpoint_create_host(ProtectedRanges.dotted(address), port))
+            case .protected:
+                // Not a failure of the interface: its health is left alone.
+                self.onEgress = nil
+                self.count(.nameProtected, 1)
+                self.closeAll(NSError(domain: NEAppProxyErrorDomain, code: NEAppProxyFlowError.hostUnreachable.rawValue))
+            case .noAnswer:
+                self.fail(nil)
+            }
+        }
+    }
+
+    private func connect(_ endpoint: nw_endpoint_t) {
+        let connection = nw_connection_create(endpoint, parameters)
+        self.connection = connection
         nw_connection_set_queue(connection, queue)
         nw_connection_set_state_changed_handler(connection) { [weak self] state, error in
             guard let self else { return }
@@ -67,15 +124,11 @@ final class TCPRelay {
             }
         }
         nw_connection_start(connection)
-        // Waiting (no route, interface down) never turns into failed by itself.
-        queue.asyncAfter(deadline: .now() + Self.giveUpSeconds) { [weak self] in
-            guard let self, !self.opened, !self.finished else { return }
-            self.fail(nil)
-        }
     }
 
     private func ready() {
         reportEgress(true)
+        guard let connection else { return }
         var onInterface = false
         if let path = nw_connection_copy_current_path(connection) {
             nw_path_enumerate_interfaces(path) { iface in
@@ -116,6 +169,7 @@ final class TCPRelay {
 
     /// App to server.
     private func pumpUp() {
+        guard let connection else { return }
         flow.readData { [weak self] data, error in
             guard let self else { return }
             self.queue.async {
@@ -124,7 +178,7 @@ final class TCPRelay {
                 guard let data, !data.isEmpty else {
                     // EOF from the app: half-close towards the server, and finish only once that
                     // final send is done, so the connection is not cancelled under it.
-                    nw_connection_send(self.connection, nil, _nw_content_context_final_send, true) { _ in
+                    nw_connection_send(connection, nil, _nw_content_context_final_send, true) { _ in
                         self.queue.async {
                             self.upDone = true
                             self.finishIfDone()
@@ -133,7 +187,7 @@ final class TCPRelay {
                     return
                 }
                 let content = data.withUnsafeBytes { DispatchData(bytes: $0) }
-                nw_connection_send(self.connection, content as __DispatchData, _nw_content_context_default_message,
+                nw_connection_send(connection, content as __DispatchData, _nw_content_context_default_message,
                                    false) { sendError in
                     self.queue.async {
                         if sendError != nil { self.count(.aborted, 1); self.closeAll(Self.aborted); return }
@@ -147,6 +201,7 @@ final class TCPRelay {
 
     /// Server to app.
     private func pumpDown() {
+        guard let connection else { return }
         nw_connection_receive(connection, 1, UInt32(Self.chunk)) { [weak self] content, _, isComplete, error in
             guard let self, !self.finished else { return }
             if let content, (content as DispatchData).count > 0 {
@@ -187,7 +242,9 @@ final class TCPRelay {
         guard !finished else { return }
         flow.closeReadWithError(error)
         flow.closeWriteWithError(error)
-        nw_connection_cancel(connection)
+        lookup?.cancel()
+        lookup = nil
+        if let connection { nw_connection_cancel(connection) }
         finish()
     }
 

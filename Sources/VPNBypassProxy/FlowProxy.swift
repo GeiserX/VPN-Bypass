@@ -99,13 +99,13 @@ final class FlowProxy: NETransparentProxyProvider {
         var verdict = FlowDecider.decide(facts, state: snapshot, now: now)
         lock.lock()
         var out: (name: String, iface: nw_interface_t)?
-        var endpoint: nw_endpoint_t?
+        var target: TCPRelay.Target?
         if case .claim(let ruleID, let egressChoice) = verdict {
             if case .direct(let name) = egressChoice { out = egress.pick(name) }
-            endpoint = Self.dialEndpoint(remote)
+            target = Self.dialTarget(remote)
             if out == nil {
                 verdict = .decline(.noInterface, ruleID: ruleID)
-            } else if endpoint == nil {
+            } else if target == nil {
                 verdict = .decline(.unknownDestination, ruleID: ruleID)
             } else if let out, !health.isUsable(out.name, at: now) {
                 verdict = .decline(.egressUnusable, ruleID: ruleID)
@@ -116,14 +116,14 @@ final class FlowProxy: NETransparentProxyProvider {
         ledger.record(verdict, bound: facts.isBound ? Egress.boundKind(flow.networkInterface) : nil)
         lock.unlock()
 
-        guard case .claim = verdict, let out, let endpoint else {
+        guard case .claim = verdict, let out, let target else {
             if case .decline(.noInterface, _) = verdict { ProxyLog.event(.noInterface) }
             return false
         }
         // Order matters (3.5): the flow's metadata into the parameters, then the connection from them.
         let params = Egress.parameters(on: out.iface)
         flow.setMetadata(params)
-        TCPRelay(flow: tcp, endpoint: endpoint, parameters: params, interfaceName: out.name, queue: queue,
+        TCPRelay(flow: tcp, target: target, parameters: params, interfaceName: out.name, queue: queue,
                  count: { [weak self] counter, n in
                      guard let self else { return }
                      self.lock.lock(); self.ledger.add(counter, n); self.lock.unlock()
@@ -175,18 +175,23 @@ final class FlowProxy: NETransparentProxyProvider {
         }
     }
 
-    /// The flow's destination as a C endpoint. A name stays a name, so it resolves on the scoped
-    /// interface; it lives only in this connection and is never logged or stored (3.5 step 4).
-    static func dialEndpoint(_ endpoint: Network.NWEndpoint) -> nw_endpoint_t? {
+    /// The flow's destination for the relay. An address (or a name that is an address literal) is
+    /// dialled as it is; a real name is looked up on the scoped interface and its answers checked
+    /// before anything is dialled (3.5 step 4). The name lives only in that lookup and is never
+    /// logged or stored.
+    static func dialTarget(_ endpoint: Network.NWEndpoint) -> TCPRelay.Target? {
         guard case .hostPort(let host, let port) = endpoint else { return nil }
         let p = "\(port.rawValue)"
         switch host {
         case .ipv4(let a):
             let b = [UInt8](a.rawValue)
             guard b.count == 4 else { return nil }
-            return nw_endpoint_create_host("\(b[0]).\(b[1]).\(b[2]).\(b[3])", p)
+            return .endpoint(nw_endpoint_create_host("\(b[0]).\(b[1]).\(b[2]).\(b[3])", p))
         case .name(let n, _):
-            return nw_endpoint_create_host(n, p)
+            if case .ipv4(let a) = ProtectedRanges.literal(.name(n)) {
+                return .endpoint(nw_endpoint_create_host(ProtectedRanges.dotted(a), p))
+            }
+            return .name(n, port: p)
         default:
             return nil
         }

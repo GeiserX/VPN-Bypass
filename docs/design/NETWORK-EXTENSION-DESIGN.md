@@ -281,9 +281,11 @@ table, in this order (the spike's `FlowDecider.decide`):
    carries no team id, so the extension reads it from `sourceAppAuditToken`
    (`SecCodeCopyGuestWithAttributes`, then `SecCodeCopySigningInformation`), cached per audit token. It
    runs last, only for a flow that would otherwise be claimed, because it reads a code signature. The
-   fixed list (Palo Alto `PXPZ95SK77`, Tailscale `W5364U7YZB` and the other VPN vendors the app detects)
-   lives in the pure `FlowDecider`; the policy adds the live tunnel owners' teams (3.3). `ruleAdd` and
-   the app chooser refuse a process rule that names a declined team's app.
+   fixed list (Palo Alto `PXPZ95SK77`, Tailscale `W5364U7YZB` and the other VPN vendors, each team read
+   with `codesign -dv` from the vendor's signed app where its installer is public) lives in the pure
+   `FlowDecider`; the policy adds the live tunnel owners' teams (3.3). The Apps list (`app.add`) and
+   the app chooser refuse a declined team's app; a process rule for one (`rule.add`, the Rules page) is
+   saved but serves nothing, since the extension declines its flows by team here.
 7. Otherwise claim it (return `true`) and re-emit (3.5).
 
 **Process rules and Custom's first match.** A process rule decides by app, the others by destination, so
@@ -309,9 +311,14 @@ do this and are the starting point.
    the original app's metadata, so a later transparent proxy sees that app, not our extension
    (`NEAppProxyFlow.h`, `setMetadata:`).
 3. `nw_connection_create(endpoint, params)`. The Swift `NWConnection` API cannot carry the metadata.
-4. The endpoint is the flow's `remoteFlowEndpoint`. For a connect-by-name flow that is host:port: dial
-   the name with the same scoped parameters, so it resolves on the physical interface. The name is held
-   in memory for that connection only, never logged or stored (3.8).
+4. The endpoint is the flow's `remoteFlowEndpoint`. For a connect-by-name flow that is host:port: look
+   the name up on the physical interface first (`DNSServiceGetAddrInfo` with its interface index, IPv4,
+   `NameLookup`), and dial the first answer with the same scoped parameters. If any answer is protected
+   (`ProtectedRanges`: private, link-local, CGNAT, loopback, multicast, reserved; or the network of a
+   tunnel interface, `NameAnswer`), nothing is dialled: the flow is already claimed and cannot be
+   handed back, so it is closed as unreachable and counted as `nameProtected`. A name with no IPv4
+   answer is closed as a failed connect. The name is held in memory for that lookup only, never logged
+   or stored (3.8).
 5. When the connection is ready, `flow.open`, then copy both ways with a bounded buffer per direction
    (Apple warns that unbounded buffering gets the provider jetsam-killed).
 6. If the connect fails, close the flow with an error. A claimed flow cannot be handed back.
