@@ -347,7 +347,9 @@ The helper adds the scoped default for such VPNs (R12, decided 2026-11-04):
   `restoreAfterHelperRestart`), and a lease: no request for 150 s and the helper removes it. One
   exception: when the interface no longer carries the unscoped default (the VPN became the primary
   service while ours was there), macOS keeps a scoped default for that interface and may rely on
-  ours, so it stays; the kernel drops it with the interface's address.
+  ours, so it stays; the kernel drops it with the interface's address. The app's startup sweep of
+  `RTF_PROTO1` routes skips interface-scoped entries: it deletes by destination, and an unscoped
+  delete of `0.0.0.0` names the system's own default route. This route is the helper's alone.
 - **The extension.** The policy names the interfaces that have a scoped default, each with a stamp
   that changes when the route was put in again (`FlowPolicy.egressRoutes`). On a new interface or
   stamp the extension forgets the failed connects it counted there (`EgressHealth.forget`), so a

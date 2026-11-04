@@ -47,6 +47,22 @@ final class StartupSweepTests: XCTestCase {
         XCTAssertEqual(orphans, ["203.0.113.2"])
     }
 
+    /// Per-app routing's scoped default (R12) is tagged too, but the helper owns it and removes
+    /// it by interface index. Swept by destination it would become an unscoped delete of
+    /// "0.0.0.0", the system's default route. Both dump shapes: with and without a netmask.
+    func testOurScopedDefaultIsNeverAnOrphan() {
+        let flags = RTF_UP | RTF_STATIC | RTF_GATEWAY | RTF_PROTO1 | RTF_IFSCOPE
+        var noMask = RouteKernel.KernelRoute(destination: 0, prefix: nil, gatewayAddress: 0xC0A80101,
+                                             gatewayInterfaceIndex: nil, flags: flags)
+        noMask.interfaceIndex = 4
+        var withMask = RouteKernel.KernelRoute(destination: 0, prefix: 0, gatewayAddress: 0xC0A80101,
+                                               gatewayInterfaceIndex: nil, flags: flags)
+        withMask.interfaceIndex = 4
+        let table = [noMask, withMask, kr(0xCB007102, ours: true)]
+        XCTAssertTrue(noMask.isDefault && noMask.isScoped && noMask.isOurs)
+        XCTAssertEqual(RouteManager.orphanedDestinations(table: table, desired: []), ["203.0.113.2"])
+    }
+
     func testEmptyTableAndUntaggedTableYieldNothing() {
         XCTAssertTrue(RouteManager.orphanedDestinations(table: [], desired: []).isEmpty)
         let foreign = [kr(0xCB007107, ours: false)]

@@ -81,6 +81,14 @@ final class ScopedDefaultRouteTests: XCTestCase {
         XCTAssertEqual(plan, .init(delete: [], add: false, outcome: .kept))
     }
 
+    func testOursThatIsDownIsPutBackNotKept() {
+        var down = ours(on: en0)
+        down = KR(destination: 0, prefix: 0, gatewayAddress: down.gatewayAddress, gatewayInterfaceIndex: nil,
+                  flags: down.flags & ~RTF_UP, interfaceIndex: en0)
+        let plan = ScopedDefaultRoute.plan(request, interfaceIndex: en0, table: vpnTable() + [down])
+        XCTAssertEqual(plan, .init(delete: [en0], add: true, outcome: .added), "a down entry is no usable route")
+    }
+
     func testAddsNothingWhenTheSystemKeepsOne() {
         // A VPN that becomes the primary service (GlobalProtect) leaves en1-style scoped defaults on
         // every physical interface: ask for en1 here.
@@ -319,6 +327,21 @@ final class ScopedDefaultEngineTests: XCTestCase {
         engine.requestPush(force: true)
         await until("pushed") { system.sent.count >= 2 }
         XCTAssertEqual(system.sent.last?.egressRoutes, [:], "an older helper (nil) adds nothing")
+    }
+
+    /// A heartbeat that fires while the app quits must not ask for the route again: the helper
+    /// would then hold it for its whole lease after the app is gone.
+    func testAPushDuringQuitDoesNotPutTheRouteBack() async {
+        engine.setEnabled(true)
+        await until("active") { engine.state == .active }
+        await engine.removeEgressRouteForQuit()
+        XCTAssertNil(calls.last?.request)
+        let before = calls.count
+        let sent = system.sent.count
+        engine.requestPush(force: true)
+        await until("a heartbeat") { system.sent.count > sent }
+        XCTAssertFalse(calls.dropFirst(before).contains { $0.request != nil }, "nothing asked for after the quit began")
+        XCTAssertEqual(system.sent.last?.egressRoutes, [:])
     }
 
     func testACrashedSessionRemovesItUntilTheRestartAsksAgain() async {

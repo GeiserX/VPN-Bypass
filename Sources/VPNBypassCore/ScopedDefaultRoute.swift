@@ -144,7 +144,8 @@ public enum ScopedDefaultRoute {
             return clear(.systemRoute)
         }
         let others = removable.filter { $0 != index }
-        if mine.contains(where: { $0.interfaceIndex == index && $0.gatewayAddress == gateway }) {
+        // Kept only while it is up; a down entry of ours is deleted and added again below.
+        if mine.contains(where: { $0.interfaceIndex == index && $0.gatewayAddress == gateway && $0.flags & RTF_UP != 0 }) {
             return Plan(delete: others, add: false, outcome: .kept)
         }
         // Only next to the interface's own unscoped default through the same router.

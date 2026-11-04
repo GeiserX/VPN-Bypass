@@ -115,6 +115,9 @@ final class FlowEngineManager: ObservableObject {
     private var lastEgressOutcome: ScopedDefaultOutcome?
     /// The route calls in order: a removal can never overtake the add before it.
     private var egressRouteTask: Task<ScopedDefaultOutcome?, Never>?
+    /// The app is quitting: every later call removes the route, so a heartbeat that fires during
+    /// the quit cannot put it back for the helper's 150 s lease.
+    private var quitting = false
 
     init(system: FlowEngineSystem) {
         self.system = system
@@ -492,7 +495,7 @@ final class FlowEngineManager: ObservableObject {
     @discardableResult
     func syncEgressRoute(claims: Bool, interface: String?) async -> ScopedDefaultOutcome? {
         let facts = egressRouteFacts()
-        let want = ScopedDefaultRoute.want(engineClaims: claims, vpnConnected: facts.vpnConnected,
+        let want = ScopedDefaultRoute.want(engineClaims: claims && !quitting, vpnConnected: facts.vpnConnected,
                                            interface: interface, gateway: facts.gateway)
         let previous = egressRouteTask
         let task = Task { [weak self] () -> ScopedDefaultOutcome? in
@@ -540,6 +543,7 @@ final class FlowEngineManager: ObservableObject {
 
     /// At quit: the route goes with the app (the helper's lease would take it two minutes later).
     func removeEgressRouteForQuit() async {
+        quitting = true
         await syncEgressRoute(claims: false, interface: nil)
     }
 
