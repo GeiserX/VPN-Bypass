@@ -1822,6 +1822,12 @@ struct DropdownStatus: Equatable {
         /// them now. Only served apps count as skipping the VPN.
         var enabledApps: Int = 0
         var appsServed: Bool = false
+
+        /// Bypass mode with no service or domain on and per-app routing serving the Apps list:
+        /// no address is routed, and none should be, yet those apps skip the VPN.
+        var onlyServedApps: Bool {
+            mode == .bypass && appsServed && enabledApps > 0 && enabledServices == 0 && enabledDomains == 0
+        }
     }
 
     /// The chip right of the wordmark: the only coloured signal in the block.
@@ -1970,7 +1976,7 @@ struct DropdownStatus: Equatable {
                                   note: scheduledNote, line3: Line3(text: scheduledNote ?? ""))
         }
         let problems = partialReasons(input)
-        if input.installedRoutes == 0 && !input.everythingElseDirect {
+        if input.installedRoutes == 0 && !input.everythingElseDirect && !input.onlyServedApps {
             return DropdownStatus(chip: .notRouting, tone: .warn,
                                   headline: String(localized: "\(name) connected"),
                                   sentence: String(localized: "Nothing is routed right now."),

@@ -273,4 +273,47 @@ final class BypassAppsTests: XCTestCase {
         XCTAssertFalse(FirstRunSetup.isFresh(mode: .bypass, domains: [], services: [],
                                              apps: [BypassApp(pattern: "com.example.A")], installedRoutes: 0))
     }
+
+    func testServedAppsAloneAreNotNothingRouted() {
+        var only = input(apps: 2, served: true, services: 0)
+        only.installedRoutes = 0
+        XCTAssertNotEqual(DropdownStatus.make(only, now: Date()).chip, .notRouting)
+        XCTAssertNotEqual(StatusPage.summary(only, now: Date()).title, "Nothing routed")
+        // Apps that per-app routing does not serve, or services with no address, still warn.
+        var unserved = only
+        unserved.appsServed = false
+        XCTAssertEqual(DropdownStatus.make(unserved, now: Date()).chip, .notRouting)
+        var withServices = input(apps: 2, served: true, services: 1)
+        withServices.installedRoutes = 0
+        XCTAssertEqual(DropdownStatus.make(withServices, now: Date()).chip, .notRouting)
+        XCTAssertEqual(StatusPage.summary(withServices, now: Date()).title, "Nothing routed")
+    }
+
+    // MARK: - Review fixes
+
+    func testAnEntryThatIsOffHasNoReasonWhateverTheEngine() {
+        let off = BypassApp(pattern: "com.example.A", enabled: false)
+        for engine: FlowEngineState in [.off, .active, .starting, .unavailable(.notInThisBuild)] {
+            XCTAssertNil(BypassAppServing.serving(off, engine: engine).reason, "\(engine)")
+        }
+        XCTAssertNil(BypassAppServing.serving(off, engine: .active, listIsLive: false).reason)
+    }
+
+    func testAddByIdStoresTheSigningIdentifier() {
+        BypassApps.lookup = { id in
+            id == "com.example.Bundle" ? AppIdentity(name: "Example", signingID: "com.example.Signed", team: "TEAM000001") : nil
+        }
+        XCTAssertEqual(try rm.addBypassApp("com.example.Bundle").get().pattern, "com.example.Signed")
+        XCTAssertEqual(rm.addBypassApp("com.example.Bundle"), .failure(.alreadyListed("Example")))
+    }
+
+    func testARepeatedIdInTheConfigGetsAFreshOne() throws {
+        let id = UUID()
+        var c = RouteManager.Config()
+        c.bypassApps = [BypassApp(id: id, pattern: "com.example.A"), BypassApp(id: id, pattern: "com.example.B")]
+        let again = try JSONDecoder().decode(RouteManager.Config.self, from: JSONEncoder().encode(c))
+        XCTAssertEqual(again.bypassApps.map(\.pattern), ["com.example.A", "com.example.B"])
+        XCTAssertEqual(again.bypassApps[0].id, id)
+        XCTAssertNotEqual(again.bypassApps[1].id, id)
+    }
 }

@@ -176,8 +176,9 @@ enum BypassApps {
         return take(running) + take(installed)
     }
 
-    /// The candidates on this Mac. Reads every app's Info.plist in /Applications, its Utilities
-    /// folder and ~/Applications, so call it off the main thread.
+    /// The candidates on this Mac. Reads every app's Info.plist in /Applications, the system's
+    /// apps in /System/Applications, both Utilities folders and ~/Applications, so call it off
+    /// the main thread.
     static func loadCandidates(listed: [BypassApp]) async -> [Candidate] {
         let running = await MainActor.run {
             NSWorkspace.shared.runningApplications.compactMap { app -> Candidate? in
@@ -186,7 +187,8 @@ enum BypassApps {
                                  bundleID: id, isRunning: true)
             }
         }
-        let folders = ["/Applications", "/Applications/Utilities", NSHomeDirectory() + "/Applications"]
+        let folders = ["/Applications", "/Applications/Utilities", "/System/Applications",
+                       "/System/Applications/Utilities", NSHomeDirectory() + "/Applications"]
         var installed: [Candidate] = []
         for folder in folders {
             let names = (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []
@@ -219,10 +221,10 @@ enum BypassAppServing {
     /// entry that is off has no reason: its own switch says why.
     static func serving(_ app: BypassApp, engine: FlowEngineState, listIsLive: Bool = true)
         -> (servedBy: RuleServedBy, reason: ProcessRule.InactiveReason?) {
+        guard app.enabled else { return (.none, nil) }
         if case .unavailable = engine { return (.none, .perAppRoutingNotAvailable) }
         guard listIsLive else { return (.none, .notInBypassMode) }
         if let reason = engine.ruleReason { return (.none, reason) }
-        guard app.enabled else { return (.none, nil) }
         return (.perAppEngine, nil)
     }
 
@@ -237,13 +239,14 @@ enum BypassAppServing {
 
 extension RouteManager {
     /// Adds an app to the list. `identity` is the app the chooser picked; without one (an add
-    /// by id), the installed app with that id is looked up, so its name and team are known.
+    /// by id), the installed app with that id is looked up, so its name and team are known, and
+    /// the entry holds the identifier its code is signed with, which is what flows report.
     /// Only the config changes: per-app routing picks it up with its next policy push.
     @discardableResult
     func addBypassApp(_ pattern: String, identity: AppIdentity? = nil) -> Result<BypassApp, BypassAppError> {
         let trimmed = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
         let found = identity ?? (ProcessRule.invalid(trimmed) == nil ? BypassApps.lookup(trimmed) : nil)
-        switch BypassApps.check(trimmed, identity: found, in: config.bypassApps) {
+        switch BypassApps.check(found?.signingID ?? trimmed, identity: found, in: config.bypassApps) {
         case .failure(let error):
             return .failure(error)
         case .success(let value):

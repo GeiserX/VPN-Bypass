@@ -206,7 +206,11 @@ struct Config: Codable {
         activeProfileId = try container.decodeIfPresent(UUID.self, forKey: .activeProfileId)
         otherNetworksSettings = try container.decodeIfPresent(ProfileSettings.self, forKey: .otherNetworksSettings)
         flowEngine = try container.decodeIfPresent(FlowEngineSetting.self, forKey: .flowEngine) ?? FlowEngineSetting()
-        bypassApps = try container.decodeIfPresent([BypassApp].self, forKey: .bypassApps) ?? []
+        // A repeated id (a hand-edited file) gets a fresh one, so each row keeps its own counts.
+        var appIDs = Set<UUID>()
+        bypassApps = (try container.decodeIfPresent([BypassApp].self, forKey: .bypassApps) ?? []).map { app in
+            appIDs.insert(app.id).inserted ? app : BypassApp(pattern: app.pattern, name: app.name, enabled: app.enabled)
+        }
 
         // One-time migration: derive the routes/rules representation from the
         // legacy bypass list + single proxy so the new model is populated for

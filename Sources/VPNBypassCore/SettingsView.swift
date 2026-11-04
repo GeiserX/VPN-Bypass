@@ -111,6 +111,10 @@ struct SettingsView: View {
             // The change was made to another mode's list, which this page no longer edits.
             settingsUndo.clear()
         }
+        .onChange(of: routeManager.config.activeProfileId) { _ in
+            // The change was made to another network profile's lists, which are no longer in use.
+            settingsUndo.clear()
+        }
         // The line belongs to the page that made the change.
         .onChange(of: selectedTab) { tab in
             settingsUndo.clear()

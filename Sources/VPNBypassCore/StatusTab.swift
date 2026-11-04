@@ -73,7 +73,7 @@ enum StatusPage {
             title = status.headline
         } else if input.installedRoutes == 0 && input.nothingConfigured {
             title = String(localized: "Not set up", bundle: bundle)
-        } else if input.installedRoutes == 0 && !input.everythingElseDirect {
+        } else if input.installedRoutes == 0 && !input.everythingElseDirect && !input.onlyServedApps {
             title = String(localized: "Nothing routed", bundle: bundle)
         } else {
             title = status.isPartial
