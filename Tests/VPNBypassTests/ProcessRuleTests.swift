@@ -183,6 +183,27 @@ final class ProcessRuleTests: XCTestCase {
         XCTAssertTrue(VPNBCLI.whyLines(answer).last?.contains("inactive app rules: com.example.App") == true)
     }
 
+    /// Every Custom answer names the app rules, not only the rule and default ones: an installed
+    /// route, an unresolved name and a pause decide before the rules loop.
+    func testWhyNamesProcessRulesWhateverDecidedTheName() {
+        let direct = Route(name: "Direct", egress: .direct)
+        let rules = [Rule(matchType: .process, pattern: "com.example.App", routeId: direct.id, order: 0)]
+        var s = customSnapshot(rules: rules, routes: [direct], defaultRouteId: direct.id)
+        s.activeRoutes = [(destination: "203.0.113.7", gateway: "192.168.1.1", source: "203.0.113.7")]
+        let installed = SiteRoute.match(host: "app.example.com", addresses: ["203.0.113.7"], in: s)
+        XCTAssertEqual(installed.match, .route)
+        XCTAssertEqual(installed.inactiveAppRules, ["com.example.App"])
+
+        let unresolved = SiteRoute.match(host: "app.example.com", addresses: [], in: s)
+        XCTAssertEqual(unresolved.match, .unresolved)
+        XCTAssertEqual(unresolved.inactiveAppRules, ["com.example.App"])
+
+        var bypass = s
+        bypass.custom = false
+        XCTAssertEqual(SiteRoute.match(host: "app.example.com", addresses: ["203.0.113.7"], in: bypass).inactiveAppRules, [],
+                       "outside Custom no rule is in force, so none is named")
+    }
+
     /// Positive control: with no process rule, the answer carries no such field or sentence.
     func testWhyWithoutProcessRulesSaysNothingAboutApps() {
         let direct = Route(name: "Direct", egress: .direct)

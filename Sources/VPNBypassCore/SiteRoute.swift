@@ -173,6 +173,18 @@ enum SiteRoute {
     // MARK: - Matching
 
     static func match(host: String, addresses: [String], in s: Snapshot) -> Found {
+        var found = matchDestination(host: host, addresses: addresses, in: s)
+        // Custom: a process rule matches an app, never a name, and nothing serves it yet
+        // (ProcessRule.serving). Every answer names them, whatever decided the name (an installed
+        // route, a rule, the default, a pause, no address), so a listed app is not a mystery.
+        if s.custom {
+            found.inactiveAppRules = s.rules.filter(\.enabled).sorted { $0.order < $1.order }
+                .filter { ProcessRule.serving($0).servedBy == RuleServedBy.none }.map(\.pattern)
+        }
+        return found
+    }
+
+    private static func matchDestination(host: String, addresses: [String], in s: Snapshot) -> Found {
         // The pause rides along on every answer, so `paused` is there whatever matched.
         guard !addresses.isEmpty else { return Found(match: .unresolved, expected: nil, pause: s.pause) }
         // Paused, the app's routes are out (Pause.swift), and Pause runs only where that sends
@@ -181,7 +193,7 @@ enum SiteRoute {
         if let pause = s.pause {
             var lists = s
             lists.pause = nil
-            let after = match(host: host, addresses: addresses, in: lists)
+            let after = matchDestination(host: host, addresses: addresses, in: lists)
             if after.match == .route {
                 var kept = after
                 kept.pause = pause
@@ -224,9 +236,6 @@ enum SiteRoute {
             }.map(\.id))
             let byId = Dictionary(s.routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let ordered = s.rules.filter(\.enabled).sorted { $0.order < $1.order }
-            // A process rule matches an app, never a name, and nothing serves it yet
-            // (ProcessRule.serving): the answer names them so a listed app is not a mystery.
-            let apps = ordered.filter { ProcessRule.serving($0).servedBy == RuleServedBy.none }.map(\.pattern)
             for (index, rule) in ordered.enumerated() {
                 // A rule whose route is gone or turned off is inert, as RouteCompiler and
                 // WildcardRoutes treat it: the name falls through to a later rule.
@@ -242,16 +251,13 @@ enum SiteRoute {
                     found.notRouted = unrouted.reason
                     found.resolverDomain = unrouted.resolver
                 }
-                found.inactiveAppRules = apps
                 return found
             }
             if let id = s.defaultRouteId, let route = byId[id] {
                 return Found(match: .defaultRoute, routeName: route.name,
-                             expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces),
-                             inactiveAppRules: apps)
+                             expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
             }
-            return Found(match: .none, expected: loopback ? .physical : s.vpnInterface.map { .tunnel($0) },
-                         inactiveAppRules: apps)
+            return Found(match: .none, expected: loopback ? .physical : s.vpnInterface.map { .tunnel($0) })
         }
 
         // 2. A listed wildcard (the most specific one, as macOS picks the resolver file).

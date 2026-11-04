@@ -1531,14 +1531,15 @@ final class DocScreenshotsTests: XCTestCase {
     func testStatusPageSiteCheckProcessRule() throws {
         seedCustom()
         let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
-        let vpn = try XCTUnwrap(rm.config.routes.first { $0.egress == .vpnDefault })
-        let rules = [Rule(matchType: .process, pattern: "com.example.App", routeId: direct.id, order: 0)]
-        let snapshot = SiteRoute.Snapshot(mode: .custom, custom: true, list: [], services: [], rules: rules,
-                                          routes: [direct, vpn], defaultRouteId: vpn.id, activeRoutes: [],
-                                          localGateway: "192.168.1.1", vpnInterface: "utun4")
+        rm.config.rules.append(Rule(matchType: .process, pattern: "com.example.App", routeId: direct.id, order: 3))
+        // The same rules and routes the page counts, so the answer and the headline agree.
+        let snapshot = SiteRoute.Snapshot(mode: .custom, custom: true, list: [], services: [], rules: rm.config.rules,
+                                          routes: rm.config.routes, defaultRouteId: rm.config.defaultRouteId,
+                                          activeRoutes: [], localGateway: "192.168.1.1", vpnInterface: "utun4")
         let host = "app.example.com"
-        let probe = PathCheck.Probe(address: "203.0.113.7", routeInterface: "utun4", sourceAddress: "10.8.0.2",
-                                    sourceInterface: "utun4", answer: .connected, latencyMs: 24)
+        // Outside the seeded 203.0.113.0/24 rule, so no destination rule matches the name.
+        let probe = PathCheck.Probe(address: "198.51.100.20", routeInterface: "en0", sourceAddress: "192.168.1.20",
+                                    sourceInterface: "en0", answer: .connected, latencyMs: 24)
         let control = PathCheck.Probe(address: "192.0.2.1", routeInterface: "utun4", answer: .notTried)
         let answer = SiteRoute.answer(host: host, mode: .custom, addresses: [probe.address],
                                       found: SiteRoute.match(host: host, addresses: [probe.address], in: snapshot),
