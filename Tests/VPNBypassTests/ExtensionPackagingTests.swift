@@ -114,8 +114,53 @@ final class ExtensionPackagingTests: XCTestCase {
             }
         }
         let log = try text("Sources/VPNBypassProxy/ProxyLog.swift")
-        XCTAssertTrue(log.contains("static func event(_ e: ProxyEvent, _ a: Int = 0)"))
+        XCTAssertTrue(log.contains("static func event(_ e: ProxyEvent, _ a: Int = 0, _ b: Int = 0)"))
+        XCTAssertFalse(log.contains("%@") || log.contains("{private}"), "only integers reach the format")
         XCTAssertFalse(log.contains("String"), "the log function takes no string")
+    }
+
+    // MARK: - The re-emit path (design 3.5) and what the extension never reads (3.6, 3.8)
+
+    private func proxySource() throws -> String {
+        let dir = Self.root.appendingPathComponent("Sources/VPNBypassProxy")
+        return try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }.sorted()
+            .map { try text("Sources/VPNBypassProxy/\($0)") }.joined(separator: "\n")
+    }
+
+    func testTheExtensionNeverReadsHostNames() throws {
+        XCTAssertFalse(try proxySource().contains(".remoteHostname"), "a host name never claims a flow in v1")
+    }
+
+    func testClaimedFlowsAreScopedToTheInterfaceNeverBoundToASourceAddress() throws {
+        let source = try proxySource()
+        XCTAssertTrue(source.contains("nw_parameters_require_interface(params, iface)"))
+        XCTAssertTrue(source.contains("nw_ip_options_set_version(ip, nw_ip_version_4)"))
+        // The spike's traps: the disable-TLS sentinel ran a TLS handshake on every flow, and a
+        // source-address bind moves no bytes behind a VPN's 0/1 routes.
+        XCTAssertFalse(source.contains("nw_parameters_create_secure_tcp"))
+        XCTAssertFalse(source.contains("nw_parameters_set_local_endpoint"))
+        XCTAssertFalse(source.contains("NWConnection("), "the Swift API cannot carry the flow's metadata")
+    }
+
+    func testTheMetadataIsSetBeforeTheConnectionIsMade() throws {
+        let proxy = try text("Sources/VPNBypassProxy/FlowProxy.swift")
+        let metadata = try XCTUnwrap(proxy.range(of: "flow.setMetadata(params)"))
+        let relay = try XCTUnwrap(proxy.range(of: "TCPRelay(flow: tcp, endpoint: endpoint, parameters: params,"))
+        XCTAssertLessThan(metadata.lowerBound, relay.lowerBound)
+        let relaySource = try text("Sources/VPNBypassProxy/TCPRelay.swift")
+        XCTAssertTrue(relaySource.contains("self.connection = nw_connection_create(endpoint, parameters)"))
+    }
+
+    func testTheExtensionIncludesTCPOnlyAndRunsTheLeaseWatchdog() throws {
+        let proxy = try text("Sources/VPNBypassProxy/FlowProxy.swift")
+        XCTAssertTrue(proxy.contains("protocol: .TCP, direction: .outbound)]"))
+        XCTAssertFalse(proxy.contains(".UDP"), "UDP stays out until its own stage (3.6)")
+        XCTAssertFalse(proxy.contains(".any, direction"), "no include rule for every protocol")
+        XCTAssertTrue(proxy.contains("state.expireLease(at: Date())"), "a dead app's policy is dropped on a timer")
+        XCTAssertTrue(proxy.contains("state.sessionStopped()"), "a stopped session leaves no policy for the next one")
+        XCTAssertTrue(proxy.contains("if message != .status { state.receive(message, at: now) }"),
+                      "a status read never renews or drops the policy")
+        XCTAssertFalse(proxy.contains("providerConfiguration"), "that plist is world-readable (3.3)")
     }
 
     // MARK: - Entitlements

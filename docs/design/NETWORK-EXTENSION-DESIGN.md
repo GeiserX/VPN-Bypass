@@ -102,15 +102,24 @@ GlobalProtect connected). Everything below is from its two results files.
 | The status reply sometimes never arrived | A3: 3 of the status calls printed "no reply from the extension" while the session was connected; the next call answered | The heartbeat must retry before it calls the extension silent (3.7) |
 | The approval alert and System Settings showed a blank icon | spike 0.1.4 had no icon in the extension bundle; 0.1.5 added `AppIcon.icns` to both bundles | The fix is in 6.1, but nobody has seen the 0.1.5 alert live. L0 checks it |
 
-Not run, so still open:
-- **B2**, 10 minutes of normal use with the policy pushed and the VPN connected. The owner's test runs it
-  (section 10).
-- **B3.2**, lease expiry: quit the app and see claimed apps go back into the VPN within 2 minutes. The
-  lease logic is unit-tested in the spike, never seen live. The mini runs it in step 5.
-- **`kill -9` under include-all-TCP beside GlobalProtect.** It ran under `all` on the mini only. The
-  stall above says what to expect.
-- **L9** (extension replaced by an update, `brew upgrade` and `brew uninstall`) and **L11** (consent and
-  start at reboot or login) were never run.
+Step 5 ran these on the mini with a WireGuard full tunnel standing in for the VPN
+(`NE-ENGINE-LIVE-RESULTS.md`):
+- **B2**: 10 minutes, the policy held with the heartbeat. Listed app direct every round, unlisted
+  through the VPN, no heartbeat missed, same extension process, memory 8.8 to 9.8 MB.
+- **B3.2**: the holder killed, the listed app back in the VPN 2 minutes after the last push.
+- **`kill -9` under include-all-TCP**: every new TCP connection stalled about 5.4 s, then everything
+  went on; unclaimed downloads and the tunnel survived. Beside GlobalProtect it is still unseen.
+- **L9**: an in-place bundle swap and a real `brew upgrade` change nothing until the app files the
+  activation request again; then the extension is replaced without a prompt, and the session ends and
+  must be started again. `brew uninstall` leaves the extension running; whether a reboot stops it is
+  untested (L11).
+- **The status reply never went missing**: 1,600 requests and every soak heartbeat, 0 to 3 ms.
+
+Still open:
+- **L11** (consent and start at reboot or login): not run, the mini is shared.
+- **A route-only full-tunnel VPN** (0/1 and 128/1 without becoming the primary service) leaves the
+  primary physical interface with no interface-scoped default route, so a connection required to use
+  it never connects (3.5). Not seen with GlobalProtect.
 - The exact System Settings path and prompt wording of the two approvals were not written down.
   Step 4 recorded them on the mini (macOS 26.6.1); the owner's Mac on macOS 27 still has to confirm
   them (L0):
@@ -308,6 +317,19 @@ do this and are the starting point.
 7. No read timeouts on idle claimed flows (Proton tears idle flows down after 3 s, which breaks
    long-lived connections).
 
+**The interface needs an interface-scoped default route.** A VPN that takes `0/1` and `128/1` without
+becoming the primary service (wg-quick, many route-only clients) leaves the primary physical interface
+with an unscoped default only. A connection required to use it then waits with no route; adding
+`route add -ifscope <iface> default <router>` by hand fixed it at once (mini, step 5,
+`NE-ENGINE-LIVE-RESULTS.md`). GlobalProtect becomes the primary service and does not show this. So the
+extension guards the listed app's connection:
+- a connection that goes to `waiting` before it was ever ready fails at once, not after the 10 s give-up;
+- after two failed connects in a row on an interface, flows for it are declined as `egressUnusable` for
+  30 s, then one claim tries again (`EgressHealth`). The connects that failed are not handed back: the
+  app sees them fail, and its next connection (a retry, or the next address) goes through the VPN, in
+  well under a second on the mini.
+Whether the helper adds the scoped default for such VPNs is open (R12).
+
 ### 3.6 UDP
 
 Not in v1. Two reasons:
@@ -341,7 +363,8 @@ stall after a crash.
   replaces or removes it on an update (6.4). After a crash it does **not** start it (2.1). L9 and L11
   cover the rest, first on the mini.
 - **Crash.** Flows the extension was copying die; those are only the listed apps' flows. Every new TCP
-  connection on the Mac waits about 5 s, then the session goes `disconnected` with the configuration
+  connection on the Mac waits about 5 s (5.4 s measured in step 5 under include-all-TCP; it is the OS's
+  exit timer, so nothing in the extension can shorten it), then the session goes `disconnected` with the configuration
   still enabled, and new flows go out as if no proxy were there. The listed apps go back into the VPN,
   which is safe. The app's watchdog:
   - sees the session `disconnected` with the configuration enabled and a last disconnect error, and shows
@@ -618,7 +641,7 @@ and the helper's requirement checks identifier and team only.
 
 ### 8.2 The Mac mini: the first live tests
 
-The mini runs macOS 26 with SIP off and system extension developer mode on, so it can install and
+The mini runs macOS 26 with SIP off and AMFI off, so it can install and
 activate a signed build without the owner. It cannot test AMFI (L0): AMFI does not enforce signatures
 there. It has no GlobalProtect; Tailscale's connections stand in for a VPN client's, as in the spike, and
 a throwaway WireGuard tunnel can add a full-tunnel VPN. Everything installed for a test is removed
@@ -641,19 +664,19 @@ there):
 | # | Question | Where | State |
 |---|---|---|---|
 | L0 | Does AMFI accept the signed app and extension? Does the approval alert show the app's icon? | owner's Mac | spike: answered for AMFI (2.1); icon not seen |
-| L1 | Does a start or stop close flows the engine does not claim? Plus a reboot or login with the configuration enabled while the VPN connects | mini, then owner's Mac | spike: answered for start and stop, on both Macs (2.1). The reboot part is L11 |
+| L1 | Does a start or stop close flows the engine does not claim? Plus a reboot or login with the configuration enabled while the VPN connects | mini, then owner's Mac | answered for start and stop, on both Macs (2.1); step 5 again on the mini with a WireGuard full tunnel. The reboot part is L11 |
 | L2 | Does a claimed flow leave on the physical interface? One rule, a test binary only | owner's Mac | spike: answered (B1) |
 | L3 | Does GlobalProtect react (HIP report, enforcer, re-route) to scoped egress? | owner's Mac | spike: nothing seen in two minutes (B4); the soak answers it |
-| L4 | Which signing id and `isBound` arrive for Safari, Chrome helpers, a URLSession app, curl, an unsigned Go binary; and for bound flows, which interface? Counters only | mini, then owner's Mac | open; bound HTTPS flows seen (2.1) |
+| L4 | Which signing id and `isBound` arrive for Safari, Chrome helpers, a URLSession app, curl, an unsigned Go binary; and for bound flows, which interface? Counters only | mini, then owner's Mac | partly: the reply counts bound flows per interface kind (step 5); on the mini only other software's flows arrived bound, all `physical`. Per-app on the owner's Mac |
 | L5 | With another transparent proxy enabled too: who sees flows first, and does `setMetadata` keep attribution? | owner's Mac | open |
 | L6 | Sleep and wake, Wi-Fi to Ethernet: new flows still claimed and leaving on the new interface | owner's Mac | open |
 | L7 | UDP: does an include rule for UDP break Chrome QUIC for flows we decline? (gates the UDP stage) | later | open |
-| L8 | `kill -9`: what happens to new and open flows, does the OS restart it, and does the watchdog do what 3.7 says? | mini | spike: answered for the OS side (2.1); the watchdog is new |
-| L9 | Extension version bump by a real `brew upgrade` and by an in-place bundle swap, with the engine active: does `sysextd` stop or uninstall it, does the configuration stay enabled, is a new approval asked, are unclaimed flows untouched? `brew uninstall`: is it active until reboot? | mini | open |
+| L8 | `kill -9`: what happens to new and open flows, does the OS restart it, and does the watchdog do what 3.7 says? | mini | answered for the OS side: 5.4 s stall, no restart (step 5, `NE-ENGINE-LIVE-RESULTS.md`); the app's watchdog comes with `FlowEngineManager` |
+| L9 | Extension version bump by a real `brew upgrade` and by an in-place bundle swap, with the engine active: does `sysextd` stop or uninstall it, does the configuration stay enabled, is a new approval asked, are unclaimed flows untouched? `brew uninstall`: is it active until reboot? | mini | answered (step 5): a swap or `brew upgrade` changes nothing until the app files the activation request; then replaced without a prompt, session ended, configuration kept; `brew uninstall` leaves it running (whether a reboot stops it is L11) |
 | L10 | Throughput and CPU through the extension against direct; added latency of new connections | mini | open |
-| L11 | Does the consent survive a reboot (PIA #94)? Does the OS start the provider at boot or login, and does that touch the VPN's or Tailscale's connections? | mini | open |
-| L12 | Soak: 10 minutes of normal use (the spike's B2), then a working day with GlobalProtect connected; drops against a day with the engine off. GlobalProtect logs local time, ours UTC | owner's Mac | open |
-| L13 | Lease expiry (the spike's B3.2): quit the app, listed apps go back into the VPN within 2 minutes | mini, then owner's Mac | open |
+| L11 | Does the consent survive a reboot (PIA #94)? Does the OS start the provider at boot or login, and does that touch the VPN's or Tailscale's connections? | mini | open; not run in step 5, the mini is shared |
+| L12 | Soak: 10 minutes of normal use (the spike's B2), then a working day with GlobalProtect connected; drops against a day with the engine off. GlobalProtect logs local time, ours UTC | owner's Mac | the 10 minutes ran on the mini with a WireGuard tunnel (step 5): clean. The working day is open |
+| L13 | Lease expiry (the spike's B3.2): quit the app, listed apps go back into the VPN within 2 minutes | mini, then owner's Mac | answered on the mini (step 5): back in the VPN 2 min after the last push |
 
 Before L4 is answered, every live step uses one narrow rule: a test binary, never a browser.
 
@@ -661,17 +684,18 @@ Before L4 is answered, every live step uses one narrow rule: a test binary, neve
 
 | # | Risk | Hard or impossible |
 |---|---|---|
-| R1 | Starting the proxy closes flows | **Hard, mostly answered.** The spike saw only claimed flows close, on both Macs, the VPN client's untouched (2.1). Left: the OS's own starts at boot and login (L11) and on an update (L9). Fallback if they do harm: the per-session engine (3.7) |
+| R1 | Starting the proxy closes flows | **Hard, mostly answered.** The spike saw only claimed flows close, on both Macs, the VPN client's untouched (2.1). Left: the OS's own starts at boot and login (L11). An update (L9) ends the session and leaves unclaimed flows alone (step 5). Fallback if they do harm: the per-session engine (3.7) |
 | R2 | Order between several transparent proxies is unspecified without MDM; another proxy running after ours may re-route our flows into the tunnel | **Impossible to control** from our side without MDM's `Order` (an OS rule). Mitigation: `setMetadata` so attribution survives; detect and report via L5 |
 | R3 | A VPN with `includeAllNetworks` or `enforceRoutes` | **Impossible** to escape: Apple says it supersedes scoping by apps, and `NETransparentProxyManager` cannot opt out. We stand down and say so (3.7) |
 | R4 | MDM sets `AllowUserOverrides=false` | **Impossible** on that Mac unless its admin allow-lists team 624WUVM8B4. Kernel engine stays |
 | R5 | Bad profile kills the whole app at launch | **Hard.** Seen in the spike (2.1). Release launch gate proven red (6.3), or the nested activator |
 | R6 | Chrome QUIC breaks on diverted UDP | **Hard**, an Apple bug (FB23636906). v1 is TCP-only; UDP waits on L7 |
 | R7 | Apps whose flows arrive bound, or resolve-then-connect apps with no host name | **Hard.** Bound flows are declined and the group says so (3.4 step 3); L4 says how common they are. Name rules keep using kernel routes and the forwarder |
-| R8 | A crash stalls every new TCP connection on the Mac for about 5 s, paused or not (the include rule stays installed) | **Hard, measured** (2.1). The OS sets the 5 s, not us. Never block `handleNewFlow`; at most one automatic restart, then off (3.7). Only Turn off removes the exposure |
+| R8 | A crash stalls every new TCP connection on the Mac for about 5 s, paused or not (the include rule stays installed) | **Hard, measured** (2.1; 5.4 s in step 5). The OS sets the 5 s, not us. Never block `handleNewFlow`; at most one automatic restart, then off (3.7). Only Turn off removes the exposure |
 | R9 | Throughput loss through user space | **Hard.** Claim only listed apps' flows; L10 measures |
 | R10 | Known Apple bugs with any transparent proxy installed: FaceTime/AirDrop, captive portals, flows lost after sleep | **Hard**, outside our code. Decline Apple daemons, pause on captive networks, document; L6 |
-| R11 | Homebrew cannot remove the extension | **Hard.** In-app remove plus a documented manual path |
+| R11 | Homebrew cannot remove the extension | **Hard.** In-app remove plus a documented manual path. Seen in step 5: after `brew uninstall` it runs on and every new TCP connection still passes through it; whether a reboot ends that is untested (L11) |
+| R12 | A route-only full-tunnel VPN leaves the physical interface with no scoped default route, so claimed flows cannot connect (3.5) | **Hard.** The extension stops claiming for that interface after two failures, so the listed app falls back to the VPN. Fix: the helper adds an `-ifscope` default route for such VPNs; a decision for a later step |
 
 ## 10. The plan: one PR per step
 

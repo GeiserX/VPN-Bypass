@@ -81,6 +81,12 @@ public enum FlowDecision: Equatable, Sendable {
         case unsupportedRoute
         /// A VPN or network-security client, by team id.
         case protectedTeam
+        /// Claimable, but the egress interface is not up (the policy's, or no Wi-Fi or Ethernet
+        /// at all). Decided by the extension after the decider, never by `decide`.
+        case noInterface
+        /// Claimable, but the last connects out the egress interface failed (`EgressHealth`):
+        /// left to normal routing, so the app still gets through the VPN instead of failing.
+        case egressUnusable
     }
 
     /// Claim the flow for `ruleID` and send it out `egress`.
@@ -98,13 +104,37 @@ public struct FlowPolicyState: Sendable {
     public private(set) var receivedAt: Date?
     /// The version of the last push this build could not read, until a readable one arrives.
     public private(set) var rejectedVersion: Int?
+    /// How many times a policy's lease ran out before the next push (`expireLease`).
+    public private(set) var leaseExpiries = 0
 
     public init() {}
+
+    /// The extension's watchdog, run on a timer whether flows arrive or not: once the lease has
+    /// run out, the policy is dropped, so every flow is declined and the reply shows no policy
+    /// (generation 0) instead of a stale one. Returns true on the tick that dropped it.
+    public mutating func expireLease(at now: Date) -> Bool {
+        guard policy != nil, !isLeaseLive(at: now) else { return false }
+        policy = nil
+        receivedAt = nil
+        leaseExpiries += 1
+        return true
+    }
+
+    /// The session stopped (`stopProxy`): drop the policy, so a session started again in the same
+    /// process declines every flow until the app pushes, instead of claiming with the policy of the
+    /// session that was turned off while its lease still runs. Not a lapse, so not counted.
+    public mutating func sessionStopped() {
+        policy = nil
+        receivedAt = nil
+    }
 
     /// Takes in a pushed message. An unreadable one drops the live policy, so every flow is
     /// declined until the app pushes one this build reads (3.3).
     public mutating func receive(_ message: FlowPolicyMessage, at now: Date) {
         switch message {
+        case .status:
+            // A status read neither renews the lease nor drops the policy.
+            return
         case .policy(let p):
             policy = p
             receivedAt = now
