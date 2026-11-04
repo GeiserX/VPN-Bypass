@@ -221,6 +221,29 @@ enum ProcessRule {
         pattern == previous ? pattern : storedPattern(pattern)
     }
 
+    /// What the Rules page's editor saves for an App rule, or the line it shows instead. The
+    /// checks are the Apps list's: a pattern a rule can match, and not VPN Bypass itself or an
+    /// app signed by a VPN or network-security team, read from `chosen` (the app the chooser
+    /// picked, while the pattern is still its signing id) or from the installed app with that
+    /// bundle id. The value stored is the chosen app's signing id, or `storedPattern`.
+    enum EditorValue: Equatable {
+        /// The pattern to store.
+        case save(String)
+        /// The line the sheet shows instead.
+        case refuse(String)
+    }
+
+    static func editorValue(_ pattern: String, chosen: AppIdentity?, previous: String?,
+                            in bundle: Bundle = .main) -> EditorValue {
+        guard invalid(pattern) == nil else { return .refuse(localizedMessage(in: bundle)) }
+        let chosen = chosen?.signingID == pattern ? chosen : nil
+        let identity = chosen ?? (pattern != previous && kind(of: pattern) == .bundleID ? BypassApps.lookup(pattern) : nil)
+        if let refusal = BypassApps.refusal(identity?.signingID ?? pattern, identity: identity) {
+            return .refuse(refusal.localizedMessage(in: bundle))
+        }
+        return .save(chosen != nil ? pattern : storedPattern(pattern, previous: previous))
+    }
+
     /// Nil when `pattern` is a bundle id or an executable name as the design defines them.
     static func invalid(_ pattern: String) -> Invalid? {
         guard !pattern.isEmpty else { return .empty }

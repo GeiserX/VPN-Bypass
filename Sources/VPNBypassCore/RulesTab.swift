@@ -935,6 +935,13 @@ struct RuleEditorSheet: View {
     @State private var routeId: UUID?
     @State private var validationError: String?
     @State private var showingNewRouteSheet = false
+    @State private var showingAppChooser = RuleEditorSheet.appChooserForScreenshots
+    /// The app the chooser picked, while the pattern is still its signing identifier: its team
+    /// decides whether the rule is refused.
+    @State private var chosenApp: AppIdentity?
+
+    /// The doc screenshots open the app chooser over the sheet.
+    static var appChooserForScreenshots = false
 
     init(
         editingRule: Rule?,
@@ -960,7 +967,7 @@ struct RuleEditorSheet: View {
         case .suffix:  return "*.example.com"
         case .ip:      return "10.0.0.5"
         case .cidr:    return "10.0.0.0/8"
-        case .process: return "com.example.App"
+        case .process: return String(localized: "com.example.App or Example")
         case .service: return ""
         }
     }
@@ -975,6 +982,7 @@ struct RuleEditorSheet: View {
                     Text("Service").tag(MatchType.service)
                     Text("IP").tag(MatchType.ip)
                     Text("CIDR").tag(MatchType.cidr)
+                    Text("App").tag(MatchType.process)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -994,6 +1002,17 @@ struct RuleEditorSheet: View {
                         }
                         .pickerStyle(.menu)
                         .labelsHidden()
+                    }
+                }
+            } else if matchType == .process {
+                SheetField(String(localized: "App"), required: true) {
+                    HStack(spacing: Theme.Space.s) {
+                        TextField(patternPlaceholder, text: $pattern)
+                            .textFieldStyle(.roundedBorder)
+                            .font(Theme.Font.body)
+                            .accessibilityLabel(String(localized: "App's bundle ID or executable name"))
+                        Button(String(localized: "Choose…")) { showingAppChooser = true }
+                            .accessibilityLabel(String(localized: "Choose an app from this Mac"))
                     }
                 }
             } else {
@@ -1025,6 +1044,23 @@ struct RuleEditorSheet: View {
                 showingNewRouteSheet = false
             }
         }
+        .sheet(isPresented: $showingAppChooser) {
+            AppChooserSheet(listed: [], title: String(localized: "Choose an App"), confirmTitle: String(localized: "Choose"),
+                            onCancel: { showingAppChooser = false }, onPick: { pick in
+                showingAppChooser = false
+                validationError = nil
+                switch pick {
+                case .app(let candidate):
+                    let identity = BypassApps.identity(ofAppAt: candidate.url)
+                        ?? AppIdentity(name: candidate.name, signingID: candidate.bundleID, team: nil, bundleID: candidate.bundleID)
+                    chosenApp = identity
+                    pattern = identity.signingID
+                case .name(let name):
+                    chosenApp = nil
+                    pattern = name
+                }
+            })
+        }
     }
 
     private func attemptSave() {
@@ -1044,10 +1080,16 @@ struct RuleEditorSheet: View {
             validationError = String(localized: "Enter a valid IPv4 CIDR range (e.g. 10.0.0.0/8).")
             return
         }
-        // Only an existing process rule opens with this match (the picker has no App yet).
-        guard matchType != .process || ProcessRule.invalid(effectivePattern) == nil else {
-            validationError = ProcessRule.localizedMessage()
-            return
+        var stored = effectivePattern
+        if matchType == .process {
+            let previous = editingRule?.matchType == .process ? editingRule?.pattern : nil
+            switch ProcessRule.editorValue(effectivePattern, chosen: chosenApp, previous: previous) {
+            case .refuse(let message):
+                validationError = message
+                return
+            case .save(let value):
+                stored = value
+            }
         }
         guard let routeId else {
             validationError = String(localized: "Select a route.")
@@ -1056,10 +1098,7 @@ struct RuleEditorSheet: View {
         let rule = Rule(
             id: editingRule?.id ?? UUID(),
             matchType: matchType,
-            pattern: matchType == .process
-                ? ProcessRule.storedPattern(effectivePattern,
-                                            previous: editingRule?.matchType == .process ? editingRule?.pattern : nil)
-                : effectivePattern,
+            pattern: stored,
             routeId: routeId,
             enabled: editingRule?.enabled ?? true,
             order: editingRule?.order ?? 0 // new rules: RulesTab.saveRule overwrites this to (max order)+1
