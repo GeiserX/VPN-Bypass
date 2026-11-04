@@ -208,6 +208,12 @@ never carries them.
   on a network or VPN change (where the listeners re-bind, `reconcileProxyListeners`,
   `RouteManager.swift:6276`), on Pause and Resume (3.7), when the session turns `connected`, and on the
   heartbeat. A push needs no DNS, so it is not held up by the lookups that connect-from-cache works around.
+- **A push that takes matchers away counts only once the extension confirms it.** Pause, a switch to VPN
+  Only, a kill-switch stand-down and a removed rule all shrink what the extension claims. Until the
+  extension replies with the new generation, its old matchers still send listed apps direct, so the app
+  shows the new state only after that reply. With no reply within 10 s the app stops the session
+  (`stopVPNTunnel`, the configuration stays enabled): that costs only the listed apps' open connections
+  (2.1) and puts them into the VPN at once, instead of up to 2 minutes later when the lease runs out.
 - **Include rules never change at runtime.** They are set once in `startProxy` and cover all outbound TCP
   minus fixed exclusions (3.4). Every decision lives in the policy message, so a rule change never needs
   `setTunnelNetworkSettings`, a re-save of the manager, or a restart.
@@ -347,6 +353,8 @@ stall after a crash.
   empty policy and Resume (`:3143`) pushes the real one. Pause is not an off switch: the include rule
   stays installed, so every new TCP connection still goes through a call into the extension, and a hang
   would still stall it (R8). The UI copy says so. Only Turn off (`isEnabled = false`) removes that call.
+  Pause and Resume show the new state only after the extension replies with the new policy generation;
+  a Pause with no reply stops the session (3.3).
 
 ### 3.8 Logging and privacy
 
@@ -409,7 +417,7 @@ How the engine sits beside what 6.0 added:
 |---|---|
 | Wildcard forwarder and `/etc/resolver` files (helper) | None. The forwarder is ours, so its lookups are declined (3.4 step 2). A listed app's names still resolve through it |
 | Delegated resolvers (Tailscale, a VPN's split DNS) | None: DNS is not proxied, and 100.64/10 and private ranges are excluded |
-| VPN Only and its blocks while the VPN is down | The engine does not run in VPN Only (no matchers pushed) |
+| VPN Only and its blocks while the VPN is down | The engine does not run in VPN Only (no matchers pushed; the switch waits for the extension's reply or stops the session, 3.3) |
 | Tunnel attribution (`TunnelOwnership`) | Feeds the extra declined teams in the policy (3.3) |
 | Helper self-update (2.8.0) | None: the helper does not change. The extension has its own update path (6.4) |
 | Kill-switch detection (`VPNKillSwitch`) | The engine stands down on the same signal (3.7) |
@@ -425,7 +433,8 @@ Modes:
 ## 5. Opt-in UX and fallbacks
 
 **Settings > General, "Per-app routing" group**, off by default. Before any system prompt it says:
-- what it does: only apps you list skip the VPN;
+- what it does: apps you list skip the VPN for all their TCP connections; domain, service and IP rules
+  keep working as before, for every app;
 - macOS will ask twice: first allow the extension in System Settings, then allow VPN Bypass to add a
   proxy configuration (the exact path and wording come from L0);
 - if you say no, nothing else changes.
@@ -578,7 +587,8 @@ and the helper's requirement checks identifier and team only.
   in the blob (assert on the encoded bytes).
 - `ruleAdd` validation: accepts bundle ids and basenames, rejects paths, wildcards and declined-team apps.
 - `FlowEngineManager` state machine with a fake manager: crash then one restart, second crash within
-  10 minutes turns it off, heartbeat retries before "silent".
+  10 minutes turns it off, heartbeat retries before "silent", a push that removes matchers shows the new
+  state only after the reply and stops the session when no reply comes within 10 s.
 - Logging: a compile-time check that the extension's log function takes no `String`.
 - Each new test is first run against a deliberately broken implementation and must fail.
 
