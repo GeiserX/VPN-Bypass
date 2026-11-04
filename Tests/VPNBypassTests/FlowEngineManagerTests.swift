@@ -315,6 +315,23 @@ final class FlowEngineManagerTests: XCTestCase {
         XCTAssertEqual(system.starts, 2)
     }
 
+    /// 3.3: a reply that echoes another generation does not confirm the push. The policy is not
+    /// taken as live, the session is stopped and started once, and the restart's push counts.
+    func testAReplyWithAnotherGenerationDoesNotConfirmThePush() async {
+        await turnOnToActive()
+        let before = engine.confirmed
+        var seen: [FlowEngineState] = []
+        let watch = engine.$state.sink { seen.append($0) }
+        defer { watch.cancel() }
+        system.replies = [try! JSONEncoder().encode(FlowPolicyReply(policyGeneration: before!.generation, policyLive: true))]
+        input.processRules.append(.init(id: UUID(), pattern: "com.example.Other", routeID: directID, order: 1))
+        engine.inputsChanged()
+        await until("restarted and confirmed by the next push") { system.stops == 1 && engine.state == .active }
+        XCTAssertTrue(seen.contains(.failed(.stoppedRestarting)), "a stale echo is not a confirmation")
+        XCTAssertEqual(engine.confirmed?.matchers.count, 2)
+        XCTAssertGreaterThan(engine.confirmed!.generation, before!.generation + 1)
+    }
+
     func testAHeartbeatRetriesTwiceBeforeTheExtensionIsSilent() async {
         await turnOnToActive()
         system.replies = [nil, nil]
