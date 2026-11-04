@@ -251,6 +251,19 @@ final class FlowDeciderTests: XCTestCase {
         }
     }
 
+    func testEveryVPNClientTeamReadFromItsSignatureIsDeclined() {
+        // Read with `codesign -dv` from each vendor's own signed app on 2026-11-04: GlobalProtect,
+        // Tailscale, AWS VPN Client, FortiClient VPN, Cloudflare WARP, OpenVPN Connect, Proton VPN,
+        // Mullvad VPN, NordVPN, ExpressVPN, Surfshark, Private Internet Access.
+        let verified = ["PXPZ95SK77", "W5364U7YZB", "94KV3E626L", "AH4XFXJ7DK", "68WVV388M8", "ACV7L3WCD8",
+                        "J6S6Q257EK", "CKG9MXH72F", "W5W395V82Y", "TC292Y5427", "YHUG37CKN8", "5357M5NW9W"]
+        for team in verified {
+            XCTAssertEqual(decide(facts(team: team), live()), .decline(.protectedTeam, ruleID: ruleA), team)
+        }
+        XCTAssertEqual(decide(facts(team: "TEAM000001"), live()), .claim(ruleID: ruleA, egress: en0),
+                       "any other team is claimed")
+    }
+
     func testTunnelOwnerTeamFromThePolicyDeclines() {
         let s = live(teams: ["TEAM000001"])
         XCTAssertEqual(decide(facts(team: "TEAM000001"), s), .decline(.protectedTeam, ruleID: ruleA))
