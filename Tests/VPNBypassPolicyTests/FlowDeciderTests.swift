@@ -48,7 +48,7 @@ final class FlowDeciderTests: XCTestCase {
 
     func testLeaseIsCappedWhateverThePolicyAsks() {
         let s = live(lease: 86_400)
-        let cap = TimeInterval(FlowPolicy.maxLeaseSeconds)
+        let cap: TimeInterval = 300
         XCTAssertEqual(decide(facts(), s, at: cap), .claim(ruleID: ruleA, egress: en0))
         XCTAssertEqual(decide(facts(), s, at: cap + 1), .decline(.leaseExpired))
     }
