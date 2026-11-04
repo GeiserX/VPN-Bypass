@@ -15,18 +15,22 @@ import VPNBypassPolicy
 
 /// One entry of the Apps list.
 struct BypassApp: Codable, Identifiable, Equatable {
-    let id: UUID
+    var id: UUID
     /// The app's signing identifier (its bundle id, as a rule matches it) or an executable name.
     var pattern: String
     /// The app's name as the chooser found it; nil for an entry added by its id alone.
     var name: String?
     var enabled: Bool
+    /// The app's bundle id, kept only where it differs from the signing identifier in
+    /// `pattern`: the icon, the chooser and `vpnb app.rm` find the app by it.
+    var bundleID: String?
 
-    init(id: UUID = UUID(), pattern: String, name: String? = nil, enabled: Bool = true) {
+    init(id: UUID = UUID(), pattern: String, name: String? = nil, enabled: Bool = true, bundleID: String? = nil) {
         self.id = id
         self.pattern = pattern
         self.name = name
         self.enabled = enabled
+        self.bundleID = bundleID == pattern ? nil : bundleID
     }
 
     init(from decoder: Decoder) throws {
@@ -35,6 +39,22 @@ struct BypassApp: Codable, Identifiable, Equatable {
         pattern = try c.decode(String.self, forKey: .pattern)
         name = try c.decodeIfPresent(String.self, forKey: .name)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        bundleID = try c.decodeIfPresent(String.self, forKey: .bundleID)
+    }
+
+    /// Whether this entry is the app `value` names, by its signing identifier or its bundle id.
+    func names(_ value: String) -> Bool { pattern == value || bundleID == value }
+
+    /// `apps` with a fresh id for each repeated one (a hand-edited file), so each row keeps its
+    /// own counts and its own switch.
+    static func uniqueIDs(_ apps: [BypassApp]) -> [BypassApp] {
+        var seen = Set<UUID>()
+        return apps.map { app in
+            guard !seen.insert(app.id).inserted else { return app }
+            var copy = app
+            copy.id = UUID()
+            return copy
+        }
     }
 
     /// The name a row shows: the app's, or its id when none was found.
@@ -50,6 +70,8 @@ struct AppIdentity: Equatable {
     var name: String
     var signingID: String
     var team: String?
+    /// The bundle's id, when the app has one.
+    var bundleID: String?
 }
 
 /// Why an app cannot go on the list.
@@ -107,7 +129,7 @@ enum BypassApps {
         if let team = identity?.team, FlowDecider.protectedTeams.contains(team) {
             return .failure(.vpnClient(identity?.name ?? value))
         }
-        if let listed = list.first(where: { $0.pattern == value }) {
+        if let listed = list.first(where: { $0.names(value) || (identity?.bundleID).map($0.names) == true }) {
             return .failure(.alreadyListed(listed.displayName))
         }
         return .success(value)
@@ -126,7 +148,8 @@ enum BypassApps {
         let bundle = Bundle(url: url)
         let signing = signingInfo(url)
         guard let id = signing.identifier ?? bundle?.bundleIdentifier, !id.isEmpty else { return nil }
-        return AppIdentity(name: displayName(url, bundle: bundle), signingID: id, team: signing.team)
+        return AppIdentity(name: displayName(url, bundle: bundle), signingID: id, team: signing.team,
+                           bundleID: bundle?.bundleIdentifier)
     }
 
     private static func signingInfo(_ url: URL) -> (identifier: String?, team: String?) {
@@ -148,8 +171,9 @@ enum BypassApps {
     /// The icon a row shows: the installed app's, found by its id. Nil for an executable name or
     /// an app not installed; the row shows a plain glyph then. A seam for the screenshots.
     static var icon: (BypassApp) -> NSImage? = { app in
-        guard ProcessRule.kind(of: app.pattern) == .bundleID,
-              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.pattern) else { return nil }
+        let id = app.bundleID ?? app.pattern
+        guard ProcessRule.kind(of: id) == .bundleID,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return nil }
         return NSWorkspace.shared.icon(forFile: url.path)
     }
 
@@ -167,7 +191,7 @@ enum BypassApps {
     /// The running apps first, then those in the Applications folders, each once (by bundle id),
     /// by name within each part. Apps already listed are left out.
     static func candidates(running: [Candidate], installed: [Candidate], listed: [BypassApp]) -> [Candidate] {
-        let taken = Set(listed.map(\.pattern))
+        let taken = Set(listed.flatMap { [$0.pattern] + ($0.bundleID.map { [$0] } ?? []) })
         var seen = Set<String>()
         func take(_ list: [Candidate]) -> [Candidate] {
             list.filter { !taken.contains($0.bundleID) && !FlowDecider.ownIdentifiers.contains($0.bundleID) && seen.insert($0.bundleID).inserted }
@@ -250,7 +274,7 @@ extension RouteManager {
         case .failure(let error):
             return .failure(error)
         case .success(let value):
-            let app = BypassApp(pattern: value, name: found?.name)
+            let app = BypassApp(pattern: value, name: found?.name, bundleID: found?.bundleID)
             config.bypassApps.append(app)
             saveConfig()
             log(.info, "Added app: \(app.displayName) (\(value))")
@@ -277,7 +301,7 @@ extension RouteManager {
 
     /// Puts a removed app back where it sat. False when it is listed again meanwhile.
     func restoreBypassApp(_ app: BypassApp, at index: Int) -> Bool {
-        guard !config.bypassApps.contains(where: { $0.id == app.id || $0.pattern == app.pattern }) else { return false }
+        guard !config.bypassApps.contains(where: { $0.id == app.id || $0.names(app.pattern) }) else { return false }
         config.bypassApps.insert(app, at: min(max(index, 0), config.bypassApps.count))
         saveConfig()
         log(.success, "Restored app: \(app.displayName)")

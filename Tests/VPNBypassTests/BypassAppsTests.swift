@@ -301,10 +301,39 @@ final class BypassAppsTests: XCTestCase {
 
     func testAddByIdStoresTheSigningIdentifier() {
         BypassApps.lookup = { id in
-            id == "com.example.Bundle" ? AppIdentity(name: "Example", signingID: "com.example.Signed", team: "TEAM000001") : nil
+            id == "com.example.Bundle"
+                ? AppIdentity(name: "Example", signingID: "com.example.Signed", team: "TEAM000001", bundleID: id) : nil
         }
-        XCTAssertEqual(try rm.addBypassApp("com.example.Bundle").get().pattern, "com.example.Signed")
+        let app = try! rm.addBypassApp("com.example.Bundle").get()
+        XCTAssertEqual(app.pattern, "com.example.Signed")
+        XCTAssertEqual(app.bundleID, "com.example.Bundle", "kept for the icon, the chooser and app.rm")
         XCTAssertEqual(rm.addBypassApp("com.example.Bundle"), .failure(.alreadyListed("Example")))
+        // The chooser leaves it out by its bundle id.
+        let url = URL(fileURLWithPath: "/Applications/Example.app")
+        XCTAssertEqual(BypassApps.candidates(running: [], installed: [BypassApps.Candidate(url: url, name: "Example", bundleID: "com.example.Bundle", isRunning: false)],
+                                             listed: rm.config.bypassApps), [])
+        // A plain entry stores no bundle id.
+        XCTAssertNil(BypassApp(pattern: "com.example.A", bundleID: "com.example.A").bundleID)
+    }
+
+    func testAppRmByBundleIdRemovesAnEntryStoredUnderItsSigningId() async {
+        BypassApps.lookup = { id in
+            id == "com.example.Bundle"
+                ? AppIdentity(name: "Example", signingID: "com.example.Signed", team: "TEAM000001", bundleID: id) : nil
+        }
+        _ = rm.addBypassApp("com.example.Bundle")
+        let gone = await send("app.rm", ["pattern": "com.example.Bundle"])
+        XCTAssertTrue(gone.ok, "\(String(describing: gone.error))")
+        XCTAssertEqual(rm.config.bypassApps, [])
+    }
+
+    func testAProfileWithARepeatedIdGivesTheLiveListFreshOnes() {
+        let id = UUID()
+        var c = RouteManager.Config()
+        c.bypassApps = [BypassApp(id: id, pattern: "com.example.A"), BypassApp(id: id, pattern: "com.example.B")]
+        let applied = ProfileSettings(capturing: c).applied(to: RouteManager.Config())
+        XCTAssertEqual(Set(applied.bypassApps.map(\.id)).count, 2)
+        XCTAssertEqual(applied.bypassApps[0].id, id)
     }
 
     func testARepeatedIdInTheConfigGetsAFreshOne() throws {

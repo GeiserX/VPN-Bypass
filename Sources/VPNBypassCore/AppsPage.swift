@@ -156,7 +156,7 @@ struct AppsTab: View {
 
     private func add(_ candidate: BypassApps.Candidate) {
         let identity = BypassApps.identity(ofAppAt: candidate.url)
-            ?? AppIdentity(name: candidate.name, signingID: candidate.bundleID, team: nil)
+            ?? AppIdentity(name: candidate.name, signingID: candidate.bundleID, team: nil, bundleID: candidate.bundleID)
         switch routeManager.addBypassApp(identity.signingID, identity: identity) {
         case .failure(let error): refusal = error.localizedMessage()
         case .success: refusal = nil

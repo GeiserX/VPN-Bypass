@@ -320,7 +320,7 @@ enum ClassicControl {
             target = UUID(uuidString: id).flatMap { uuid in rm.config.bypassApps.first { $0.id == uuid } }
         } else if let pattern {
             let value = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
-            target = rm.config.bypassApps.first { $0.pattern == value }
+            target = rm.config.bypassApps.first { $0.names(value) }
         } else {
             return fail("invalid_args", "id or pattern is required")
         }

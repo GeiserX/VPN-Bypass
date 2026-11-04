@@ -177,7 +177,7 @@ struct ProfileSettings: Codable, Equatable {
         }
         c.rules = rules
         c.defaultRouteId = defaultRouteId
-        c.bypassApps = bypassApps ?? []
+        c.bypassApps = BypassApp.uniqueIDs(bypassApps ?? [])
         // Custom mode reads its rules only from schema 2 on (`usesCustomEngine`).
         if routingMode == .custom, c.schemaVersion < 2 { c.schemaVersion = 2 }
         return c
