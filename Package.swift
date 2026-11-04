@@ -18,9 +18,15 @@ let package = Package(
             path: "Sources/VPNBypassPeerAuth",
             publicHeadersPath: "include"
         ),
+        // Per-app routing's policy: pure, Foundation only, no resources, so the Network Extension
+        // can link it without VPNBypassCore (whose Bundle.module would trap there).
+        .target(
+            name: "VPNBypassPolicy",
+            path: "Sources/VPNBypassPolicy"
+        ),
         .target(
             name: "VPNBypassCore",
-            dependencies: ["VPNBypassPeerAuth"],
+            dependencies: ["VPNBypassPeerAuth", "VPNBypassPolicy"],
             path: "Sources/VPNBypassCore",
             exclude: ["Resources/catalogue/README.md"],
             resources: [
@@ -39,8 +45,13 @@ let package = Package(
         ),
         .testTarget(
             name: "VPNBypassTests",
-            dependencies: ["VPNBypassCore"],
+            dependencies: ["VPNBypassCore", "VPNBypassPolicy"],
             path: "Tests/VPNBypassTests"
+        ),
+        .testTarget(
+            name: "VPNBypassPolicyTests",
+            dependencies: ["VPNBypassPolicy"],
+            path: "Tests/VPNBypassPolicyTests"
         )
     ]
 )
