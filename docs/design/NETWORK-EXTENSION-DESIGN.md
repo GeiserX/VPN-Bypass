@@ -112,6 +112,17 @@ Not run, so still open:
 - **L9** (extension replaced by an update, `brew upgrade` and `brew uninstall`) and **L11** (consent and
   start at reboot or login) were never run.
 - The exact System Settings path and prompt wording of the two approvals were not written down.
+  Step 4 recorded them on the mini (macOS 26.6.1); the owner's Mac on macOS 27 still has to confirm
+  them (L0):
+  1. Activation request: an alert "“VPNBypass” would like to use a new network extension", buttons
+     OK and Open System Settings. It names the app by its executable, not "VPN Bypass".
+  2. System Settings > General > Login Items & Extensions > Extensions, By Category > Network
+     Extensions (i): a switch per app, then the admin password ("System Extensions is trying to modify
+     a System Extension").
+  3. First save of the configuration: "“VPN Bypass” Would Like to Add Proxy Configurations", "All
+     network activity on this Mac may be filtered or monitored.", buttons Allow and Don't Allow.
+  4. Deactivation asks for the admin password too ("<app name> is trying to modify a System
+     Extension") and leaves the extension `[terminated waiting to uninstall on reboot]`.
 
 ## 3. Architecture
 
@@ -155,8 +166,8 @@ files an activation request.
 | Extension | `com.apple.application-identifier` `624WUVM8B4.com.geiserx.vpn-bypass.proxy`, `com.apple.developer.team-identifier`, `com.apple.developer.networking.networkextension = [app-proxy-provider-systemextension]` | `MAC_APP_DIRECT` for `com.geiserx.vpn-bypass.proxy` |
 | `vpnb`, helper | none (as today) | none |
 
-The spike's `entitlements/app.entitlements` and `proxy.entitlements` are the working templates; they ran
-under AMFI on the MacBook.
+The spike's `entitlements/app.entitlements` and `proxy.entitlements` were the templates; the shipping
+files are `entitlements/app.entitlements` and `entitlements/proxy.entitlements`.
 
 Rules learned from earlier AMFI incidents and the spike:
 - On macOS 26 and later, AMFI SIGKILLs a binary that carries these restricted entitlements without an
@@ -173,9 +184,8 @@ Rules learned from earlier AMFI incidents and the spike:
 **The one real packaging risk.** With the entitlements on the main app, a bad or missing profile kills the
 whole app at launch, including the kernel engine everyone relies on. We accept that because one app is
 simpler than a separate activator app plus IPC between them, but only behind a release gate that is proven
-to go red (6.3). If no runner can make that gate fail, the fallback is a nested activator app (PIA's
-layout: a sub-app inside the bundle that owns the extension and the entitlements), so the main binary
-never carries them.
+to go red (6.3). It was, on a GitHub macOS runner, so the nested activator app (PIA's layout) is not
+needed.
 
 ### 3.3 Config delivery
 
@@ -489,10 +499,11 @@ with `--entitlements`. Added:
    `entitlements/proxy.entitlements`;
 3. copy the app profile to `Contents/embedded.provisionprofile`, sign the app with
    `entitlements/app.entitlements` (today's `VPNBypass.entitlements` plus the NE keys, 3.2);
-4. verify: `--verify --deep --strict`, the helper requirement, the signed entitlements of both against
-   their files, and `security cms -D` on both profiles: certificate SHA-1 equals the signing identity's,
-   `application-identifier` is `624WUVM8B4.<id>`, profile entitlements are a superset of the signed ones,
-   not expired (the spike's `scripts/sign.sh` does these checks);
+4. verify: `--verify --deep --strict`, the helper requirement, the extension's identifier and team, the
+   signed entitlements of both against their files, and, before each profile is embedded,
+   `scripts/check-profile.py` on it: certificate SHA-1 equals the signing identity's,
+   `application-identifier` is `624WUVM8B4.<id>`, a Developer ID profile, profile entitlements a
+   superset of the signed ones, not expired;
 5. notarize and staple as today. The nested extension is covered by the app's ticket.
 
 `VPNBypass.entitlements` moves into `entitlements/app.entitlements`; `Makefile:140` and the auto-tag path
@@ -507,10 +518,15 @@ afterwards. Profiles live outside the repo.
   decoded into `$RUNNER_TEMP`. A missing secret fails the release, as the other signing secrets do today
   (step "Import signing certificate").
 - **Launch gate.** `ci.yml` already launches the unsigned bundle (`scripts/smoke-launch.sh`, job "build
-  and launch app"), and `release.yml` waits for that job. Nothing launches the **signed** app. Add a step
-  after `make release` that runs `scripts/smoke-launch.sh` on the stapled app and fails if it dies in the
-  first seconds. Prove the gate can go red once with a deliberately wrong profile. If the runner does not
-  enforce AMFI, the gate is worthless and 3.2's fallback (nested activator) applies.
+  and launch app"), and `release.yml` waits for that job. `release.yml` now also runs
+  `scripts/smoke-launch.sh` on the stapled app after `make release`; the script execs the extension's
+  binary as well and fails when AMFI killed either one (exit 137). Proven on 2026-11-04 on
+  `macos-latest` (macOS 26.6.2, SIP off): green with both right profiles; red with the extension's
+  profile in the app, with no profile in the extension, and with no profile in the app. SIP off does
+  not stop AMFI from killing a Developer ID binary whose restricted entitlements no profile covers.
+  It does let an ad hoc signature through, and it ran an extension that carried the app's profile
+  (same team and entitlements, wrong `application-identifier`); `check-profile.py` refuses that one
+  before signing. The mini cannot run this gate: it boots with `amfi_get_out_of_my_way`.
 - `ci.yml`: add the extension binary to the universal-architecture loop (`:117-126`); assert its
   `Info.plist` has `SYSX` and `NetworkExtension`, and that its `NEProviderClasses` value is an ObjC class
   in the built binary. CI bundles stay unsigned and entitlement-free.
@@ -540,14 +556,19 @@ extension: the policy carries a version, and an extension that does not know it 
 
 ## 7. App Store Connect
 
-**State on 2026-11-04** (read-only API calls with the team's App Manager key, team 624WUVM8B4):
+**State on 2026-11-04**, after step 4 (team 624WUVM8B4, App Manager key):
 
 | Bundle id | ASC id | Platform | Capabilities | Profile |
 |---|---|---|---|---|
 | `com.geiserx.vpn-bypass.spike` | `KLY8U6HHCZ` | `UNIVERSAL` | `SYSTEM_EXTENSION_INSTALL`, `NETWORK_EXTENSIONS`, `IN_APP_PURCHASE` | "VPN Bypass NE spike app DevID", `MAC_APP_DIRECT`, `ACTIVE`, expires 2031-09-17 |
 | `com.geiserx.vpn-bypass.spike.proxy` | `5BJDJSV4HL` | `UNIVERSAL` | `NETWORK_EXTENSIONS`, `IN_APP_PURCHASE` | "VPN Bypass NE spike proxy DevID", `MAC_APP_DIRECT`, `ACTIVE`, expires 2031-09-17 |
-| `com.geiserx.vpn-bypass` | none | | | none |
-| `com.geiserx.vpn-bypass.proxy` | none | | | none |
+| `com.geiserx.vpn-bypass` | `F3K7VAMYN9` | `UNIVERSAL` | `SYSTEM_EXTENSION_INSTALL`, `NETWORK_EXTENSIONS` | "VPN Bypass app DevID" (`58RPKT632J`), `MAC_APP_DIRECT`, `ACTIVE` |
+| `com.geiserx.vpn-bypass.proxy` | `9G3B8X56B6` | `UNIVERSAL` | `NETWORK_EXTENSIONS` | "VPN Bypass proxy DevID" (`U99V6326W3`), `MAC_APP_DIRECT`, `ACTIVE` |
+
+Both new profiles hold certificate `LTV59DZ9B4` (SHA-1 `0709E698...`), carry `624WUVM8B4.<id>` and the
+`-systemextension` NE values, and pass `scripts/check-profile.py` against their entitlements files. They
+are the GitHub secrets `PROVISIONING_PROFILE_APP_BASE64` and `PROVISIONING_PROFILE_PROXY_BASE64`, with a
+copy in the private profiles folder outside the repo. A second dry run planned no change.
 
 What the spike taught about the API:
 - The spike's `scripts/asc-profiles.py` created both ids, their capabilities and both profiles through
@@ -557,7 +578,8 @@ What the spike taught about the API:
 - The profile allows more NE values than we sign with (`packet-tunnel`, `app-proxy` and
   `content-filter`, each with `-systemextension`). The signed entitlements must be a subset, and they are.
 
-**Remaining steps** (step 4 of section 10). They run once, are idempotent, and use the same key:
+**The steps** (step 4 of section 10, done on 2026-11-04). They run once, are idempotent, and use the same
+key:
 1. Move `spikes/ne-proxy/scripts/asc-profiles.py` to `scripts/asc-profiles.py`, with the two real ids in
    its table: `com.geiserx.vpn-bypass` (capabilities `SYSTEM_EXTENSION_INSTALL`, `NETWORK_EXTENSIONS`)
    and `com.geiserx.vpn-bypass.proxy` (`NETWORK_EXTENSIONS`). Profile names "VPN Bypass app DevID" and

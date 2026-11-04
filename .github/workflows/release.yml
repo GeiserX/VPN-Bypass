@@ -147,17 +147,42 @@ jobs:
           security find-identity -v -p codesigning "$keychain" | grep -q "$APPLE_SIGNING_IDENTITY" \
             || { echo "::error::the certificate holds no codesigning identity $APPLE_SIGNING_IDENTITY"; exit 1; }
 
+      # The app and its per-app routing extension carry Network Extension entitlements, which
+      # AMFI accepts only with an embedded Developer ID profile per binary (minted by
+      # scripts/asc-profiles.py). A missing secret fails here, like the certificate's.
+      - name: Decode provisioning profiles
+        env:
+          PROVISIONING_PROFILE_APP_BASE64: ${{ secrets.PROVISIONING_PROFILE_APP_BASE64 }}
+          PROVISIONING_PROFILE_PROXY_BASE64: ${{ secrets.PROVISIONING_PROFILE_PROXY_BASE64 }}
+        run: |
+          for name in PROVISIONING_PROFILE_APP_BASE64 PROVISIONING_PROFILE_PROXY_BASE64; do
+            [ -n "${!name}" ] || { echo "::error::secret $name is not set"; exit 1; }
+          done
+          echo "$PROVISIONING_PROFILE_APP_BASE64" | base64 --decode > "$RUNNER_TEMP/app.provisionprofile"
+          echo "$PROVISIONING_PROFILE_PROXY_BASE64" | base64 --decode > "$RUNNER_TEMP/proxy.provisionprofile"
+
       - name: Build, sign and notarize release
         env:
           SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROVISIONING_PROFILE_APP: ${{ runner.temp }}/app.provisionprofile
+          PROVISIONING_PROFILE_PROXY: ${{ runner.temp }}/proxy.provisionprofile
         run: make release
 
-      - name: Remove signing keychain
+      # The launch gate. A profile that does not cover the signed entitlements gets the app (or
+      # the extension) SIGKILLed by AMFI at exec, on every user's Mac. This runner enforces it the
+      # same way (a wrong profile and no profile were both killed when the gate was proven), so
+      # launching the signed app here catches it before anything is published.
+      - name: Launch the signed app
+        run: scripts/smoke-launch.sh "VPN Bypass.app"
+
+      - name: Remove signing keychain and profiles
         if: always()
-        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/app.provisionprofile" "$RUNNER_TEMP/proxy.provisionprofile"
 
       - name: Calculate SHA256
         id: sha

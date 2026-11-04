@@ -27,7 +27,8 @@ on:
       - 'Info.plist'
       - 'Makefile'
       - 'assets/**'
-      - 'VPNBypass.entitlements'
+      - 'Proxy/**'
+      - 'entitlements/**'
       - '.github/workflows/auto-tag.yml'
   # Run by hand to cut the release for a series of merges made while releases were paused
   # (repo variable AUTO_RELEASE=false), or to force the bump: a redesign shipped as a major.

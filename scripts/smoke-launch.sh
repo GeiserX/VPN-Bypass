@@ -8,6 +8,13 @@
 # CI runs it on every pull request and every push to main (job "build and launch app"),
 # and release.yml refuses to publish a commit where that job is not green.
 #
+# It is also the release's launch gate. release.yml runs it on the signed, notarized app: the
+# app and its per-app routing extension carry Network Extension entitlements, and AMFI kills a
+# binary whose embedded provisioning profile does not cover them, at exec, before any of our code
+# runs (exit 137). That would take the whole app down on every user's Mac, so the gate also execs
+# the extension's binary and fails if AMFI killed it. Proven on a GitHub macOS runner: a wrong
+# profile and no profile were killed, the right one ran.
+#
 # What it cannot check: anything that needs the main thread after launch. On a machine
 # without the privileged helper (every CI runner) the app asks for an admin password to
 # install it, and that prompt holds the main thread, so `vpnb status` gets no answer and
@@ -25,6 +32,26 @@ version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/C
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
   || { echo "::error::Info.plist version is '$version', not X.Y.Z"; exit 1; }
 "$cli" --help >/dev/null || { echo "::error::vpnb --help failed"; exit 1; }
+
+# The extension normally runs only when sysextd starts it, so exec it by hand: AMFI judges its
+# signature and profile at exec. Outside sysextd it may exit or wait; only SIGKILL is a failure.
+ext_bin="$app/Contents/Library/SystemExtensions/com.geiserx.vpn-bypass.proxy.systemextension/Contents/MacOS/com.geiserx.vpn-bypass.proxy"
+if [ -e "$ext_bin" ]; then
+  "$ext_bin" >/dev/null 2>&1 &
+  ext_pid=$!
+  sleep 3
+  if kill -0 "$ext_pid" 2>/dev/null; then
+    kill -TERM "$ext_pid" 2>/dev/null || true
+    wait "$ext_pid" 2>/dev/null || true
+    echo "Extension binary started and kept running."
+  else
+    ext_status=0
+    wait "$ext_pid" || ext_status=$?
+    [ "$ext_status" -ne 137 ] \
+      || { echo "::error::the extension was killed at exec (SIGKILL): AMFI refused its signature or provisioning profile"; exit 1; }
+    echo "Extension binary started and exited with status $ext_status (not killed)."
+  fi
+fi
 
 sock="$HOME/Library/Application Support/VPNBypass/control.sock"
 applog="$HOME/Library/Logs/VPNBypass/vpnbypass.log"
@@ -56,7 +83,12 @@ PY
 }
 up=""
 for _ in $(seq 1 60); do
-  kill -0 "$pid" 2>/dev/null || fail "the app exited during launch"
+  if ! kill -0 "$pid" 2>/dev/null; then
+    status=0
+    wait "$pid" || status=$?
+    [ "$status" -ne 137 ] || fail "the app was killed at exec (SIGKILL): AMFI refused its signature or provisioning profile"
+    fail "the app exited during launch (status $status)"
+  fi
   if [ -S "$sock" ] && connect 2>/dev/null; then up=1; break; fi
   sleep 1
 done

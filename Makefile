@@ -3,6 +3,9 @@
 APP_NAME = VPN Bypass
 BUNDLE_ID = com.geiserx.vpn-bypass
 HELPER_ID = com.geiserx.vpnbypass.helper
+# Per-app routing's system extension, inside the app at Contents/Library/SystemExtensions.
+PROXY_ID = com.geiserx.vpn-bypass.proxy
+PROXY_BUNDLE = $(APP_BUNDLE)/Contents/Library/SystemExtensions/$(PROXY_ID).systemextension
 # Where `make build` puts the universal binaries. SwiftPM picks the folder
 # (.build/apple/Products/Release before Swift 6.4, .build/out/Products/Release
 # since), so ask it rather than name one. Asked once, when a recipe first uses it.
@@ -92,6 +95,16 @@ bundle: build build-helper
 	@ls "$(APP_BUNDLE)"/Contents/Resources/catalogue/*.json >/dev/null
 	@# The Shortcuts actions: Shortcuts finds them only through Metadata.appintents
 	@scripts/appintents-metadata.sh "$(APP_BUNDLE)"
+	@# Per-app routing's system extension. macOS replaces an installed extension only when its
+	@# version changes, so it carries the app's version.
+	@mkdir -p "$(PROXY_BUNDLE)/Contents/MacOS" "$(PROXY_BUNDLE)/Contents/Resources"
+	@cp "$(BUILD_DIR)/$(PROXY_ID)" "$(PROXY_BUNDLE)/Contents/MacOS/"
+	@cp Proxy/Info.plist "$(PROXY_BUNDLE)/Contents/"
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" "$(PROXY_BUNDLE)/Contents/Info.plist"
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(VERSION)" "$(PROXY_BUNDLE)/Contents/Info.plist"
+	@cp assets/AppIcon.icns "$(PROXY_BUNDLE)/Contents/Resources/"
+	@cp -R Proxy/*.lproj "$(PROXY_BUNDLE)/Contents/Resources/"
+	@scripts/check-extension-bundle.sh "$(APP_BUNDLE)"
 	@echo "App bundle created: $(APP_BUNDLE)"
 
 clean:
@@ -132,12 +145,12 @@ uninstall-helper:
 	@sudo rm -f /Library/LaunchDaemons/$(HELPER_ID).plist
 	@echo "Helper uninstalled"
 
-# Create the signed, notarized release DMG for distribution. Needs SIGN_IDENTITY and
-# notary credentials (see scripts/sign-and-notarize.sh); there is no ad-hoc fallback,
-# since the helper only accepts an app signed by our Developer ID team.
+# Create the signed, notarized release DMG for distribution. Needs SIGN_IDENTITY, notary
+# credentials and the two provisioning profiles (see scripts/sign-and-notarize.sh); there is
+# no ad-hoc fallback, since the helper only accepts an app signed by our Developer ID team.
 release: bundle
 	@echo "Creating release v$(VERSION)..."
-	@scripts/sign-and-notarize.sh app --entitlements VPNBypass.entitlements "$(APP_BUNDLE)"
+	@scripts/sign-and-notarize.sh app --entitlements entitlements/app.entitlements "$(APP_BUNDLE)"
 	@mkdir -p dist
 	@$(MAKE) dmg
 	@scripts/sign-and-notarize.sh dmg "dist/VPN-Bypass-$(VERSION).dmg"
