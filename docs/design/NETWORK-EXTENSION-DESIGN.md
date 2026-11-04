@@ -283,8 +283,9 @@ table, in this order (the spike's `FlowDecider.decide`):
    runs last, only for a flow that would otherwise be claimed, because it reads a code signature. The
    fixed list (Palo Alto `PXPZ95SK77`, Tailscale `W5364U7YZB` and the other VPN vendors, each team read
    with `codesign -dv` from the vendor's signed app where its installer is public) lives in the pure
-   `FlowDecider`; the policy adds the live tunnel owners' teams (3.3). `ruleAdd` and
-   the app chooser refuse a process rule that names a declined team's app.
+   `FlowDecider`; the policy adds the live tunnel owners' teams (3.3). The Apps list (`app.add`) and
+   the app chooser refuse a declined team's app; a process rule for one (`rule.add`, the Rules page) is
+   saved but serves nothing, since the extension declines its flows by team here.
 7. Otherwise claim it (return `true`) and re-emit (3.5).
 
 **Process rules and Custom's first match.** A process rule decides by app, the others by destination, so

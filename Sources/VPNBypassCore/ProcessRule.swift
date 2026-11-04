@@ -163,12 +163,20 @@ enum ProcessRule {
     /// identifier exactly, case included, while LaunchServices finds an app whatever the case
     /// typed: so for the bundle id of an installed app, the identifier its code is signed with,
     /// read from its signature (`com.example.app` typed is stored `com.example.App`), as the
-    /// Apps list does. An executable name, or an app not installed, is kept as typed.
+    /// Apps list does. An executable name, or an app not installed, is kept as typed; so is a
+    /// signing id without a dot, which the compiler would read as an executable name.
     static func storedPattern(_ pattern: String) -> String {
-        guard kind(of: pattern) == .bundleID, invalid(pattern) == nil, let app = BypassApps.lookup(pattern) else {
+        guard kind(of: pattern) == .bundleID, invalid(pattern) == nil, let app = BypassApps.lookup(pattern),
+              kind(of: app.signingID) == .bundleID, invalid(app.signingID) == nil else {
             return pattern
         }
         return app.signingID
+    }
+
+    /// What the Rules page saves: a process rule saved with its pattern unchanged keeps it, so a
+    /// stored signing id is never looked up again as another app's bundle id.
+    static func storedPattern(_ pattern: String, previous: String?) -> String {
+        pattern == previous ? pattern : storedPattern(pattern)
     }
 
     /// Nil when `pattern` is a bundle id or an executable name as the design defines them.

@@ -43,7 +43,11 @@ final class NameLookup {
             return lookup
         }
         lookup.ref = ref
-        DNSServiceSetDispatchQueue(ref, queue)
+        guard DNSServiceSetDispatchQueue(ref, queue) == kDNSServiceErr_NoError else {
+            // No answer would ever arrive: end now, as a lookup with no answer.
+            queue.async { lookup.finish() }
+            return lookup
+        }
         queue.asyncAfter(deadline: .now() + timeoutSeconds) { [weak lookup] in lookup?.finish() }
         return lookup
     }
@@ -63,7 +67,8 @@ final class NameLookup {
             lookup.answers.append(UInt32(bigEndian: v4))
         }
         // A negative answer (`NoSuchRecord`) or a failure ends the lookup too; so does the last
-        // record of a batch.
+        // record of a batch. An answer that only arrives in a later batch is not seen; that never
+        // lets a protected address be dialled, since only an answer that was checked is dialled.
         if error != kDNSServiceErr_NoError || flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) == 0 {
             lookup.finish()
         }
@@ -80,10 +85,11 @@ final class NameLookup {
         callback?(answers)
     }
 
-    /// The IPv4 addresses of the Mac's interfaces now, for `NameAnswer.tunnelNetworks`.
-    static func interfaceAddresses() -> [InterfaceAddress] {
+    /// The IPv4 addresses of the Mac's interfaces now, for `NameAnswer.tunnelNetworks`; nil when
+    /// they cannot be read, so the caller fails closed rather than checking against no tunnels.
+    static func interfaceAddresses() -> [InterfaceAddress]? {
         var head: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&head) == 0, let first = head else { return [] }
+        guard getifaddrs(&head) == 0, let first = head else { return nil }
         defer { freeifaddrs(head) }
         func v4(_ sa: UnsafeMutablePointer<sockaddr>?) -> UInt32? {
             guard let sa, sa.pointee.sa_family == sa_family_t(AF_INET) else { return nil }

@@ -88,6 +88,24 @@ final class ProcessRuleTests: XCTestCase {
         XCTAssertEqual(ProcessRule.storedPattern("com.example.app"), "com.example.App", "the Rules page saves through the same call")
     }
 
+    /// A signing id without a dot would be read as an executable name, and a pattern saved
+    /// unchanged is never looked up again as another app's bundle id.
+    func testStoredPatternKeepsTheTypedIdForADotlessSigningIdAndAnUnchangedPattern() {
+        let saved = BypassApps.lookup
+        defer { BypassApps.lookup = saved }
+        BypassApps.lookup = { id in
+            switch id.lowercased() {
+            case "com.example.daemon": return AppIdentity(name: "Daemon", signingID: "exampled", team: nil, bundleID: "com.example.daemon")
+            case "com.example.app": return AppIdentity(name: "Other", signingID: "com.example.Other", team: nil, bundleID: "com.example.app")
+            default: return nil
+            }
+        }
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.daemon"), "com.example.daemon")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.App", previous: "com.example.App"), "com.example.App")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.app", previous: "com.example.App"), "com.example.Other")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.app", previous: nil), "com.example.Other")
+    }
+
     func testRuleAddSavesAProcessRuleAndSaysItRoutesNothingYet() throws {
         let direct = Route(name: "Direct", egress: .direct)
         let (updated, response) = CommandRouter.apply(

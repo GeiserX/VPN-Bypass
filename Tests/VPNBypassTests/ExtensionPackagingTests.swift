@@ -159,8 +159,14 @@ final class ExtensionPackagingTests: XCTestCase {
         XCTAssertTrue(proxy.contains("return .name(n, port: p)"))
         XCTAssertFalse(proxy.contains("nw_endpoint_create_host(n, p)"), "a real name is never dialled as a name")
         let relay = try text("Sources/VPNBypassProxy/TCPRelay.swift")
-        let lookup = try XCTUnwrap(relay.range(of: "NameLookup.start(name, interfaceIndex: if_nametoindex(interfaceName)"))
-        let check = try XCTUnwrap(relay.range(of: "switch NameAnswer.check(answers, tunnelNetworks:"))
+        let index = try XCTUnwrap(relay.range(of: "guard index != 0 else { fail(nil); return }"),
+                                  "index 0 asks every interface's resolvers, the VPN's included")
+        let lookup = try XCTUnwrap(relay.range(of: "NameLookup.start(name, interfaceIndex: index, queue: queue)"))
+        XCTAssertLessThan(index.lowerBound, lookup.lowerBound)
+        let interfaces = try XCTUnwrap(relay.range(of: "guard let addresses = NameLookup.interfaceAddresses() else { self.fail(nil); return }"),
+                                       "no interface list fails the flow closed")
+        let check = try XCTUnwrap(relay.range(of: "switch NameAnswer.check(answers, tunnelNetworks: NameAnswer.tunnelNetworks(addresses))"))
+        XCTAssertLessThan(interfaces.lowerBound, check.lowerBound)
         let dial = try XCTUnwrap(relay.range(of: "self.connect(nw_endpoint_create_host(ProtectedRanges.dotted(address), port))"))
         XCTAssertLessThan(lookup.lowerBound, check.lowerBound)
         XCTAssertLessThan(check.lowerBound, dial.lowerBound)
@@ -171,6 +177,7 @@ final class ExtensionPackagingTests: XCTestCase {
                       "a claimed flow cannot be handed back: it is closed")
         let lookupSource = try text("Sources/VPNBypassProxy/NameLookup.swift")
         XCTAssertTrue(lookupSource.contains("DNSServiceProtocol(kDNSServiceProtocol_IPv4)"))
+        XCTAssertTrue(lookupSource.contains("guard DNSServiceSetDispatchQueue(ref, queue) == kDNSServiceErr_NoError else {"))
         XCTAssertFalse(lookupSource.contains("os_log"), "the name is never logged (3.8)")
     }
 

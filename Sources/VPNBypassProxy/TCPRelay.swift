@@ -84,10 +84,16 @@ final class TCPRelay {
     /// app sees a failed connect. A name that points into a private network is never reached
     /// past the VPN: one the app resolves itself arrives by address, which the excluded ranges keep.
     private func resolve(_ name: String, port: String) {
-        lookup = NameLookup.start(name, interfaceIndex: if_nametoindex(interfaceName), queue: queue) { [weak self] answers in
+        // Index 0 would mean any interface, so the VPN's resolvers: an interface that is gone
+        // fails the connect instead.
+        let index = if_nametoindex(interfaceName)
+        guard index != 0 else { fail(nil); return }
+        lookup = NameLookup.start(name, interfaceIndex: index, queue: queue) { [weak self] answers in
             guard let self, !self.finished else { return }
             self.lookup = nil
-            switch NameAnswer.check(answers, tunnelNetworks: NameAnswer.tunnelNetworks(NameLookup.interfaceAddresses())) {
+            // Without the interfaces a tunnel's own network cannot be checked: fail, never dial.
+            guard let addresses = NameLookup.interfaceAddresses() else { self.fail(nil); return }
+            switch NameAnswer.check(answers, tunnelNetworks: NameAnswer.tunnelNetworks(addresses)) {
             case .dial(let address):
                 self.connect(nw_endpoint_create_host(ProtectedRanges.dotted(address), port))
             case .protected:
