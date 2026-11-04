@@ -1054,7 +1054,7 @@ struct RuleEditorSheet: View {
         let rule = Rule(
             id: editingRule?.id ?? UUID(),
             matchType: matchType,
-            pattern: effectivePattern,
+            pattern: matchType == .process ? ProcessRule.storedPattern(effectivePattern) : effectivePattern,
             routeId: routeId,
             enabled: editingRule?.enabled ?? true,
             order: editingRule?.order ?? 0 // new rules: RulesTab.saveRule overwrites this to (max order)+1

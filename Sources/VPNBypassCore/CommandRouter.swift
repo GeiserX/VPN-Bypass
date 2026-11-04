@@ -456,7 +456,8 @@ enum CommandRouter {
             return errorResponse(config, code: "not_found", message: "no route with that id")
         }
         let nextOrder = (config.rules.map(\.order).max() ?? -1) + 1
-        let rule = Rule(matchType: matchType, pattern: pattern, routeId: routeId, order: nextOrder)
+        let stored = matchType == .process ? ProcessRule.storedPattern(pattern) : pattern
+        let rule = Rule(matchType: matchType, pattern: stored, routeId: routeId, order: nextOrder)
         var updated = config
         updated.rules.append(rule)
         // Saved, but nothing serves it yet: the reply says so rather than a bare ok.

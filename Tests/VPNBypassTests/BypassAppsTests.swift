@@ -299,6 +299,17 @@ final class BypassAppsTests: XCTestCase {
         XCTAssertNil(BypassAppServing.serving(off, engine: .active, listIsLive: false).reason)
     }
 
+    func testAddByIdStoresTheSigningIdentifierInItsOwnCase() {
+        // LaunchServices finds an app whatever the case typed; flows are matched case and all.
+        BypassApps.lookup = { id in
+            id.lowercased() == "com.example.browser"
+                ? AppIdentity(name: "Browser", signingID: "com.example.Browser", team: "TEAM000001", bundleID: "com.example.Browser") : nil
+        }
+        XCTAssertEqual(try rm.addBypassApp("com.example.browser").get().pattern, "com.example.Browser")
+        XCTAssertEqual(rm.addBypassApp("COM.EXAMPLE.BROWSER"), .failure(.alreadyListed("Browser")))
+        XCTAssertEqual(rm.config.bypassApps.map(\.pattern), ["com.example.Browser"])
+    }
+
     func testAddByIdStoresTheSigningIdentifier() {
         BypassApps.lookup = { id in
             id == "com.example.Bundle"

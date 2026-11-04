@@ -64,6 +64,30 @@ final class ProcessRuleTests: XCTestCase {
         XCTAssertTrue(updated.rules.isEmpty)
     }
 
+    /// Flows are matched by their exact signing identifier, case included, so a rule stores the
+    /// installed app's identifier as its signature has it, whatever case was typed.
+    func testRuleAddStoresTheInstalledAppsExactSigningIdentifier() throws {
+        let saved = BypassApps.lookup
+        defer { BypassApps.lookup = saved }
+        // LaunchServices finds an app whatever the case of the id it is asked for.
+        BypassApps.lookup = { id in
+            id.lowercased() == "com.example.app"
+                ? AppIdentity(name: "Example", signingID: "com.example.App", team: "TEAM000001", bundleID: "com.example.App") : nil
+        }
+        let direct = Route(name: "Direct", egress: .direct)
+        var config = config(route: direct)
+        for typed in ["com.example.app", "COM.EXAMPLE.APP", "com.other.Tool", "exampletool"] {
+            let (updated, response) = CommandRouter.apply(
+                ControlRequest(cmd: "rule.add", args: ["match": "process", "pattern": typed,
+                                                        "routeId": direct.id.uuidString]), to: config)
+            XCTAssertTrue(response.ok, typed)
+            config = updated
+        }
+        XCTAssertEqual(config.rules.map(\.pattern), ["com.example.App", "com.example.App", "com.other.Tool", "exampletool"],
+                       "an app not installed and an executable name are kept as typed")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.app"), "com.example.App", "the Rules page saves through the same call")
+    }
+
     func testRuleAddSavesAProcessRuleAndSaysItRoutesNothingYet() throws {
         let direct = Route(name: "Direct", egress: .direct)
         let (updated, response) = CommandRouter.apply(
