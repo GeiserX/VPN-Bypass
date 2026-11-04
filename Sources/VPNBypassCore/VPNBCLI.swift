@@ -175,6 +175,21 @@ public enum VPNBCLI {
             }
         }
 
+        if let apps = result.apps {
+            if apps.isEmpty {
+                out.append("no apps")
+            } else {
+                for a in apps {
+                    var line = "\(a.id)  \(a.pattern)"
+                    if let name = a.name, name != a.pattern { line += "  (\(name))" }
+                    line += "  \(a.enabled ? "enabled" : "disabled")"
+                    if a.servedBy == .perAppEngine { line += "  served by per-app routing" }
+                    if a.servedBy == RuleServedBy.none, a.inactiveReason != nil { line += "  " + ProcessRule.inactiveNote(reason: a.inactiveReason) }
+                    out.append(line)
+                }
+            }
+        }
+
         if let activeRoutes = result.activeRoutes {
             if activeRoutes.isEmpty {
                 out.append("no active routes")

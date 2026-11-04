@@ -281,9 +281,14 @@ enum StatusPage {
         switch input.mode {
         case .bypass:
             let s = input.enabledServices, d = input.enabledDomains
-            if s == 0 && d == 0 { return Line(text: String(localized: "No services or domains", bundle: bundle)) }
+            if s == 0 && d == 0 && input.enabledApps == 0 { return Line(text: String(localized: "No services or domains", bundle: bundle)) }
             let services = s == 1 ? String(localized: "1 service", bundle: bundle) : String(localized: "\(s) services", bundle: bundle)
             let domains = d == 1 ? String(localized: "1 domain", bundle: bundle) : String(localized: "\(d) domains", bundle: bundle)
+            if input.enabledApps > 0 {
+                let a = input.enabledApps
+                let apps = a == 1 ? String(localized: "1 app", bundle: bundle) : String(localized: "\(a) apps", bundle: bundle)
+                return Line(text: ((s > 0 ? [services] : []) + (d > 0 ? [domains] : []) + [apps]).joined(separator: ", "))
+            }
             if d == 0 { return Line(text: services) }
             if s == 0 { return Line(text: domains) }
             return Line(text: String(localized: "\(services), \(domains)", bundle: bundle))
@@ -542,6 +547,7 @@ extension DropdownStatus.Input {
             nothingConfigured: FirstRunSetup.isFresh(mode: config.routingMode,
                                                      domains: config.domains,
                                                      services: config.services,
+                                                     apps: config.bypassApps,
                                                      installedRoutes: routeManager.routedAddressCount),
             everythingElseDirect: routeManager.everythingElseDirect,
             killSwitch: routeManager.vpnKillSwitch,
@@ -559,7 +565,9 @@ extension DropdownStatus.Input {
                 .filter { routed.contains($0.destination) }.count ?? 0,
             lastCheckBroken: routeManager.lastRouteCheck?.controlBroken ?? false,
             pause: routeManager.pauseState,
-            configUnreadable: routeManager.isConfigLoadFailed
+            configUnreadable: routeManager.isConfigLoadFailed,
+            enabledApps: mode == .bypass ? config.bypassApps.filter(\.enabled).count : 0,
+            appsServed: FlowEngineManager.shared.state == .active && BypassAppServing.listIsLive(config)
         )
     }
 }

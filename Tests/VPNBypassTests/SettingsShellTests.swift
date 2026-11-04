@@ -35,7 +35,7 @@ final class SettingsShellTests: XCTestCase {
     func testTheSidebarListsEveryPageInThreeGroupsAfterStatus() {
         XCTAssertEqual(SettingsSidebar.groups.map(\.pages), [
             [.status],
-            [.domains, .services, .rules, .routes],
+            [.domains, .services, .apps, .rules, .routes],
             [.lookups, .logs],
             [.general, .about],
         ])
@@ -49,8 +49,8 @@ final class SettingsShellTests: XCTestCase {
             SettingsSidebar.pages.filter { SettingsSidebar.isReadOnly($0, in: mode) }
         }
         XCTAssertEqual(readOnly(.bypass), [.rules, .routes])
-        XCTAssertEqual(readOnly(.vpnOnly), [.services, .rules, .routes])
-        XCTAssertEqual(readOnly(.custom), [.domains, .services])
+        XCTAssertEqual(readOnly(.vpnOnly), [.services, .apps, .rules, .routes])
+        XCTAssertEqual(readOnly(.custom), [.domains, .services, .apps])
     }
 
     func testAReadOnlyPageSaysWhichModeItAppliesInAndOffersThatMode() {
@@ -80,7 +80,7 @@ final class SettingsShellTests: XCTestCase {
                     XCTAssertNotEqual(title, group.title(), "\(language): \(group.kind)")
                 }
             }
-            for (page, mode) in [(SettingsView.SettingsTab.rules, RoutingMode.bypass), (.routes, .bypass), (.services, .custom), (.domains, .custom)] {
+            for (page, mode) in [(SettingsView.SettingsTab.rules, RoutingMode.bypass), (.routes, .bypass), (.services, .custom), (.domains, .custom), (.apps, .custom)] {
                 let line = try XCTUnwrap(SettingsSidebar.readOnlyLine(page, in: mode, bundle: bundle))
                 XCTAssertNotEqual(line, SettingsSidebar.readOnlyLine(page, in: mode), "\(language): \(page)")
                 XCTAssertTrue(line.contains(DropdownModePicker.label(mode, in: bundle)), "\(language): \(line)")
@@ -105,7 +105,7 @@ final class SettingsShellTests: XCTestCase {
         XCTAssertTrue(SettingsSidebar.matches("Télégram", search: "telegram"))
         XCTAssertFalse(SettingsSidebar.matches("Telegram", search: "zoom"))
         XCTAssertEqual(SettingsView.SettingsTab.allCases.filter(SettingsSidebar.isSearchable),
-                       [.domains, .services, .rules, .routes, .lookups, .logs])
+                       [.domains, .services, .apps, .rules, .routes, .lookups, .logs])
     }
 
     /// The System Routes rows follow the Routes search like the listener routes do.

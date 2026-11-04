@@ -1102,10 +1102,8 @@
 "The proxy configuration was not allowed, so per-app routing is off. Nothing else changed." = "La configuration de proxy n'a pas été autorisée, le routage par app est donc désactivé. Rien d'autre n'a changé.";
 "Use per-app routing" = "Utiliser le routage par app";
 "Per-app routing" = "Routage par app";
-"Apps you name in a rule with the Direct route skip the VPN for their TCP connections to public IPv4 addresses. Everything else keeps its normal route, which may be the VPN: IPv6, connections an app binds to a network interface itself, local and private addresses, and the VPN client's own traffic. Domain, service and IP rules keep working as before, for every app." = "Les apps que vous nommez dans une règle avec la route Direct contournent le VPN pour leurs connexions TCP vers des adresses IPv4 publiques. Tout le reste garde sa route normale, qui peut être le VPN : IPv6, les connexions qu'une app lie elle-même à une interface réseau, les adresses locales et privées, et le trafic du client VPN lui-même. Les règles de domaine, de service et d'IP fonctionnent comme avant, pour toutes les apps.";
 "Turning it on asks twice: first allow the extension in System Settings > General > Login Items & Extensions > Network Extensions (with your password), then allow VPN Bypass to add a proxy configuration. If you say no, nothing else changes. Turning it on or off resets the open connections of the apps you named." = "L'activer demande deux fois : d'abord autorisez l'extension dans Réglages Système > Général > Ouverture et extensions > Extensions réseau (avec votre mot de passe), puis autorisez VPN Bypass à ajouter une configuration de proxy. Si vous refusez, rien d'autre ne change. L'activer ou le désactiver réinitialise les connexions ouvertes des apps que vous avez nommées.";
 "Pause stands it down too, but new connections still pass through the extension; only turning it off takes it out of the way." = "La pause le met aussi en retrait, mais les nouvelles connexions passent encore par l'extension ; seule la désactivation l'écarte.";
-"It serves rules for apps, which work in Custom mode. Add one with the command vpnb rule.add match=process." = "Il sert les règles d'apps, qui fonctionnent en mode Personnalisé. Ajoutez-en une avec la commande vpnb rule.add match=process.";
 "%lld connections went around the VPN since the extension started." = "%lld connexions ont contourné le VPN depuis le démarrage de l'extension.";
 "%lld came bound to a network interface, which per-app routing cannot serve." = "%lld sont arrivées liées à une interface réseau, ce que le routage par app ne peut pas servir.";
 "An update of the extension is waiting for approval in System Settings." = "Une mise à jour de l'extension attend votre autorisation dans Réglages Système.";
@@ -1123,3 +1121,31 @@
 "Inactive: this rule's route was deleted or is turned off." = "Inactive : la route de cette règle a été supprimée ou est désactivée.";
 "Rules for apps (%@) change nothing now: per-app routing does not serve them (Settings > General says why)." = "Les règles d'apps (%@) ne changent rien pour l'instant : le routage par app ne les sert pas (Réglages > Général dit pourquoi).";
 "Rules for apps (%@) change nothing now: per-app routing serves only rules whose route is Direct and turned on." = "Les règles d'apps (%@) ne changent rien pour l'instant : le routage par app ne sert que les règles dont la route est Direct et activée.";
+
+/* Bypass mode's Apps list */
+"Apps on the Apps list (Bypass mode), or named in a rule with the Direct route (Custom mode), skip the VPN for their TCP connections to public IPv4 addresses. Everything else keeps its normal route, which may be the VPN: IPv6, connections an app binds to a network interface itself, local and private addresses, and the VPN client's own traffic. Domain, service and IP rules keep working as before, for every app." = "Les apps de la liste Apps (mode Contournement), ou nommées dans une règle avec la route Direct (mode Personnalisé), contournent le VPN pour leurs connexions TCP vers des adresses IPv4 publiques. Tout le reste garde sa route normale, qui peut être le VPN : l'IPv6, les connexions qu'une app lie elle-même à une interface réseau, les adresses locales et privées, et le trafic propre du client VPN. Les règles de domaine, de service et d'IP fonctionnent comme avant, pour toutes les apps.";
+"It does not run in VPN Only mode. In Bypass mode it serves the Apps list, in Custom mode the rules for apps." = "Il ne fonctionne pas en mode VPN uniquement. En mode Contournement, il sert la liste Apps ; en mode Personnalisé, les règles d'apps.";
+"Inactive: the Apps list works in Bypass mode." = "Inactive : la liste Apps fonctionne en mode Contournement.";
+"%@ is already on the list." = "%@ est déjà dans la liste.";
+"VPN Bypass itself always keeps its normal route." = "VPN Bypass garde toujours sa route normale.";
+"%@ is a VPN or network security app, so it keeps its own route." = "%@ est une app de VPN ou de sécurité réseau, elle garde donc sa propre route.";
+"Apps" = "Apps";
+"The Apps list applies in Bypass mode. You are in %@." = "La liste Apps s'applique en mode Contournement. Vous êtes en %@.";
+"The apps on this list skip the VPN, through per-app routing." = "Les apps de cette liste contournent le VPN grâce au routage par app.";
+"Per-app routing is off, so the apps on this list still use the VPN. Turn it on in General to let them skip it." = "Le routage par app est désactivé, les apps de cette liste utilisent donc toujours le VPN. Activez-le dans Général pour qu'elles le contournent.";
+"Until per-app routing is active, the apps on this list use the VPN." = "Tant que le routage par app n'est pas actif, les apps de cette liste utilisent le VPN.";
+"Apps list" = "Liste Apps";
+"No apps yet" = "Aucune app pour l'instant";
+"Add an app to let it skip the VPN." = "Ajoutez une app pour qu'elle contourne le VPN.";
+"Add App…" = "Ajouter une app…";
+"Per-App Routing Settings…" = "Réglages du routage par app…";
+"Open the per-app routing settings in General" = "Ouvrir les réglages du routage par app dans Général";
+"Add an App" = "Ajouter une app";
+"Search by name or bundle ID" = "Rechercher par nom ou identifiant de paquet";
+"Looking for apps…" = "Recherche des apps…";
+"No app matches." = "Aucune app ne correspond.";
+"Running" = "Ouvertes";
+"Applications" = "Applications";
+"1 app skips the VPN." = "1 app contourne le VPN.";
+"1 app" = "1 app";
+"%lld apps" = "%lld apps";

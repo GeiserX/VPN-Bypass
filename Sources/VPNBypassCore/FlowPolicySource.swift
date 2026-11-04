@@ -26,9 +26,9 @@ extension FlowPolicyCompiler.Input {
                                                enabled: $0.enabled, order: $0.order)
             },
             routes: config.routes.map { FlowPolicyCompiler.Route(id: $0.id, kind: flowRouteKind($0), enabled: $0.enabled) },
-            // Bypass mode's Apps list arrives with its config field (design step 7); until then
-            // Bypass mode compiles to no matchers.
-            bypassApps: [],
+            bypassApps: config.bypassApps.map {
+                FlowPolicyCompiler.BypassApp(id: $0.id.uuidString, pattern: $0.pattern, enabled: $0.enabled)
+            },
             paused: paused,
             killSwitchActive: killSwitchActive,
             physicalInterface: physicalInterface,

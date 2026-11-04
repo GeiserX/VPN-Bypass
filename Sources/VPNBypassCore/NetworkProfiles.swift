@@ -147,6 +147,8 @@ struct ProfileSettings: Codable, Equatable {
     var enabledServiceIds: [String]
     var rules: [Rule]
     var defaultRouteId: UUID?
+    /// Bypass mode's Apps list. Optional: a profile stored before the list existed has none.
+    var bypassApps: [BypassApp]?
 
     init(capturing config: Config) {
         routingMode = config.routingMode
@@ -155,6 +157,7 @@ struct ProfileSettings: Codable, Equatable {
         enabledServiceIds = config.services.filter(\.enabled).map(\.id)
         rules = config.rules
         defaultRouteId = config.defaultRouteId
+        bypassApps = config.bypassApps
     }
 
     /// `config` with these settings in use. The service definitions stay the config's own: an
@@ -174,6 +177,7 @@ struct ProfileSettings: Codable, Equatable {
         }
         c.rules = rules
         c.defaultRouteId = defaultRouteId
+        c.bypassApps = bypassApps ?? []
         // Custom mode reads its rules only from schema 2 on (`usesCustomEngine`).
         if routingMode == .custom, c.schemaVersion < 2 { c.schemaVersion = 2 }
         return c

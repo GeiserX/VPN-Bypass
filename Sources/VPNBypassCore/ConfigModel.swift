@@ -167,6 +167,9 @@ struct Config: Codable {
     /// Settings > General > Per-app routing (docs/design/NETWORK-EXTENSION-DESIGN.md, 5). Off
     /// until the user turns it on; an older build ignores the key.
     var flowEngine: FlowEngineSetting = FlowEngineSetting()
+    /// Bypass mode's Apps list: apps that skip the VPN while per-app routing is on. An older
+    /// build ignores the key.
+    var bypassApps: [BypassApp] = []
 
     // Custom decoder for backward compatibility with configs missing new fields
     init(from decoder: Decoder) throws {
@@ -203,6 +206,7 @@ struct Config: Codable {
         activeProfileId = try container.decodeIfPresent(UUID.self, forKey: .activeProfileId)
         otherNetworksSettings = try container.decodeIfPresent(ProfileSettings.self, forKey: .otherNetworksSettings)
         flowEngine = try container.decodeIfPresent(FlowEngineSetting.self, forKey: .flowEngine) ?? FlowEngineSetting()
+        bypassApps = try container.decodeIfPresent([BypassApp].self, forKey: .bypassApps) ?? []
 
         // One-time migration: derive the routes/rules representation from the
         // legacy bypass list + single proxy so the new model is populated for
@@ -211,7 +215,7 @@ struct Config: Codable {
         if routes.isEmpty {
             let derived = Config.derive(
                 domains: domains, services: services,
-                mode: routingMode, inverseDomains: inverseDomains, proxy: proxyConfig
+                mode: routingMode, inverseDomains: inverseDomains, proxy: proxyConfig, apps: bypassApps
             )
             routes = derived.routes
             rules = derived.rules
@@ -278,12 +282,15 @@ struct Config: Codable {
     ///  - bypass  → default = Corporate VPN; each enabled domain/service → a rule to Direct
     ///  - vpnOnly → default = Direct; each enabled inverse domain → a rule to Corporate VPN
     ///  - an enabled legacy proxy → one SOCKS5 proxy route, with its services routed to it
+    ///  - bypass  → each enabled entry of the Apps list → a process rule to Direct, after the
+    ///    domains and services (a process rule decides by app, so its place does not matter)
     static func derive(
         domains: [DomainEntry],
         services: [ServiceEntry],
         mode: RoutingMode,
         inverseDomains: [DomainEntry],
-        proxy: ProxyConfig
+        proxy: ProxyConfig,
+        apps: [BypassApp] = []
     ) -> (routes: [Route], rules: [Rule], defaultRouteId: UUID?) {
         let vpnRoute = Route(name: "Corporate VPN", egress: .vpnDefault)
         let directRoute = Route(name: "Direct", egress: .direct)
@@ -323,6 +330,10 @@ struct Config: Codable {
                 rules.append(Rule(matchType: .service, pattern: s.id, routeId: target, order: order))
                 order += 1
             }
+            for app in apps where app.enabled {
+                rules.append(Rule(matchType: .process, pattern: app.pattern, routeId: directRoute.id, order: order))
+                order += 1
+            }
         case .vpnOnly:
             defaultRouteId = directRoute.id
             for d in inverseDomains where d.enabled {
@@ -352,7 +363,7 @@ struct Config: Codable {
     /// it (through `RoutingModeCopy.lists(from:)`), so what they say matches what the switch does.
     var customModeBuildsRulesFromLists: Bool {
         rules.isEmpty && !Config.derive(domains: domains, services: services, mode: routingMode,
-                                        inverseDomains: inverseDomains, proxy: proxyConfig).rules.isEmpty
+                                        inverseDomains: inverseDomains, proxy: proxyConfig, apps: bypassApps).rules.isEmpty
     }
 
     /// The test `preparedForCustomMode()` runs before it derives anything: no rules yet, and
@@ -361,7 +372,8 @@ struct Config: Codable {
     private var hasRoutableListsAndNoRules: Bool {
         rules.isEmpty && (!domains.isEmpty
             || services.contains { $0.enabled }
-            || inverseDomains.contains { $0.enabled })
+            || inverseDomains.contains { $0.enabled }
+            || bypassApps.contains { $0.enabled })
     }
 
     /// Prepare THIS config for Custom mode, purely (no actor, no I/O) so the GUI
@@ -394,7 +406,7 @@ struct Config: Codable {
 
         let derived = Config.derive(
             domains: c.domains, services: c.services,
-            mode: c.routingMode, inverseDomains: c.inverseDomains, proxy: c.proxyConfig
+            mode: c.routingMode, inverseDomains: c.inverseDomains, proxy: c.proxyConfig, apps: c.bypassApps
         )
 
         if !hasSystemRoutes {

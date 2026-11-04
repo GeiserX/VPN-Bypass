@@ -141,6 +141,11 @@ struct OutsideChange: Equatable {
             // `after` no longer does.
             let left = Set((after.domains + after.inverseDomains).map(\.id))
             return (before.domains + before.inverseDomains).first { !left.contains($0.id) }.map { .removedDomain($0.domain) }
+        case "app.add":
+            return result?.apps?.first.map { .addedDomain($0.name ?? $0.pattern) }
+        case "app.rm":
+            let left = Set(after.bypassApps.map(\.id))
+            return before.bypassApps.first { !left.contains($0.id) }.map { .removedDomain($0.displayName) }
         case "service.enable":
             return result?.services?.first.map { .turnedOn($0.name) }
         case "service.disable":

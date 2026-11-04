@@ -432,6 +432,7 @@ struct MenuContent: View {
         FirstRunSetup.isFresh(mode: routeManager.config.routingMode,
                               domains: routeManager.config.domains,
                               services: routeManager.config.services,
+                              apps: routeManager.config.bypassApps,
                               installedRoutes: routeManager.routedAddressCount)
     }
 
@@ -1817,6 +1818,10 @@ struct DropdownStatus: Equatable {
         var pause: PauseState? = nil
         /// config.json could not be read: a Resume would have nothing to put back.
         var configUnreadable: Bool = false
+        /// Bypass mode's Apps list: the entries that are on, and whether per-app routing serves
+        /// them now. Only served apps count as skipping the VPN.
+        var enabledApps: Int = 0
+        var appsServed: Bool = false
     }
 
     /// The chip right of the wordmark: the only coloured signal in the block.
@@ -2138,6 +2143,14 @@ struct DropdownStatus: Equatable {
             let s = input.enabledServices, d = input.enabledDomains
             let services = s == 1 ? String(localized: "1 service") : String(localized: "\(s) services")
             let domains = d == 1 ? String(localized: "1 domain") : String(localized: "\(d) domains")
+            if input.appsServed, input.enabledApps > 0 {
+                let a = input.enabledApps
+                if s == 0, d == 0, a == 1 { return String(localized: "1 app skips the VPN.") }
+                let apps = a == 1 ? String(localized: "1 app") : String(localized: "\(a) apps")
+                let parts = (s > 0 ? [services] : []) + (d > 0 ? [domains] : []) + [apps]
+                let list = ListFormatter.localizedString(byJoining: parts)
+                return String(localized: "\(list) skip the VPN.")
+            }
             switch (s, d) {
             case (0, 0): return String(localized: "Nothing skips the VPN yet.")
             case (_, 0): return s == 1 ? String(localized: "1 service skips the VPN.") : String(localized: "\(services) skip the VPN.")
@@ -2262,9 +2275,10 @@ enum FirstRunSetup {
     /// service off, and no route installed. VPN Only always installs its catch-all routes and
     /// Custom has its own pages, so the question is asked in Bypass only.
     static func isFresh(mode: RouteManager.RoutingMode, domains: [DomainEntry],
-                        services: [ServiceEntry], installedRoutes: Int) -> Bool {
+                        services: [ServiceEntry], apps: [BypassApp] = [], installedRoutes: Int) -> Bool {
         mode == .bypass
             && domains.isEmpty
+            && apps.isEmpty
             && !services.contains(where: { $0.enabled })
             && installedRoutes == 0
     }

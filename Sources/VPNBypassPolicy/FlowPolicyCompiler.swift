@@ -10,7 +10,8 @@
 //   A Direct route becomes `direct(interface)`; the primary VPN `vpnDefault`; anything else
 //   `unsupported`. Non-Direct rules stay in the list so first match holds: an earlier VPN rule for
 //   an app keeps a later Direct rule from claiming it.
-// - Bypass: the Apps list, each entry Direct.
+// - Bypass: the Apps list, each entry that is on Direct, under the entry's own id (so its
+//   counters stay on its row when another entry is removed or turned off).
 // - VPN Only, Pause and a VPN kill switch: no matchers. Per-app routing never runs there.
 
 import Foundation
@@ -63,13 +64,28 @@ public enum FlowPolicyCompiler {
         }
     }
 
+    /// An entry of Bypass mode's Apps list.
+    public struct BypassApp: Equatable, Sendable {
+        /// The entry's id, which the policy carries as the matcher's rule id.
+        public var id: String
+        /// A bundle id or an executable name.
+        public var pattern: String
+        public var enabled: Bool
+
+        public init(id: String, pattern: String, enabled: Bool = true) {
+            self.id = id
+            self.pattern = pattern
+            self.enabled = enabled
+        }
+    }
+
     public struct Input: Equatable, Sendable {
         public var mode: Mode
         /// Custom mode's process rules. Other rule kinds stay with the kernel engine.
         public var processRules: [ProcessRule]
         public var routes: [Route]
-        /// Bypass mode's Apps list: bundle ids or executable names, each sent Direct.
-        public var bypassApps: [String]
+        /// Bypass mode's Apps list: bundle ids or executable names, each sent Direct while on.
+        public var bypassApps: [BypassApp]
         public var paused: Bool
         /// A VPN with `includeAllNetworks` or `enforceRoutes` is up: interface scoping cannot
         /// escape it, so per-app routing stands down (3.7).
@@ -80,7 +96,7 @@ public enum FlowPolicyCompiler {
         /// Team ids of the processes that own the live tunnels.
         public var tunnelOwnerTeams: [String]
 
-        public init(mode: Mode, processRules: [ProcessRule] = [], routes: [Route] = [], bypassApps: [String] = [],
+        public init(mode: Mode, processRules: [ProcessRule] = [], routes: [Route] = [], bypassApps: [BypassApp] = [],
                     paused: Bool = false, killSwitchActive: Bool = false, physicalInterface: String? = nil,
                     tunnelOwnerTeams: [String] = []) {
             self.mode = mode
@@ -93,9 +109,6 @@ public enum FlowPolicyCompiler {
             self.tunnelOwnerTeams = tunnelOwnerTeams
         }
     }
-
-    /// The id a Bypass-mode Apps entry carries in the policy and its counters.
-    public static func bypassAppRuleID(_ index: Int) -> String { "bypass-app-\(index)" }
 
     public static func compile(_ input: Input, generation: Int,
                                leaseSeconds: Int = FlowPolicy.defaultLeaseSeconds) -> FlowPolicy {
@@ -110,8 +123,12 @@ public enum FlowPolicyCompiler {
         case .vpnOnly:
             return []
         case .bypass:
-            return unique(input.bypassApps).enumerated().map { i, pattern in
-                AppMatcher(ruleID: bypassAppRuleID(i), kind: AppMatcher.kind(of: pattern), pattern: pattern, egress: direct)
+            // An entry that is off matches nothing; of two entries naming one app, the first wins.
+            var seen = Set<String>()
+            return input.bypassApps.compactMap { app -> AppMatcher? in
+                let pattern = trimmed(app.pattern)
+                guard app.enabled, !pattern.isEmpty, seen.insert(pattern).inserted else { return nil }
+                return AppMatcher(ruleID: app.id, kind: AppMatcher.kind(of: pattern), pattern: pattern, egress: direct)
             }
         case .custom:
             let routes = Dictionary(input.routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

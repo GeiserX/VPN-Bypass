@@ -174,7 +174,7 @@ public enum FlowEngineState: Equatable, Sendable {
 
 /// Per rule, what the extension did with its app's connections since it started.
 public struct FlowEngineRuleCounters: Codable, Equatable, Sendable {
-    /// A rule's UUID, or `bypass-app-<n>`. Never an app name.
+    /// A rule's UUID, or an Apps list entry's. Never an app name.
     public var ruleId: String
     /// Connections carried around the VPN.
     public var claimed: Int

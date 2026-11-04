@@ -32,7 +32,7 @@ struct SettingsView: View {
     // MARK: - Page model
 
     enum SettingsTab: String, Hashable, CaseIterable {
-        case status, domains, services, rules, routes, lookups, general, logs, about
+        case status, domains, services, apps, rules, routes, lookups, general, logs, about
 
         /// The page's name, also the window's title.
         var name: String { name(in: .main) }
@@ -42,6 +42,7 @@ struct SettingsView: View {
             case .status:   return String(localized: "Status", bundle: bundle)
             case .domains:  return String(localized: "Domains", bundle: bundle)
             case .services: return String(localized: "Services", bundle: bundle)
+            case .apps:     return String(localized: "Apps", bundle: bundle)
             case .rules:    return String(localized: "Rules", bundle: bundle)
             case .routes:   return String(localized: "Routes", bundle: bundle)
             case .lookups:  return String(localized: "Lookups", bundle: bundle)
@@ -59,6 +60,7 @@ struct SettingsView: View {
             case .status:   return String(localized: "What is routed now, and what needs a look.", bundle: bundle)
             case .domains:  return DomainsPage.purpose(isInverse: false, in: bundle)
             case .services: return ServicesPage.purpose(in: bundle)
+            case .apps:     return AppsPage.purpose(in: bundle)
             case .rules:    return RulesTab.purpose(ruleCount: 0, in: bundle)
             case .routes:   return String(localized: "The ways out a rule can pick.", bundle: bundle)
             case .lookups:  return String(localized: "The names this Mac looks up.", bundle: bundle)
@@ -73,6 +75,7 @@ struct SettingsView: View {
             case .status:   return "waveform.path.ecg.rectangle"
             case .domains:  return "globe"
             case .services: return "square.grid.2x2"
+            case .apps:     return "app.badge"
             case .rules:    return "list.bullet"
             case .routes:   return "arrow.triangle.branch"
             case .lookups:  return "magnifyingglass"
@@ -223,6 +226,7 @@ struct SettingsView: View {
             })
         case .domains:  DomainsTab()
         case .services: ServicesTab()
+        case .apps:     AppsTab()
         case .rules:    RulesTab()
         case .routes:   RoutesTab()
         case .lookups:  LookupsTab()

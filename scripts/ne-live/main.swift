@@ -245,7 +245,7 @@ case "push", "pause":
     let apps = cmd == "pause" ? [] : (opts.value("--apps") ?? "").split(separator: ",").map(String.init)
     let iface = opts.value("--iface")
     let matchers = apps.enumerated().map { i, a in
-        AppMatcher(ruleID: FlowPolicyCompiler.bypassAppRuleID(i), kind: AppMatcher.kind(of: a), pattern: a,
+        AppMatcher(ruleID: "bypass-app-\(i)", kind: AppMatcher.kind(of: a), pattern: a,
                    egress: .direct(interface: iface))
     }
     let lease = Int(opts.value("--lease") ?? "") ?? FlowPolicy.defaultLeaseSeconds

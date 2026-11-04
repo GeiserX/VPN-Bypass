@@ -1578,6 +1578,99 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(try renderSettings(page: .rules, to: "rules-process-rule-off.png"), Self.settingsSize)
     }
 
+    // MARK: - Bypass mode's Apps list, drawn for the pull request
+
+    private var savedAppIcon: ((BypassApp) -> NSImage?)?
+
+    /// Three apps on the list, with icons of apps every Mac has standing in for example apps.
+    private func seedApps() -> [BypassApp] {
+        savedAppIcon = BypassApps.icon
+        seedBypass()
+        let apps = [BypassApp(pattern: "com.example.Browser", name: "Example Browser"),
+                    BypassApp(pattern: "com.example.Mail", name: "Example Mail"),
+                    BypassApp(pattern: "example-sync", enabled: false)]
+        rm.config.bypassApps = apps
+        let icons = ["com.example.Browser": "/Applications/Safari.app", "com.example.Mail": "/System/Applications/Mail.app"]
+        BypassApps.icon = { app in icons[app.pattern].map { NSWorkspace.shared.icon(forFile: $0) } }
+        return apps
+    }
+
+    private func resetApps() {
+        if let savedAppIcon { BypassApps.icon = savedAppIcon }
+        AppsTab.hoveredForScreenshots = nil
+        FlowEngineManager.shared.showForScreenshots(nil)
+    }
+
+    /// The Apps page with per-app routing off: the list stays, and the page says the apps use the
+    /// VPN until it is turned on.
+    func testAppsPageOff() throws {
+        _ = seedApps()
+        FlowEngineManager.shared.showForScreenshots(.off)
+        defer { resetApps() }
+        XCTAssertEqual(try renderSettings(page: .apps, to: "apps-off.png"), Self.settingsSize)
+    }
+
+    /// The Apps page while per-app routing serves it, with each app's counts.
+    func testAppsPageActive() throws {
+        let apps = seedApps()
+        rm.config.flowEngine.enabled = true
+        AppsTab.hoveredForScreenshots = "com.example.Mail"
+        FlowEngineManager.shared.showForScreenshots(.active, reply: FlowEngineReplySummary(
+            policyGeneration: 4, claimedByRule: [apps[0].id.uuidString: 128, apps[1].id.uuidString: 17],
+            boundByRule: [apps[0].id.uuidString: 2]))
+        defer { resetApps() }
+        XCTAssertEqual(try renderSettings(page: .apps, to: "apps-active.png"), Self.settingsSize)
+    }
+
+    /// The Apps page in another mode: read-only, saying where it applies.
+    func testAppsPageInCustomMode() throws {
+        _ = seedApps()
+        rm.config.routingMode = .custom
+        rm.config.schemaVersion = 2
+        FlowEngineManager.shared.showForScreenshots(.active)
+        defer { resetApps() }
+        XCTAssertEqual(try renderSettings(page: .apps, to: "apps-custom-mode.png"), Self.settingsSize)
+    }
+
+    /// The chooser, with the running apps first.
+    func testAppsChooser() throws {
+        let url = URL(fileURLWithPath: "/Applications/Example.app")
+        AppChooserSheet.candidatesForScreenshots = [
+            .init(url: url, name: "Example Chat", bundleID: "com.example.Chat", isRunning: true),
+            .init(url: url, name: "Example Notes", bundleID: "com.example.Notes", isRunning: true),
+            .init(url: url, name: "Example Calendar", bundleID: "com.example.Calendar", isRunning: false),
+            .init(url: url, name: "Example Music", bundleID: "com.example.Music", isRunning: false),
+            .init(url: url, name: "Example Photos", bundleID: "com.example.Photos", isRunning: false),
+        ]
+        AppChooserSheet.pickedForScreenshots = "com.example.Chat"
+        let icons = ["com.example.Chat": "Messages", "com.example.Notes": "Notes", "com.example.Calendar": "Calendar",
+                     "com.example.Music": "Music", "com.example.Photos": "Photos"]
+        AppChooserSheet.icon = { NSWorkspace.shared.icon(forFile: "/System/Applications/\(icons[$0.bundleID] ?? "Notes").app") }
+        defer {
+            AppChooserSheet.candidatesForScreenshots = nil
+            AppChooserSheet.pickedForScreenshots = nil
+            AppChooserSheet.icon = { NSWorkspace.shared.icon(forFile: $0.url.path) }
+        }
+        try renderSheet(AppChooserSheet(listed: [], onCancel: {}, onPick: { _ in }).environmentObject(rm), to: "apps-chooser.png")
+    }
+
+    /// The dropdown with apps on the list while per-app routing serves them: they count.
+    func testDropdownCountsServedApps() throws {
+        _ = seedApps()
+        rm.config.flowEngine.enabled = true
+        FlowEngineManager.shared.showForScreenshots(.active)
+        defer { resetApps() }
+        _ = try renderDropdown(to: "dropdown-apps-served.png")
+    }
+
+    /// Status in Bypass mode with apps on the list: the From row counts them.
+    func testStatusCountsApps() throws {
+        _ = seedApps()
+        FlowEngineManager.shared.showForScreenshots(.off)
+        defer { resetApps() }
+        _ = try renderSettings(page: .status, to: "status-apps.png")
+    }
+
     // MARK: - Process rules say they need per-app routing, drawn for the pull request
 
     /// The Rules page with a process rule among the destination rules. Before this change its

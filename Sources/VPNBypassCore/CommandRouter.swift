@@ -103,6 +103,8 @@ public struct ControlResult: Codable, Equatable, Sendable {
     public var why: SiteRouteAnswer? = nil
     /// `engine.status`, `engine.on`, `engine.off`: per-app routing.
     public var engine: FlowEngineStatus? = nil
+    /// `app.list`, `app.add`: Bypass mode's Apps list.
+    public var apps: [ControlApp]? = nil
 }
 
 /// Live enforcement facts for `status` — the answer to "is it actually working?", which the
@@ -275,7 +277,7 @@ enum CommandRouter {
     static func isMutating(_ cmd: String) -> Bool {
         switch cmd {
         case "status", "route.list", "rule.list",
-             "domain.list", "service.list", "routes.active", "logs", "why", "engine.status": return false
+             "domain.list", "service.list", "routes.active", "logs", "why", "engine.status", "app.list": return false
         default: return true
         }
     }
