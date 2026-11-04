@@ -206,6 +206,9 @@ func push(_ policy: FlowPolicy, hold: Bool, every: Double) {
         out("push generation \(policy.generation) matchers \(policy.matchers.count): echo \(echoed ? "confirmed" : "MISSING") in \(Int(seconds * 1000)) ms")
         out(driver.describe(reply))
         guard hold else { finish(echoed ? 0 : 1) }
+        if every >= Double(policy.leaseSeconds) {
+            out("warning: lease \(policy.leaseSeconds) s does not outlast the \(Int(every)) s resend; the policy lapses between heartbeats")
+        }
         out("holding: re-sending every \(Int(every)) s until killed")
         onSignal { out("stopped holding"); finish(0) }
         var misses = 0, sent = 0

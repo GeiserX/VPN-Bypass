@@ -145,7 +145,7 @@ final class ExtensionPackagingTests: XCTestCase {
     func testTheMetadataIsSetBeforeTheConnectionIsMade() throws {
         let proxy = try text("Sources/VPNBypassProxy/FlowProxy.swift")
         let metadata = try XCTUnwrap(proxy.range(of: "flow.setMetadata(params)"))
-        let relay = try XCTUnwrap(proxy.range(of: "TCPRelay(flow: tcp"))
+        let relay = try XCTUnwrap(proxy.range(of: "TCPRelay(flow: tcp, endpoint: endpoint, parameters: params,"))
         XCTAssertLessThan(metadata.lowerBound, relay.lowerBound)
         let relaySource = try text("Sources/VPNBypassProxy/TCPRelay.swift")
         XCTAssertTrue(relaySource.contains("self.connection = nw_connection_create(endpoint, parameters)"))

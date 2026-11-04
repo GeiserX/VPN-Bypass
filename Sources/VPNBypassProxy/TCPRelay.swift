@@ -122,18 +122,22 @@ final class TCPRelay {
                 guard !self.finished else { return }
                 if error != nil { self.count(.appReset, 1); self.closeAll(Self.aborted); return }
                 guard let data, !data.isEmpty else {
-                    // EOF from the app: half-close towards the server.
-                    nw_connection_send(self.connection, nil, _nw_content_context_final_send, true) { _ in }
-                    self.upDone = true
-                    self.finishIfDone()
+                    // EOF from the app: half-close towards the server, and finish only once that
+                    // final send is done, so the connection is not cancelled under it.
+                    nw_connection_send(self.connection, nil, _nw_content_context_final_send, true) { _ in
+                        self.queue.async {
+                            self.upDone = true
+                            self.finishIfDone()
+                        }
+                    }
                     return
                 }
-                self.bytesUp += data.count
                 let content = data.withUnsafeBytes { DispatchData(bytes: $0) }
                 nw_connection_send(self.connection, content as __DispatchData, _nw_content_context_default_message,
                                    false) { sendError in
                     self.queue.async {
                         if sendError != nil { self.count(.aborted, 1); self.closeAll(Self.aborted); return }
+                        self.bytesUp += data.count
                         self.pumpUp()
                     }
                 }
@@ -147,10 +151,12 @@ final class TCPRelay {
             guard let self, !self.finished else { return }
             if let content, (content as DispatchData).count > 0 {
                 let data = Data(content as DispatchData)
-                self.bytesDown += data.count
                 self.flow.write(data) { writeError in
                     self.queue.async {
                         if writeError != nil { self.count(.appReset, 1); self.closeAll(Self.aborted); return }
+                        self.bytesDown += data.count
+                        // A last chunk can come with an error: the app must see the abort, not a clean end.
+                        if error != nil { self.count(.aborted, 1); self.closeAll(Self.aborted); return }
                         if isComplete { self.endDown() } else { self.pumpDown() }
                     }
                 }

@@ -104,7 +104,7 @@ the extension is dead while it runs. What limits it is how often it can happen: 
 - **`brew uninstall`** with the engine active: the app is gone, the extension stays
   `activated enabled` and keeps running with its policy. The listed app was still sent around the
   VPN until the lease ran out. After that it declines every flow, but the include rule stays, so every
-  new TCP connection still passes through it until a reboot or a manual removal. This is why the
+  new TCP connection still passes through it until a manual removal (whether a reboot ends it is L11, not run). This is why the
   in-app "Remove per-app routing" (step 7) matters.
 
 ### L13 / B3.2: lease expiry

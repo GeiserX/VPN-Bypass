@@ -92,9 +92,12 @@ final class FlowProxy: NETransparentProxyProvider {
                               executablePath: { Self.executablePath(token) },
                               teamIdentifier: { [weak self] in self?.teamIdentifier(token) })
 
-        lock.lock()
+        // Decide on a copy of the state, outside the lock: the team id lookup makes synchronous
+        // Security calls, and a slow one must not hold up policy pushes or the lease watchdog.
         let now = Date()
-        var verdict = FlowDecider.decide(facts, state: state, now: now)
+        lock.lock(); let snapshot = state; lock.unlock()
+        var verdict = FlowDecider.decide(facts, state: snapshot, now: now)
+        lock.lock()
         var out: (name: String, iface: nw_interface_t)?
         var endpoint: nw_endpoint_t?
         if case .claim(let ruleID, let egressChoice) = verdict {
@@ -205,7 +208,7 @@ final class FlowProxy: NETransparentProxyProvider {
         teamLock.unlock()
         if let hit { return hit.isEmpty ? nil : hit }
         var code: SecCode?
-        var team = ""
+        var team: String?
         if SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributeAudit: token] as CFDictionary, [], &code) == errSecSuccess,
            let code {
             var staticCode: SecStaticCode?
@@ -217,6 +220,9 @@ final class FlowProxy: NETransparentProxyProvider {
                 }
             }
         }
+        // A failed lookup is not cached, so the next flow from that process tries again; only a
+        // signature that was read (with or without a team) is.
+        guard let team else { return nil }
         teamLock.lock()
         if teamCache.count > 512 { teamCache.removeAll() }
         teamCache[token] = team

@@ -111,7 +111,8 @@ Step 5 ran these on the mini with a WireGuard full tunnel standing in for the VP
   went on; unclaimed downloads and the tunnel survived. Beside GlobalProtect it is still unseen.
 - **L9**: an in-place bundle swap and a real `brew upgrade` change nothing until the app files the
   activation request again; then the extension is replaced without a prompt, and the session ends and
-  must be started again. `brew uninstall` leaves the extension running until reboot.
+  must be started again. `brew uninstall` leaves the extension running; whether a reboot stops it is
+  untested (L11).
 - **The status reply never went missing**: 1,600 requests and every soak heartbeat, 0 to 3 ms.
 
 Still open:
@@ -324,8 +325,9 @@ with an unscoped default only. A connection required to use it then waits with n
 extension guards the listed app's connection:
 - a connection that goes to `waiting` before it was ever ready fails at once, not after the 10 s give-up;
 - after two failed connects in a row on an interface, flows for it are declined as `egressUnusable` for
-  30 s, then one claim tries again (`EgressHealth`). The listed app falls back to the VPN in well under a
-  second.
+  30 s, then one claim tries again (`EgressHealth`). The connects that failed are not handed back: the
+  app sees them fail, and its next connection (a retry, or the next address) goes through the VPN, in
+  well under a second on the mini.
 Whether the helper adds the scoped default for such VPNs is open (R12).
 
 ### 3.6 UDP
@@ -670,7 +672,7 @@ there):
 | L6 | Sleep and wake, Wi-Fi to Ethernet: new flows still claimed and leaving on the new interface | owner's Mac | open |
 | L7 | UDP: does an include rule for UDP break Chrome QUIC for flows we decline? (gates the UDP stage) | later | open |
 | L8 | `kill -9`: what happens to new and open flows, does the OS restart it, and does the watchdog do what 3.7 says? | mini | answered for the OS side: 5.4 s stall, no restart (step 5, `NE-ENGINE-LIVE-RESULTS.md`); the app's watchdog comes with `FlowEngineManager` |
-| L9 | Extension version bump by a real `brew upgrade` and by an in-place bundle swap, with the engine active: does `sysextd` stop or uninstall it, does the configuration stay enabled, is a new approval asked, are unclaimed flows untouched? `brew uninstall`: is it active until reboot? | mini | answered (step 5): a swap or `brew upgrade` changes nothing until the app files the activation request; then replaced without a prompt, session ended, configuration kept; `brew uninstall` leaves it running until reboot |
+| L9 | Extension version bump by a real `brew upgrade` and by an in-place bundle swap, with the engine active: does `sysextd` stop or uninstall it, does the configuration stay enabled, is a new approval asked, are unclaimed flows untouched? `brew uninstall`: is it active until reboot? | mini | answered (step 5): a swap or `brew upgrade` changes nothing until the app files the activation request; then replaced without a prompt, session ended, configuration kept; `brew uninstall` leaves it running (whether a reboot stops it is L11) |
 | L10 | Throughput and CPU through the extension against direct; added latency of new connections | mini | open |
 | L11 | Does the consent survive a reboot (PIA #94)? Does the OS start the provider at boot or login, and does that touch the VPN's or Tailscale's connections? | mini | open; not run in step 5, the mini is shared |
 | L12 | Soak: 10 minutes of normal use (the spike's B2), then a working day with GlobalProtect connected; drops against a day with the engine off. GlobalProtect logs local time, ours UTC | owner's Mac | the 10 minutes ran on the mini with a WireGuard tunnel (step 5): clean. The working day is open |
@@ -692,7 +694,7 @@ Before L4 is answered, every live step uses one narrow rule: a test binary, neve
 | R8 | A crash stalls every new TCP connection on the Mac for about 5 s, paused or not (the include rule stays installed) | **Hard, measured** (2.1; 5.4 s in step 5). The OS sets the 5 s, not us. Never block `handleNewFlow`; at most one automatic restart, then off (3.7). Only Turn off removes the exposure |
 | R9 | Throughput loss through user space | **Hard.** Claim only listed apps' flows; L10 measures |
 | R10 | Known Apple bugs with any transparent proxy installed: FaceTime/AirDrop, captive portals, flows lost after sleep | **Hard**, outside our code. Decline Apple daemons, pause on captive networks, document; L6 |
-| R11 | Homebrew cannot remove the extension | **Hard.** In-app remove plus a documented manual path. Seen in step 5: after `brew uninstall` it runs on and every new TCP connection still passes through it until reboot |
+| R11 | Homebrew cannot remove the extension | **Hard.** In-app remove plus a documented manual path. Seen in step 5: after `brew uninstall` it runs on and every new TCP connection still passes through it; whether a reboot ends that is untested (L11) |
 | R12 | A route-only full-tunnel VPN leaves the physical interface with no scoped default route, so claimed flows cannot connect (3.5) | **Hard.** The extension stops claiming for that interface after two failures, so the listed app falls back to the VPN. Fix: the helper adds an `-ifscope` default route for such VPNs; a decision for a later step |
 
 ## 10. The plan: one PR per step
