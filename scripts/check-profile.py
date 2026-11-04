@@ -12,7 +12,8 @@ cover, at launch, before any of our code runs (design 3.2). So the profile must 
 - a Developer ID profile (ProvisionsAllDevices), so it is valid on any Mac;
 - a superset of the signed entitlements: every value we sign with is allowed.
 
-PROFILE is the signed .provisionprofile (decoded with `security cms -D`) or an already decoded plist.
+PROFILE is the signed .provisionprofile, decoded with `security cms -D`: a plain plist is refused, since
+AMFI would not read it. --plist reads an already decoded plist instead (tests).
 Prints the profile's name and expiry only, never its content. Exit 0 fits, 1 does not, 2 usage.
 """
 import argparse
@@ -25,10 +26,10 @@ import sys
 TEAM = "624WUVM8B4"
 
 
-def load(path: str) -> dict:
-    raw = open(path, "rb").read()
-    if not (raw.startswith(b"<?xml") or raw.startswith(b"bplist")):
-        raw = subprocess.run(["security", "cms", "-D", "-i", path], capture_output=True, check=True).stdout
+def load(path: str, decoded: bool) -> dict:
+    if decoded:
+        return plistlib.load(open(path, "rb"))
+    raw = subprocess.run(["/usr/bin/security", "cms", "-D", "-i", path], capture_output=True, check=True).stdout
     return plistlib.loads(raw)
 
 
@@ -69,9 +70,10 @@ def main() -> int:
     ap.add_argument("--id", required=True)
     ap.add_argument("--entitlements", required=True)
     ap.add_argument("--cert-sha1", required=True)
+    ap.add_argument("--plist", action="store_true", help="PROFILE is an already decoded plist (tests)")
     a = ap.parse_args()
     try:
-        profile = load(a.profile)
+        profile = load(a.profile, a.plist)
     except (OSError, subprocess.CalledProcessError, plistlib.InvalidFileException) as e:
         print(f"error: {a.profile} does not decode as a provisioning profile ({type(e).__name__})", file=sys.stderr)
         return 1

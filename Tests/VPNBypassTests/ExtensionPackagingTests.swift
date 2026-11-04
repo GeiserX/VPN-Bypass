@@ -193,11 +193,12 @@ final class ExtensionPackagingTests: XCTestCase {
     }
 
     private func check(_ profile: URL, id: String = "com.geiserx.vpn-bypass",
-                       entitlements: String = "entitlements/app.entitlements", sha1: String? = nil) throws -> Run {
+                       entitlements: String = "entitlements/app.entitlements", sha1: String? = nil,
+                       decoded: Bool = true) throws -> Run {
         try run("/usr/bin/python3", ["-I", Self.root.appendingPathComponent("scripts/check-profile.py").path,
                                      profile.path, "--id", id,
                                      "--entitlements", Self.root.appendingPathComponent(entitlements).path,
-                                     "--cert-sha1", sha1 ?? certificateSHA1])
+                                     "--cert-sha1", sha1 ?? certificateSHA1] + (decoded ? ["--plist"] : []))
     }
 
     func testAProfileThatFitsPasses() throws {
@@ -236,9 +237,15 @@ final class ExtensionPackagingTests: XCTestCase {
     func testAFileThatIsNoProfileIsRefused() throws {
         let junk = try temporaryDirectory().appendingPathComponent("junk.provisionprofile")
         try Data("not a profile".utf8).write(to: junk)
-        let r = try check(junk)
+        var r = try check(junk, decoded: false)
         XCTAssertEqual(r.status, 1)
         XCTAssertTrue(r.err.contains("does not decode"), r.err)
+        // A plain plist that would fit is still no profile: AMFI reads only the signed (CMS) file,
+        // so without --plist the check refuses it.
+        r = try check(try profile(), decoded: false)
+        XCTAssertEqual(r.status, 1)
+        XCTAssertTrue(r.err.contains("does not decode"), r.err)
+        XCTAssertFalse(try text("scripts/sign-and-notarize.sh").contains("--plist"), "signing never skips the CMS check")
     }
 
     // MARK: - Signing
