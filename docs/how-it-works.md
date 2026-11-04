@@ -124,7 +124,7 @@ Both steps read the same routing table, so the check reports the route the syste
 
 ## Which app uses a route
 
-A route belongs to a destination address, not to an application. Once VPN Bypass installs a route for `203.0.113.10`, every process on the Mac that sends to `203.0.113.10` uses it, whichever process caused the lookup and whether or not it is the app you listed. A wildcard route is created by a lookup, but the lookup reaches the forwarder through the macOS resolver, so it carries no process; every other route comes from your lists, apart from VPN Only's catch-alls. The routing table has no field that could record an app either. Routes cannot tell apps apart; only [per-app routing](#per-app-routing), which is off by default, can, and it does not use routes.
+A route belongs to a destination address, not to an application. Once VPN Bypass installs a route for `203.0.113.10`, every process on the Mac that sends to `203.0.113.10` uses it, whichever process caused the lookup and whether or not it is the app you listed. A wildcard route is created by a lookup, but the lookup reaches the forwarder through the macOS resolver, so it carries no process; every other route comes from your lists, apart from VPN Only's catch-alls. The routing table has no field that could record an app either. Routes cannot tell apps apart; only [per-app routing](#per-app-routing), which is off by default, can, and it does not tell apps apart with routes (its one route, a scoped default on the physical interface, serves every connection tied to that interface).
 
 What a route does record is why it exists. `vpnb routes.active` gives each route a `source`:
 

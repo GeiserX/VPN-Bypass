@@ -200,6 +200,7 @@ final class ScopedDefaultEngineTests: XCTestCase {
     /// Every call to the helper, in order, with the number of policies sent before it.
     private var calls: [(request: ScopedDefaultRequest?, sentBefore: Int)] = []
     private var answer: ScopedDefaultOutcome? = .added
+    private var removalAnswer: ScopedDefaultOutcome? = .removed
     private let directID = UUID()
 
     override func setUp() async throws {
@@ -208,6 +209,7 @@ final class ScopedDefaultEngineTests: XCTestCase {
         vpnUp = true
         calls = []
         answer = .added
+        removalAnswer = .removed
         input = FlowPolicyCompiler.Input(
             mode: .custom,
             processRules: [.init(id: UUID(), pattern: "com.example.App", routeID: directID, order: 0)],
@@ -224,7 +226,7 @@ final class ScopedDefaultEngineTests: XCTestCase {
         e.egressRouteFacts = { [unowned self] in (self.vpnUp, "192.168.1.1") }
         e.applyEgressRoute = { [unowned self] request in
             self.calls.append((request, self.system.sent.count))
-            return request == nil ? .removed : self.answer
+            return request == nil ? self.removalAnswer : self.answer
         }
         engine = e
     }
@@ -317,5 +319,42 @@ final class ScopedDefaultEngineTests: XCTestCase {
         engine.requestPush(force: true)
         await until("pushed") { system.sent.count >= 2 }
         XCTAssertEqual(system.sent.last?.egressRoutes, [:], "an older helper (nil) adds nothing")
+    }
+
+    func testACrashedSessionRemovesItUntilTheRestartAsksAgain() async {
+        engine.setEnabled(true)
+        await until("active") { engine.state == .active }
+        let before = calls.count
+        system.connectOnStart = false
+        system.crash()
+        await until("removed while nothing claims") { calls.dropFirst(before).contains { $0.request == nil } }
+    }
+
+    func testAFailedRemovalIsSentAgain() async {
+        removalAnswer = .failed
+        engine.inputsChanged()
+        await until("one removal") { calls.count == 1 }
+        engine.inputsChanged()
+        await until("sent again, not taken as done") { calls.count == 2 }
+        removalAnswer = .removed
+        engine.inputsChanged()
+        await until("third") { calls.count == 3 }
+        engine.inputsChanged()
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(calls.count, 3, "a removal the helper confirmed is not sent again")
+    }
+
+    func testAnUnansweredCallGivesTheNextRouteANewStamp() async {
+        engine.setEnabled(true)
+        await until("active") { engine.state == .active }
+        let first = system.sent.last?.egressRoutes
+        answer = nil   // the helper added it, but the reply was lost
+        engine.requestPush(force: true)
+        await until("pushed") { system.sent.count >= 2 }
+        answer = .kept
+        engine.requestPush(force: true)
+        await until("pushed again") { system.sent.count >= 3 }
+        XCTAssertEqual(system.sent.last.map { Array($0.egressRoutes.keys) }, ["en0"])
+        XCTAssertNotEqual(system.sent.last?.egressRoutes, first, "a new stamp, so the extension forgets old failures")
     }
 }

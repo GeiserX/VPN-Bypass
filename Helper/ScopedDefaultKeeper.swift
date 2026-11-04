@@ -24,13 +24,27 @@ final class ScopedDefaultKeeper {
     private var lastRenew = DispatchTime.now()
     private var leaseTimer: DispatchSourceTimer?
     private var lastOutcome: ScopedDefaultOutcome?
+    /// A removal failed: the lease timer tries it again on its next tick.
+    private var removalPending = false
 
     /// Brings the table in line with `request` (nil: ours goes). Call on `HelperTool.routeQueue`.
     func set(_ request: ScopedDefaultRequest?, reason: String = "asked by the app") -> ScopedDefaultOutcome {
-        lastRenew = DispatchTime.now()
+        // Only a request renews the lease: a removal that fails must be tried again by the lease
+        // timer, not 150 s after its own attempt.
+        if request != nil { lastRenew = DispatchTime.now() }
         let outcome = apply(request)
-        held = request
-        if request != nil { armLease() } else { disarmLease() }
+        if request != nil {
+            held = request
+            removalPending = false
+            armLease()
+        } else if outcome == .failed {
+            removalPending = true
+            armLease()
+        } else {
+            held = nil
+            removalPending = false
+            disarmLease()
+        }
         // Interface names and the router only; never a host name.
         if outcome != lastOutcome || outcome == .refused || outcome == .failed {
             let target = request.map { "\($0.interface) via \($0.gateway)" } ?? "none"
@@ -75,7 +89,12 @@ final class ScopedDefaultKeeper {
         let timer = DispatchSource.makeTimerSource(queue: HelperTool.routeQueue)
         timer.schedule(deadline: .now() + 15, repeating: 15)
         timer.setEventHandler { [weak self] in
-            guard let self, self.held != nil else { return }
+            guard let self else { return }
+            if self.removalPending {
+                _ = self.set(nil, reason: "retrying a removal that failed")
+                return
+            }
+            guard self.held != nil else { return }
             let idle = Double(DispatchTime.now().uptimeNanoseconds - self.lastRenew.uptimeNanoseconds) / 1_000_000_000
             if idle > Self.leaseSeconds { _ = self.set(nil, reason: "the app stopped asking") }
         }

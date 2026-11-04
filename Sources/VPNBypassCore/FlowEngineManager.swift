@@ -407,7 +407,9 @@ final class FlowEngineManager: ObservableObject {
         guard attempt == a, established else { return }
         if route?.interfaceHasRoute == true, let name = input.physicalInterface {
             if route == .added || egressRouteStamp?.interface != name { egressRouteStamp = (name, policy.generation) }
-        } else if route != nil || input.physicalInterface == nil {
+        } else {
+            // No route, or no answer: the next route found gets a new stamp, so the extension
+            // forgets failures even when the helper added it on a call whose reply was lost.
             egressRouteStamp = nil
         }
         if let stamp = egressRouteStamp { policy.egressRoutes = [stamp.interface: stamp.stamp] }
@@ -499,7 +501,9 @@ final class FlowEngineManager: ObservableObject {
             // Nothing of ours to remove: the helper said so last time.
             if want == nil, case .some(.none) = self.egressRouteSent { return nil }
             let outcome = await self.applyEgressRoute(want)
-            self.egressRouteSent = outcome == nil ? nil : .some(want)
+            // An unanswered call or a failed write leaves the state unknown, so the next removal
+            // is sent again.
+            self.egressRouteSent = outcome == nil || outcome == .failed ? nil : .some(want)
             self.noteEgressRoute(outcome, want)
             return outcome
         }
@@ -558,6 +562,8 @@ final class FlowEngineManager: ObservableObject {
         heartbeatTask = nil
         stoppingOnPurpose = true
         system.stopSession()
+        // Nothing claims while it is down; a restart asks for the route again before its push.
+        Task { await syncEgressRoute(claims: false, interface: nil) }
         let t = now()
         failures = failures.filter { t.timeIntervalSince($0) < Self.failureWindow } + [t]
         if failures.count >= 2 {
