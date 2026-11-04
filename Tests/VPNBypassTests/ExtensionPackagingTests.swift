@@ -246,6 +246,17 @@ final class ExtensionPackagingTests: XCTestCase {
         XCTAssertEqual(r.status, 1)
         XCTAssertTrue(r.err.contains("does not decode"), r.err)
         XCTAssertFalse(try text("scripts/sign-and-notarize.sh").contains("--plist"), "signing never skips the CMS check")
+        // Malformed XML and a plist that is no dictionary get the same refusal, not a traceback.
+        let broken = try temporaryDirectory().appendingPathComponent("broken.plist")
+        try Data("<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>a</key></plist>".utf8).write(to: broken)
+        let array = try temporaryDirectory().appendingPathComponent("array.plist")
+        try PropertyListSerialization.data(fromPropertyList: ["x"], format: .xml, options: 0).write(to: array)
+        for url in [broken, array] {
+            r = try check(url)
+            XCTAssertEqual(r.status, 1, url.lastPathComponent)
+            XCTAssertTrue(r.err.contains("does not decode"), r.err)
+            XCTAssertFalse(r.err.contains("Traceback"), r.err)
+        }
     }
 
     // MARK: - Signing

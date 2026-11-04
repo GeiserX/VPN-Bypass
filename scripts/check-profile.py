@@ -22,15 +22,21 @@ import hashlib
 import plistlib
 import subprocess
 import sys
+from xml.parsers.expat import ExpatError
 
 TEAM = "624WUVM8B4"
 
 
 def load(path: str, decoded: bool) -> dict:
     if decoded:
-        return plistlib.load(open(path, "rb"))
-    raw = subprocess.run(["/usr/bin/security", "cms", "-D", "-i", path], capture_output=True, check=True).stdout
-    return plistlib.loads(raw)
+        with open(path, "rb") as f:
+            raw = f.read()
+    else:
+        raw = subprocess.run(["/usr/bin/security", "cms", "-D", "-i", path], capture_output=True, check=True).stdout
+    profile = plistlib.loads(raw)
+    if not isinstance(profile, dict):
+        raise ValueError("not a dictionary")
+    return profile
 
 
 def allowed(key: str, wanted, have) -> bool:
@@ -74,7 +80,7 @@ def main() -> int:
     a = ap.parse_args()
     try:
         profile = load(a.profile, a.plist)
-    except (OSError, subprocess.CalledProcessError, plistlib.InvalidFileException) as e:
+    except (OSError, subprocess.CalledProcessError, ValueError, ExpatError) as e:
         print(f"error: {a.profile} does not decode as a provisioning profile ({type(e).__name__})", file=sys.stderr)
         return 1
     entitlements = plistlib.load(open(a.entitlements, "rb"))
