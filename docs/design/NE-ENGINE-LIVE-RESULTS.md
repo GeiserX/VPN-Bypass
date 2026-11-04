@@ -150,3 +150,38 @@ L11 needs a quiet window on the mini, or a spare Mac.
 Configuration removed, extension deactivated (`terminated waiting to uninstall on reboot`), test app
 and test cask tap removed, tunnel down and its peer deleted, signing material and profiles deleted
 from the mini, keychain search list restored.
+
+## Step 6: the app's own switch, live
+
+Run on the same mini on 2026-11-04, with `scripts/ne-live/make-test-app.sh --engine`: the bundle's
+executable is `scripts/ne-live/engine-main.swift`, which runs the app's own `FlowEngineManager` and
+`LiveFlowEngineSystem` unchanged, with a Custom policy for one listed app and `en1` as the interface.
+The whole app could not run there: another VPN Bypass and its helper are installed on that Mac.
+
+- **The stand-in VPN:** a WireGuard tunnel to a peer that does not exist, with `AllowedIPs` set to
+  the one public address of an IP-echo service. Anything sent to that address through the tunnel is
+  lost, so a request that answers went around it.
+- **The listed app:** a copy of `curl` named `ne6-fetch`. Plain `curl` is the unlisted app.
+
+| Step | State the manager showed | `ne6-fetch` | `curl` |
+|---|---|---|---|
+| Switch on, no extension yet | `awaitingExtensionApproval`, then `awaitingConfigApproval` after the first approval, then `active` after Allow | | |
+| Active | `active` | 200 in 0.16 s | timed out (8 s) |
+| `ne6-fetch --interface en1` | `active`, and the next reply counted 1 bound flow for the rule | 200 | |
+| Pause | `paused (pause)`, policy with 0 app rules | timed out | |
+| Resume | `active` | 200 | |
+| `kill -9` the extension | `failed (stoppedRestarting)`, then `active` 1 s later | 200 | |
+| `kill -9` again within 10 minutes | `failed (stoppedTwice)`, configuration disabled | timed out | timed out |
+| Switch on again, then off | `active` without a prompt (the configuration existed), then `off` | 200, then timed out | timed out |
+
+With the switch off, the address still went to the tunnel by the kernel route, as before.
+
+Found and fixed on the way: `LiveFlowEngineSystem` watched the session status with
+`queue: .main`. NetworkExtension posts that notification from the main queue, and the post waits for
+the observer's operation, so when the main queue is not drained by the main thread's run loop (the
+driver uses `dispatchMain()`) the post waited on itself and the manager stayed in `starting`. The
+observer now runs on the posting thread and hops to the main actor.
+
+Cleanup: configuration removed, extension 6.0.907 deactivated (`terminated waiting to uninstall on
+reboot`), test app, tunnel and signing material deleted, keychain search list as it was, and the
+system extension authorization rule back to `authenticate-admin-nonshared`.

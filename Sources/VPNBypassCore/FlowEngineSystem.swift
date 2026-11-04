@@ -132,8 +132,12 @@ final class LiveFlowEngineSystem: FlowEngineSystem {
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
         guard let m else { return }
+        // Delivered on the posting thread, then hopped to the main actor. With `queue: .main` the
+        // post waits for an operation on the main queue, and NetworkExtension posts from the main
+        // queue: when that queue is not drained by the main thread's run loop (dispatchMain, the
+        // live-test driver), the post waited on itself forever.
         observer = NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange, object: m.connection,
-                                                          queue: .main) { [weak self] _ in
+                                                          queue: nil) { [weak self] _ in
             Task { @MainActor in self?.onSessionChange?() }
         }
     }
