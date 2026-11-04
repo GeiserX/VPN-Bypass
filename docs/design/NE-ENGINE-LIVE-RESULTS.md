@@ -241,3 +241,30 @@ to uninstall on reboot`, as were 6.0.909), test app, driver, tunnel, the peer an
 deleted, no scoped default of ours left, signing keychain deleted and the search list as it was, and
 the system extension authorization rule back to `authenticate-admin-nonshared`. The mini was not
 restarted.
+
+## Names that resolve to a protected address, live
+
+Run on the same mini on 2026-11-04, macOS 26.6.1, no VPN up, for the step that checks a
+connect-by-name flow's answer before it is dialled (design 3.5 step 4). Bundle: `make-test-app.sh`
+(extension 6.0.1010) with the `ne-driver`, policy Direct on `en0` for an executable named
+`ne10-byname`. Test names: `nip.io` names that answer a LAN address and a 10/8 address,
+`localtest.me` (127.0.0.1), and public names.
+
+**Which flows reach the extension by name.** Three connect-by-name clients built as `ne10-byname`
+(`NWConnection(host:port:)`, `URLSession` over plain HTTP, `CFStreamCreatePairWithSocketToHost`):
+each public name was claimed (counter `claimed` up by one, home address in the answer). Each name
+with a private or loopback answer never reached the extension (no counter moved) and went out by the
+normal route: macOS resolved the name before the flow existed, and the excluded ranges kept the
+address out. So on this macOS the name check is a second line behind the excluded ranges; it matters
+for a flow that does arrive as a host name.
+
+**The lookup and the check, as the extension runs them.** `NameLookup` and `NameAnswer` compiled
+into a command line and run scoped to `en0`: public names answered `dial` in about 90 ms (two
+answers for a two-address name), the LAN, 10/8, CGNAT (`100.64.0.1`) and loopback names answered
+`protected`, a name that does not exist `noAnswer`. Two tunnel networks were found on the mini's
+`utun` interfaces.
+
+Cleanup: configuration removed, extension 6.0.1010 deactivated (`terminated waiting to uninstall on
+reboot`), test app, clients and signing material deleted, keychain search list as it was, and the
+system extension authorization rule back to `authenticate-admin-nonshared`. The mini was not
+restarted.
