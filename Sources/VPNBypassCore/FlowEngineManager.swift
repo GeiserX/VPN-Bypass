@@ -129,10 +129,14 @@ final class FlowEngineManager: ObservableObject {
         beginActivity()
         state = .starting
         log(.info, "Per-app routing: turning on (activation request filed)")
-        system.requestActivation(onNeedsApproval: { [weak self] in
+        system.requestActivation(onNeedsApproval: { [weak self] replacing in
             guard let self, self.attempt == a else { return }
-            self.state = .awaitingExtensionApproval
-            self.log(.info, "Per-app routing: waiting for the extension to be allowed in System Settings")
+            // An update whose replacement waits (6.4): the old extension gets no policy from this
+            // app, so its lease runs out and listed apps use the VPN until the user allows it.
+            self.state = replacing ? .updateWaiting : .awaitingExtensionApproval
+            self.log(.info, replacing
+                ? "Per-app routing: an update of the extension waits to be allowed in System Settings"
+                : "Per-app routing: waiting for the extension to be allowed in System Settings")
         }, completion: { [weak self] outcome in
             guard let self, self.attempt == a else { return }
             switch outcome {
@@ -232,14 +236,16 @@ final class FlowEngineManager: ObservableObject {
         if force { forceNext = true }
         if pushing { pushAgain = true; return }
         pushing = true
-        let a = attempt
         Task {
+            // The attempt is read on every round: a push requested by a new attempt while an
+            // older attempt's push was still in flight runs here, instead of being dropped until
+            // the next heartbeat.
             repeat {
                 pushAgain = false
                 let f = forceNext
                 forceNext = false
-                await push(a, force: f)
-            } while pushAgain && attempt == a && established
+                await push(attempt, force: f)
+            } while pushAgain && established
             pushing = false
         }
     }

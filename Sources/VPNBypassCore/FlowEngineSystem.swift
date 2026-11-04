@@ -47,8 +47,9 @@ enum FlowEngineSaveResult: Equatable {
 protocol FlowEngineSystem: AnyObject {
     var support: FlowEngineSupport { get }
     /// Files the activation (or replacement) request. `onNeedsApproval` runs when macOS waits for
-    /// the user; `completion` runs once, possibly much later, when the request ends.
-    func requestActivation(onNeedsApproval: @escaping @MainActor () -> Void,
+    /// the user, with `true` when the request replaces an installed extension of another version
+    /// (an update); `completion` runs once, possibly much later, when the request ends.
+    func requestActivation(onNeedsApproval: @escaping @MainActor (_ replacing: Bool) -> Void,
                            completion: @escaping @MainActor (FlowEngineActivation) -> Void)
     /// Our configuration's `isEnabled`, nil when there is none.
     func loadConfiguration() async -> Bool?
@@ -100,7 +101,7 @@ final class LiveFlowEngineSystem: FlowEngineSystem {
         return (value as? Bool) == true
     }
 
-    func requestActivation(onNeedsApproval: @escaping @MainActor () -> Void,
+    func requestActivation(onNeedsApproval: @escaping @MainActor (_ replacing: Bool) -> Void,
                            completion: @escaping @MainActor (FlowEngineActivation) -> Void) {
         let delegate = ActivationDelegate(onNeedsApproval: onNeedsApproval) { [weak self] outcome in
             self?.requestDelegate = nil
@@ -230,10 +231,12 @@ private final class ResumeOnce: @unchecked Sendable {
 
 /// The activation request's delegate. macOS calls it on the main queue (the request's queue).
 private final class ActivationDelegate: NSObject, OSSystemExtensionRequestDelegate {
-    let onNeedsApproval: @MainActor () -> Void
+    let onNeedsApproval: @MainActor (_ replacing: Bool) -> Void
     let completion: @MainActor (FlowEngineActivation) -> Void
+    /// macOS asked whether to replace an installed extension of another version: an update.
+    private var replacing = false
 
-    init(onNeedsApproval: @escaping @MainActor () -> Void, completion: @escaping @MainActor (FlowEngineActivation) -> Void) {
+    init(onNeedsApproval: @escaping @MainActor (_ replacing: Bool) -> Void, completion: @escaping @MainActor (FlowEngineActivation) -> Void) {
         self.onNeedsApproval = onNeedsApproval
         self.completion = completion
     }
@@ -241,11 +244,13 @@ private final class ActivationDelegate: NSObject, OSSystemExtensionRequestDelega
     /// An installed extension of another version is replaced by this app's (an update, 6.4).
     func request(_ request: OSSystemExtensionRequest, actionForReplacingExtension existing: OSSystemExtensionProperties,
                  withExtension ext: OSSystemExtensionProperties) -> OSSystemExtensionRequest.ReplacementAction {
-        .replace
+        replacing = true
+        return .replace
     }
 
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-        Task { @MainActor in self.onNeedsApproval() }
+        let replacing = replacing
+        Task { @MainActor in self.onNeedsApproval(replacing) }
     }
 
     func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {

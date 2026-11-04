@@ -18,6 +18,8 @@ final class FakeFlowEngineSystem: FlowEngineSystem {
     /// Answered at once when set; otherwise `finishActivation` answers.
     var activationAnswer: FlowEngineActivation? = .activated
     var asksApproval = false
+    /// The request replaces an installed extension of another version.
+    var replacing = false
     private var pendingActivation: (@MainActor (FlowEngineActivation) -> Void)?
 
     /// Our configuration's isEnabled; nil when there is none.
@@ -41,10 +43,10 @@ final class FakeFlowEngineSystem: FlowEngineSystem {
 
     var calls: Int { activationRequests + saves.count + starts + stops + sent.count }
 
-    func requestActivation(onNeedsApproval: @escaping @MainActor () -> Void,
+    func requestActivation(onNeedsApproval: @escaping @MainActor (_ replacing: Bool) -> Void,
                            completion: @escaping @MainActor (FlowEngineActivation) -> Void) {
         activationRequests += 1
-        if asksApproval { onNeedsApproval() }
+        if asksApproval { onNeedsApproval(replacing) }
         if let activationAnswer { completion(activationAnswer) } else { pendingActivation = completion }
     }
 
@@ -84,7 +86,17 @@ final class FakeFlowEngineSystem: FlowEngineSystem {
         onSessionChange?()
     }
 
+    /// While true a send waits, as a slow extension reply does.
+    var holdSend = false
+    /// Sends waiting under `holdSend`.
+    var heldSends = 0
+
     func send(_ data: Data, timeout: TimeInterval) async -> Data? {
+        if holdSend {
+            heldSends += 1
+            while holdSend { try? await Task.sleep(nanoseconds: 5_000_000) }
+            heldSends -= 1
+        }
         guard case .policy(let p) = FlowPolicyMessage.decode(data) else { return nil }
         sent.append(p)
         if !replies.isEmpty { return replies.removeFirst() }
@@ -210,6 +222,36 @@ final class FlowEngineManagerTests: XCTestCase {
         XCTAssertEqual(system.sent.last?.matchers.map(\.ruleID), [ruleID.uuidString])
         XCTAssertEqual(system.sent.last?.matchers.first?.egress, .direct(interface: "en0"))
         XCTAssertEqual(engine.confirmed, system.sent.last)
+    }
+
+    /// 6.4: an update whose replacement waits for approval says so, and the old extension gets
+    /// nothing from this app until it is allowed.
+    func testAReplacementWaitingForApprovalShowsTheUpdateWaiting() async {
+        system.activationAnswer = nil
+        system.asksApproval = true
+        system.replacing = true
+        engine.setEnabled(true)
+        XCTAssertEqual(engine.state, .updateWaiting)
+        XCTAssertTrue(engine.state.waitsInSystemSettings)
+        XCTAssertEqual(engine.state.ruleReason, .perAppRoutingUpdateWaiting)
+        XCTAssertEqual(system.starts + system.sent.count, 0, "the old extension gets no policy")
+        system.finishActivation(.activated)
+        await until("active once the update is allowed") { engine.state == .active }
+    }
+
+    /// A push the new attempt asks for while the last attempt's push is still waiting for its
+    /// reply runs as soon as that one returns, not at the next heartbeat 30 s later.
+    func testAPushRequestedDuringAnOlderAttemptsPushIsNotDropped() async {
+        await turnOnToActive()
+        system.holdSend = true
+        engine.requestPush(force: true)
+        await until("the push waits for its reply") { system.heldSends == 1 }
+        engine.setEnabled(false)
+        engine.setEnabled(true)
+        await until("the new session is up") { system.starts == 2 && system.session == .connected }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        system.holdSend = false
+        await until("the new attempt's push went out and was confirmed") { engine.state == .active }
     }
 
     func testAnAlreadyEnabledConfigurationIsNotSavedAgain() async {
