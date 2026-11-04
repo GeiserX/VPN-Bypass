@@ -100,6 +100,7 @@ final class ProcessRuleTests: XCTestCase {
             case "com.example.editor": return AppIdentity(name: "Editor", signingID: "com.example", team: nil, bundleID: "com.example.Editor")
             case "com.example.app": return AppIdentity(name: "Other", signingID: "com.example.Other", team: nil, bundleID: "com.example.app")
             case "com.example.browser": return AppIdentity(name: "Browser", signingID: "com.example.Browser", team: nil, bundleID: "com.example.Browser")
+            case "com.example.kiosk": return AppIdentity(name: "Kiosk", signingID: "com.example.\u{212A}iosk", team: nil, bundleID: "com.example.kiosk")
             default: return nil
             }
         }
@@ -107,7 +108,10 @@ final class ProcessRuleTests: XCTestCase {
         XCTAssertEqual(ProcessRule.storedPattern("com.example.Editor"), "com.example.Editor", "a prefix would match siblings")
         XCTAssertEqual(ProcessRule.storedPattern("com.example.app"), "com.example.app", "another identifier")
         XCTAssertEqual(ProcessRule.storedPattern("com.example.browser"), "com.example.Browser", "case only")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.kiosk"), "com.example.kiosk", "a signing id the rules would refuse")
         XCTAssertEqual(ProcessRule.storedPattern("com.example.browser", previous: "com.example.browser"), "com.example.browser")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.browser", previous: nil), "com.example.Browser")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.browser", previous: "com.example.App"), "com.example.Browser")
     }
 
     func testRuleAddSavesAProcessRuleAndSaysItRoutesNothingYet() throws {

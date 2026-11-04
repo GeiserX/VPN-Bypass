@@ -168,7 +168,7 @@ enum ProcessRule {
     /// name) leaves the pattern as typed, and so does an executable name or an app not installed.
     static func storedPattern(_ pattern: String) -> String {
         guard kind(of: pattern) == .bundleID, invalid(pattern) == nil, let app = BypassApps.lookup(pattern),
-              app.signingID.caseInsensitiveCompare(pattern) == .orderedSame else {
+              app.signingID.caseInsensitiveCompare(pattern) == .orderedSame, invalid(app.signingID) == nil else {
             return pattern
         }
         return app.signingID
