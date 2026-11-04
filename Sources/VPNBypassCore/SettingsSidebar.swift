@@ -32,7 +32,7 @@ enum SettingsSidebar {
     /// The same groups in every mode.
     static let groups: [Group] = [
         Group(kind: .top, pages: [.status]),
-        Group(kind: .routing, pages: [.domains, .services, .rules, .routes]),
+        Group(kind: .routing, pages: [.domains, .services, .apps, .rules, .routes]),
         Group(kind: .insight, pages: [.lookups, .logs]),
         Group(kind: .app, pages: [.general, .about]),
     ]
@@ -43,7 +43,7 @@ enum SettingsSidebar {
     static func modes(of page: Page) -> [RoutingMode]? {
         switch page {
         case .domains: return [.bypass, .vpnOnly]
-        case .services: return [.bypass]
+        case .services, .apps: return [.bypass]
         case .rules, .routes: return [.custom]
         case .status, .lookups, .logs, .general, .about: return nil
         }
@@ -68,6 +68,7 @@ enum SettingsSidebar {
         switch page {
         case .domains: return String(localized: "Domains apply in Bypass and VPN Only modes. You are in \(current).", bundle: bundle)
         case .services: return String(localized: "Services apply in Bypass mode. You are in \(current).", bundle: bundle)
+        case .apps: return String(localized: "The Apps list applies in Bypass mode. You are in \(current).", bundle: bundle)
         case .rules: return String(localized: "Rules apply in Custom mode. You are in \(current).", bundle: bundle)
         case .routes: return String(localized: "Routes apply in Custom mode. You are in \(current).", bundle: bundle)
         case .status, .lookups, .logs, .general, .about: return nil
@@ -77,7 +78,7 @@ enum SettingsSidebar {
     /// The list pages and Logs, which get the search field in the title bar (⌘F).
     static func isSearchable(_ page: Page) -> Bool {
         switch page {
-        case .domains, .services, .rules, .routes, .lookups, .logs: return true
+        case .domains, .services, .apps, .rules, .routes, .lookups, .logs: return true
         case .status, .general, .about: return false
         }
     }

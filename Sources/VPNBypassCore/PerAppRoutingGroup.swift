@@ -11,7 +11,7 @@ import SwiftUI
 enum PerAppRouting {
     /// What it does and what it leaves alone, shown before anything is turned on.
     static func explanation(in bundle: Bundle = .main) -> String {
-        String(localized: "Apps you name in a rule with the Direct route skip the VPN for their TCP connections to public IPv4 addresses. Everything else keeps its normal route, which may be the VPN: IPv6, connections an app binds to a network interface itself, local and private addresses, and the VPN client's own traffic. Domain, service and IP rules keep working as before, for every app.", bundle: bundle)
+        String(localized: "Apps on the Apps list (Bypass mode), or named in a rule with the Direct route (Custom mode), skip the VPN for their TCP connections to public IPv4 addresses. Everything else keeps its normal route, which may be the VPN: IPv6, connections an app binds to a network interface itself, local and private addresses, and the VPN client's own traffic. Domain, service and IP rules keep working as before, for every app.", bundle: bundle)
     }
 
     /// The two approvals, said before the first system prompt.
@@ -24,11 +24,11 @@ enum PerAppRouting {
         String(localized: "Pause stands it down too, but new connections still pass through the extension; only turning it off takes it out of the way.", bundle: bundle)
     }
 
-    /// Process rules live in Custom mode; Bypass and VPN Only have none to serve yet. The Rules
-    /// page has no app match yet, so the note names the command that adds one.
+    /// Bypass mode serves the Apps list and Custom its rules for apps; VPN Only has nothing for it.
     static func modeNote(_ mode: RouteManager.RoutingMode, in bundle: Bundle = .main) -> String? {
-        mode == .custom ? nil
-            : String(localized: "It serves rules for apps, which work in Custom mode. Add one with the command vpnb rule.add match=process.", bundle: bundle)
+        mode == .vpnOnly
+            ? String(localized: "It does not run in VPN Only mode. In Bypass mode it serves the Apps list, in Custom mode the rules for apps.", bundle: bundle)
+            : nil
     }
 
     /// The counts since the extension started, nil before the first reply.

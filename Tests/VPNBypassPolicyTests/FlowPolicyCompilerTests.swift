@@ -17,6 +17,11 @@ final class FlowPolicyCompilerTests: XCTestCase {
 
     func compile(_ input: C.Input) -> FlowPolicy { C.compile(input, generation: 3) }
 
+    /// Apps list entries with ids "app-0", "app-1"…, all on.
+    func apps(_ patterns: [String]) -> [C.BypassApp] {
+        patterns.enumerated().map { C.BypassApp(id: "app-\($0)", pattern: $1) }
+    }
+
     func testCustomRoutesCompileToTheirEgress() {
         let rules = [
             rule("com.example.Direct", direct, order: 0),
@@ -70,35 +75,50 @@ final class FlowPolicyCompilerTests: XCTestCase {
     }
 
     func testBypassAppsCompileToTheSameMatchersAsCustomDirectRules() {
-        let apps = ["com.example.App", "ExampleTool"]
-        let bypass = compile(C.Input(mode: .bypass, bypassApps: apps, physicalInterface: "en0"))
-        let custom = compile(C.Input(mode: .custom, processRules: apps.enumerated().map { rule($1, direct, order: $0) },
+        let patterns = ["com.example.App", "ExampleTool"]
+        let bypass = compile(C.Input(mode: .bypass, bypassApps: apps(patterns), physicalInterface: "en0"))
+        let custom = compile(C.Input(mode: .custom, processRules: patterns.enumerated().map { rule($1, direct, order: $0) },
                                      routes: routes, physicalInterface: "en0"))
         XCTAssertEqual(bypass.matchers.map { [$0.pattern, "\($0.kind)", "\($0.egress)"] },
                        custom.matchers.map { [$0.pattern, "\($0.kind)", "\($0.egress)"] })
-        XCTAssertEqual(bypass.matchers.map(\.ruleID), ["bypass-app-0", "bypass-app-1"])
+        XCTAssertEqual(bypass.matchers.map(\.ruleID), ["app-0", "app-1"])
     }
 
     func testBypassAppsTrimmedAndDeduplicated() {
-        let p = compile(C.Input(mode: .bypass, bypassApps: [" com.example.App", "", "com.example.App", "Tool"]))
+        let p = compile(C.Input(mode: .bypass, bypassApps: apps([" com.example.App", "", "com.example.App", "Tool"])))
         XCTAssertEqual(p.matchers.map(\.pattern), ["com.example.App", "Tool"])
+        XCTAssertEqual(p.matchers.map(\.ruleID), ["app-0", "app-3"])
+    }
+
+    /// An entry turned off claims nothing, and the others keep their own ids: the counters the
+    /// extension keeps per rule id stay on the right row when an earlier entry goes.
+    func testBypassAppsOffMatchNothingAndKeepTheirIds() {
+        var list = apps(["com.example.First", "com.example.Second"])
+        list[0].enabled = false
+        let p = compile(C.Input(mode: .bypass, bypassApps: list))
+        XCTAssertEqual(p.matchers.map(\.pattern), ["com.example.Second"])
+        XCTAssertEqual(p.matchers.map(\.ruleID), ["app-1"])
+        // A duplicate that is off does not hide the one that is on.
+        var dup = apps(["com.example.App", "com.example.App"])
+        dup[0].enabled = false
+        XCTAssertEqual(compile(C.Input(mode: .bypass, bypassApps: dup)).matchers.map(\.ruleID), ["app-1"])
     }
 
     func testBypassIgnoresCustomRulesAndCustomIgnoresBypassApps() {
         let r = [rule("com.example.Custom", direct, order: 0)]
         XCTAssertEqual(compile(C.Input(mode: .bypass, processRules: r, routes: routes)).matchers, [])
-        XCTAssertEqual(compile(C.Input(mode: .custom, routes: routes, bypassApps: ["com.example.App"])).matchers, [])
+        XCTAssertEqual(compile(C.Input(mode: .custom, routes: routes, bypassApps: apps(["com.example.App"]))).matchers, [])
     }
 
     func testStandDownStatesCompileToNoMatchers() {
         let r = [rule("com.example.App", direct, order: 0)]
-        let apps = ["com.example.App"]
+        let list = apps(["com.example.App"])
         let table: [(C.Input, String)] = [
-            (C.Input(mode: .vpnOnly, processRules: r, routes: routes, bypassApps: apps), "VPN Only"),
+            (C.Input(mode: .vpnOnly, processRules: r, routes: routes, bypassApps: list), "VPN Only"),
             (C.Input(mode: .custom, processRules: r, routes: routes, paused: true), "Pause, Custom"),
-            (C.Input(mode: .bypass, bypassApps: apps, paused: true), "Pause, Bypass"),
+            (C.Input(mode: .bypass, bypassApps: list, paused: true), "Pause, Bypass"),
             (C.Input(mode: .custom, processRules: r, routes: routes, killSwitchActive: true), "kill switch, Custom"),
-            (C.Input(mode: .bypass, bypassApps: apps, killSwitchActive: true), "kill switch, Bypass"),
+            (C.Input(mode: .bypass, bypassApps: list, killSwitchActive: true), "kill switch, Bypass"),
         ]
         for (input, label) in table {
             let p = compile(input)

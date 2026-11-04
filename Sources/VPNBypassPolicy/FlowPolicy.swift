@@ -29,7 +29,7 @@ public struct AppMatcher: Codable, Hashable, Sendable {
         case executableName
     }
 
-    /// The rule's id, so counters land on the rule. A rule UUID, or `bypass-app-<n>` for an
+    /// The rule's id, so counters land on the rule. A rule UUID, or the UUID of an
     /// entry of Bypass mode's Apps list. Never an app name: replies carry rule ids only.
     public var ruleID: String
     public var kind: Kind

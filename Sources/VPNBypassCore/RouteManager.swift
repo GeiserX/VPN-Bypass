@@ -733,7 +733,7 @@ final class RouteManager: ObservableObject {
         guard config.routes.isEmpty else { return }
         let derived = Config.derive(
             domains: config.domains, services: config.services, mode: config.routingMode,
-            inverseDomains: config.inverseDomains, proxy: config.proxyConfig
+            inverseDomains: config.inverseDomains, proxy: config.proxyConfig, apps: config.bypassApps
         )
         config.routes = derived.routes
         config.rules = derived.rules

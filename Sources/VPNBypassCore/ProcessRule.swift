@@ -43,6 +43,8 @@ enum ProcessRule {
         case routeNotSupported
         /// The rule's route was deleted or is turned off, so the rule matches nothing.
         case routeUnavailable
+        /// An entry of Bypass mode's Apps list, while another mode is in use.
+        case notInBypassMode
     }
 
     /// The engine that serves `rule`, and why none does. A process rule with the Direct route is
@@ -103,6 +105,8 @@ enum ProcessRule {
             return String(localized: "Inactive: per-app routing sends apps Direct only in this version; pick the Direct route.", bundle: bundle)
         case .routeUnavailable:
             return String(localized: "Inactive: this rule's route was deleted or is turned off.", bundle: bundle)
+        case .notInBypassMode:
+            return String(localized: "Inactive: the Apps list works in Bypass mode.", bundle: bundle)
         }
     }
 
@@ -122,6 +126,7 @@ enum ProcessRule {
         case .perAppRoutingFailed: return "inactive: per-app routing stopped"
         case .routeNotSupported: return "inactive: per-app routing serves the Direct route only"
         case .routeUnavailable: return "inactive: its route was deleted or is turned off"
+        case .notInBypassMode: return "inactive: the Apps list works in Bypass mode"
         case nil: return "inactive" + (reason.map { ": \($0)" } ?? "")
         }
     }
