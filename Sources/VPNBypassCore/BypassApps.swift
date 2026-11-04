@@ -301,7 +301,8 @@ extension RouteManager {
 
     /// Puts a removed app back where it sat. False when it is listed again meanwhile.
     func restoreBypassApp(_ app: BypassApp, at index: Int) -> Bool {
-        guard !config.bypassApps.contains(where: { $0.id == app.id || $0.names(app.pattern) }) else { return false }
+        guard !config.bypassApps.contains(where: { $0.id == app.id || $0.names(app.pattern) || app.bundleID.map($0.names) == true })
+        else { return false }
         config.bypassApps.insert(app, at: min(max(index, 0), config.bypassApps.count))
         saveConfig()
         log(.success, "Restored app: \(app.displayName)")

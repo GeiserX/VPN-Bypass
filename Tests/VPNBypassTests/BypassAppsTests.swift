@@ -327,6 +327,13 @@ final class BypassAppsTests: XCTestCase {
         XCTAssertEqual(rm.config.bypassApps, [])
     }
 
+    func testUndoDoesNotRestoreAnAppListedAgainByItsBundleId() {
+        let removed = BypassApp(pattern: "com.example.Signed", name: "Example", bundleID: "com.example.Bundle")
+        rm.config.bypassApps = [BypassApp(pattern: "com.example.Bundle")]
+        XCTAssertFalse(rm.restoreBypassApp(removed, at: 0))
+        XCTAssertEqual(rm.config.bypassApps.count, 1)
+    }
+
     func testAProfileWithARepeatedIdGivesTheLiveListFreshOnes() {
         let id = UUID()
         var c = RouteManager.Config()
