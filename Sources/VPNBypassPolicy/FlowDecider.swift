@@ -122,7 +122,9 @@ public struct FlowPolicyState: Sendable {
     public func isLeaseLive(at now: Date) -> Bool {
         guard let p = policy, let t = receivedAt else { return false }
         let age = now.timeIntervalSince(t)
-        return age >= 0 && age <= TimeInterval(p.leaseSeconds)
+        // Capped: a lease is the promise that a quit or crashed app stops per-app routing soon,
+        // so a policy cannot ask for a longer one.
+        return age >= 0 && age <= TimeInterval(min(p.leaseSeconds, FlowPolicy.maxLeaseSeconds))
     }
 }
 
@@ -179,9 +181,10 @@ public enum FlowDecider {
 
         // 4. What the flow is and where it goes.
         guard f.transport == .tcp else { return .decline(.notTCP) }
-        switch f.remote {
+        switch ProtectedRanges.literal(f.remote) {
         case .ipv6: return .decline(.ipv6)
         case .ipv4(let a) where ProtectedRanges.contains(a): return .decline(.protectedDestination)
+        case .name(let n) where ProtectedRanges.isLocalName(n): return .decline(.protectedDestination)
         case .unknown: return .decline(.unknownDestination)
         case .ipv4, .name: break
         }
@@ -240,6 +243,23 @@ public enum ProtectedRanges {
     public static let ipv6CIDRs: [(address: String, prefix: Int)] = [
         ("fc00::", 7), ("fe80::", 10), ("ff00::", 8), ("fd7a:115c:a1e0::", 48),
     ]
+
+    /// A connect-by-name endpoint whose name is an address literal, read as that address, so the
+    /// range and IPv6 checks still apply (`.name("10.0.0.5")` is 10/8, `.name("::1")` is IPv6).
+    /// A real name stays a name: its answer is checked where it is resolved (3.5 step 4).
+    public static func literal(_ remote: FlowFacts.Remote) -> FlowFacts.Remote {
+        guard case .name(let n) = remote else { return remote }
+        if let a = parse(n) { return .ipv4(a) }
+        if n.contains(":") { return .ipv6 }
+        return remote
+    }
+
+    /// Names that never leave the Mac or the local link: `localhost` and mDNS `.local` names.
+    public static func isLocalName(_ name: String) -> Bool {
+        var n = name.lowercased()
+        if n.hasSuffix(".") { n.removeLast() }
+        return n == "localhost" || n.hasSuffix(".localhost") || n == "local" || n.hasSuffix(".local")
+    }
 
     public static func contains(_ a: UInt32) -> Bool {
         ipv4.contains { r in

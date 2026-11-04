@@ -58,6 +58,8 @@ public struct FlowPolicy: Codable, Equatable, Sendable {
     public static let currentVersion = 1
     /// Without a fresh push within this many seconds the extension declines every flow.
     public static let defaultLeaseSeconds = 120
+    /// The longest lease the extension honours, whatever the policy asks for.
+    public static let maxLeaseSeconds = 300
 
     public var version: Int
     /// Raised by the app on every push. The extension echoes the generation it holds, and the app

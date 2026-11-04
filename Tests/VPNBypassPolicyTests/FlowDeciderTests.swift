@@ -46,6 +46,13 @@ final class FlowDeciderTests: XCTestCase {
         XCTAssertEqual(decide(facts(), s, at: -1), .decline(.leaseExpired))
     }
 
+    func testLeaseIsCappedWhateverThePolicyAsks() {
+        let s = live(lease: 86_400)
+        let cap = TimeInterval(FlowPolicy.maxLeaseSeconds)
+        XCTAssertEqual(decide(facts(), s, at: cap), .claim(ruleID: ruleA, egress: en0))
+        XCTAssertEqual(decide(facts(), s, at: cap + 1), .decline(.leaseExpired))
+    }
+
     func testUnknownVersionDeclinesEverything() {
         XCTAssertEqual(decide(facts(), live(version: 99)), .decline(.unknownVersion))
         var s = live()
@@ -133,6 +140,19 @@ final class FlowDeciderTests: XCTestCase {
             (.ipv4(publicIP), .claim(ruleID: ruleA, egress: en0)),
             // A connect-by-name flow: the extension dials the name on the physical interface (3.5).
             (.name("example.com"), .claim(ruleID: ruleA, egress: en0)),
+            (.name("example.com."), .claim(ruleID: ruleA, egress: en0)),
+            // A name that is an address literal is checked as that address.
+            (.name("10.0.0.5"), .decline(.protectedDestination)),
+            (.name("100.100.100.100"), .decline(.protectedDestination)),
+            (.name("93.184.216.34"), .claim(ruleID: ruleA, egress: en0)),
+            (.name("::1"), .decline(.ipv6)),
+            (.name("2001:db8::1"), .decline(.ipv6)),
+            // Names that never leave the Mac or the local link.
+            (.name("localhost"), .decline(.protectedDestination)),
+            (.name("LOCALHOST."), .decline(.protectedDestination)),
+            (.name("printer.local"), .decline(.protectedDestination)),
+            (.name("app.localhost"), .decline(.protectedDestination)),
+            (.name("localhost.example.com"), .claim(ruleID: ruleA, egress: en0)),
         ]
         for (remote, verdict) in table {
             XCTAssertEqual(decide(facts(remote: remote), s), verdict, "\(remote)")
