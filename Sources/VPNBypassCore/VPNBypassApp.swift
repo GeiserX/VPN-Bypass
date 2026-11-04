@@ -211,6 +211,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         RouteManager.shared.log(.warning, "Signal teardown exceeded \(Int(deadline))s — exiting")
                         exit(0)
                     }
+                    // Per-app routing's scoped default route (R12) goes with the app.
+                    await FlowEngineManager.shared.removeEgressRouteForQuit()
                     await RouteManager.shared.cleanupOnQuit()
                     exit(0)
                 }
@@ -271,6 +273,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         Task { @MainActor in
+            // Per-app routing's scoped default route (R12) goes with the app.
+            await FlowEngineManager.shared.removeEgressRouteForQuit()
             await RouteManager.shared.cleanupOnQuit()
             guard !didReply else { return }
             didReply = true

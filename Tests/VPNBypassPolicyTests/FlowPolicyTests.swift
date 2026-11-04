@@ -102,4 +102,25 @@ final class FlowPolicyTests: XCTestCase {
         XCTAssertEqual(AppMatcher.kind(of: "com.example.App"), .bundleID)
         XCTAssertEqual(AppMatcher.kind(of: "Example Helper"), .executableName)
     }
+    // MARK: - Egress routes (R12)
+
+    func testAPolicyWithoutEgressRoutesStillDecodes() throws {
+        let old = Data(#"{"declinedTeams":[],"generation":7,"leaseSeconds":120,"matchers":[],"version":1}"#.utf8)
+        guard case .policy(let p) = FlowPolicyMessage.decode(old) else { return XCTFail("an older app's push must still read") }
+        XCTAssertEqual(p.generation, 7)
+        XCTAssertEqual(p.egressRoutes, [:])
+    }
+
+    func testEgressRoutesRoundTripAndOnlyNewOrRestampedOnesCount() throws {
+        let p = FlowPolicy(generation: 2, matchers: [], egressRoutes: ["en0": 2])
+        guard case .policy(let back) = FlowPolicyMessage.decode(try FlowPolicyMessage.encode(p)) else { return XCTFail() }
+        XCTAssertEqual(back, p)
+        XCTAssertEqual(p.newEgressRoutes(since: FlowPolicy(generation: 1, matchers: [])), ["en0"])
+        XCTAssertEqual(p.newEgressRoutes(since: nil), ["en0"])
+        XCTAssertEqual(p.newEgressRoutes(since: FlowPolicy(generation: 1, matchers: [], egressRoutes: ["en0": 2])), [],
+                       "the same route, renewed by a heartbeat")
+        XCTAssertEqual(p.newEgressRoutes(since: FlowPolicy(generation: 1, matchers: [], egressRoutes: ["en0": 1])), ["en0"],
+                       "put in again after it went missing (a helper restart)")
+        XCTAssertEqual(FlowPolicy(generation: 3, matchers: []).newEgressRoutes(since: p), [])
+    }
 }

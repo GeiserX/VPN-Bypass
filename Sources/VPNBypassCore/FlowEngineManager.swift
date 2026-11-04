@@ -1,7 +1,9 @@
 // FlowEngineManager.swift
 // Per-app routing's app side: turns the extension on and off, keeps its policy fresh, and
 // decides what to do when it fails. The kernel engine never reads anything from here: routes,
-// /etc/hosts and the wildcard forwarder run the same whether this is on, off or failing.
+// /etc/hosts and the wildcard forwarder run the same whether this is on, off or failing. The one
+// kernel route that follows this engine is its own: the scoped default on the physical
+// interface, held only while it claims flows past a VPN (R12, `syncEgressRoute`).
 //
 // Design: docs/design/NETWORK-EXTENSION-DESIGN.md, 3.3 (config delivery), 3.7 (failures) and 5
 // (states). In short:
@@ -66,6 +68,11 @@ final class FlowEngineManager: ObservableObject {
     var saveActivated: @MainActor (Bool) -> Void = { UserDefaults.standard.set($0, forKey: FlowEngineManager.activatedKey) }
     nonisolated static let activatedKey = "flowEngineExtensionActivated"
     var log: @MainActor (FlowEngineLogLevel, String) -> Void = { _, _ in }
+    /// What the scoped default route on the physical interface depends on besides the engine
+    /// (R12, `ScopedDefaultRoute.want`): whether the VPN is up, and the physical router.
+    var egressRouteFacts: @MainActor () -> (vpnConnected: Bool, gateway: String?) = { (false, nil) }
+    /// Asks the helper to hold that route (nil: remove ours); nil when it could not be asked.
+    var applyEgressRoute: @MainActor (ScopedDefaultRequest?) async -> ScopedDefaultOutcome? = { _ in nil }
     var now: () -> Date = Date.init
     var sleep: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
     /// The wait between heartbeats (a seam: tests send them by hand).
@@ -97,6 +104,20 @@ final class FlowEngineManager: ObservableObject {
     private var removalsInFlight = 0
     var subscriptions: Set<AnyCancellable> = []
     private(set) var started = false
+    /// What the helper was last told about the scoped default route: `.some(nil)` after a
+    /// removal it answered, nil when unknown (launch, a helper restart, an unanswered call), so
+    /// the next removal is sent again.
+    private var egressRouteSent: ScopedDefaultRequest??
+    /// The interface with a scoped default and the stamp the policy carries for it: the
+    /// generation of the push that found the route added, so a route put in again (after a
+    /// helper restart) gets a new stamp and the extension forgets the failures without it.
+    private var egressRouteStamp: (interface: String, stamp: Int)?
+    private var lastEgressOutcome: ScopedDefaultOutcome?
+    /// The route calls in order: a removal can never overtake the add before it.
+    private var egressRouteTask: Task<ScopedDefaultOutcome?, Never>?
+    /// The app is quitting: every later call removes the route, so a heartbeat that fires during
+    /// the quit cannot put it back for the helper's 150 s lease.
+    private var quitting = false
 
     init(system: FlowEngineSystem) {
         self.system = system
@@ -156,7 +177,11 @@ final class FlowEngineManager: ObservableObject {
     /// or the network.
     func inputsChanged() {
         followSwitch()
-        if wantsOn, established { requestPush(force: false) }
+        if wantsOn, established {
+            requestPush(force: false)
+        } else {
+            Task { await syncEgressRoute(claims: false, interface: nil) }
+        }
     }
 
     private func turnOn() {
@@ -221,6 +246,7 @@ final class FlowEngineManager: ObservableObject {
         system.stopSession()
         state = .off
         log(.info, "Per-app routing: turned off; every app follows the routes again")
+        Task { await syncEgressRoute(claims: false, interface: nil) }
         switch teardown {
         case .none: break
         case .disable: disableConfiguration()
@@ -377,8 +403,21 @@ final class FlowEngineManager: ObservableObject {
     private func push(_ a: Int, force: Bool) async {
         let input = await inputs()
         guard attempt == a, established else { return }
-        let policy = FlowPolicyCompiler.compile(input, generation: nextGeneration())
-        if !force, let confirmed, confirmed.matchers == policy.matchers, confirmed.declinedTeams == policy.declinedTeams {
+        var policy = FlowPolicyCompiler.compile(input, generation: nextGeneration())
+        // The scoped default route goes in before a policy that claims is pushed, so a listed
+        // app's first connect finds it (R12). Every push asks again, which renews its lease.
+        let route = await syncEgressRoute(claims: !policy.claimsNothing, interface: input.physicalInterface)
+        guard attempt == a, established else { return }
+        if route?.interfaceHasRoute == true, let name = input.physicalInterface {
+            if route == .added || egressRouteStamp?.interface != name { egressRouteStamp = (name, policy.generation) }
+        } else {
+            // No route, or no answer: the next route found gets a new stamp, so the extension
+            // forgets failures even when the helper added it on a call whose reply was lost.
+            egressRouteStamp = nil
+        }
+        if let stamp = egressRouteStamp { policy.egressRoutes = [stamp.interface: stamp.stamp] }
+        if !force, let confirmed, confirmed.matchers == policy.matchers, confirmed.declinedTeams == policy.declinedTeams,
+           confirmed.egressRoutes == policy.egressRoutes {
             state = Self.state(after: input)
             return
         }
@@ -447,6 +486,67 @@ final class FlowEngineManager: ObservableObject {
         }
     }
 
+    // MARK: - The scoped default route (R12)
+
+    /// Brings the helper's scoped default route on the physical interface in line with the
+    /// engine: wanted while it claims flows and the VPN is up (`ScopedDefaultRoute.want`),
+    /// removed otherwise. Returns the helper's answer, nil when nothing was asked or it could
+    /// not be asked.
+    @discardableResult
+    func syncEgressRoute(claims: Bool, interface: String?) async -> ScopedDefaultOutcome? {
+        let facts = egressRouteFacts()
+        let want = ScopedDefaultRoute.want(engineClaims: claims && !quitting, vpnConnected: facts.vpnConnected,
+                                           interface: interface, gateway: facts.gateway)
+        let previous = egressRouteTask
+        let task = Task { [weak self] () -> ScopedDefaultOutcome? in
+            _ = await previous?.value
+            guard let self else { return nil }
+            // Nothing of ours to remove: the helper said so last time.
+            if want == nil, case .some(.none) = self.egressRouteSent { return nil }
+            let outcome = await self.applyEgressRoute(want)
+            // An unanswered call or a failed write leaves the state unknown, so the next removal
+            // is sent again.
+            self.egressRouteSent = outcome == nil || outcome == .failed ? nil : .some(want)
+            self.noteEgressRoute(outcome, want)
+            return outcome
+        }
+        egressRouteTask = task
+        return await task.value
+    }
+
+    private func noteEgressRoute(_ outcome: ScopedDefaultOutcome?, _ want: ScopedDefaultRequest?) {
+        guard let outcome, outcome != lastEgressOutcome else { return }
+        lastEgressOutcome = outcome
+        let iface = want?.interface ?? "the physical interface"
+        switch outcome {
+        case .added: log(.info, "Per-app routing: added a scoped default route on \(iface), so listed apps can leave around the VPN")
+        case .systemRoute: log(.info, "Per-app routing: \(iface) already has a scoped default route; none added")
+        case .removed: log(.info, "Per-app routing: removed its scoped default route")
+        case .leftInPlace: log(.info, "Per-app routing: left its scoped default route in place, as macOS now keeps one for that interface")
+        case .refused: log(.warning, "Per-app routing: no scoped default route added; \(iface) does not carry the default route through its router")
+        case .failed: log(.warning, "Per-app routing: the scoped default route could not be changed")
+        case .kept, .absent: break
+        }
+    }
+
+    /// A new helper process removed the route at start: ask again, with the next push when
+    /// the engine claims, otherwise with a removal it has not answered yet.
+    func helperRestarted() async {
+        egressRouteSent = nil
+        lastEgressOutcome = nil
+        if wantsOn, established {
+            requestPush(force: true)
+        } else {
+            await syncEgressRoute(claims: false, interface: nil)
+        }
+    }
+
+    /// At quit: the route goes with the app (the helper's lease would take it two minutes later).
+    func removeEgressRouteForQuit() async {
+        quitting = true
+        await syncEgressRoute(claims: false, interface: nil)
+    }
+
     // MARK: - Failures
 
     private func sessionChanged() {
@@ -466,6 +566,8 @@ final class FlowEngineManager: ObservableObject {
         heartbeatTask = nil
         stoppingOnPurpose = true
         system.stopSession()
+        // Nothing claims while it is down; a restart asks for the route again before its push.
+        Task { await syncEgressRoute(claims: false, interface: nil) }
         let t = now()
         failures = failures.filter { t.timeIntervalSince($0) < Self.failureWindow } + [t]
         if failures.count >= 2 {

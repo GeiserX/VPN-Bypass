@@ -13,6 +13,11 @@
 //
 //   launchctl asuser $(id -u) "/Applications/VPN Bypass NE Test.app/Contents/MacOS/VPNBypass" on --apps ne6-fetch
 //
+// With `--route-driver PATH --gateway ROUTER` it also keeps per-app routing's scoped default route
+// (R12) the way the app does, through `FlowEngineManager.syncEgressRoute`, but by running the
+// helper's code from `sudo -n PATH set|clear` (scoped-route-main.swift) instead of the installed
+// helper, and with the VPN taken as up.
+//
 // It prints every state change. SIGUSR1 turns per-app routing off (the switch), SIGUSR2 pauses
 // it (Pause), SIGINT and SIGTERM quit without turning it off (the app quitting: the lease runs
 // out). Never shipped.
@@ -53,6 +58,22 @@ MainActor.assumeIsolated {
     engine.isEnabled = { enabled }
     engine.saveEnabled = { enabled = $0 }
     engine.log = { level, message in out("log \(level): \(message)") }
+    if let driver = value("--route-driver"), let gateway = value("--gateway") {
+        engine.egressRouteFacts = { (true, gateway) }
+        engine.applyEgressRoute = { request in
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+            p.arguments = ["-n", driver] + (request.map { ["set", $0.interface, $0.gateway] } ?? ["clear"])
+            let pipe = Pipe()
+            p.standardOutput = pipe
+            guard (try? p.run()) != nil else { return nil }
+            p.waitUntilExit()
+            let answer = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            out("route \(request.map { "set \($0.interface)" } ?? "clear"): \(answer)")
+            return ScopedDefaultOutcome(rawValue: answer)
+        }
+    }
     keep.append(engine.$state.removeDuplicates().sink { out("state \($0.code)\($0.reasonCode.map { " (\($0))" } ?? "")") })
     keep.append(engine.$reply.sink { r in
         guard let r else { return }

@@ -77,6 +77,13 @@ public struct EgressHealth: Sendable {
         if (failures[interface] ?? 0) >= Self.threshold { lastFailure[interface] = now }
     }
 
+    /// The interface just got a scoped default route (R12): connects that failed on it before
+    /// failed for want of that route, so they no longer count.
+    public mutating func forget(_ interface: String) {
+        failures[interface] = nil
+        lastFailure[interface] = nil
+    }
+
     public mutating func record(_ interface: String, succeeded: Bool, at now: Date) {
         if succeeded {
             failures[interface] = nil

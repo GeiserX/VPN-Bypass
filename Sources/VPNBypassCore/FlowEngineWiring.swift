@@ -18,6 +18,9 @@ extension FlowEngineManager {
             rm.config.flowEngine.enabled = on
             rm.saveConfig()
         }
+        egressRouteFacts = { (rm.isVPNConnected, rm.localGateway) }
+        applyEgressRoute = { await HelperManager.shared.setScopedDefaultRoute($0) }
+        HelperManager.shared.afterHelperRestart = { [weak self] in await self?.helperRestarted() }
         log = { level, message in
             switch level {
             case .info: rm.log(.info, message)
@@ -31,6 +34,7 @@ extension FlowEngineManager {
             rm.$vpnKillSwitch.map { _ in () }.eraseToAnyPublisher(),
             rm.$localGateway.map { _ in () }.eraseToAnyPublisher(),
             rm.$vpnInterface.map { _ in () }.eraseToAnyPublisher(),
+            rm.$isVPNConnected.map { _ in () }.eraseToAnyPublisher(),
         ]
         Publishers.MergeMany(changes)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)

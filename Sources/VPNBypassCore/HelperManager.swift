@@ -95,7 +95,8 @@ final class HelperManager: ObservableObject {
 
     /// What a new helper process does not have that the old one had, put back once it answers:
     /// the wildcard list (it starts with no resolver files and no forwarder) and the DNS Lookups
-    /// capture when the page is on. Kernel routes, VPN Only blocks and `/etc/hosts` outlive the
+    /// capture when the page is on, then per-app routing's scoped default route (a new helper
+    /// removes it at start, R12). Kernel routes, VPN Only blocks and `/etc/hosts` outlive the
     /// helper; the routes are applied again only to put back a batch the old helper dropped as
     /// it stopped. A helper that crashed and was started again by launchd is noticed by the
     /// wildcard and capture drains instead (`running` false), which do the same for their part.
@@ -105,7 +106,13 @@ final class HelperManager: ObservableObject {
         // routes must not wait for it.
         if reapplyRoutes { await reapplyRoutesAfterUpdate() }
         await DNSLookupsMonitor.shared.helperRestarted()
+        // Last: a new helper removed per-app routing's scoped default route at start (R12).
+        await afterHelperRestart?()
     }
+
+    /// Set by per-app routing (its wiring file), which asks for its scoped default route
+    /// again. A hook, so the helper's code here never reads per-app routing.
+    var afterHelperRestart: (@MainActor () async -> Void)?
 
     private func checkAndInstallHelper() async -> Bool {
 
@@ -487,6 +494,8 @@ final class HelperManager: ObservableObject {
         static let wildcards = "2.5.0"
         static let blockRoutes = "2.6.0"
         static let selfUpdate = "2.8.0"
+        /// Per-app routing's scoped default route on the physical interface (R12).
+        static let scopedDefault = "2.9.0"
         /// The oldest helper the app routes through while its update waits. Older ones lack
         /// the VPN Only blocks or the wildcards (a listed name would leave outside the tunnel)
         /// or the route batches (1.5.0), so the app waits for their update instead.
@@ -763,6 +772,24 @@ final class HelperManager: ObservableObject {
             }
             helper.drainWildcardRoutes { running, routes in
                 once.complete((running, routes.compactMap(LearnedWildcardRoute.init(dictionary:))))
+            }
+        }
+    }
+
+    // MARK: - Per-app routing's scoped default route (R12)
+
+    /// Asks the helper to hold `request`'s scoped default route (nil: remove ours). Nil when it
+    /// could not be asked: not running, too old for the call (an update waits), or no answer.
+    func setScopedDefaultRoute(_ request: ScopedDefaultRequest?) async -> ScopedDefaultOutcome? {
+        guard isHelperInstalled, runningHelperSupports(MethodSince.scopedDefault) else { return nil }
+        let connection = getOrCreateConnection()
+        return await withXPCDeadline(seconds: xpcTimeout, fallback: ScopedDefaultOutcome?.none) { once in
+            guard let helper = connection.remoteObjectProxyWithErrorHandler({ _ in once.complete(nil) }) as? HelperProtocol else {
+                once.complete(nil)
+                return
+            }
+            helper.setScopedDefaultRoute(interface: request?.interface ?? "", gateway: request?.gateway ?? "") { ok, answer in
+                once.complete(ok ? ScopedDefaultOutcome(rawValue: answer) : nil)
             }
         }
     }

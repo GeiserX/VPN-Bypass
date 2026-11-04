@@ -5988,10 +5988,15 @@ final class RouteManager: ObservableObject {
 
     /// Which table entries are OUR orphans: tagged RTF_PROTO1 (only this app sets it) yet not
     /// wanted by the current session. Pure so it can be unit-tested against synthetic tables.
+    ///
+    /// Interface-scoped entries are never orphans here. The only one of ours is per-app
+    /// routing's scoped default (R12), which the helper owns and removes by its interface index
+    /// (`ScopedDefaultKeeper`); swept by destination it would reach the helper as "0.0.0.0", an
+    /// UNSCOPED delete that names the system's own default route.
     nonisolated static func orphanedDestinations(
         table: [RouteKernel.KernelRoute], desired: Set<String>
     ) -> [String] {
-        table.filter { $0.isOurs }.map(\.destinationString).filter { !desired.contains($0) }
+        table.filter { $0.isOurs && !$0.isScoped }.map(\.destinationString).filter { !desired.contains($0) }
     }
 
     /// The MIRROR of `orphanedDestinations`: destinations this session still wants that are no

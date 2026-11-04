@@ -215,6 +215,22 @@ final class FlowLedgerTests: XCTestCase {
         XCTAssertTrue(h.isUsable("en0", at: t0.addingTimeInterval(2 + EgressHealth.cooldown)))
     }
 
+    /// R12: connects that failed before the scoped default route existed stop counting once it
+    /// does, so the next claim goes out at once instead of after the cooldown.
+    func testARouteThatAppearedForgetsTheFailuresBeforeIt() {
+        var h = EgressHealth()
+        h.record("en0", succeeded: false, at: t0)
+        h.record("en0", succeeded: false, at: t0.addingTimeInterval(1))
+        h.record("en1", succeeded: false, at: t0)
+        h.record("en1", succeeded: false, at: t0.addingTimeInterval(1))
+        XCTAssertFalse(h.isUsable("en0", at: t0.addingTimeInterval(2)))
+        h.forget("en0")
+        XCTAssertTrue(h.isUsable("en0", at: t0.addingTimeInterval(2)))
+        XCTAssertFalse(h.isUsable("en1", at: t0.addingTimeInterval(2)), "per interface")
+        h.record("en0", succeeded: false, at: t0.addingTimeInterval(3))
+        XCTAssertTrue(h.isUsable("en0", at: t0.addingTimeInterval(4)), "one new failure is below the threshold again")
+    }
+
     func testTheEchoTimeoutIsWellInsideTheLease() {
         XCTAssertGreaterThan(FlowPolicy.echoTimeoutSeconds, 0)
         XCTAssertLessThan(FlowPolicy.echoTimeoutSeconds * 4, FlowPolicy.defaultLeaseSeconds)

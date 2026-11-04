@@ -143,6 +143,11 @@ final class FlowProxy: NETransparentProxyProvider {
         let message = FlowPolicyMessage.decode(messageData)
         let now = Date()
         lock.lock()
+        if case .policy(let p) = message {
+            // A scoped default route that just appeared (R12): connects that failed on that
+            // interface failed for want of it, so they stop counting against it.
+            for name in p.newEgressRoutes(since: state.policy) { health.forget(name) }
+        }
         if message != .status { state.receive(message, at: now) }
         let reply = ledger.reply(state: state, now: now, extensionVersion: version)
         lock.unlock()
