@@ -1,5 +1,6 @@
 import CryptoKit
 import XCTest
+@testable import VPNBypassCore
 
 /// Per-app routing's system extension ships inside the app before any routing does (design,
 /// section 10 step 4). These are the packaging facts that otherwise show only when macOS
@@ -22,20 +23,44 @@ final class ExtensionPackagingTests: XCTestCase {
 
     private struct Run { var status: Int32; var out: String; var err: String }
 
+    /// Runs `executable` with stdout and stderr going to files, read once it exits. Two pipes
+    /// read one after the other hang as soon as the program fills the second one (64 KB) while
+    /// the first is still open: it blocks writing, and the read waits for an end that never comes.
     private func run(_ executable: String, _ args: [String], env: [String: String] = [:]) throws -> Run {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ne-packaging-run-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let outURL = dir.appendingPathComponent("stdout"), errURL = dir.appendingPathComponent("stderr")
+        FileManager.default.createFile(atPath: outURL.path, contents: nil)
+        FileManager.default.createFile(atPath: errURL.path, contents: nil)
+        let out = try FileHandle(forWritingTo: outURL), err = try FileHandle(forWritingTo: errURL)
+        defer { try? out.close(); try? err.close() }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
         process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"].merging(env) { $1 }
-        let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
         try process.run()
-        let o = out.fileHandleForReading.readDataToEndOfFile()
-        let e = err.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return Run(status: process.terminationStatus, out: String(decoding: o, as: UTF8.self),
-                   err: String(decoding: e, as: UTF8.self))
+        return Run(status: process.terminationStatus, out: try String(contentsOf: outURL, encoding: .utf8),
+                   err: try String(contentsOf: errURL, encoding: .utf8))
+    }
+
+    /// The suite once hung on the mini: check-profile.py filled stderr while `run` was still
+    /// reading stdout to its end. A program that writes far more than a pipe holds to stderr
+    /// first must come back, with both streams whole.
+    func testRunReturnsWhenAProgramFillsStderrBeforeStdout() throws {
+        let done = expectation(description: "run returned")
+        var result: Run?
+        DispatchQueue.global().async {
+            result = try? self.run("/bin/sh", ["-c", "head -c 300000 /dev/zero | tr '\\0' e >&2; echo out"])
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 20)
+        XCTAssertEqual(result?.status, 0)
+        XCTAssertEqual(result?.out, "out\n")
+        XCTAssertEqual(result?.err.count, 300_000)
     }
 
     private func temporaryDirectory() throws -> URL {
@@ -43,6 +68,55 @@ final class ExtensionPackagingTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
         return dir
+    }
+
+    // MARK: - The app's name in the approval alert
+
+    /// macOS's "would like to use a new network extension" alert names the app by the file name
+    /// of the executable that files the request, whatever its Info.plist says. Live on the mini
+    /// (macOS 26.6.1, 2026-11-05): the same test app said "VPNBypass" with the executable named
+    /// so, also with an Info.plist embedded in it, and "VPN Bypass" once the file was renamed.
+    /// The old name stays as a link to the new file: an older running copy watches that path for
+    /// the update (AppUpdateRelauncher stats it, following the link), and a login item written
+    /// by an older version starts it.
+    func testTheAppExecutableIsNamedAsTheApprovalAlertShowsIt() throws {
+        let app = try plist("Info.plist")
+        XCTAssertEqual(app["CFBundleExecutable"] as? String, "VPN Bypass")
+        XCTAssertEqual(app["CFBundleDisplayName"] as? String, "VPN Bypass")
+
+        let makefile = try text("Makefile")
+        XCTAssertTrue(makefile.contains("@cp $(BUILD_DIR)/VPNBypass \"$(APP_BUNDLE)/Contents/MacOS/VPN Bypass\""), "make bundle names the executable")
+        XCTAssertTrue(makefile.contains("@ln -s \"VPN Bypass\" \"$(APP_BUNDLE)/Contents/MacOS/VPNBypass\""), "make bundle keeps the old name as a link")
+        let testApp = try text("scripts/ne-live/make-test-app.sh")
+        XCTAssertTrue(testApp.contains("exe=\"$dst/Contents/MacOS/VPN Bypass\""), "the live-test app names itself as the app does")
+        XCTAssertTrue(try text("scripts/smoke-launch.sh").contains("bin=\"$app/Contents/MacOS/VPN Bypass\""))
+        XCTAssertTrue(try text(".github/workflows/ci.yml").contains("\"VPN Bypass.app/Contents/MacOS/VPN Bypass\""))
+        XCTAssertTrue(try text("Sources/VPNBypassCore/LaunchAtLoginManager.swift").contains("appPath + \"/Contents/MacOS/VPN Bypass\""))
+
+        // An older copy's relauncher stats the old path: through the link it sees the new file.
+        let macOS = try temporaryDirectory()
+        let exe = macOS.appendingPathComponent("VPN Bypass")
+        try Data("new".utf8).write(to: exe)
+        try FileManager.default.createSymbolicLink(atPath: macOS.appendingPathComponent("VPNBypass").path, withDestinationPath: "VPN Bypass")
+        XCTAssertEqual(AppUpdateRelauncher.identity(ofFileAt: macOS.appendingPathComponent("VPNBypass").path),
+                       AppUpdateRelauncher.identity(ofFileAt: exe.path))
+    }
+
+    /// The app's own Open System Settings button: the alert's does nothing (sysextd cannot
+    /// launch System Settings into the user's session; launchd error 112 in its log on the mini),
+    /// so the app opens the sheet itself, with the URL sysextd builds, which lands on the Network
+    /// Extensions list with the extension's switch (checked on the mini, macOS 26.6.1).
+    func testOpenSystemSettingsOpensTheNetworkExtensionsSheet() throws {
+        XCTAssertEqual(PerAppRouting.extensionsSettingsURL.absoluteString,
+                       "x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=com.apple.system_extension.network_extension.extension-point&extensionIdentifier=\(Self.proxyID)")
+        // The shape is the one this Mac's sysextd uses (macOS 26 and 27 carry the same string).
+        let sysextd = URL(fileURLWithPath: "/System/Library/Frameworks/SystemExtensions.framework/Versions/A/Helpers/sysextd")
+        if let binary = try? Data(contentsOf: sysextd) {
+            for needle in ["x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=%@&extensionIdentifier=%@",
+                           "com.apple.system_extension.network_extension.extension-point"] {
+                XCTAssertNotNil(binary.range(of: Data(needle.utf8)), needle)
+            }
+        }
     }
 
     // MARK: - The extension's bundle
@@ -89,8 +163,8 @@ final class ExtensionPackagingTests: XCTestCase {
         XCTAssertTrue(makefile.contains(#"@cp -R Proxy/*.lproj "$(PROXY_BUNDLE)/Contents/Resources/""#))
     }
 
-    /// The approval alert and System Settings name the app by its display name. Without one they
-    /// fell back to the executable's name and showed "VPNBypass".
+    /// System Settings names the app by its display name; without one it fell back to the
+    /// executable's name. The approval alert uses the executable's name whatever this says (above).
     func testTheAppNamesItselfVPNBypassWithASpace() throws {
         let info = try plist("Info.plist")
         XCTAssertEqual(info["CFBundleDisplayName"] as? String, "VPN Bypass")
@@ -180,9 +254,23 @@ final class ExtensionPackagingTests: XCTestCase {
                                        "no interface list fails the flow closed")
         let check = try XCTUnwrap(relay.range(of: "switch NameAnswer.check(answers, tunnelNetworks: NameAnswer.tunnelNetworks(addresses))"))
         XCTAssertLessThan(interfaces.lowerBound, check.lowerBound)
-        let dial = try XCTUnwrap(relay.range(of: "self.connect(nw_endpoint_create_host(ProtectedRanges.dotted(address), port))"))
+        let dial = try XCTUnwrap(relay.range(of: "self.nextAnswers = safe"))
         XCTAssertLessThan(lookup.lowerBound, check.lowerBound)
         XCTAssertLessThan(check.lowerBound, dial.lowerBound)
+        // Only the answers the check passed are ever dialled, the next one when a connect fails.
+        XCTAssertEqual(relay.components(separatedBy: "nw_endpoint_create_host(").count, 2, "one dial, of a checked answer")
+        XCTAssertTrue(relay.contains("self.connect(nw_endpoint_create_host(ProtectedRanges.dotted(address), answerPort))"))
+        XCTAssertTrue(relay.contains("let address = nextAnswers.removeFirst()"))
+        XCTAssertTrue(relay.contains("case nw_connection_state_failed: self.connectFailed(error)"))
+        XCTAssertTrue(relay.contains("case nw_connection_state_waiting where !self.opened: self.connectFailed(error)"))
+        let failed = try XCTUnwrap(relay.range(of: "private func connectFailed(_ error: nw_error_t?) {"))
+        XCTAssertTrue(relay[failed.lowerBound...].prefix(400).contains("connectNextAnswer()"))
+        // A connection that got ready is the flow's, while its open is still pending too: neither
+        // the next-answer timer nor a later failure moves on to another answer.
+        XCTAssertTrue(relay[failed.lowerBound...].prefix(400).contains("guard !readied, !finished, !nextAnswers.isEmpty"))
+        XCTAssertTrue(relay.contains("guard let self, self.attempt == thisAttempt, !self.readied, !self.finished else { return }"))
+        let ready = try XCTUnwrap(relay.range(of: "private func ready() {"))
+        XCTAssertTrue(relay[ready.upperBound...].prefix(40).contains("readied = true"))
         let refused = try XCTUnwrap(relay.range(of: "case .protected:"))
         let tail = relay[refused.lowerBound...].prefix(400)
         XCTAssertTrue(tail.contains("self.count(.nameProtected, 1)"), String(tail))
@@ -408,7 +496,7 @@ final class ExtensionPackagingTests: XCTestCase {
             try "#!/bin/bash\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         }
-        try script(macos.appendingPathComponent("VPNBypass"), appBody)
+        try script(macos.appendingPathComponent("VPN Bypass"), appBody)
         try script(macos.appendingPathComponent("vpnb"), "exit 0")
         let info: [String: Any] = ["CFBundleShortVersionString": "6.1.0"]
         try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)

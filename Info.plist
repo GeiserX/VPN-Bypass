@@ -13,7 +13,7 @@
 		<string>fr</string>
 	</array>
 	<key>CFBundleExecutable</key>
-	<string>VPNBypass</string>
+	<string>VPN Bypass</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>

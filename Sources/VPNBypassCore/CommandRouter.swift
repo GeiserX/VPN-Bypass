@@ -476,6 +476,14 @@ enum CommandRouter {
         if matchType == .process, let invalid = ProcessRule.invalid(pattern) {
             return errorResponse(config, code: "invalid_args", message: ProcessRule.message(invalid))
         }
+        // The Rules page's refusal: VPN Bypass itself, or an installed app signed by a VPN or
+        // network-security team, which the extension turns down whatever the rule says.
+        if matchType == .process {
+            let identity = ProcessRule.kind(of: pattern) == .bundleID ? BypassApps.lookup(pattern) : nil
+            if let refusal = BypassApps.refusal(identity?.signingID ?? pattern, identity: identity) {
+                return errorResponse(config, code: refusal.code, message: refusal.message)
+            }
+        }
         guard let routeId = uuid(request.args, "routeId"), config.routes.contains(where: { $0.id == routeId }) else {
             return errorResponse(config, code: "not_found", message: "no route with that id")
         }

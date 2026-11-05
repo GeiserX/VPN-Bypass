@@ -1181,3 +1181,5 @@
 "Choose an app from this Mac" = "Choisir une app de ce Mac";
 "Choose an App" = "Choisir une app";
 "Choose" = "Choisir";
+"%@ matches no rule. Everything else is set to %@, but the app adds routes for rules only, so it follows the system's own routing." = "%@ ne correspond à aucune règle. Tout le reste est réglé sur %@, mais l’app n’ajoute des routes que pour les règles, donc il suit le routage du système.";
+"Its 0/1 and 128/1 routes come before the default route on %@." = "Ses routes 0/1 et 128/1 passent avant la route par défaut sur %@.";

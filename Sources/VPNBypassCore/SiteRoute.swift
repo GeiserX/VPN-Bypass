@@ -172,6 +172,10 @@ enum SiteRoute {
         var inactiveAppRules: [String] = []
         /// Per-app routing's state when the rules were read, for the sentence about them.
         var appRulesEngine: FlowEngineState = .unavailable(.notInThisBuild)
+        /// defaultRoute: Everything else names a route other than the way the system already
+        /// sends it (Direct, a pinned tunnel, a proxy), which nothing installs, so the name
+        /// follows the system's own routing instead.
+        var defaultRouteNotApplied = false
     }
 
     // MARK: - Matching
@@ -259,11 +263,16 @@ enum SiteRoute {
                 }
                 return found
             }
+            // The engine installs routes for rules only (RouteCompiler), never for Everything
+            // else: a name no rule claims follows the system's own routing, the VPN for a full
+            // tunnel, whatever route Everything else names.
+            let systemWay: PathCheck.Way? = loopback ? .physical : s.vpnInterface.map { .tunnel($0) }
             if let id = s.defaultRouteId, let route = byId[id] {
-                return Found(match: .defaultRoute, routeName: route.name,
-                             expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
+                var found = Found(match: .defaultRoute, routeName: route.name, expected: systemWay)
+                found.defaultRouteNotApplied = way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces) != systemWay
+                return found
             }
-            return Found(match: .none, expected: loopback ? .physical : s.vpnInterface.map { .tunnel($0) })
+            return Found(match: .none, expected: systemWay)
         }
 
         // 2. A listed wildcard (the most specific one, as macOS picks the resolver file).
@@ -511,6 +520,8 @@ enum SiteRoute {
             let kind = found.ruleMatchType ?? ""
             let route = found.routeName ?? ""
             return String(localized: "\(host) matches rule \(position), \(kind) \(entry), which sends it to \(route).")
+        case .defaultRoute where found.defaultRouteNotApplied:
+            return String(localized: "\(host) matches no rule. Everything else is set to \(found.routeName ?? ""), but the app adds routes for rules only, so it follows the system's own routing.")
         case .defaultRoute:
             return splitTunnel
                 ? String(localized: "\(host) matches no rule, so it takes the default route, \(found.routeName ?? ""), which leaves it to the system's own routing.")
@@ -617,14 +628,20 @@ enum SiteRoute {
 // MARK: - RouteManager
 
 extension RouteManager {
-    /// The interface each pinned Custom route resolves to now, read only when an enabled rule
-    /// points at one (listing the tunnels runs ifconfig), as the apply does.
-    func pinnedInterfaces() async -> [UUID: String] {
-        guard Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) else { return [:] }
-        let referenced = Set(config.rules.filter(\.enabled).map(\.routeId))
-        let pinned = config.routes.filter {
+    /// The pinned Custom routes Site Check needs the interface of: those an enabled rule points
+    /// at, and Everything else's, so a pin it names is compared with the system's way.
+    nonisolated static func pinnedRoutesToRead(_ config: Config) -> [Route] {
+        guard usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) else { return [] }
+        let referenced = Set(config.rules.filter(\.enabled).map(\.routeId) + [config.defaultRouteId].compactMap { $0 })
+        return config.routes.filter {
             referenced.contains($0.id) && $0.egress == .vpnDefault && $0.vpnSelector?.kind == .interface
         }
+    }
+
+    /// The interface each pinned Custom route resolves to now, read only when one is in use
+    /// (`pinnedRoutesToRead`; listing the tunnels runs ifconfig).
+    func pinnedInterfaces() async -> [UUID: String] {
+        let pinned = Self.pinnedRoutesToRead(config)
         guard !pinned.isEmpty else { return [:] }
         let links = await listVPNLinks()
         var out: [UUID: String] = [:]

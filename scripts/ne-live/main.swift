@@ -8,7 +8,7 @@
 // It speaks the real wire format (VPNBypassPolicy is compiled in), so what it proves about the
 // extension holds for the app. Run it as the console user, from the installed test bundle:
 //
-//   launchctl asuser $(id -u) "/Applications/VPN Bypass NE Test.app/Contents/MacOS/VPNBypass" status
+//   launchctl asuser $(id -u) "/Applications/VPN Bypass NE Test.app/Contents/MacOS/VPN Bypass" status
 //
 // Exit codes: 0 ok, 1 failed, 2 usage, 3 needs the owner's approval.
 

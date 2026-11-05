@@ -40,8 +40,9 @@ public struct InterfaceAddress: Equatable, Sendable {
 }
 
 public enum NameAnswer: Equatable, Sendable {
-    /// Dial this address (the first answer), out the physical interface.
-    case dial(UInt32)
+    /// Dial these addresses out the physical interface, in the order they came and each once:
+    /// the first, then the next when a connect fails. All of them passed the check.
+    case dial([UInt32])
     /// An answer is protected: close the flow.
     case protected
     /// No IPv4 answer: close the flow as unreachable.
@@ -62,10 +63,12 @@ public enum NameAnswer: Equatable, Sendable {
     /// just that address: the name points into a network the VPN or the local link owns, so the
     /// app expects to reach it there, never past the VPN.
     public static func check(_ answers: [UInt32], tunnelNetworks: [IPv4Network]) -> NameAnswer {
-        guard let first = answers.first else { return .noAnswer }
+        guard !answers.isEmpty else { return .noAnswer }
         let isProtected = answers.contains { a in
             ProtectedRanges.contains(a) || tunnelNetworks.contains { $0.contains(a) }
         }
-        return isProtected ? .protected : .dial(first)
+        guard !isProtected else { return .protected }
+        var seen = Set<UInt32>()
+        return .dial(answers.filter { seen.insert($0).inserted })
     }
 }

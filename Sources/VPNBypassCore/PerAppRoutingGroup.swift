@@ -66,8 +66,12 @@ enum PerAppRouting {
         return true
     }
 
-    /// System Settings, Login Items & Extensions, where the extension switch is.
-    static let extensionsSettingsURL = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!
+    /// System Settings' Network Extensions sheet, where the extension's switch is: the URL
+    /// macOS's own approval alert asks for (sysextd's format, on macOS 26 and 27). That alert's
+    /// Open System Settings button does nothing: sysextd, a root daemon, cannot launch System
+    /// Settings into the user's session (live on the mini, 2026-11-05: "Unable to open login items
+    /// & extensions", launchd error 112), so the app opens it itself, from its own button.
+    static let extensionsSettingsURL = URL(string: "x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=com.apple.system_extension.network_extension.extension-point&extensionIdentifier=\(LiveFlowEngineSystem.extensionIdentifier)")!
 }
 
 struct PerAppRoutingGroup: View {
@@ -123,6 +127,14 @@ struct PerAppRoutingGroup: View {
             }
             .padding(.horizontal, ListRow.inset)
             .padding(.vertical, Theme.Space.s)
+        }
+        // The counts line reads the extension while it shows, not only at the heartbeat.
+        .task(id: engine.state == .active) {
+            guard engine.state == .active else { return }
+            while !Task.isCancelled {
+                await engine.refreshCounts()
+                try? await Task.sleep(nanoseconds: UInt64(FlowEngineManager.countsRefreshSeconds * 1_000_000_000))
+            }
         }
     }
 

@@ -221,11 +221,19 @@ enum ProcessRule {
     /// shorter prefix would match sibling apps too, a dotless one would read as an executable
     /// name) leaves the pattern as typed, and so does an executable name or an app not installed.
     static func storedPattern(_ pattern: String) -> String {
-        guard kind(of: pattern) == .bundleID, invalid(pattern) == nil, let app = BypassApps.lookup(pattern),
-              app.signingID.caseInsensitiveCompare(pattern) == .orderedSame, invalid(app.signingID) == nil else {
+        guard kind(of: pattern) == .bundleID, invalid(pattern) == nil, let app = BypassApps.lookup(pattern) else {
             return pattern
         }
-        return app.signingID
+        return storedPattern(pattern, signingID: app.signingID)
+    }
+
+    /// `signingID`, the identifier of the installed app `typed` names, when it differs from
+    /// `typed` in case only; `typed` otherwise. The one rule every add by id follows
+    /// (`rule.add`, the Rules page, `app.add`), so no add stores a shorter or other identifier
+    /// than the one asked for.
+    static func storedPattern(_ typed: String, signingID: String) -> String {
+        guard signingID.caseInsensitiveCompare(typed) == .orderedSame, invalid(signingID) == nil else { return typed }
+        return signingID
     }
 
     /// What the Rules page saves: a process rule saved with its pattern unchanged keeps it, so a

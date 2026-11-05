@@ -440,7 +440,29 @@ public enum RouteKernel {
     /// `slashOneTunnelOwnerIndex` resolved to a name, kept only when it names a tunnel-class
     /// interface — a /1 pinned to a physical link is not a VPN and must not steer selection.
     public static func slashOneTunnelOwner(_ table: [KernelRoute]) -> String? {
-        guard let index = slashOneTunnelOwnerIndex(table) else { return nil }
+        slashOneTunnelOwnerIndex(table).flatMap(tunnelName)
+    }
+
+    /// The interface that holds both halves, 0.0.0.0/1 and 128.0.0.0/1, as live unscoped routes,
+    /// nil when either is missing or they are on different interfaces. Only then does one tunnel carry everything
+    /// the default route would, which is what the Status page says (selection, above, settles
+    /// for one half).
+    public static func slashOnePairOwnerIndex(_ table: [KernelRoute]) -> UInt16? {
+        func owner(_ destination: UInt32) -> UInt16? {
+            // Only a route ordinary traffic takes counts: not scoped, cloned, down or a reject.
+            table.first { !$0.isOurs && isComparableEntry($0.flags) && $0.prefix == 1
+                && $0.destination == destination && $0.gatewayInterfaceIndex != nil }?.gatewayInterfaceIndex
+        }
+        guard let low = owner(0), let high = owner(0x8000_0000), low == high else { return nil }
+        return low
+    }
+
+    /// `slashOnePairOwnerIndex` resolved to a tunnel-class interface name.
+    public static func slashOnePairOwner(_ table: [KernelRoute]) -> String? {
+        slashOnePairOwnerIndex(table).flatMap(tunnelName)
+    }
+
+    private static func tunnelName(_ index: UInt16) -> String? {
         var buffer = [CChar](repeating: 0, count: Int(IFNAMSIZ) + 1)
         guard if_indextoname(UInt32(index), &buffer) != nil else { return nil }
         let name = String(cString: buffer)

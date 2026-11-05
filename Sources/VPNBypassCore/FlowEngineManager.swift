@@ -600,6 +600,23 @@ final class FlowEngineManager: ObservableObject {
 
     // MARK: - Reading
 
+    /// How often the General page reads the counters while it shows them.
+    static let countsRefreshSeconds: TimeInterval = 5
+
+    /// Reads the extension's counters now with a status request, which changes nothing in it,
+    /// so a page showing them does not wait for the next heartbeat (up to 30 s; right after a
+    /// turn-on the first reply's 0 stood that long). Kept only while it is the reply of the
+    /// policy confirmed last and nothing else changed meanwhile; the heartbeat does the rest.
+    func refreshCounts() async {
+        guard wantsOn, established, state == .active, !pushing, let generation = confirmed?.generation else { return }
+        let a = attempt
+        guard let raw = await system.send(FlowPolicyMessage.statusRequest, timeout: 2),
+              attempt == a, established, !pushing, confirmed?.generation == generation,
+              let answer = try? JSONDecoder().decode(FlowPolicyReply.self, from: raw),
+              answer.rejectedVersion == nil, answer.policyLive, answer.policyGeneration == generation else { return }
+        reply = Self.summary(answer)
+    }
+
     /// A rule's counters from the last reply, nil when it has none.
     func counters(forRule id: String) -> FlowEngineRuleCounters? {
         guard let reply, reply.claimedByRule[id] != nil || reply.boundByRule[id] != nil else { return nil }

@@ -23,7 +23,7 @@
 set -euo pipefail
 
 app="${1:?usage: $0 PATH/TO/VPN\ Bypass.app}"
-bin="$app/Contents/MacOS/VPNBypass"
+bin="$app/Contents/MacOS/VPN Bypass"
 cli="$app/Contents/MacOS/vpnb"
 for f in "$bin" "$cli"; do
   [ -x "$f" ] || { echo "::error::$f is missing or not executable"; exit 1; }

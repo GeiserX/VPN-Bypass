@@ -124,8 +124,17 @@ Still open:
 - The exact System Settings path and prompt wording of the two approvals were not written down.
   Step 4 recorded them on the mini (macOS 26.6.1); the owner's Mac on macOS 27 still has to confirm
   them (L0):
-  1. Activation request: an alert "“VPNBypass” would like to use a new network extension", buttons
-     OK and Open System Settings. It names the app by its executable, not "VPN Bypass".
+  1. Activation request: an alert "“VPN Bypass” would like to use a new network extension", buttons
+     OK and Open System Settings. sysextd names the app by the file name of the executable that
+     files the request; an Info.plist embedded in the executable (`__TEXT,__info_plist`) did not
+     change it. The executable was `VPNBypass` and the alert said "VPNBypass"; it is now
+     `Contents/MacOS/VPN Bypass`, with `VPNBypass` kept as a link to it (proved on the mini with the
+     same test app, both names, link included). Its Open
+     System Settings button does nothing on macOS 26.6.1: sysextd logs "Unable to open login items &
+     extensions" (RunningBoard, launchd error 112: a root daemon cannot launch an app into the user's
+     session). The app's own button opens the URL sysextd would have,
+     `x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=com.apple.system_extension.network_extension.extension-point&extensionIdentifier=com.geiserx.vpn-bypass.proxy`,
+     which lands on the Network Extensions sheet (same format string in sysextd on macOS 27).
   2. System Settings > General > Login Items & Extensions > Extensions, By Category > Network
      Extensions (i): a switch per app, then the admin password ("System Extensions is trying to modify
      a System Extension").
@@ -140,7 +149,8 @@ Still open:
 
 ```
 VPN Bypass.app/Contents/
-  MacOS/VPNBypass                       app: owns NETransparentProxyManager, sends the policy
+  MacOS/VPN Bypass                      app: owns NETransparentProxyManager, sends the policy
+  MacOS/VPNBypass                       link to it, the old name (older copies and login items)
   MacOS/vpnb                            unchanged, no entitlements
   MacOS/com.geiserx.vpnbypass.helper    unchanged, no entitlements
   Library/LaunchDaemons/...helper.plist unchanged
