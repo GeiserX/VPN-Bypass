@@ -88,6 +88,43 @@ final class ProcessRuleTests: XCTestCase {
         XCTAssertEqual(ProcessRule.storedPattern("com.example.app"), "com.example.App", "the Rules page saves through the same call")
     }
 
+    /// `rule.add` refuses what the Rules page refuses (`ProcessRule.editorValue`): an installed
+    /// app signed by a VPN or network-security team, and VPN Bypass itself. The extension turns
+    /// those down whatever the rule says, so saving one would be a rule that never does anything.
+    func testRuleAddRefusesAVPNClientsAppByTeamAsTheRulesPageDoes() throws {
+        let saved = BypassApps.lookup
+        defer { BypassApps.lookup = saved }
+        BypassApps.lookup = { id in
+            switch id {
+            case "com.example.vpn": return AppIdentity(name: "Example VPN", signingID: id, team: "PXPZ95SK77", bundleID: id)
+            case "com.example.App": return AppIdentity(name: "Example", signingID: id, team: "TEAM000001", bundleID: id)
+            default: return nil
+            }
+        }
+        let direct = Route(name: "Direct", egress: .direct)
+        for pattern in ["com.example.vpn", "com.geiserx.vpn-bypass"] {
+            let (updated, response) = CommandRouter.apply(
+                ControlRequest(cmd: "rule.add", args: ["match": "process", "pattern": pattern,
+                                                        "routeId": direct.id.uuidString]), to: config(route: direct))
+            XCTAssertFalse(response.ok, pattern)
+            XCTAssertEqual(response.error?.code, "refused", pattern)
+            XCTAssertTrue(updated.rules.isEmpty, pattern)
+            XCTAssertEqual(ProcessRule.editorValue(pattern, chosen: nil, previous: nil),
+                           .refuse(try XCTUnwrap(BypassApps.refusal(pattern, identity: BypassApps.lookup(pattern))).localizedMessage()),
+                           "the Rules page refuses it too")
+        }
+        let vpn = CommandRouter.apply(
+            ControlRequest(cmd: "rule.add", args: ["match": "process", "pattern": "com.example.vpn",
+                                                    "routeId": direct.id.uuidString]), to: config(route: direct)).response
+        XCTAssertEqual(vpn.error?.message, BypassAppError.vpnClient("Example VPN").message)
+        // Positive control: an app signed by any other team is saved.
+        let (updated, ok) = CommandRouter.apply(
+            ControlRequest(cmd: "rule.add", args: ["match": "process", "pattern": "com.example.App",
+                                                    "routeId": direct.id.uuidString]), to: config(route: direct))
+        XCTAssertTrue(ok.ok, "\(String(describing: ok.error))")
+        XCTAssertEqual(updated.rules.map(\.pattern), ["com.example.App"])
+    }
+
     /// Storing the signing id only ever changes case: a signing id that differs otherwise would
     /// change what the rule matches (a shorter prefix matches sibling apps, a dotless one reads as
     /// an executable name), and a pattern saved unchanged is kept as it is.
