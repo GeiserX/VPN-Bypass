@@ -265,6 +265,12 @@ final class ExtensionPackagingTests: XCTestCase {
         XCTAssertTrue(relay.contains("case nw_connection_state_waiting where !self.opened: self.connectFailed(error)"))
         let failed = try XCTUnwrap(relay.range(of: "private func connectFailed(_ error: nw_error_t?) {"))
         XCTAssertTrue(relay[failed.lowerBound...].prefix(400).contains("connectNextAnswer()"))
+        // A connection that got ready is the flow's, while its open is still pending too: neither
+        // the next-answer timer nor a later failure moves on to another answer.
+        XCTAssertTrue(relay[failed.lowerBound...].prefix(400).contains("guard !readied, !finished, !nextAnswers.isEmpty"))
+        XCTAssertTrue(relay.contains("guard let self, self.attempt == thisAttempt, !self.readied, !self.finished else { return }"))
+        let ready = try XCTUnwrap(relay.range(of: "private func ready() {"))
+        XCTAssertTrue(relay[ready.upperBound...].prefix(40).contains("readied = true"))
         let refused = try XCTUnwrap(relay.range(of: "case .protected:"))
         let tail = relay[refused.lowerBound...].prefix(400)
         XCTAssertTrue(tail.contains("self.count(.nameProtected, 1)"), String(tail))

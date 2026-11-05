@@ -44,6 +44,9 @@ final class TCPRelay {
     private let count: Count
     private var onEgress: Egress?
     private var opened = false
+    /// The outbound connection got ready; the flow's own open may still be pending. From here
+    /// on no next answer is tried: the connection that got ready is the flow's.
+    private var readied = false
     private var finished = false
     private var upDone = false
     private var downDone = false
@@ -126,16 +129,16 @@ final class TCPRelay {
         guard !nextAnswers.isEmpty else { return }
         let thisAttempt = attempt
         queue.asyncAfter(deadline: .now() + Self.nextAnswerSeconds) { [weak self] in
-            guard let self, self.attempt == thisAttempt, !self.opened, !self.finished else { return }
+            guard let self, self.attempt == thisAttempt, !self.readied, !self.finished else { return }
             self.connectFailed(nil)
         }
     }
 
-    /// A connect that failed before the flow opened: on to the next answer of a claimed name
+    /// A connect that failed before it got ready: on to the next answer of a claimed name
     /// when one is left, otherwise the flow fails. The connection given up is cancelled without
     /// ending the relay.
     private func connectFailed(_ error: nw_error_t?) {
-        guard !opened, !finished, !nextAnswers.isEmpty, let old = connection else { fail(error); return }
+        guard !readied, !finished, !nextAnswers.isEmpty, let old = connection else { fail(error); return }
         attempt += 1
         connection = nil
         nw_connection_cancel(old)
@@ -164,6 +167,7 @@ final class TCPRelay {
     }
 
     private func ready() {
+        readied = true
         reportEgress(true)
         guard let connection else { return }
         var onInterface = false
