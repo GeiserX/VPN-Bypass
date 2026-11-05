@@ -458,6 +458,10 @@ final class ExtensionPackagingTests: XCTestCase {
             echo '     1 valid identities found'
             """.write(to: security, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: security.path)
+        // The step after the lookup signs: a stand-in codesign marks that it was reached.
+        let codesign = tools.appendingPathComponent("codesign")
+        try "#!/bin/bash\necho 'stand-in codesign reached' >&2\nexit 1\n".write(to: codesign, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: codesign.path)
         let env = ["PATH": "\(tools.path):/usr/bin:/bin:/usr/sbin:/sbin", "SIGN_IDENTITY": sha1,
                    "APPLE_ID": "a", "APPLE_PASSWORD": "b", "APPLE_TEAM_ID": "c",
                    "PROVISIONING_PROFILE_APP": entitlements, "PROVISIONING_PROFILE_PROXY": entitlements]
@@ -465,7 +469,7 @@ final class ExtensionPackagingTests: XCTestCase {
         XCTAssertNotEqual(r.status, 141, "the identity lookup died on a SIGPIPE")
         XCTAssertNotEqual(r.status, 0, "the stand-in bundle cannot be signed")
         XCTAssertFalse(r.err.contains("no valid codesigning identity"), r.err)
-        XCTAssertFalse(r.err.isEmpty, "a later step says why it stopped")
+        XCTAssertTrue(r.err.contains("stand-in codesign reached"), "the script went on to signing: " + r.err)
     }
 
     func testTheSigningScriptNeedsBothProfilesBeforeItSignsAnything() throws {
