@@ -126,6 +126,10 @@ final class FakeFlowEngineSystem: FlowEngineSystem {
         onSessionChange?()
     }
 
+    /// Status requests sent, and whether the extension answers them (with its counters now).
+    var statusRequests = 0
+    var answersStatus = true
+
     /// While true a send waits, as a slow extension reply does.
     var holdSend = false
     /// Sends waiting under `holdSend`.
@@ -137,7 +141,13 @@ final class FakeFlowEngineSystem: FlowEngineSystem {
             while holdSend { try? await Task.sleep(nanoseconds: 5_000_000) }
             heldSends -= 1
         }
-        guard case .policy(let p) = FlowPolicyMessage.decode(data) else { return nil }
+        let message = FlowPolicyMessage.decode(data)
+        if message == .status {
+            statusRequests += 1
+            guard answersStatus, let last = sent.last else { return nil }
+            return Self.echo(last, claimed: claimedByRule, bound: boundByRule, version: extensionVersion)
+        }
+        guard case .policy(let p) = message else { return nil }
         sent.append(p)
         if !replies.isEmpty { return replies.removeFirst() }
         return Self.echo(p, claimed: claimedByRule, bound: boundByRule, version: extensionVersion)
@@ -631,6 +641,37 @@ final class FlowEngineManagerTests: XCTestCase {
     }
 
     // MARK: - Counters and status
+
+    /// The General page's count: the first reply after a turn-on says 0, and connections made
+    /// right after it must show without waiting for the next heartbeat (live on the mini,
+    /// 2026-11-05). A status request reads them; it pushes nothing.
+    func testCountsAreReadBetweenHeartbeats() async {
+        await turnOnToActive()
+        let pushes = system.sent.count
+        XCTAssertEqual(PerAppRouting.countsLine(engine.reply), "0 connections went around the VPN since the extension started.")
+        system.claimedByRule = [ruleID.uuidString: 4]
+        await engine.refreshCounts()
+        XCTAssertEqual(system.statusRequests, 1)
+        XCTAssertEqual(system.sent.count, pushes, "no policy push")
+        XCTAssertEqual(PerAppRouting.countsLine(engine.reply), "4 connections went around the VPN since the extension started.")
+        XCTAssertEqual(engine.counters(forRule: ruleID.uuidString)?.claimed, 4)
+
+        // An answer that is not the confirmed policy's (an extension that restarted) is left to
+        // the heartbeat, and so is no answer.
+        system.replies = []
+        system.answersStatus = false
+        system.claimedByRule = [ruleID.uuidString: 9]
+        await engine.refreshCounts()
+        XCTAssertEqual(engine.counters(forRule: ruleID.uuidString)?.claimed, 4)
+
+        // Off, nothing is asked.
+        engine.setEnabled(false)
+        await until("off") { engine.state == .off }
+        system.answersStatus = true
+        let asked = system.statusRequests
+        await engine.refreshCounts()
+        XCTAssertEqual(system.statusRequests, asked)
+    }
 
     func testCountsLandOnTheRuleAndCarryNoNames() async throws {
         system.claimedByRule = [ruleID.uuidString: 12]

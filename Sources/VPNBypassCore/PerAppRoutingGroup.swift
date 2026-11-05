@@ -124,6 +124,14 @@ struct PerAppRoutingGroup: View {
             .padding(.horizontal, ListRow.inset)
             .padding(.vertical, Theme.Space.s)
         }
+        // The counts line reads the extension while it shows, not only at the heartbeat.
+        .task(id: engine.state == .active) {
+            guard engine.state == .active else { return }
+            while !Task.isCancelled {
+                await engine.refreshCounts()
+                try? await Task.sleep(nanoseconds: UInt64(FlowEngineManager.countsRefreshSeconds * 1_000_000_000))
+            }
+        }
     }
 
     private func note(_ text: String) -> some View {
