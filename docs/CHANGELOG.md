@@ -25,7 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Rules page's editor has an App match: a bundle ID or executable name typed, or an app picked from the same chooser as the Apps page, with the Apps page's checks. The chooser takes a typed executable name too.
 - Every place that shows rules for apps says what per-app routing does with them. The Status and dropdown sentence counts destination rules and rules for apps apart and says when rules for apps wait for per-app routing; `rule.list` and the Rules page no longer say a `process` rule is served in Bypass or VPN Only mode (`inactiveReason` `notInCustomMode`); an Apps list entry whose installed app is a VPN or network security app says it is turned down (`vpnClientApp`); and the dropdown joins its list in the app's language.
 - `vpnb` reads a `servedBy` it does not know as absent instead of failing the reply, so an older `vpnb` keeps working with a later app.
-- Site Check no longer offers Send Direct for a site that already goes Direct.
 - The extension approval alert and System Settings name the app VPN Bypass, not VPNBypass.
 
 ## [6.0.12]

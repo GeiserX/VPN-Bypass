@@ -1787,25 +1787,6 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(try renderSettings(page: .apps, to: "gaps-apps-turned-down.png"), Self.settingsSize)
     }
 
-    /// "Where does this site go?" in Custom mode for a host no rule matches, with Everything
-    /// else on Direct: it already goes direct.
-    func testGapsSiteCheckThatAlreadyGoesDirect() throws {
-        seedCustom()
-        let snapshot = SiteRoute.Snapshot(mode: .custom, custom: true, list: [], services: [], rules: rm.config.rules,
-                                          routes: rm.config.routes, defaultRouteId: rm.config.defaultRouteId,
-                                          activeRoutes: [], localGateway: "192.168.1.1", vpnInterface: "utun4")
-        let host = "news.example.com"
-        let probe = PathCheck.Probe(address: "198.51.100.20", routeInterface: "en0", sourceAddress: "192.168.1.20",
-                                    sourceInterface: "en0", answer: .connected, latencyMs: 24)
-        let control = PathCheck.Probe(address: "192.0.2.1", routeInterface: "utun4", answer: .notTried)
-        let answer = SiteRoute.answer(host: host, mode: .custom, addresses: [probe.address],
-                                      found: SiteRoute.match(host: host, addresses: [probe.address], in: snapshot),
-                                      probes: [probe], control: (control, .passed), vpnConnected: true)
-        defer { StatusTab.siteCheckForScreenshots = nil }
-        StatusTab.siteCheckForScreenshots = (host, answer)
-        XCTAssertEqual(try renderSettings(page: .status, to: "gaps-site-check-direct.png"), Self.settingsSize)
-    }
-
     // BEGIN GAPS AFTER-ONLY
     /// The chooser with an executable name typed in its new field.
     func testGapsAppsChooserWithATypedName() throws {
