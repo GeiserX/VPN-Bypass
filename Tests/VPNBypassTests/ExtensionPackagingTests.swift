@@ -1,5 +1,6 @@
 import CryptoKit
 import XCTest
+@testable import VPNBypassCore
 
 /// Per-app routing's system extension ships inside the app before any routing does (design,
 /// section 10 step 4). These are the packaging facts that otherwise show only when macOS
@@ -67,6 +68,25 @@ final class ExtensionPackagingTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
         return dir
+    }
+
+    // MARK: - The app's name in the approval alert
+
+    /// The app's own Open System Settings button: the alert's does nothing (sysextd cannot
+    /// launch System Settings into the user's session; launchd error 112 in its log on the mini),
+    /// so the app opens the sheet itself, with the URL sysextd builds, which lands on the Network
+    /// Extensions list with the extension's switch (checked on the mini, macOS 26.6.1).
+    func testOpenSystemSettingsOpensTheNetworkExtensionsSheet() throws {
+        XCTAssertEqual(PerAppRouting.extensionsSettingsURL.absoluteString,
+                       "x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=com.apple.system_extension.network_extension.extension-point&extensionIdentifier=\(Self.proxyID)")
+        // The shape is the one this Mac's sysextd uses (macOS 26 and 27 carry the same string).
+        let sysextd = URL(fileURLWithPath: "/System/Library/Frameworks/SystemExtensions.framework/Versions/A/Helpers/sysextd")
+        if let binary = try? Data(contentsOf: sysextd) {
+            for needle in ["x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=%@&extensionIdentifier=%@",
+                           "com.apple.system_extension.network_extension.extension-point"] {
+                XCTAssertNotNil(binary.range(of: Data(needle.utf8)), needle)
+            }
+        }
     }
 
     // MARK: - The extension's bundle

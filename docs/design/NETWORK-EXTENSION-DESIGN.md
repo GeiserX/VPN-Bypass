@@ -125,7 +125,12 @@ Still open:
   Step 4 recorded them on the mini (macOS 26.6.1); the owner's Mac on macOS 27 still has to confirm
   them (L0):
   1. Activation request: an alert "“VPNBypass” would like to use a new network extension", buttons
-     OK and Open System Settings. It names the app by its executable, not "VPN Bypass".
+     OK and Open System Settings. It names the app by its executable, not "VPN Bypass". Its Open
+     System Settings button does nothing on macOS 26.6.1: sysextd logs "Unable to open login items &
+     extensions" (RunningBoard, launchd error 112: a root daemon cannot launch an app into the user's
+     session). The app's own button opens the URL sysextd would have,
+     `x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=com.apple.system_extension.network_extension.extension-point&extensionIdentifier=com.geiserx.vpn-bypass.proxy`,
+     which lands on the Network Extensions sheet (same format string in sysextd on macOS 27).
   2. System Settings > General > Login Items & Extensions > Extensions, By Category > Network
      Extensions (i): a switch per app, then the admin password ("System Extensions is trying to modify
      a System Extension").
