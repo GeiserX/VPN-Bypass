@@ -18,6 +18,9 @@ final class TCPRelay {
     static let giveUpSeconds: Double = 10
     /// The most one read takes from the server at once.
     static let chunk = 65536
+    /// A claimed name's answer that is not ready this long after its connect started gives way
+    /// to the next answer, while there is one: a blackholed address may never fail by itself.
+    static let nextAnswerSeconds: Double = 3
 
     /// Where the flow goes: an address, or a host name that is looked up on the interface and
     /// checked first (design 3.5 step 4, `NameAnswer`).
@@ -31,6 +34,11 @@ final class TCPRelay {
     private let parameters: nw_parameters_t
     private var connection: nw_connection_t?
     private var lookup: NameLookup?
+    /// A claimed name's answers not tried yet, all of them safe (`NameAnswer.check`), and its port.
+    private var nextAnswers: [UInt32] = []
+    private var answerPort = ""
+    /// Counts connect attempts, so a timer or a handler of an attempt given up does nothing.
+    private var attempt = 0
     private let queue: DispatchQueue
     private let interfaceName: String
     private let count: Count
@@ -94,8 +102,10 @@ final class TCPRelay {
             // Without the interfaces a tunnel's own network cannot be checked: fail, never dial.
             guard let addresses = NameLookup.interfaceAddresses() else { self.fail(nil); return }
             switch NameAnswer.check(answers, tunnelNetworks: NameAnswer.tunnelNetworks(addresses)) {
-            case .dial(let address):
-                self.connect(nw_endpoint_create_host(ProtectedRanges.dotted(address), port))
+            case .dial(let safe):
+                self.answerPort = port
+                self.nextAnswers = safe
+                self.connectNextAnswer()
             case .protected:
                 // Not a failure of the interface: its health is left alone.
                 self.onEgress = nil
@@ -107,18 +117,45 @@ final class TCPRelay {
         }
     }
 
+    /// Dials the next of a claimed name's answers, all of them checked safe; the relay never
+    /// dials an answer `NameAnswer.check` did not pass, so a protected one is never tried.
+    private func connectNextAnswer() {
+        guard !nextAnswers.isEmpty else { fail(nil); return }
+        let address = nextAnswers.removeFirst()
+        self.connect(nw_endpoint_create_host(ProtectedRanges.dotted(address), answerPort))
+        guard !nextAnswers.isEmpty else { return }
+        let thisAttempt = attempt
+        queue.asyncAfter(deadline: .now() + Self.nextAnswerSeconds) { [weak self] in
+            guard let self, self.attempt == thisAttempt, !self.opened, !self.finished else { return }
+            self.connectFailed(nil)
+        }
+    }
+
+    /// A connect that failed before the flow opened: on to the next answer of a claimed name
+    /// when one is left, otherwise the flow fails. The connection given up is cancelled without
+    /// ending the relay.
+    private func connectFailed(_ error: nw_error_t?) {
+        guard !opened, !finished, !nextAnswers.isEmpty, let old = connection else { fail(error); return }
+        attempt += 1
+        connection = nil
+        nw_connection_cancel(old)
+        connectNextAnswer()
+    }
+
     private func connect(_ endpoint: nw_endpoint_t) {
         let connection = nw_connection_create(endpoint, parameters)
         self.connection = connection
+        let thisAttempt = attempt
         nw_connection_set_queue(connection, queue)
         nw_connection_set_state_changed_handler(connection) { [weak self] state, error in
-            guard let self else { return }
+            // A connection given up for the next answer reports its own cancel: not the relay's.
+            guard let self, self.attempt == thisAttempt else { return }
             switch state {
             case nw_connection_state_ready: self.ready()
-            case nw_connection_state_failed: self.fail(error)
-            // Waiting before it ever got ready means no route out the interface: fail now rather
-            // than hold the app's connect until the give-up timer.
-            case nw_connection_state_waiting where !self.opened: self.fail(error)
+            case nw_connection_state_failed: self.connectFailed(error)
+            // Waiting before it ever got ready means no route out the interface: try the next
+            // answer, or fail now rather than hold the app's connect until the give-up timer.
+            case nw_connection_state_waiting where !self.opened: self.connectFailed(error)
             case nw_connection_state_cancelled: self.finish()
             default: break
             }

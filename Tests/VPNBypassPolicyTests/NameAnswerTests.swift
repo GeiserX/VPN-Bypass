@@ -6,9 +6,12 @@ import XCTest
 final class NameAnswerTests: XCTestCase {
     func ip(_ s: String) -> UInt32 { ProtectedRanges.parse(s)! }
 
-    func testAPublicAnswerIsDialled() {
-        XCTAssertEqual(NameAnswer.check([ip("93.184.216.34"), ip("93.184.216.35")], tunnelNetworks: []),
-                       .dial(ip("93.184.216.34")))
+    /// Every answer is kept, in order and once each, so a connect that fails on the first goes on
+    /// to the next, as Network does for a name it resolves itself.
+    func testEveryPublicAnswerIsDialledInTurn() {
+        XCTAssertEqual(NameAnswer.check([ip("93.184.216.34"), ip("93.184.216.35"), ip("93.184.216.34")], tunnelNetworks: []),
+                       .dial([ip("93.184.216.34"), ip("93.184.216.35")]))
+        XCTAssertEqual(NameAnswer.check([ip("93.184.216.34")], tunnelNetworks: []), .dial([ip("93.184.216.34")]))
     }
 
     func testAnyProtectedAnswerRefusesTheName() {
@@ -37,8 +40,8 @@ final class NameAnswerTests: XCTestCase {
                               IPv4Network(address: ip("203.0.113.1"), netmask: ~0)])
         XCTAssertEqual(NameAnswer.check([ip("198.51.100.200")], tunnelNetworks: nets), .protected)
         XCTAssertEqual(NameAnswer.check([ip("203.0.113.1")], tunnelNetworks: nets), .protected)
-        XCTAssertEqual(NameAnswer.check([ip("198.51.101.1")], tunnelNetworks: nets), .dial(ip("198.51.101.1")))
-        XCTAssertEqual(NameAnswer.check([ip("203.0.113.2")], tunnelNetworks: nets), .dial(ip("203.0.113.2")))
+        XCTAssertEqual(NameAnswer.check([ip("198.51.101.1")], tunnelNetworks: nets), .dial([ip("198.51.101.1")]))
+        XCTAssertEqual(NameAnswer.check([ip("203.0.113.2")], tunnelNetworks: nets), .dial([ip("203.0.113.2")]))
     }
 
     func testPhysicalInterfacesAddNoNetwork() {

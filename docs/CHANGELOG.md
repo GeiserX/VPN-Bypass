@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `vpnb` reads a `servedBy` it does not know as absent instead of failing the reply, so an older `vpnb` keeps working with a later app.
 - The extension approval alert and System Settings name the app VPN Bypass, not VPNBypass.
 - `vpnb app.add` takes the installed app's signing identifier only when it differs from the id typed in case, as `rule.add` does, so a shorter one never widens an entry to sibling apps. `vpnb rule.add match=process` refuses VPN Bypass itself and an app signed by a VPN or network security team, as the Rules page does.
+- A listed app's connection by name tries the next safe answer of its lookup when a connect fails (after 3 seconds without one), as Network does for a name it resolves itself; a name with any protected answer is still refused whole.
 
 ## [6.0.12]
 
