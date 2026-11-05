@@ -209,15 +209,16 @@ public struct SanitizedRule: Codable, Equatable, Sendable {
     public var inactiveReason: String? = nil
 
     init(_ rule: Rule, engine: FlowEngineState = .unavailable(.notInThisBuild), routes: [Route]? = nil,
-         customEngine: Bool = true) {
+         customEngine: Bool = true, turnedDown: Bool = false) {
         id = rule.id
         matchType = rule.matchType
         pattern = rule.pattern
         routeId = rule.routeId
         enabled = rule.enabled
         order = rule.order
-        let serving = routes.map { ProcessRule.serving(rule, engine: engine, routes: $0, customEngine: customEngine) }
-            ?? ProcessRule.serving(rule, engine: engine, customEngine: customEngine)
+        let serving = routes.map {
+            ProcessRule.serving(rule, engine: engine, routes: $0, customEngine: customEngine, turnedDown: turnedDown)
+        } ?? ProcessRule.serving(rule, engine: engine, customEngine: customEngine, turnedDown: turnedDown)
         servedBy = serving.servedBy
         inactiveReason = serving.reason?.rawValue
     }

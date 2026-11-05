@@ -169,8 +169,21 @@ enum BypassApps {
         let bundle = Bundle(url: url)
         let signing = signingInfo(url)
         guard let id = signing.identifier ?? bundle?.bundleIdentifier, !id.isEmpty else { return nil }
-        return AppIdentity(name: displayName(url, bundle: bundle), signingID: id, team: signing.team,
-                           bundleID: bundle?.bundleIdentifier)
+        return AppIdentity(name: displayName(url, bundle: bundle),
+                           signingID: matchable(id, executableName: bundle?.executableURL?.lastPathComponent),
+                           team: signing.team, bundleID: bundle?.bundleIdentifier)
+    }
+
+    /// The pattern that matches an app signed `signingID`. A dotless pattern is matched by the
+    /// process's executable file name, not its signing identifier (FlowPolicy's kind is the
+    /// pattern's shape), so an app signed with a dotless identifier is stored by its executable's
+    /// name; a dotless executable name that is, otherwise the identifier as it is.
+    static func matchable(_ signingID: String, executableName: String?) -> String {
+        guard ProcessRule.kind(of: signingID) == .executableName, let executableName, !executableName.isEmpty,
+              ProcessRule.kind(of: executableName) == .executableName, ProcessRule.invalid(executableName) == nil else {
+            return signingID
+        }
+        return executableName
     }
 
     private static func signingInfo(_ url: URL) -> (identifier: String?, team: String?) {

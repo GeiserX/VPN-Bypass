@@ -407,5 +407,104 @@ final class AppListVerbTests: XCTestCase {
         // An executable name names no app: nothing to read, so it is not marked.
         XCTAssertFalse(BypassApps.isTurnedDown(BypassApp(pattern: "example-tool"), declinedTeams: ["TUNNEL1234"]))
     }
-}
 
+    // Review: a process rule for an app the extension turns down never reads as served.
+    func testARuleForATurnedDownAppIsNotServedAnywhere() throws {
+        BypassApps.lookup = { id in
+            switch id {
+            case "com.example.vpn": return AppIdentity(name: "Example VPN", signingID: id, team: "PXPZ95SK77", bundleID: id)
+            case "com.example.Tunnel": return AppIdentity(name: "Tunnel", signingID: id, team: "TUNNEL1234", bundleID: id)
+            default: return nil
+            }
+        }
+        let direct = Route(name: "Direct", egress: .direct)
+        var c = RouteManager.Config()
+        c.schemaVersion = 2
+        c.routingMode = .custom
+        c.routes = [direct]
+        let vpn = Rule(matchType: .process, pattern: "com.example.vpn", routeId: direct.id, order: 0)
+        let tunnel = Rule(matchType: .process, pattern: "com.example.Tunnel", routeId: direct.id, order: 1)
+        let plain = Rule(matchType: .process, pattern: "com.example.App", routeId: direct.id, order: 2)
+        c.rules = [vpn, tunnel, plain]
+
+        XCTAssertEqual(ProcessRule.serving(vpn, engine: .active, config: c).reason, .vpnClientApp)
+        XCTAssertEqual(ProcessRule.serving(tunnel, engine: .active, config: c).servedBy, .perAppEngine)
+        XCTAssertEqual(ProcessRule.serving(tunnel, engine: .active, config: c, declinedTeams: ["TUNNEL1234"]).reason, .vpnClientApp)
+        XCTAssertEqual(ProcessRule.serving(plain, engine: .active, config: c, declinedTeams: ["TUNNEL1234"]).servedBy, .perAppEngine)
+        // A rule turned off still has no reason.
+        var off = vpn
+        off.enabled = false
+        XCTAssertNil(ProcessRule.serving(off, engine: .active, config: c).reason)
+
+        // The Rules page row and rule.list say so.
+        XCTAssertEqual(RuleRow.detail(for: vpn, route: direct, engine: .active,
+                                      turnedDown: ProcessRule.isTurnedDown(vpn, declinedTeams: [])),
+                       ProcessRule.rowNote(.vpnClientApp))
+        let sanitized = SanitizedRule(vpn, engine: .active, routes: [direct], turnedDown: true)
+        XCTAssertEqual(sanitized.servedBy, RuleServedBy.none)
+        XCTAssertEqual(sanitized.inactiveReason, "vpnClientApp")
+        let line = VPNBCLI.textLines(ControlResponse(ok: true, result: ControlResult(rules: [sanitized])))[0]
+        XCTAssertFalse(line.contains("served by per-app routing"), line)
+
+        // The sentence counts it as doing nothing, not as deciding.
+        var input = DropdownStatus.Input(isVPNConnected: true, vpnName: nil, helperReady: true, mode: .custom,
+                                         enabledServices: 0, enabledDomains: 0, enabledRules: 3,
+                                         installedRoutes: 0, pending: nil, lastRouteChange: nil,
+                                         lastDNSRefresh: nil, nextDNSRefresh: nil, autoDNSRefresh: true)
+        input.countAppRules(c.rules, config: c, engine: .active, declinedTeams: ["TUNNEL1234"])
+        XCTAssertEqual([input.enabledAppRules, input.servedAppRules, input.waitingAppRules], [3, 1, 0])
+    }
+
+    // Review: the Bypass count leaves out entries the extension turns down.
+    func testTheBypassAppCountLeavesOutTurnedDownEntries() {
+        BypassApps.lookup = { id in
+            id == "com.example.vpn" ? AppIdentity(name: "Example VPN", signingID: id, team: "PXPZ95SK77", bundleID: id) : nil
+        }
+        let apps = [BypassApp(pattern: "com.example.vpn"), BypassApp(pattern: "com.example.Browser"),
+                    BypassApp(pattern: "example-tool"), BypassApp(pattern: "com.example.Off", enabled: false)]
+        XCTAssertEqual(DropdownStatus.Input.countedApps(apps, declinedTeams: []), 2)
+    }
+
+    // Review: a destination rule whose route is off or deleted decides nothing.
+    func testTheRuleCountLeavesOutDestinationRulesWithNoUsableRoute() {
+        let on = Route(name: "Direct", egress: .direct)
+        var offRoute = Route(name: "Off", egress: .direct)
+        offRoute.enabled = false
+        var c = RouteManager.Config()
+        c.routes = [on, offRoute]
+        c.rules = [
+            Rule(matchType: .domain, pattern: "a.example.com", routeId: on.id, order: 0),
+            Rule(matchType: .domain, pattern: "b.example.com", routeId: offRoute.id, order: 1),
+            Rule(matchType: .domain, pattern: "c.example.com", routeId: UUID(), order: 2),
+            Rule(matchType: .domain, pattern: "d.example.com", routeId: on.id, enabled: false, order: 3),
+            // App rules are always counted: countAppRules says what each one does.
+            Rule(matchType: .process, pattern: "com.example.App", routeId: offRoute.id, order: 4),
+        ]
+        XCTAssertEqual(DropdownStatus.Input.countedRules(c), 2)
+    }
+
+    // Review: app.enable, app.disable and app.rm find a bundle id whatever the case typed.
+    func testAppVerbsFindABundleIDWhateverTheCase() async {
+        rm.config.bypassApps = [BypassApp(pattern: "com.example.Mail"), BypassApp(pattern: "Example-Tool")]
+        let off = await send("app.disable", ["pattern": "com.example.mail"])
+        XCTAssertTrue(off.ok, "\(String(describing: off.error))")
+        XCTAssertEqual(rm.config.bypassApps.first?.enabled, false)
+        // An executable name matches exactly, case included, as the extension compares it.
+        let tool = await send("app.disable", ["pattern": "example-tool"])
+        XCTAssertEqual(tool.error?.code, "not_found")
+        let removed = await send("app.rm", ["pattern": "COM.EXAMPLE.MAIL"])
+        XCTAssertTrue(removed.ok)
+        XCTAssertEqual(rm.config.bypassApps.map(\.pattern), ["Example-Tool"])
+    }
+
+    // Review: an app signed with a dotless identifier is stored by its executable's name, the
+    // way a dotless pattern is matched.
+    func testAnAppWithADotlessSigningIDIsStoredByItsExecutableName() {
+        XCTAssertEqual(BypassApps.matchable("com.example.App", executableName: "Example"), "com.example.App")
+        XCTAssertEqual(BypassApps.matchable("example", executableName: "Example Helper"), "Example Helper")
+        XCTAssertEqual(BypassApps.matchable("example", executableName: "example"), "example")
+        // No executable, or one that would read as a bundle id: the identifier as it is.
+        XCTAssertEqual(BypassApps.matchable("example", executableName: nil), "example")
+        XCTAssertEqual(BypassApps.matchable("example", executableName: "example.bin"), "example")
+    }
+}

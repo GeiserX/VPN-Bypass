@@ -519,13 +519,14 @@ enum StatusPage {
 
 extension DropdownStatus.Input {
     /// Fills the app-rule counts from `rules` (the enabled process rules among them).
-    mutating func countAppRules(_ rules: [Rule], config: Config, engine: FlowEngineState) {
+    /// `declinedTeams`: the live tunnels' owners, whose apps the extension turns down.
+    mutating func countAppRules(_ rules: [Rule], config: Config, engine: FlowEngineState, declinedTeams: [String] = []) {
         let apps = rules.filter { $0.enabled && $0.matchType == .process }
         enabledAppRules = apps.count
         servedAppRules = 0
         waitingAppRules = 0
         for rule in apps {
-            let serving = ProcessRule.serving(rule, engine: engine, config: config)
+            let serving = ProcessRule.serving(rule, engine: engine, config: config, declinedTeams: declinedTeams)
             // Only a rule on a Direct route that is on waits for per-app routing; per-app
             // routing would not serve one on another route either.
             let route = config.routes.first { $0.id == rule.routeId }
@@ -547,6 +548,7 @@ extension DropdownStatus.Input {
             ? .custom
             : (config.routingMode == .vpnOnly ? .vpnOnly : .bypass)
         let routed = Set(routeManager.activeRoutes.map(\.destination))
+        let declinedTeams = FlowEngineManager.shared.confirmed?.declinedTeams ?? []
         var input = DropdownStatus.Input(
             isVPNConnected: routeManager.isVPNConnected,
             vpnName: routeManager.vpnType.flatMap { $0 == .unknown ? nil : $0.rawValue },
@@ -556,7 +558,7 @@ extension DropdownStatus.Input {
             enabledDomains: mode == .vpnOnly
                 ? config.inverseDomains.filter { $0.enabled }.count
                 : config.domains.filter { $0.enabled }.count,
-            enabledRules: config.rules.filter { $0.enabled }.count,
+            enabledRules: Self.countedRules(config),
             installedRoutes: routeManager.routedAddressCount,
             pending: routeManager.pendingReconnectApply,
             // Without the failed addresses routed since, as Problems lists them.
@@ -586,11 +588,29 @@ extension DropdownStatus.Input {
             lastCheckBroken: routeManager.lastRouteCheck?.controlBroken ?? false,
             pause: routeManager.pauseState,
             configUnreadable: routeManager.isConfigLoadFailed,
-            enabledApps: mode == .bypass ? config.bypassApps.filter(\.enabled).count : 0,
+            enabledApps: mode == .bypass ? Self.countedApps(config.bypassApps, declinedTeams: declinedTeams) : 0,
             appsServed: FlowEngineManager.shared.state == .active && BypassAppServing.listIsLive(config)
         )
-        if mode == .custom { input.countAppRules(config.rules, config: config, engine: FlowEngineManager.shared.state) }
+        if mode == .custom {
+            input.countAppRules(config.rules, config: config, engine: FlowEngineManager.shared.state,
+                                declinedTeams: declinedTeams)
+        }
         return input
+    }
+
+    /// The enabled rules the sentence counts: every rule for an app (`countAppRules` sorts
+    /// them), and the destination rules whose route exists and is on. A destination rule whose
+    /// route is off or deleted routes nothing (RouteCompiler skips it).
+    static func countedRules(_ config: Config) -> Int {
+        config.rules.filter { rule in
+            rule.enabled && (rule.matchType == .process
+                || config.routes.contains { $0.id == rule.routeId && $0.enabled })
+        }.count
+    }
+
+    /// The enabled Apps entries that can skip the VPN: not the ones the extension turns down.
+    static func countedApps(_ apps: [BypassApp], declinedTeams: [String]) -> Int {
+        apps.filter { $0.enabled && !BypassApps.isTurnedDown($0, declinedTeams: declinedTeams) }.count
     }
 }
 

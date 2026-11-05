@@ -347,7 +347,14 @@ enum ClassicControl {
             target = UUID(uuidString: id).flatMap { uuid in rm.config.bypassApps.first { $0.id == uuid } }
         } else if let pattern {
             let value = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+            // A bundle id finds its app whatever the case typed, as LaunchServices does when
+            // `app.add` stores the case the app is signed with; an executable name matches exactly.
             target = rm.config.bypassApps.first { $0.names(value) }
+                ?? (ProcessRule.kind(of: value) == .bundleID
+                    ? rm.config.bypassApps.first { app in
+                        [app.pattern, app.bundleID].contains { $0?.caseInsensitiveCompare(value) == .orderedSame }
+                    }
+                    : nil)
         } else {
             return .failure(AppTargetError(code: "invalid_args", message: "id or pattern is required"))
         }

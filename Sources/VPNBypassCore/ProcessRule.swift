@@ -76,11 +76,13 @@ enum ProcessRule {
     /// the extension, so none is served whatever the engine does.
     static func serving(_ rule: Rule, engine: FlowEngineState = .unavailable(.notInThisBuild),
                         routeIsDirect: Bool = true, routeUsable: Bool = true,
-                        customEngine: Bool = true) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+                        customEngine: Bool = true, turnedDown: Bool = false) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
         guard rule.matchType == .process else { return (.kernel, nil) }
         if case .unavailable = engine { return (.none, .perAppRoutingNotAvailable) }
         // A rule turned off has no reason: its own switch says why.
         guard customEngine else { return (.none, rule.enabled ? .notInCustomMode : nil) }
+        // The extension declines the app's connections by its team (FlowDecider step 6).
+        if turnedDown { return (.none, rule.enabled ? .vpnClientApp : nil) }
         guard routeUsable else { return (.none, .routeUnavailable) }
         guard routeIsDirect else { return (.none, .routeNotSupported) }
         if let reason = engine.ruleReason { return (.none, reason) }
@@ -90,20 +92,30 @@ enum ProcessRule {
 
     /// `serving` for the rule's route (nil: deleted).
     static func serving(_ rule: Rule, engine: FlowEngineState, route: Route?,
-                        customEngine: Bool = true) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+                        customEngine: Bool = true, turnedDown: Bool = false) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
         serving(rule, engine: engine, routeIsDirect: route?.egress == .direct, routeUsable: route?.enabled ?? false,
-                customEngine: customEngine)
+                customEngine: customEngine, turnedDown: turnedDown)
     }
 
     /// `serving` with the rule's route looked up in `routes`.
     static func serving(_ rule: Rule, engine: FlowEngineState, routes: [Route],
-                        customEngine: Bool = true) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
-        serving(rule, engine: engine, route: routes.first { $0.id == rule.routeId }, customEngine: customEngine)
+                        customEngine: Bool = true, turnedDown: Bool = false) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        serving(rule, engine: engine, route: routes.first { $0.id == rule.routeId }, customEngine: customEngine,
+                turnedDown: turnedDown)
     }
 
     /// `serving` for a rule of `config`, in the mode it runs now.
-    static func serving(_ rule: Rule, engine: FlowEngineState, config: Config) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
-        serving(rule, engine: engine, routes: config.routes, customEngine: customEngine(config))
+    static func serving(_ rule: Rule, engine: FlowEngineState, config: Config,
+                        declinedTeams: [String] = []) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        serving(rule, engine: engine, routes: config.routes, customEngine: customEngine(config),
+                turnedDown: isTurnedDown(rule, declinedTeams: declinedTeams))
+    }
+
+    /// Whether the extension turns down the app a process rule names, as the Apps list reads
+    /// it (`BypassApps.isTurnedDown`): VPN Bypass itself, or an installed app signed by a VPN or
+    /// network-security team or by a live tunnel's owner (`declinedTeams`).
+    static func isTurnedDown(_ rule: Rule, declinedTeams: [String]) -> Bool {
+        rule.matchType == .process && BypassApps.isTurnedDown(BypassApp(pattern: rule.pattern), declinedTeams: declinedTeams)
     }
 
     /// Whether Custom mode's rules run now, the only mode whose process rules per-app routing serves.
