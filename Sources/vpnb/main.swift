@@ -63,6 +63,8 @@ func printUsage() {
                                                  Add an app that skips the VPN (Bypass mode, while
                                                  per-app routing is on; until then it uses the VPN)
       app.rm (id=<uuid> | pattern=<value>)      Remove an app from the list
+      app.enable (id=<uuid> | pattern=<value>)  Turn an app on the list on
+      app.disable (id=<uuid> | pattern=<value>) Turn an app on the list off
       service.list [id=<service id>]            List the services (with id=: its domains and IP ranges)
       service.enable id=<service id>            Enable a service
       service.disable id=<service id>           Disable a service

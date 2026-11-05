@@ -1721,6 +1721,91 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(try renderSettings(page: .status, to: "status-site-process-rule.png"), Self.settingsSize)
     }
 
+    // MARK: - Every place that shows app rules tells the truth, drawn for the pull request
+
+    /// Custom mode with two destination rules and two rules for apps while per-app routing is
+    /// off: the rules for apps change nothing yet.
+    private func seedAppRulesWaiting() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        rm.config.rules.append(Rule(matchType: .process, pattern: "com.example.Chat", routeId: direct.id, order: 3))
+        rm.config.rules.append(Rule(matchType: .process, pattern: "example-sync", routeId: direct.id, order: 4))
+        FlowEngineManager.shared.showForScreenshots(.off)
+    }
+
+    func testGapsDropdownWithAppRulesWaiting() throws {
+        try seedAppRulesWaiting()
+        defer { FlowEngineManager.shared.showForScreenshots(nil) }
+        _ = try renderDropdown(to: "gaps-dropdown-app-rules.png")
+    }
+
+    func testGapsStatusWithAppRulesWaiting() throws {
+        try seedAppRulesWaiting()
+        defer { FlowEngineManager.shared.showForScreenshots(nil) }
+        _ = try renderSettings(page: .status, to: "gaps-status-app-rules.png")
+    }
+
+    /// The Rules page, read-only in Bypass mode, while per-app routing is on: it serves no
+    /// process rule there, so the row must not say it does.
+    func testGapsRulesPageInBypassMode() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        rm.config.rules.append(Rule(matchType: .process, pattern: "com.example.Chat", routeId: direct.id, order: 3))
+        rm.config.routingMode = .bypass
+        rm.config.flowEngine.enabled = true
+        FlowEngineManager.shared.showForScreenshots(.active)
+        defer { FlowEngineManager.shared.showForScreenshots(nil) }
+        _ = try renderSettings(page: .rules, to: "gaps-rules-bypass-mode.png")
+    }
+
+    /// The rule editor on a rule for an app.
+    func testGapsRuleEditorOnAnAppRule() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        let rule = Rule(matchType: .process, pattern: "com.example.Chat", routeId: direct.id, order: 3)
+        try renderSheet(RuleEditorSheet(editingRule: rule, services: rm.config.services, onSave: { _ in }, onCancel: {})
+                            .environmentObject(rm),
+                        to: "gaps-rule-editor-app.png")
+    }
+
+    /// The Apps page with an entry added by its id before the app was installed, now installed
+    /// and signed by a VPN vendor's team: the extension turns it down.
+    func testGapsAppsPageWithAnEntryTurnedDown() throws {
+        let apps = seedApps()
+        rm.config.bypassApps.append(BypassApp(pattern: "com.example.vpn", name: "Example VPN"))
+        rm.config.flowEngine.enabled = true
+        let savedLookup = BypassApps.lookup
+        BypassApps.lookup = { id in
+            id == "com.example.vpn" ? AppIdentity(name: "Example VPN", signingID: id, team: "PXPZ95SK77", bundleID: id) : nil
+        }
+        FlowEngineManager.shared.showForScreenshots(.active, reply: FlowEngineReplySummary(
+            policyGeneration: 4, claimedByRule: [apps[0].id.uuidString: 128, apps[1].id.uuidString: 17], boundByRule: [:]))
+        defer {
+            BypassApps.lookup = savedLookup
+            resetApps()
+        }
+        XCTAssertEqual(try renderSettings(page: .apps, to: "gaps-apps-turned-down.png"), Self.settingsSize)
+    }
+
+    // BEGIN GAPS AFTER-ONLY
+    /// The chooser with an executable name typed in its new field.
+    func testGapsAppsChooserWithATypedName() throws {
+        AppChooserSheet.candidatesForScreenshots = [
+            .init(url: URL(fileURLWithPath: "/Applications/Example.app"), name: "Example Chat",
+                  bundleID: "com.example.Chat", isRunning: true),
+        ]
+        AppChooserSheet.typedForScreenshots = "example-sync"
+        AppChooserSheet.icon = { _ in NSWorkspace.shared.icon(forFile: "/System/Applications/Messages.app") }
+        defer {
+            AppChooserSheet.candidatesForScreenshots = nil
+            AppChooserSheet.typedForScreenshots = ""
+            AppChooserSheet.icon = { NSWorkspace.shared.icon(forFile: $0.url.path) }
+        }
+        try renderSheet(AppChooserSheet(listed: [], onCancel: {}, onPick: { _ in }).environmentObject(rm),
+                        to: "gaps-apps-chooser-typed.png")
+    }
+    // END GAPS AFTER-ONLY
+
     // MARK: - Dropdown rows and the add field (step 11), drawn for the pull request
 
     // BEGIN ROWS SHOTS

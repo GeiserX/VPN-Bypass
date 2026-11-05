@@ -123,16 +123,37 @@ enum BypassApps {
     static func check(_ pattern: String, identity: AppIdentity?, in list: [BypassApp]) -> Result<String, BypassAppError> {
         let value = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
         if let invalid = ProcessRule.invalid(value) { return .failure(.invalid(invalid)) }
-        if FlowDecider.ownIdentifiers.contains(where: { $0 == value || $0.hasPrefix(value + ".") }) {
-            return .failure(.ownApp)
-        }
-        if let team = identity?.team, FlowDecider.protectedTeams.contains(team) {
-            return .failure(.vpnClient(identity?.name ?? value))
-        }
+        if let refusal = refusal(value, identity: identity) { return .failure(refusal) }
         if let listed = list.first(where: { $0.names(value) || (identity?.bundleID).map($0.names) == true }) {
             return .failure(.alreadyListed(listed.displayName))
         }
         return .success(value)
+    }
+
+    /// Why per-app routing would turn down an app named `value` whatever its rule says: VPN
+    /// Bypass itself, or an app signed by a VPN or network-security team (`identity`'s, when one
+    /// was found). The Apps list and the Rules page refuse those; nil when neither applies.
+    static func refusal(_ value: String, identity: AppIdentity?) -> BypassAppError? {
+        if FlowDecider.ownIdentifiers.contains(where: { $0 == value || $0.hasPrefix(value + ".") }) {
+            return .ownApp
+        }
+        if let team = identity?.team, FlowDecider.protectedTeams.contains(team) {
+            return .vpnClient(identity?.name ?? value)
+        }
+        return nil
+    }
+
+    /// Whether the extension turns `app` down when it connects (FlowDecider step 6): the
+    /// installed app it names is signed by a VPN or network-security team, or by the team of a
+    /// process that owns a live tunnel (`declinedTeams`, from the last confirmed policy). An
+    /// entry added by its id before the app was installed passes the add, so this is read when
+    /// the entry is shown. An executable name names no app to read a team from: the extension
+    /// still turns a VPN client's process down, but only the connection can tell.
+    static func isTurnedDown(_ app: BypassApp, declinedTeams: [String] = []) -> Bool {
+        let id = app.bundleID ?? app.pattern
+        if FlowDecider.ownIdentifiers.contains(app.pattern) { return true }
+        guard ProcessRule.kind(of: id) == .bundleID, let team = lookup(id)?.team else { return false }
+        return FlowDecider.protectedTeams.contains(team) || declinedTeams.contains(team)
     }
 
     /// The installed app signed `signingID`, for an add by id (`vpnb app.add`). A seam for tests.
@@ -148,8 +169,21 @@ enum BypassApps {
         let bundle = Bundle(url: url)
         let signing = signingInfo(url)
         guard let id = signing.identifier ?? bundle?.bundleIdentifier, !id.isEmpty else { return nil }
-        return AppIdentity(name: displayName(url, bundle: bundle), signingID: id, team: signing.team,
-                           bundleID: bundle?.bundleIdentifier)
+        return AppIdentity(name: displayName(url, bundle: bundle),
+                           signingID: matchable(id, executableName: bundle?.executableURL?.lastPathComponent),
+                           team: signing.team, bundleID: bundle?.bundleIdentifier)
+    }
+
+    /// The pattern that matches an app signed `signingID`. A dotless pattern is matched by the
+    /// process's executable file name, not its signing identifier (FlowPolicy's kind is the
+    /// pattern's shape), so an app signed with a dotless identifier is stored by its executable's
+    /// name; a dotless executable name that is, otherwise the identifier as it is.
+    static func matchable(_ signingID: String, executableName: String?) -> String {
+        guard ProcessRule.kind(of: signingID) == .executableName, let executableName, !executableName.isEmpty,
+              ProcessRule.kind(of: executableName) == .executableName, ProcessRule.invalid(executableName) == nil else {
+            return signingID
+        }
+        return executableName
     }
 
     private static func signingInfo(_ url: URL) -> (identifier: String?, team: String?) {
@@ -243,9 +277,12 @@ enum BypassAppServing {
 
     /// Per-app routing serves an entry that is on while it is active and the list is live. An
     /// entry that is off has no reason: its own switch says why.
-    static func serving(_ app: BypassApp, engine: FlowEngineState, listIsLive: Bool = true)
+    /// `turnedDown` (`BypassApps.isTurnedDown`): the extension declines the app's connections,
+    /// so it is never served, whatever the engine does.
+    static func serving(_ app: BypassApp, engine: FlowEngineState, listIsLive: Bool = true, turnedDown: Bool = false)
         -> (servedBy: RuleServedBy, reason: ProcessRule.InactiveReason?) {
         guard app.enabled else { return (.none, nil) }
+        if turnedDown { return (.none, .vpnClientApp) }
         if case .unavailable = engine { return (.none, .perAppRoutingNotAvailable) }
         guard listIsLive else { return (.none, .notInBypassMode) }
         if let reason = engine.ruleReason { return (.none, reason) }
@@ -255,6 +292,7 @@ enum BypassAppServing {
     /// `vpnb`'s note for an entry nothing serves.
     static func inactiveNote(reason: String?) -> String {
         guard reason != nil else { return "the app is turned off" }
+        if reason == ProcessRule.InactiveReason.vpnClientApp.rawValue { return ProcessRule.inactiveNote(reason: reason) }
         return ProcessRule.inactiveNote(reason: reason) + "; until then the app uses the VPN"
     }
 }

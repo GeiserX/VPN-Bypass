@@ -89,6 +89,19 @@ final class ExtensionPackagingTests: XCTestCase {
         XCTAssertTrue(makefile.contains(#"@cp -R Proxy/*.lproj "$(PROXY_BUNDLE)/Contents/Resources/""#))
     }
 
+    /// The approval alert and System Settings name the app by its display name. Without one they
+    /// fell back to the executable's name and showed "VPNBypass".
+    func testTheAppNamesItselfVPNBypassWithASpace() throws {
+        let info = try plist("Info.plist")
+        XCTAssertEqual(info["CFBundleDisplayName"] as? String, "VPN Bypass")
+        XCTAssertEqual(info["CFBundleName"] as? String, "VPN Bypass")
+        // No language renames it: the name is the same everywhere.
+        for language in ["en", "es", "fr"] {
+            let strings = try plist("Sources/VPNBypassCore/Resources/\(language).lproj/InfoPlist.strings")
+            XCTAssertNil(strings["CFBundleDisplayName"], language)
+        }
+    }
+
     func testTheBundleStepEmbedsTheExtensionWithTheAppsVersion() throws {
         let makefile = try text("Makefile")
         XCTAssertTrue(makefile.contains("PROXY_BUNDLE = $(APP_BUNDLE)/Contents/Library/SystemExtensions/$(PROXY_ID).systemextension"))

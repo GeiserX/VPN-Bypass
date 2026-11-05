@@ -24,14 +24,20 @@ enum AppsPage {
 
     /// The rows the search leaves. `counters` reads a rule id's counts from the extension's
     /// last reply; an entry's rule id is its own id.
+    /// `turnedDown` (`BypassApps.isTurnedDown`) marks an entry the extension declines: its row
+    /// says so, whatever the engine does.
     static func rows(_ apps: [BypassApp], engine: FlowEngineState, listIsLive: Bool, search: String,
                      counters: (String) -> FlowEngineRuleCounters? = { _ in nil },
+                     turnedDown: (BypassApp) -> Bool = { _ in false },
                      bundle: Bundle = .main) -> [Row] {
         apps.filter { SettingsSidebar.matches($0.displayName, search: search) || SettingsSidebar.matches($0.pattern, search: search) }
             .map { app in
-                let served = BypassAppServing.serving(app, engine: engine, listIsLive: listIsLive).servedBy == .perAppEngine
+                let serving = BypassAppServing.serving(app, engine: engine, listIsLive: listIsLive, turnedDown: turnedDown(app))
+                let served = serving.servedBy == .perAppEngine
                 var parts = app.displayName == app.pattern ? [] : [app.pattern]
-                if served {
+                if serving.reason == .vpnClientApp {
+                    parts.append(ProcessRule.rowNote(.vpnClientApp, in: bundle))
+                } else if served {
                     let c = counters(app.id.uuidString)
                     parts.append(ProcessRule.rowNote(nil, claimed: c?.claimed ?? 0, bound: c?.bound ?? 0, in: bundle))
                 }
@@ -80,8 +86,10 @@ struct AppsTab: View {
 
     var body: some View {
         let apps = routeManager.config.bypassApps
+        let declined = engine.confirmed?.declinedTeams ?? []
         let rows = AppsPage.rows(apps, engine: engine.state, listIsLive: listIsLive, search: searchText,
-                                 counters: { engine.counters(forRule: $0) })
+                                 counters: { engine.counters(forRule: $0) },
+                                 turnedDown: { BypassApps.isTurnedDown($0, declinedTeams: declined) })
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if let notice = AppsPage.notice(engine: engine.state, listIsLive: listIsLive) {
                 noticeLine(notice)
@@ -117,9 +125,12 @@ struct AppsTab: View {
         .pageTitleActions([.add(String(localized: "Add App…")) { showingChooser = true }])
         .onChange(of: apps.map(\.pattern)) { _ in refusal = nil }
         .sheet(isPresented: $showingChooser) {
-            AppChooserSheet(listed: apps, onCancel: { showingChooser = false }, onPick: { candidate in
+            AppChooserSheet(listed: apps, onCancel: { showingChooser = false }, onPick: { pick in
                 showingChooser = false
-                add(candidate)
+                switch pick {
+                case .app(let candidate): add(candidate)
+                case .name(let name): add(name)
+                }
             })
         }
     }
@@ -162,28 +173,65 @@ struct AppsTab: View {
         case .success: refusal = nil
         }
     }
+
+    /// An executable name (or a bundle id) typed in the chooser: added as `vpnb app.add` adds it.
+    private func add(_ name: String) {
+        switch routeManager.addBypassApp(name) {
+        case .failure(let error): refusal = error.localizedMessage()
+        case .success: refusal = nil
+        }
+    }
 }
 
-/// The chooser: the running apps, then those in the Applications folders, with a search.
+/// The chooser: the running apps, then those in the Applications folders, with a search, and a
+/// field for an executable name (a command-line tool has no app to pick).
 struct AppChooserSheet: View {
     let listed: [BypassApp]
+    var title = String(localized: "Add an App")
+    var confirmTitle = String(localized: "Add")
     let onCancel: () -> Void
-    let onPick: (BypassApps.Candidate) -> Void
+    let onPick: (Pick) -> Void
+
+    /// What the chooser hands back: an app from the list, or a name typed in the field.
+    enum Pick: Equatable {
+        case app(BypassApps.Candidate)
+        case name(String)
+    }
 
     /// The doc screenshots fill the chooser with these instead of the Mac's apps.
     static var candidatesForScreenshots: [BypassApps.Candidate]?
     /// The doc screenshots draw this app picked.
     static var pickedForScreenshots: String?
+    /// The doc screenshots type this in the name field.
+    static var typedForScreenshots = ""
 
     @State private var candidates: [BypassApps.Candidate]? = AppChooserSheet.candidatesForScreenshots
     @State private var search = ""
     @State private var picked: String? = AppChooserSheet.pickedForScreenshots
+    @State private var typed = AppChooserSheet.typedForScreenshots
     @FocusState private var isSearchFocused: Bool
+
+    /// The pick the confirm button hands back: a typed name wins over a row, since typing
+    /// clears the row and picking a row clears the name. Nil while the name is not one a rule
+    /// can match (`ProcessRule.invalid`) or nothing is picked.
+    static func pick(row: BypassApps.Candidate?, typed: String) -> Pick? {
+        let name = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { return ProcessRule.invalid(name) == nil ? .name(name) : nil }
+        return row.map(Pick.app)
+    }
+
+    /// The line under the name field while what is typed cannot be matched; nil otherwise.
+    static func typedError(_ typed: String, in bundle: Bundle = .main) -> String? {
+        let name = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, ProcessRule.invalid(name) != nil else { return nil }
+        return ProcessRule.localizedMessage(in: bundle)
+    }
 
     var body: some View {
         let shown = BypassApps.filter(candidates ?? [], search: search)
-        let pick = shown.first { $0.bundleID == picked }
-        SheetScaffold(String(localized: "Add an App"), confirmTitle: String(localized: "Add"),
+        let row = shown.first { $0.bundleID == picked }
+        let pick = Self.pick(row: row, typed: typed)
+        SheetScaffold(title, confirmTitle: confirmTitle,
                       canConfirm: pick != nil, onCancel: onCancel, onConfirm: { if let pick { onPick(pick) } }) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
@@ -221,7 +269,21 @@ struct AppChooserSheet: View {
                     }
                 }
             }
-            .frame(height: 300)
+            .frame(height: 260)
+
+            SheetField(String(localized: "Or an executable name")) {
+                TextField(String(localized: "Example"), text: $typed)
+                    .textFieldStyle(.roundedBorder)
+                    .font(Theme.Font.body)
+                    .accessibilityLabel(String(localized: "Executable name"))
+                    .help(String(localized: "For a program with no app to pick, such as a command-line tool: the last part of its path."))
+                    .onChange(of: typed) { value in
+                        if !value.isEmpty { picked = nil }
+                    }
+            }
+            if let error = Self.typedError(typed) {
+                SheetError(message: error)
+            }
         }
         .frame(width: SheetScaffold<EmptyView>.width)
         .task {
@@ -250,6 +312,7 @@ struct AppChooserSheet: View {
         let selected = picked == c.bundleID
         return Button {
             picked = c.bundleID
+            typed = ""
         } label: {
             HStack(spacing: Theme.Space.s) {
                 Image(nsImage: AppChooserSheet.icon(c))

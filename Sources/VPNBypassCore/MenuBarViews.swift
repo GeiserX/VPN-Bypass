@@ -1822,11 +1822,21 @@ struct DropdownStatus: Equatable {
         /// them now. Only served apps count as skipping the VPN.
         var enabledApps: Int = 0
         var appsServed: Bool = false
+        /// Custom mode: of `enabledRules`, the ones that match an app (process rules), how many
+        /// per-app routing serves now, and how many wait for it (it is off, starting, paused or
+        /// not available). The rest of them do nothing for their route (`ProcessRule.serving`).
+        var enabledAppRules: Int = 0
+        var servedAppRules: Int = 0
+        var waitingAppRules: Int = 0
 
         /// Bypass mode with no service or domain on and per-app routing serving the Apps list:
         /// no address is routed, and none should be, yet those apps skip the VPN.
         var onlyServedApps: Bool {
-            mode == .bypass && appsServed && enabledApps > 0 && enabledServices == 0 && enabledDomains == 0
+            switch mode {
+            case .bypass: return appsServed && enabledApps > 0 && enabledServices == 0 && enabledDomains == 0
+            case .custom: return servedAppRules > 0 && enabledRules == enabledAppRules
+            case .vpnOnly: return false
+            }
         }
     }
 
@@ -1977,9 +1987,12 @@ struct DropdownStatus: Equatable {
         }
         let problems = partialReasons(input)
         if input.installedRoutes == 0 && !input.everythingElseDirect && !input.onlyServedApps {
+            // Custom mode with rules for apps only: say what they wait for, or that they do nothing.
+            let nothing = String(localized: "Nothing is routed right now.")
+            let onlyAppRules = input.mode == .custom && input.enabledAppRules > 0 && input.enabledAppRules >= input.enabledRules
             return DropdownStatus(chip: .notRouting, tone: .warn,
                                   headline: String(localized: "\(name) connected"),
-                                  sentence: String(localized: "Nothing is routed right now."),
+                                  sentence: onlyAppRules ? nothing + " " + whatIsRouted(input) : nothing,
                                   note: scheduledNote,
                                   line3: Line3(text: numbersLine(input, now: now), isProblem: true,
                                                action: problems.isEmpty ? nil : .show))
@@ -2142,36 +2155,77 @@ struct DropdownStatus: Equatable {
         }
     }
 
-    /// One sentence on what the user's own lists route.
-    static func whatIsRouted(_ input: Input) -> String {
+    /// One sentence on what the user's own lists route, in `bundle`'s language (lists too).
+    static func whatIsRouted(_ input: Input, bundle: Bundle = .main) -> String {
         switch input.mode {
         case .bypass:
             let s = input.enabledServices, d = input.enabledDomains
-            let services = s == 1 ? String(localized: "1 service") : String(localized: "\(s) services")
-            let domains = d == 1 ? String(localized: "1 domain") : String(localized: "\(d) domains")
+            let services = s == 1 ? String(localized: "1 service", bundle: bundle) : String(localized: "\(s) services", bundle: bundle)
+            let domains = d == 1 ? String(localized: "1 domain", bundle: bundle) : String(localized: "\(d) domains", bundle: bundle)
             if input.appsServed, input.enabledApps > 0 {
                 let a = input.enabledApps
-                if s == 0, d == 0, a == 1 { return String(localized: "1 app skips the VPN.") }
-                let apps = a == 1 ? String(localized: "1 app") : String(localized: "\(a) apps")
+                if s == 0, d == 0, a == 1 { return String(localized: "1 app skips the VPN.", bundle: bundle) }
+                let apps = a == 1 ? String(localized: "1 app", bundle: bundle) : String(localized: "\(a) apps", bundle: bundle)
                 let parts = (s > 0 ? [services] : []) + (d > 0 ? [domains] : []) + [apps]
-                let list = ListFormatter.localizedString(byJoining: parts)
-                return String(localized: "\(list) skip the VPN.")
+                let list = AppLanguage.list(parts, in: bundle)
+                return String(localized: "\(list) skip the VPN.", bundle: bundle)
             }
             switch (s, d) {
-            case (0, 0): return String(localized: "Nothing skips the VPN yet.")
-            case (_, 0): return s == 1 ? String(localized: "1 service skips the VPN.") : String(localized: "\(services) skip the VPN.")
-            case (0, _): return d == 1 ? String(localized: "1 domain skips the VPN.") : String(localized: "\(domains) skip the VPN.")
-            default: return String(localized: "\(services) and \(domains) skip the VPN.")
+            case (0, 0): return String(localized: "Nothing skips the VPN yet.", bundle: bundle)
+            case (_, 0): return s == 1 ? String(localized: "1 service skips the VPN.", bundle: bundle) : String(localized: "\(services) skip the VPN.", bundle: bundle)
+            case (0, _): return d == 1 ? String(localized: "1 domain skips the VPN.", bundle: bundle) : String(localized: "\(domains) skip the VPN.", bundle: bundle)
+            default: return String(localized: "\(services) and \(domains) skip the VPN.", bundle: bundle)
             }
         case .vpnOnly:
             let d = input.enabledDomains
-            if d == 0 { return String(localized: "Nothing is sent through the VPN yet.") }
-            return d == 1 ? String(localized: "1 entry uses the VPN.") : String(localized: "\(d) entries use the VPN.")
+            if d == 0 { return String(localized: "Nothing is sent through the VPN yet.", bundle: bundle) }
+            return d == 1 ? String(localized: "1 entry uses the VPN.", bundle: bundle) : String(localized: "\(d) entries use the VPN.", bundle: bundle)
         case .custom:
-            let r = input.enabledRules
-            if r == 0 { return String(localized: "No rules yet.") }
-            return r == 1 ? String(localized: "1 rule decides where traffic goes.") : String(localized: "\(r) rules decide where traffic goes.")
+            return customRules(input, bundle: bundle)
         }
+    }
+
+    /// Custom mode's sentence. Rules for apps are counted apart from the rules for destinations,
+    /// and only those per-app routing serves now decide anything; the others are named as
+    /// waiting for it, or as doing nothing (their route), so a list of app rules alone never
+    /// reads as routing traffic, nor as "No rules yet."
+    private static func customRules(_ input: Input, bundle: Bundle) -> String {
+        let a = max(min(input.enabledAppRules, input.enabledRules), 0)
+        let d = input.enabledRules - a
+        if a == 0 {
+            if d == 0 { return String(localized: "No rules yet.", bundle: bundle) }
+            return d == 1 ? String(localized: "1 rule decides where traffic goes.", bundle: bundle)
+                          : String(localized: "\(d) rules decide where traffic goes.", bundle: bundle)
+        }
+        let served = max(min(input.servedAppRules, a), 0)
+        let waiting = max(min(input.waitingAppRules, a - served), 0)
+        let idle = a - served - waiting
+        var sentences: [String] = []
+        switch (d, served) {
+        case (0, 0):
+            break
+        case (_, 0):
+            sentences.append(d == 1 ? String(localized: "1 destination rule decides where traffic goes.", bundle: bundle)
+                                    : String(localized: "\(d) destination rules decide where traffic goes.", bundle: bundle))
+        case (0, _):
+            sentences.append(served == 1 ? String(localized: "1 app rule decides where traffic goes.", bundle: bundle)
+                                         : String(localized: "\(served) app rules decide where traffic goes.", bundle: bundle))
+        default:
+            let destinations = d == 1 ? String(localized: "1 destination rule", bundle: bundle)
+                                      : String(localized: "\(d) destination rules", bundle: bundle)
+            let apps = served == 1 ? String(localized: "1 app rule", bundle: bundle)
+                                   : String(localized: "\(served) app rules", bundle: bundle)
+            sentences.append(String(localized: "\(destinations) and \(apps) decide where traffic goes.", bundle: bundle))
+        }
+        if waiting > 0 {
+            sentences.append(waiting == 1 ? String(localized: "1 app rule waits for per-app routing.", bundle: bundle)
+                                          : String(localized: "\(waiting) app rules wait for per-app routing.", bundle: bundle))
+        }
+        if idle > 0 {
+            sentences.append(idle == 1 ? String(localized: "1 app rule does nothing: the Rules page says why.", bundle: bundle)
+                                       : String(localized: "\(idle) app rules do nothing: the Rules page says why.", bundle: bundle))
+        }
+        return sentences.joined(separator: " ")
     }
 
     /// "38 s", "18 min", "1 h", "1 h 20 min". Minutes round up, so "1 min" never means 1 s.
