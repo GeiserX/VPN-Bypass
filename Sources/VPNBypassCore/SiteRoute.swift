@@ -172,6 +172,10 @@ enum SiteRoute {
         var inactiveAppRules: [String] = []
         /// Per-app routing's state when the rules were read, for the sentence about them.
         var appRulesEngine: FlowEngineState = .unavailable(.notInThisBuild)
+        /// defaultRoute: Everything else names a route other than the way the system already
+        /// sends it (Direct, a pinned tunnel, a proxy), which nothing installs, so the name
+        /// follows the system's own routing instead.
+        var defaultRouteNotApplied = false
     }
 
     // MARK: - Matching
@@ -259,11 +263,16 @@ enum SiteRoute {
                 }
                 return found
             }
+            // The engine installs routes for rules only (RouteCompiler), never for Everything
+            // else: a name no rule claims follows the system's own routing, the VPN for a full
+            // tunnel, whatever route Everything else names.
+            let systemWay: PathCheck.Way? = loopback ? .physical : s.vpnInterface.map { .tunnel($0) }
             if let id = s.defaultRouteId, let route = byId[id] {
-                return Found(match: .defaultRoute, routeName: route.name,
-                             expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
+                var found = Found(match: .defaultRoute, routeName: route.name, expected: systemWay)
+                found.defaultRouteNotApplied = way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces) != systemWay
+                return found
             }
-            return Found(match: .none, expected: loopback ? .physical : s.vpnInterface.map { .tunnel($0) })
+            return Found(match: .none, expected: systemWay)
         }
 
         // 2. A listed wildcard (the most specific one, as macOS picks the resolver file).
@@ -511,6 +520,8 @@ enum SiteRoute {
             let kind = found.ruleMatchType ?? ""
             let route = found.routeName ?? ""
             return String(localized: "\(host) matches rule \(position), \(kind) \(entry), which sends it to \(route).")
+        case .defaultRoute where found.defaultRouteNotApplied:
+            return String(localized: "\(host) matches no rule. Everything else is set to \(found.routeName ?? ""), but the app adds routes for rules only, so it follows the system's own routing.")
         case .defaultRoute:
             return splitTunnel
                 ? String(localized: "\(host) matches no rule, so it takes the default route, \(found.routeName ?? ""), which leaves it to the system's own routing.")

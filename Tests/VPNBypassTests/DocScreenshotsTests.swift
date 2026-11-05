@@ -1475,6 +1475,35 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(try renderSettings(page: .status, to: "status-site-tailnet-after.png"), Self.settingsSize)
     }
 
+    // MARK: - Live findings of the per-app routing run (step gaps2-13), drawn for the pull request
+
+    /// Site Check in Custom mode, Everything else set to Direct, for a site no rule claims. The
+    /// app adds routes for rules only, so the site takes the VPN. Before: expected Direct and
+    /// called the VPN the wrong way. After: expects the VPN and says why the setting does not apply.
+    func testStatusPageSiteCheckEverythingElseDirect() throws {
+        seedCustom()
+        let host = "example.org"
+        let probe = PathCheck.Probe(address: "198.51.100.20", routeInterface: "utun4", sourceAddress: "10.8.0.2",
+                                    sourceInterface: "utun4", answer: .connected, latencyMs: 24)
+        let control = PathCheck.Probe(address: "192.0.2.1", routeInterface: "utun4", answer: .notTried)
+        func answer(_ found: SiteRoute.Found) -> SiteRouteAnswer {
+            SiteRoute.answer(host: host, mode: .custom, addresses: [probe.address], found: found, probes: [probe],
+                             control: (control, .passed), vpnConnected: true)
+        }
+        let found = SiteRoute.match(host: host, addresses: [probe.address], in: rm.siteRouteSnapshot)
+        XCTAssertTrue(found.defaultRouteNotApplied)
+        var old = found
+        old.expected = .physical
+        old.defaultRouteNotApplied = false
+        XCTAssertEqual(answer(old).verdict, .wrongWay)
+        XCTAssertEqual(answer(found).verdict, .ok)
+        defer { StatusTab.siteCheckForScreenshots = nil }
+        StatusTab.siteCheckForScreenshots = (host, answer(old))
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-site-everything-else-before.png"), Self.settingsSize)
+        StatusTab.siteCheckForScreenshots = (host, answer(found))
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-site-everything-else-after.png"), Self.settingsSize)
+    }
+
     /// Logs with three tunnels up. Before: the status pass logged the tunnel line every 30
     /// seconds and it filled the page. After: once, then the lines that matter.
     func testLogsMultiTunnelLineOnce() throws {

@@ -1181,3 +1181,4 @@
 "Choose an app from this Mac" = "Choose an app from this Mac";
 "Choose an App" = "Choose an App";
 "Choose" = "Choose";
+"%@ matches no rule. Everything else is set to %@, but the app adds routes for rules only, so it follows the system's own routing." = "%@ matches no rule. Everything else is set to %@, but the app adds routes for rules only, so it follows the system's own routing.";
