@@ -443,14 +443,15 @@ public enum RouteKernel {
         slashOneTunnelOwnerIndex(table).flatMap(tunnelName)
     }
 
-    /// The interface that holds both halves, 0.0.0.0/1 and 128.0.0.0/1, nil when either is
-    /// missing or they are on different interfaces. Only then does one tunnel carry everything
+    /// The interface that holds both halves, 0.0.0.0/1 and 128.0.0.0/1, as live unscoped routes,
+    /// nil when either is missing or they are on different interfaces. Only then does one tunnel carry everything
     /// the default route would, which is what the Status page says (selection, above, settles
     /// for one half).
     public static func slashOnePairOwnerIndex(_ table: [KernelRoute]) -> UInt16? {
         func owner(_ destination: UInt32) -> UInt16? {
-            table.first { !$0.isOurs && $0.prefix == 1 && $0.destination == destination && $0.gatewayInterfaceIndex != nil }?
-                .gatewayInterfaceIndex
+            // Only a route ordinary traffic takes counts: not scoped, cloned, down or a reject.
+            table.first { !$0.isOurs && isComparableEntry($0.flags) && $0.prefix == 1
+                && $0.destination == destination && $0.gatewayInterfaceIndex != nil }?.gatewayInterfaceIndex
         }
         guard let low = owner(0), let high = owner(0x8000_0000), low == high else { return nil }
         return low
