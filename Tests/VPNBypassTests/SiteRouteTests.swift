@@ -200,6 +200,28 @@ final class SiteRouteTests: XCTestCase {
                        "example.org matches no rule, so it takes the default route, Corp VPN.")
     }
 
+    /// Everything else set to a pinned tunnel no rule uses: its pin is read too, so Site Check
+    /// sees that the system sends the name to the primary VPN instead and says the setting is not
+    /// applied.
+    func testEverythingElseOnAPinnedTunnelIsComparedWithItsPin() {
+        let pinned = Route(name: "WG", egress: .vpnDefault, vpnSelector: VPNSelector(kind: .interface, interfaceName: "utun9"))
+        var config = RouteManager.Config()
+        config.schemaVersion = 2
+        config.routingMode = .custom
+        config.routes = [direct, pinned]
+        XCTAssertTrue(RouteManager.pinnedRoutesToRead(config).isEmpty, "no rule and not Everything else")
+        config.defaultRouteId = pinned.id
+        XCTAssertEqual(RouteManager.pinnedRoutesToRead(config).map(\.id), [pinned.id])
+        config.routingMode = .bypass
+        XCTAssertTrue(RouteManager.pinnedRoutesToRead(config).isEmpty, "only Custom reads pins")
+
+        var s = snapshot(mode: .custom, routes: [direct, pinned], defaultRouteId: pinned.id)
+        s.pinnedInterfaces = [pinned.id: "utun7"]
+        let found = SiteRoute.match(host: "example.org", addresses: ["203.0.113.5"], in: s)
+        XCTAssertEqual(found.expected, .tunnel("utun4"))
+        XCTAssertTrue(found.defaultRouteNotApplied)
+    }
+
     /// The kernel decides before the rules: an installed route is reported first.
     func testCustomInstalledRouteComesBeforeTheRules() {
         let rules = [Rule(matchType: .domain, pattern: "example.com", routeId: corp.id, order: 0)]

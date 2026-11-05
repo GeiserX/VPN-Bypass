@@ -628,14 +628,20 @@ enum SiteRoute {
 // MARK: - RouteManager
 
 extension RouteManager {
-    /// The interface each pinned Custom route resolves to now, read only when an enabled rule
-    /// points at one (listing the tunnels runs ifconfig), as the apply does.
-    func pinnedInterfaces() async -> [UUID: String] {
-        guard Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) else { return [:] }
-        let referenced = Set(config.rules.filter(\.enabled).map(\.routeId))
-        let pinned = config.routes.filter {
+    /// The pinned Custom routes Site Check needs the interface of: those an enabled rule points
+    /// at, and Everything else's, so a pin it names is compared with the system's way.
+    nonisolated static func pinnedRoutesToRead(_ config: Config) -> [Route] {
+        guard usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) else { return [] }
+        let referenced = Set(config.rules.filter(\.enabled).map(\.routeId) + [config.defaultRouteId].compactMap { $0 })
+        return config.routes.filter {
             referenced.contains($0.id) && $0.egress == .vpnDefault && $0.vpnSelector?.kind == .interface
         }
+    }
+
+    /// The interface each pinned Custom route resolves to now, read only when one is in use
+    /// (`pinnedRoutesToRead`; listing the tunnels runs ifconfig).
+    func pinnedInterfaces() async -> [UUID: String] {
+        let pinned = Self.pinnedRoutesToRead(config)
         guard !pinned.isEmpty else { return [:] }
         let links = await listVPNLinks()
         var out: [UUID: String] = [:]
