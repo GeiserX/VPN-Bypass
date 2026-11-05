@@ -22,20 +22,44 @@ final class ExtensionPackagingTests: XCTestCase {
 
     private struct Run { var status: Int32; var out: String; var err: String }
 
+    /// Runs `executable` with stdout and stderr going to files, read once it exits. Two pipes
+    /// read one after the other hang as soon as the program fills the second one (64 KB) while
+    /// the first is still open: it blocks writing, and the read waits for an end that never comes.
     private func run(_ executable: String, _ args: [String], env: [String: String] = [:]) throws -> Run {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ne-packaging-run-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let outURL = dir.appendingPathComponent("stdout"), errURL = dir.appendingPathComponent("stderr")
+        FileManager.default.createFile(atPath: outURL.path, contents: nil)
+        FileManager.default.createFile(atPath: errURL.path, contents: nil)
+        let out = try FileHandle(forWritingTo: outURL), err = try FileHandle(forWritingTo: errURL)
+        defer { try? out.close(); try? err.close() }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
         process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"].merging(env) { $1 }
-        let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
         try process.run()
-        let o = out.fileHandleForReading.readDataToEndOfFile()
-        let e = err.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return Run(status: process.terminationStatus, out: String(decoding: o, as: UTF8.self),
-                   err: String(decoding: e, as: UTF8.self))
+        return Run(status: process.terminationStatus, out: try String(contentsOf: outURL, encoding: .utf8),
+                   err: try String(contentsOf: errURL, encoding: .utf8))
+    }
+
+    /// The suite once hung on the mini: check-profile.py filled stderr while `run` was still
+    /// reading stdout to its end. A program that writes far more than a pipe holds to stderr
+    /// first must come back, with both streams whole.
+    func testRunReturnsWhenAProgramFillsStderrBeforeStdout() throws {
+        let done = expectation(description: "run returned")
+        var result: Run?
+        DispatchQueue.global().async {
+            result = try? self.run("/bin/sh", ["-c", "head -c 300000 /dev/zero | tr '\\0' e >&2; echo out"])
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 20)
+        XCTAssertEqual(result?.status, 0)
+        XCTAssertEqual(result?.out, "out\n")
+        XCTAssertEqual(result?.err.count, 300_000)
     }
 
     private func temporaryDirectory() throws -> URL {
