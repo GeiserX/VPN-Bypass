@@ -485,6 +485,47 @@ final class ExtensionPackagingTests: XCTestCase {
         XCTAssertTrue(script.contains(#"cp "$1" "$4/Contents/embedded.provisionprofile""#), "AMFI reads that name")
     }
 
+    // MARK: - The bundle check
+
+    /// `make bundle`, and so `make release`, runs check-extension-bundle.sh. Its class check read
+    /// otool's whole listing through `grep -q`, which exits at the first match; under pipefail
+    /// otool's SIGPIPE then failed the check although the class was there (6.0.991 on the mini,
+    /// 2026-11-05: "class FlowProxy ... is not in the binary", exit 141 from the pipe). A listing
+    /// that names the class early and goes on for long must pass.
+    func testTheBundleCheckPassesWhenOtoolNamesTheClassEarlyInALongListing() throws {
+        let app = try temporaryDirectory().appendingPathComponent("VPN Bypass.app")
+        let ext = app.appendingPathComponent("Contents/Library/SystemExtensions/\(Self.proxyID).systemextension/Contents")
+        try FileManager.default.createDirectory(at: ext.appendingPathComponent("MacOS"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: ext.appendingPathComponent("Resources"), withIntermediateDirectories: true)
+        let bin = ext.appendingPathComponent("MacOS/\(Self.proxyID)")
+        try "#!/bin/sh\n".write(to: bin, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.path)
+        try Data().write(to: ext.appendingPathComponent("Resources/AppIcon.icns"))
+        let versions = ["CFBundleShortVersionString": "6.0.991", "CFBundleVersion": "6.0.991"]
+        try PropertyListSerialization.data(fromPropertyList: versions, format: .xml, options: 0)
+            .write(to: app.appendingPathComponent("Contents/Info.plist"))
+        var info: [String: Any] = versions
+        info.merge([
+            "CFBundlePackageType": "SYSX", "CFBundleIdentifier": Self.proxyID, "CFBundleExecutable": Self.proxyID,
+            "NSSystemExtensionUsageDescription": "Per-app routing.", "CFBundleIconFile": "AppIcon",
+            "NetworkExtension": ["NEProviderClasses": ["com.apple.networkextension.app-proxy": "FlowProxy"]],
+        ] as [String: Any]) { $1 }
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: ext.appendingPathComponent("Info.plist"))
+        // Stand-ins for the tools: otool -ov names the class first, then 400 KB of listing.
+        let tools = try temporaryDirectory()
+        for (name, body) in [("lipo", "exit 0"),
+                             ("otool", #"[ "$1" = -L ] && { echo "$2:"; exit 0; }; echo "    name 0x1 FlowProxy"; i=0; while [ $i -lt 8000 ]; do echo "    name 0x2 _TtC14VPNBypassProxy6Egress padding padding padding"; i=$((i+1)); done"#)] {
+            let url = tools.appendingPathComponent(name)
+            try "#!/bin/bash\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        let r = try run("/bin/bash", [Self.root.appendingPathComponent("scripts/check-extension-bundle.sh").path, app.path],
+                        env: ["PATH": "\(tools.path):/usr/bin:/bin:/usr/sbin:/sbin"])
+        XCTAssertEqual(r.status, 0, r.err)
+        XCTAssertTrue(r.out.contains("extension bundle ok: \(Self.proxyID) 6.0.991, provider class FlowProxy"), r.out + r.err)
+    }
+
     // MARK: - The launch gate
 
     /// A fake bundle whose binaries are shell scripts, so the gate's red path runs anywhere.

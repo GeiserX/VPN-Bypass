@@ -32,9 +32,11 @@ done
 cls=$(read_key 'NetworkExtension.NEProviderClasses.com\.apple\.networkextension\.app-proxy' "$info") \
   || fail "no NetworkExtension > NEProviderClasses > com.apple.networkextension.app-proxy entry"
 # The class must be in the binary under that exact Objective-C name, or activation fails.
+# grep reads the whole listing (no -q): with -q it exits at the first match, otool or awk gets
+# SIGPIPE, and pipefail turns a found class into a failure.
 for arch in arm64 x86_64; do
   lipo "$bin" -verify_arch "$arch" || fail "the binary has no $arch slice"
-  otool -arch "$arch" -ov "$bin" | awk '$1 == "name" {print $3}' | grep -qxF "$cls" \
+  otool -arch "$arch" -ov "$bin" | awk '$1 == "name" {print $3}' | grep -xF "$cls" >/dev/null \
     || fail "$arch: class $cls, named in NEProviderClasses, is not in the binary"
 done
 # The extension links the system and nothing else: no copy of the app's frameworks or resources.
