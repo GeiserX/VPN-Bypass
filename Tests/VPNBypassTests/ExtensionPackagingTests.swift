@@ -437,6 +437,41 @@ final class ExtensionPackagingTests: XCTestCase {
 
     // MARK: - Signing
 
+    /// The identity lookup read `security find-identity` through an awk that exits at the match.
+    /// When security wrote again after that it got SIGPIPE, and pipefail ended the script with
+    /// 141 and no message (6.0.991 on the mini, 2026-11-05). A lookup that matches before more
+    /// output must go on to the next step.
+    func testTheSigningScriptGoesOnWhenTheIdentityIsListedBeforeMoreOutput() throws {
+        let script = Self.root.appendingPathComponent("scripts/sign-and-notarize.sh").path
+        let entitlements = Self.root.appendingPathComponent("entitlements/app.entitlements").path
+        let app = try temporaryDirectory().appendingPathComponent("VPN Bypass.app")
+        try FileManager.default.createDirectory(
+            at: app.appendingPathComponent("Contents/Library/SystemExtensions/\(Self.proxyID).systemextension"),
+            withIntermediateDirectories: true)
+        let sha1 = "0709E69882B3D2CAA34D25B6654AA7BAC0C2BF26"
+        let tools = try temporaryDirectory()
+        let security = tools.appendingPathComponent("security")
+        try """
+            #!/bin/bash
+            echo '  1) \(sha1) "Developer ID Application: Example (624WUVM8B4)"'
+            sleep 0.5
+            echo '     1 valid identities found'
+            """.write(to: security, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: security.path)
+        // The step after the lookup signs: a stand-in codesign marks that it was reached.
+        let codesign = tools.appendingPathComponent("codesign")
+        try "#!/bin/bash\necho 'stand-in codesign reached' >&2\nexit 1\n".write(to: codesign, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: codesign.path)
+        let env = ["PATH": "\(tools.path):/usr/bin:/bin:/usr/sbin:/sbin", "SIGN_IDENTITY": sha1,
+                   "APPLE_ID": "a", "APPLE_PASSWORD": "b", "APPLE_TEAM_ID": "c",
+                   "PROVISIONING_PROFILE_APP": entitlements, "PROVISIONING_PROFILE_PROXY": entitlements]
+        let r = try run("/bin/bash", [script, "app", "--entitlements", entitlements, app.path], env: env)
+        XCTAssertNotEqual(r.status, 141, "the identity lookup died on a SIGPIPE")
+        XCTAssertNotEqual(r.status, 0, "the stand-in bundle cannot be signed")
+        XCTAssertFalse(r.err.contains("no valid codesigning identity"), r.err)
+        XCTAssertTrue(r.err.contains("stand-in codesign reached"), "the script went on to signing: " + r.err)
+    }
+
     func testTheSigningScriptNeedsBothProfilesBeforeItSignsAnything() throws {
         let script = Self.root.appendingPathComponent("scripts/sign-and-notarize.sh").path
         let entitlements = Self.root.appendingPathComponent("entitlements/app.entitlements").path

@@ -54,7 +54,9 @@ if [ "$mode" = "app" ]; then
   [ -d "$proxy" ] || { echo "error: $proxy is missing" >&2; exit 1; }
   # The profiles must hold the signing certificate: its SHA-1, whether SIGN_IDENTITY is the SHA-1
   # or the identity's name.
-  sign_sha1=$(security find-identity -v -p codesigning | awk -v id="$SIGN_IDENTITY" 'index($0, id) {print $2; exit}')
+  # awk reads to the end: exiting at the match would leave security writing into a closed pipe,
+  # and its SIGPIPE ends the script under pipefail (exit 141, no message).
+  sign_sha1=$(security find-identity -v -p codesigning | awk -v id="$SIGN_IDENTITY" '!found && index($0, id) {print $2; found = 1}')
   [ -n "$sign_sha1" ] || { echo "error: no valid codesigning identity matches SIGN_IDENTITY" >&2; exit 1; }
 fi
 if [ -n "${NOTARY_PROFILE:-}" ]; then
