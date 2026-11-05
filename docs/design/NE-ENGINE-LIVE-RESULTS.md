@@ -268,3 +268,81 @@ Cleanup: configuration removed, extension 6.0.1010 deactivated (`terminated wait
 reboot`), test app, clients and signing material deleted, keychain search list as it was, and the
 system extension authorization rule back to `authenticate-admin-nonshared`. The mini was not
 restarted.
+
+## Step gaps-12: the whole signed app, live
+
+Run on the same mini on 2026-11-05, macOS 26.6.1, with the whole app this time: the release/6.1 head
+`fa24268` built by `make release VERSION=6.0.990`, signed with the real profiles in a temporary
+keychain, notarized and stapled (`spctl`: accepted, "Notarized Developer ID"). Extension 6.0.990,
+helper 2.9.0. The mini's own VPN Bypass (5.1.4, helper 2.3.1) was recorded by checksum first and put
+back afterwards.
+
+- **The stand-in VPNs:** a throwaway WireGuard peer in a container on another LAN machine that NATs to
+  a second internet line. `VPN_IP` is that line's address, `HOME_IP` the mini's own. Two tunnels:
+  - *half:* `AllowedIPs = 0.0.0.0/0`, so `0/1` and `128/1` on `utun5`;
+  - *default:* `Table = off`, plus a `State:/Network/Service/<id>/IPv4` key with `OverridePrimary`
+    and a DNS key, so macOS treats the tunnel as the primary service, as a VPN client does.
+- **The apps:** copies of `curl` named `ne12-custom` (a Custom process rule to Direct) and
+  `ne12-app` (a Bypass Apps entry). Plain `curl` is the unlisted app. Each fetch asks an IP-echo
+  service which address it came from.
+- **Approvals:** the system extension authorization rule was set to `allow` for the run and put back
+  afterwards, so the administrator password prompt was not seen. Clicks went through `cliclick`.
+
+| Step | Command or click | What happened |
+|---|---|---|
+| Helper self-update | helper 2.8.0 (from 6.0.12) installed, then 6.0.990 launched | log 03:17:55Z "Helper v2.8.0 installs v2.9.0 itself, no password needed", 03:17:57Z "Helper updated to v2.9.0"; no prompt; installed binary's sha256 equals the bundled one |
+| Switch on from Settings, half tunnel up | General > Per-app routing switch | alert '"VPNBypass" would like to use a new network extension' with the system's lock icon; System Settings > General > Login Items & Extensions > Network Extensions lists "VPN Bypass" with its icon; after the toggle, '"VPN Bypass" Would Like to Add Proxy Configurations', Allow; `active` at 03:22:05Z |
+| R12 route added | `netstat -rn -f inet` | `default ROUTER UGS1cIg en0` added by the helper, logged |
+| Custom rule | `vpnb mode mode=custom`, `vpnb rule.add match=process pattern=ne12-custom routeId=<Direct>` | `ne12-custom` got `HOME_IP` (0.15 to 0.18 s, https and http); `curl` and `ne12-app` got `VPN_IP`. Rules row: "Served by per-app routing: 4 connections went around the VPN." |
+| Status headline | Settings > Status | before the switch: "Nothing is routed right now. 1 app rule waits for per-app routing."; after: "1 app rule decides where traffic goes." |
+| Rule editor | Rules > Add | match kinds Domain, Service, IP, CIDR, App; App shows the field "com.example.App or Example" and Choose… |
+| Bypass Apps entry | `vpnb mode mode=bypass`, `vpnb app.add pattern=ne12-app` | answer "served by per-app routing"; `ne12-app` got `HOME_IP`; `curl` and `ne12-custom` got `VPN_IP`. Status: "1 app skips the VPN."; Apps row: "Served by per-app routing: 3 connections went around the VPN." |
+| Half tunnel down | `wg-quick down` | scoped route gone 4 s later, logged "removed its scoped default route" |
+| Default tunnel up | `wg-quick up` + scutil primary | logged "en0 already has a scoped default route; none added" (the system's `UGScIg en0` was there); listed app `HOME_IP` in each mode, `curl` `VPN_IP` |
+| `vpnb engine.off` | | `removed` in 1 s; `systemextensionsctl list`: 6.0.990 `terminated waiting to uninstall on reboot`; configurations named "VPN Bypass per-app routing": 0; no extension process; the system's scoped route untouched; listed apps back to `VPN_IP`; Settings: "The extension is removed from this Mac." |
+| `vpnb engine.on` | | both approvals asked again; `active` at 03:30:33Z |
+| Half tunnel while active | switch tunnels | scoped route in within 1 s; listed app `HOME_IP`, `curl` `VPN_IP` |
+| First crash | `kill -9` the extension | 03:31:13Z "session ended on its own … Starting it again once"; route removed and added back; `active` 03:31:14Z with a new pid; a request in the gap went to `VPN_IP` |
+| Second crash within 10 min | `kill -9` again | 03:32:58Z `failed (stoppedTwice)`, switch off, scoped route removed; configuration and extension stay. Settings: "Per-app routing stopped twice within 10 minutes, so it was turned off. Your listed apps use the VPN." with a Remove Extension button |
+| Remove Extension | the button | removed in 1 s; configurations 0; extension `terminated waiting to uninstall on reboot` |
+| Switch on, then off, from Settings | the switch | off ran the removal (configuration removed, extension deactivated); route removed; listed app back to `VPN_IP` |
+| Manual removal path | System Settings > Network | on macOS 26.6.1: Network > VPN & Filters, section "Filters & Proxies", row "VPN Bypass per-app routing", Transparent Proxy, Enabled, with + and − |
+
+![Status: an app rule waits for per-app routing](../images/pr/ne-live-gates/01-status-custom-app-rule-waiting.png)
+![The first approval](../images/pr/ne-live-gates/03-alert-new-network-extension.png)
+![The second approval](../images/pr/ne-live-gates/06-alert-add-proxy-configurations.png)
+![General: per-app routing active](../images/pr/ne-live-gates/07-general-on-active.png)
+![Rules: the app rule is served](../images/pr/ne-live-gates/08-rules-app-rule-served.png)
+![The rule editor's App match](../images/pr/ne-live-gates/09-rule-editor-app-match.png)
+![Status: an app rule decides](../images/pr/ne-live-gates/10-status-app-rule-decides.png)
+![Status: one app skips the VPN](../images/pr/ne-live-gates/11-status-bypass-one-app.png)
+![Apps: served by per-app routing](../images/pr/ne-live-gates/12-apps-served.png)
+![General: stopped twice, Remove Extension](../images/pr/ne-live-gates/15-general-stopped-twice-remove.png)
+![General: removed after the button](../images/pr/ne-live-gates/16-general-removed-after-remove-button.png)
+
+More shots in `docs/images/pr/ne-live-gates/`: the switch off (02), awaiting the extension (14), and
+removed after `engine.off` (13). The System Settings sheets are not committed: they list other
+products installed on the mini.
+
+**Seen on the way, not fixed here:**
+
+- The system alert's own "Open System Settings" button closed the alert without opening System
+  Settings, twice. The app's own Open System Settings button opens Login Items & Extensions, from
+  where the Network Extensions (i) sheet is one click.
+- The alert names the app "VPNBypass" (the bundle name) although `CFBundleDisplayName` is set; System
+  Settings uses "VPN Bypass".
+- With the half tunnel up, Status says "Default route: en0, outside the VPN", while `0/1` and `128/1`
+  send everything into `utun5`. That line is wrong for this kind of VPN.
+- Right after the switch comes back on, the General group says "0 connections went around" until the
+  next count arrives.
+
+**Left for the owner's Mac:** L0 on macOS 27 (the alert and the sheet), L1 to L4 with GlobalProtect
+and the AWS VPN Client, Remove and the Filters & Proxies path on macOS 27, the administrator password
+prompt for each approval, L11 (restart and login) and the soak.
+
+Cleanup: app quit; tunnels and the peer container removed; scutil keys gone; the mini's 5.1.4 app and
+helper 2.3.1 back (sha256, modes and signature match, helper running); its settings, log and
+`/etc/hosts` (sha256 and mode 0440) back; the authorization rule back to
+`authenticate-admin-nonshared`; temporary keychain deleted, search list as it was, profiles and keys
+deleted. Three 6.0.990 extension entries stay `terminated waiting to uninstall on reboot`; the mini
+was not restarted.
