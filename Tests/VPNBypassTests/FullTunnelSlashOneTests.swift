@@ -30,6 +30,25 @@ final class FullTunnelSlashOneTests: XCTestCase {
         XCTAssertEqual(RouteKernel.slashOneTunnelOwnerIndex(table), 24)
     }
 
+    /// The Status page names a carrier only for the whole pair on one interface: with one half,
+    /// the other half of the space still leaves by the default route.
+    func testThePairOwnerNeedsBothHalvesOnOneInterface() {
+        let pair = [
+            kr(0, prefix: 0, gateway: 0xC0A8_0A01),
+            kr(0, prefix: 1, ifIndex: 24),
+            kr(0x8000_0000, prefix: 1, ifIndex: 24),
+        ]
+        XCTAssertEqual(RouteKernel.slashOnePairOwnerIndex(pair), 24)
+        XCTAssertNil(RouteKernel.slashOnePairOwnerIndex(Array(pair.prefix(2))), "one half only")
+        XCTAssertNil(RouteKernel.slashOnePairOwnerIndex([pair[0], pair[1], kr(0x8000_0000, prefix: 1, ifIndex: 25)]),
+                     "halves on two interfaces")
+        XCTAssertNil(RouteKernel.slashOnePairOwnerIndex([pair[0], kr(0, prefix: 1, ifIndex: 24, flags: RTF_PROTO1),
+                                                         kr(0x8000_0000, prefix: 1, ifIndex: 24, flags: RTF_PROTO1)]),
+                     "our own routes")
+        // Selection still settles for one half.
+        XCTAssertEqual(RouteKernel.slashOneTunnelOwnerIndex(Array(pair.prefix(2))), 24)
+    }
+
     /// Our own VPN Only catch-alls are RTF_PROTO1-tagged; they must never masquerade as a VPN.
     func testOurOwnRoutesNeverCountAsTheSlashOneOwner() {
         let table = [

@@ -1858,8 +1858,8 @@ final class RouteManager: ObservableObject {
         /// Destinations of the kernel routes carrying OUR ownership tag (RTF_PROTO1) — ground
         /// truth of what this app currently owns, read silently from the table itself.
         let taggedDestinations: [String]
-        /// The tunnel whose 0.0.0.0/1 + 128.0.0.0/1 pair covers the default route (wg-quick,
-        /// OpenVPN def1), nil without one: by longest prefix it carries everything, though
+        /// The tunnel that holds both halves, 0.0.0.0/1 and 128.0.0.0/1, over the default route
+        /// (wg-quick, OpenVPN def1), nil without the whole pair: by longest prefix it carries everything, though
         /// `route get default` still names the physical interface.
         var halfRouteCarrier: String? = nil
 
@@ -1878,7 +1878,7 @@ final class RouteManager: ObservableObject {
                                    selectedInterface: vpnInterface,
                                    defaultRouteInterface: defaultIface,
                                    taggedDestinations: tagged,
-                                   halfRouteCarrier: table.flatMap(RouteKernel.slashOneTunnelOwner))
+                                   halfRouteCarrier: table.flatMap(RouteKernel.slashOnePairOwner))
     }
 
     func listVPNLinks() async -> [VPNLink] {
