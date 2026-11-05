@@ -495,6 +495,14 @@ final class AppListVerbTests: XCTestCase {
         let removed = await send("app.rm", ["pattern": "COM.EXAMPLE.MAIL"])
         XCTAssertTrue(removed.ok)
         XCTAssertEqual(rm.config.bypassApps.map(\.pattern), ["Example-Tool"])
+        // Two entries that differ only in case: the fallback names neither, the id does.
+        rm.config.bypassApps = [BypassApp(pattern: "com.example.Chat"), BypassApp(pattern: "com.example.CHAT")]
+        let ambiguous = await send("app.disable", ["pattern": "com.example.chat"])
+        XCTAssertEqual(ambiguous.error?.code, "ambiguous")
+        XCTAssertEqual(rm.config.bypassApps.map(\.enabled), [true, true])
+        let exact = await send("app.disable", ["pattern": "com.example.CHAT"])
+        XCTAssertTrue(exact.ok)
+        XCTAssertEqual(rm.config.bypassApps.map(\.enabled), [true, false])
     }
 
     // Review: an app signed with a dotless identifier is stored by its executable's name, the
