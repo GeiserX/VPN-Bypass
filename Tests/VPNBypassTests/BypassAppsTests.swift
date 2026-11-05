@@ -310,14 +310,33 @@ final class BypassAppsTests: XCTestCase {
         XCTAssertEqual(rm.config.bypassApps.map(\.pattern), ["com.example.Browser"])
     }
 
-    func testAddByIdStoresTheSigningIdentifier() {
+    /// An add by id takes the installed app's signing id only when it differs in case (the rule
+    /// `rule.add` follows): a shorter signing id would widen the entry to every sibling app, as
+    /// entries match an id and its dotted descendants, and another one is not what was asked for.
+    func testAddByIdKeepsTheIdTypedWhenTheSigningIdDiffersInMoreThanCase() async {
+        BypassApps.lookup = { id in
+            switch id {
+            case "com.example.Editor": return AppIdentity(name: "Editor", signingID: "com.example", team: "TEAM000001", bundleID: id)
+            case "com.example.Bundle": return AppIdentity(name: "Example", signingID: "com.example.Signed", team: "TEAM000001", bundleID: id)
+            default: return nil
+            }
+        }
+        XCTAssertEqual(try rm.addBypassApp("com.example.Editor").get().pattern, "com.example.Editor", "a prefix would match siblings")
+        let reply = await send("app.add", ["pattern": "com.example.Bundle"])
+        XCTAssertTrue(reply.ok, "\(String(describing: reply.error))")
+        XCTAssertEqual(reply.result?.apps?.first?.pattern, "com.example.Bundle", "another identifier")
+        XCTAssertEqual(rm.config.bypassApps.map(\.pattern), ["com.example.Editor", "com.example.Bundle"])
+    }
+
+    func testAddByIdKeepsTheBundleIdOfTheAppItFound() {
         BypassApps.lookup = { id in
             id == "com.example.Bundle"
                 ? AppIdentity(name: "Example", signingID: "com.example.Signed", team: "TEAM000001", bundleID: id) : nil
         }
         let app = try! rm.addBypassApp("com.example.Bundle").get()
-        XCTAssertEqual(app.pattern, "com.example.Signed")
-        XCTAssertEqual(app.bundleID, "com.example.Bundle", "kept for the icon, the chooser and app.rm")
+        XCTAssertEqual(app.pattern, "com.example.Bundle")
+        XCTAssertEqual(app.name, "Example")
+        XCTAssertNil(app.bundleID, "the pattern is the bundle id")
         XCTAssertEqual(rm.addBypassApp("com.example.Bundle"), .failure(.alreadyListed("Example")))
         // The chooser leaves it out by its bundle id.
         let url = URL(fileURLWithPath: "/Applications/Example.app")
@@ -332,7 +351,9 @@ final class BypassAppsTests: XCTestCase {
             id == "com.example.Bundle"
                 ? AppIdentity(name: "Example", signingID: "com.example.Signed", team: "TEAM000001", bundleID: id) : nil
         }
-        _ = rm.addBypassApp("com.example.Bundle")
+        // The chooser stores the picked app's signing id.
+        let identity = AppIdentity(name: "Example", signingID: "com.example.Signed", team: "TEAM000001", bundleID: "com.example.Bundle")
+        XCTAssertEqual(try rm.addBypassApp(identity.signingID, identity: identity).get().pattern, "com.example.Signed")
         let gone = await send("app.rm", ["pattern": "com.example.Bundle"])
         XCTAssertTrue(gone.ok, "\(String(describing: gone.error))")
         XCTAssertEqual(rm.config.bypassApps, [])

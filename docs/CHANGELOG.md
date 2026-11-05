@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `vpnb app.enable`, `app.disable` and `app.rm` find a bundle ID whatever its case, as `app.add` does. An app picked in a chooser whose code is signed with a dotless identifier is stored by its executable's name, which is how a dotless pattern is matched.
 - `vpnb` reads a `servedBy` it does not know as absent instead of failing the reply, so an older `vpnb` keeps working with a later app.
 - The extension approval alert and System Settings name the app VPN Bypass, not VPNBypass.
+- `vpnb app.add` takes the installed app's signing identifier only when it differs from the id typed in case, as `rule.add` does, so a shorter one never widens an entry to sibling apps.
 
 ## [6.0.12]
 

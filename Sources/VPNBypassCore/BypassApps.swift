@@ -300,15 +300,18 @@ enum BypassAppServing {
 // MARK: - The list
 
 extension RouteManager {
-    /// Adds an app to the list. `identity` is the app the chooser picked; without one (an add
-    /// by id), the installed app with that id is looked up, so its name and team are known, and
-    /// the entry holds the identifier its code is signed with, which is what flows report.
+    /// Adds an app to the list. `identity` is the app the chooser picked, and the entry holds the
+    /// identifier its code is signed with, which is what flows report. Without one (an add by
+    /// id), the installed app with that id is looked up, so its name and team are known; the
+    /// entry takes its signing identifier only when that differs from the id typed in case
+    /// (`ProcessRule.storedPattern`), so a shorter one never widens the entry to sibling apps.
     /// Only the config changes: per-app routing picks it up with its next policy push.
     @discardableResult
     func addBypassApp(_ pattern: String, identity: AppIdentity? = nil) -> Result<BypassApp, BypassAppError> {
         let trimmed = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
         let found = identity ?? (ProcessRule.invalid(trimmed) == nil ? BypassApps.lookup(trimmed) : nil)
-        switch BypassApps.check(found?.signingID ?? trimmed, identity: found, in: config.bypassApps) {
+        let value = identity?.signingID ?? found.map { ProcessRule.storedPattern(trimmed, signingID: $0.signingID) } ?? trimmed
+        switch BypassApps.check(value, identity: found, in: config.bypassApps) {
         case .failure(let error):
             return .failure(error)
         case .success(let value):
