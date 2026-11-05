@@ -1987,9 +1987,12 @@ struct DropdownStatus: Equatable {
         }
         let problems = partialReasons(input)
         if input.installedRoutes == 0 && !input.everythingElseDirect && !input.onlyServedApps {
+            // Custom mode with rules for apps only: say what they wait for, or that they do nothing.
+            let nothing = String(localized: "Nothing is routed right now.")
+            let onlyAppRules = input.mode == .custom && input.enabledAppRules > 0 && input.enabledAppRules >= input.enabledRules
             return DropdownStatus(chip: .notRouting, tone: .warn,
                                   headline: String(localized: "\(name) connected"),
-                                  sentence: String(localized: "Nothing is routed right now."),
+                                  sentence: onlyAppRules ? nothing + " " + whatIsRouted(input) : nothing,
                                   note: scheduledNote,
                                   line3: Line3(text: numbersLine(input, now: now), isProblem: true,
                                                action: problems.isEmpty ? nil : .show))

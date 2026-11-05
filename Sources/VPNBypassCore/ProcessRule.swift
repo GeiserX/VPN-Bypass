@@ -79,7 +79,8 @@ enum ProcessRule {
                         customEngine: Bool = true) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
         guard rule.matchType == .process else { return (.kernel, nil) }
         if case .unavailable = engine { return (.none, .perAppRoutingNotAvailable) }
-        guard customEngine else { return (.none, .notInCustomMode) }
+        // A rule turned off has no reason: its own switch says why.
+        guard customEngine else { return (.none, rule.enabled ? .notInCustomMode : nil) }
         guard routeUsable else { return (.none, .routeUnavailable) }
         guard routeIsDirect else { return (.none, .routeNotSupported) }
         if let reason = engine.ruleReason { return (.none, reason) }

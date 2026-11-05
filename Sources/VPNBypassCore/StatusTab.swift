@@ -526,7 +526,15 @@ extension DropdownStatus.Input {
         waitingAppRules = 0
         for rule in apps {
             let serving = ProcessRule.serving(rule, engine: engine, config: config)
-            if serving.servedBy == .perAppEngine { servedAppRules += 1 } else if serving.reason?.waitsForEngine == true { waitingAppRules += 1 }
+            // Only a rule on a Direct route that is on waits for per-app routing; per-app
+            // routing would not serve one on another route either.
+            let route = config.routes.first { $0.id == rule.routeId }
+            let directRoute = route?.enabled == true && route?.egress == .direct
+            if serving.servedBy == .perAppEngine {
+                servedAppRules += 1
+            } else if serving.reason?.waitsForEngine == true && directRoute {
+                waitingAppRules += 1
+            }
         }
     }
 

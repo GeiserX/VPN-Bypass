@@ -37,6 +37,10 @@ final class AppRuleTruthTests: XCTestCase {
                                                  physicalInterface: "en0", tunnelOwnerTeams: [])
             XCTAssertFalse(FlowPolicyCompiler.compile(input, generation: 1).matchers.contains { $0.ruleID == app.id.uuidString })
         }
+        // A rule turned off has no reason in any mode: its own switch says why.
+        var off = app
+        off.enabled = false
+        XCTAssertNil(ProcessRule.serving(off, engine: .active, config: config(mode: .bypass)).reason)
         // A build without per-app routing says that first: it is the reason in every mode.
         XCTAssertEqual(ProcessRule.serving(app, engine: .unavailable(.notInThisBuild), config: config(mode: .bypass)).reason,
                        .perAppRoutingNotAvailable)
@@ -169,11 +173,39 @@ final class AppRuleTruthTests: XCTestCase {
         var waiting = custom(rules: 2, apps: 2, waiting: 2)
         waiting.installedRoutes = 0
         XCTAssertEqual(DropdownStatus.make(waiting, now: Date()).chip, .notRouting)
+        // ...and the sentence says why nothing is routed, not just that it is not.
+        XCTAssertEqual(DropdownStatus.make(waiting, now: Date()).sentence,
+                       "Nothing is routed right now. 2 app rules wait for per-app routing.")
+        // A destination rule with no route installed keeps the plain sentence.
+        var destination = custom(rules: 2, apps: 1, waiting: 1)
+        destination.installedRoutes = 0
+        XCTAssertEqual(DropdownStatus.make(destination, now: Date()).sentence, "Nothing is routed right now.")
     }
 
-    // MARK: - (j) Site Check offers Send Direct only where it would change something
+    /// A rule on another route would not be served once per-app routing runs, so it does not wait for it.
+    func testOnlyRulesOnAnEnabledDirectRouteWaitForPerAppRouting() {
+        let vpn = Route(name: "VPN", egress: .vpnDefault)
+        var offDirect = Route(name: "Off", egress: .direct)
+        offDirect.enabled = false
+        var c = config(mode: .custom)
+        c.routes = [direct, vpn, offDirect]
+        c.rules = [
+            Rule(matchType: .process, pattern: "com.example.A", routeId: direct.id, order: 0),
+            Rule(matchType: .process, pattern: "com.example.B", routeId: vpn.id, order: 1),
+            Rule(matchType: .process, pattern: "com.example.C", routeId: offDirect.id, order: 2),
+            Rule(matchType: .process, pattern: "com.example.D", routeId: UUID(), order: 3),
+        ]
+        var input = custom(rules: 4)
+        input.countAppRules(c.rules, config: c, engine: .unavailable(.notInThisBuild))
+        XCTAssertEqual([input.enabledAppRules, input.servedAppRules, input.waitingAppRules], [4, 0, 1])
+    }
 
-    func testSendDirectIsHiddenWhenTheDefaultRouteIsAlreadyDirect() {
+    // MARK: - Site Check keeps Send Direct with Everything else on Direct
+
+    /// In Custom mode the app installs routes for rules only, so a host no rule claims follows
+    /// the system's default route (the VPN) whatever the default route says. Send Direct is
+    /// what actually sends it direct, so it stays offered.
+    func testSendDirectStaysOfferedWhenEverythingElseIsDirect() {
         let vpn = Route(name: "Corp VPN", egress: .vpnDefault)
         func answer(default route: Route) -> SiteRouteAnswer {
             let s = SiteRoute.Snapshot(mode: .custom, custom: true, list: [], services: [], rules: [],
@@ -183,14 +215,12 @@ final class AppRuleTruthTests: XCTestCase {
             return SiteRoute.answer(host: "example.org", mode: .custom, addresses: ["203.0.113.5"], found: found,
                                     probes: [], control: nil, vpnConnected: true)
         }
-        let goesDirect = answer(default: direct)
-        XCTAssertEqual(goesDirect.match, .defaultRoute)
-        XCTAssertFalse(goesDirect.canAdd)
-        XCTAssertNil(StatusPage.siteAdd(goesDirect, mode: .custom))
-        // Everything else into the VPN: Send Direct is the way out, as before.
-        let intoVPN = answer(default: vpn)
-        XCTAssertTrue(intoVPN.canAdd)
-        XCTAssertEqual(StatusPage.siteAdd(intoVPN, mode: .custom)?.title, "Send Direct")
+        for route in [direct, vpn] {
+            let a = answer(default: route)
+            XCTAssertEqual(a.match, .defaultRoute)
+            XCTAssertTrue(a.canAdd, route.name)
+            XCTAssertEqual(StatusPage.siteAdd(a, mode: .custom)?.title, "Send Direct", route.name)
+        }
     }
 
     // MARK: - (e) The dropdown's list joins in the app's language
