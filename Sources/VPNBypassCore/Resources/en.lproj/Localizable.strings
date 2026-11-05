@@ -1182,3 +1182,4 @@
 "Choose an App" = "Choose an App";
 "Choose" = "Choose";
 "%@ matches no rule. Everything else is set to %@, but the app adds routes for rules only, so it follows the system's own routing." = "%@ matches no rule. Everything else is set to %@, but the app adds routes for rules only, so it follows the system's own routing.";
+"Its 0/1 and 128/1 routes come before the default route on %@." = "Its 0/1 and 128/1 routes come before the default route on %@.";

@@ -227,11 +227,20 @@ enum StatusPage {
 
     /// Which interface carries the default route, and what it is to this app. Nil
     /// `snapshot` means the tunnels have not been read yet.
+    /// A tunnel's 0/1 + 128/1 pair over a default left on the physical interface carries
+    /// everything, so the line names that tunnel, and says the pair is why.
     static func defaultRouteLine(_ snapshot: RouteManager.CoexistenceSnapshot?, bundle: Bundle = .main) -> Line {
         guard let snapshot else { return Line(text: String(localized: "Reading…", bundle: bundle)) }
-        guard let iface = snapshot.defaultRouteInterface else {
+        guard let iface = snapshot.trafficCarrier else {
             return Line(text: String(localized: "Not found", bundle: bundle), tone: .warn)
         }
+        let line = carrierLine(iface, snapshot: snapshot, bundle: bundle)
+        guard snapshot.halfRouteCarrier != nil, let physical = snapshot.defaultRouteInterface, physical != iface else { return line }
+        return Line(text: line.text + ". " + String(localized: "Its 0/1 and 128/1 routes come before the default route on \(physical).", bundle: bundle),
+                    tone: line.tone)
+    }
+
+    private static func carrierLine(_ iface: String, snapshot: RouteManager.CoexistenceSnapshot, bundle: Bundle) -> Line {
         if iface == snapshot.selectedInterface {
             return Line(text: String(localized: "\(iface), the VPN", bundle: bundle))
         }
@@ -486,7 +495,7 @@ enum StatusPage {
         } else {
             role = String(localized: "Not used by the app.", bundle: bundle)
         }
-        guard link.interface == snapshot.defaultRouteInterface else { return role }
+        guard link.interface == snapshot.trafficCarrier else { return role }
         return role + " " + String(localized: "It carries the default route.", bundle: bundle)
     }
 

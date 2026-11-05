@@ -1504,6 +1504,18 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(try renderSettings(page: .status, to: "status-site-everything-else-after.png"), Self.settingsSize)
     }
 
+    /// Status's Default route row under a VPN that takes the internet with 0/1 and 128/1 and
+    /// leaves `default` on en0. Before: "en0, outside the VPN". After: the tunnel, and why.
+    func testStatusDefaultRouteUnderHalfRoutes() throws {
+        var snapshot = RouteManager.CoexistenceSnapshot(links: [], selectedInterface: "utun4",
+                                                        defaultRouteInterface: "en0", taggedDestinations: [])
+        try renderComponent(StatusLineRow(label: String(localized: "Default route"), line: StatusPage.defaultRouteLine(snapshot)),
+                            to: "status-default-route-before.png")
+        snapshot.halfRouteCarrier = "utun4"
+        try renderComponent(StatusLineRow(label: String(localized: "Default route"), line: StatusPage.defaultRouteLine(snapshot)),
+                            to: "status-default-route-after.png")
+    }
+
     /// Logs with three tunnels up. Before: the status pass logged the tunnel line every 30
     /// seconds and it filled the page. After: once, then the lines that matter.
     func testLogsMultiTunnelLineOnce() throws {
