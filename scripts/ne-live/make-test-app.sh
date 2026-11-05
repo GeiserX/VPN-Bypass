@@ -39,6 +39,10 @@ if [ -n "$version" ]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$proxy/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" "$proxy/Contents/Info.plist"
 fi
+# Named as the app's executable, old name linked, so the approval alert names it as users see it.
+exe="$dst/Contents/MacOS/VPN Bypass"
+rm -f "$dst/Contents/MacOS/VPNBypass"
+ln -s "VPN Bypass" "$dst/Contents/MacOS/VPNBypass"
 if [ "$engine" = 1 ]; then
   build="$(mktemp -d)"
   trap 'rm -rf "$build"' EXIT
@@ -47,12 +51,12 @@ if [ "$engine" = 1 ]; then
     "$root"/Sources/VPNBypassPolicy/*.swift
   cp "$here/engine-main.swift" "$build/main.swift"
   core="$root/Sources/VPNBypassCore"
-  swiftc -O -swift-version 5 -I "$build" -L "$build" -lVPNBypassPolicy -o "$dst/Contents/MacOS/VPNBypass" "$build/main.swift" \
+  swiftc -O -swift-version 5 -I "$build" -L "$build" -lVPNBypassPolicy -o "$exe" "$build/main.swift" \
     "$core/FlowEngineManager.swift" "$core/FlowEngineSystem.swift" "$core/FlowEngineState.swift" \
     "$core/ProcessRule.swift" "$core/RouteModel.swift" \
     "$core/ScopedDefaultRoute.swift" "$core/RouteKernel.swift" "$core/HelperProtocol.swift"
 else
-  swiftc -O -swift-version 5 -o "$dst/Contents/MacOS/VPNBypass" "$here/main.swift" "$root"/Sources/VPNBypassPolicy/*.swift
+  swiftc -O -swift-version 5 -o "$exe" "$here/main.swift" "$root"/Sources/VPNBypassPolicy/*.swift
 fi
 
 keychain=()

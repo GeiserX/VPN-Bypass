@@ -11,7 +11,7 @@
 // Build it into a test bundle with `make-test-app.sh APP OUT [VERSION] --engine`, then run it as
 // the console user:
 //
-//   launchctl asuser $(id -u) "/Applications/VPN Bypass NE Test.app/Contents/MacOS/VPNBypass" on --apps ne6-fetch
+//   launchctl asuser $(id -u) "/Applications/VPN Bypass NE Test.app/Contents/MacOS/VPN Bypass" on --apps ne6-fetch
 //
 // With `--route-driver PATH --gateway ROUTER` it also keeps per-app routing's scoped default route
 // (R12) the way the app does, through `FlowEngineManager.syncEgressRoute`, but by running the

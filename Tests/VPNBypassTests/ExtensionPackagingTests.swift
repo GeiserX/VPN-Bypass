@@ -72,6 +72,36 @@ final class ExtensionPackagingTests: XCTestCase {
 
     // MARK: - The app's name in the approval alert
 
+    /// macOS's "would like to use a new network extension" alert names the app by the file name
+    /// of the executable that files the request, whatever its Info.plist says. Live on the mini
+    /// (macOS 26.6.1, 2026-11-05): the same test app said "VPNBypass" with the executable named
+    /// so, also with an Info.plist embedded in it, and "VPN Bypass" once the file was renamed.
+    /// The old name stays as a link to the new file: an older running copy watches that path for
+    /// the update (AppUpdateRelauncher stats it, following the link), and a login item written
+    /// by an older version starts it.
+    func testTheAppExecutableIsNamedAsTheApprovalAlertShowsIt() throws {
+        let app = try plist("Info.plist")
+        XCTAssertEqual(app["CFBundleExecutable"] as? String, "VPN Bypass")
+        XCTAssertEqual(app["CFBundleDisplayName"] as? String, "VPN Bypass")
+
+        let makefile = try text("Makefile")
+        XCTAssertTrue(makefile.contains("@cp $(BUILD_DIR)/VPNBypass \"$(APP_BUNDLE)/Contents/MacOS/VPN Bypass\""), "make bundle names the executable")
+        XCTAssertTrue(makefile.contains("@ln -s \"VPN Bypass\" \"$(APP_BUNDLE)/Contents/MacOS/VPNBypass\""), "make bundle keeps the old name as a link")
+        let testApp = try text("scripts/ne-live/make-test-app.sh")
+        XCTAssertTrue(testApp.contains("exe=\"$dst/Contents/MacOS/VPN Bypass\""), "the live-test app names itself as the app does")
+        XCTAssertTrue(try text("scripts/smoke-launch.sh").contains("bin=\"$app/Contents/MacOS/VPN Bypass\""))
+        XCTAssertTrue(try text(".github/workflows/ci.yml").contains("\"VPN Bypass.app/Contents/MacOS/VPN Bypass\""))
+        XCTAssertTrue(try text("Sources/VPNBypassCore/LaunchAtLoginManager.swift").contains("appPath + \"/Contents/MacOS/VPN Bypass\""))
+
+        // An older copy's relauncher stats the old path: through the link it sees the new file.
+        let macOS = try temporaryDirectory()
+        let exe = macOS.appendingPathComponent("VPN Bypass")
+        try Data("new".utf8).write(to: exe)
+        try FileManager.default.createSymbolicLink(atPath: macOS.appendingPathComponent("VPNBypass").path, withDestinationPath: "VPN Bypass")
+        XCTAssertEqual(AppUpdateRelauncher.identity(ofFileAt: macOS.appendingPathComponent("VPNBypass").path),
+                       AppUpdateRelauncher.identity(ofFileAt: exe.path))
+    }
+
     /// The app's own Open System Settings button: the alert's does nothing (sysextd cannot
     /// launch System Settings into the user's session; launchd error 112 in its log on the mini),
     /// so the app opens the sheet itself, with the URL sysextd builds, which lands on the Network
@@ -133,8 +163,8 @@ final class ExtensionPackagingTests: XCTestCase {
         XCTAssertTrue(makefile.contains(#"@cp -R Proxy/*.lproj "$(PROXY_BUNDLE)/Contents/Resources/""#))
     }
 
-    /// The approval alert and System Settings name the app by its display name. Without one they
-    /// fell back to the executable's name and showed "VPNBypass".
+    /// System Settings names the app by its display name; without one it fell back to the
+    /// executable's name. The approval alert uses the executable's name whatever this says (above).
     func testTheAppNamesItselfVPNBypassWithASpace() throws {
         let info = try plist("Info.plist")
         XCTAssertEqual(info["CFBundleDisplayName"] as? String, "VPN Bypass")
@@ -460,7 +490,7 @@ final class ExtensionPackagingTests: XCTestCase {
             try "#!/bin/bash\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         }
-        try script(macos.appendingPathComponent("VPNBypass"), appBody)
+        try script(macos.appendingPathComponent("VPN Bypass"), appBody)
         try script(macos.appendingPathComponent("vpnb"), "exit 0")
         let info: [String: Any] = ["CFBundleShortVersionString": "6.1.0"]
         try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)

@@ -68,7 +68,11 @@ bundle: build build-helper
 	@mkdir -p "$(APP_BUNDLE)/Contents/MacOS"
 	@mkdir -p "$(APP_BUNDLE)/Contents/Resources"
 	@mkdir -p "$(APP_BUNDLE)/Contents/Library/LaunchDaemons"
-	@cp $(BUILD_DIR)/VPNBypass "$(APP_BUNDLE)/Contents/MacOS/"
+	@# The executable is named "VPN Bypass" because macOS's extension approval alert names the
+	@# app by that file name. VPNBypass, the old name, stays as a link: an older running copy
+	@# watches it to notice the update, and a login item written by an older version starts it.
+	@cp $(BUILD_DIR)/VPNBypass "$(APP_BUNDLE)/Contents/MacOS/VPN Bypass"
+	@ln -s "VPN Bypass" "$(APP_BUNDLE)/Contents/MacOS/VPNBypass"
 	@# Bundle the vpnb control CLI alongside the app binary. It's a SwiftPM
 	@# executable target, so the universal `swift build` above already produced
 	@# it at $(BUILD_DIR)/vpnb (same arm64+x86_64 treatment as VPNBypass). The
