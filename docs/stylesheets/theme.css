@@ -54,8 +54,10 @@
  *     the first one is styled and page titles keep their own look;
  *   - the title of the navigation drawer on a narrow screen
  *     (label[for=__drawer]), where the name is a bare text node.
- * Both sit on --md-primary-fg-color (#0B1220) in the dark and the light
- * scheme, so one set of colours holds in both. */
+ * On the dark scheme both sit on the navy and take the banner's colours. The
+ * header of Zensical's modern theme takes the page background, so on the light
+ * scheme it is white: there "VPN" keeps the default text colour and "Bypass"
+ * takes the light scheme's link blue (white would vanish, sky reads at 2.0:1). */
 .md-header__topic:first-child .md-ellipsis,
 .md-nav--primary > .md-nav__title[for="__drawer"] {
   --vb-wordmark-size: 0.9rem;
@@ -80,7 +82,6 @@
 .md-nav--primary > .md-nav__title[for="__drawer"]::before {
   content: "VPN";
   content: "VPN" / "";
-  color: #FFFFFF;
   font-weight: 800;
 }
 
@@ -92,6 +93,29 @@
   font-weight: 200;
   /* The banner gap: 18 px at a cap height of 54 px, about 0.06em. */
   margin-left: 0.06em;
+}
+
+[data-md-color-scheme="slate"] .md-header__topic:first-child .md-ellipsis::before,
+[data-md-color-scheme="slate"] .md-nav--primary > .md-nav__title[for="__drawer"]::before {
+  color: #FFFFFF;
+}
+
+[data-md-color-scheme="default"] .md-header__topic:first-child .md-ellipsis::after,
+[data-md-color-scheme="default"] .md-nav--primary > .md-nav__title[for="__drawer"]::after {
+  color: #0369A1;
+}
+
+/* The drawer title is a flex row with an 8 px gap between items, and the logo,
+   the name's text node and the two drawn words are each an item, so the logo
+   sat between "VPN" and "Bypass". Put the logo first and keep the gap after it
+   only, so the drawer reads like the header. */
+.md-nav--primary > .md-nav__title[for="__drawer"] {
+  gap: 0;
+}
+
+.md-nav--primary > .md-nav__title[for="__drawer"] .md-logo {
+  order: -1;
+  margin-right: 0.4rem;
 }
 
 /* Keep the mark and the name close, so they read as one unit. */
