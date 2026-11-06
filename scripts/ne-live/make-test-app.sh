@@ -29,6 +29,10 @@ root="$here/../.."
 : "${SIGN_IDENTITY:?SIGN_IDENTITY is not set}"
 : "${PROVISIONING_PROFILE_APP:?}" "${PROVISIONING_PROFILE_PROXY:?}"
 
+# A symlink as OUT would let `rm -rf` below follow it, possibly into APP: refuse it.
+dst_trim="${dst%/}"
+[ ! -L "$dst_trim" ] || { echo "OUT must not be a symlink: $dst" >&2; exit 1; }
+dst="$dst_trim"
 src_real="$(cd "$src" && pwd -P)"
 dst_real="$(cd "$(dirname "$dst")" && pwd -P)/$(basename "$dst")"
 case "$src_real/" in "$dst_real/"*) echo "OUT must not be APP or contain it: $dst" >&2; exit 1 ;; esac

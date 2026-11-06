@@ -172,12 +172,14 @@ enum BypassApps {
     /// `lookup`, kept `identityCacheSeconds` per id.
     static func cachedLookup(_ id: String, now: Date = Date()) -> AppIdentity? {
         identityCacheLock.lock()
-        defer { identityCacheLock.unlock() }
-        if let hit = identityCache[id], now >= hit.at, now.timeIntervalSince(hit.at) < identityCacheSeconds {
-            return hit.identity
-        }
+        let hit = identityCache[id]
+        identityCacheLock.unlock()
+        if let hit, now >= hit.at, now.timeIntervalSince(hit.at) < identityCacheSeconds { return hit.identity }
+        // Read outside the lock, so a slow signature read holds up no other row.
         let identity = lookup(id)
+        identityCacheLock.lock()
         identityCache[id] = (identity, now)
+        identityCacheLock.unlock()
         return identity
     }
 

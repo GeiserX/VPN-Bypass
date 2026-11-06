@@ -103,7 +103,7 @@ log_after=$(stat -f %z "$applog" 2>/dev/null || echo 0)
 # them launches fine but offers no services, and says so in the log.
 # Captured first: under pipefail, `tail | grep -q` fails with SIGPIPE (141) when grep quits
 # early, so a found line would read as not found.
-this_launch=$(tail -c +"$((log_before + 1))" "$applog")
+this_launch=$(tail -c +"$((log_before + 1))" "$applog") || fail "could not read $applog after the launch"
 if grep -q "Service catalogue:" <<<"$this_launch"; then
   fail "the app could not read its service catalogue"
 fi

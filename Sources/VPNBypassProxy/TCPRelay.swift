@@ -47,6 +47,9 @@ final class TCPRelay {
     /// The outbound connection got ready; the flow's own open may still be pending. From here
     /// on no next answer is tried: the connection that got ready is the flow's.
     private var readied = false
+    /// A connect of this flow was refused or reset by its server, so the interface reaches it,
+    /// even when a later answer's connect timed out.
+    private var serverReached = false
     private var finished = false
     private var upDone = false
     private var downDone = false
@@ -99,7 +102,7 @@ final class TCPRelay {
         // fails the connect instead.
         let index = if_nametoindex(interfaceName)
         guard index != 0 else { fail(nil); return }
-        lookup = NameLookup.start(name, interfaceIndex: index, queue: queue) { [weak self] answers in
+        lookup = NameLookup.start(name, interfaceIndex: index, queue: queue) { [weak self] answers, answered in
             guard let self, !self.finished else { return }
             self.lookup = nil
             // Without the interfaces a tunnel's own network cannot be checked: fail, never dial.
@@ -121,8 +124,9 @@ final class TCPRelay {
                 self.closeAll(NSError(domain: NEAppProxyErrorDomain, code: NEAppProxyFlowError.hostUnreachable.rawValue))
             case .noAnswer:
                 // The lookup asks for A records only: an IPv6-only or unknown name has none, and
-                // the interface that answered works. Its health is left alone.
-                self.onEgress = nil
+                // the interface whose resolver answered works, so its health is left alone. A
+                // lookup that timed out or failed counts against it.
+                if answered { self.onEgress = nil }
                 self.fail(nil)
             }
         }
@@ -146,6 +150,7 @@ final class TCPRelay {
     /// when one is left, otherwise the flow fails. The connection given up is cancelled without
     /// ending the relay.
     private func connectFailed(_ error: nw_error_t?) {
+        if Self.reachedServer(error) { serverReached = true }
         guard !readied, !finished, !nextAnswers.isEmpty, let old = connection else { fail(error); return }
         attempt += 1
         connection = nil
@@ -206,9 +211,9 @@ final class TCPRelay {
         guard !finished else { return }
         if !opened {
             // A server that refused or reset the connect was reached: the interface has a route,
-            // so one such app's failures never stop every listed app using it (`EgressHealth`).
-            if Self.reachedServer(error) { onEgress = nil }
-            reportEgress(false)
+            // so it counts as a working interface, and one app's refused connects never stop
+            // every listed app using it (`EgressHealth`).
+            reportEgress(serverReached || Self.reachedServer(error))
             count(.egressFailed, 1)
             ProxyLog.event(.egressFailed, error.map { Int(nw_error_get_error_code($0)) } ?? -1)
             // A claimed flow cannot be handed back: close it so the app sees a failed connect.
@@ -241,10 +246,9 @@ final class TCPRelay {
                     nw_connection_send(connection, nil, _nw_content_context_final_send, true) { sendError in
                         self.queue.async {
                             guard !self.finished else { return }
-                            // The half-close did not reach the server. Once the server's side
-                            // ended cleanly the app has its whole answer, so only a response still
-                            // coming in is aborted; otherwise an error would replace a full answer.
-                            if sendError != nil, !self.downDone { self.count(.aborted, 1); self.closeAll(Self.aborted); return }
+                            // The half-close did not reach the server, so the request may be
+                            // incomplete: the app sees an abort, never a clean end.
+                            if sendError != nil { self.count(.aborted, 1); self.closeAll(Self.aborted); return }
                             self.upDone = true
                             self.finishIfDone()
                         }

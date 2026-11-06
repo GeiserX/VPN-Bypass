@@ -101,7 +101,8 @@ final class FlowProxy: NETransparentProxyProvider {
         var out: (name: String, iface: nw_interface_t)?
         var target: TCPRelay.Target?
         // A push, a stop or the lease watchdog may have changed the policy meanwhile.
-        if case .claim(let ruleID, _) = verdict, !state.keepsVerdict(of: snapshot, at: now) {
+        // Read the clock again: the team lookup may have taken the lease past its end.
+        if case .claim(let ruleID, _) = verdict, !state.keepsVerdict(of: snapshot, at: Date()) {
             verdict = .decline(.policyChanged, ruleID: ruleID)
         }
         if case .claim(let ruleID, let egressChoice) = verdict {

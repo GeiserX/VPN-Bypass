@@ -19,18 +19,21 @@ final class NameLookup {
     private let queue: DispatchQueue
     private var ref: DNSServiceRef?
     private var answers: [UInt32] = []
-    private var done: (([UInt32]) -> Void)?
+    /// A resolver answered, with records or a negative answer; false for a timeout or a failure.
+    private var answered = false
+    private var done: (([UInt32], Bool) -> Void)?
     private var retainSelf: NameLookup?
 
-    private init(queue: DispatchQueue, done: @escaping ([UInt32]) -> Void) {
+    private init(queue: DispatchQueue, done: @escaping ([UInt32], Bool) -> Void) {
         self.queue = queue
         self.done = done
     }
 
     /// Starts the lookup; `done` runs once on `queue` with the IPv4 answers in the order they came,
-    /// empty when there were none, the lookup failed or it timed out. Call on `queue`.
+    /// empty when there were none, the lookup failed or it timed out, and whether a resolver
+    /// answered at all (a negative answer counts; a timeout or a failure does not). Call on `queue`.
     static func start(_ name: String, interfaceIndex: UInt32, queue: DispatchQueue,
-                      done: @escaping ([UInt32]) -> Void) -> NameLookup {
+                      done: @escaping ([UInt32], Bool) -> Void) -> NameLookup {
         let lookup = NameLookup(queue: queue, done: done)
         lookup.retainSelf = lookup
         let context = Unmanaged.passUnretained(lookup).toOpaque()
@@ -61,6 +64,9 @@ final class NameLookup {
     private static let reply: DNSServiceGetAddrInfoReply = { _, flags, _, error, _, address, _, context in
         guard let context else { return }
         let lookup = Unmanaged<NameLookup>.fromOpaque(context).takeUnretainedValue()
+        if error == kDNSServiceErr_NoError || error == kDNSServiceErr_NoSuchRecord || error == kDNSServiceErr_NoSuchName {
+            lookup.answered = true
+        }
         if error == kDNSServiceErr_NoError, flags & DNSServiceFlags(kDNSServiceFlagsAdd) != 0,
            let address, address.pointee.sa_family == sa_family_t(AF_INET) {
             let v4 = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr.s_addr }
@@ -82,7 +88,7 @@ final class NameLookup {
         let callback = done
         done = nil
         retainSelf = nil
-        callback?(answers)
+        callback?(answers, answered)
     }
 
     /// The IPv4 addresses of the Mac's interfaces now, for `NameAnswer.tunnelNetworks`; nil when

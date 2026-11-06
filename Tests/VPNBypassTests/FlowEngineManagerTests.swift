@@ -97,16 +97,23 @@ final class FakeFlowEngineSystem: FlowEngineSystem {
         pendingActivation = nil
     }
 
-    /// While true the preferences cannot be read.
-    var loadFails = false
+    /// Reads of the preferences that fail from now on, each one taking one: the read that
+    /// starts a save counts too, as the live save reads first.
+    var failingReads = 0
 
-    func loadConfiguration() async throws -> Bool? {
-        if loadFails { throw NSError(domain: "NEConfigurationErrorDomain", code: 1) }
+    private func read() throws -> Bool? {
+        if failingReads > 0 {
+            failingReads -= 1
+            throw NSError(domain: "NEConfigurationErrorDomain", code: 1)
+        }
         return configuration
     }
 
+    func loadConfiguration() async throws -> Bool? { try read() }
+
     func saveConfiguration(enabled: Bool) async -> FlowEngineSaveResult {
         saves.append(enabled)
+        do { _ = try read() } catch { return .failed(code: 1) }
         while holdSave && (enabled || !holdOnlyEnablingSaves) { try? await Task.sleep(nanoseconds: 5_000_000) }
         if saveAnswer == .saved {
             if configuration == nil && !enabled { return .saved }
@@ -351,6 +358,10 @@ final class FlowEngineManagerTests: XCTestCase {
         XCTAssertTrue(engine.wantsOn)
         system.connectOnStart = true
         engine.inputsChanged()
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(system.starts, 1, "not tried again within \(FlowEngineManager.startRetrySeconds) s")
+        clock = clock.addingTimeInterval(FlowEngineManager.startRetrySeconds)
+        engine.inputsChanged()
         await until("active after the retry") { engine.state == .active }
         XCTAssertEqual(system.starts, 2)
     }
@@ -379,11 +390,21 @@ final class FlowEngineManagerTests: XCTestCase {
     /// not "none", and one left enabled would keep every new connection passing through.
     func testAnUnreadableConfigurationIsDisabledWithTheSwitchOff() async {
         system.configuration = true
-        system.loadFails = true
+        // The launch read fails, and so does the first disabling save's own read.
+        system.failingReads = 2
         engine.begin()
-        await until("disabled") { system.configuration == false }
-        XCTAssertEqual(system.saves, [false])
+        await until("disabled on the second try") { system.configuration == false }
+        XCTAssertEqual(system.saves, [false, false])
         XCTAssertTrue(engine.mayBeInstalled)
+    }
+
+    /// A configuration that cannot be read when turning on is a failed start, not a prompt
+    /// waiting for approval, and no save is attempted.
+    func testAnUnreadableConfigurationAtTurnOnIsAFailedStart() async {
+        system.failingReads = 1
+        engine.setEnabled(true)
+        await until("failed start") { engine.state == .failed(.startFailed) }
+        XCTAssertEqual(system.saves, [])
     }
 
     /// Off shows no counters, generation or version of the last session.
