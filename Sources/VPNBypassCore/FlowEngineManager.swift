@@ -99,6 +99,15 @@ final class FlowEngineManager: ObservableObject {
     private var failures: [Date] = []
     /// When the last start failed (`.failed(.startFailed)`), for `startRetrySeconds`.
     private var lastStartFailure: Date?
+    /// Whether the network is up, from the app's path monitor (nil: it has not reported yet).
+    private(set) var networkAvailable: Bool?
+    /// Raised on every report of a network that is up, and its value when the current start
+    /// began: a network that came up while a start was failing is a reason to start again at once.
+    private var networkUps = 0
+    private var networkUpsAtStart = 0
+    /// When the network last started the session again: those retries skip `startRetrySeconds`
+    /// after a failure, but run at most that often, so a flapping network cannot loop starts.
+    private var lastNetworkRetry: Date?
     private var heartbeatTask: Task<Void, Never>?
     private var pushing = false
     private var pushAgain = false
@@ -157,6 +166,13 @@ final class FlowEngineManager: ObservableObject {
             turnOff(teardown: .remove)
             return
         }
+        // On by hand while on but failed: start over, so turning it on never does nothing. A
+        // restart after a crash is already under way and keeps going.
+        if on, wantsOn, case .failed(let why) = state, why != .stoppedRestarting {
+            log(.info, "Per-app routing: turned on again after it failed (\(why.rawValue)), so it starts over")
+            turnOn()
+            return
+        }
         followSwitch()
     }
 
@@ -197,9 +213,32 @@ final class FlowEngineManager: ObservableObject {
         }
     }
 
+    /// The app's network monitor saw the network change (its status or primary interface).
+    /// A failed start runs again as soon as the network is up, without waiting for
+    /// `startRetrySeconds` or another input: after a restart the session is started before the
+    /// Mac has a network, and macOS does not start it again by itself.
+    func networkChanged(available: Bool) {
+        networkAvailable = available
+        guard available else { return }
+        networkUps += 1
+        guard wantsOn, state == .failed(.startFailed), networkRetryAllowed() else { return }
+        retryStart(because: "the network is up")
+    }
+
+    private func networkRetryAllowed() -> Bool {
+        lastNetworkRetry.map { now().timeIntervalSince($0) >= Self.startRetrySeconds } ?? true
+    }
+
+    /// When a failed start is tried again (`engine.status`'s retry, nil when not failed).
+    var startRetry: FlowEngineStartRetry? {
+        guard wantsOn, state == .failed(.startFailed) else { return nil }
+        return networkAvailable == true ? .onNextChange : .waitingForNetwork
+    }
+
     private func turnOn() {
         wantsOn = true
         attempt += 1
+        networkUpsAtStart = networkUps
         let a = attempt
         beginActivity()
         state = .starting
@@ -217,11 +256,13 @@ final class FlowEngineManager: ObservableObject {
         }
     }
 
-    private func retryStart() {
+    private func retryStart(because why: String? = nil) {
         attempt += 1
+        networkUpsAtStart = networkUps
+        if why != nil { lastNetworkRetry = now() }
         let a = attempt
         state = .starting
-        log(.info, "Per-app routing: starting its session again after a failed start")
+        log(.info, "Per-app routing: starting its session again after a failed start" + (why.map { " (\($0))" } ?? ""))
         Task { await configureAndStart(a) }
     }
 
@@ -402,6 +443,15 @@ final class FlowEngineManager: ObservableObject {
     private func startFailed() {
         lastStartFailure = now()
         state = .failed(.startFailed)
+        // The network came up while this start was failing (the start right after a restart):
+        // start again now; the report that would have done it arrived before the failure.
+        if networkAvailable == true, networkUps != networkUpsAtStart, networkRetryAllowed() {
+            retryStart(because: "the network came up while it started")
+            return
+        }
+        log(.info, networkAvailable == true
+            ? "Per-app routing: it starts again on the next change of the network or the settings, \(Int(Self.startRetrySeconds)) s from now at the soonest"
+            : "Per-app routing: it starts again once the network is up")
     }
 
     private func startSession(_ a: Int) async {
@@ -641,6 +691,7 @@ final class FlowEngineManager: ObservableObject {
         }
         log(.warning, "Per-app routing stopped; listed apps use the VPN. Starting it again once")
         state = .failed(.stoppedRestarting)
+        networkUpsAtStart = networkUps
         await sleep(1)
         guard attempt == a else { return }
         await startSession(a)
@@ -687,7 +738,8 @@ final class FlowEngineManager: ObservableObject {
 
     /// The `status` and `engine.status` field.
     func status() -> FlowEngineStatus {
-        FlowEngineStatus(enabled: isEnabled(), state: state, reply: reply, appVersion: appVersion, removal: removal)
+        FlowEngineStatus(enabled: isEnabled(), state: state, reply: reply, appVersion: appVersion, removal: removal,
+                         retry: startRetry)
     }
 
     /// An extension of another version than the app answers: its update waits for approval.

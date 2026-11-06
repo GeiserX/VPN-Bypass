@@ -366,6 +366,81 @@ final class FlowEngineManagerTests: XCTestCase {
         XCTAssertEqual(system.starts, 2)
     }
 
+    /// After a restart the session is started before the Mac has a network and does not
+    /// connect. When the network comes up it is started again at once (no 30 s floor, no other
+    /// input), once, and connects; meanwhile status and the log say the retry waits for it.
+    func testAStartThatFailsWithNoNetworkRunsAgainWhenTheNetworkComesUp() async {
+        var lines: [String] = []
+        engine.log = { _, line in lines.append(line) }
+        engine.networkChanged(available: false)
+        system.connectOnStart = false
+        engine.setEnabled(true)
+        await until("the start failed") { engine.state == .failed(.startFailed) }
+        XCTAssertEqual(engine.status().retry, "waitingForNetwork")
+        XCTAssertTrue(engine.status().textLines[0].contains("retry: when the network is up"))
+        XCTAssertTrue(lines.contains("Per-app routing: it starts again once the network is up"), "\(lines)")
+        XCTAssertEqual(system.starts, 1)
+
+        system.connectOnStart = true
+        engine.networkChanged(available: true)
+        await until("active after the network came up") { engine.state == .active }
+        XCTAssertEqual(system.starts, 2, "one retry")
+        XCTAssertNil(engine.status().retry)
+        XCTAssertTrue(lines.contains { $0.contains("starting its session again after a failed start (the network is up)") }, "\(lines)")
+    }
+
+    /// The live run on macOS 27.2: the start ran at launch, the network was reported up while
+    /// it was still waiting to connect, and the start failed 5 s later. The report arrived
+    /// before the failure, so the failure itself starts it again, at once.
+    func testANetworkThatComesUpDuringAFailingStartStartsItAgainRightAfter() async {
+        system.connectOnStart = false
+        var reported = false
+        engine.sleep = { [unowned self] _ in
+            if !reported, self.system.starts == 1 {
+                reported = true
+                self.engine.networkChanged(available: true)
+                self.system.connectOnStart = true
+            }
+            await Task.yield()
+        }
+        engine.setEnabled(true)
+        await until("active after the retry") { engine.state == .active }
+        XCTAssertEqual(system.starts, 2)
+    }
+
+    /// A network that keeps coming and going starts the session again at most every 30 s.
+    func testAFlappingNetworkRetriesAtMostEveryThirtySeconds() async {
+        system.connectOnStart = false
+        engine.networkChanged(available: false)
+        engine.setEnabled(true)
+        await until("the start failed") { engine.state == .failed(.startFailed) }
+        engine.networkChanged(available: true)
+        await until("the retry failed") { system.starts == 2 && engine.state == .failed(.startFailed) }
+        XCTAssertEqual(engine.status().retry, "onNextChange")
+        engine.networkChanged(available: false)
+        engine.networkChanged(available: true)
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(system.starts, 2, "not again within \(FlowEngineManager.startRetrySeconds) s")
+        clock = clock.addingTimeInterval(FlowEngineManager.startRetrySeconds)
+        system.connectOnStart = true
+        engine.networkChanged(available: true)
+        await until("active") { engine.state == .active }
+        XCTAssertEqual(system.starts, 3)
+    }
+
+    /// `vpnb engine.on` or the switch while it is on but failed starts it over, at once.
+    func testTurningOnWhileFailedStartsItOver() async {
+        system.connectOnStart = false
+        engine.setEnabled(true)
+        await until("the start failed") { engine.state == .failed(.startFailed) }
+        let activations = system.activationRequests
+        system.connectOnStart = true
+        engine.setEnabled(true)
+        await until("active") { engine.state == .active }
+        XCTAssertEqual(system.starts, 2)
+        XCTAssertEqual(system.activationRequests, activations + 1)
+    }
+
     /// Turned off while macOS's configuration prompt is open, then allowed: the enabling save
     /// that lands after the turn-off is disabled again, so no connection passes through the
     /// extension under a switch that says off.

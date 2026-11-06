@@ -335,6 +335,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let interfaceStr = interfaceNames.sorted().joined(separator: ", ")
                 RouteManager.shared.log(.info, "Network change detected: \(statusStr) via \(interfaceStr)")
                 RouteManager.shared.noteNetworkChange()
+                FlowEngineManager.shared.networkChanged(available: path.status == .satisfied)
                 
                 RouteManager.shared.refreshStatus()
             }

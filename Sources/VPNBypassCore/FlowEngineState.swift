@@ -231,11 +231,14 @@ public struct FlowEngineStatus: Codable, Equatable, Sendable {
     public var leaseExpiries: Int? = nil
     /// `FlowEngineRemoval` code of the last removal, omitted when none ran since launch.
     public var removal: String? = nil
+    /// `FlowEngineStartRetry` code: when a failed start is tried again; omitted otherwise.
+    public var retry: String? = nil
 
     public init(enabled: Bool, state: FlowEngineState, reply: FlowEngineReplySummary? = nil, appVersion: String? = nil,
-                removal: FlowEngineRemoval? = nil) {
+                removal: FlowEngineRemoval? = nil, retry: FlowEngineStartRetry? = nil) {
         self.enabled = enabled
         self.removal = removal?.rawValue
+        self.retry = retry?.rawValue
         self.state = state.code
         self.reason = state.reasonCode
         // Also with no reply: a replacement waiting for approval has none.
@@ -261,12 +264,25 @@ public struct FlowEngineStatus: Codable, Equatable, Sendable {
         if let extensionVersion { line += "  extension: \(extensionVersion)" }
         if updateWaiting == true { line += "  update waiting" }
         if let removal { line += "  extension removal: \(removal)" }
+        switch retry.flatMap(FlowEngineStartRetry.init(rawValue:)) {
+        case .waitingForNetwork: line += "  retry: when the network is up"
+        case .onNextChange: line += "  retry: on the next change of the network or the settings"
+        case nil: break
+        }
         var out = [line]
         for r in rules ?? [] {
             out.append("  rule \(r.ruleId): \(r.claimed) around the VPN, \(r.bound) bound to an interface (not served)")
         }
         return out
     }
+}
+
+/// When a failed start is tried again (`engine.status`'s `retry`).
+public enum FlowEngineStartRetry: String, Codable, Sendable {
+    /// The network is down or not reported yet: the start runs again once it is up.
+    case waitingForNetwork
+    /// The network is up: the start runs again on the next change, at most every 30 s.
+    case onNextChange
 }
 
 /// The parts of the extension's reply the app keeps (`FlowPolicyReply`, copied so this file
