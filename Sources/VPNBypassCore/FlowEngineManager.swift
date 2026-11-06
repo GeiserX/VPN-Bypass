@@ -44,6 +44,11 @@ final class FlowEngineManager: ObservableObject {
     static let heartbeatTries = 3
     /// How long a started session may take to connect.
     static let startTimeout: TimeInterval = 10
+    /// A failed start is tried again on an input change at most this often, so a flapping
+    /// network cannot loop saves and session starts.
+    static let startRetrySeconds: TimeInterval = 30
+    /// Tries of a disabling save whose read of the preferences failed.
+    static let disableTries = 3
 
     @Published private(set) var state: FlowEngineState
     /// The extension's last reply (counters, version).
@@ -92,6 +97,8 @@ final class FlowEngineManager: ObservableObject {
     private(set) var confirmed: FlowPolicy?
     private var lastGeneration = 0
     private var failures: [Date] = []
+    /// When the last start failed (`.failed(.startFailed)`), for `startRetrySeconds`.
+    private var lastStartFailure: Date?
     private var heartbeatTask: Task<Void, Never>?
     private var pushing = false
     private var pushAgain = false
@@ -180,6 +187,12 @@ final class FlowEngineManager: ObservableObject {
         if wantsOn, established {
             requestPush(force: false)
         } else {
+            // A session that would not start or connect is tried again on the next change, so
+            // listed apps do not stay in the VPN until the switch is flipped or the app relaunches.
+            if wantsOn, state == .failed(.startFailed),
+               lastStartFailure.map({ now().timeIntervalSince($0) >= Self.startRetrySeconds }) ?? true {
+                retryStart()
+            }
             Task { await syncEgressRoute(claims: false, interface: nil) }
         }
     }
@@ -202,6 +215,14 @@ final class FlowEngineManager: ObservableObject {
         } else {
             fileActivation(a)
         }
+    }
+
+    private func retryStart() {
+        attempt += 1
+        let a = attempt
+        state = .starting
+        log(.info, "Per-app routing: starting its session again after a failed start")
+        Task { await configureAndStart(a) }
     }
 
     private func fileActivation(_ a: Int) {
@@ -239,6 +260,8 @@ final class FlowEngineManager: ObservableObject {
         attempt += 1
         established = false
         confirmed = nil
+        // The last session's generation, version and counters are not this state's.
+        reply = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
         endActivity()
@@ -258,19 +281,39 @@ final class FlowEngineManager: ObservableObject {
     /// ran) would keep every new TCP connection passing through the extension: disable it.
     private func disableStaleConfiguration() async {
         guard case .supported = system.support, !wantsOn else { return }
-        let existing = await system.loadConfiguration()
+        let existing: Bool?
+        do {
+            existing = try await system.loadConfiguration()
+        } catch {
+            // Unknown is not "none": disable anyway. The save reads the preferences again, and
+            // with no configuration it saves nothing.
+            guard !wantsOn else { return }
+            mayBeInstalled = true
+            log(.warning, "Per-app routing is off and its configuration could not be read, so it is turned off in case it was left enabled")
+            disableConfiguration()
+            return
+        }
         if existing != nil || wasActivated() { mayBeInstalled = true }
         guard existing == true, !wantsOn else { return }
         log(.info, "Per-app routing is off, so its configuration left enabled is turned off")
         disableConfiguration()
     }
 
-    /// Saves the configuration disabled, after any disable still in flight.
+    /// Saves the configuration disabled, after any disable still in flight. A save whose read of
+    /// the preferences failed is tried again, up to `disableTries` times, unless a turn-on came.
     private func disableConfiguration() {
         let previous = pendingTeardown
-        pendingTeardown = Task { [system] in
+        pendingTeardown = Task { [weak self, system] in
             await previous?.value
-            _ = await system.saveConfiguration(enabled: false)
+            for try_ in 1...Self.disableTries {
+                guard case .failed(let code) = await system.saveConfiguration(enabled: false) else { return }
+                guard let self, !self.wantsOn else { return }
+                if try_ == Self.disableTries {
+                    self.log(.warning, "Per-app routing: its configuration could not be turned off (code \(code)); Remove Extension takes it")
+                    return
+                }
+                await self.sleep(2)
+            }
         }
     }
 
@@ -318,11 +361,25 @@ final class FlowEngineManager: ObservableObject {
     private func configureAndStart(_ a: Int) async {
         await pendingTeardown?.value
         guard attempt == a else { return }
-        if await system.loadConfiguration() != true {
+        let existing: Bool?
+        do {
+            existing = try await system.loadConfiguration()
+        } catch {
             guard attempt == a else { return }
+            log(.warning, "Per-app routing: its configuration could not be read (code \((error as NSError).code))")
+            startFailed()
+            return
+        }
+        guard attempt == a else { return }
+        if existing != true {
             state = .awaitingConfigApproval
             let saved = await system.saveConfiguration(enabled: true)
-            guard attempt == a else { return }
+            guard attempt == a else {
+                // Turned off while macOS's prompt was open, then allowed: this save enabled a
+                // configuration nobody wants now. Disable it, after any teardown in flight.
+                if saved == .saved, !wantsOn { disableConfiguration() }
+                return
+            }
             switch saved {
             case .saved:
                 break
@@ -334,12 +391,17 @@ final class FlowEngineManager: ObservableObject {
                 return
             case .failed(let code):
                 log(.warning, "Per-app routing: the configuration could not be saved (code \(code))")
-                state = .failed(.startFailed)
+                startFailed()
                 return
             }
         }
         guard attempt == a else { return }
         await startSession(a)
+    }
+
+    private func startFailed() {
+        lastStartFailure = now()
+        state = .failed(.startFailed)
     }
 
     private func startSession(_ a: Int) async {
@@ -350,7 +412,7 @@ final class FlowEngineManager: ObservableObject {
         if system.session != .connected {
             guard system.startSession() else {
                 log(.warning, "Per-app routing: the session would not start")
-                state = .failed(.startFailed)
+                startFailed()
                 return
             }
             var waited: TimeInterval = 0
@@ -363,7 +425,7 @@ final class FlowEngineManager: ObservableObject {
                 log(.warning, "Per-app routing: the session did not connect within \(Int(Self.startTimeout)) s")
                 stoppingOnPurpose = true
                 system.stopSession()
-                state = .failed(.startFailed)
+                startFailed()
                 return
             }
         }

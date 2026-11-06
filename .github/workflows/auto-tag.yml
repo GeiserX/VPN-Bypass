@@ -29,6 +29,13 @@ on:
       - 'assets/**'
       - 'Proxy/**'
       - 'entitlements/**'
+      # The scripts make bundle, make release and release.yml run: a fix to one must ship.
+      - 'scripts/appintents-metadata.sh'
+      - 'scripts/asc-profiles.py'
+      - 'scripts/check-extension-bundle.sh'
+      - 'scripts/release-notes.sh'
+      - 'scripts/sign-and-notarize.sh'
+      - 'scripts/smoke-launch.sh'
       - '.github/workflows/auto-tag.yml'
   # Run by hand to cut the release for a series of merges made while releases were paused
   # (repo variable AUTO_RELEASE=false), or to force the bump: a redesign shipped as a major.

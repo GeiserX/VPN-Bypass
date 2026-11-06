@@ -269,7 +269,10 @@ enum SiteRoute {
             let systemWay: PathCheck.Way? = loopback ? .physical : s.vpnInterface.map { .tunnel($0) }
             if let id = s.defaultRouteId, let route = byId[id] {
                 var found = Found(match: .defaultRoute, routeName: route.name, expected: systemWay)
-                found.defaultRouteNotApplied = way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces) != systemWay
+                // With no VPN connected the name leaves by the physical interface, which is what
+                // Direct asks for.
+                found.defaultRouteNotApplied = way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces)
+                    != (systemWay ?? .physical)
                 return found
             }
             return Found(match: .none, expected: systemWay)

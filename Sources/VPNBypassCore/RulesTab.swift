@@ -1053,8 +1053,10 @@ struct RuleEditorSheet: View {
                 validationError = nil
                 switch pick {
                 case .app(let candidate):
-                    let identity = BypassApps.identity(ofAppAt: candidate.url)
-                        ?? AppIdentity(name: candidate.name, signingID: candidate.bundleID, team: nil, bundleID: candidate.bundleID)
+                    guard let identity = BypassApps.identity(ofAppAt: candidate.url) else {
+                        validationError = BypassAppError.unreadableSignature(candidate.name).localizedMessage()
+                        return
+                    }
                     chosenApp = identity
                     pattern = identity.signingID
                 case .name(let name):

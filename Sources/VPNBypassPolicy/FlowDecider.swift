@@ -25,6 +25,15 @@ public struct FlowFacts {
         case udp
     }
 
+    /// What the flow's code signature says about its team.
+    public enum Team: Equatable, Sendable {
+        case id(String)
+        /// Read, with no team: unsigned or ad-hoc signed code.
+        case none
+        /// The signature could not be read, so whether the app is a VPN client is unknown.
+        case unreadable
+    }
+
     /// `NEFlowMetaData.sourceAppSigningIdentifier`.
     public var signingIdentifier: String
     public var remote: Remote
@@ -36,20 +45,30 @@ public struct FlowFacts {
     public var transport: Transport
     /// The flow's executable path (from the audit token), for executable-name matchers.
     public var executablePath: () -> String?
-    /// The flow's team id (from its code signature), for the protected-team check.
-    public var teamIdentifier: () -> String?
+    /// The flow's team (from its code signature), for the protected-team check.
+    public var team: () -> Team
 
     public init(signingIdentifier: String, remote: Remote, remoteHostname: String? = nil,
                 isBound: Bool = false, transport: Transport = .tcp,
                 executablePath: @escaping () -> String? = { nil },
-                teamIdentifier: @escaping () -> String? = { nil }) {
+                team: @escaping () -> Team) {
         self.signingIdentifier = signingIdentifier
         self.remote = remote
         self.remoteHostname = remoteHostname
         self.isBound = isBound
         self.transport = transport
         self.executablePath = executablePath
-        self.teamIdentifier = teamIdentifier
+        self.team = team
+    }
+
+    /// A flow whose signature was read: `teamIdentifier` nil is code signed with no team.
+    public init(signingIdentifier: String, remote: Remote, remoteHostname: String? = nil,
+                isBound: Bool = false, transport: Transport = .tcp,
+                executablePath: @escaping () -> String? = { nil },
+                teamIdentifier: @escaping () -> String? = { nil }) {
+        self.init(signingIdentifier: signingIdentifier, remote: remote, remoteHostname: remoteHostname,
+                  isBound: isBound, transport: transport, executablePath: executablePath,
+                  team: { teamIdentifier().map(Team.id) ?? .none })
     }
 }
 
@@ -81,6 +100,12 @@ public enum FlowDecision: Equatable, Sendable {
         case unsupportedRoute
         /// A VPN or network-security client, by team id.
         case protectedTeam
+        /// The app's code signature could not be read, so it could be a VPN client: claiming it
+        /// could carry the VPN's own traffic outside the tunnel.
+        case unreadableTeam
+        /// A claim reached on a policy that was replaced, dropped or ran out while the flow was
+        /// being decided (`FlowPolicyState.keepsVerdict`): declined rather than claimed under it.
+        case policyChanged
         /// Claimable, but the egress interface is not up (the policy's, or no Wi-Fi or Ethernet
         /// at all). Decided by the extension after the decider, never by `decide`.
         case noInterface
@@ -147,6 +172,14 @@ public struct FlowPolicyState: Sendable {
             policy = nil
             receivedAt = nil
         }
+    }
+
+    /// Whether a verdict reached on `snapshot` still holds: the same matchers and declined teams,
+    /// and a live lease. A heartbeat that only renews the lease keeps it.
+    public func keepsVerdict(of snapshot: FlowPolicyState, at now: Date) -> Bool {
+        guard let p = policy, let old = snapshot.policy else { return false }
+        return isLeaseLive(at: now) && p.version == old.version && p.matchers == old.matchers
+            && p.declinedTeams == old.declinedTeams
     }
 
     public func isLeaseLive(at now: Date) -> Bool {
@@ -239,8 +272,14 @@ public enum FlowDecider {
         }
 
         // 6. VPN and security clients, by team: the fixed list and the live tunnels' owners.
-        if let team = f.teamIdentifier(), protectedTeams.contains(team) || policy.declinedTeams.contains(team) {
+        // A signature that could not be read is declined too: it could be one of them.
+        switch f.team() {
+        case .unreadable:
+            return .decline(.unreadableTeam, ruleID: m.ruleID)
+        case .id(let team) where protectedTeams.contains(team) || policy.declinedTeams.contains(team):
             return .decline(.protectedTeam, ruleID: m.ruleID)
+        case .id, .none:
+            break
         }
 
         // 7. Claim it.
@@ -275,6 +314,7 @@ public enum ProtectedRanges {
         (0xA9FE_0000, 16),  // 169.254/16
         (0xAC10_0000, 12),  // 172.16/12
         (0xC0A8_0000, 16),  // 192.168/16
+        (0xC612_0000, 15),  // 198.18/15 benchmarking (RFC 2544), not globally reachable
         (0xE000_0000, 4),   // 224/4 multicast
         (0xF000_0000, 4),   // 240/4 reserved and broadcast
     ]

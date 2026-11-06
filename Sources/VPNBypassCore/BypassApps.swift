@@ -84,13 +84,16 @@ enum BypassAppError: Error, Equatable {
     /// A VPN or network-security client (by team id): it must keep its own path, so the extension
     /// never claims it.
     case vpnClient(String)
+    /// The app's code signature could not be read, so the identifier its connections carry is
+    /// unknown: a guess (its bundle id) could differ from it, and the entry would match nothing.
+    case unreadableSignature(String)
 
     /// The control socket's error code.
     var code: String {
         switch self {
         case .invalid: return "invalid_args"
         case .alreadyListed: return "already_exists"
-        case .ownApp, .vpnClient: return "refused"
+        case .ownApp, .vpnClient, .unreadableSignature: return "refused"
         }
     }
 
@@ -101,6 +104,7 @@ enum BypassAppError: Error, Equatable {
         case .alreadyListed(let name): return "\(name) is already on the Apps list"
         case .ownApp: return "VPN Bypass's own traffic always keeps its normal route"
         case .vpnClient(let name): return "\(name) is a VPN or network security app; per-app routing never takes its traffic out of its own path"
+        case .unreadableSignature(let name): return "\(name)'s code signature could not be read, so per-app routing could not tell its connections apart"
         }
     }
 
@@ -111,6 +115,8 @@ enum BypassAppError: Error, Equatable {
         case .alreadyListed(let name): return String(localized: "\(name) is already on the list.", bundle: bundle)
         case .ownApp: return String(localized: "VPN Bypass itself always keeps its normal route.", bundle: bundle)
         case .vpnClient(let name): return String(localized: "\(name) is a VPN or network security app, so it keeps its own route.", bundle: bundle)
+        case .unreadableSignature(let name):
+            return String(localized: "The code signature of \(name) could not be read, so per-app routing could not tell its connections apart.", bundle: bundle)
         }
     }
 }
@@ -152,22 +158,52 @@ enum BypassApps {
     static func isTurnedDown(_ app: BypassApp, declinedTeams: [String] = []) -> Bool {
         let id = app.bundleID ?? app.pattern
         if FlowDecider.ownIdentifiers.contains(app.pattern) { return true }
-        guard ProcessRule.kind(of: id) == .bundleID, let team = lookup(id)?.team else { return false }
+        guard ProcessRule.kind(of: id) == .bundleID, let team = cachedLookup(id)?.team else { return false }
         return FlowDecider.protectedTeams.contains(team) || declinedTeams.contains(team)
     }
 
-    /// The installed app signed `signingID`, for an add by id (`vpnb app.add`). A seam for tests.
+    /// How long `isTurnedDown` keeps an app's identity. SwiftUI bodies call it per row on every
+    /// render, and each `lookup` reads a code signature from disk on the main thread; an app
+    /// installed or replaced after it was read shows within this long.
+    static let identityCacheSeconds: TimeInterval = 10
+    private static let identityCacheLock = NSLock()
+    private static var identityCache: [String: (identity: AppIdentity?, at: Date)] = [:]
+
+    /// `lookup`, kept `identityCacheSeconds` per id.
+    static func cachedLookup(_ id: String, now: Date = Date()) -> AppIdentity? {
+        identityCacheLock.lock()
+        let hit = identityCache[id]
+        identityCacheLock.unlock()
+        if let hit, now >= hit.at, now.timeIntervalSince(hit.at) < identityCacheSeconds { return hit.identity }
+        // Read outside the lock, so a slow signature read holds up no other row.
+        let identity = lookup(id)
+        identityCacheLock.lock()
+        identityCache[id] = (identity, now)
+        identityCacheLock.unlock()
+        return identity
+    }
+
+    /// The installed app signed `signingID`, for an add by id (`vpnb app.add`). A seam for tests;
+    /// replacing it forgets what `cachedLookup` kept.
     static var lookup: (String) -> AppIdentity? = { signingID in
         guard ProcessRule.kind(of: signingID) == .bundleID,
               let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: signingID) else { return nil }
         return identity(ofAppAt: url)
+    } {
+        didSet {
+            identityCacheLock.lock()
+            identityCache.removeAll()
+            identityCacheLock.unlock()
+        }
     }
 
     /// The app at `url`: its name, and the identifier and team its code is signed with. An
-    /// unsigned app is matched by its bundle id, which is what macOS reports for it.
+    /// unsigned app is matched by its bundle id, which is what macOS reports for it. Nil when the
+    /// signature could not be read: the bundle id is no stand-in then, since a signed app's
+    /// identifier can differ from it (`BypassAppError.unreadableSignature`).
     static func identity(ofAppAt url: URL) -> AppIdentity? {
         let bundle = Bundle(url: url)
-        let signing = signingInfo(url)
+        guard let signing = signingInfo(url) else { return nil }
         guard let id = signing.identifier ?? bundle?.bundleIdentifier, !id.isEmpty else { return nil }
         return AppIdentity(name: displayName(url, bundle: bundle),
                            signingID: matchable(id, executableName: bundle?.executableURL?.lastPathComponent),
@@ -186,12 +222,13 @@ enum BypassApps {
         return executableName
     }
 
-    private static func signingInfo(_ url: URL) -> (identifier: String?, team: String?) {
+    /// The signing identifier and team, both nil for unsigned code; nil when the read failed.
+    private static func signingInfo(_ url: URL) -> (identifier: String?, team: String?)? {
         var code: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code else { return (nil, nil) }
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code else { return nil }
         var info: CFDictionary?
         guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-              let dict = info as? [String: Any] else { return (nil, nil) }
+              let dict = info as? [String: Any] else { return nil }
         return (dict[kSecCodeInfoIdentifier as String] as? String, dict[kSecCodeInfoTeamIdentifier as String] as? String)
     }
 

@@ -1137,6 +1137,7 @@
 "%@ is already on the list." = "%@ est déjà dans la liste.";
 "VPN Bypass itself always keeps its normal route." = "VPN Bypass garde toujours sa route normale.";
 "%@ is a VPN or network security app, so it keeps its own route." = "%@ est une app de VPN ou de sécurité réseau, elle garde donc sa propre route.";
+"The code signature of %@ could not be read, so per-app routing could not tell its connections apart." = "La signature de code de %@ n’a pas pu être lue, le routage par app ne pourrait donc pas reconnaître ses connexions.";
 "Apps" = "Apps";
 "The Apps list applies in Bypass mode. You are in %@." = "La liste Apps s'applique en mode Contournement. Vous êtes en %@.";
 "The apps on this list skip the VPN, through per-app routing." = "Les apps de cette liste contournent le VPN grâce au routage par app.";

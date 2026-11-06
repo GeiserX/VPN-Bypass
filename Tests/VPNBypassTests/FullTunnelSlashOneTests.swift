@@ -50,6 +50,12 @@ final class FullTunnelSlashOneTests: XCTestCase {
         XCTAssertNil(RouteKernel.slashOnePairOwnerIndex([pair[0], kr(0, prefix: 1, ifIndex: 24, flags: up | RTF_IFSCOPE),
                                                          kr(0x8000_0000, prefix: 1, ifIndex: 24, flags: up | RTF_IFSCOPE)]),
                      "scoped halves")
+        // OpenVPN's def1 pair has address gateways: the interface it leaves by is `rtm_index`.
+        var low = kr(0, prefix: 1, gateway: 0x0A08_0001, flags: up | RTF_GATEWAY)
+        var high = kr(0x8000_0000, prefix: 1, gateway: 0x0A08_0001, flags: up | RTF_GATEWAY)
+        low.interfaceIndex = 24
+        high.interfaceIndex = 24
+        XCTAssertEqual(RouteKernel.slashOnePairOwnerIndex([pair[0], low, high]), 24, "address-gatewayed halves")
         // Selection still settles for one half.
         XCTAssertEqual(RouteKernel.slashOneTunnelOwnerIndex(Array(pair.prefix(2))), 24)
     }

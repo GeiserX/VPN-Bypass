@@ -250,8 +250,9 @@ final class ExtensionPackagingTests: XCTestCase {
                                   "index 0 asks every interface's resolvers, the VPN's included")
         let lookup = try XCTUnwrap(relay.range(of: "NameLookup.start(name, interfaceIndex: index, queue: queue)"))
         XCTAssertLessThan(index.lowerBound, lookup.lowerBound)
-        let interfaces = try XCTUnwrap(relay.range(of: "guard let addresses = NameLookup.interfaceAddresses() else { self.fail(nil); return }"),
+        let interfaces = try XCTUnwrap(relay.range(of: "guard let addresses = NameLookup.interfaceAddresses() else {"),
                                        "no interface list fails the flow closed")
+        XCTAssertTrue(relay[interfaces.upperBound...].prefix(120).contains("self.fail(nil)"), "no interface list fails the flow closed")
         let check = try XCTUnwrap(relay.range(of: "switch NameAnswer.check(answers, tunnelNetworks: NameAnswer.tunnelNetworks(addresses))"))
         XCTAssertLessThan(interfaces.lowerBound, check.lowerBound)
         let dial = try XCTUnwrap(relay.range(of: "self.nextAnswers = safe"))

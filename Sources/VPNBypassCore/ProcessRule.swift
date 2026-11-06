@@ -20,51 +20,7 @@ public enum RuleServedBy: String, Codable, Equatable, Sendable {
     case none
 }
 
-enum ProcessRule {
-    /// Why nothing serves a rule, as the wire code `SanitizedRule.inactiveReason` carries. A
-    /// string on the wire, so a later reason still decodes in an older `vpnb`.
-    enum InactiveReason: String {
-        /// This Mac or this build cannot run per-app routing (macOS 14 or older, a dev build).
-        case perAppRoutingNotAvailable
-        /// The Per-app routing switch is off.
-        case perAppRoutingOff
-        /// macOS is waiting for the user to allow the extension or its configuration.
-        case perAppRoutingWaitingForApproval
-        /// The Mac's administrator forbids it, or the app is not in /Applications.
-        case perAppRoutingBlocked
-        case perAppRoutingStarting
-        /// Pause, a VPN kill switch, or VPN Only mode.
-        case perAppRoutingPaused
-        /// The extension's update waits for approval and it does not read this app's policy.
-        case perAppRoutingUpdateWaiting
-        /// It stopped or would not start.
-        case perAppRoutingFailed
-        /// The rule's route is not Direct: this version carries listed apps around the VPN only.
-        case routeNotSupported
-        /// The rule's route was deleted or is turned off, so the rule matches nothing.
-        case routeUnavailable
-        /// An entry of Bypass mode's Apps list, while another mode is in use.
-        case notInBypassMode
-        /// A process rule while Bypass or VPN Only mode is in use: per-app routing compiles
-        /// process rules in Custom mode only (FlowPolicyCompiler).
-        case notInCustomMode
-        /// The app is VPN Bypass itself or a VPN or network-security app (by its signing team):
-        /// the extension turns its connections down, so it keeps its own path.
-        case vpnClientApp
-
-        /// The rule does nothing until per-app routing serves it: the engine's state, not the
-        /// rule's route or the mode, keeps it out.
-        var waitsForEngine: Bool {
-            switch self {
-            case .perAppRoutingNotAvailable, .perAppRoutingOff, .perAppRoutingWaitingForApproval, .perAppRoutingBlocked,
-                 .perAppRoutingStarting, .perAppRoutingPaused, .perAppRoutingUpdateWaiting, .perAppRoutingFailed:
-                return true
-            case .routeNotSupported, .routeUnavailable, .notInBypassMode, .notInCustomMode, .vpnClientApp:
-                return false
-            }
-        }
-    }
-
+extension ProcessRule {
     /// The engine that serves `rule`, and why none does. A process rule with the Direct route is
     /// served while per-app routing is active; with another route, or a route deleted or turned
     /// off, it is not served in this version, whatever the engine does (FlowPolicyCompiler drops
@@ -78,15 +34,15 @@ enum ProcessRule {
                         routeIsDirect: Bool = true, routeUsable: Bool = true,
                         customEngine: Bool = true, turnedDown: Bool = false) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
         guard rule.matchType == .process else { return (.kernel, nil) }
+        // A rule turned off has no reason, whatever the engine or its route: its own switch says why.
+        guard rule.enabled else { return (.none, nil) }
         if case .unavailable = engine { return (.none, .perAppRoutingNotAvailable) }
-        // A rule turned off has no reason: its own switch says why.
-        guard customEngine else { return (.none, rule.enabled ? .notInCustomMode : nil) }
+        guard customEngine else { return (.none, .notInCustomMode) }
         // The extension declines the app's connections by its team (FlowDecider step 6).
-        if turnedDown { return (.none, rule.enabled ? .vpnClientApp : nil) }
+        if turnedDown { return (.none, .vpnClientApp) }
         guard routeUsable else { return (.none, .routeUnavailable) }
         guard routeIsDirect else { return (.none, .routeNotSupported) }
         if let reason = engine.ruleReason { return (.none, reason) }
-        guard rule.enabled else { return (.none, nil) }
         return (.perAppEngine, nil)
     }
 

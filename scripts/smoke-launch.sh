@@ -101,8 +101,11 @@ log_after=$(stat -f %z "$applog" 2>/dev/null || echo 0)
 [ "$log_after" -gt "$log_before" ] || fail "the app wrote nothing to $applog"
 # The service catalogue ships as files in Contents/Resources/catalogue; a bundle without
 # them launches fine but offers no services, and says so in the log.
-if tail -c +"$((log_before + 1))" "$applog" | grep -q "Service catalogue:"; then
+# Captured first: under pipefail, `tail | grep -q` fails with SIGPIPE (141) when grep quits
+# early, so a found line would read as not found.
+this_launch=$(tail -c +"$((log_before + 1))" "$applog") || fail "could not read $applog after the launch"
+if grep -q "Service catalogue:" <<<"$this_launch"; then
   fail "the app could not read its service catalogue"
 fi
-echo "--- app log (this launch) ---"; tail -c +"$((log_before + 1))" "$applog"
+echo "--- app log (this launch) ---"; printf '%s\n' "$this_launch"
 echo "Smoke launch passed: VPN Bypass $version launched, opened its control socket and kept running."

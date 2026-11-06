@@ -27,6 +27,8 @@ final class FakeFlowEngineSystem: FlowEngineSystem {
     var saveAnswer: FlowEngineSaveResult = .saved
     /// While true a save waits, as macOS does while its prompt is on screen.
     var holdSave = false
+    /// With `holdSave`, only enabling saves wait (the prompt); a disabling one goes through.
+    var holdOnlyEnablingSaves = false
     var saves: [Bool] = []
 
     var session: FlowEngineSession = .none
@@ -95,11 +97,24 @@ final class FakeFlowEngineSystem: FlowEngineSystem {
         pendingActivation = nil
     }
 
-    func loadConfiguration() async -> Bool? { configuration }
+    /// Reads of the preferences that fail from now on, each one taking one: the read that
+    /// starts a save counts too, as the live save reads first.
+    var failingReads = 0
+
+    private func read() throws -> Bool? {
+        if failingReads > 0 {
+            failingReads -= 1
+            throw NSError(domain: "NEConfigurationErrorDomain", code: 1)
+        }
+        return configuration
+    }
+
+    func loadConfiguration() async throws -> Bool? { try read() }
 
     func saveConfiguration(enabled: Bool) async -> FlowEngineSaveResult {
         saves.append(enabled)
-        while holdSave { try? await Task.sleep(nanoseconds: 5_000_000) }
+        do { _ = try read() } catch { return .failed(code: 1) }
+        while holdSave && (enabled || !holdOnlyEnablingSaves) { try? await Task.sleep(nanoseconds: 5_000_000) }
         if saveAnswer == .saved {
             if configuration == nil && !enabled { return .saved }
             configuration = enabled
@@ -332,6 +347,74 @@ final class FlowEngineManagerTests: XCTestCase {
         await turnOnToActive()
         XCTAssertEqual(system.saves, [], "re-saving has lost consent elsewhere (3.3)")
         XCTAssertEqual(system.starts, 0, "a connected session is used as it is")
+    }
+
+    /// A session that would not connect is tried again on the next change of its inputs, so
+    /// listed apps do not stay in the VPN until the switch is flipped.
+    func testAFailedStartIsTriedAgainWhenTheInputsChange() async {
+        system.connectOnStart = false
+        engine.setEnabled(true)
+        await until("the start failed") { engine.state == .failed(.startFailed) }
+        XCTAssertTrue(engine.wantsOn)
+        system.connectOnStart = true
+        engine.inputsChanged()
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(system.starts, 1, "not tried again within \(FlowEngineManager.startRetrySeconds) s")
+        clock = clock.addingTimeInterval(FlowEngineManager.startRetrySeconds)
+        engine.inputsChanged()
+        await until("active after the retry") { engine.state == .active }
+        XCTAssertEqual(system.starts, 2)
+    }
+
+    /// Turned off while macOS's configuration prompt is open, then allowed: the enabling save
+    /// that lands after the turn-off is disabled again, so no connection passes through the
+    /// extension under a switch that says off.
+    func testAnEnablingSaveThatLandsAfterATurnOffIsDisabled() async {
+        system.holdSave = true
+        system.holdOnlyEnablingSaves = true
+        engine.setEnabled(true)
+        await until("the configuration prompt") { engine.state == .awaitingConfigApproval }
+        enabled = false
+        engine.followSwitch()
+        XCTAssertEqual(engine.state, .off)
+        // The turn-off's own disable finds no configuration yet, so it saves nothing.
+        await until("the turn-off's disable ran") { system.saves == [true, false] }
+        XCTAssertNil(system.configuration)
+        system.holdSave = false
+        await until("the late save is disabled after it") { system.saves == [true, false, false] }
+        XCTAssertEqual(system.configuration, false)
+        XCTAssertEqual(system.starts, 0)
+    }
+
+    /// With the switch off, a configuration that cannot be read is disabled anyway: unknown is
+    /// not "none", and one left enabled would keep every new connection passing through.
+    func testAnUnreadableConfigurationIsDisabledWithTheSwitchOff() async {
+        system.configuration = true
+        // The launch read fails, and so does the first disabling save's own read.
+        system.failingReads = 2
+        engine.begin()
+        await until("disabled on the second try") { system.configuration == false }
+        XCTAssertEqual(system.saves, [false, false])
+        XCTAssertTrue(engine.mayBeInstalled)
+    }
+
+    /// A configuration that cannot be read when turning on is a failed start, not a prompt
+    /// waiting for approval, and no save is attempted.
+    func testAnUnreadableConfigurationAtTurnOnIsAFailedStart() async {
+        system.failingReads = 1
+        engine.setEnabled(true)
+        await until("failed start") { engine.state == .failed(.startFailed) }
+        XCTAssertEqual(system.saves, [])
+    }
+
+    /// Off shows no counters, generation or version of the last session.
+    func testTurningOffForgetsTheLastReply() async {
+        system.claimedByRule = [ruleID.uuidString: 3]
+        await turnOnToActive()
+        XCTAssertNotNil(engine.reply)
+        engine.setEnabled(false)
+        XCTAssertNil(engine.reply)
+        XCTAssertNil(engine.status().policyGeneration)
     }
 
     func testBlockedReasonsComeFromTheActivationError() async {
@@ -746,7 +829,8 @@ final class ProcessRuleServingTests: XCTestCase {
         XCTAssertEqual(ProcessRule.serving(appOff, engine: .active, routes: [direct]).servedBy, RuleServedBy.none)
         XCTAssertNil(ProcessRule.serving(appOff, engine: .active, routes: [direct]).reason)
         XCTAssertNil(RuleRow.detail(for: appOff, route: direct, engine: .active))
-        XCTAssertEqual(RuleRow.detail(for: appOff, route: direct, engine: .off), ProcessRule.rowNote(.perAppRoutingOff))
+        XCTAssertNil(RuleRow.detail(for: appOff, route: direct, engine: .off), "no note in any engine state")
+        XCTAssertNil(ProcessRule.serving(appOff, engine: .off, routes: []).reason, "nor for a deleted route")
         // A destination rule is the kernel engine's in every state.
         let domain = Rule(matchType: .domain, pattern: "example.com", routeId: direct.id, order: 1)
         XCTAssertEqual(ProcessRule.serving(domain, engine: .active, routes: [direct]).servedBy, .kernel)

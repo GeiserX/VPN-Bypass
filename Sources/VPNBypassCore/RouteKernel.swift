@@ -450,8 +450,10 @@ public enum RouteKernel {
     public static func slashOnePairOwnerIndex(_ table: [KernelRoute]) -> UInt16? {
         func owner(_ destination: UInt32) -> UInt16? {
             // Only a route ordinary traffic takes counts: not scoped, cloned, down or a reject.
-            table.first { !$0.isOurs && isComparableEntry($0.flags) && $0.prefix == 1
-                && $0.destination == destination && $0.gatewayInterfaceIndex != nil }?.gatewayInterfaceIndex
+            // An interface gateway names its interface; an address gateway (OpenVPN's
+            // `redirect-gateway def1`) leaves by `rtm_index`.
+            table.lazy.filter { !$0.isOurs && isComparableEntry($0.flags) && $0.prefix == 1 && $0.destination == destination }
+                .compactMap { $0.gatewayInterfaceIndex ?? ($0.interfaceIndex != 0 ? $0.interfaceIndex : nil) }.first
         }
         guard let low = owner(0), let high = owner(0x8000_0000), low == high else { return nil }
         return low

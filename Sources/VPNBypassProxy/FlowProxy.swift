@@ -90,7 +90,7 @@ final class FlowProxy: NETransparentProxyProvider {
                               remote: Self.remote(of: remote),
                               isBound: flow.isBound,
                               executablePath: { Self.executablePath(token) },
-                              teamIdentifier: { [weak self] in self?.teamIdentifier(token) })
+                              team: { [weak self] in self?.team(token) ?? .unreadable })
 
         // Decide on a copy of the state, outside the lock: the team id lookup makes synchronous
         // Security calls, and a slow one must not hold up policy pushes or the lease watchdog.
@@ -100,6 +100,11 @@ final class FlowProxy: NETransparentProxyProvider {
         lock.lock()
         var out: (name: String, iface: nw_interface_t)?
         var target: TCPRelay.Target?
+        // A push, a stop or the lease watchdog may have changed the policy meanwhile.
+        // Read the clock again: the team lookup may have taken the lease past its end.
+        if case .claim(let ruleID, _) = verdict, !state.keepsVerdict(of: snapshot, at: Date()) {
+            verdict = .decline(.policyChanged, ruleID: ruleID)
+        }
         if case .claim(let ruleID, let egressChoice) = verdict {
             if case .direct(let name) = egressChoice { out = egress.pick(name) }
             target = Self.dialTarget(remote)
@@ -210,13 +215,13 @@ final class FlowProxy: NETransparentProxyProvider {
         return String(cString: buf)
     }
 
-    /// Team id of the flow's source process, from its audit token. Cached per token.
-    func teamIdentifier(_ token: Data?) -> String? {
-        guard let token else { return nil }
+    /// Team of the flow's source process, from its audit token. Cached per token.
+    func team(_ token: Data?) -> FlowFacts.Team {
+        guard let token else { return .unreadable }
         teamLock.lock()
         let hit = teamCache[token]
         teamLock.unlock()
-        if let hit { return hit.isEmpty ? nil : hit }
+        if let hit { return hit.isEmpty ? .none : .id(hit) }
         var code: SecCode?
         var team: String?
         if SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributeAudit: token] as CFDictionary, [], &code) == errSecSuccess,
@@ -231,12 +236,12 @@ final class FlowProxy: NETransparentProxyProvider {
             }
         }
         // A failed lookup is not cached, so the next flow from that process tries again; only a
-        // signature that was read (with or without a team) is.
-        guard let team else { return nil }
+        // signature that was read (with or without a team) is. The decider declines it meanwhile.
+        guard let team else { return .unreadable }
         teamLock.lock()
         if teamCache.count > 512 { teamCache.removeAll() }
         teamCache[token] = team
         teamLock.unlock()
-        return team.isEmpty ? nil : team
+        return team.isEmpty ? .none : .id(team)
     }
 }
