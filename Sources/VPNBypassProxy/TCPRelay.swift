@@ -103,7 +103,12 @@ final class TCPRelay {
             guard let self, !self.finished else { return }
             self.lookup = nil
             // Without the interfaces a tunnel's own network cannot be checked: fail, never dial.
-            guard let addresses = NameLookup.interfaceAddresses() else { self.fail(nil); return }
+            // A failed read of this Mac's addresses says nothing of the interface's health.
+            guard let addresses = NameLookup.interfaceAddresses() else {
+                self.onEgress = nil
+                self.fail(nil)
+                return
+            }
             switch NameAnswer.check(answers, tunnelNetworks: NameAnswer.tunnelNetworks(addresses)) {
             case .dial(let safe):
                 self.answerPort = port
@@ -115,6 +120,9 @@ final class TCPRelay {
                 self.count(.nameProtected, 1)
                 self.closeAll(NSError(domain: NEAppProxyErrorDomain, code: NEAppProxyFlowError.hostUnreachable.rawValue))
             case .noAnswer:
+                // The lookup asks for A records only: an IPv6-only or unknown name has none, and
+                // the interface that answered works. Its health is left alone.
+                self.onEgress = nil
                 self.fail(nil)
             }
         }
@@ -197,6 +205,9 @@ final class TCPRelay {
     private func fail(_ error: nw_error_t?) {
         guard !finished else { return }
         if !opened {
+            // A server that refused or reset the connect was reached: the interface has a route,
+            // so one such app's failures never stop every listed app using it (`EgressHealth`).
+            if Self.reachedServer(error) { onEgress = nil }
             reportEgress(false)
             count(.egressFailed, 1)
             ProxyLog.event(.egressFailed, error.map { Int(nw_error_get_error_code($0)) } ?? -1)
@@ -206,6 +217,14 @@ final class TCPRelay {
         }
         count(.aborted, 1)
         closeAll(Self.aborted)
+    }
+
+    /// The connect failed because the server answered it (refused or reset), not for want of a
+    /// route out the interface.
+    static func reachedServer(_ error: nw_error_t?) -> Bool {
+        guard let error, nw_error_get_error_domain(error) == nw_error_domain_posix else { return false }
+        let code = nw_error_get_error_code(error)
+        return code == ECONNREFUSED || code == ECONNRESET
     }
 
     /// App to server.
@@ -219,8 +238,13 @@ final class TCPRelay {
                 guard let data, !data.isEmpty else {
                     // EOF from the app: half-close towards the server, and finish only once that
                     // final send is done, so the connection is not cancelled under it.
-                    nw_connection_send(connection, nil, _nw_content_context_final_send, true) { _ in
+                    nw_connection_send(connection, nil, _nw_content_context_final_send, true) { sendError in
                         self.queue.async {
+                            guard !self.finished else { return }
+                            // The half-close did not reach the server. Once the server's side
+                            // ended cleanly the app has its whole answer, so only a response still
+                            // coming in is aborted; otherwise an error would replace a full answer.
+                            if sendError != nil, !self.downDone { self.count(.aborted, 1); self.closeAll(Self.aborted); return }
                             self.upDone = true
                             self.finishIfDone()
                         }
@@ -231,6 +255,8 @@ final class TCPRelay {
                 nw_connection_send(connection, content as __DispatchData, _nw_content_context_default_message,
                                    false) { sendError in
                     self.queue.async {
+                        // Late, after the relay closed: no second count and no read on a closed flow.
+                        guard !self.finished else { return }
                         if sendError != nil { self.count(.aborted, 1); self.closeAll(Self.aborted); return }
                         self.bytesUp += data.count
                         self.pumpUp()
@@ -249,6 +275,7 @@ final class TCPRelay {
                 let data = Data(content as DispatchData)
                 self.flow.write(data) { writeError in
                     self.queue.async {
+                        guard !self.finished else { return }
                         if writeError != nil { self.count(.appReset, 1); self.closeAll(Self.aborted); return }
                         self.bytesDown += data.count
                         // A last chunk can come with an error: the app must see the abort, not a clean end.

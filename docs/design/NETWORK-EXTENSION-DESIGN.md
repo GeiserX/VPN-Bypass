@@ -258,7 +258,7 @@ routing must include broadly and decide per flow.
 `includedNetworkRules`: one rule, `remoteNetwork nil`, protocol TCP, outbound. (`nil` matches every remote
 except loopback, `NENetworkRule.h:116-122`.) The spike ran this as scope `all`.
 
-`excludedNetworkRules` (fixed): 10/8, 172.16/12, 192.168/16, 169.254/16, 224/4, 100.64/10 (Tailscale, the
+`excludedNetworkRules` (fixed): 10/8, 172.16/12, 192.168/16, 198.18/15, 169.254/16, 224/4, 100.64/10 (Tailscale, the
 same range as `ProtectedDestinations`, `HelperProtocol.swift:512`), fc00::/7, fe80::/10, ff00::/8,
 fd7a:115c:a1e0::/48. Apple says exclusions win, but FB14453214 reports them ignored, so `handleNewFlow`
 repeats the checks. An exclusion on `0.0.0.0/8` with port 0 makes `setTunnelNetworkSettings` fail ("Either
@@ -289,7 +289,8 @@ table, in this order (the spike's `FlowDecider.decide`):
 6. VPN and security clients: return `false`. They are recognised by **team identifier**, not signing id:
    GlobalProtect's daemon is signed `Identifier=PanGPS`, `TeamIdentifier=PXPZ95SK77`. `NEFlowMetaData`
    carries no team id, so the extension reads it from `sourceAppAuditToken`
-   (`SecCodeCopyGuestWithAttributes`, then `SecCodeCopySigningInformation`), cached per audit token. It
+   (`SecCodeCopyGuestWithAttributes`, then `SecCodeCopySigningInformation`), cached per audit token. A
+   signature that cannot be read is declined too (`unreadableTeam`): it could be a VPN client's. It
    runs last, only for a flow that would otherwise be claimed, because it reads a code signature. The
    fixed list (Palo Alto `PXPZ95SK77`, Tailscale `W5364U7YZB` and the other VPN vendors, each team read
    with `codesign -dv` from the vendor's signed app where its installer is public) lives in the pure

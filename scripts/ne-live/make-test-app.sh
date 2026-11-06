@@ -32,6 +32,7 @@ root="$here/../.."
 src_real="$(cd "$src" && pwd -P)"
 dst_real="$(cd "$(dirname "$dst")" && pwd -P)/$(basename "$dst")"
 case "$src_real/" in "$dst_real/"*) echo "OUT must not be APP or contain it: $dst" >&2; exit 1 ;; esac
+case "$dst_real/" in "$src_real/"*) echo "OUT must not be inside APP: $dst" >&2; exit 1 ;; esac
 rm -rf "$dst"
 ditto "$src" "$dst"
 proxy="$dst/Contents/Library/SystemExtensions/com.geiserx.vpn-bypass.proxy.systemextension"
@@ -53,7 +54,7 @@ if [ "$engine" = 1 ]; then
   core="$root/Sources/VPNBypassCore"
   swiftc -O -swift-version 5 -I "$build" -L "$build" -lVPNBypassPolicy -o "$exe" "$build/main.swift" \
     "$core/FlowEngineManager.swift" "$core/FlowEngineSystem.swift" "$core/FlowEngineState.swift" \
-    "$core/ProcessRule.swift" "$core/RouteModel.swift" \
+    "$core/ProcessRuleReason.swift" "$core/RouteModel.swift" \
     "$core/ScopedDefaultRoute.swift" "$core/RouteKernel.swift" "$core/HelperProtocol.swift"
 else
   swiftc -O -swift-version 5 -o "$exe" "$here/main.swift" "$root"/Sources/VPNBypassPolicy/*.swift

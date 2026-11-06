@@ -180,6 +180,9 @@ final class FlowEngineManager: ObservableObject {
         if wantsOn, established {
             requestPush(force: false)
         } else {
+            // A session that would not start or connect is tried again on the next change, so
+            // listed apps do not stay in the VPN until the switch is flipped or the app relaunches.
+            if wantsOn, state == .failed(.startFailed) { retryStart() }
             Task { await syncEgressRoute(claims: false, interface: nil) }
         }
     }
@@ -202,6 +205,14 @@ final class FlowEngineManager: ObservableObject {
         } else {
             fileActivation(a)
         }
+    }
+
+    private func retryStart() {
+        attempt += 1
+        let a = attempt
+        state = .starting
+        log(.info, "Per-app routing: starting its session again after a failed start")
+        Task { await configureAndStart(a) }
     }
 
     private func fileActivation(_ a: Int) {
@@ -239,6 +250,8 @@ final class FlowEngineManager: ObservableObject {
         attempt += 1
         established = false
         confirmed = nil
+        // The last session's generation, version and counters are not this state's.
+        reply = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
         endActivity()
@@ -258,7 +271,18 @@ final class FlowEngineManager: ObservableObject {
     /// ran) would keep every new TCP connection passing through the extension: disable it.
     private func disableStaleConfiguration() async {
         guard case .supported = system.support, !wantsOn else { return }
-        let existing = await system.loadConfiguration()
+        let existing: Bool?
+        do {
+            existing = try await system.loadConfiguration()
+        } catch {
+            // Unknown is not "none": disable anyway. The save reads the preferences again, and
+            // with no configuration it saves nothing.
+            guard !wantsOn else { return }
+            mayBeInstalled = true
+            log(.warning, "Per-app routing is off and its configuration could not be read, so it is turned off in case it was left enabled")
+            disableConfiguration()
+            return
+        }
         if existing != nil || wasActivated() { mayBeInstalled = true }
         guard existing == true, !wantsOn else { return }
         log(.info, "Per-app routing is off, so its configuration left enabled is turned off")
@@ -318,11 +342,16 @@ final class FlowEngineManager: ObservableObject {
     private func configureAndStart(_ a: Int) async {
         await pendingTeardown?.value
         guard attempt == a else { return }
-        if await system.loadConfiguration() != true {
+        if (try? await system.loadConfiguration()) != true {
             guard attempt == a else { return }
             state = .awaitingConfigApproval
             let saved = await system.saveConfiguration(enabled: true)
-            guard attempt == a else { return }
+            guard attempt == a else {
+                // Turned off while macOS's prompt was open, then allowed: this save enabled a
+                // configuration nobody wants now. Disable it, after any teardown in flight.
+                if saved == .saved, !wantsOn { disableConfiguration() }
+                return
+            }
             switch saved {
             case .saved:
                 break

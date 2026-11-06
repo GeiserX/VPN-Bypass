@@ -61,7 +61,9 @@ public enum EgressInterface {
 /// leaves the primary physical interface with an unscoped default only, and a connection
 /// required to use it waits with no route (measured on the mini, docs/design/NE-ENGINE-LIVE-RESULTS.md).
 /// After `threshold` failures in a row on an interface, flows for it are declined for
-/// `cooldown` seconds; then one claim is tried again. A success clears the count.
+/// `cooldown` seconds; then one claim is tried again. A success clears the count. Only a connect
+/// that may have found no route counts: the relay (`TCPRelay`) does not report a server that
+/// refused or reset it, a name with no IPv4 answer, or a failed read of the Mac's addresses.
 public struct EgressHealth: Sendable {
     public static let threshold = 2
     public static let cooldown: TimeInterval = 30

@@ -40,6 +40,33 @@ final class BypassAppsTests: XCTestCase {
         await ControlSurface.handle(ControlRequest(cmd: cmd, args: args))
     }
 
+    /// Rows ask `isTurnedDown` on every render: the signature is read once per app and kept a
+    /// few seconds, not read again per row per render on the main thread.
+    func testTurnedDownReadsEachAppsSignatureOnceWhileItIsKept() {
+        var reads = 0
+        BypassApps.lookup = { id in
+            reads += 1
+            return AppIdentity(name: "VPN", signingID: id, team: "PXPZ95SK77", bundleID: id)
+        }
+        let app = BypassApp(pattern: "com.example.vpn")
+        for _ in 0..<5 { XCTAssertTrue(BypassApps.isTurnedDown(app)) }
+        XCTAssertEqual(reads, 1)
+        let later = Date().addingTimeInterval(BypassApps.identityCacheSeconds + 1)
+        XCTAssertNotNil(BypassApps.cachedLookup("com.example.vpn", now: later))
+        XCTAssertEqual(reads, 2, "read again once kept long enough")
+        BypassApps.lookup = { _ in nil }
+        XCTAssertFalse(BypassApps.isTurnedDown(app), "a new lookup forgets what was kept")
+    }
+
+    /// An app whose signature cannot be read is refused with a reason, never saved under its
+    /// bundle id as a guess at its signing id.
+    func testAnUnreadableSignatureIsRefused() {
+        let error = BypassAppError.unreadableSignature("Example")
+        XCTAssertEqual(error.code, "refused")
+        XCTAssertTrue(error.localizedMessage().contains("Example"))
+        XCTAssertNil(BypassApps.identity(ofAppAt: URL(fileURLWithPath: "/nonexistent/Example.app")))
+    }
+
     private func compile(_ c: RouteManager.Config) -> FlowPolicy {
         FlowPolicyCompiler.compile(FlowPolicyCompiler.Input(config: c, paused: false, killSwitchActive: false,
                                                              physicalInterface: "en0", tunnelOwnerTeams: []),

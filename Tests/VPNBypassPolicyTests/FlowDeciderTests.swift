@@ -129,12 +129,16 @@ final class FlowDeciderTests: XCTestCase {
             (.ipv4(ProtectedRanges.parse("172.16.0.1")!), .decline(.protectedDestination)),
             (.ipv4(ProtectedRanges.parse("172.31.255.255")!), .decline(.protectedDestination)),
             (.ipv4(ProtectedRanges.parse("192.168.1.1")!), .decline(.protectedDestination)),
+            (.ipv4(ProtectedRanges.parse("198.18.0.1")!), .decline(.protectedDestination)),
+            (.ipv4(ProtectedRanges.parse("198.19.255.255")!), .decline(.protectedDestination)),
             (.ipv4(ProtectedRanges.parse("224.0.0.251")!), .decline(.protectedDestination)),
             (.ipv4(ProtectedRanges.parse("255.255.255.255")!), .decline(.protectedDestination)),
             // Just outside each range: public, claimed.
             (.ipv4(ProtectedRanges.parse("100.128.0.1")!), .claim(ruleID: ruleA, egress: en0)),
             (.ipv4(ProtectedRanges.parse("100.63.255.255")!), .claim(ruleID: ruleA, egress: en0)),
             (.ipv4(ProtectedRanges.parse("172.32.0.1")!), .claim(ruleID: ruleA, egress: en0)),
+            (.ipv4(ProtectedRanges.parse("198.17.255.255")!), .claim(ruleID: ruleA, egress: en0)),
+            (.ipv4(ProtectedRanges.parse("198.20.0.1")!), .claim(ruleID: ruleA, egress: en0)),
             (.ipv4(ProtectedRanges.parse("11.0.0.1")!), .claim(ruleID: ruleA, egress: en0)),
             (.ipv4(ProtectedRanges.parse("223.255.255.255")!), .claim(ruleID: ruleA, egress: en0)),
             (.ipv4(publicIP), .claim(ruleID: ruleA, egress: en0)),
@@ -269,6 +273,35 @@ final class FlowDeciderTests: XCTestCase {
         XCTAssertEqual(decide(facts(team: "TEAM000001"), s), .decline(.protectedTeam, ruleID: ruleA))
         XCTAssertEqual(decide(facts(team: "TEAM000002"), s), .claim(ruleID: ruleA, egress: en0))
         XCTAssertEqual(decide(facts(team: nil), s), .claim(ruleID: ruleA, egress: en0))
+    }
+
+    /// A signature that could not be read is not "unsigned": the app could be a VPN client, so
+    /// its flow is declined, never carried outside the tunnel.
+    func testAnUnreadableTeamIsDeclined() {
+        let f = FlowFacts(signingIdentifier: "com.example.App", remote: .ipv4(publicIP), team: { .unreadable })
+        XCTAssertEqual(decide(f, live()), .decline(.unreadableTeam, ruleID: ruleA))
+        let unsigned = FlowFacts(signingIdentifier: "com.example.App", remote: .ipv4(publicIP), team: { .none })
+        XCTAssertEqual(decide(unsigned, live()), .claim(ruleID: ruleA, egress: en0))
+    }
+
+    /// A claim decided on a copy of the state is kept only while the policy that made it still
+    /// holds: a heartbeat renewal keeps it; a new rule set, a stop or a lapsed lease does not.
+    func testAVerdictIsKeptOnlyWhileItsPolicyHolds() {
+        let snapshot = live()
+        var renewed = snapshot
+        renewed.receive(.policy(FlowPolicy(version: FlowPolicy.currentVersion, generation: 8,
+                                           matchers: [matcher("com.example.App", ruleA)], leaseSeconds: 120)),
+                        at: t0.addingTimeInterval(30))
+        XCTAssertTrue(renewed.keepsVerdict(of: snapshot, at: t0.addingTimeInterval(31)))
+        var changed = snapshot
+        changed.receive(.policy(FlowPolicy(version: FlowPolicy.currentVersion, generation: 8,
+                                           matchers: [matcher("com.other.App", ruleA)], leaseSeconds: 120)),
+                        at: t0.addingTimeInterval(1))
+        XCTAssertFalse(changed.keepsVerdict(of: snapshot, at: t0.addingTimeInterval(1)))
+        var stopped = snapshot
+        stopped.sessionStopped()
+        XCTAssertFalse(stopped.keepsVerdict(of: snapshot, at: t0))
+        XCTAssertFalse(snapshot.keepsVerdict(of: snapshot, at: t0.addingTimeInterval(121)), "lease ran out")
     }
 
     func testTeamReadOnlyForAFlowThatWouldBeClaimed() {

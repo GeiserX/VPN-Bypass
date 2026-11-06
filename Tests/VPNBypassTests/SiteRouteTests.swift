@@ -200,6 +200,18 @@ final class SiteRouteTests: XCTestCase {
                        "example.org matches no rule, so it takes the default route, Corp VPN.")
     }
 
+    /// With no VPN connected a name no rule claims leaves by the physical interface, so a Direct
+    /// Everything else is applied; one set to the VPN is not.
+    func testEverythingElseDirectIsAppliedWithNoVPN() {
+        let found = SiteRoute.match(host: "example.org", addresses: ["203.0.113.5"],
+                                    in: snapshot(mode: .custom, routes: [direct, corp], defaultRouteId: direct.id, vpn: nil))
+        XCTAssertEqual(found.match, .defaultRoute)
+        XCTAssertFalse(found.defaultRouteNotApplied)
+        let vpn = SiteRoute.match(host: "example.org", addresses: ["203.0.113.5"],
+                                  in: snapshot(mode: .custom, routes: [direct, corp], defaultRouteId: corp.id, vpn: nil))
+        XCTAssertTrue(vpn.defaultRouteNotApplied)
+    }
+
     /// Everything else set to a pinned tunnel no rule uses: its pin is read too, so Site Check
     /// sees that the system sends the name to the primary VPN instead and says the setting is not
     /// applied.

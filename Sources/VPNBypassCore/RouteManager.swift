@@ -1855,8 +1855,9 @@ final class RouteManager: ObservableObject {
         let links: [VPNLink]
         let selectedInterface: String?
         let defaultRouteInterface: String?
-        /// Destinations of the kernel routes carrying OUR ownership tag (RTF_PROTO1) — ground
-        /// truth of what this app currently owns, read silently from the table itself.
+        /// Destinations of the kernel routes carrying OUR ownership tag (RTF_PROTO1), scoped
+        /// routes left out — ground truth of what this app currently owns, read silently from
+        /// the table itself.
         let taggedDestinations: [String]
         /// The tunnel that holds both halves, 0.0.0.0/1 and 128.0.0.0/1, over the default route
         /// (wg-quick, OpenVPN def1), nil without the whole pair: by longest prefix it carries everything, though
@@ -1873,7 +1874,8 @@ final class RouteManager: ObservableObject {
         let links = await listVPNLinks()
         let defaultIface = await currentDefaultRouteInterface()
         let table = RouteKernel.currentTable()
-        let tagged = table?.filter { $0.isOurs }.map(\.destinationString) ?? []
+        // The per-app scoped default is ours too, but no address: it is not counted as one.
+        let tagged = table?.filter { $0.isOurs && !$0.isScoped }.map(\.destinationString) ?? []
         return CoexistenceSnapshot(links: links,
                                    selectedInterface: vpnInterface,
                                    defaultRouteInterface: defaultIface,

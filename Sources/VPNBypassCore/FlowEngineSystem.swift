@@ -62,8 +62,9 @@ protocol FlowEngineSystem: AnyObject {
     /// (an update); `completion` runs once, possibly much later, when the request ends.
     func requestActivation(onNeedsApproval: @escaping @MainActor (_ replacing: Bool) -> Void,
                            completion: @escaping @MainActor (FlowEngineActivation) -> Void)
-    /// Our configuration's `isEnabled`, nil when there is none.
-    func loadConfiguration() async -> Bool?
+    /// Our configuration's `isEnabled`, nil when there is none. Throws when the preferences
+    /// could not be read, so a failed read is never taken for "none".
+    func loadConfiguration() async throws -> Bool?
     /// Creates the configuration when there is none and sets `isEnabled`. The first enabling save
     /// shows macOS's "would like to add proxy configurations" prompt and returns once it is answered.
     func saveConfiguration(enabled: Bool) async -> FlowEngineSaveResult
@@ -131,8 +132,8 @@ final class LiveFlowEngineSystem: FlowEngineSystem {
         OSSystemExtensionManager.shared.submitRequest(request)
     }
 
-    func loadConfiguration() async -> Bool? {
-        try? await load()?.isEnabled
+    func loadConfiguration() async throws -> Bool? {
+        try await load()?.isEnabled
     }
 
     /// Ours, nil when there is none. Throws when the preferences could not be read, so a failed
