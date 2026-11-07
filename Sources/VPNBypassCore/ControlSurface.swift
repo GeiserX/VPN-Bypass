@@ -76,6 +76,9 @@ public enum ControlSurface {
         if request.v == 1, request.cmd == "why" {
             return await why(request.args ?? [:])
         }
+        if request.v == 1, let response = engine(request.cmd) {
+            return response
+        }
 
         let ports = ProxyListenerManager.shared.activePorts
         var (newConfig, response) = CommandRouter.apply(request, to: RouteManager.shared.config, listenerPorts: ports)
@@ -98,8 +101,23 @@ public enum ControlSurface {
                 appVersion: appVersion(from: Bundle.main.infoDictionary),
                 killSwitch: rm.vpnKillSwitch?.flagNames,
                 paused: rm.pauseState?.wireDescription,
-                convertedEntries: rm.convertedEntries.isEmpty ? nil : rm.convertedEntries
+                convertedEntries: rm.convertedEntries.isEmpty ? nil : rm.convertedEntries,
+                flowEngine: FlowEngineManager.shared.status()
             )
+        }
+
+        // Which engine serves each rule depends on per-app routing's live state, which the pure
+        // router cannot see: fill it in here.
+        if let rules = response.result?.rules {
+            let engineState = FlowEngineManager.shared.state
+            let declinedTeams = FlowEngineManager.shared.confirmed?.declinedTeams ?? []
+            let byId = Dictionary(newConfig.rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            response.result?.rules = rules.map { sanitized in
+                guard let rule = byId[sanitized.id] else { return sanitized }
+                return SanitizedRule(rule, engine: engineState, routes: newConfig.routes,
+                                     customEngine: ProcessRule.customEngine(newConfig),
+                                     turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: declinedTeams))
+            }
         }
 
         // Read verbs (and any errored verb) leave the config untouched — don't
@@ -130,6 +148,44 @@ public enum ControlSurface {
         await RouteManager.shared.reconcileAfterConfigChange(reconcileListeners: true, reapplyRoutes: reapply)
 
         return response
+    }
+
+    /// `engine.status`, `engine.on`, `engine.off`, `engine.remove`: per-app routing. `on` can only
+    /// file the activation request: the reply says when the next step waits in System Settings.
+    /// `off` (when it was on) and `remove` take the extension off the Mac, which waits for an
+    /// administrator password. Nil for any other verb.
+    @MainActor
+    static func engine(_ cmd: String) -> ControlResponse? {
+        let engine = FlowEngineManager.shared
+        switch cmd {
+        case "engine.status":
+            break
+        case "engine.on":
+            if case .unavailable = engine.state {
+                return ControlResponse(ok: false, error: ControlError(code: "unavailable",
+                    message: "per-app routing cannot run here: \(engine.state.reasonCode ?? "unavailable")"))
+            }
+            engine.setEnabled(true)
+        case "engine.off":
+            engine.setEnabled(false)
+        case "engine.remove":
+            if case .unavailable = engine.state {
+                return ControlResponse(ok: false, error: ControlError(code: "unavailable",
+                    message: "per-app routing cannot run here, so there is no extension to remove: \(engine.state.reasonCode ?? "unavailable")"))
+            }
+            engine.removeExtension()
+        default:
+            return nil
+        }
+        var result = ControlResult(engine: engine.status())
+        if cmd == "engine.on" {
+            result.message = "per-app routing is turning on; macOS asks to allow the extension in System Settings > General > Login Items & Extensions > Network Extensions, then to allow the proxy configuration. engine.status shows where it is"
+        } else if cmd == "engine.off" || cmd == "engine.remove" {
+            result.message = engine.removal == .removing
+                ? "per-app routing is off; every app follows the routes. Its extension is being removed: macOS asks for an administrator password. engine.status shows the removal"
+                : "per-app routing is off; every app follows the routes"
+        }
+        return ControlResponse(ok: true, result: result)
     }
 
     /// `why host=<name, link or address>`: which entry routes it, and the path check on it.

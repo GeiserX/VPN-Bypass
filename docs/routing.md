@@ -21,7 +21,7 @@ A **route** is a place traffic can exit:
 | **HTTP / SOCKS5 proxy** | a local `127.0.0.1` listener that forwards to your proxy |
 | **Tailscale peer** | out through a chosen Tailscale device used as an exit |
 
-A **rule** maps traffic to a route by `domain`, `suffix`, `ip`, `cidr`, `service`, or `process`. A `process` rule names an app, by its bundle id (`com.example.App`) or its executable's name (`Example`), never a path or a wildcard; it routes nothing until per-app routing exists, and the Rules page, `vpnb rule.list` and `vpnb rule.add` say so. The first matching rule wins; anything unmatched takes the **default** route. Direct and detected VPN routes appear automatically; proxy and Tailscale-peer routes are ones you add.
+A **rule** maps traffic to a route by `domain`, `suffix`, `ip`, `cidr`, `service`, or `process`. A `process` rule names an app, by its bundle id (`com.example.App`) or its executable's name (`Example`), never a path or a wildcard; [per-app routing](how-it-works.md#per-app-routing) serves it when that is on and the rule's route is Direct; otherwise it routes nothing, and the Rules page, `vpnb rule.list` and `vpnb rule.add` say why. The first matching rule wins; anything unmatched takes the **default** route. Direct and detected VPN routes appear automatically; proxy and Tailscale-peer routes are ones you add.
 
 A proxy route's `127.0.0.1` listener holds your upstream proxy credentials, so it will not serve a client that cannot prove it is you. Any process on the machine can reach a loopback port, and macOS gives a TCP listener no way to see who connected, so the listener asks for a password instead. Use **Copy Shell Exports** or **Copy Proxy URL** on the route. Both hand you the address with the credentials already in it:
 

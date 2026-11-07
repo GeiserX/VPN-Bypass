@@ -101,7 +101,7 @@ final class LaunchAtLoginManager: ObservableObject {
 
         let launchAgentContent: [String: Any] = [
             "Label": bundleIdentifier,
-            "ProgramArguments": [appPath + "/Contents/MacOS/VPNBypass"],
+            "ProgramArguments": [appPath + "/Contents/MacOS/VPN Bypass"],
             "RunAtLoad": true,
             "KeepAlive": false
         ]

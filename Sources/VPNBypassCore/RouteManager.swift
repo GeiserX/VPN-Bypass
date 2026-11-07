@@ -733,7 +733,7 @@ final class RouteManager: ObservableObject {
         guard config.routes.isEmpty else { return }
         let derived = Config.derive(
             domains: config.domains, services: config.services, mode: config.routingMode,
-            inverseDomains: config.inverseDomains, proxy: config.proxyConfig
+            inverseDomains: config.inverseDomains, proxy: config.proxyConfig, apps: config.bypassApps
         )
         config.routes = derived.routes
         config.rules = derived.rules
@@ -1734,7 +1734,7 @@ final class RouteManager: ObservableObject {
     
     /// Which interface the default route currently exits through, or nil if unreadable.
     /// This is the only direct evidence of which tunnel is actually carrying traffic.
-    /// The plain `route get default` answer — what the coexistence diagnostics card shows.
+    /// The plain `route get default` answer.
     func currentDefaultRouteInterface() async -> String? {
         await routeLookupAsync("default")?.interfaceName
     }
@@ -1748,8 +1748,9 @@ final class RouteManager: ObservableObject {
     /// and excluded), then fall back to the default route. Without this, selection rule 1
     /// never fires for a /1-style VPN, and hysteresis pins whichever tunnel happened to
     /// connect first — observed in #103 as NetBird staying "the VPN" while the user's
-    /// WireGuard carried the traffic. Kept separate from currentDefaultRouteInterface so
-    /// the diagnostics card keeps reporting the real default route.
+    /// WireGuard carried the traffic. Kept separate from currentDefaultRouteInterface: the
+    /// Status page names the carrier and the default route's own interface both
+    /// (`CoexistenceSnapshot.halfRouteCarrier`).
     func currentTrafficCarrierInterface() async -> String? {
         if let table = RouteKernel.currentTable(),
            let owner = RouteKernel.slashOneTunnelOwner(table) {
@@ -1854,9 +1855,17 @@ final class RouteManager: ObservableObject {
         let links: [VPNLink]
         let selectedInterface: String?
         let defaultRouteInterface: String?
-        /// Destinations of the kernel routes carrying OUR ownership tag (RTF_PROTO1) — ground
-        /// truth of what this app currently owns, read silently from the table itself.
+        /// Destinations of the kernel routes carrying OUR ownership tag (RTF_PROTO1), scoped
+        /// routes left out — ground truth of what this app currently owns, read silently from
+        /// the table itself.
         let taggedDestinations: [String]
+        /// The tunnel that holds both halves, 0.0.0.0/1 and 128.0.0.0/1, over the default route
+        /// (wg-quick, OpenVPN def1), nil without the whole pair: by longest prefix it carries everything, though
+        /// `route get default` still names the physical interface.
+        var halfRouteCarrier: String? = nil
+
+        /// The interface every address no route of ours covers actually leaves through.
+        var trafficCarrier: String? { halfRouteCarrier ?? defaultRouteInterface }
     }
 
     /// On-demand only — never call from a timer. `listVPNLinks` spawns `ifconfig` and
@@ -1864,11 +1873,14 @@ final class RouteManager: ObservableObject {
     func coexistenceSnapshot() async -> CoexistenceSnapshot {
         let links = await listVPNLinks()
         let defaultIface = await currentDefaultRouteInterface()
-        let tagged = RouteKernel.currentTable()?.filter { $0.isOurs }.map(\.destinationString) ?? []
+        let table = RouteKernel.currentTable()
+        // The per-app scoped default is ours too, but no address: it is not counted as one.
+        let tagged = table?.filter { $0.isOurs && !$0.isScoped }.map(\.destinationString) ?? []
         return CoexistenceSnapshot(links: links,
                                    selectedInterface: vpnInterface,
                                    defaultRouteInterface: defaultIface,
-                                   taggedDestinations: tagged)
+                                   taggedDestinations: tagged,
+                                   halfRouteCarrier: table.flatMap(RouteKernel.slashOnePairOwner))
     }
 
     func listVPNLinks() async -> [VPNLink] {
@@ -5988,10 +6000,15 @@ final class RouteManager: ObservableObject {
 
     /// Which table entries are OUR orphans: tagged RTF_PROTO1 (only this app sets it) yet not
     /// wanted by the current session. Pure so it can be unit-tested against synthetic tables.
+    ///
+    /// Interface-scoped entries are never orphans here. The only one of ours is per-app
+    /// routing's scoped default (R12), which the helper owns and removes by its interface index
+    /// (`ScopedDefaultKeeper`); swept by destination it would reach the helper as "0.0.0.0", an
+    /// UNSCOPED delete that names the system's own default route.
     nonisolated static func orphanedDestinations(
         table: [RouteKernel.KernelRoute], desired: Set<String>
     ) -> [String] {
-        table.filter { $0.isOurs }.map(\.destinationString).filter { !desired.contains($0) }
+        table.filter { $0.isOurs && !$0.isScoped }.map(\.destinationString).filter { !desired.contains($0) }
     }
 
     /// The MIRROR of `orphanedDestinations`: destinations this session still wants that are no

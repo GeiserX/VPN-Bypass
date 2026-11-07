@@ -175,12 +175,63 @@ final class SiteRouteTests: XCTestCase {
         XCTAssertTrue(manager.siteRouteSnapshot.services.isEmpty)
     }
 
-    func testCustomWithNoMatchTakesTheDefaultRoute() {
+    /// The engine installs routes for rules only, so a name no rule claims follows the system's
+    /// own routing, the VPN, even with Everything else set to Direct: the check expects the
+    /// tunnel, and the sentence says why the setting does not apply.
+    func testCustomWithNoMatchFollowsTheSystemWhateverEverythingElseSays() {
         let s = snapshot(mode: .custom, routes: [direct, corp], defaultRouteId: direct.id)
         let found = SiteRoute.match(host: "example.org", addresses: ["203.0.113.5"], in: s)
         XCTAssertEqual(found.match, .defaultRoute)
         XCTAssertEqual(found.routeName, "Direct")
-        XCTAssertEqual(found.expected, .physical)
+        XCTAssertEqual(found.expected, .tunnel("utun4"))
+        XCTAssertTrue(found.defaultRouteNotApplied)
+        let tunnel = PathCheck.Probe(address: "203.0.113.5", routeInterface: "utun4", answer: .connected)
+        let answer = SiteRoute.answer(host: "example.org", mode: .custom, addresses: ["203.0.113.5"], found: found,
+                                      probes: [tunnel], control: nil, vpnConnected: true)
+        XCTAssertEqual(answer.verdict, .ok, "the traffic takes the VPN, which is right")
+        XCTAssertTrue(answer.summary.contains("Everything else is set to Direct, but the app adds routes for rules only"), answer.summary)
+        XCTAssertTrue(answer.canAdd, "Send Direct still sends it direct")
+        // Everything else set to the VPN is what the system does anyway.
+        let vpn = SiteRoute.match(host: "example.org", addresses: ["203.0.113.5"],
+                                  in: snapshot(mode: .custom, routes: [direct, corp], defaultRouteId: corp.id))
+        XCTAssertEqual(vpn.expected, .tunnel("utun4"))
+        XCTAssertFalse(vpn.defaultRouteNotApplied)
+        XCTAssertEqual(SiteRoute.whySentence(host: "example.org", mode: .custom, found: vpn),
+                       "example.org matches no rule, so it takes the default route, Corp VPN.")
+    }
+
+    /// With no VPN connected a name no rule claims leaves by the physical interface, so a Direct
+    /// Everything else is applied; one set to the VPN is not.
+    func testEverythingElseDirectIsAppliedWithNoVPN() {
+        let found = SiteRoute.match(host: "example.org", addresses: ["203.0.113.5"],
+                                    in: snapshot(mode: .custom, routes: [direct, corp], defaultRouteId: direct.id, vpn: nil))
+        XCTAssertEqual(found.match, .defaultRoute)
+        XCTAssertFalse(found.defaultRouteNotApplied)
+        let vpn = SiteRoute.match(host: "example.org", addresses: ["203.0.113.5"],
+                                  in: snapshot(mode: .custom, routes: [direct, corp], defaultRouteId: corp.id, vpn: nil))
+        XCTAssertTrue(vpn.defaultRouteNotApplied)
+    }
+
+    /// Everything else set to a pinned tunnel no rule uses: its pin is read too, so Site Check
+    /// sees that the system sends the name to the primary VPN instead and says the setting is not
+    /// applied.
+    func testEverythingElseOnAPinnedTunnelIsComparedWithItsPin() {
+        let pinned = Route(name: "WG", egress: .vpnDefault, vpnSelector: VPNSelector(kind: .interface, interfaceName: "utun9"))
+        var config = RouteManager.Config()
+        config.schemaVersion = 2
+        config.routingMode = .custom
+        config.routes = [direct, pinned]
+        XCTAssertTrue(RouteManager.pinnedRoutesToRead(config).isEmpty, "no rule and not Everything else")
+        config.defaultRouteId = pinned.id
+        XCTAssertEqual(RouteManager.pinnedRoutesToRead(config).map(\.id), [pinned.id])
+        config.routingMode = .bypass
+        XCTAssertTrue(RouteManager.pinnedRoutesToRead(config).isEmpty, "only Custom reads pins")
+
+        var s = snapshot(mode: .custom, routes: [direct, pinned], defaultRouteId: pinned.id)
+        s.pinnedInterfaces = [pinned.id: "utun7"]
+        let found = SiteRoute.match(host: "example.org", addresses: ["203.0.113.5"], in: s)
+        XCTAssertEqual(found.expected, .tunnel("utun4"))
+        XCTAssertTrue(found.defaultRouteNotApplied)
     }
 
     /// The kernel decides before the rules: an installed route is reported first.

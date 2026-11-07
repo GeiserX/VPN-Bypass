@@ -281,7 +281,7 @@ final class FrontTabTests: XCTestCase {
     }
 
     func testTheAppIsEntitledToSendAppleEventsAndSaysWhy() throws {
-        let entitlements = try plist("VPNBypass.entitlements")
+        let entitlements = try plist("entitlements/app.entitlements")
         XCTAssertEqual(entitlements["com.apple.security.automation.apple-events"] as? Bool, true)
         let info = try plist("Info.plist")
         let why = try XCTUnwrap(info["NSAppleEventsUsageDescription"] as? String)
@@ -295,7 +295,7 @@ final class FrontTabTests: XCTestCase {
 
     func testTheReleaseSignsTheAppWithItsEntitlements() throws {
         let makefile = try text("Makefile")
-        XCTAssertTrue(makefile.contains("scripts/sign-and-notarize.sh app --entitlements VPNBypass.entitlements"),
+        XCTAssertTrue(makefile.contains("scripts/sign-and-notarize.sh app --entitlements entitlements/app.entitlements"),
                       "make release must pass the entitlements, or the signed app cannot send Apple Events")
         let script = try text("scripts/sign-and-notarize.sh")
         XCTAssertTrue(script.contains("sign --entitlements \"$entitlements\" \"$target\""))
@@ -321,11 +321,11 @@ final class FrontTabTests: XCTestCase {
         var (status, message) = try run(["app", "--entitlements", "/nonexistent.entitlements", target])
         XCTAssertNotEqual(status, 0)
         XCTAssertTrue(message.contains("entitlements file /nonexistent.entitlements does not exist"), message)
-        (status, message) = try run(["dmg", "--entitlements", "VPNBypass.entitlements", target])
+        (status, message) = try run(["dmg", "--entitlements", "entitlements/app.entitlements", target])
         XCTAssertNotEqual(status, 0)
         XCTAssertTrue(message.contains("--entitlements is for app only"), message)
         // A good flag gets past parsing and stops at the missing identity, signing nothing.
-        let entitlements = Self.root.appendingPathComponent("VPNBypass.entitlements").path
+        let entitlements = Self.root.appendingPathComponent("entitlements/app.entitlements").path
         (status, message) = try run(["app", "--entitlements", entitlements, target])
         XCTAssertNotEqual(status, 0)
         XCTAssertTrue(message.contains("SIGN_IDENTITY is not set"), message)

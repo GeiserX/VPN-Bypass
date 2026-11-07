@@ -47,7 +47,9 @@ if [ -z "$CONSTS" ]; then
         echo '["AnyResolverProviding","AppEntity","AppEnum","AppExtension","AppIntent","AppIntentsPackage","AppShortcutProviding","AppShortcutsProvider","AppUnionValue","AppUnionValueCasesProviding","DynamicOptionsProvider","EntityQuery","ExtensionPointDefining","IntentValueQuery","Resolver","TransientEntity","_AssistantIntentsProvider","_GenerativeFunctionExtractable","_IntentValueRepresentable"]' > "$PROTOCOLS"
         NATIVE=()
         # The flags below only work on the native build system; Swift Build adds its own.
-        if swift build --help 2>&1 | grep -q -- '--build-system'; then NATIVE=(--build-system native); fi
+        # Captured first: `| grep -q` under pipefail can fail with SIGPIPE (141) on a match.
+        BUILD_HELP=$(swift build --help 2>&1 || true)
+        if grep -q -- '--build-system' <<<"$BUILD_HELP"; then NATIVE=(--build-system native); fi
         swift build --package-path "$ROOT" -c release --arch arm64 "${NATIVE[@]}" --target "$MODULE" \
             --scratch-path "$WORK/build" \
             -Xswiftc -emit-const-values-path -Xswiftc "$CONSTS" \

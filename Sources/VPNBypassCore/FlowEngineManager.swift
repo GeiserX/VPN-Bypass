@@ -1,0 +1,791 @@
+// FlowEngineManager.swift
+// Per-app routing's app side: turns the extension on and off, keeps its policy fresh, and
+// decides what to do when it fails. The kernel engine never reads anything from here: routes,
+// /etc/hosts and the wildcard forwarder run the same whether this is on, off or failing. The one
+// kernel route that follows this engine is its own: the scoped default on the physical
+// interface, held only while it claims flows past a VPN (R12, `syncEgressRoute`).
+//
+// Design: docs/design/NETWORK-EXTENSION-DESIGN.md, 3.3 (config delivery), 3.7 (failures) and 5
+// (states). In short:
+// - Off by default. Turning it on files the activation request, saves the configuration
+//   enabled (macOS asks twice, once for each), starts the session and pushes the policy.
+// - Every change of rules, mode, Pause, the VPN's kill switch or the network pushes the policy
+//   again; a 30 s heartbeat renews its 2-minute lease. A push that can stop the extension
+//   claiming something counts only once the extension echoes its generation; with no echo
+//   within 10 s the session is stopped, so listed apps go into the VPN at once.
+// - A stopped or silent extension is started again once; a second failure within 10 minutes
+//   turns per-app routing off (a crash stalls every new TCP connection for about 5 s, so it
+//   must not loop).
+// - Turning it off by hand (the switch, `vpnb engine.off`) or Remove Extension removes the
+//   configuration and files the deactivation request, so nothing of it stays on the Mac: off is
+//   the old way. A turn-off the app makes by itself (a second failure, a declined
+//   configuration, a config.json switched off) only disables the configuration, so no password
+//   prompt appears unasked; Remove Extension takes what is left.
+
+import Combine
+import Foundation
+import VPNBypassPolicy
+
+/// The levels the manager logs at; the app maps them onto its own log.
+enum FlowEngineLogLevel {
+    case info, warning, error
+}
+
+@MainActor
+final class FlowEngineManager: ObservableObject {
+    static let shared = FlowEngineManager(system: LiveFlowEngineSystem())
+
+    /// How often the policy is pushed again, well inside its lease (3.3).
+    static let heartbeatSeconds: TimeInterval = 30
+    /// A second failure within this window turns per-app routing off (3.7).
+    static let failureWindow: TimeInterval = 600
+    /// Tries per heartbeat before the extension counts as silent: one reply can go missing with
+    /// the session healthy (spike A3), so a heartbeat retries twice.
+    static let heartbeatTries = 3
+    /// How long a started session may take to connect.
+    static let startTimeout: TimeInterval = 10
+    /// A failed start is tried again on an input change at most this often, so a flapping
+    /// network cannot loop saves and session starts.
+    static let startRetrySeconds: TimeInterval = 30
+    /// Tries of a disabling save whose read of the preferences failed.
+    static let disableTries = 3
+
+    @Published private(set) var state: FlowEngineState
+    /// The extension's last reply (counters, version).
+    @Published private(set) var reply: FlowEngineReplySummary?
+    /// The last removal since launch (nil: none ran).
+    @Published private(set) var removal: FlowEngineRemoval?
+    /// A configuration of ours exists, or an activation completed and no removal since, so the
+    /// extension may be installed: Remove Extension shows.
+    @Published private(set) var mayBeInstalled = false
+
+    let system: FlowEngineSystem
+    /// What the policy is compiled from. Wired to RouteManager by `start(observing:)`
+    /// (FlowEngineWiring.swift); this file knows nothing of the rest of the app, so the live
+    /// test driver (scripts/ne-live) compiles it as it is.
+    var inputs: @MainActor () async -> FlowPolicyCompiler.Input = { FlowPolicyCompiler.Input(mode: .bypass) }
+    /// The saved switch, and how to change it (both config.json).
+    var isEnabled: @MainActor () -> Bool = { false }
+    var saveEnabled: @MainActor (Bool) -> Void = { _ in }
+    /// An activation completed and no removal finished since (UserDefaults): a declined
+    /// configuration leaves the extension installed with no configuration to find at launch.
+    var wasActivated: @MainActor () -> Bool = { UserDefaults.standard.bool(forKey: FlowEngineManager.activatedKey) }
+    var saveActivated: @MainActor (Bool) -> Void = { UserDefaults.standard.set($0, forKey: FlowEngineManager.activatedKey) }
+    nonisolated static let activatedKey = "flowEngineExtensionActivated"
+    var log: @MainActor (FlowEngineLogLevel, String) -> Void = { _, _ in }
+    /// What the scoped default route on the physical interface depends on besides the engine
+    /// (R12, `ScopedDefaultRoute.want`): whether the VPN is up, and the physical router.
+    var egressRouteFacts: @MainActor () -> (vpnConnected: Bool, gateway: String?) = { (false, nil) }
+    /// Asks the helper to hold that route (nil: remove ours); nil when it could not be asked.
+    var applyEgressRoute: @MainActor (ScopedDefaultRequest?) async -> ScopedDefaultOutcome? = { _ in nil }
+    var now: () -> Date = Date.init
+    var sleep: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
+    /// The wait between heartbeats (a seam: tests send them by hand).
+    var heartbeatWait: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
+    /// The wait before the one retry a failed start schedules (a seam: tests release it by hand).
+    var retryWait: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
+    /// The app's version, to tell an extension whose update waits.
+    var appVersion: String? = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+
+    /// The user wants it running and this manager is acting on that.
+    private(set) var wantsOn = false
+    /// Raised on every turn-on and turn-off, so a late callback of an earlier attempt does nothing.
+    private var attempt = 0
+    /// The session reached `connected` in this attempt, so its end is a failure, not a start-up.
+    private var established = false
+    /// The app stopped the session itself; the status change that follows is not a crash.
+    private var stoppingOnPurpose = false
+    /// The policy the extension last confirmed (nil: unknown, e.g. after a launch).
+    private(set) var confirmed: FlowPolicy?
+    private var lastGeneration = 0
+    private var failures: [Date] = []
+    /// When the last start failed (`.failed(.startFailed)`), for `startRetrySeconds`.
+    private var lastStartFailure: Date?
+    /// Whether the network is up, from the app's path monitor (nil: it has not reported yet).
+    private(set) var networkAvailable: Bool?
+    /// Raised on every report of a network that is up, and its value when the current start
+    /// began: a network that came up while a start was failing is a reason to start again at once.
+    private var networkUps = 0
+    private var networkUpsAtStart = 0
+    /// When the network last started the session again: those retries skip `startRetrySeconds`
+    /// after a failure, but run at most that often, so a flapping network cannot loop starts.
+    private var lastNetworkRetry: Date?
+    /// The attempt the scheduled retry started: its own failure schedules no other one.
+    private var scheduledRetryAttempt: Int?
+    private var heartbeatTask: Task<Void, Never>?
+    private var pushing = false
+    private var pushAgain = false
+    private var forceNext = false
+    private var activity: NSObjectProtocol?
+    /// The disable or removal a turn-off started; the next turn-on waits for it, so a late disable
+    /// cannot land after the enabling read, and a removal cannot take away what a turn-on installs.
+    private var pendingTeardown: Task<Void, Never>?
+    /// Removals not finished yet (a deactivation can wait minutes for the password).
+    private var removalsInFlight = 0
+    var subscriptions: Set<AnyCancellable> = []
+    private(set) var started = false
+    /// What the helper was last told about the scoped default route: `.some(nil)` after a
+    /// removal it answered, nil when unknown (launch, a helper restart, an unanswered call), so
+    /// the next removal is sent again.
+    private var egressRouteSent: ScopedDefaultRequest??
+    /// The interface with a scoped default and the stamp the policy carries for it: the
+    /// generation of the push that found the route added, so a route put in again (after a
+    /// helper restart) gets a new stamp and the extension forgets the failures without it.
+    private var egressRouteStamp: (interface: String, stamp: Int)?
+    private var lastEgressOutcome: ScopedDefaultOutcome?
+    /// The route calls in order: a removal can never overtake the add before it.
+    private var egressRouteTask: Task<ScopedDefaultOutcome?, Never>?
+    /// The app is quitting: every later call removes the route, so a heartbeat that fires during
+    /// the quit cannot put it back for the helper's 150 s lease.
+    private var quitting = false
+
+    init(system: FlowEngineSystem) {
+        self.system = system
+        if case .unavailable(let why) = system.support {
+            state = .unavailable(why)
+        } else {
+            state = .off
+        }
+        system.onSessionChange = { [weak self] in self?.sessionChanged() }
+    }
+
+    // MARK: - Launch and the switch
+
+    /// Marks the manager wired (`start(observing:)` in FlowEngineWiring.swift), then follows
+    /// the saved switch; with it off, disables a configuration of ours left enabled.
+    func begin() {
+        guard !started else { return }
+        started = true
+        followSwitch()
+        if !wantsOn { Task { await disableStaleConfiguration() } }
+    }
+
+    /// The switch in Settings or `vpnb engine.on|off`. Turning it on by hand forgets earlier
+    /// failures, so a user who saw "stopped twice" can try again. Turning it off by hand removes
+    /// the extension too.
+    func setEnabled(_ on: Bool) {
+        if on { failures.removeAll() }
+        if isEnabled() != on { saveEnabled(on) }
+        guard on || !wantsOn else {
+            turnOff(teardown: .remove)
+            return
+        }
+        // On by hand while on but failed: start over, so turning it on never does nothing. A
+        // restart after a crash is already under way and keeps going.
+        if on, wantsOn, case .failed(let why) = state, why != .stoppedRestarting {
+            log(.info, "Per-app routing: turned on again after it failed (\(why.rawValue)), so it starts over")
+            turnOn()
+            return
+        }
+        followSwitch()
+    }
+
+    /// Remove Extension and `vpnb engine.remove`: turns per-app routing off if it is on, removes
+    /// its configuration and files the deactivation request.
+    func removeExtension() {
+        guard case .supported = system.support, removalsInFlight == 0 || wantsOn else { return }
+        if isEnabled() { saveEnabled(false) }
+        if wantsOn {
+            turnOff(teardown: .remove)
+        } else {
+            startRemoval()
+        }
+    }
+
+    /// Starts or stops to match the saved switch (also after an import or a profile switch).
+    func followSwitch() {
+        guard case .supported = system.support else { return }
+        let want = isEnabled()
+        if want, !wantsOn { turnOn() }
+        if !want, wantsOn { turnOff() }
+    }
+
+    /// Something the policy is made of changed: the switch, rules, mode, Pause, the kill switch
+    /// or the network.
+    func inputsChanged() {
+        followSwitch()
+        if wantsOn, established {
+            requestPush(force: false)
+        } else {
+            // A session that would not start or connect is tried again on the next change, so
+            // listed apps do not stay in the VPN until the switch is flipped or the app relaunches.
+            if wantsOn, state == .failed(.startFailed),
+               lastStartFailure.map({ now().timeIntervalSince($0) >= Self.startRetrySeconds }) ?? true {
+                retryStart()
+            }
+            Task { await syncEgressRoute(claims: false, interface: nil) }
+        }
+    }
+
+    /// The app's network monitor saw the network change (its status or primary interface).
+    /// A failed start runs again as soon as the network is up, without waiting for
+    /// `startRetrySeconds` or another input: after a restart the session is started before the
+    /// Mac has a network, and macOS does not start it again by itself.
+    func networkChanged(available: Bool) {
+        networkAvailable = available
+        guard available else { return }
+        networkUps += 1
+        guard wantsOn, state == .failed(.startFailed), networkRetryAllowed() else { return }
+        retryStart(because: "the network is up")
+    }
+
+    private func networkRetryAllowed() -> Bool {
+        lastNetworkRetry.map { now().timeIntervalSince($0) >= Self.startRetrySeconds } ?? true
+    }
+
+    /// When a failed start is tried again (`engine.status`'s retry, nil when not failed).
+    var startRetry: FlowEngineStartRetry? {
+        guard wantsOn, state == .failed(.startFailed) else { return nil }
+        return networkAvailable == true ? .onNextChange : .waitingForNetwork
+    }
+
+    private func turnOn() {
+        wantsOn = true
+        attempt += 1
+        networkUpsAtStart = networkUps
+        let a = attempt
+        beginActivity()
+        state = .starting
+        removal = nil
+        // A removal still waiting for its password would take away what this turn-on installs:
+        // the activation request is filed once it ended.
+        if removalsInFlight > 0, let teardown = pendingTeardown {
+            Task { [weak self] in
+                await teardown.value
+                guard let self, self.attempt == a else { return }
+                self.fileActivation(a)
+            }
+        } else {
+            fileActivation(a)
+        }
+    }
+
+    private func retryStart(because why: String? = nil) {
+        attempt += 1
+        networkUpsAtStart = networkUps
+        if why != nil { lastNetworkRetry = now() }
+        let a = attempt
+        state = .starting
+        log(.info, "Per-app routing: starting its session again after a failed start" + (why.map { " (\($0))" } ?? ""))
+        Task { await configureAndStart(a) }
+    }
+
+    private func fileActivation(_ a: Int) {
+        log(.info, "Per-app routing: turning on (activation request filed)")
+        system.requestActivation(onNeedsApproval: { [weak self] replacing in
+            guard let self, self.attempt == a else { return }
+            // An update whose replacement waits (6.4): the old extension gets no policy from this
+            // app, so its lease runs out and listed apps use the VPN until the user allows it.
+            self.state = replacing ? .updateWaiting : .awaitingExtensionApproval
+            self.log(.info, replacing
+                ? "Per-app routing: an update of the extension waits to be allowed in System Settings"
+                : "Per-app routing: waiting for the extension to be allowed in System Settings")
+        }, completion: { [weak self] outcome in
+            guard let self, self.attempt == a else { return }
+            switch outcome {
+            case .activated:
+                self.mayBeInstalled = true
+                self.saveActivated(true)
+                Task { await self.configureAndStart(a) }
+            case .willCompleteAfterReboot:
+                self.state = .blocked(.needsRestart)
+            case .failed(let code):
+                self.log(.warning, "Per-app routing: the activation request failed (code \(code))")
+                self.state = FlowEngineState.forActivationError(code: code)
+            }
+        })
+    }
+
+    /// What a turn-off does to the configuration: nothing (a declined save left none), disable
+    /// it (a turn-off the app makes by itself), or remove it with the extension (by hand).
+    private enum Teardown { case none, disable, remove }
+
+    private func turnOff(teardown: Teardown = .disable) {
+        wantsOn = false
+        attempt += 1
+        established = false
+        confirmed = nil
+        // The last session's generation, version and counters are not this state's.
+        reply = nil
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        endActivity()
+        stoppingOnPurpose = true
+        system.stopSession()
+        state = .off
+        log(.info, "Per-app routing: turned off; every app follows the routes again")
+        Task { await syncEgressRoute(claims: false, interface: nil) }
+        switch teardown {
+        case .none: break
+        case .disable: disableConfiguration()
+        case .remove: startRemoval()
+        }
+    }
+
+    /// With the switch off, a configuration of ours left enabled (a config.json replaced while it
+    /// ran) would keep every new TCP connection passing through the extension: disable it.
+    private func disableStaleConfiguration() async {
+        guard case .supported = system.support, !wantsOn else { return }
+        let existing: Bool?
+        do {
+            existing = try await system.loadConfiguration()
+        } catch {
+            // Unknown is not "none": disable anyway. The save reads the preferences again, and
+            // with no configuration it saves nothing.
+            guard !wantsOn else { return }
+            mayBeInstalled = true
+            log(.warning, "Per-app routing is off and its configuration could not be read, so it is turned off in case it was left enabled")
+            disableConfiguration()
+            return
+        }
+        if existing != nil || wasActivated() { mayBeInstalled = true }
+        guard existing == true, !wantsOn else { return }
+        log(.info, "Per-app routing is off, so its configuration left enabled is turned off")
+        disableConfiguration()
+    }
+
+    /// Saves the configuration disabled, after any disable still in flight. A save whose read of
+    /// the preferences failed is tried again, up to `disableTries` times, unless a turn-on came.
+    private func disableConfiguration() {
+        let previous = pendingTeardown
+        pendingTeardown = Task { [weak self, system] in
+            await previous?.value
+            for try_ in 1...Self.disableTries {
+                guard case .failed(let code) = await system.saveConfiguration(enabled: false) else { return }
+                guard let self, !self.wantsOn else { return }
+                if try_ == Self.disableTries {
+                    self.log(.warning, "Per-app routing: its configuration could not be turned off (code \(code)); Remove Extension takes it")
+                    return
+                }
+                await self.sleep(2)
+            }
+        }
+    }
+
+    /// Removes the configuration, then files the deactivation request, after any teardown still
+    /// in flight. The session was stopped by the turn-off, or was not running.
+    private func startRemoval() {
+        removal = .removing
+        removalsInFlight += 1
+        log(.info, "Per-app routing: removing its configuration and the extension (macOS asks for an administrator password)")
+        let previous = pendingTeardown
+        pendingTeardown = Task { [weak self, system] in
+            await previous?.value
+            let configurationRemoved = await system.removeConfiguration()
+            let outcome: FlowEngineDeactivation = await withCheckedContinuation { continuation in
+                system.requestDeactivation { continuation.resume(returning: $0) }
+            }
+            self?.finishRemoval(configurationRemoved: configurationRemoved, outcome)
+        }
+    }
+
+    private func finishRemoval(configurationRemoved: Bool, _ outcome: FlowEngineDeactivation) {
+        removalsInFlight -= 1
+        let result: FlowEngineRemoval
+        switch outcome {
+        case .removed:
+            result = configurationRemoved ? .removed : .failed
+        case .willCompleteAfterReboot:
+            result = configurationRemoved ? .needsRestart : .failed
+        case .failed(let code):
+            log(.warning, "Per-app routing: the extension could not be removed (code \(code))")
+            result = .failed
+        }
+        if !configurationRemoved { log(.warning, "Per-app routing: its configuration could not be removed") }
+        if result != .failed { log(.info, result == .removed
+            ? "Per-app routing: the extension and its configuration are removed"
+            : "Per-app routing: its configuration is removed; macOS removes the extension at the next restart") }
+        if result != .failed { saveActivated(false) }
+        // A turn-on that waited for this removal reports its own state; the removal stays
+        // visible only while per-app routing is off.
+        guard !wantsOn else { return }
+        // A later removal still queued behind this one decides the outcome: until it ends the
+        // status stays `removing`, so a script polling `engine.status` does not stop early.
+        guard removalsInFlight == 0 else { removal = .removing; return }
+        removal = result
+        mayBeInstalled = result == .failed
+    }
+
+    private func configureAndStart(_ a: Int) async {
+        await pendingTeardown?.value
+        guard attempt == a else { return }
+        let existing: Bool?
+        do {
+            existing = try await system.loadConfiguration()
+        } catch {
+            guard attempt == a else { return }
+            log(.warning, "Per-app routing: its configuration could not be read (code \((error as NSError).code))")
+            startFailed()
+            return
+        }
+        guard attempt == a else { return }
+        if existing != true {
+            state = .awaitingConfigApproval
+            let saved = await system.saveConfiguration(enabled: true)
+            guard attempt == a else {
+                // Turned off while macOS's prompt was open, then allowed: this save enabled a
+                // configuration nobody wants now. Disable it, after any teardown in flight.
+                if saved == .saved, !wantsOn { disableConfiguration() }
+                return
+            }
+            switch saved {
+            case .saved:
+                break
+            case .declined:
+                log(.info, "Per-app routing: the proxy configuration was not allowed, so it is off again")
+                turnOff(teardown: .none)
+                saveEnabled(false)
+                state = .failed(.configurationDeclined)
+                return
+            case .failed(let code):
+                log(.warning, "Per-app routing: the configuration could not be saved (code \(code))")
+                startFailed()
+                return
+            }
+        }
+        guard attempt == a else { return }
+        await startSession(a)
+    }
+
+    private func startFailed() {
+        lastStartFailure = now()
+        state = .failed(.startFailed)
+        // The network came up while this start was failing (the start right after a restart):
+        // start again now; the report that would have done it arrived before the failure.
+        if networkAvailable == true, networkUps != networkUpsAtStart, networkRetryAllowed() {
+            retryStart(because: "the network came up while it started")
+            return
+        }
+        log(.info, networkAvailable == true
+            ? "Per-app routing: it starts again on the next change of the network or the settings, \(Int(Self.startRetrySeconds)) s from now at the soonest"
+            : "Per-app routing: it starts again once the network is up")
+        // With the network up, a change inside the 30 s floor starts nothing, so without this a
+        // failure just after a periodic refresh would wait for the refresh after that (about
+        // 60 s). One retry at the end of the floor, only while the network is reported up (without
+        // it, `networkChanged` starts it); the one it starts schedules no other.
+        if networkAvailable == true, scheduledRetryAttempt != attempt { scheduleRetry() }
+    }
+
+    private func scheduleRetry() {
+        let a = attempt
+        Task { [weak self] in
+            guard let self else { return }
+            await self.retryWait(Self.startRetrySeconds)
+            guard self.attempt == a, self.wantsOn, self.state == .failed(.startFailed),
+                  self.networkAvailable == true else { return }
+            self.retryStart(because: "\(Int(Self.startRetrySeconds)) s after the failed start")
+            self.scheduledRetryAttempt = self.attempt
+        }
+    }
+
+    private func startSession(_ a: Int) async {
+        if state != .failed(.stoppedRestarting) { state = .starting }
+        established = false
+        stoppingOnPurpose = false
+        confirmed = nil
+        if system.session != .connected {
+            guard system.startSession() else {
+                log(.warning, "Per-app routing: the session would not start")
+                startFailed()
+                return
+            }
+            var waited: TimeInterval = 0
+            while system.session != .connected, waited < Self.startTimeout {
+                await sleep(0.25)
+                waited += 0.25
+                guard attempt == a else { return }
+            }
+            guard system.session == .connected else {
+                log(.warning, "Per-app routing: the session did not connect within \(Int(Self.startTimeout)) s")
+                stoppingOnPurpose = true
+                system.stopSession()
+                startFailed()
+                return
+            }
+        }
+        established = true
+        startHeartbeat(a)
+        requestPush(force: true)
+    }
+
+    // MARK: - Policy push
+
+    /// Pushes now, or right after the push in flight, so pushes never overlap.
+    func requestPush(force: Bool) {
+        if force { forceNext = true }
+        if pushing { pushAgain = true; return }
+        pushing = true
+        Task {
+            // The attempt is read on every round: a push requested by a new attempt while an
+            // older attempt's push was still in flight runs here, instead of being dropped until
+            // the next heartbeat.
+            repeat {
+                pushAgain = false
+                let f = forceNext
+                forceNext = false
+                await push(attempt, force: f)
+            } while pushAgain && established
+            pushing = false
+        }
+    }
+
+    /// A generation that rises across launches too, so an extension still holding the last
+    /// launch's policy never sees an older number.
+    private func nextGeneration() -> Int {
+        lastGeneration = max(lastGeneration + 1, Int(now().timeIntervalSince1970 * 10))
+        return lastGeneration
+    }
+
+    private func push(_ a: Int, force: Bool) async {
+        let input = await inputs()
+        guard attempt == a, established else { return }
+        var policy = FlowPolicyCompiler.compile(input, generation: nextGeneration())
+        // The scoped default route goes in before a policy that claims is pushed, so a listed
+        // app's first connect finds it (R12). Every push asks again, which renews its lease.
+        let route = await syncEgressRoute(claims: !policy.claimsNothing, interface: input.physicalInterface)
+        guard attempt == a, established else { return }
+        if route?.interfaceHasRoute == true, let name = input.physicalInterface {
+            if route == .added || egressRouteStamp?.interface != name { egressRouteStamp = (name, policy.generation) }
+        } else {
+            // No route, or no answer: the next route found gets a new stamp, so the extension
+            // forgets failures even when the helper added it on a call whose reply was lost.
+            egressRouteStamp = nil
+        }
+        if let stamp = egressRouteStamp { policy.egressRoutes = [stamp.interface: stamp.stamp] }
+        if !force, let confirmed, confirmed.matchers == policy.matchers, confirmed.declinedTeams == policy.declinedTeams,
+           confirmed.egressRoutes == policy.egressRoutes {
+            state = Self.state(after: input)
+            return
+        }
+        let shrinks = policy.shrinksClaims(from: confirmed)
+        guard let data = try? FlowPolicyMessage.encode(policy) else { return }
+        // A push that can stop a claim gets one try of 10 s (3.3); the others retry like the
+        // heartbeat before the extension counts as silent.
+        let tries = shrinks ? 1 : Self.heartbeatTries
+        var answer: FlowPolicyReply?
+        for _ in 0..<tries {
+            let raw = await system.send(data, timeout: TimeInterval(FlowPolicy.echoTimeoutSeconds))
+            guard attempt == a, established else { return }
+            if let raw, let decoded = try? JSONDecoder().decode(FlowPolicyReply.self, from: raw) {
+                answer = decoded
+                break
+            }
+        }
+        guard let answer else {
+            log(.warning, shrinks
+                ? "Per-app routing: no echo within \(FlowPolicy.echoTimeoutSeconds) s for a change that takes apps out, so its session is stopped"
+                : "Per-app routing: the extension did not answer \(tries) times")
+            await failed(a)
+            return
+        }
+        if answer.rejectedVersion != nil {
+            if state != .updateWaiting { log(.warning, "Per-app routing: the running extension does not read this app's policy; its update waits for approval") }
+            state = .updateWaiting
+            return
+        }
+        guard answer.confirms(policy) else {
+            log(.warning, "Per-app routing: the extension did not confirm policy \(policy.generation)")
+            await failed(a)
+            return
+        }
+        // Published only once confirmed: `policyGeneration` in the status is the confirmed one.
+        reply = Self.summary(answer)
+        confirmed = policy
+        let next = Self.state(after: input)
+        if next != state { log(.info, "Per-app routing: \(next.code)\(next.reasonCode.map { " (\($0))" } ?? ""), policy \(policy.generation), \(policy.matchers.count) app rule(s)") }
+        state = next
+    }
+
+    /// The state a confirmed policy compiled from `input` puts the engine in.
+    static func state(after input: FlowPolicyCompiler.Input) -> FlowEngineState {
+        if input.paused { return .paused(.pause) }
+        if input.killSwitchActive { return .paused(.killSwitch) }
+        if input.mode == .vpnOnly { return .paused(.vpnOnly) }
+        return .active
+    }
+
+    static func summary(_ r: FlowPolicyReply) -> FlowEngineReplySummary {
+        FlowEngineReplySummary(policyGeneration: r.policyGeneration, extensionVersion: r.extensionVersion,
+                               claimedByRule: r.claimedByRule, boundByRule: r.boundByRule,
+                               declined: r.declined, leaseExpiries: r.leaseExpiries)
+    }
+
+    private func startHeartbeat(_ a: Int) {
+        heartbeatTask?.cancel()
+        heartbeatTask = Task { [weak self] in
+            while true {
+                guard let wait = self?.heartbeatWait else { return }
+                await wait(Self.heartbeatSeconds)
+                guard let self, !Task.isCancelled, self.attempt == a, self.established else { return }
+                self.requestPush(force: true)
+            }
+        }
+    }
+
+    // MARK: - The scoped default route (R12)
+
+    /// Brings the helper's scoped default route on the physical interface in line with the
+    /// engine: wanted while it claims flows and the VPN is up (`ScopedDefaultRoute.want`),
+    /// removed otherwise. Returns the helper's answer, nil when nothing was asked or it could
+    /// not be asked.
+    @discardableResult
+    func syncEgressRoute(claims: Bool, interface: String?) async -> ScopedDefaultOutcome? {
+        let facts = egressRouteFacts()
+        let want = ScopedDefaultRoute.want(engineClaims: claims && !quitting, vpnConnected: facts.vpnConnected,
+                                           interface: interface, gateway: facts.gateway)
+        let previous = egressRouteTask
+        let task = Task { [weak self] () -> ScopedDefaultOutcome? in
+            _ = await previous?.value
+            guard let self else { return nil }
+            // Nothing of ours to remove: the helper said so last time.
+            if want == nil, case .some(.none) = self.egressRouteSent { return nil }
+            let outcome = await self.applyEgressRoute(want)
+            // An unanswered call or a failed write leaves the state unknown, so the next removal
+            // is sent again.
+            self.egressRouteSent = outcome == nil || outcome == .failed ? nil : .some(want)
+            self.noteEgressRoute(outcome, want)
+            return outcome
+        }
+        egressRouteTask = task
+        return await task.value
+    }
+
+    private func noteEgressRoute(_ outcome: ScopedDefaultOutcome?, _ want: ScopedDefaultRequest?) {
+        guard let outcome, outcome != lastEgressOutcome else { return }
+        lastEgressOutcome = outcome
+        let iface = want?.interface ?? "the physical interface"
+        switch outcome {
+        case .added: log(.info, "Per-app routing: added a scoped default route on \(iface), so listed apps can leave around the VPN")
+        case .systemRoute: log(.info, "Per-app routing: \(iface) already has a scoped default route; none added")
+        case .removed: log(.info, "Per-app routing: removed its scoped default route")
+        case .leftInPlace: log(.info, "Per-app routing: left its scoped default route in place, as macOS now keeps one for that interface")
+        case .refused: log(.warning, "Per-app routing: no scoped default route added; \(iface) does not carry the default route through its router")
+        case .failed: log(.warning, "Per-app routing: the scoped default route could not be changed")
+        case .kept, .absent: break
+        }
+    }
+
+    /// A new helper process removed the route at start: ask again, with the next push when
+    /// the engine claims, otherwise with a removal it has not answered yet.
+    func helperRestarted() async {
+        egressRouteSent = nil
+        lastEgressOutcome = nil
+        if wantsOn, established {
+            requestPush(force: true)
+        } else {
+            await syncEgressRoute(claims: false, interface: nil)
+        }
+    }
+
+    /// At quit: the route goes with the app (the helper's lease would take it two minutes later).
+    func removeEgressRouteForQuit() async {
+        quitting = true
+        await syncEgressRoute(claims: false, interface: nil)
+    }
+
+    // MARK: - Failures
+
+    private func sessionChanged() {
+        guard wantsOn, established, !stoppingOnPurpose else { return }
+        guard system.session == .disconnected || system.session == .none else { return }
+        log(.warning, "Per-app routing: the extension's session ended on its own")
+        let a = attempt
+        Task { await failed(a) }
+    }
+
+    /// The extension stopped, went silent or did not confirm: stop what is left of the session,
+    /// start it once, and turn per-app routing off on a second failure within 10 minutes.
+    private func failed(_ a: Int) async {
+        guard attempt == a, established else { return }
+        established = false
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        stoppingOnPurpose = true
+        system.stopSession()
+        // Nothing claims while it is down; a restart asks for the route again before its push.
+        Task { await syncEgressRoute(claims: false, interface: nil) }
+        let t = now()
+        failures = failures.filter { t.timeIntervalSince($0) < Self.failureWindow } + [t]
+        if failures.count >= 2 {
+            log(.error, "Per-app routing stopped twice within 10 minutes, so it is turned off; listed apps use the VPN")
+            turnOff()
+            saveEnabled(false)
+            state = .failed(.stoppedTwice)
+            return
+        }
+        log(.warning, "Per-app routing stopped; listed apps use the VPN. Starting it again once")
+        state = .failed(.stoppedRestarting)
+        networkUpsAtStart = networkUps
+        await sleep(1)
+        guard attempt == a else { return }
+        await startSession(a)
+    }
+
+    // MARK: - App Nap
+
+    /// While it is on, timers must not be delayed past the lease (3.3).
+    private func beginActivity() {
+        guard activity == nil else { return }
+        activity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep,
+                                                         reason: "Per-app routing renews its policy every 30 seconds")
+    }
+
+    private func endActivity() {
+        if let activity { ProcessInfo.processInfo.endActivity(activity) }
+        activity = nil
+    }
+
+    // MARK: - Reading
+
+    /// How often the General page reads the counters while it shows them.
+    static let countsRefreshSeconds: TimeInterval = 5
+
+    /// Reads the extension's counters now with a status request, which changes nothing in it,
+    /// so a page showing them does not wait for the next heartbeat (up to 30 s; right after a
+    /// turn-on the first reply's 0 stood that long). Kept only while it is the reply of the
+    /// policy confirmed last and nothing else changed meanwhile; the heartbeat does the rest.
+    func refreshCounts() async {
+        guard wantsOn, established, state == .active, !pushing, let generation = confirmed?.generation else { return }
+        let a = attempt
+        guard let raw = await system.send(FlowPolicyMessage.statusRequest, timeout: 2),
+              attempt == a, established, !pushing, confirmed?.generation == generation,
+              let answer = try? JSONDecoder().decode(FlowPolicyReply.self, from: raw),
+              answer.rejectedVersion == nil, answer.policyLive, answer.policyGeneration == generation else { return }
+        reply = Self.summary(answer)
+    }
+
+    /// A rule's counters from the last reply, nil when it has none.
+    func counters(forRule id: String) -> FlowEngineRuleCounters? {
+        guard let reply, reply.claimedByRule[id] != nil || reply.boundByRule[id] != nil else { return nil }
+        return FlowEngineRuleCounters(ruleId: id, claimed: reply.claimedByRule[id] ?? 0, bound: reply.boundByRule[id] ?? 0)
+    }
+
+    /// The `status` and `engine.status` field.
+    func status() -> FlowEngineStatus {
+        FlowEngineStatus(enabled: isEnabled(), state: state, reply: reply, appVersion: appVersion, removal: removal,
+                         retry: startRetry)
+    }
+
+    /// An extension of another version than the app answers: its update waits for approval.
+    var updateWaiting: Bool {
+        if state == .updateWaiting { return true }
+        guard let ext = reply?.extensionVersion, let appVersion else { return false }
+        return ext != appVersion
+    }
+
+    /// For the doc screenshots: shows a state and counters without an extension.
+    func showForScreenshots(_ state: FlowEngineState?, reply: FlowEngineReplySummary? = nil,
+                            removal: FlowEngineRemoval? = nil, mayBeInstalled: Bool = false) {
+        self.removal = removal
+        self.mayBeInstalled = mayBeInstalled
+        if let state {
+            self.state = state
+        } else if case .unavailable(let why) = system.support {
+            self.state = .unavailable(why)
+        } else {
+            self.state = .off
+        }
+        self.reply = reply
+    }
+}
+

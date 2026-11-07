@@ -8,6 +8,10 @@ import Foundation
 // sets its wildcards again on its next pass.
 WildcardForwarder.removeLeftoverResolverFiles()
 
+// Per-app routing's scoped default route (R12) is held for an app that asks every 30 s. A new
+// helper process holds nothing yet, so one left by the last run goes; the app asks again.
+ScopedDefaultKeeper.shared.removeAll(reason: "helper started")
+
 // launchd stops the helper with SIGTERM (`launchctl bootout` on an upgrade or an uninstall, and
 // at shutdown). A helper that is not started again would leave its resolver files pointing at
 // a closed port, so they go first. A crash is covered by KeepAlive in the launchd plist: the
@@ -16,6 +20,7 @@ signal(SIGTERM, SIG_IGN)
 let terminationSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
 terminationSource.setEventHandler {
     WildcardForwarder.shared.shutdown()
+    ScopedDefaultKeeper.shared.removeAll(reason: "helper stopping")
     exit(0)
 }
 terminationSource.resume()

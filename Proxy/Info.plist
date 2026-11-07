@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>es</string>
+		<string>fr</string>
+	</array>
+	<key>CFBundleDisplayName</key>
+	<string>VPN Bypass</string>
+	<key>CFBundleExecutable</key>
+	<string>com.geiserx.vpn-bypass.proxy</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.geiserx.vpn-bypass.proxy</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>VPN Bypass</string>
+	<key>CFBundlePackageType</key>
+	<string>SYSX</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.0.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 GeiserX. All rights reserved.</string>
+	<key>NSSystemExtensionUsageDescription</key>
+	<string>VPN Bypass uses this extension for per-app routing: the apps you list connect outside the VPN.</string>
+	<key>NetworkExtension</key>
+	<dict>
+		<key>NEProviderClasses</key>
+		<dict>
+			<key>com.apple.networkextension.app-proxy</key>
+			<string>FlowProxy</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

@@ -64,6 +64,93 @@ final class ProcessRuleTests: XCTestCase {
         XCTAssertTrue(updated.rules.isEmpty)
     }
 
+    /// Flows are matched by their exact signing identifier, case included, so a rule stores the
+    /// installed app's identifier as its signature has it, whatever case was typed.
+    func testRuleAddStoresTheInstalledAppsExactSigningIdentifier() throws {
+        let saved = BypassApps.lookup
+        defer { BypassApps.lookup = saved }
+        // LaunchServices finds an app whatever the case of the id it is asked for.
+        BypassApps.lookup = { id in
+            id.lowercased() == "com.example.app"
+                ? AppIdentity(name: "Example", signingID: "com.example.App", team: "TEAM000001", bundleID: "com.example.App") : nil
+        }
+        let direct = Route(name: "Direct", egress: .direct)
+        var config = config(route: direct)
+        for typed in ["com.example.app", "COM.EXAMPLE.APP", "com.other.Tool", "exampletool"] {
+            let (updated, response) = CommandRouter.apply(
+                ControlRequest(cmd: "rule.add", args: ["match": "process", "pattern": typed,
+                                                        "routeId": direct.id.uuidString]), to: config)
+            XCTAssertTrue(response.ok, typed)
+            config = updated
+        }
+        XCTAssertEqual(config.rules.map(\.pattern), ["com.example.App", "com.example.App", "com.other.Tool", "exampletool"],
+                       "an app not installed and an executable name are kept as typed")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.app"), "com.example.App", "the Rules page saves through the same call")
+    }
+
+    /// `rule.add` refuses what the Rules page refuses (`ProcessRule.editorValue`): an installed
+    /// app signed by a VPN or network-security team, and VPN Bypass itself. The extension turns
+    /// those down whatever the rule says, so saving one would be a rule that never does anything.
+    func testRuleAddRefusesAVPNClientsAppByTeamAsTheRulesPageDoes() throws {
+        let saved = BypassApps.lookup
+        defer { BypassApps.lookup = saved }
+        BypassApps.lookup = { id in
+            switch id {
+            case "com.example.vpn": return AppIdentity(name: "Example VPN", signingID: id, team: "PXPZ95SK77", bundleID: id)
+            case "com.example.App": return AppIdentity(name: "Example", signingID: id, team: "TEAM000001", bundleID: id)
+            default: return nil
+            }
+        }
+        let direct = Route(name: "Direct", egress: .direct)
+        for pattern in ["com.example.vpn", "com.geiserx.vpn-bypass"] {
+            let (updated, response) = CommandRouter.apply(
+                ControlRequest(cmd: "rule.add", args: ["match": "process", "pattern": pattern,
+                                                        "routeId": direct.id.uuidString]), to: config(route: direct))
+            XCTAssertFalse(response.ok, pattern)
+            XCTAssertEqual(response.error?.code, "refused", pattern)
+            XCTAssertTrue(updated.rules.isEmpty, pattern)
+            XCTAssertEqual(ProcessRule.editorValue(pattern, chosen: nil, previous: nil),
+                           .refuse(try XCTUnwrap(BypassApps.refusal(pattern, identity: BypassApps.lookup(pattern))).localizedMessage()),
+                           "the Rules page refuses it too")
+        }
+        let vpn = CommandRouter.apply(
+            ControlRequest(cmd: "rule.add", args: ["match": "process", "pattern": "com.example.vpn",
+                                                    "routeId": direct.id.uuidString]), to: config(route: direct)).response
+        XCTAssertEqual(vpn.error?.message, BypassAppError.vpnClient("Example VPN").message)
+        // Positive control: an app signed by any other team is saved.
+        let (updated, ok) = CommandRouter.apply(
+            ControlRequest(cmd: "rule.add", args: ["match": "process", "pattern": "com.example.App",
+                                                    "routeId": direct.id.uuidString]), to: config(route: direct))
+        XCTAssertTrue(ok.ok, "\(String(describing: ok.error))")
+        XCTAssertEqual(updated.rules.map(\.pattern), ["com.example.App"])
+    }
+
+    /// Storing the signing id only ever changes case: a signing id that differs otherwise would
+    /// change what the rule matches (a shorter prefix matches sibling apps, a dotless one reads as
+    /// an executable name), and a pattern saved unchanged is kept as it is.
+    func testStoredPatternOnlyEverChangesCase() {
+        let saved = BypassApps.lookup
+        defer { BypassApps.lookup = saved }
+        BypassApps.lookup = { id in
+            switch id.lowercased() {
+            case "com.example.daemon": return AppIdentity(name: "Daemon", signingID: "exampled", team: nil, bundleID: "com.example.daemon")
+            case "com.example.editor": return AppIdentity(name: "Editor", signingID: "com.example", team: nil, bundleID: "com.example.Editor")
+            case "com.example.app": return AppIdentity(name: "Other", signingID: "com.example.Other", team: nil, bundleID: "com.example.app")
+            case "com.example.browser": return AppIdentity(name: "Browser", signingID: "com.example.Browser", team: nil, bundleID: "com.example.Browser")
+            case "com.example.kiosk": return AppIdentity(name: "Kiosk", signingID: "com.example.\u{212A}iosk", team: nil, bundleID: "com.example.kiosk")
+            default: return nil
+            }
+        }
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.daemon"), "com.example.daemon", "dotless signing id")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.Editor"), "com.example.Editor", "a prefix would match siblings")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.app"), "com.example.app", "another identifier")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.browser"), "com.example.Browser", "case only")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.kiosk"), "com.example.kiosk", "a signing id the rules would refuse")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.browser", previous: "com.example.browser"), "com.example.browser")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.browser", previous: nil), "com.example.Browser")
+        XCTAssertEqual(ProcessRule.storedPattern("com.example.browser", previous: "com.example.App"), "com.example.Browser")
+    }
+
     func testRuleAddSavesAProcessRuleAndSaysItRoutesNothingYet() throws {
         let direct = Route(name: "Direct", egress: .direct)
         let (updated, response) = CommandRouter.apply(
@@ -72,7 +159,7 @@ final class ProcessRuleTests: XCTestCase {
         XCTAssertTrue(response.ok)
         XCTAssertEqual(updated.rules.count, 1)
         XCTAssertEqual(response.result?.message, ProcessRule.savedMessage)
-        XCTAssertTrue(ProcessRule.savedMessage.contains("will not route anything until per-app routing exists"))
+        XCTAssertTrue(ProcessRule.savedMessage.contains("only while per-app routing is on and its route is Direct"))
         let rule = try XCTUnwrap(response.result?.rules?.first)
         XCTAssertEqual(rule.servedBy, RuleServedBy.none)
         XCTAssertEqual(rule.inactiveReason, "perAppRoutingNotAvailable")
@@ -122,7 +209,8 @@ final class ProcessRuleTests: XCTestCase {
     }
 
     func testAnUnknownReasonIsPrintedAsItCame() {
-        XCTAssertEqual(ProcessRule.inactiveNote(reason: "perAppRoutingOff"), "inactive: perAppRoutingOff")
+        XCTAssertEqual(ProcessRule.inactiveNote(reason: "perAppRoutingSomethingNew"), "inactive: perAppRoutingSomethingNew")
+        XCTAssertEqual(ProcessRule.inactiveNote(reason: "perAppRoutingOff"), "inactive: per-app routing is off")
         XCTAssertEqual(ProcessRule.inactiveNote(reason: nil), "inactive")
     }
 
@@ -133,7 +221,7 @@ final class ProcessRuleTests: XCTestCase {
         let app = Rule(matchType: .process, pattern: "com.example.App", routeId: proxy.id, order: 0)
         XCTAssertEqual(RuleRow.detail(for: app, route: Route(name: "Direct", egress: .direct)),
                        "Needs per-app routing, which is not available yet, so this rule does nothing.")
-        XCTAssertEqual(RuleRow.detail(for: app, route: proxy), ProcessRule.rowNote(),
+        XCTAssertEqual(RuleRow.detail(for: app, route: proxy), ProcessRule.rowNote(.perAppRoutingNotAvailable),
                        "a rule that does nothing reaches no app, so the proxy note gives way")
         // Positive controls: a destination rule keeps the proxy note, or no line.
         let domain = Rule(matchType: .domain, pattern: "example.com", routeId: proxy.id, order: 1)
@@ -144,7 +232,7 @@ final class ProcessRuleTests: XCTestCase {
     func testTheNewLinesAreTranslated() throws {
         let es = try XCTUnwrap(Bundle(url: Self.resources.appendingPathComponent("es.lproj")))
         let fr = try XCTUnwrap(Bundle(url: Self.resources.appendingPathComponent("fr.lproj")))
-        XCTAssertEqual(ProcessRule.rowNote(in: es),
+        XCTAssertEqual(ProcessRule.rowNote(.perAppRoutingNotAvailable, in: es),
                        "Necesita el enrutamiento por app, que aún no está disponible, así que esta regla no hace nada.")
         XCTAssertEqual(ProcessRule.localizedMessage(in: fr),
                        "Saisissez l'identifiant de paquet d'une app (com.example.App) ou le nom de son exécutable (Example), sans chemin ni joker.")

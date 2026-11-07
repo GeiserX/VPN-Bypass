@@ -56,6 +56,18 @@ Switch on a service there, or type a site into the field and press Return. "All 
 
 If the status chip reads Not routing and the dropdown says the helper is not running, Settings > Status shows its state, with an Install, Update or Retry button; the dropdown's Fix… button opens it. If macOS says the app is damaged, see [Troubleshooting](troubleshooting.md#app-wont-open-damaged-error-macos-gatekeeper).
 
+## Uninstall
+
+1. If you turned on per-app routing, turn it off first in Settings > General (or `vpnb engine.off`), and enter your administrator password when macOS asks: that removes its extension. Quit only once Settings > General says the extension is removed or will be removed at the next restart (`vpnb engine.status` shows `removal: removed` or `needsRestart`); quitting before that can leave it installed. Homebrew cannot remove it once the app is gone; see [Remove the per-app routing extension](troubleshooting.md#remove-the-per-app-routing-extension).
+2. Quit VPN Bypass from its menu. Quitting removes its routes and its `/etc/hosts` entries.
+3. `brew uninstall --cask vpn-bypass` (add `--zap` to delete your settings too), or move the app from Applications to the Bin.
+4. Remove the privileged helper. Stopping it removes its wildcard resolver files from `/etc/resolver`:
+
+```bash
+sudo launchctl bootout system/com.geiserx.vpnbypass.helper
+sudo rm -f /Library/PrivilegedHelperTools/com.geiserx.vpnbypass.helper /Library/LaunchDaemons/com.geiserx.vpnbypass.helper.plist
+```
+
 ## Requirements
 
 - macOS 13.0 (Ventura) or later

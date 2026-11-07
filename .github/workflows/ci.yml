@@ -116,13 +116,20 @@ jobs:
         run: make bundle
       - name: Check the binaries are universal
         run: |
-          for f in "VPN Bypass.app/Contents/MacOS/VPNBypass" \
+          for f in "VPN Bypass.app/Contents/MacOS/VPN Bypass" \
                    "VPN Bypass.app/Contents/MacOS/vpnb" \
-                   "VPN Bypass.app/Contents/MacOS/com.geiserx.vpnbypass.helper"; do
+                   "VPN Bypass.app/Contents/MacOS/com.geiserx.vpnbypass.helper" \
+                   "VPN Bypass.app/Contents/Library/SystemExtensions/com.geiserx.vpn-bypass.proxy.systemextension/Contents/MacOS/com.geiserx.vpn-bypass.proxy"; do
             archs=$(lipo -archs "$f")
             echo "$f: $archs"
             case " $archs " in *" arm64 "*) ;; *) echo "::error::$f has no arm64 slice"; exit 1 ;; esac
             case " $archs " in *" x86_64 "*) ;; *) echo "::error::$f has no x86_64 slice"; exit 1 ;; esac
           done
+      - name: Check the per-app routing extension
+        # make bundle already ran this; run it again as its own step so a regression is named in
+        # the checks list: SYSX, the NetworkExtension dictionary, and the NEProviderClasses class
+        # present in both slices of the binary (a mismatch shows only at activation otherwise).
+        # CI bundles stay unsigned and carry no entitlements; release.yml signs with the profiles.
+        run: scripts/check-extension-bundle.sh "VPN Bypass.app"
       - name: Launch the built app
         run: scripts/smoke-launch.sh "VPN Bypass.app"

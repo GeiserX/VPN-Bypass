@@ -101,6 +101,10 @@ public struct ControlResult: Codable, Equatable, Sendable {
     public var logs: [ControlLogEntry]? = nil
     /// `why`: which entry routes a host, and the path check on it.
     public var why: SiteRouteAnswer? = nil
+    /// `engine.status`, `engine.on`, `engine.off`, `engine.remove`: per-app routing.
+    public var engine: FlowEngineStatus? = nil
+    /// `app.list`, `app.add`: Bypass mode's Apps list.
+    public var apps: [ControlApp]? = nil
 }
 
 /// Live enforcement facts for `status` — the answer to "is it actually working?", which the
@@ -127,12 +131,14 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
     /// Entries saved as ".example.com" that this version rewrote as "*.example.com", until the
     /// user dismisses the note on Status. Nil (omitted) when there are none.
     public var convertedEntries: [ConvertedEntry]? = nil
+    /// Per-app routing: its switch, state and counters. Nil (omitted) from an app without it.
+    public var flowEngine: FlowEngineStatus? = nil
 
     public init(helperReady: Bool, helperState: String, vpnConnected: Bool,
                 vpnInterface: String? = nil, vpnType: String? = nil,
                 enforcedRouteCount: Int, enforcing: Bool, appVersion: String? = nil,
                 killSwitch: [String]? = nil, paused: String? = nil,
-                convertedEntries: [ConvertedEntry]? = nil) {
+                convertedEntries: [ConvertedEntry]? = nil, flowEngine: FlowEngineStatus? = nil) {
         self.helperReady = helperReady
         self.helperState = helperState
         self.vpnConnected = vpnConnected
@@ -144,6 +150,7 @@ public struct RuntimeStatus: Codable, Equatable, Sendable {
         self.killSwitch = killSwitch
         self.paused = paused
         self.convertedEntries = convertedEntries
+        self.flowEngine = flowEngine
     }
 }
 
@@ -201,16 +208,40 @@ public struct SanitizedRule: Codable, Equatable, Sendable {
     /// reason still decodes in an older `vpnb`.
     public var inactiveReason: String? = nil
 
-    init(_ rule: Rule) {
+    init(_ rule: Rule, engine: FlowEngineState = .unavailable(.notInThisBuild), routes: [Route]? = nil,
+         customEngine: Bool = true, turnedDown: Bool = false) {
         id = rule.id
         matchType = rule.matchType
         pattern = rule.pattern
         routeId = rule.routeId
         enabled = rule.enabled
         order = rule.order
-        let serving = ProcessRule.serving(rule)
+        let serving = routes.map {
+            ProcessRule.serving(rule, engine: engine, routes: $0, customEngine: customEngine, turnedDown: turnedDown)
+        } ?? ProcessRule.serving(rule, engine: engine, customEngine: customEngine, turnedDown: turnedDown)
         servedBy = serving.servedBy
         inactiveReason = serving.reason?.rawValue
+    }
+
+    /// A `servedBy` this build does not know (a later engine) decodes as nil, as from an older
+    /// app, instead of failing the whole reply in an older `vpnb`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        matchType = try c.decode(MatchType.self, forKey: .matchType)
+        pattern = try c.decode(String.self, forKey: .pattern)
+        routeId = try c.decode(UUID.self, forKey: .routeId)
+        enabled = try c.decode(Bool.self, forKey: .enabled)
+        order = try c.decode(Int.self, forKey: .order)
+        servedBy = RuleServedBy.lenient(c, forKey: .servedBy)
+        inactiveReason = try c.decodeIfPresent(String.self, forKey: .inactiveReason)
+    }
+}
+
+extension RuleServedBy {
+    /// The value under `key`, nil when it is missing or one this build does not know.
+    static func lenient<K: CodingKey>(_ c: KeyedDecodingContainer<K>, forKey key: K) -> RuleServedBy? {
+        (try? c.decodeIfPresent(String.self, forKey: key)).flatMap(RuleServedBy.init(rawValue:))
     }
 }
 
@@ -270,7 +301,7 @@ enum CommandRouter {
     static func isMutating(_ cmd: String) -> Bool {
         switch cmd {
         case "status", "route.list", "rule.list",
-             "domain.list", "service.list", "routes.active", "logs", "why": return false
+             "domain.list", "service.list", "routes.active", "logs", "why", "engine.status", "app.list": return false
         default: return true
         }
     }
@@ -300,7 +331,7 @@ enum CommandRouter {
     private static func ruleList(
         _ config: RouteManager.Config
     ) -> (config: RouteManager.Config, response: ControlResponse) {
-        let rules = config.rules.sorted { $0.order < $1.order }.map(SanitizedRule.init)
+        let rules = config.rules.sorted { $0.order < $1.order }.map { SanitizedRule($0) }
         return successResponse(config, result: ControlResult(rules: rules))
     }
 
@@ -445,11 +476,20 @@ enum CommandRouter {
         if matchType == .process, let invalid = ProcessRule.invalid(pattern) {
             return errorResponse(config, code: "invalid_args", message: ProcessRule.message(invalid))
         }
+        // The Rules page's refusal: VPN Bypass itself, or an installed app signed by a VPN or
+        // network-security team, which the extension turns down whatever the rule says.
+        if matchType == .process {
+            let identity = ProcessRule.kind(of: pattern) == .bundleID ? BypassApps.lookup(pattern) : nil
+            if let refusal = BypassApps.refusal(identity?.signingID ?? pattern, identity: identity) {
+                return errorResponse(config, code: refusal.code, message: refusal.message)
+            }
+        }
         guard let routeId = uuid(request.args, "routeId"), config.routes.contains(where: { $0.id == routeId }) else {
             return errorResponse(config, code: "not_found", message: "no route with that id")
         }
         let nextOrder = (config.rules.map(\.order).max() ?? -1) + 1
-        let rule = Rule(matchType: matchType, pattern: pattern, routeId: routeId, order: nextOrder)
+        let stored = matchType == .process ? ProcessRule.storedPattern(pattern) : pattern
+        let rule = Rule(matchType: matchType, pattern: stored, routeId: routeId, order: nextOrder)
         var updated = config
         updated.rules.append(rule)
         // Saved, but nothing serves it yet: the reply says so rather than a bare ok.

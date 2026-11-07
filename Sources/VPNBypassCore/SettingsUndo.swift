@@ -23,6 +23,8 @@ enum UndoableChange {
     case domainsSwitched(ids: [UUID], on: Bool, list: DomainList)
     /// The services a Turn All On or Turn All Off switched, and which way.
     case servicesSwitched(ids: [String], on: Bool)
+    /// An entry of the Apps list, and where it sat.
+    case bypassApp(BypassApp, index: Int)
 
     /// The page whose line shows this change.
     var page: SettingsView.SettingsTab {
@@ -31,6 +33,7 @@ enum UndoableChange {
         case .customService, .servicesSwitched: return .services
         case .rule: return .rules
         case .route, .routeDuplicated: return .routes
+        case .bypassApp: return .apps
         }
     }
 
@@ -68,6 +71,8 @@ enum UndoableChange {
                 : String(localized: "\(ids.count) domains", bundle: bundle)
             return on ? String(localized: "Turned on \(what).", bundle: bundle)
                 : String(localized: "Turned off \(what).", bundle: bundle)
+        case .bypassApp(let app, _):
+            return String(localized: "Removed \(app.displayName).", bundle: bundle)
         case .servicesSwitched(let ids, let on):
             let what = ids.count == 1 ? String(localized: "1 service", bundle: bundle)
                 : String(localized: "\(ids.count) services", bundle: bundle)
@@ -108,6 +113,8 @@ extension RouteManager {
             return !setInverseDomainsEnabled(Set(ids), !on).isEmpty
         case .servicesSwitched(let ids, let on):
             return !setServicesEnabled(Set(ids), !on).isEmpty
+        case .bypassApp(let app, let index):
+            return restoreBypassApp(app, at: index)
         }
     }
 }

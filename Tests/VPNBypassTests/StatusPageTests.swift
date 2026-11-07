@@ -159,6 +159,24 @@ final class StatusPageTests: XCTestCase {
         XCTAssertEqual(StatusPage.defaultRouteLine(snapshot(default: "en0")).text, "en0, outside the VPN")
     }
 
+    /// wg-quick and OpenVPN def1 leave `default` on en0 and add 0/1 + 128/1 through the tunnel,
+    /// which by longest prefix carry everything (live on the mini, 2026-11-05: the line said
+    /// "en0, outside the VPN" while every packet entered utun5).
+    func testDefaultRouteLineNamesTheTunnelWhoseHalfRoutesCarryEverything() {
+        var s = snapshot(default: "en0")
+        s.halfRouteCarrier = "utun4"
+        XCTAssertEqual(s.trafficCarrier, "utun4")
+        XCTAssertEqual(StatusPage.defaultRouteLine(s).text,
+                       "utun4, the VPN. Its 0/1 and 128/1 routes come before the default route on en0.")
+        s.halfRouteCarrier = "utun7"
+        XCTAssertEqual(StatusPage.defaultRouteLine(s).text,
+                       "utun7, another tunnel. Its 0/1 and 128/1 routes come before the default route on en0.")
+        XCTAssertEqual(StatusPage.tunnelLine(other, snapshot: s), "Not used by the app. It carries the default route.")
+        XCTAssertEqual(StatusPage.tunnelLine(wireguard, snapshot: s), "The app acts on this one.")
+        // Positive control: no pair, the default route's own interface as before.
+        XCTAssertEqual(StatusPage.defaultRouteLine(snapshot(default: "en0")).text, "en0, outside the VPN")
+    }
+
     // MARK: Addresses owned
 
     private func owned(_ destination: String, _ source: String) -> RoutedBySource.InstalledRoute {

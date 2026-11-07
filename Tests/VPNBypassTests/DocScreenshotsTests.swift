@@ -1475,6 +1475,47 @@ final class DocScreenshotsTests: XCTestCase {
         XCTAssertEqual(try renderSettings(page: .status, to: "status-site-tailnet-after.png"), Self.settingsSize)
     }
 
+    // MARK: - Live findings of the per-app routing run (step gaps2-13), drawn for the pull request
+
+    /// Site Check in Custom mode, Everything else set to Direct, for a site no rule claims. The
+    /// app adds routes for rules only, so the site takes the VPN. Before: expected Direct and
+    /// called the VPN the wrong way. After: expects the VPN and says why the setting does not apply.
+    func testStatusPageSiteCheckEverythingElseDirect() throws {
+        seedCustom()
+        let host = "example.org"
+        let probe = PathCheck.Probe(address: "198.51.100.20", routeInterface: "utun4", sourceAddress: "10.8.0.2",
+                                    sourceInterface: "utun4", answer: .connected, latencyMs: 24)
+        let control = PathCheck.Probe(address: "192.0.2.1", routeInterface: "utun4", answer: .notTried)
+        func answer(_ found: SiteRoute.Found) -> SiteRouteAnswer {
+            SiteRoute.answer(host: host, mode: .custom, addresses: [probe.address], found: found, probes: [probe],
+                             control: (control, .passed), vpnConnected: true)
+        }
+        let found = SiteRoute.match(host: host, addresses: [probe.address], in: rm.siteRouteSnapshot)
+        XCTAssertTrue(found.defaultRouteNotApplied)
+        var old = found
+        old.expected = .physical
+        old.defaultRouteNotApplied = false
+        XCTAssertEqual(answer(old).verdict, .wrongWay)
+        XCTAssertEqual(answer(found).verdict, .ok)
+        defer { StatusTab.siteCheckForScreenshots = nil }
+        StatusTab.siteCheckForScreenshots = (host, answer(old))
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-site-everything-else-before.png"), Self.settingsSize)
+        StatusTab.siteCheckForScreenshots = (host, answer(found))
+        XCTAssertEqual(try renderSettings(page: .status, to: "status-site-everything-else-after.png"), Self.settingsSize)
+    }
+
+    /// Status's Default route row under a VPN that takes the internet with 0/1 and 128/1 and
+    /// leaves `default` on en0. Before: "en0, outside the VPN". After: the tunnel, and why.
+    func testStatusDefaultRouteUnderHalfRoutes() throws {
+        var snapshot = RouteManager.CoexistenceSnapshot(links: [], selectedInterface: "utun4",
+                                                        defaultRouteInterface: "en0", taggedDestinations: [])
+        try renderComponent(StatusLineRow(label: String(localized: "Default route"), line: StatusPage.defaultRouteLine(snapshot)),
+                            to: "status-default-route-before.png")
+        snapshot.halfRouteCarrier = "utun4"
+        try renderComponent(StatusLineRow(label: String(localized: "Default route"), line: StatusPage.defaultRouteLine(snapshot)),
+                            to: "status-default-route-after.png")
+    }
+
     /// Logs with three tunnels up. Before: the status pass logged the tunnel line every 30
     /// seconds and it filled the page. After: once, then the lines that matter.
     func testLogsMultiTunnelLineOnce() throws {
@@ -1515,6 +1556,178 @@ final class DocScreenshotsTests: XCTestCase {
         try renderLogs(search: nil, lines: after.sorted { $0.0 < $1.0 }, to: "logs-dns-lookups-helper-update-after.png")
     }
 
+    // MARK: - Per-app routing, drawn for the pull request
+
+    /// General in Custom mode with the Per-app routing group in `state`, its switch as `on`.
+    private func renderPerAppRouting(_ state: FlowEngineState, on: Bool, reply: FlowEngineReplySummary? = nil,
+                                     removal: FlowEngineRemoval? = nil, mayBeInstalled: Bool = false,
+                                     to name: String) throws {
+        seedCustom()
+        rm.config.flowEngine.enabled = on
+        GeneralTab.detectedDNSForScreenshots = "192.0.2.53"
+        FlowEngineManager.shared.showForScreenshots(state, reply: reply, removal: removal, mayBeInstalled: mayBeInstalled)
+        defer {
+            GeneralTab.detectedDNSForScreenshots = nil
+            FlowEngineManager.shared.showForScreenshots(nil)
+        }
+        _ = try renderSettings(page: .general, height: 1600, to: name)
+    }
+
+    /// Off, as a signed build on macOS 15 shows it before anything is turned on: what it does and
+    /// the two approvals, said before any system prompt.
+    func testGeneralPerAppRoutingOff() throws {
+        try renderPerAppRouting(.off, on: false, to: "general-per-app-off.png")
+    }
+
+    /// Turned on, waiting for the extension to be allowed in System Settings.
+    func testGeneralPerAppRoutingWaitingForApproval() throws {
+        try renderPerAppRouting(.awaitingExtensionApproval, on: true, to: "general-per-app-approval.png")
+    }
+
+    /// Active, with the counts of the last reply.
+    func testGeneralPerAppRoutingActive() throws {
+        let rule = UUID().uuidString
+        try renderPerAppRouting(.active, on: true,
+                                reply: FlowEngineReplySummary(policyGeneration: 1, claimedByRule: [rule: 42], boundByRule: [rule: 3]),
+                                to: "general-per-app-active.png")
+    }
+
+    /// Stopped twice within 10 minutes: turned off, and it says so.
+    func testGeneralPerAppRoutingStoppedTwice() throws {
+        try renderPerAppRouting(.failed(.stoppedTwice), on: false, mayBeInstalled: true, to: "general-per-app-stopped-twice.png")
+    }
+
+    /// Turned off by hand: the extension is being removed, and macOS asks for the password.
+    func testGeneralPerAppRoutingRemoving() throws {
+        try renderPerAppRouting(.off, on: false, removal: .removing, mayBeInstalled: true, to: "general-per-app-removing.png")
+    }
+
+    /// The removal is done: off is the old way, and nothing of the extension is left.
+    func testGeneralPerAppRoutingRemoved() throws {
+        try renderPerAppRouting(.off, on: false, removal: .removed, to: "general-per-app-removed.png")
+    }
+
+    /// The removal failed (the password prompt was cancelled): Remove Extension tries again.
+    func testGeneralPerAppRoutingRemovalFailed() throws {
+        try renderPerAppRouting(.off, on: false, removal: .failed, mayBeInstalled: true, to: "general-per-app-removal-failed.png")
+    }
+
+    /// The Rules page while per-app routing serves the process rule, with its counts.
+    func testRulesPageProcessRuleServed() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        let rule = Rule(matchType: .process, pattern: "com.example.App", routeId: direct.id, order: 3)
+        rm.config.rules.append(rule)
+        rm.config.flowEngine.enabled = true
+        FlowEngineManager.shared.showForScreenshots(.active, reply: FlowEngineReplySummary(
+            policyGeneration: 1, claimedByRule: [rule.id.uuidString: 42], boundByRule: [rule.id.uuidString: 3]))
+        defer { FlowEngineManager.shared.showForScreenshots(nil) }
+        XCTAssertEqual(try renderSettings(page: .rules, to: "rules-process-rule-served.png"), Self.settingsSize)
+    }
+
+    /// The Rules page with per-app routing off: the rule says so and where to turn it on.
+    func testRulesPageProcessRuleOff() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        rm.config.rules.append(Rule(matchType: .process, pattern: "com.example.App", routeId: direct.id, order: 3))
+        FlowEngineManager.shared.showForScreenshots(.off)
+        defer { FlowEngineManager.shared.showForScreenshots(nil) }
+        XCTAssertEqual(try renderSettings(page: .rules, to: "rules-process-rule-off.png"), Self.settingsSize)
+    }
+
+    // MARK: - Bypass mode's Apps list, drawn for the pull request
+
+    private var savedAppIcon: ((BypassApp) -> NSImage?)?
+
+    /// Three apps on the list, with icons of apps every Mac has standing in for example apps.
+    private func seedApps() -> [BypassApp] {
+        savedAppIcon = BypassApps.icon
+        seedBypass()
+        let apps = [BypassApp(pattern: "com.example.Browser", name: "Example Browser"),
+                    BypassApp(pattern: "com.example.Mail", name: "Example Mail"),
+                    BypassApp(pattern: "example-sync", enabled: false)]
+        rm.config.bypassApps = apps
+        let icons = ["com.example.Browser": "/Applications/Safari.app", "com.example.Mail": "/System/Applications/Mail.app"]
+        BypassApps.icon = { app in icons[app.pattern].map { NSWorkspace.shared.icon(forFile: $0) } }
+        return apps
+    }
+
+    private func resetApps() {
+        if let savedAppIcon { BypassApps.icon = savedAppIcon }
+        AppsTab.hoveredForScreenshots = nil
+        FlowEngineManager.shared.showForScreenshots(nil)
+    }
+
+    /// The Apps page with per-app routing off: the list stays, and the page says the apps use the
+    /// VPN until it is turned on.
+    func testAppsPageOff() throws {
+        _ = seedApps()
+        FlowEngineManager.shared.showForScreenshots(.off)
+        defer { resetApps() }
+        XCTAssertEqual(try renderSettings(page: .apps, to: "apps-off.png"), Self.settingsSize)
+    }
+
+    /// The Apps page while per-app routing serves it, with each app's counts.
+    func testAppsPageActive() throws {
+        let apps = seedApps()
+        rm.config.flowEngine.enabled = true
+        AppsTab.hoveredForScreenshots = "com.example.Mail"
+        FlowEngineManager.shared.showForScreenshots(.active, reply: FlowEngineReplySummary(
+            policyGeneration: 4, claimedByRule: [apps[0].id.uuidString: 128, apps[1].id.uuidString: 17],
+            boundByRule: [apps[0].id.uuidString: 2]))
+        defer { resetApps() }
+        XCTAssertEqual(try renderSettings(page: .apps, to: "apps-active.png"), Self.settingsSize)
+    }
+
+    /// The Apps page in another mode: read-only, saying where it applies.
+    func testAppsPageInCustomMode() throws {
+        _ = seedApps()
+        rm.config.routingMode = .custom
+        rm.config.schemaVersion = 2
+        FlowEngineManager.shared.showForScreenshots(.active)
+        defer { resetApps() }
+        XCTAssertEqual(try renderSettings(page: .apps, to: "apps-custom-mode.png"), Self.settingsSize)
+    }
+
+    /// The chooser, with the running apps first.
+    func testAppsChooser() throws {
+        let url = URL(fileURLWithPath: "/Applications/Example.app")
+        AppChooserSheet.candidatesForScreenshots = [
+            .init(url: url, name: "Example Chat", bundleID: "com.example.Chat", isRunning: true),
+            .init(url: url, name: "Example Notes", bundleID: "com.example.Notes", isRunning: true),
+            .init(url: url, name: "Example Calendar", bundleID: "com.example.Calendar", isRunning: false),
+            .init(url: url, name: "Example Music", bundleID: "com.example.Music", isRunning: false),
+            .init(url: url, name: "Example Photos", bundleID: "com.example.Photos", isRunning: false),
+        ]
+        AppChooserSheet.pickedForScreenshots = "com.example.Chat"
+        let icons = ["com.example.Chat": "Messages", "com.example.Notes": "Notes", "com.example.Calendar": "Calendar",
+                     "com.example.Music": "Music", "com.example.Photos": "Photos"]
+        AppChooserSheet.icon = { NSWorkspace.shared.icon(forFile: "/System/Applications/\(icons[$0.bundleID] ?? "Notes").app") }
+        defer {
+            AppChooserSheet.candidatesForScreenshots = nil
+            AppChooserSheet.pickedForScreenshots = nil
+            AppChooserSheet.icon = { NSWorkspace.shared.icon(forFile: $0.url.path) }
+        }
+        try renderSheet(AppChooserSheet(listed: [], onCancel: {}, onPick: { _ in }).environmentObject(rm), to: "apps-chooser.png")
+    }
+
+    /// The dropdown with apps on the list while per-app routing serves them: they count.
+    func testDropdownCountsServedApps() throws {
+        _ = seedApps()
+        rm.config.flowEngine.enabled = true
+        FlowEngineManager.shared.showForScreenshots(.active)
+        defer { resetApps() }
+        _ = try renderDropdown(to: "dropdown-apps-served.png")
+    }
+
+    /// Status in Bypass mode with apps on the list: the From row counts them.
+    func testStatusCountsApps() throws {
+        _ = seedApps()
+        FlowEngineManager.shared.showForScreenshots(.off)
+        defer { resetApps() }
+        _ = try renderSettings(page: .status, to: "status-apps.png")
+    }
+
     // MARK: - Process rules say they need per-app routing, drawn for the pull request
 
     /// The Rules page with a process rule among the destination rules. Before this change its
@@ -1548,6 +1761,91 @@ final class DocScreenshotsTests: XCTestCase {
         StatusTab.siteCheckForScreenshots = (host, answer)
         XCTAssertEqual(try renderSettings(page: .status, to: "status-site-process-rule.png"), Self.settingsSize)
     }
+
+    // MARK: - Every place that shows app rules tells the truth, drawn for the pull request
+
+    /// Custom mode with two destination rules and two rules for apps while per-app routing is
+    /// off: the rules for apps change nothing yet.
+    private func seedAppRulesWaiting() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        rm.config.rules.append(Rule(matchType: .process, pattern: "com.example.Chat", routeId: direct.id, order: 3))
+        rm.config.rules.append(Rule(matchType: .process, pattern: "example-sync", routeId: direct.id, order: 4))
+        FlowEngineManager.shared.showForScreenshots(.off)
+    }
+
+    func testGapsDropdownWithAppRulesWaiting() throws {
+        try seedAppRulesWaiting()
+        defer { FlowEngineManager.shared.showForScreenshots(nil) }
+        _ = try renderDropdown(to: "gaps-dropdown-app-rules.png")
+    }
+
+    func testGapsStatusWithAppRulesWaiting() throws {
+        try seedAppRulesWaiting()
+        defer { FlowEngineManager.shared.showForScreenshots(nil) }
+        _ = try renderSettings(page: .status, to: "gaps-status-app-rules.png")
+    }
+
+    /// The Rules page, read-only in Bypass mode, while per-app routing is on: it serves no
+    /// process rule there, so the row must not say it does.
+    func testGapsRulesPageInBypassMode() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        rm.config.rules.append(Rule(matchType: .process, pattern: "com.example.Chat", routeId: direct.id, order: 3))
+        rm.config.routingMode = .bypass
+        rm.config.flowEngine.enabled = true
+        FlowEngineManager.shared.showForScreenshots(.active)
+        defer { FlowEngineManager.shared.showForScreenshots(nil) }
+        _ = try renderSettings(page: .rules, to: "gaps-rules-bypass-mode.png")
+    }
+
+    /// The rule editor on a rule for an app.
+    func testGapsRuleEditorOnAnAppRule() throws {
+        seedCustom()
+        let direct = try XCTUnwrap(rm.config.routes.first { $0.egress == .direct })
+        let rule = Rule(matchType: .process, pattern: "com.example.Chat", routeId: direct.id, order: 3)
+        try renderSheet(RuleEditorSheet(editingRule: rule, services: rm.config.services, onSave: { _ in }, onCancel: {})
+                            .environmentObject(rm),
+                        to: "gaps-rule-editor-app.png")
+    }
+
+    /// The Apps page with an entry added by its id before the app was installed, now installed
+    /// and signed by a VPN vendor's team: the extension turns it down.
+    func testGapsAppsPageWithAnEntryTurnedDown() throws {
+        let apps = seedApps()
+        rm.config.bypassApps.append(BypassApp(pattern: "com.example.vpn", name: "Example VPN"))
+        rm.config.flowEngine.enabled = true
+        let savedLookup = BypassApps.lookup
+        BypassApps.lookup = { id in
+            id == "com.example.vpn" ? AppIdentity(name: "Example VPN", signingID: id, team: "PXPZ95SK77", bundleID: id) : nil
+        }
+        FlowEngineManager.shared.showForScreenshots(.active, reply: FlowEngineReplySummary(
+            policyGeneration: 4, claimedByRule: [apps[0].id.uuidString: 128, apps[1].id.uuidString: 17], boundByRule: [:]))
+        defer {
+            BypassApps.lookup = savedLookup
+            resetApps()
+        }
+        XCTAssertEqual(try renderSettings(page: .apps, to: "gaps-apps-turned-down.png"), Self.settingsSize)
+    }
+
+    // BEGIN GAPS AFTER-ONLY
+    /// The chooser with an executable name typed in its new field.
+    func testGapsAppsChooserWithATypedName() throws {
+        AppChooserSheet.candidatesForScreenshots = [
+            .init(url: URL(fileURLWithPath: "/Applications/Example.app"), name: "Example Chat",
+                  bundleID: "com.example.Chat", isRunning: true),
+        ]
+        AppChooserSheet.typedForScreenshots = "example-sync"
+        AppChooserSheet.icon = { _ in NSWorkspace.shared.icon(forFile: "/System/Applications/Messages.app") }
+        defer {
+            AppChooserSheet.candidatesForScreenshots = nil
+            AppChooserSheet.typedForScreenshots = ""
+            AppChooserSheet.icon = { NSWorkspace.shared.icon(forFile: $0.url.path) }
+        }
+        try renderSheet(AppChooserSheet(listed: [], onCancel: {}, onPick: { _ in }).environmentObject(rm),
+                        to: "gaps-apps-chooser-typed.png")
+    }
+    // END GAPS AFTER-ONLY
 
     // MARK: - Dropdown rows and the add field (step 11), drawn for the pull request
 

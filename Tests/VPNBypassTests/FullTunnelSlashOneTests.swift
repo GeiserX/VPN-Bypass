@@ -30,6 +30,36 @@ final class FullTunnelSlashOneTests: XCTestCase {
         XCTAssertEqual(RouteKernel.slashOneTunnelOwnerIndex(table), 24)
     }
 
+    /// The Status page names a carrier only for the whole pair on one interface: with one half,
+    /// the other half of the space still leaves by the default route.
+    func testThePairOwnerNeedsBothHalvesOnOneInterface() {
+        let up = RTF_UP | RTF_STATIC
+        let pair = [
+            kr(0, prefix: 0, gateway: 0xC0A8_0A01, flags: up | RTF_GATEWAY),
+            kr(0, prefix: 1, ifIndex: 24, flags: up),
+            kr(0x8000_0000, prefix: 1, ifIndex: 24, flags: up),
+        ]
+        XCTAssertEqual(RouteKernel.slashOnePairOwnerIndex(pair), 24)
+        XCTAssertNil(RouteKernel.slashOnePairOwnerIndex(Array(pair.prefix(2))), "one half only")
+        XCTAssertNil(RouteKernel.slashOnePairOwnerIndex([pair[0], pair[1], kr(0x8000_0000, prefix: 1, ifIndex: 25, flags: up)]),
+                     "halves on two interfaces")
+        XCTAssertNil(RouteKernel.slashOnePairOwnerIndex([pair[0], kr(0, prefix: 1, ifIndex: 24, flags: up | RTF_PROTO1),
+                                                         kr(0x8000_0000, prefix: 1, ifIndex: 24, flags: up | RTF_PROTO1)]),
+                     "our own routes")
+        // Scoped halves serve only sockets bound to the tunnel; the rest takes the default route.
+        XCTAssertNil(RouteKernel.slashOnePairOwnerIndex([pair[0], kr(0, prefix: 1, ifIndex: 24, flags: up | RTF_IFSCOPE),
+                                                         kr(0x8000_0000, prefix: 1, ifIndex: 24, flags: up | RTF_IFSCOPE)]),
+                     "scoped halves")
+        // OpenVPN's def1 pair has address gateways: the interface it leaves by is `rtm_index`.
+        var low = kr(0, prefix: 1, gateway: 0x0A08_0001, flags: up | RTF_GATEWAY)
+        var high = kr(0x8000_0000, prefix: 1, gateway: 0x0A08_0001, flags: up | RTF_GATEWAY)
+        low.interfaceIndex = 24
+        high.interfaceIndex = 24
+        XCTAssertEqual(RouteKernel.slashOnePairOwnerIndex([pair[0], low, high]), 24, "address-gatewayed halves")
+        // Selection still settles for one half.
+        XCTAssertEqual(RouteKernel.slashOneTunnelOwnerIndex(Array(pair.prefix(2))), 24)
+    }
+
     /// Our own VPN Only catch-alls are RTF_PROTO1-tagged; they must never masquerade as a VPN.
     func testOurOwnRoutesNeverCountAsTheSlashOneOwner() {
         let table = [

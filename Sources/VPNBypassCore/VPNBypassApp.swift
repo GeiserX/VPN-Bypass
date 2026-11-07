@@ -132,6 +132,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // require the helper. This clears the "Setting Up..." spinner
                 // instead of hanging on it forever when the helper is absent.
                 await RouteManager.shared.detectVPNStateOnly()
+                // This network's profile, which the startup apply below would have put in use,
+                // so per-app routing's first push carries this network's app list.
+                await RouteManager.shared.selectNetworkProfileBeforeStartupApply()
+                FlowEngineManager.shared.start(observing: RouteManager.shared)
                 // Proxy-route listeners are userspace and don't need the helper —
                 // start them regardless so multi-route works even if the helper is down.
                 await RouteManager.shared.reconcileProxyListeners()
@@ -143,6 +147,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Detect VPN and apply routes on startup
             await RouteManager.shared.detectAndApplyRoutesAsync()
+
+            // Per-app routing, when the user turned it on (off by default). It starts once the
+            // startup apply put this network's profile in use, so its first push never carries
+            // the app list of the profile saved last. The kernel engine does not depend on it.
+            FlowEngineManager.shared.start(observing: RouteManager.shared)
 
             // Start the auto DNS refresh timer
             RouteManager.shared.startDNSRefreshTimer()
@@ -179,9 +188,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Run the same teardown on SIGTERM that a normal Quit runs.
     ///
     /// `applicationShouldTerminate` is only invoked for the Quit AppleEvent / `NSApp.terminate`.
-    /// It is NOT invoked for SIGTERM — and SIGTERM is exactly what the Homebrew cask's preflight
-    /// sends (`pkill -x VPNBypass`) on every upgrade. Because `activeRoutes` lives only in memory
-    /// and nothing reconciles against the kernel, an upgrade previously left the entire route set
+    /// It is NOT invoked for SIGTERM, which `pkill`, `killall` and launchd send; the Homebrew
+    /// cask's old preflight sent it (`pkill -x VPNBypass`) on every upgrade. Because
+    /// `activeRoutes` lives only in memory and nothing reconciles against the kernel, an upgrade
+    /// previously left the entire route set
     /// installed but *untracked*: the replacement binary started with an empty model, so no later
     /// cleanup could ever remove them. In VPN Only that strands the bypass-all
     /// catch-alls pointing at the local gateway — every subsequent connection silently leaves the
@@ -207,6 +217,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         RouteManager.shared.log(.warning, "Signal teardown exceeded \(Int(deadline))s — exiting")
                         exit(0)
                     }
+                    // Per-app routing's scoped default route (R12) goes with the app.
+                    await FlowEngineManager.shared.removeEgressRouteForQuit()
                     await RouteManager.shared.cleanupOnQuit()
                     exit(0)
                 }
@@ -218,7 +230,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 
     /// Shared first step of BOTH quit paths — menu quit and SIGTERM/SIGINT (the latter is
-    /// what `brew upgrade`'s pkill delivers, and it previously performed none of these stops,
+    /// what `pkill` or `killall` delivers, and it previously performed none of these stops,
     /// so timers and monitors kept firing route work during teardown).
     @MainActor private func beginAppShutdown() {
         controlServer?.stop()
@@ -267,6 +279,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         Task { @MainActor in
+            // Per-app routing's scoped default route (R12) goes with the app.
+            await FlowEngineManager.shared.removeEgressRouteForQuit()
             await RouteManager.shared.cleanupOnQuit()
             guard !didReply else { return }
             didReply = true
@@ -321,6 +335,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let interfaceStr = interfaceNames.sorted().joined(separator: ", ")
                 RouteManager.shared.log(.info, "Network change detected: \(statusStr) via \(interfaceStr)")
                 RouteManager.shared.noteNetworkChange()
+                FlowEngineManager.shared.networkChanged(available: path.status == .satisfied)
                 
                 RouteManager.shared.refreshStatus()
             }

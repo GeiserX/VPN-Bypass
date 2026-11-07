@@ -215,6 +215,9 @@ struct ListRow: View {
     let name: String
     var detail: String?
     var needsAttention = false
+    /// An image in place of the glyph, such as an app's icon. The glyph still shows while the row
+    /// needs attention.
+    var icon: NSImage?
     var number: String?
     /// From `numberColumnWidth(for:)`, the same on every row of the page.
     var numberWidth: CGFloat = 0
@@ -257,13 +260,22 @@ struct ListRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
-            Image(systemName: Self.leadingGlyph(glyph, needsAttention: needsAttention))
-                .font(.system(size: 13))
-                .foregroundColor(needsAttention ? Theme.attention : Theme.textSecondary)
-                .frame(width: Self.glyphColumn)
-                // A row read as one line says its problem in that line.
-                .accessibilityHidden(!needsAttention || spokenLabel != nil)
-                .accessibilityLabel(String(localized: "Needs attention"))
+            if let icon, !needsAttention {
+                Image(nsImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 18, height: 18)
+                    .frame(width: Self.glyphColumn)
+                    .accessibilityHidden(true)
+            } else {
+                Image(systemName: Self.leadingGlyph(glyph, needsAttention: needsAttention))
+                    .font(.system(size: 13))
+                    .foregroundColor(needsAttention ? Theme.attention : Theme.textSecondary)
+                    .frame(width: Self.glyphColumn)
+                    // A row read as one line says its problem in that line.
+                    .accessibilityHidden(!needsAttention || spokenLabel != nil)
+                    .accessibilityLabel(String(localized: "Needs attention"))
+            }
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(name)

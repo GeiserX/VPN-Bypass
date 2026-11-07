@@ -1,0 +1,654 @@
+import CryptoKit
+import XCTest
+@testable import VPNBypassCore
+
+/// Per-app routing's system extension ships inside the app before any routing does (design,
+/// section 10 step 4). These are the packaging facts that otherwise show only when macOS
+/// activates the extension, or when AMFI kills the signed app on a user's Mac.
+final class ExtensionPackagingTests: XCTestCase {
+
+    private static let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    private static let proxyID = "com.geiserx.vpn-bypass.proxy"
+    private static let team = "624WUVM8B4"
+
+    private func text(_ path: String) throws -> String {
+        try String(contentsOf: Self.root.appendingPathComponent(path), encoding: .utf8)
+    }
+
+    private func plist(_ path: String) throws -> [String: Any] {
+        let data = try Data(contentsOf: Self.root.appendingPathComponent(path))
+        return try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+    }
+
+    private struct Run { var status: Int32; var out: String; var err: String }
+
+    /// Runs `executable` with stdout and stderr going to files, read once it exits. Two pipes
+    /// read one after the other hang as soon as the program fills the second one (64 KB) while
+    /// the first is still open: it blocks writing, and the read waits for an end that never comes.
+    private func run(_ executable: String, _ args: [String], env: [String: String] = [:]) throws -> Run {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ne-packaging-run-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let outURL = dir.appendingPathComponent("stdout"), errURL = dir.appendingPathComponent("stderr")
+        FileManager.default.createFile(atPath: outURL.path, contents: nil)
+        FileManager.default.createFile(atPath: errURL.path, contents: nil)
+        let out = try FileHandle(forWritingTo: outURL), err = try FileHandle(forWritingTo: errURL)
+        defer { try? out.close(); try? err.close() }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = args
+        process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"].merging(env) { $1 }
+        process.standardOutput = out
+        process.standardError = err
+        try process.run()
+        process.waitUntilExit()
+        return Run(status: process.terminationStatus, out: try String(contentsOf: outURL, encoding: .utf8),
+                   err: try String(contentsOf: errURL, encoding: .utf8))
+    }
+
+    /// The suite once hung on the mini: check-profile.py filled stderr while `run` was still
+    /// reading stdout to its end. A program that writes far more than a pipe holds to stderr
+    /// first must come back, with both streams whole.
+    func testRunReturnsWhenAProgramFillsStderrBeforeStdout() throws {
+        let done = expectation(description: "run returned")
+        var result: Run?
+        DispatchQueue.global().async {
+            result = try? self.run("/bin/sh", ["-c", "head -c 300000 /dev/zero | tr '\\0' e >&2; echo out"])
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 20)
+        XCTAssertEqual(result?.status, 0)
+        XCTAssertEqual(result?.out, "out\n")
+        XCTAssertEqual(result?.err.count, 300_000)
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ne-packaging-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return dir
+    }
+
+    // MARK: - The app's name in the approval alert
+
+    /// macOS's "would like to use a new network extension" alert names the app by the file name
+    /// of the executable that files the request, whatever its Info.plist says. Live on the mini
+    /// (macOS 26.6.1, 2026-11-05): the same test app said "VPNBypass" with the executable named
+    /// so, also with an Info.plist embedded in it, and "VPN Bypass" once the file was renamed.
+    /// The old name stays as a link to the new file: an older running copy watches that path for
+    /// the update (AppUpdateRelauncher stats it, following the link), and a login item written
+    /// by an older version starts it.
+    func testTheAppExecutableIsNamedAsTheApprovalAlertShowsIt() throws {
+        let app = try plist("Info.plist")
+        XCTAssertEqual(app["CFBundleExecutable"] as? String, "VPN Bypass")
+        XCTAssertEqual(app["CFBundleDisplayName"] as? String, "VPN Bypass")
+
+        let makefile = try text("Makefile")
+        XCTAssertTrue(makefile.contains("@cp $(BUILD_DIR)/VPNBypass \"$(APP_BUNDLE)/Contents/MacOS/VPN Bypass\""), "make bundle names the executable")
+        XCTAssertTrue(makefile.contains("@ln -s \"VPN Bypass\" \"$(APP_BUNDLE)/Contents/MacOS/VPNBypass\""), "make bundle keeps the old name as a link")
+        let testApp = try text("scripts/ne-live/make-test-app.sh")
+        XCTAssertTrue(testApp.contains("exe=\"$dst/Contents/MacOS/VPN Bypass\""), "the live-test app names itself as the app does")
+        XCTAssertTrue(try text("scripts/smoke-launch.sh").contains("bin=\"$app/Contents/MacOS/VPN Bypass\""))
+        XCTAssertTrue(try text(".github/workflows/ci.yml").contains("\"VPN Bypass.app/Contents/MacOS/VPN Bypass\""))
+        XCTAssertTrue(try text("Sources/VPNBypassCore/LaunchAtLoginManager.swift").contains("appPath + \"/Contents/MacOS/VPN Bypass\""))
+
+        // An older copy's relauncher stats the old path: through the link it sees the new file.
+        let macOS = try temporaryDirectory()
+        let exe = macOS.appendingPathComponent("VPN Bypass")
+        try Data("new".utf8).write(to: exe)
+        try FileManager.default.createSymbolicLink(atPath: macOS.appendingPathComponent("VPNBypass").path, withDestinationPath: "VPN Bypass")
+        XCTAssertEqual(AppUpdateRelauncher.identity(ofFileAt: macOS.appendingPathComponent("VPNBypass").path),
+                       AppUpdateRelauncher.identity(ofFileAt: exe.path))
+    }
+
+    /// The app's own Open System Settings button: the alert's does nothing (sysextd cannot
+    /// launch System Settings into the user's session; launchd error 112 in its log on the mini),
+    /// so the app opens the sheet itself, with the URL sysextd builds, which lands on the Network
+    /// Extensions list with the extension's switch (checked on the mini, macOS 26.6.1).
+    func testOpenSystemSettingsOpensTheNetworkExtensionsSheet() throws {
+        XCTAssertEqual(PerAppRouting.extensionsSettingsURL.absoluteString,
+                       "x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=com.apple.system_extension.network_extension.extension-point&extensionIdentifier=\(Self.proxyID)")
+        // The shape is the one this Mac's sysextd uses (macOS 26 and 27 carry the same string).
+        let sysextd = URL(fileURLWithPath: "/System/Library/Frameworks/SystemExtensions.framework/Versions/A/Helpers/sysextd")
+        if let binary = try? Data(contentsOf: sysextd) {
+            for needle in ["x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=%@&extensionIdentifier=%@",
+                           "com.apple.system_extension.network_extension.extension-point"] {
+                XCTAssertNotNil(binary.range(of: Data(needle.utf8)), needle)
+            }
+        }
+    }
+
+    // MARK: - The extension's bundle
+
+    func testTheExtensionIsASystemExtensionNamingItsProviderClass() throws {
+        let info = try plist("Proxy/Info.plist")
+        XCTAssertEqual(info["CFBundlePackageType"] as? String, "SYSX")
+        XCTAssertEqual(info["CFBundleIdentifier"] as? String, Self.proxyID)
+        XCTAssertEqual(info["CFBundleExecutable"] as? String, Self.proxyID, "the SwiftPM product's name")
+        XCTAssertEqual(info["LSMinimumSystemVersion"] as? String, "15.0", "the nw_endpoint_t flow APIs (3.1)")
+        XCTAssertEqual(info["CFBundleIconFile"] as? String, "AppIcon", "the approval alert shows the icon")
+        XCTAssertNil(info["NEMachServiceName"], "not needed, settled by the spike")
+        let ne = try XCTUnwrap(info["NetworkExtension"] as? [String: Any])
+        let classes = try XCTUnwrap(ne["NEProviderClasses"] as? [String: String])
+        XCTAssertEqual(classes, ["com.apple.networkextension.app-proxy": "FlowProxy"])
+        // The class carries that exact Objective-C name, whatever the module is called.
+        let source = try text("Sources/VPNBypassProxy/FlowProxy.swift")
+        XCTAssertTrue(source.contains("@objc(FlowProxy)\nfinal class FlowProxy: NETransparentProxyProvider"))
+        XCTAssertTrue(try text("Package.swift").contains(#".executable(name: "\#(Self.proxyID)", targets: ["VPNBypassProxy"])"#))
+    }
+
+    func testTheExtensionNeverLinksTheAppsCore() throws {
+        let package = try text("Package.swift")
+        let target = try XCTUnwrap(package.range(of: #"name: "VPNBypassProxy","#))
+        let rest = package[target.upperBound...]
+        let end = try XCTUnwrap(rest.range(of: ")"))
+        XCTAssertEqual(rest[..<end.lowerBound].replacingOccurrences(of: " ", with: "")
+                        .replacingOccurrences(of: "\n", with: ""),
+                       #"dependencies:["VPNBypassPolicy"],path:"Sources/VPNBypassProxy""#,
+                       "VPNBypassCore's Bundle.module would trap inside the extension")
+    }
+
+    func testTheApprovalAlertTextIsInEveryLanguage() throws {
+        let english = try XCTUnwrap(try plist("Proxy/Info.plist")["NSSystemExtensionUsageDescription"] as? String)
+        var seen: Set<String> = []
+        for language in ["en", "es", "fr"] {
+            let strings = try plist("Proxy/\(language).lproj/InfoPlist.strings")
+            let value = try XCTUnwrap(strings["NSSystemExtensionUsageDescription"] as? String, language)
+            if language == "en" { XCTAssertEqual(value, english) }
+            seen.insert(value)
+        }
+        XCTAssertEqual(seen.count, 3, "Spanish and French are translated, not copies of the English")
+        let makefile = try text("Makefile")
+        XCTAssertTrue(makefile.contains(#"@cp -R Proxy/*.lproj "$(PROXY_BUNDLE)/Contents/Resources/""#))
+    }
+
+    /// System Settings names the app by its display name; without one it fell back to the
+    /// executable's name. The approval alert uses the executable's name whatever this says (above).
+    func testTheAppNamesItselfVPNBypassWithASpace() throws {
+        let info = try plist("Info.plist")
+        XCTAssertEqual(info["CFBundleDisplayName"] as? String, "VPN Bypass")
+        XCTAssertEqual(info["CFBundleName"] as? String, "VPN Bypass")
+        // No language renames it: the name is the same everywhere.
+        for language in ["en", "es", "fr"] {
+            let strings = try plist("Sources/VPNBypassCore/Resources/\(language).lproj/InfoPlist.strings")
+            XCTAssertNil(strings["CFBundleDisplayName"], language)
+        }
+    }
+
+    func testTheBundleStepEmbedsTheExtensionWithTheAppsVersion() throws {
+        let makefile = try text("Makefile")
+        XCTAssertTrue(makefile.contains("PROXY_BUNDLE = $(APP_BUNDLE)/Contents/Library/SystemExtensions/$(PROXY_ID).systemextension"))
+        for line in [#"@cp "$(BUILD_DIR)/$(PROXY_ID)" "$(PROXY_BUNDLE)/Contents/MacOS/""#,
+                     #"@cp Proxy/Info.plist "$(PROXY_BUNDLE)/Contents/""#,
+                     #"Set :CFBundleShortVersionString $(VERSION)" "$(PROXY_BUNDLE)/Contents/Info.plist""#,
+                     #"Set :CFBundleVersion $(VERSION)" "$(PROXY_BUNDLE)/Contents/Info.plist""#,
+                     #"@cp assets/AppIcon.icns "$(PROXY_BUNDLE)/Contents/Resources/""#,
+                     #"@scripts/check-extension-bundle.sh "$(APP_BUNDLE)""#] {
+            XCTAssertTrue(makefile.contains(line), line)
+        }
+    }
+
+    func testTheExtensionLogsNoStrings() throws {
+        // Design 3.8: one log function, a fixed event and integers. No other logging call.
+        let dir = Self.root.appendingPathComponent("Sources/VPNBypassProxy")
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }
+        XCTAssertFalse(files.isEmpty)
+        for file in files {
+            let source = try text("Sources/VPNBypassProxy/\(file)")
+            for call in ["NSLog(", "print(", "Logger(", "os_log(", "debugPrint("] where file != "ProxyLog.swift" {
+                XCTAssertFalse(source.contains(call), "\(file) logs with \(call)")
+            }
+        }
+        let log = try text("Sources/VPNBypassProxy/ProxyLog.swift")
+        XCTAssertTrue(log.contains("static func event(_ e: ProxyEvent, _ a: Int = 0, _ b: Int = 0)"))
+        XCTAssertFalse(log.contains("%@") || log.contains("{private}"), "only integers reach the format")
+        XCTAssertFalse(log.contains("String"), "the log function takes no string")
+    }
+
+    // MARK: - The re-emit path (design 3.5) and what the extension never reads (3.6, 3.8)
+
+    private func proxySource() throws -> String {
+        let dir = Self.root.appendingPathComponent("Sources/VPNBypassProxy")
+        return try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }.sorted()
+            .map { try text("Sources/VPNBypassProxy/\($0)") }.joined(separator: "\n")
+    }
+
+    func testTheExtensionNeverReadsHostNames() throws {
+        XCTAssertFalse(try proxySource().contains(".remoteHostname"), "a host name never claims a flow in v1")
+    }
+
+    func testClaimedFlowsAreScopedToTheInterfaceNeverBoundToASourceAddress() throws {
+        let source = try proxySource()
+        XCTAssertTrue(source.contains("nw_parameters_require_interface(params, iface)"))
+        XCTAssertTrue(source.contains("nw_ip_options_set_version(ip, nw_ip_version_4)"))
+        // The spike's traps: the disable-TLS sentinel ran a TLS handshake on every flow, and a
+        // source-address bind moves no bytes behind a VPN's 0/1 routes.
+        XCTAssertFalse(source.contains("nw_parameters_create_secure_tcp"))
+        XCTAssertFalse(source.contains("nw_parameters_set_local_endpoint"))
+        XCTAssertFalse(source.contains("NWConnection("), "the Swift API cannot carry the flow's metadata")
+    }
+
+    func testTheMetadataIsSetBeforeTheConnectionIsMade() throws {
+        let proxy = try text("Sources/VPNBypassProxy/FlowProxy.swift")
+        let metadata = try XCTUnwrap(proxy.range(of: "flow.setMetadata(params)"))
+        let relay = try XCTUnwrap(proxy.range(of: "TCPRelay(flow: tcp, target: target, parameters: params,"))
+        XCTAssertLessThan(metadata.lowerBound, relay.lowerBound)
+        let relaySource = try text("Sources/VPNBypassProxy/TCPRelay.swift")
+        XCTAssertTrue(relaySource.contains("let connection = nw_connection_create(endpoint, parameters)"))
+    }
+
+    /// A connect-by-name flow is looked up on the egress interface and its answers checked
+    /// before anything is dialled (design 3.5 step 4); the name is never handed to Network to
+    /// resolve and dial in one go, which would connect to a protected answer unchecked.
+    func testANameIsCheckedBeforeItIsDialled() throws {
+        let proxy = try text("Sources/VPNBypassProxy/FlowProxy.swift")
+        XCTAssertTrue(proxy.contains("return .name(n, port: p)"))
+        XCTAssertFalse(proxy.contains("nw_endpoint_create_host(n, p)"), "a real name is never dialled as a name")
+        let relay = try text("Sources/VPNBypassProxy/TCPRelay.swift")
+        let index = try XCTUnwrap(relay.range(of: "guard index != 0 else { fail(nil); return }"),
+                                  "index 0 asks every interface's resolvers, the VPN's included")
+        let lookup = try XCTUnwrap(relay.range(of: "NameLookup.start(name, interfaceIndex: index, queue: queue)"))
+        XCTAssertLessThan(index.lowerBound, lookup.lowerBound)
+        let interfaces = try XCTUnwrap(relay.range(of: "guard let addresses = NameLookup.interfaceAddresses() else {"),
+                                       "no interface list fails the flow closed")
+        XCTAssertTrue(relay[interfaces.upperBound...].prefix(120).contains("self.fail(nil)"), "no interface list fails the flow closed")
+        let check = try XCTUnwrap(relay.range(of: "switch NameAnswer.check(answers, tunnelNetworks: NameAnswer.tunnelNetworks(addresses))"))
+        XCTAssertLessThan(interfaces.lowerBound, check.lowerBound)
+        let dial = try XCTUnwrap(relay.range(of: "self.nextAnswers = safe"))
+        XCTAssertLessThan(lookup.lowerBound, check.lowerBound)
+        XCTAssertLessThan(check.lowerBound, dial.lowerBound)
+        // Only the answers the check passed are ever dialled, the next one when a connect fails.
+        XCTAssertEqual(relay.components(separatedBy: "nw_endpoint_create_host(").count, 2, "one dial, of a checked answer")
+        XCTAssertTrue(relay.contains("self.connect(nw_endpoint_create_host(ProtectedRanges.dotted(address), answerPort))"))
+        XCTAssertTrue(relay.contains("let address = nextAnswers.removeFirst()"))
+        XCTAssertTrue(relay.contains("case nw_connection_state_failed: self.connectFailed(error)"))
+        XCTAssertTrue(relay.contains("case nw_connection_state_waiting where !self.opened: self.connectFailed(error)"))
+        let failed = try XCTUnwrap(relay.range(of: "private func connectFailed(_ error: nw_error_t?) {"))
+        XCTAssertTrue(relay[failed.lowerBound...].prefix(400).contains("connectNextAnswer()"))
+        // A connection that got ready is the flow's, while its open is still pending too: neither
+        // the next-answer timer nor a later failure moves on to another answer.
+        XCTAssertTrue(relay[failed.lowerBound...].prefix(400).contains("guard !readied, !finished, !nextAnswers.isEmpty"))
+        XCTAssertTrue(relay.contains("guard let self, self.attempt == thisAttempt, !self.readied, !self.finished else { return }"))
+        let ready = try XCTUnwrap(relay.range(of: "private func ready() {"))
+        XCTAssertTrue(relay[ready.upperBound...].prefix(40).contains("readied = true"))
+        let refused = try XCTUnwrap(relay.range(of: "case .protected:"))
+        let tail = relay[refused.lowerBound...].prefix(400)
+        XCTAssertTrue(tail.contains("self.count(.nameProtected, 1)"), String(tail))
+        XCTAssertTrue(tail.contains("self.closeAll(NSError(domain: NEAppProxyErrorDomain, code: NEAppProxyFlowError.hostUnreachable.rawValue))"),
+                      "a claimed flow cannot be handed back: it is closed")
+        let lookupSource = try text("Sources/VPNBypassProxy/NameLookup.swift")
+        XCTAssertTrue(lookupSource.contains("DNSServiceProtocol(kDNSServiceProtocol_IPv4)"))
+        XCTAssertTrue(lookupSource.contains("guard DNSServiceSetDispatchQueue(ref, queue) == kDNSServiceErr_NoError else {"))
+        XCTAssertFalse(lookupSource.contains("os_log"), "the name is never logged (3.8)")
+    }
+
+    func testTheExtensionIncludesTCPOnlyAndRunsTheLeaseWatchdog() throws {
+        let proxy = try text("Sources/VPNBypassProxy/FlowProxy.swift")
+        XCTAssertTrue(proxy.contains("protocol: .TCP, direction: .outbound)]"))
+        XCTAssertFalse(proxy.contains(".UDP"), "UDP stays out until its own stage (3.6)")
+        XCTAssertFalse(proxy.contains(".any, direction"), "no include rule for every protocol")
+        XCTAssertTrue(proxy.contains("state.expireLease(at: Date())"), "a dead app's policy is dropped on a timer")
+        XCTAssertTrue(proxy.contains("state.sessionStopped()"), "a stopped session leaves no policy for the next one")
+        XCTAssertTrue(proxy.contains("if message != .status { state.receive(message, at: now) }"),
+                      "a status read never renews or drops the policy")
+        XCTAssertFalse(proxy.contains("providerConfiguration"), "that plist is world-readable (3.3)")
+    }
+
+    // MARK: - Entitlements
+
+    private static let relaxations = [
+        "com.apple.security.cs.disable-library-validation",
+        "com.apple.security.cs.allow-unsigned-executable-memory",
+        "com.apple.security.cs.allow-jit",
+        "com.apple.security.cs.allow-dyld-environment-variables",
+        "com.apple.security.get-task-allow",
+    ]
+
+    func testTheAppKeepsItsEntitlementsAndGainsTheNetworkExtensionOnes() throws {
+        let app = try plist("entitlements/app.entitlements")
+        XCTAssertEqual(Set(app.keys), [
+            "com.apple.security.app-sandbox", "com.apple.security.network.client",
+            "com.apple.security.automation.apple-events",
+            "com.apple.application-identifier", "com.apple.developer.team-identifier",
+            "com.apple.developer.system-extension.install", "com.apple.developer.networking.networkextension",
+        ])
+        XCTAssertEqual(app["com.apple.security.app-sandbox"] as? Bool, false)
+        XCTAssertEqual(app["com.apple.application-identifier"] as? String, "\(Self.team).com.geiserx.vpn-bypass")
+        XCTAssertEqual(app["com.apple.developer.team-identifier"] as? String, Self.team)
+        XCTAssertEqual(app["com.apple.developer.system-extension.install"] as? Bool, true)
+        XCTAssertEqual(app["com.apple.developer.networking.networkextension"] as? [String],
+                       ["app-proxy-provider-systemextension"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: Self.root.appendingPathComponent("VPNBypass.entitlements").path),
+                       "moved to entitlements/app.entitlements")
+    }
+
+    func testTheExtensionCarriesOnlyItsProviderEntitlement() throws {
+        let proxy = try plist("entitlements/proxy.entitlements")
+        XCTAssertEqual(Set(proxy.keys), ["com.apple.application-identifier", "com.apple.developer.team-identifier",
+                                         "com.apple.developer.networking.networkextension"])
+        XCTAssertEqual(proxy["com.apple.application-identifier"] as? String, "\(Self.team).\(Self.proxyID)")
+        XCTAssertEqual(proxy["com.apple.developer.team-identifier"] as? String, Self.team)
+        XCTAssertEqual(proxy["com.apple.developer.networking.networkextension"] as? [String],
+                       ["app-proxy-provider-systemextension"])
+    }
+
+    func testNoBinaryCombinesNetworkExtensionWithARuntimeRelaxation() throws {
+        for file in ["entitlements/app.entitlements", "entitlements/proxy.entitlements"] {
+            let keys = try plist(file).keys
+            for key in Self.relaxations { XCTAssertFalse(keys.contains(key), "\(file) has \(key)") }
+        }
+    }
+
+    // MARK: - Profiles
+
+    private let certificate = Data("test certificate".utf8)
+    private var certificateSHA1: String {
+        Insecure.SHA1.hash(data: certificate).map { String(format: "%02X", $0) }.joined()
+    }
+
+    private func profile(id: String = "com.geiserx.vpn-bypass", certificates: [Data]? = nil,
+                         expires: Date = Date().addingTimeInterval(86_400 * 365), allDevices: Bool = true,
+                         networkExtension: [String] = ["app-proxy-provider-systemextension",
+                                                       "packet-tunnel-provider-systemextension"],
+                         systemExtensionInstall: Bool = true) throws -> URL {
+        var entitlements: [String: Any] = [
+            "com.apple.application-identifier": "\(Self.team).\(id)",
+            "com.apple.developer.team-identifier": Self.team,
+            "com.apple.developer.networking.networkextension": networkExtension,
+            "keychain-access-groups": ["\(Self.team).*"],
+        ]
+        if systemExtensionInstall { entitlements["com.apple.developer.system-extension.install"] = true }
+        let body: [String: Any] = [
+            "Name": "test profile", "TeamIdentifier": [Self.team], "ExpirationDate": expires,
+            "ProvisionsAllDevices": allDevices, "DeveloperCertificates": certificates ?? [certificate],
+            "Entitlements": entitlements,
+        ]
+        let url = try temporaryDirectory().appendingPathComponent("profile.plist")
+        try PropertyListSerialization.data(fromPropertyList: body, format: .xml, options: 0).write(to: url)
+        return url
+    }
+
+    private func check(_ profile: URL, id: String = "com.geiserx.vpn-bypass",
+                       entitlements: String = "entitlements/app.entitlements", sha1: String? = nil,
+                       decoded: Bool = true) throws -> Run {
+        try run("/usr/bin/python3", ["-I", Self.root.appendingPathComponent("scripts/check-profile.py").path,
+                                     profile.path, "--id", id,
+                                     "--entitlements", Self.root.appendingPathComponent(entitlements).path,
+                                     "--cert-sha1", sha1 ?? certificateSHA1] + (decoded ? ["--plist"] : []))
+    }
+
+    func testAProfileThatFitsPasses() throws {
+        let r = try check(try profile())
+        XCTAssertEqual(r.status, 0, r.err)
+        XCTAssertTrue(r.out.contains("profile ok"), r.out)
+        // The SHA-1 is compared without regard to case.
+        XCTAssertEqual(try check(try profile(), sha1: certificateSHA1.lowercased()).status, 0)
+        let proxy = try check(try profile(id: Self.proxyID, systemExtensionInstall: false), id: Self.proxyID,
+                              entitlements: "entitlements/proxy.entitlements")
+        XCTAssertEqual(proxy.status, 0, proxy.err)
+    }
+
+    /// Each of these gets the signed binary SIGKILLed by AMFI at launch.
+    func testAProfileThatDoesNotFitIsRefusedAndSaysWhy() throws {
+        let cases: [(URL, String)] = [
+            (try profile(id: "com.geiserx.vpn-bypass.spike"), "not 624WUVM8B4.com.geiserx.vpn-bypass"),
+            (try profile(certificates: [Data("another certificate".utf8)]), "does not hold the signing certificate"),
+            (try profile(expires: Date().addingTimeInterval(-60)), "expired"),
+            (try profile(allDevices: false), "not a Developer ID profile"),
+            (try profile(networkExtension: ["packet-tunnel-provider-systemextension"]),
+             "does not allow com.apple.developer.networking.networkextension"),
+            (try profile(systemExtensionInstall: false), "does not allow com.apple.developer.system-extension.install"),
+        ]
+        for (url, why) in cases {
+            let r = try check(url)
+            XCTAssertEqual(r.status, 1, why)
+            XCTAssertTrue(r.err.contains(why), "\(why): \(r.err)")
+        }
+        // The app's profile does not fit the extension.
+        let r = try check(try profile(), id: Self.proxyID, entitlements: "entitlements/proxy.entitlements")
+        XCTAssertEqual(r.status, 1)
+        XCTAssertTrue(r.err.contains("not 624WUVM8B4.com.geiserx.vpn-bypass.proxy"), r.err)
+    }
+
+    func testAFileThatIsNoProfileIsRefused() throws {
+        let junk = try temporaryDirectory().appendingPathComponent("junk.provisionprofile")
+        try Data("not a profile".utf8).write(to: junk)
+        var r = try check(junk, decoded: false)
+        XCTAssertEqual(r.status, 1)
+        XCTAssertTrue(r.err.contains("does not decode"), r.err)
+        // A plain plist that would fit is still no profile: AMFI reads only the signed (CMS) file,
+        // so without --plist the check refuses it.
+        r = try check(try profile(), decoded: false)
+        XCTAssertEqual(r.status, 1)
+        XCTAssertTrue(r.err.contains("does not decode"), r.err)
+        XCTAssertFalse(try text("scripts/sign-and-notarize.sh").contains("--plist"), "signing never skips the CMS check")
+        // Malformed XML and a plist that is no dictionary get the same refusal, not a traceback.
+        let broken = try temporaryDirectory().appendingPathComponent("broken.plist")
+        try Data("<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>a</key></plist>".utf8).write(to: broken)
+        let array = try temporaryDirectory().appendingPathComponent("array.plist")
+        try PropertyListSerialization.data(fromPropertyList: ["x"], format: .xml, options: 0).write(to: array)
+        for url in [broken, array] {
+            r = try check(url)
+            XCTAssertEqual(r.status, 1, url.lastPathComponent)
+            XCTAssertTrue(r.err.contains("does not decode"), r.err)
+            XCTAssertFalse(r.err.contains("Traceback"), r.err)
+        }
+    }
+
+    // MARK: - Signing
+
+    /// The identity lookup read `security find-identity` through an awk that exits at the match.
+    /// When security wrote again after that it got SIGPIPE, and pipefail ended the script with
+    /// 141 and no message (6.0.991 on the mini, 2026-11-05). A lookup that matches before more
+    /// output must go on to the next step.
+    func testTheSigningScriptGoesOnWhenTheIdentityIsListedBeforeMoreOutput() throws {
+        let script = Self.root.appendingPathComponent("scripts/sign-and-notarize.sh").path
+        let entitlements = Self.root.appendingPathComponent("entitlements/app.entitlements").path
+        let app = try temporaryDirectory().appendingPathComponent("VPN Bypass.app")
+        try FileManager.default.createDirectory(
+            at: app.appendingPathComponent("Contents/Library/SystemExtensions/\(Self.proxyID).systemextension"),
+            withIntermediateDirectories: true)
+        let sha1 = "0709E69882B3D2CAA34D25B6654AA7BAC0C2BF26"
+        let tools = try temporaryDirectory()
+        let security = tools.appendingPathComponent("security")
+        try """
+            #!/bin/bash
+            echo '  1) \(sha1) "Developer ID Application: Example (624WUVM8B4)"'
+            sleep 0.5
+            echo '     1 valid identities found'
+            """.write(to: security, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: security.path)
+        // The step after the lookup signs: a stand-in codesign marks that it was reached.
+        let codesign = tools.appendingPathComponent("codesign")
+        try "#!/bin/bash\necho 'stand-in codesign reached' >&2\nexit 1\n".write(to: codesign, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: codesign.path)
+        let env = ["PATH": "\(tools.path):/usr/bin:/bin:/usr/sbin:/sbin", "SIGN_IDENTITY": sha1,
+                   "APPLE_ID": "a", "APPLE_PASSWORD": "b", "APPLE_TEAM_ID": "c",
+                   "PROVISIONING_PROFILE_APP": entitlements, "PROVISIONING_PROFILE_PROXY": entitlements]
+        let r = try run("/bin/bash", [script, "app", "--entitlements", entitlements, app.path], env: env)
+        XCTAssertNotEqual(r.status, 141, "the identity lookup died on a SIGPIPE")
+        XCTAssertNotEqual(r.status, 0, "the stand-in bundle cannot be signed")
+        XCTAssertFalse(r.err.contains("no valid codesigning identity"), r.err)
+        XCTAssertTrue(r.err.contains("stand-in codesign reached"), "the script went on to signing: " + r.err)
+    }
+
+    func testTheSigningScriptNeedsBothProfilesBeforeItSignsAnything() throws {
+        let script = Self.root.appendingPathComponent("scripts/sign-and-notarize.sh").path
+        let entitlements = Self.root.appendingPathComponent("entitlements/app.entitlements").path
+        let app = try temporaryDirectory().appendingPathComponent("VPN Bypass.app")
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let identity = ["SIGN_IDENTITY": "0000000000000000000000000000000000000000",
+                        "APPLE_ID": "a", "APPLE_PASSWORD": "b", "APPLE_TEAM_ID": "c"]
+        var r = try run("/bin/bash", [script, "app", "--entitlements", entitlements, app.path], env: identity)
+        XCTAssertNotEqual(r.status, 0)
+        XCTAssertTrue(r.err.contains("PROVISIONING_PROFILE_APP (path to a provisioning profile) is not set"), r.err)
+        var env = identity.merging(["PROVISIONING_PROFILE_APP": entitlements]) { $1 }
+        r = try run("/bin/bash", [script, "app", "--entitlements", entitlements, app.path], env: env)
+        XCTAssertTrue(r.err.contains("PROVISIONING_PROFILE_PROXY (path to a provisioning profile) is not set"), r.err)
+        env["PROVISIONING_PROFILE_PROXY"] = "/nonexistent.provisionprofile"
+        r = try run("/bin/bash", [script, "app", "--entitlements", entitlements, app.path], env: env)
+        XCTAssertTrue(r.err.contains("PROVISIONING_PROFILE_PROXY: /nonexistent.provisionprofile does not exist"), r.err)
+        env["PROVISIONING_PROFILE_PROXY"] = entitlements
+        r = try run("/bin/bash", [script, "app", "--entitlements", entitlements, app.path], env: env)
+        XCTAssertTrue(r.err.contains("com.geiserx.vpn-bypass.proxy.systemextension is missing"), r.err)
+        // app mode without entitlements would sign the app without its Network Extension keys.
+        r = try run("/bin/bash", [script, "app", app.path], env: env)
+        XCTAssertTrue(r.err.contains("app needs --entitlements"), r.err)
+    }
+
+    func testTheSigningScriptSignsInsideOutWithProfilesAndChecksTheResult() throws {
+        let script = try text("scripts/sign-and-notarize.sh")
+        let order = [
+            #"sign --identifier com.geiserx.vpnbypass.helper"#,
+            #"sign --identifier com.geiserx.vpn-bypass.vpnb"#,
+            #"embed_profile "$PROVISIONING_PROFILE_PROXY" "$proxy_id" "$proxy_entitlements" "$proxy""#,
+            #"sign --entitlements "$proxy_entitlements" "$proxy""#,
+            #"check_signed_entitlements "$proxy" "$proxy_entitlements""#,
+            #"embed_profile "$PROVISIONING_PROFILE_APP" com.geiserx.vpn-bypass "$entitlements" "$target""#,
+            #"sign --entitlements "$entitlements" "$target""#,
+            #"check_signed_entitlements "$target" "$entitlements""#,
+            #"codesign --verify --deep --strict --verbose=2 "$target""#,
+            #"codesign --verify -R="$helper_requirement" "$target""#,
+            #"codesign --verify -R="$proxy_requirement" "$proxy""#,
+            #"notarize "$work/app.zip""#,
+        ]
+        var from = script.startIndex
+        for step in order {
+            let found = try XCTUnwrap(script.range(of: step, range: from..<script.endIndex), "missing or out of order: \(step)")
+            from = found.upperBound
+        }
+        XCTAssertTrue(script.contains(#"cp "$1" "$4/Contents/embedded.provisionprofile""#), "AMFI reads that name")
+    }
+
+    // MARK: - The bundle check
+
+    /// `make bundle`, and so `make release`, runs check-extension-bundle.sh. Its class check read
+    /// otool's whole listing through `grep -q`, which exits at the first match; under pipefail
+    /// otool's SIGPIPE then failed the check although the class was there (6.0.991 on the mini,
+    /// 2026-11-05: "class FlowProxy ... is not in the binary", exit 141 from the pipe). A listing
+    /// that names the class early and goes on for long must pass.
+    func testTheBundleCheckPassesWhenOtoolNamesTheClassEarlyInALongListing() throws {
+        let app = try temporaryDirectory().appendingPathComponent("VPN Bypass.app")
+        let ext = app.appendingPathComponent("Contents/Library/SystemExtensions/\(Self.proxyID).systemextension/Contents")
+        try FileManager.default.createDirectory(at: ext.appendingPathComponent("MacOS"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: ext.appendingPathComponent("Resources"), withIntermediateDirectories: true)
+        let bin = ext.appendingPathComponent("MacOS/\(Self.proxyID)")
+        try "#!/bin/sh\n".write(to: bin, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.path)
+        try Data().write(to: ext.appendingPathComponent("Resources/AppIcon.icns"))
+        let versions = ["CFBundleShortVersionString": "6.0.991", "CFBundleVersion": "6.0.991"]
+        try PropertyListSerialization.data(fromPropertyList: versions, format: .xml, options: 0)
+            .write(to: app.appendingPathComponent("Contents/Info.plist"))
+        var info: [String: Any] = versions
+        info.merge([
+            "CFBundlePackageType": "SYSX", "CFBundleIdentifier": Self.proxyID, "CFBundleExecutable": Self.proxyID,
+            "NSSystemExtensionUsageDescription": "Per-app routing.", "CFBundleIconFile": "AppIcon",
+            "NetworkExtension": ["NEProviderClasses": ["com.apple.networkextension.app-proxy": "FlowProxy"]],
+        ] as [String: Any]) { $1 }
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: ext.appendingPathComponent("Info.plist"))
+        // Stand-ins for the tools: otool -ov names the class first, then 400 KB of listing.
+        let tools = try temporaryDirectory()
+        for (name, body) in [("lipo", "exit 0"),
+                             ("otool", #"[ "$1" = -L ] && { echo "$2:"; exit 0; }; echo "    name 0x1 FlowProxy"; i=0; while [ $i -lt 8000 ]; do echo "    name 0x2 _TtC14VPNBypassProxy6Egress padding padding padding"; i=$((i+1)); done"#)] {
+            let url = tools.appendingPathComponent(name)
+            try "#!/bin/bash\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        let r = try run("/bin/bash", [Self.root.appendingPathComponent("scripts/check-extension-bundle.sh").path, app.path],
+                        env: ["PATH": "\(tools.path):/usr/bin:/bin:/usr/sbin:/sbin"])
+        XCTAssertEqual(r.status, 0, r.err)
+        XCTAssertTrue(r.out.contains("extension bundle ok: \(Self.proxyID) 6.0.991, provider class FlowProxy"), r.out + r.err)
+    }
+
+    // MARK: - The launch gate
+
+    /// A fake bundle whose binaries are shell scripts, so the gate's red path runs anywhere.
+    private func fakeApp(app appBody: String, extensionBody: String?) throws -> URL {
+        let app = try temporaryDirectory().appendingPathComponent("VPN Bypass.app")
+        let macos = app.appendingPathComponent("Contents/MacOS")
+        try FileManager.default.createDirectory(at: macos, withIntermediateDirectories: true)
+        func script(_ url: URL, _ body: String) throws {
+            try "#!/bin/bash\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        try script(macos.appendingPathComponent("VPN Bypass"), appBody)
+        try script(macos.appendingPathComponent("vpnb"), "exit 0")
+        let info: [String: Any] = ["CFBundleShortVersionString": "6.1.0"]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: app.appendingPathComponent("Contents/Info.plist"))
+        if let extensionBody {
+            let ext = app.appendingPathComponent(
+                "Contents/Library/SystemExtensions/\(Self.proxyID).systemextension/Contents/MacOS")
+            try FileManager.default.createDirectory(at: ext, withIntermediateDirectories: true)
+            try script(ext.appendingPathComponent(Self.proxyID), extensionBody)
+        }
+        return app
+    }
+
+    private func smokeLaunch(_ app: URL) throws -> Run {
+        // Its own HOME: the script clears the control socket under $HOME.
+        let home = try temporaryDirectory()
+        return try run("/bin/bash", [Self.root.appendingPathComponent("scripts/smoke-launch.sh").path, app.path],
+                       env: ["HOME": home.path])
+    }
+
+    func testTheGateFailsWhenAMFIKillsTheExtension() throws {
+        let r = try smokeLaunch(try fakeApp(app: "exit 0", extensionBody: "kill -KILL $$"))
+        XCTAssertEqual(r.status, 1)
+        XCTAssertTrue(r.out.contains("the extension was killed at exec (SIGKILL)"), r.out)
+    }
+
+    func testTheGateFailsWhenAMFIKillsTheApp() throws {
+        let r = try smokeLaunch(try fakeApp(app: "kill -KILL $$", extensionBody: "exit 0"))
+        XCTAssertEqual(r.status, 1)
+        XCTAssertTrue(r.out.contains("the app was killed at exec (SIGKILL)"), r.out)
+    }
+
+    func testAnExtensionThatExitsOutsideSysextdIsNoFailure() throws {
+        // Outside sysextd the real extension may exit at once; only a kill is AMFI's verdict. The
+        // fake app then dies without its socket, which the gate reports as the app's failure.
+        let r = try smokeLaunch(try fakeApp(app: "exit 3", extensionBody: "exit 1"))
+        XCTAssertTrue(r.out.contains("Extension binary started and exited with status 1 (not killed)"), r.out)
+        XCTAssertTrue(r.out.contains("the app exited during launch (status 3)"), r.out)
+    }
+
+    // MARK: - CI and release
+
+    func testTheReleaseDecodesBothProfilesAndLaunchesTheSignedApp() throws {
+        let release = try text(".github/workflows/release.yml")
+        for secret in ["PROVISIONING_PROFILE_APP_BASE64", "PROVISIONING_PROFILE_PROXY_BASE64"] {
+            XCTAssertTrue(release.contains("${{ secrets.\(secret) }}"), secret)
+        }
+        XCTAssertTrue(release.contains(#"[ -n "${!name}" ] || { echo "::error::secret $name is not set"; exit 1; }"#))
+        XCTAssertTrue(release.contains("PROVISIONING_PROFILE_APP: ${{ runner.temp }}/app.provisionprofile"))
+        XCTAssertTrue(release.contains("PROVISIONING_PROFILE_PROXY: ${{ runner.temp }}/proxy.provisionprofile"))
+        let build = try XCTUnwrap(release.range(of: "run: make release"))
+        let gate = try XCTUnwrap(release.range(of: #"run: scripts/smoke-launch.sh "VPN Bypass.app""#))
+        let publish = try XCTUnwrap(release.range(of: "name: Create GitHub Release"))
+        XCTAssertLessThan(build.lowerBound, gate.lowerBound, "the gate launches the signed app")
+        XCTAssertLessThan(gate.lowerBound, publish.lowerBound, "before anything is published")
+    }
+
+    func testCIChecksTheExtensionAndReleasesFollowItsFiles() throws {
+        let ci = try text(".github/workflows/ci.yml")
+        XCTAssertTrue(ci.contains(#""VPN Bypass.app/Contents/Library/SystemExtensions/com.geiserx.vpn-bypass.proxy.systemextension/Contents/MacOS/com.geiserx.vpn-bypass.proxy"; do"#),
+                      "the extension is in the universal-architecture loop")
+        XCTAssertTrue(ci.contains(#"run: scripts/check-extension-bundle.sh "VPN Bypass.app""#))
+        let autoTag = try text(".github/workflows/auto-tag.yml")
+        XCTAssertTrue(autoTag.contains("- 'entitlements/**'"))
+        XCTAssertTrue(autoTag.contains("- 'Proxy/**'"))
+        XCTAssertFalse(autoTag.contains("VPNBypass.entitlements"))
+        let ignore = try text(".gitignore").split(separator: "\n").map(String.init)
+        XCTAssertTrue(ignore.contains("*.provisionprofile"), "profiles never enter git")
+    }
+
+    func testTheProfileScriptRegistersTheRealIDs() throws {
+        let script = try text("scripts/asc-profiles.py")
+        XCTAssertTrue(script.contains(#""com.geiserx.vpn-bypass": ("vpn-bypass-app", "VPN Bypass app DevID","#))
+        XCTAssertTrue(script.contains(#"["SYSTEM_EXTENSION_INSTALL", "NETWORK_EXTENSIONS"]"#))
+        XCTAssertTrue(script.contains(#""com.geiserx.vpn-bypass.proxy": ("vpn-bypass-proxy", "VPN Bypass proxy DevID", ["NETWORK_EXTENSIONS"])"#))
+        XCTAssertFalse(script.contains("spike"), "the spike's ids stay as they are")
+    }
+}

@@ -37,8 +37,10 @@ func printUsage() {
       rule.list                                 List all rules
       rule.add match=<domain|suffix|ip|cidr|service|process> pattern=<value> routeId=<uuid>
                                                  Add a routing rule (process: a bundle id or an
-                                                 executable name; it routes nothing until per-app
-                                                 routing exists)
+                                                 executable name; it routes the app's TCP
+                                                 connections to public IPv4 addresses, unless the
+                                                 app binds them to an interface, only while
+                                                 per-app routing is on and its route is Direct)
       rule.rm id=<uuid>                         Remove a rule
       mode mode=<bypass|vpnOnly|custom>          Set the routing mode (custom carries
                                                  your listed domains into rules)
@@ -55,6 +57,14 @@ func printUsage() {
       domain.disable (id=<uuid> | domain=<value>) [list=]
                                                  Disable a domain
                                                  (a domain on both lists needs list=)
+      app.list                                  List Bypass mode's Apps list, and whether per-app
+                                                 routing serves each app now
+      app.add pattern=<bundle id or executable name>
+                                                 Add an app that skips the VPN (Bypass mode, while
+                                                 per-app routing is on; until then it uses the VPN)
+      app.rm (id=<uuid> | pattern=<value>)      Remove an app from the list
+      app.enable (id=<uuid> | pattern=<value>)  Turn an app on the list on
+      app.disable (id=<uuid> | pattern=<value>) Turn an app on the list off
       service.list [id=<service id>]            List the services (with id=: its domains and IP ranges)
       service.enable id=<service id>            Enable a service
       service.disable id=<service id>           Disable a service
@@ -79,6 +89,17 @@ func printUsage() {
                                                  unless every enabled rule goes Direct
       resume                                    Put the routes back (one apply, after the
                                                  tunnel settles)
+      engine.status                             Per-app routing: its switch, state, policy
+                                                 generation and per-rule counts
+      engine.on                                 Turn per-app routing on (macOS then asks to allow
+                                                 the extension and its proxy configuration)
+      engine.off                                Turn per-app routing off: every app follows the
+                                                 routes again. If it was on, its extension is
+                                                 removed (macOS asks for an administrator
+                                                 password); if it was already off, nothing
+                                                 changes, so use engine.remove
+      engine.remove                             Remove the extension and its configuration, also
+                                                 when per-app routing is already off
 
       help | --help | -h                        Show this help
 

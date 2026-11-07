@@ -254,7 +254,7 @@ final class DropdownStatusTests: XCTestCase {
         // String(localized: "…") literals, turned into their lookup keys: an interpolated String
         // becomes %@ and an Int %lld. The String-typed interpolations are the named locals
         // below and every call except max(…); a wrong guess fails here, never silently.
-        let stringLocals: Set<String> = ["name", "services", "domains", "when", "checked", "routes"]
+        let stringLocals: Set<String> = ["name", "services", "domains", "when", "checked", "routes", "list", "destinations", "apps"]
         // `, bundle: bundle` is the form a function with an `in bundle:` variant uses.
         let literal = try NSRegularExpression(pattern: #"String\(localized: "((?:[^"\\]|\\.)*)"(?:, bundle: bundle)?\)"#)
         let interpolation = try NSRegularExpression(pattern: #"\\\((.*?)\)(?=[^)]|$)"#)

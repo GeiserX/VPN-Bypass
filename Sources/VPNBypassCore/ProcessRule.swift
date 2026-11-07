@@ -4,9 +4,9 @@
 // A process rule matches an app, not a destination. The kernel engine (routes, /etc/hosts, the
 // wildcard forwarder) decides by destination only, so it can never serve one: RuleResolver,
 // RuleDestinationBuilder and WildcardRoutes skip process rules by design. Per-app routing, the
-// opt-in Network Extension engine (docs/design/NETWORK-EXTENSION-DESIGN.md), will serve them.
-// Until it exists every surface says so (the Rules page, `vpnb rule.list`, `rule.add`, `why`)
-// instead of keeping a rule that silently does nothing.
+// opt-in Network Extension engine (docs/design/NETWORK-EXTENSION-DESIGN.md), serves those with
+// the Direct route while it is active. In every other state every surface says why the rule does
+// nothing (the Rules page, `vpnb rule.list`, `rule.add`, `why`) instead of staying silent.
 
 import Foundation
 
@@ -14,39 +14,129 @@ import Foundation
 public enum RuleServedBy: String, Codable, Equatable, Sendable {
     /// The routing table, /etc/hosts and the wildcard forwarder: every destination rule.
     case kernel
-    /// Per-app routing (the Network Extension engine): process rules, once it runs.
+    /// Per-app routing (the Network Extension engine): process rules, while it is active.
     case perAppEngine
     /// Nothing serves the rule; `SanitizedRule.inactiveReason` says why.
     case none
 }
 
-enum ProcessRule {
-    /// Why nothing serves a rule, as the wire code `SanitizedRule.inactiveReason` carries. A
-    /// string on the wire, so a later reason (per-app routing off, waiting for approval) still
-    /// decodes in an older `vpnb`.
-    enum InactiveReason: String {
-        /// This version has no per-app routing engine.
-        case perAppRoutingNotAvailable
+extension ProcessRule {
+    /// The engine that serves `rule`, and why none does. A process rule with the Direct route is
+    /// served while per-app routing is active; with another route, or a route deleted or turned
+    /// off, it is not served in this version, whatever the engine does (FlowPolicyCompiler drops
+    /// it). Every other kind is a destination the kernel engine routes. `engine` defaults to the
+    /// state of a build without per-app routing, the answer the pure `CommandRouter` gives; the
+    /// control surface fills in the live one. A rule turned off is not served and has no reason:
+    /// its own switch says why. `customEngine` is whether Custom mode's rules run now
+    /// (`RouteManager.usesCustomEngine`): in another mode the compiler sends no process rule to
+    /// the extension, so none is served whatever the engine does.
+    static func serving(_ rule: Rule, engine: FlowEngineState = .unavailable(.notInThisBuild),
+                        routeIsDirect: Bool = true, routeUsable: Bool = true,
+                        customEngine: Bool = true, turnedDown: Bool = false) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        guard rule.matchType == .process else { return (.kernel, nil) }
+        // A rule turned off has no reason, whatever the engine or its route: its own switch says why.
+        guard rule.enabled else { return (.none, nil) }
+        if case .unavailable = engine { return (.none, .perAppRoutingNotAvailable) }
+        guard customEngine else { return (.none, .notInCustomMode) }
+        // The extension declines the app's connections by its team (FlowDecider step 6).
+        if turnedDown { return (.none, .vpnClientApp) }
+        guard routeUsable else { return (.none, .routeUnavailable) }
+        guard routeIsDirect else { return (.none, .routeNotSupported) }
+        if let reason = engine.ruleReason { return (.none, reason) }
+        return (.perAppEngine, nil)
     }
 
-    /// The engine that serves `rule`, and why none does. Process rules are served by nothing
-    /// until per-app routing exists; every other kind is a destination the kernel engine routes.
-    static func serving(_ rule: Rule) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
-        rule.matchType == .process ? (.none, .perAppRoutingNotAvailable) : (.kernel, nil)
+    /// `serving` for the rule's route (nil: deleted).
+    static func serving(_ rule: Rule, engine: FlowEngineState, route: Route?,
+                        customEngine: Bool = true, turnedDown: Bool = false) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        serving(rule, engine: engine, routeIsDirect: route?.egress == .direct, routeUsable: route?.enabled ?? false,
+                customEngine: customEngine, turnedDown: turnedDown)
     }
 
-    /// The Rules page's line under a process rule.
-    static func rowNote(in bundle: Bundle = .main) -> String {
-        String(localized: "Needs per-app routing, which is not available yet, so this rule does nothing.", bundle: bundle)
+    /// `serving` with the rule's route looked up in `routes`.
+    static func serving(_ rule: Rule, engine: FlowEngineState, routes: [Route],
+                        customEngine: Bool = true, turnedDown: Bool = false) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        serving(rule, engine: engine, route: routes.first { $0.id == rule.routeId }, customEngine: customEngine,
+                turnedDown: turnedDown)
+    }
+
+    /// `serving` for a rule of `config`, in the mode it runs now.
+    static func serving(_ rule: Rule, engine: FlowEngineState, config: Config,
+                        declinedTeams: [String] = []) -> (servedBy: RuleServedBy, reason: InactiveReason?) {
+        serving(rule, engine: engine, routes: config.routes, customEngine: customEngine(config),
+                turnedDown: isTurnedDown(rule, declinedTeams: declinedTeams))
+    }
+
+    /// Whether the extension turns down the app a process rule names, as the Apps list reads
+    /// it (`BypassApps.isTurnedDown`): VPN Bypass itself, or an installed app signed by a VPN or
+    /// network-security team or by a live tunnel's owner (`declinedTeams`).
+    static func isTurnedDown(_ rule: Rule, declinedTeams: [String]) -> Bool {
+        rule.matchType == .process && BypassApps.isTurnedDown(BypassApp(pattern: rule.pattern), declinedTeams: declinedTeams)
+    }
+
+    /// Whether Custom mode's rules run now, the only mode whose process rules per-app routing serves.
+    static func customEngine(_ config: Config) -> Bool {
+        RouteManager.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode)
+    }
+
+    /// The Rules page's line under a process rule, by why nothing serves it (nil: it is served).
+    static func rowNote(_ reason: InactiveReason?, claimed: Int = 0, bound: Int = 0, in bundle: Bundle = .main) -> String {
+        guard let reason else {
+            var line = String(localized: "Served by per-app routing: \(claimed) connections went around the VPN.", bundle: bundle)
+            if bound > 0 {
+                line += " " + String(localized: "\(bound) came bound to a network interface, which per-app routing cannot serve.", bundle: bundle)
+            }
+            return line
+        }
+        switch reason {
+        case .perAppRoutingNotAvailable:
+            return String(localized: "Needs per-app routing, which is not available yet, so this rule does nothing.", bundle: bundle)
+        case .perAppRoutingOff:
+            return String(localized: "Inactive: per-app routing is off (Settings > General).", bundle: bundle)
+        case .perAppRoutingWaitingForApproval:
+            return String(localized: "Inactive: per-app routing is waiting for your approval in System Settings.", bundle: bundle)
+        case .perAppRoutingBlocked:
+            return String(localized: "Inactive: per-app routing is blocked on this Mac (Settings > General says why).", bundle: bundle)
+        case .perAppRoutingStarting:
+            return String(localized: "Inactive while per-app routing starts.", bundle: bundle)
+        case .perAppRoutingPaused:
+            return String(localized: "Paused: this app uses the VPN until per-app routing resumes.", bundle: bundle)
+        case .perAppRoutingUpdateWaiting:
+            return String(localized: "Inactive: an update of per-app routing is waiting for approval in System Settings.", bundle: bundle)
+        case .perAppRoutingFailed:
+            return String(localized: "Inactive: per-app routing stopped, so this app uses the VPN (Settings > General says why).", bundle: bundle)
+        case .routeNotSupported:
+            return String(localized: "Inactive: per-app routing sends apps Direct only in this version; pick the Direct route.", bundle: bundle)
+        case .routeUnavailable:
+            return String(localized: "Inactive: this rule's route was deleted or is turned off.", bundle: bundle)
+        case .notInBypassMode:
+            return String(localized: "Inactive: the Apps list works in Bypass mode.", bundle: bundle)
+        case .notInCustomMode:
+            return String(localized: "Inactive: rules for apps work in Custom mode.", bundle: bundle)
+        case .vpnClientApp:
+            return String(localized: "Turned down: this is a VPN or network security app, so per-app routing leaves it on its own path.", bundle: bundle)
+        }
     }
 
     /// What `rule.add match=process` replies after saving the rule.
-    static let savedMessage = "process rule saved, but it will not route anything until per-app routing exists; this version does not have it yet"
+    static let savedMessage = "process rule saved; it routes the app's connections only while per-app routing is on and its route is Direct"
 
     /// `vpnb rule.list`'s note for a rule nothing serves, by its wire reason.
     static func inactiveNote(reason: String?) -> String {
         switch reason.flatMap(InactiveReason.init(rawValue:)) {
         case .perAppRoutingNotAvailable: return "inactive: needs per-app routing, which is not available yet"
+        case .perAppRoutingOff: return "inactive: per-app routing is off"
+        case .perAppRoutingWaitingForApproval: return "inactive: per-app routing is waiting for approval"
+        case .perAppRoutingBlocked: return "inactive: per-app routing is blocked"
+        case .perAppRoutingStarting: return "inactive: per-app routing is starting"
+        case .perAppRoutingPaused: return "paused: per-app routing stands down"
+        case .perAppRoutingUpdateWaiting: return "inactive: per-app routing update waiting for approval"
+        case .perAppRoutingFailed: return "inactive: per-app routing stopped"
+        case .routeNotSupported: return "inactive: per-app routing serves the Direct route only"
+        case .routeUnavailable: return "inactive: its route was deleted or is turned off"
+        case .notInBypassMode: return "inactive: the Apps list works in Bypass mode"
+        case .notInCustomMode: return "inactive: rules for apps work in Custom mode"
+        case .vpnClientApp: return "turned down: a VPN or network security app keeps its own path"
         case nil: return "inactive" + (reason.map { ": \($0)" } ?? "")
         }
     }
@@ -77,6 +167,58 @@ enum ProcessRule {
 
     static func kind(of pattern: String) -> Kind {
         pattern.contains(".") ? .bundleID : .executableName
+    }
+
+    /// What a process rule stores for a valid `pattern`. Flows are matched by their signing
+    /// identifier exactly, case included, while LaunchServices finds an app whatever the case
+    /// typed: so for the bundle id of an installed app, the identifier its code is signed with,
+    /// read from its signature (`com.example.app` typed is stored `com.example.App`), as the
+    /// Apps list does. Only the case changes: a signing id that differs in more than case (a
+    /// shorter prefix would match sibling apps too, a dotless one would read as an executable
+    /// name) leaves the pattern as typed, and so does an executable name or an app not installed.
+    static func storedPattern(_ pattern: String) -> String {
+        guard kind(of: pattern) == .bundleID, invalid(pattern) == nil, let app = BypassApps.lookup(pattern) else {
+            return pattern
+        }
+        return storedPattern(pattern, signingID: app.signingID)
+    }
+
+    /// `signingID`, the identifier of the installed app `typed` names, when it differs from
+    /// `typed` in case only; `typed` otherwise. The one rule every add by id follows
+    /// (`rule.add`, the Rules page, `app.add`), so no add stores a shorter or other identifier
+    /// than the one asked for.
+    static func storedPattern(_ typed: String, signingID: String) -> String {
+        guard signingID.caseInsensitiveCompare(typed) == .orderedSame, invalid(signingID) == nil else { return typed }
+        return signingID
+    }
+
+    /// What the Rules page saves: a process rule saved with its pattern unchanged keeps it, so a
+    /// stored signing id is never looked up again as another app's bundle id.
+    static func storedPattern(_ pattern: String, previous: String?) -> String {
+        pattern == previous ? pattern : storedPattern(pattern)
+    }
+
+    /// What the Rules page's editor saves for an App rule, or the line it shows instead. The
+    /// checks are the Apps list's: a pattern a rule can match, and not VPN Bypass itself or an
+    /// app signed by a VPN or network-security team, read from `chosen` (the app the chooser
+    /// picked, while the pattern is still its signing id) or from the installed app with that
+    /// bundle id. The value stored is the chosen app's signing id, or `storedPattern`.
+    enum EditorValue: Equatable {
+        /// The pattern to store.
+        case save(String)
+        /// The line the sheet shows instead.
+        case refuse(String)
+    }
+
+    static func editorValue(_ pattern: String, chosen: AppIdentity?, previous: String?,
+                            in bundle: Bundle = .main) -> EditorValue {
+        guard invalid(pattern) == nil else { return .refuse(localizedMessage(in: bundle)) }
+        let chosen = chosen?.signingID == pattern ? chosen : nil
+        let identity = chosen ?? (pattern != previous && kind(of: pattern) == .bundleID ? BypassApps.lookup(pattern) : nil)
+        if let refusal = BypassApps.refusal(identity?.signingID ?? pattern, identity: identity) {
+            return .refuse(refusal.localizedMessage(in: bundle))
+        }
+        return .save(chosen != nil ? pattern : storedPattern(pattern, previous: previous))
     }
 
     /// Nil when `pattern` is a bundle id or an executable name as the design defines them.

@@ -628,6 +628,33 @@ class HelperTool: NSObject, HelperProtocol {
         reply(running, routes.map(\.dictionary))
     }
 
+    // MARK: - Per-app routing's scoped default (R12)
+
+    func setScopedDefaultRoute(interface: String, gateway: String, withReply reply: @escaping (Bool, String) -> Void) {
+        let request: ScopedDefaultRequest?
+        if interface.isEmpty && gateway.isEmpty {
+            request = nil
+        } else {
+            // The same checks as the app's, again at the privileged boundary: a physical `en`
+            // interface and a unicast IPv4 router, nothing else.
+            guard ScopedDefaultRoute.isValidInterface(interface), ScopedDefaultRoute.isValidGateway(gateway) else {
+                helperLog.error("scoped default: refused invalid interface or gateway")
+                reply(false, "Invalid interface or gateway")
+                return
+            }
+            request = ScopedDefaultRequest(interface: interface, gateway: gateway)
+        }
+        Self.routeQueue.async {
+            reply(true, ScopedDefaultKeeper.shared.set(request).rawValue)
+        }
+    }
+
+    /// Writes one message for a default route scoped to `interfaceIndex`. Nil on success, else
+    /// the errno. Call it on `routeQueue`; only `ScopedDefaultKeeper` does.
+    func writeScopedDefault(type: Int32, interfaceIndex: UInt16, gateway: String) -> Int32? {
+        routeSocketPerform(type: type, spec: RouteKernel.scopedDefaultSpec(interfaceIndex: interfaceIndex, gateway: gateway))
+    }
+
     // MARK: - Self-update
 
     private static let selfUpdateLock = NSLock()
@@ -653,6 +680,7 @@ class HelperTool: NSObject, HelperProtocol {
             reply(true, nil)
             HelperTool.routeQueue.asyncAfter(deadline: .now() + 0.5) {
                 WildcardForwarder.shared.shutdown()
+                _ = ScopedDefaultKeeper.shared.set(nil, reason: "helper updating")
                 exit(HelperSelfUpdate.restartExitStatus)
             }
         case .failure(let failure):

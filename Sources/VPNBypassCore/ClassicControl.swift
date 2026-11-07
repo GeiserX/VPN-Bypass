@@ -64,6 +64,39 @@ public struct ControlService: Codable, Equatable, Sendable {
     }
 }
 
+/// One entry of Bypass mode's Apps list. `servedBy` says whether per-app routing carries it
+/// now (`perAppEngine`) or not (`none`, with `inactiveReason`), as for a process rule.
+public struct ControlApp: Codable, Equatable, Sendable {
+    public var id: UUID
+    /// The app's signing identifier, or an executable name.
+    public var pattern: String
+    public var name: String?
+    public var enabled: Bool
+    public var servedBy: RuleServedBy? = nil
+    public var inactiveReason: String? = nil
+
+    init(_ app: BypassApp, engine: FlowEngineState, listIsLive: Bool, turnedDown: Bool = false) {
+        id = app.id
+        pattern = app.pattern
+        name = app.name
+        enabled = app.enabled
+        let serving = BypassAppServing.serving(app, engine: engine, listIsLive: listIsLive, turnedDown: turnedDown)
+        servedBy = serving.servedBy
+        inactiveReason = serving.reason?.rawValue
+    }
+
+    /// A `servedBy` this build does not know decodes as nil (`SanitizedRule`).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        pattern = try c.decode(String.self, forKey: .pattern)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        enabled = try c.decode(Bool.self, forKey: .enabled)
+        servedBy = RuleServedBy.lenient(c, forKey: .servedBy)
+        inactiveReason = try c.decodeIfPresent(String.self, forKey: .inactiveReason)
+    }
+}
+
 /// A kernel route VPN Bypass has installed (RouteManager.activeRoutes).
 public struct ControlActiveRoute: Codable, Equatable, Sendable {
     public var destination: String
@@ -94,6 +127,7 @@ enum ClassicControl {
         "service.list", "service.enable", "service.disable",
         "routes.active", "routes.clear", "refresh", "dns.refresh", "logs",
         "pause", "resume",
+        "app.list", "app.add", "app.rm", "app.enable", "app.disable",
     ]
 
     /// How long a domain/service mutation waits for a running route operation to finish.
@@ -128,6 +162,11 @@ enum ClassicControl {
         case "logs": response = logs(args)
         case "pause": response = await pause(args)
         case "resume": response = resume()
+        case "app.list": response = appList()
+        case "app.add": response = appAdd(args)
+        case "app.rm": response = appRemove(args)
+        case "app.enable": response = appSetEnabled(args, enabled: true)
+        case "app.disable": response = appSetEnabled(args, enabled: false)
         default: return nil
         }
         if response.ok, CommandRouter.isMutating(request.cmd) {
@@ -251,6 +290,115 @@ enum ClassicControl {
         }
         let after = entries(list, rm).first(where: { $0.id == entry.id }) ?? entry
         return ok(ControlResult(domains: [ControlDomain(after, list: list)]))
+    }
+
+    // MARK: - app.*
+
+    /// The state the rows report: the live engine's. A seam so a test can set it.
+    static var engineState: @MainActor () -> FlowEngineState = { FlowEngineManager.shared.state }
+
+    /// The teams of the processes that own the live tunnels, as the extension last confirmed
+    /// them. A seam so a test can set them.
+    static var declinedTeams: @MainActor () -> [String] = { FlowEngineManager.shared.confirmed?.declinedTeams ?? [] }
+
+    /// An entry as a reply carries it, with whether the extension turns it down.
+    private static func control(_ app: BypassApp, config: RouteManager.Config) -> ControlApp {
+        ControlApp(app, engine: engineState(), listIsLive: BypassAppServing.listIsLive(config),
+                   turnedDown: BypassApps.isTurnedDown(app, declinedTeams: declinedTeams()))
+    }
+
+    private static func appList() -> ControlResponse {
+        let config = RouteManager.shared.config
+        return ok(ControlResult(apps: config.bypassApps.map { control($0, config: config) }))
+    }
+
+    /// `app.add pattern=<bundle id or executable name>`. The list holds apps, not routes, so it
+    /// needs no wait for a route operation; per-app routing reads it on its next push.
+    private static func appAdd(_ args: [String: String]) -> ControlResponse {
+        guard let pattern = args["pattern"], !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return fail("invalid_args", "pattern is required (an app's bundle id, or an executable name)")
+        }
+        let rm = RouteManager.shared
+        switch rm.addBypassApp(pattern) {
+        case .failure(let error):
+            return fail(error.code, error.message)
+        case .success(let app):
+            let control = control(app, config: rm.config)
+            var message: String?
+            if control.servedBy != .perAppEngine {
+                message = "saved; " + BypassAppServing.inactiveNote(reason: control.inactiveReason)
+            }
+            return ok(ControlResult(message: message, apps: [control]))
+        }
+    }
+
+    struct AppTargetError: Error {
+        let code: String
+        let message: String
+    }
+
+    /// The entry `id=<uuid>` or `pattern=<value>` names (its signing id or bundle id).
+    private static func appTarget(_ args: [String: String]) -> Result<BypassApp, AppTargetError> {
+        let rm = RouteManager.shared
+        let id = args["id"], pattern = args["pattern"]
+        if id != nil && pattern != nil { return .failure(AppTargetError(code: "invalid_args", message: "give id or pattern, not both")) }
+        let target: BypassApp?
+        if let id {
+            target = UUID(uuidString: id).flatMap { uuid in rm.config.bypassApps.first { $0.id == uuid } }
+        } else if let pattern {
+            let value = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+            // A bundle id finds its app whatever the case typed, as LaunchServices does when
+            // `app.add` stores the case the app is signed with; an executable name matches exactly.
+            // Two entries that differ only in case leave the case-insensitive match ambiguous:
+            // then only the id can say which one.
+            if let exact = rm.config.bypassApps.first(where: { $0.names(value) }) {
+                target = exact
+            } else if ProcessRule.kind(of: value) == .bundleID {
+                let matches = rm.config.bypassApps.filter { app in
+                    [app.pattern, app.bundleID].contains { $0?.caseInsensitiveCompare(value) == .orderedSame }
+                }
+                guard matches.count <= 1 else {
+                    return .failure(AppTargetError(code: "ambiguous", message: "more than one app on the list matches; give id"))
+                }
+                target = matches.first
+            } else {
+                target = nil
+            }
+        } else {
+            return .failure(AppTargetError(code: "invalid_args", message: "id or pattern is required"))
+        }
+        guard let target else { return .failure(AppTargetError(code: "not_found", message: "no app on the list matches")) }
+        return .success(target)
+    }
+
+    /// `app.rm id=<uuid>` or `app.rm pattern=<value>`.
+    private static func appRemove(_ args: [String: String]) -> ControlResponse {
+        switch appTarget(args) {
+        case .failure(let error): return fail(error.code, error.message)
+        case .success(let target):
+            guard RouteManager.shared.removeBypassApp(target.id) != nil else {
+                return fail("not_found", "no app on the list matches")
+            }
+            return ok(ControlResult(message: "app removed"))
+        }
+    }
+
+    /// `app.enable` / `app.disable` with `id=<uuid>` or `pattern=<value>`: the row's switch.
+    /// Replies with the entry, so the reply says whether per-app routing serves it now.
+    private static func appSetEnabled(_ args: [String: String], enabled: Bool) -> ControlResponse {
+        switch appTarget(args) {
+        case .failure(let error): return fail(error.code, error.message)
+        case .success(let target):
+            let rm = RouteManager.shared
+            rm.setBypassAppEnabled(target.id, enabled)
+            let after = rm.config.bypassApps.first { $0.id == target.id } ?? target
+            let control = control(after, config: rm.config)
+            var message: String?
+            if enabled, control.servedBy != .perAppEngine {
+                message = BypassAppServing.inactiveNote(reason: control.inactiveReason)
+            }
+            return ok(ControlResult(message: message, apps: [control]))
+        }
     }
 
     // MARK: - service.*

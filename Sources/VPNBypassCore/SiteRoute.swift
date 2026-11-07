@@ -144,6 +144,8 @@ enum SiteRoute {
         /// guard it was sent: a name under one is answered and learned as the forwarder does.
         var wildcardSpecs: [WildcardSpec] = []
         var wildcardGuard = WildcardSafetyGuard()
+        /// Per-app routing's state: process rules it serves are not named as inactive.
+        var flowEngine: FlowEngineState = .unavailable(.notInThisBuild)
     }
 
     /// What `match` found, before the check.
@@ -168,6 +170,12 @@ enum SiteRoute {
         var resolverDomain: String? = nil
         /// Custom: the enabled process rules, which decide nothing without per-app routing.
         var inactiveAppRules: [String] = []
+        /// Per-app routing's state when the rules were read, for the sentence about them.
+        var appRulesEngine: FlowEngineState = .unavailable(.notInThisBuild)
+        /// defaultRoute: Everything else names a route other than the way the system already
+        /// sends it (Direct, a pinned tunnel, a proxy), which nothing installs, so the name
+        /// follows the system's own routing instead.
+        var defaultRouteNotApplied = false
     }
 
     // MARK: - Matching
@@ -179,7 +187,9 @@ enum SiteRoute {
         // route, a rule, the default, a pause, no address), so a listed app is not a mystery.
         if s.custom {
             found.inactiveAppRules = s.rules.filter(\.enabled).sorted { $0.order < $1.order }
-                .filter { ProcessRule.serving($0).servedBy == RuleServedBy.none }.map(\.pattern)
+                .filter { ProcessRule.serving($0, engine: s.flowEngine, routes: s.routes).servedBy == RuleServedBy.none }
+                .map(\.pattern)
+            found.appRulesEngine = s.flowEngine
         }
         return found
     }
@@ -253,11 +263,19 @@ enum SiteRoute {
                 }
                 return found
             }
+            // The engine installs routes for rules only (RouteCompiler), never for Everything
+            // else: a name no rule claims follows the system's own routing, the VPN for a full
+            // tunnel, whatever route Everything else names.
+            let systemWay: PathCheck.Way? = loopback ? .physical : s.vpnInterface.map { .tunnel($0) }
             if let id = s.defaultRouteId, let route = byId[id] {
-                return Found(match: .defaultRoute, routeName: route.name,
-                             expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
+                var found = Found(match: .defaultRoute, routeName: route.name, expected: systemWay)
+                // With no VPN connected the name leaves by the physical interface, which is what
+                // Direct asks for.
+                found.defaultRouteNotApplied = way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces)
+                    != (systemWay ?? .physical)
+                return found
             }
-            return Found(match: .none, expected: loopback ? .physical : s.vpnInterface.map { .tunnel($0) })
+            return Found(match: .none, expected: systemWay)
         }
 
         // 2. A listed wildcard (the most specific one, as macOS picks the resolver file).
@@ -434,7 +452,7 @@ enum SiteRoute {
                     : nil
             if let note { check = check.map { $0 + " " + note } ?? note }
         }
-        if let note = inactiveAppRulesSentence(found.inactiveAppRules) {
+        if let note = inactiveAppRulesSentence(found.inactiveAppRules, engine: found.appRulesEngine) {
             check = check.map { $0 + " " + note } ?? note
         }
         return SiteRouteAnswer(
@@ -451,11 +469,21 @@ enum SiteRoute {
             inactiveAppRules: found.inactiveAppRules.isEmpty ? nil : found.inactiveAppRules)
     }
 
-    /// The sentence `why` ends with while process rules wait for per-app routing; nil without any.
-    static func inactiveAppRulesSentence(_ patterns: [String], in bundle: Bundle = .main) -> String? {
+    /// The sentence `why` ends with while per-app routing does not serve process rules; nil
+    /// without any. A build that cannot run it says so; while it is active the rules' routes are
+    /// why; otherwise the sentence points at the General page, which says why.
+    static func inactiveAppRulesSentence(_ patterns: [String], engine: FlowEngineState = .unavailable(.notInThisBuild),
+                                         in bundle: Bundle = .main) -> String? {
         guard !patterns.isEmpty else { return nil }
         let apps = patterns.joined(separator: ", ")
-        return String(localized: "Rules for apps (\(apps)) change nothing yet: they need per-app routing, which is not available yet.", bundle: bundle)
+        if case .unavailable = engine {
+            return String(localized: "Rules for apps (\(apps)) change nothing yet: they need per-app routing, which is not available yet.", bundle: bundle)
+        }
+        // Active: what keeps an enabled rule out is its route, not the engine.
+        if engine == .active {
+            return String(localized: "Rules for apps (\(apps)) change nothing now: per-app routing serves only rules whose route is Direct and turned on.", bundle: bundle)
+        }
+        return String(localized: "Rules for apps (\(apps)) change nothing now: per-app routing does not serve them (Settings > General says why).", bundle: bundle)
     }
 
     /// `splitTunnel`: the VPN carries only some networks, so what follows the default route is
@@ -495,6 +523,8 @@ enum SiteRoute {
             let kind = found.ruleMatchType ?? ""
             let route = found.routeName ?? ""
             return String(localized: "\(host) matches rule \(position), \(kind) \(entry), which sends it to \(route).")
+        case .defaultRoute where found.defaultRouteNotApplied:
+            return String(localized: "\(host) matches no rule. Everything else is set to \(found.routeName ?? ""), but the app adds routes for rules only, so it follows the system's own routing.")
         case .defaultRoute:
             return splitTunnel
                 ? String(localized: "\(host) matches no rule, so it takes the default route, \(found.routeName ?? ""), which leaves it to the system's own routing.")
@@ -601,14 +631,20 @@ enum SiteRoute {
 // MARK: - RouteManager
 
 extension RouteManager {
-    /// The interface each pinned Custom route resolves to now, read only when an enabled rule
-    /// points at one (listing the tunnels runs ifconfig), as the apply does.
-    func pinnedInterfaces() async -> [UUID: String] {
-        guard Self.usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) else { return [:] }
-        let referenced = Set(config.rules.filter(\.enabled).map(\.routeId))
-        let pinned = config.routes.filter {
+    /// The pinned Custom routes Site Check needs the interface of: those an enabled rule points
+    /// at, and Everything else's, so a pin it names is compared with the system's way.
+    nonisolated static func pinnedRoutesToRead(_ config: Config) -> [Route] {
+        guard usesCustomEngine(schemaVersion: config.schemaVersion, routingMode: config.routingMode) else { return [] }
+        let referenced = Set(config.rules.filter(\.enabled).map(\.routeId) + [config.defaultRouteId].compactMap { $0 })
+        return config.routes.filter {
             referenced.contains($0.id) && $0.egress == .vpnDefault && $0.vpnSelector?.kind == .interface
         }
+    }
+
+    /// The interface each pinned Custom route resolves to now, read only when one is in use
+    /// (`pinnedRoutesToRead`; listing the tunnels runs ifconfig).
+    func pinnedInterfaces() async -> [UUID: String] {
+        let pinned = Self.pinnedRoutesToRead(config)
         guard !pinned.isEmpty else { return [:] }
         let links = await listVPNLinks()
         var out: [UUID: String] = [:]
@@ -629,7 +665,8 @@ extension RouteManager {
             rules: config.rules, routes: config.routes, defaultRouteId: config.defaultRouteId,
             activeRoutes: activeRoutes.map { ($0.destination, $0.gateway, $0.source) },
             localGateway: localGateway, vpnInterface: isVPNConnected ? vpnInterface : nil,
-            pause: pauseState, wildcardSpecs: wildcards.served, wildcardGuard: wildcards.safetyGuard)
+            pause: pauseState, wildcardSpecs: wildcards.served, wildcardGuard: wildcards.safetyGuard,
+            flowEngine: FlowEngineManager.shared.state)
     }
 
     /// "Where does this site go?" for a name, a link or an address. Nil when the input holds
