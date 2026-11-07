@@ -399,6 +399,9 @@ final class FlowEngineManager: ObservableObject {
         // A turn-on that waited for this removal reports its own state; the removal stays
         // visible only while per-app routing is off.
         guard !wantsOn else { return }
+        // A later removal still queued behind this one decides the outcome: until it ends the
+        // status stays `removing`, so a script polling `engine.status` does not stop early.
+        guard removalsInFlight == 0 else { removal = .removing; return }
         removal = result
         mayBeInstalled = result == .failed
     }
@@ -458,8 +461,9 @@ final class FlowEngineManager: ObservableObject {
             : "Per-app routing: it starts again once the network is up")
         // With the network up, a change inside the 30 s floor starts nothing, so without this a
         // failure just after a periodic refresh would wait for the refresh after that (about
-        // 60 s). One retry at the end of the floor; the one it starts schedules no other.
-        if networkAvailable != false, scheduledRetryAttempt != attempt { scheduleRetry() }
+        // 60 s). One retry at the end of the floor, only while the network is reported up (without
+        // it, `networkChanged` starts it); the one it starts schedules no other.
+        if networkAvailable == true, scheduledRetryAttempt != attempt { scheduleRetry() }
     }
 
     private func scheduleRetry() {
@@ -467,7 +471,8 @@ final class FlowEngineManager: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             await self.retryWait(Self.startRetrySeconds)
-            guard self.attempt == a, self.wantsOn, self.state == .failed(.startFailed) else { return }
+            guard self.attempt == a, self.wantsOn, self.state == .failed(.startFailed),
+                  self.networkAvailable == true else { return }
             self.retryStart(because: "\(Int(Self.startRetrySeconds)) s after the failed start")
             self.scheduledRetryAttempt = self.attempt
         }

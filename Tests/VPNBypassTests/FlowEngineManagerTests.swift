@@ -690,6 +690,36 @@ final class FlowEngineManagerTests: XCTestCase {
         XCTAssertNil(engine.removal)
     }
 
+    /// Off, on and off again while the first removal waits for its password: the first one
+    /// failing does not report `failed` while the second is still queued behind it.
+    func testARemovalStaysPendingWhileALaterOneIsQueued() async {
+        await turnOnToActive()
+        system.deactivationAnswer = nil
+        engine.setEnabled(false)
+        await until("first deactivation filed") { system.deactivationRequests == 1 }
+        engine.setEnabled(true)
+        engine.setEnabled(false)
+        system.finishDeactivation(.failed(code: 1))
+        await until("second deactivation filed") { system.deactivationRequests == 2 }
+        XCTAssertEqual(engine.removal, .removing, "the queued removal decides the outcome")
+        system.finishDeactivation(.removed)
+        await until("removed") { engine.removal == .removed }
+    }
+
+    /// A start that fails before the network monitor reported schedules no 30 s retry: the
+    /// status says it waits for the network, and the network's report starts it.
+    func testAFailedStartBeforeTheNetworkReportSchedulesNoTimedRetry() async {
+        var waits = 0
+        engine.retryWait = { _ in waits += 1 }
+        system.connectOnStart = false
+        engine.setEnabled(true)
+        await until("the start failed") { engine.state == .failed(.startFailed) }
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(waits, 0)
+        XCTAssertEqual(system.starts, 1)
+        XCTAssertEqual(engine.status().retry, "waitingForNetwork")
+    }
+
     func testRemoveExtensionIsRefusedWhereItCannotRun() async {
         let unsupported = FakeFlowEngineSystem()
         unsupported.support = .unavailable(.notInThisBuild)
