@@ -1,0 +1,115 @@
+# Generated from mkdocs.yml by mkdocs-to-zensical.py; the why of every block is in
+# new-repo/templates/zensical.toml. Edit this file, not mkdocs.yml, which is gone.
+
+[project]
+site_name = "VPN Bypass"
+site_url = "https://geiserx.github.io/VPN-Bypass/"
+site_description = "A macOS menu bar app that sends the services and domains you pick around your VPN, or only them through it."
+repo_url = "https://github.com/GeiserX/VPN-Bypass"
+repo_name = "GeiserX/VPN-Bypass"
+edit_uri = "edit/main/docs/"
+strict = true
+extra_css = ["stylesheets/theme.css"]
+exclude_docs = """
+[A-Z]*.md
+design/
+research/
+notes/
+release-notes/
+requirements-docs.txt
+"""
+nav = [
+  { Home = "index.md" },
+  { "Get started" = [
+      { "Getting started" = "getting-started.md" },
+      { Usage = "usage.md" },
+      { "MCP server" = "mcp-server.md" },
+    ] },
+  { Routing = [
+      { "Routing modes" = "routing.md" },
+      { "Other VPNs and proxies" = "coexistence.md" },
+    ] },
+  { Reference = [
+      { "How it works" = "how-it-works.md" },
+      { Troubleshooting = "troubleshooting.md" },
+      { Development = "development.md" },
+    ] },
+]
+
+[project.validation]
+invalid_links = true
+invalid_link_anchors = true
+
+[project.theme]
+language = "en"
+variant = "modern"
+logo = "images/logo.svg"
+favicon = "images/icon.svg"
+font = false
+features = [
+  "navigation.tabs",
+  "navigation.sections",
+  "navigation.expand",
+  "navigation.top",
+  "content.code.copy",
+  "content.action.edit",
+  "search.highlight",
+  "toc.follow",
+  "navigation.instant",
+  "navigation.instant.progress",
+  "content.action.copy",
+]
+icon.repo = "fontawesome/brands/github"
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+scheme = "default"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to dark mode"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/GeiserX/VPN-Bypass"
+
+[[project.extra.social]]
+icon = "simple/homebrew"
+link = "https://github.com/GeiserX/homebrew-vpn-bypass"
+
+[[project.extra.social]]
+icon = "material/download"
+link = "https://github.com/GeiserX/VPN-Bypass/releases"
+
+[project.plugins.search]
+
+[project.plugins.redirects.redirect_maps]
+"installation.md" = "getting-started.md"
+
+[project.plugins.llmstxt.sections]
+Documentation = ["*.md", "*/*.md"]
+
+[project.markdown_extensions]
+admonition = {}
+"pymdownx.details" = {}
+"pymdownx.superfences".custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+"pymdownx.tabbed".alternate_style = true
+"pymdownx.highlight".anchor_linenums = true
+"pymdownx.inlinehilite" = {}
+"pymdownx.snippets".base_path = [".", "docs"]
+"pymdownx.snippets".check_paths = true
+"pymdownx.mark" = {}
+attr_list = {}
+md_in_html = {}
+"pymdownx.emoji".emoji_index = "zensical.extensions.emoji.twemoji"
+"pymdownx.emoji".emoji_generator = "zensical.extensions.emoji.to_svg"
+tables = {}
+toc.permalink = true
