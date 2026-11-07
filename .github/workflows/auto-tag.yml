@@ -32,6 +32,7 @@ on:
       # The scripts make bundle, make release and release.yml run: a fix to one must ship.
       - 'scripts/appintents-metadata.sh'
       - 'scripts/asc-profiles.py'
+      - 'scripts/check-profile.py'
       - 'scripts/check-extension-bundle.sh'
       - 'scripts/release-notes.sh'
       - 'scripts/sign-and-notarize.sh'

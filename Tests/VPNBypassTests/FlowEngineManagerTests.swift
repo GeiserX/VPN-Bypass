@@ -209,6 +209,7 @@ final class FlowEngineManagerTests: XCTestCase {
         e.now = { [unowned self] in self.clock }
         e.sleep = { _ in await Task.yield() }
         e.heartbeatWait = { _ in try? await Task.sleep(nanoseconds: 3_600_000_000_000) }
+        e.retryWait = { _ in try? await Task.sleep(nanoseconds: 3_600_000_000_000) }
         e.appVersion = "6.1.0"
         return e
     }
@@ -426,6 +427,46 @@ final class FlowEngineManagerTests: XCTestCase {
         engine.networkChanged(available: true)
         await until("active") { engine.state == .active }
         XCTAssertEqual(system.starts, 3)
+    }
+
+    /// A start that fails with the network up schedules one retry at the end of the 30 s floor,
+    /// so it does not wait for a later change; that retry's own failure schedules no other.
+    func testAFailedStartWithTheNetworkUpIsRetriedOnceAtTheEndOfTheFloor() async {
+        var released = false
+        engine.retryWait = { _ in
+            while !released { try? await Task.sleep(nanoseconds: 5_000_000) }
+        }
+        engine.networkChanged(available: true)
+        system.connectOnStart = false
+        engine.setEnabled(true)
+        await until("the start failed") { engine.state == .failed(.startFailed) }
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(system.starts, 1, "nothing before the floor ends")
+
+        released = true
+        await until("the scheduled retry failed") { system.starts == 2 && engine.state == .failed(.startFailed) }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(system.starts, 2, "the scheduled retry schedules no other")
+
+        engine.setEnabled(false)
+        await until("off") { !engine.wantsOn }
+    }
+
+    /// A scheduled retry does nothing once the switch is turned off.
+    func testAScheduledRetryDoesNothingAfterTurnOff() async {
+        var released = false
+        engine.retryWait = { _ in
+            while !released { try? await Task.sleep(nanoseconds: 5_000_000) }
+        }
+        engine.networkChanged(available: true)
+        system.connectOnStart = false
+        engine.setEnabled(true)
+        await until("the start failed") { engine.state == .failed(.startFailed) }
+        engine.setEnabled(false)
+        await until("off") { !engine.wantsOn }
+        released = true
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(system.starts, 1)
     }
 
     /// `vpnb engine.on` or the switch while it is on but failed starts it over, at once.

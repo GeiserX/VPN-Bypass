@@ -30,7 +30,8 @@ root="$here/../.."
 : "${PROVISIONING_PROFILE_APP:?}" "${PROVISIONING_PROFILE_PROXY:?}"
 
 # A symlink as OUT would let `rm -rf` below follow it, possibly into APP: refuse it.
-dst_trim="${dst%/}"
+dst_trim="$dst"
+while [ "${dst_trim%/}" != "$dst_trim" ] && [ "$dst_trim" != "/" ]; do dst_trim="${dst_trim%/}"; done
 [ ! -L "$dst_trim" ] || { echo "OUT must not be a symlink: $dst" >&2; exit 1; }
 dst="$dst_trim"
 src_real="$(cd "$src" && pwd -P)"
