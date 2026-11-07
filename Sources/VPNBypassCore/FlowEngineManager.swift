@@ -82,6 +82,8 @@ final class FlowEngineManager: ObservableObject {
     var sleep: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
     /// The wait between heartbeats (a seam: tests send them by hand).
     var heartbeatWait: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
+    /// The wait before the one retry a failed start schedules (a seam: tests release it by hand).
+    var retryWait: (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
     /// The app's version, to tell an extension whose update waits.
     var appVersion: String? = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
 
@@ -108,6 +110,8 @@ final class FlowEngineManager: ObservableObject {
     /// When the network last started the session again: those retries skip `startRetrySeconds`
     /// after a failure, but run at most that often, so a flapping network cannot loop starts.
     private var lastNetworkRetry: Date?
+    /// The attempt the scheduled retry started: its own failure schedules no other one.
+    private var scheduledRetryAttempt: Int?
     private var heartbeatTask: Task<Void, Never>?
     private var pushing = false
     private var pushAgain = false
@@ -395,6 +399,9 @@ final class FlowEngineManager: ObservableObject {
         // A turn-on that waited for this removal reports its own state; the removal stays
         // visible only while per-app routing is off.
         guard !wantsOn else { return }
+        // A later removal still queued behind this one decides the outcome: until it ends the
+        // status stays `removing`, so a script polling `engine.status` does not stop early.
+        guard removalsInFlight == 0 else { removal = .removing; return }
         removal = result
         mayBeInstalled = result == .failed
     }
@@ -452,6 +459,23 @@ final class FlowEngineManager: ObservableObject {
         log(.info, networkAvailable == true
             ? "Per-app routing: it starts again on the next change of the network or the settings, \(Int(Self.startRetrySeconds)) s from now at the soonest"
             : "Per-app routing: it starts again once the network is up")
+        // With the network up, a change inside the 30 s floor starts nothing, so without this a
+        // failure just after a periodic refresh would wait for the refresh after that (about
+        // 60 s). One retry at the end of the floor, only while the network is reported up (without
+        // it, `networkChanged` starts it); the one it starts schedules no other.
+        if networkAvailable == true, scheduledRetryAttempt != attempt { scheduleRetry() }
+    }
+
+    private func scheduleRetry() {
+        let a = attempt
+        Task { [weak self] in
+            guard let self else { return }
+            await self.retryWait(Self.startRetrySeconds)
+            guard self.attempt == a, self.wantsOn, self.state == .failed(.startFailed),
+                  self.networkAvailable == true else { return }
+            self.retryStart(because: "\(Int(Self.startRetrySeconds)) s after the failed start")
+            self.scheduledRetryAttempt = self.attempt
+        }
     }
 
     private func startSession(_ a: Int) async {
