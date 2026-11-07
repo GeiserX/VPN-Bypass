@@ -73,6 +73,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r docs/requirements-docs.txt
 
+      # The optimize plugin hands every PNG to pngquant; a missing binary fails
+      # the build, so this step cannot be skipped silently.
+      - name: Install pngquant
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pngquant
+
       # zensical.toml sets `strict = true`; the flag here keeps the build strict
       # even if someone removes that line. `python -m zensical`, never the bare
       # `zensical` command: it puts the repo root on sys.path, which the awesome
