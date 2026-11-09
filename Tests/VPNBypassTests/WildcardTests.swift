@@ -550,6 +550,18 @@ final class WildcardPlannerTests: XCTestCase {
         ])
     }
 
+    func testAWildcardOverTailscaleNamesIsNeverServed() {
+        var c = bypassConfig()
+        c.domains.append(DomainEntry(domain: "*.ts.net"))
+        c.domains.append(DomainEntry(domain: "*.tail1234.ts.net"))
+        c.domains.append(DomainEntry(domain: "*.hosts.net"))
+        let plan = WildcardPlanner.plan(c, env: env)
+        XCTAssertEqual(plan.skipped["ts.net"], "Tailscale answers these names itself")
+        XCTAssertEqual(plan.skipped["tail1234.ts.net"], "Tailscale answers these names itself")
+        XCTAssertFalse(plan.specs.contains { $0.suffix.hasSuffix("ts.net") })
+        XCTAssertTrue(plan.specs.contains { $0.suffix == "hosts.net" })
+    }
+
     func testAWildcardWithNoDNSServerOrRouteIsSkippedAndSaysWhy() {
         var noDNS = env
         noDNS.physicalDNS = ["127.0.0.1", "https://dns.example/dns-query"]
