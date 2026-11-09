@@ -156,17 +156,31 @@ final class WildcardDelegationTests: XCTestCase {
     func testThePlanHandsTheHelperEachWildcardsOtherResolvers() throws {
         var c = Config()
         c.routingMode = .bypass
+        c.domains = [DomainEntry(domain: "*.example.net"), DomainEntry(domain: "*.corp.example.net")]
+        let corp = WildcardDelegation(domain: "corp.example.net", servers: ["10.20.0.53"], interface: "utun4")
+        let env = WildcardPlanner.Environment(
+            localGateway: "192.168.10.1", physicalInterface: "en0", physicalDNS: ["192.168.10.1"],
+            vpnGateway: "10.20.0.1", vpnInterface: "utun4", vpnDNS: ["10.20.0.53"],
+            resolvers: [ScutilDNS.Resolver(domain: "corp.example.net", nameservers: ["10.20.0.53"], interface: "utun4", order: 102000)])
+        let specs = WildcardPlanner.plan(c, env: env).specs
+        XCTAssertEqual(specs.map(\.suffix), ["example.net", "corp.example.net"])
+        XCTAssertEqual(specs.map(\.delegated), [[corp], [corp]])
+        for spec in specs {
+            XCTAssertEqual(WildcardSpec(dictionary: spec.dictionary), spec, "crosses to the helper as it is")
+        }
+    }
+
+    func testAWildcardOverTheTailnetIsLeftOutSoSharedMachinesKeepResolving() {
+        var c = Config()
+        c.routingMode = .bypass
         c.domains = [DomainEntry(domain: "*.ts.net"), DomainEntry(domain: "*.example-tailnet.ts.net")]
         let env = WildcardPlanner.Environment(
             localGateway: "192.168.10.1", physicalInterface: "en0", physicalDNS: ["192.168.10.1"],
             vpnGateway: "10.20.0.1", vpnInterface: "utun4", vpnDNS: ["10.20.0.53"],
             resolvers: ScutilDNS.parse(tailscaleScutil))
-        let specs = WildcardPlanner.plan(c, env: env).specs
-        XCTAssertEqual(specs.map(\.suffix), ["ts.net", "example-tailnet.ts.net"])
-        XCTAssertEqual(specs.map(\.delegated), [[magicDNS], [magicDNS]])
-        for spec in specs {
-            XCTAssertEqual(WildcardSpec(dictionary: spec.dictionary), spec, "crosses to the helper as it is")
-        }
+        let plan = WildcardPlanner.plan(c, env: env)
+        XCTAssertEqual(plan.specs, [])
+        XCTAssertEqual(Set(plan.skipped.keys), ["ts.net", "example-tailnet.ts.net"])
     }
 
     func testTheHelperRefusesADelegationOutsideTheWildcard() {
