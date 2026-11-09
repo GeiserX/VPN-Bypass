@@ -130,12 +130,31 @@ enum WildcardPlanner {
         return out
     }
 
+    /// The suffixes Tailscale MagicDNS owns. A wildcard at or under one is not served while
+    /// Tailscale is running.
+    static let tailscaleSuffixes = ["ts.net"]
+
+    /// Whether macOS has a resolver that asks MagicDNS, which is how a running Tailscale shows.
+    static func tailscaleIsAnswering(_ resolvers: [ScutilDNS.Resolver]) -> Bool {
+        resolvers.contains { $0.nameservers.contains(ProtectedDestinations.magicDNS) }
+    }
+
     /// What the helper should serve now, and why each configured wildcard it leaves out cannot
     /// be served yet (English, for the log; the suffix is the user's own entry).
     static func plan(_ config: Config, env: Environment) -> (specs: [WildcardSpec], skipped: [String: String]) {
         var specs: [WildcardSpec] = []
         var skipped: [String: String] = [:]
         for item in configured(config) {
+            // With Tailscale running, a resolver file for a Tailscale suffix takes its names
+            // away from MagicDNS. A domain with its own resolver is handed back (`delegated`),
+            // but a machine shared in from another tailnet has none: its name would go to
+            // servers that do not know it. The addresses could never be routed anyway
+            // (`ProtectedDestinations`), so the wildcard is left out.
+            if tailscaleIsAnswering(env.resolvers),
+               tailscaleSuffixes.contains(where: { WildcardDomain.matches(item.suffix, suffix: $0) }) {
+                skipped[item.suffix] = "Tailscale answers these names itself"
+                continue
+            }
             let gateway: String?, interface: String?, upstream: [String]
             switch item.via {
             case .physical:

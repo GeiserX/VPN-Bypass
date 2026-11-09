@@ -550,6 +550,26 @@ final class WildcardPlannerTests: XCTestCase {
         ])
     }
 
+    func testAWildcardOverTailscaleNamesIsNotServedWhileTailscaleRuns() {
+        var c = bypassConfig()
+        c.domains += [DomainEntry(domain: "*.ts.net"), DomainEntry(domain: "*.tail1234.ts.net"), DomainEntry(domain: "*.hosts.net")]
+        let served: ((specs: [WildcardSpec], skipped: [String: String])) -> [String] = { $0.specs.map(\.suffix) }
+
+        // No Tailscale on this Mac: the names are public ones, served like any other.
+        XCTAssertTrue(Set(served(WildcardPlanner.plan(c, env: env))).isSuperset(of: ["ts.net", "tail1234.ts.net", "hosts.net"]))
+
+        // Tailscale running: only its own tailnet has a resolver, so a machine shared in from
+        // another tailnet would be asked of the LAN's server. Both wildcards are left out.
+        var tailscale = env
+        tailscale.resolvers = [ScutilDNS.Resolver(domain: "mine.ts.net", nameservers: ["100.100.100.100"], interface: "utun10")]
+        let plan = WildcardPlanner.plan(c, env: tailscale)
+        XCTAssertEqual(plan.skipped["ts.net"], "Tailscale answers these names itself")
+        XCTAssertEqual(plan.skipped["tail1234.ts.net"], "Tailscale answers these names itself")
+        XCTAssertFalse(served(plan).contains("ts.net"))
+        XCTAssertFalse(served(plan).contains("tail1234.ts.net"))
+        XCTAssertTrue(served(plan).contains("hosts.net"), "a suffix that only ends in the same letters is not Tailscale's")
+    }
+
     func testAWildcardWithNoDNSServerOrRouteIsSkippedAndSaysWhy() {
         var noDNS = env
         noDNS.physicalDNS = ["127.0.0.1", "https://dns.example/dns-query"]
