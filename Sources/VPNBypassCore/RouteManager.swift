@@ -52,6 +52,8 @@ final class RouteManager: ObservableObject {
     @Published var ruleBlocks: [ActiveRoute] = []
     /// Bumped when the rule blocks are released, so an install that finishes after it can tell.
     var ruleBlockEpoch = 0
+    /// The Block routes `removeUnusedBlockRoutes` took out last, so Undo of their rule puts them back.
+    var droppedBlockRoutes: [Route] = []
     /// The retry waiting after a failed list download, by list (GeoDataStore.swift).
     var geoRetryTasks: [GeoKind: Task<Void, Never>] = [:]
     var blockedDestinations: Set<String> { Set(blockedRoutes.map(\.destination)) }

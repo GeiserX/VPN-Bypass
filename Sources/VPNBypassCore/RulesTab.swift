@@ -46,15 +46,29 @@ extension RouteManager {
         return route
     }
 
-    /// Takes out a Block route no rule points at. The Rules page makes it on first use, and a version
-    /// before Block refuses a config that holds one, so it stays only while a rule needs it. Returns
-    /// whether one went.
+    /// Takes out the Block route the Rules page made (`ensureBlockRoute`) when no rule points at it.
+    /// The Rules page makes it on first use, and a version before Block refuses a config that holds
+    /// one, so it stays only while a rule needs it. A Block route made in Routes, under another name,
+    /// is the user's and stays. Returns whether one went.
     @discardableResult
     func removeUnusedBlockRoutes() -> Bool {
         let used = Set(config.rules.map(\.routeId))
-        let before = config.routes.count
-        config.routes.removeAll { $0.egress == .block && !used.contains($0.id) && $0.id != config.defaultRouteId }
-        return config.routes.count != before
+        let unused = config.routes.filter {
+            $0.egress == .block && $0.name == Route.blockName && !used.contains($0.id) && $0.id != config.defaultRouteId
+        }
+        guard !unused.isEmpty else { return false }
+        let ids = Set(unused.map(\.id))
+        config.routes.removeAll { ids.contains($0.id) }
+        droppedBlockRoutes = unused
+        return true
+    }
+
+    /// Puts back the Block route `removeUnusedBlockRoutes` took out with `rule`'s delete, so Undo
+    /// brings the rule back on its route and not on one that no longer exists.
+    func restoreDroppedBlockRoute(for rule: Rule) {
+        guard !config.routes.contains(where: { $0.id == rule.routeId }),
+              let route = droppedBlockRoutes.first(where: { $0.id == rule.routeId }) else { return }
+        config.routes.append(route)
     }
 
     /// `removeUnusedBlockRoutes`, saved when one went: after a sheet that made it was cancelled.
@@ -74,6 +88,7 @@ extension RouteManager {
     @discardableResult
     func restoreRule(_ rule: Rule) -> Bool {
         guard !config.rules.contains(where: { $0.id == rule.id }) else { return false }
+        restoreDroppedBlockRoute(for: rule)
         config.rules = Self.rules(config.rules, restoring: rule)
         saveRulesAndReapply()
         log(.success, "Restored rule: \(rule.pattern)")

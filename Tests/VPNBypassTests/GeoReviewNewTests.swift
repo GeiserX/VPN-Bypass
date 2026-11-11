@@ -113,7 +113,10 @@ final class BlockRouteKeptWhileUsedTests: XCTestCase {
 
     override func setUp() async throws { saved = rm.config }
 
-    override func tearDown() async throws { rm.config = saved }
+    override func tearDown() async throws {
+        rm.config = saved
+        rm.droppedBlockRoutes = []
+    }
 
     /// A version before Block cannot read a config that holds a Block route, so the route the Rules
     /// page made goes when its last rule does (`saveRulesAndReapply` runs this on every rule change).
@@ -136,5 +139,45 @@ final class BlockRouteKeptWhileUsedTests: XCTestCase {
         XCTAssertTrue(rm.removeUnusedBlockRoutes())
         XCTAssertFalse(rm.config.routes.contains { $0.egress == .block }, "the Block route outlived its last rule")
         XCTAssertTrue(rm.config.routes.contains { $0.id == direct.id })
+    }
+
+    /// A Block route made in Routes under its own name is the user's: a rule change or a cancelled
+    /// sheet leaves it, even before a rule uses it.
+    func testABlockRouteTheUserNamedStays() {
+        let direct = Route(name: "Direct", egress: .direct)
+        let mine = Route(name: "Block ads", egress: .block)
+        var cfg = RouteManager.Config()
+        cfg.routingMode = .custom
+        cfg.schemaVersion = 2
+        cfg.routes = [direct, mine]
+        cfg.defaultRouteId = direct.id
+        cfg.rules = [Rule(matchType: .ip, pattern: "198.51.100.7", routeId: direct.id, order: 0)]
+        rm.config = cfg
+        XCTAssertFalse(rm.removeUnusedBlockRoutes())
+        XCTAssertTrue(rm.config.routes.contains { $0.id == mine.id }, "a Block route the user made in Routes was deleted")
+    }
+
+    /// Undo of the delete that took the last Block rule puts the rule back on its Block route, not on
+    /// a route that no longer exists (a rule whose route is gone matches nothing).
+    func testUndoOfTheLastBlockRuleBringsItsRouteBack() {
+        let direct = Route(name: "Direct", egress: .direct)
+        let block = Route(name: Route.blockName, egress: .block)
+        let blocked = Rule(matchType: .cidr, pattern: "203.0.113.0/24", routeId: block.id, order: 0)
+        var cfg = RouteManager.Config()
+        cfg.routingMode = .custom
+        cfg.schemaVersion = 2
+        cfg.routes = [direct, block]
+        cfg.defaultRouteId = direct.id
+        cfg.rules = [blocked]
+        rm.config = cfg
+        // removeRule's change to the config, without its apply.
+        rm.config.rules.removeAll { $0.id == blocked.id }
+        XCTAssertTrue(rm.removeUnusedBlockRoutes())
+        // restoreRule's first step.
+        rm.restoreDroppedBlockRoute(for: blocked)
+        XCTAssertEqual(rm.config.routes.filter { $0.id == block.id }.map(\.egress), [.block],
+                       "the restored Block rule points at a route that no longer exists")
+        rm.restoreDroppedBlockRoute(for: blocked)
+        XCTAssertEqual(rm.config.routes.filter { $0.id == block.id }.count, 1, "put back once")
     }
 }
