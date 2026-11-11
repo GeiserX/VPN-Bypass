@@ -50,14 +50,6 @@ final class RouteManager: ObservableObject {
     /// asked. Apart from `blockedRoutes`, which is VPN Only's and follows the VPN: these follow the
     /// rules, whether the VPN is up or not.
     @Published var ruleBlocks: [ActiveRoute] = []
-    /// What /etc/hosts holds for Block rules whose list is too large for wildcards (HostsBlocks.swift).
-    @Published var hostsBlock = HostsBlockState()
-    /// A fingerprint of the names last written, so an unchanged list is not sent again; nil when the
-    /// blocked section is not there.
-    var hostsBlockSignature: Int?
-    /// The hosts file may hold our blocked section (a write was sent, or one was found at start), so
-    /// a release must send the removal even when no write is known to have succeeded.
-    var hostsBlockMayExist = false
     /// Bumped when the rule blocks are released, so an install that finishes after it can tell.
     var ruleBlockEpoch = 0
     /// The retry waiting after a failed list download, by list (GeoDataStore.swift).
@@ -2857,7 +2849,6 @@ final class RouteManager: ObservableObject {
             wildcards.routesApplied()   // as the classic skip path
             // No route changed, but a block may have: a rule edited, switched off or moved to another route.
             await applyRuleBlocks(compiledAll.blocks)
-            await applyHostsBlocks()
             return true
         }
 
@@ -2887,7 +2878,6 @@ final class RouteManager: ObservableObject {
         // The blocks go in after the routes are committed: the stale-route cleanup above removes by
         // destination, and would take a block just put on an address a rule used to route.
         await applyRuleBlocks(compiledAll.blocks)
-        await applyHostsBlocks()
 
         let confirmedUniqueCount = uniqueRouteCount
         // A service rule's routes are recorded under the service id; Problems names the service.
@@ -3114,7 +3104,6 @@ final class RouteManager: ObservableObject {
         if !keepingBlocked {
             await releaseBlocks(reason: "all routes removed")
             await releaseRuleBlocks(reason: "all routes removed")
-            await releaseHostsBlocks(reason: "all routes removed")
         }
 
         cancelAllRetries()
@@ -6169,7 +6158,6 @@ final class RouteManager: ObservableObject {
     func startupSweepIfNeeded(desired: [String]) async {
         guard !didStartupSweep else { return }
         didStartupSweep = true
-        await reconcileHostsBlocksAtStartup()
         guard let table = RouteKernel.currentTable() else { return }
         let orphans = Self.orphanedDestinations(table: table, desired: Set(desired))
         guard !orphans.isEmpty else { return }
@@ -6586,8 +6574,6 @@ final class RouteManager: ObservableObject {
     var removeRouteOverrideForTests: ((_ destination: String) async -> Bool)?
     var resolveIPsOverrideForTests: ((_ domain: String) async -> [String]?)?
     /// The helper's block batch, for the VPN Only block tests.
-    /// Test seam for the helper's blocked-names call; nil in production.
-    var updateBlockedHostsOverrideForTests: (([String]) async -> (success: Bool, error: String?))?
     var addBlockRoutesBatchOverrideForTests: (([String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?))?
     /// What `detectVPNInterface` answers, so a test can drive `checkVPNStatus` through a drop
     /// or a flap with no real tunnel.

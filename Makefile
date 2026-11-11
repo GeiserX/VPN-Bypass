@@ -33,7 +33,6 @@ build-helper:
 		Sources/VPNBypassCore/DNSQueryLine.swift \
 		Sources/VPNBypassCore/WildcardDNS.swift \
 		Sources/VPNBypassCore/ScopedDefaultRoute.swift \
-		Sources/VPNBypassCore/HostsBlockSection.swift \
 		Helper/DNSCapture.swift \
 		Helper/WildcardForwarder.swift \
 		Helper/ScopedDefaultKeeper.swift \
@@ -50,7 +49,6 @@ build-helper:
 		Sources/VPNBypassCore/DNSQueryLine.swift \
 		Sources/VPNBypassCore/WildcardDNS.swift \
 		Sources/VPNBypassCore/ScopedDefaultRoute.swift \
-		Sources/VPNBypassCore/HostsBlockSection.swift \
 		Helper/DNSCapture.swift \
 		Helper/WildcardForwarder.swift \
 		Helper/ScopedDefaultKeeper.swift \

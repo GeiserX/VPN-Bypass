@@ -528,12 +528,7 @@ class HelperTool: NSObject, HelperProtocol {
         
         // Write back
         let newContent = lines.joined(separator: "\n") + "\n"
-        return writeHostsFile(newContent)
-    }
-
-    /// Writes /etc/hosts atomically and makes it readable by the resolver. Always on `routeQueue`.
-    private func writeHostsFile(_ newContent: String) -> (success: Bool, error: String?) {
-        let hostsPath = "/etc/hosts"
+        
         do {
             try newContent.write(toFile: hostsPath, atomically: true, encoding: .utf8)
         } catch {
@@ -552,36 +547,7 @@ class HelperTool: NSObject, HelperProtocol {
         }
         return (true, nil)
     }
-
-    /// The blocked-names section (`HostsBlockSection`): replaced with `names`, or removed when there
-    /// are none, and left alone when it already says so. Serialised with the route and hosts
-    /// mutations, as `updateHostsFile` is.
-    func updateBlockedHosts(names: String, withReply reply: @escaping (Bool, String?) -> Void) {
-        Self.routeQueue.async {
-            let result = self.performBlockedHostsUpdate(names: names)
-            reply(result.success, result.error)
-        }
-    }
-
-    /// Always call it on `routeQueue`.
-    private func performBlockedHostsUpdate(names text: String) -> (success: Bool, error: String?) {
-        guard text.utf8.count <= HostsBlockSection.maxBytes else {
-            return (false, "The list of blocked names is too large")
-        }
-        let names = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-        guard names.count <= HostsBlockSection.maxNames else {
-            return (false, "Too many blocked names (\(names.count))")
-        }
-        guard let current = try? String(contentsOfFile: "/etc/hosts", encoding: .utf8) else {
-            return (false, "Could not read /etc/hosts")
-        }
-        // Nothing to write when the section already says this.
-        guard let updated = HostsBlockSection.rewritten(current, names: names) else { return (true, nil) }
-        let written = writeHostsFile(updated)
-        if written.success { Self.flushResolverCaches() }
-        return written
-    }
-
+    
     func flushDNSCache(withReply reply: @escaping (Bool) -> Void) {
         Self.flushResolverCaches()
         // Hosts write already succeeded; the app ignores this Bool. A

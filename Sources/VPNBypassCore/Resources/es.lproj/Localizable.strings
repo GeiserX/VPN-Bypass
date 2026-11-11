@@ -1251,6 +1251,4 @@
 "%@ matches rule %lld (%@), which goes to Block: its name gets no answer, so nothing connects." = "%@ coincide con la regla %lld (%@), que va a Bloquear: su nombre no recibe respuesta, así que nada se conecta.";
 "The download is larger than a list can be." = "La descarga es mayor de lo que puede ser una lista.";
 "Too large to route: %lld ranges, the limit is %lld." = "Demasiado grande para enrutar: %lld rangos, el límite es %lld.";
-"Turn on “Pin listed names in /etc/hosts” in General to block this list." = "Activa «Fijar los nombres de la lista en /etc/hosts» en General para bloquear esta lista.";
-"Could not write /etc/hosts: %@" = "No se pudo escribir /etc/hosts: %@";
-"%lld names blocked in /etc/hosts. Subdomains are not covered." = "%lld nombres bloqueados en /etc/hosts. Los subdominios no están cubiertos.";
+"IPv4 only; IPv6 is not routed or blocked." = "Solo IPv4; IPv6 no se enruta ni se bloquea.";

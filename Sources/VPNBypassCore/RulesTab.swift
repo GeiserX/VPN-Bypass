@@ -865,11 +865,14 @@ struct RuleRow: View {
         let key = rule.pattern.lowercased()
         if rule.matchType == .geoip, GeoDataFile.geoip.ranges(for: [key])[key] == nil { return nil }
         let count = routeManager.ruleBlockCount(forPattern: rule.pattern)
+        let note: String
         switch count {
-        case 0: return String(localized: "Not blocked yet.")
-        case 1: return String(localized: "1 address blocked")
-        default: return String(localized: "\(count) addresses blocked")
+        case 0: note = String(localized: "Not blocked yet.")
+        case 1: note = String(localized: "1 address blocked")
+        default: note = String(localized: "\(count) addresses blocked")
         }
+        // A country's IPv6 ranges are not read: say so, or a blocked country looks unreachable when it is not.
+        return rule.matchType == .geoip ? GeoDisplay.withIPv4Note(note) : note
     }
 
     /// A Country or Site rule's second line: what its list holds, or why it holds nothing.
@@ -877,15 +880,13 @@ struct RuleRow: View {
         let key = rule.pattern.lowercased()
         switch rule.matchType {
         case .geoip:
-            return GeoDisplay.detail(count: GeoDataFile.geoip.ranges(for: [key])[key]?.count, hasData: geoipStore.hasData)
+            let count = GeoDataFile.geoip.ranges(for: [key])[key]?.count
+            let detail = GeoDisplay.detail(count: count, hasData: geoipStore.hasData)
+            guard let count, (1...GeoDataFile.maxRangesPerCountry).contains(count) else { return detail }
+            return GeoDisplay.withIPv4Note(detail)
         case .geosite:
             let list = GeoDataFile.geosite.expansions(for: [key])[key]
-            // On the Block route a list too large for wildcards is blocked in /etc/hosts instead.
-            if assignedRoute?.egress == .block, let list, list.found, list.exceedsWildcards(onBlock: true), list.count <= HostsBlockSection.maxNames {
-                return GeoDisplay.hostsDetail(count: list.count, manageHosts: routeManager.config.manageHostsFile,
-                                              state: routeManager.hostsBlock)
-            }
-            return GeoDisplay.siteDetail(list, hasData: geositeStore.hasData)
+            return GeoDisplay.siteDetail(list, hasData: geositeStore.hasData, onBlock: assignedRoute?.egress == .block)
         default:
             return nil
         }

@@ -31,10 +31,22 @@ enum GeoDisplay {
         }
     }
 
+    /// A Country rule's line with the note that only its IPv4 ranges are routed or blocked: the lists
+    /// hold IPv6 ranges too, and the kernel engine routes IPv4 only.
+    static func withIPv4Note(_ detail: String, in bundle: Bundle = .main) -> String {
+        "\(detail) · \(String(localized: "IPv4 only; IPv6 is not routed or blocked.", bundle: bundle))"
+    }
+
     /// The line under a Site rule's row: what the list holds, or why it routes nothing.
-    static func siteDetail(_ list: GeoSiteExpansion?, hasData: Bool, in bundle: Bundle = .main) -> String {
+    /// On the Block route the exact names become wildcards too, so the limit is on both counts together
+    /// (`GeoSiteExpansion.exceedsWildcards`), as the planner applies it.
+    static func siteDetail(_ list: GeoSiteExpansion?, hasData: Bool, onBlock: Bool = false, in bundle: Bundle = .main) -> String {
         guard hasData else { return String(localized: "Site list not downloaded yet.", bundle: bundle) }
         guard let list, list.found else { return String(localized: "Not in the site list.", bundle: bundle) }
+        if onBlock, !list.isTooLarge, list.exceedsWildcards(onBlock: true) {
+            let count = list.count, limit = GeoSiteExpansion.maxSuffixes
+            return String(localized: "Too large to route: \(count) domains, the limit is \(limit).", bundle: bundle)
+        }
         if list.isTooLarge {
             // The number that is over, with its own limit: wildcards and exact names are limited apart.
             let namesOver = list.names.count > GeoSiteExpansion.maxNames
@@ -46,18 +58,6 @@ enum GeoDisplay {
                                       : String(localized: "\(list.count) domains", bundle: bundle)
         guard list.unsupported > 0 else { return domains }
         return String(localized: "\(domains), \(list.unsupported) not supported", bundle: bundle)
-    }
-
-    /// The line under a Block rule whose list is too large for wildcards and is blocked in /etc/hosts.
-    static func hostsDetail(count: Int, manageHosts: Bool, state: HostsBlockState, in bundle: Bundle = .main) -> String {
-        if !manageHosts || state.needsHostsFile {
-            return String(localized: "Turn on “Pin listed names in /etc/hosts” in General to block this list.", bundle: bundle)
-        }
-        if let error = state.error {
-            return String(localized: "Could not write /etc/hosts: \(error)", bundle: bundle)
-        }
-        guard state.count > 0 else { return String(localized: "Not blocked yet.", bundle: bundle) }
-        return String(localized: "\(state.count) names blocked in /etc/hosts. Subdomains are not covered.", bundle: bundle)
     }
 
     /// A line about a list: when it was last synced (the time, and how long ago), or that it is being
