@@ -122,7 +122,7 @@ enum RouteCompiler {
         // the earlier narrower route win for its sub-range while the broader route serves
         // the rest. IPv4 only; a non-IPv4 dest (IPv6 literal, ::/0, malformed) falls back
         // to exact-string claiming so the containment math never runs on it (never crashes).
-        var claimed: [Claim] = []
+        var claimed = Claims()
 
         for entry in resolvedRules where entry.rule.enabled {
             // A rule pointing at a route that no longer exists — OR a route the user has
@@ -174,33 +174,34 @@ enum RouteCompiler {
 
     // MARK: - CIDR-containment claiming
 
-    /// One entry in the containment-aware claim list: a parsed IPv4 range (compared by
-    /// CIDR containment) or a raw string (exact-match fallback for a non-IPv4 dest such
-    /// as an IPv6 literal, where the containment math doesn't apply).
-    private enum Claim {
-        case v4(network: UInt32, prefix: Int)
-        case raw(String)
+    /// The containment-aware claims so far: parsed IPv4 ranges (compared by CIDR
+    /// containment), kept by prefix length, and raw strings (exact-match fallback for a
+    /// non-IPv4 dest such as an IPv6 literal, where the containment math doesn't apply).
+    /// By prefix, a new range is checked against at most 33 sets instead of every earlier
+    /// claim: a country of tens of thousands of ranges compiled in quadratic time before.
+    private struct Claims {
+        var v4ByPrefix = [Set<UInt32>](repeating: [], count: 33)
+        var raw: Set<String> = []
     }
 
-    /// First-match claim of `dest` against the ordered `claimed` list, containment-aware.
+    /// First-match claim of `dest` against the earlier claims, containment-aware.
     /// Returns true (and records the new claim) when NO earlier claim already covers
     /// `dest`; returns false (suppress) when an earlier claim fully contains it — that
     /// earlier rule owns the IP space, so no later rule may re-route any of it. The
     /// direction is one-way: only a narrower-or-equal `dest` is suppressed; a broader
     /// `dest` is still recorded and routed (kernel LPM carves out the earlier narrower
     /// route). Mirrors Set.insert(_:).inserted, but CIDR-aware for IPv4.
-    private static func claim(_ dest: String, in claimed: inout [Claim]) -> Bool {
+    private static func claim(_ dest: String, in claimed: inout Claims) -> Bool {
         if let newRange = parseIPv4(dest) {
-            for case let .v4(network, prefix) in claimed
-                where isSubset(newRange, of: (network: network, prefix: prefix)) {
-                return false
+            // An earlier range holds this one (a subset of it, or equal) when its prefix is
+            // shorter or equal and this one's network, masked to that prefix, is its network.
+            for prefix in 0...newRange.prefix where !claimed.v4ByPrefix[prefix].isEmpty {
+                if claimed.v4ByPrefix[prefix].contains(maskIPv4(newRange.network, prefix)) { return false }
             }
-            claimed.append(.v4(network: newRange.network, prefix: newRange.prefix))
-        } else {
-            for case let .raw(string) in claimed where string == dest { return false }
-            claimed.append(.raw(dest))
+            claimed.v4ByPrefix[newRange.prefix].insert(newRange.network)
+            return true
         }
-        return true
+        return claimed.raw.insert(dest).inserted
     }
 
     /// Parse an IPv4 host ("A.B.C.D" ⇒ /32) or IPv4 CIDR ("A.B.C.D/N") into a canonical
@@ -232,16 +233,6 @@ enum RouteCompiler {
         if prefix <= 0 { return 0 }
         if prefix >= 32 { return addr }
         return addr & (~UInt32(0) << (32 - prefix))
-    }
-
-    /// True when `inner` is fully contained in (a subset of, or equal to) `outer`: outer's
-    /// prefix is shorter-or-equal AND inner's network masked to outer's prefix equals
-    /// outer's network — i.e. every address in `inner` is also in `outer`.
-    private static func isSubset(
-        _ inner: (network: UInt32, prefix: Int),
-        of outer: (network: UInt32, prefix: Int)
-    ) -> Bool {
-        outer.prefix <= inner.prefix && maskIPv4(inner.network, outer.prefix) == outer.network
     }
 
     // MARK: - GlobalProtect catch-all guard (generalizes refuseVPNOnlyUnderGlobalProtect)
