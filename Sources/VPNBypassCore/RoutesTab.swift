@@ -483,7 +483,7 @@ struct RouteEditorSheet: View {
     var body: some View {
         SheetScaffold(isEditing ? String(localized: "Edit Route") : String(localized: "Add Route"),
                       confirmTitle: isEditing ? String(localized: "Save Changes") : String(localized: "Add Route"),
-                      onCancel: onCancel, onConfirm: attemptSave) {
+                      width: 500, onCancel: onCancel, onConfirm: attemptSave) {
             SheetField(String(localized: "Name"), required: true) {
                 TextField(namePlaceholder, text: $name)
                     .textFieldStyle(.roundedBorder)

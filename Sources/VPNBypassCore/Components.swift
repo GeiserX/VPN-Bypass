@@ -809,7 +809,9 @@ struct RouteChipMenu<Content: View>: View {
 // MARK: - 7. Sheet scaffold
 
 /// The one sheet frame: a title, the content, then Cancel and a default button on the right,
-/// with no divider and no close button. Esc cancels, Return confirms. Width 420, height fits.
+/// with no divider and no close button. Esc cancels, Return confirms. Width 420 unless a sheet
+/// asks for more (the rule and route editors, whose segmented choice has more than five segments);
+/// height fits.
 struct SheetScaffold<Content: View>: View {
     static var width: CGFloat { 420 }
 
@@ -817,12 +819,15 @@ struct SheetScaffold<Content: View>: View {
     let confirmTitle: String
     var isDestructive = false
     var canConfirm = true
+    var width: CGFloat = SheetScaffold.width
     let onCancel: () -> Void
     let onConfirm: () -> Void
     let content: Content
 
     init(_ title: String, confirmTitle: String, isDestructive: Bool = false, canConfirm: Bool = true,
+         width: CGFloat = SheetScaffold.width,
          onCancel: @escaping () -> Void, onConfirm: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+        self.width = width
         self.title = title
         self.confirmTitle = confirmTitle
         self.isDestructive = isDestructive
@@ -861,7 +866,7 @@ struct SheetScaffold<Content: View>: View {
             }
         }
         .padding(Theme.Space.page - 4)
-        .frame(width: Self.width, alignment: .leading)
+        .frame(width: width, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
         .background(Theme.bgSecondary)
     }

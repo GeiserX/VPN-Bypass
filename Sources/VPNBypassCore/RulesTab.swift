@@ -1022,6 +1022,9 @@ struct RuleEditorSheet: View {
     /// The doc screenshots open the app chooser over the sheet.
     static var appChooserForScreenshots = false
 
+    /// Wider than the usual sheet: seven kinds of match sit in one row.
+    static let sheetWidth: CGFloat = 540
+
     init(
         editingRule: Rule?,
         services: [RouteManager.ServiceEntry],
@@ -1056,7 +1059,7 @@ struct RuleEditorSheet: View {
     var body: some View {
         SheetScaffold(isEditing ? String(localized: "Edit Rule") : String(localized: "Add Rule"),
                       confirmTitle: isEditing ? String(localized: "Save Changes") : String(localized: "Add Rule"),
-                      onCancel: onCancel, onConfirm: attemptSave) {
+                      width: Self.sheetWidth, onCancel: onCancel, onConfirm: attemptSave) {
             SheetField(String(localized: "Match"), required: true) {
                 Picker(String(localized: "Match"), selection: $matchType) {
                     Text("Domain").tag(MatchType.domain)
