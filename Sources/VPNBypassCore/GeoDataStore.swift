@@ -280,12 +280,12 @@ final class GeoDataStore: ObservableObject {
         // another file is refused before it is read. Every preset publishes one, so a preset whose
         // digest cannot be read fails and keeps the list in use; only a custom address that publishes
         // none is used unchecked, and the list's status line says so.
+        let kind = self.kind
         let expected = GeoChecksum.digest(in: await fetchChecksum(GeoChecksum.url(for: source)) ?? "")
         if expected == nil, GeoSource.presets.contains(where: { $0.url(for: kind) == source.absoluteString }) {
             return await finish(failed: String(localized: "Could not download the checksum its source publishes."), from: source)
         }
         // Read off the main actor: a list is tens of megabytes. The whole file must read.
-        let kind = self.kind
         let check = await Task.detached(priority: .utility) { () -> (usable: Bool, digest: String?) in
             guard let data = try? Data(contentsOf: downloaded, options: .mappedIfSafe) else { return (false, nil) }
             return (kind.isUsable(data), expected == nil ? nil : GeoChecksum.sha256(data))
