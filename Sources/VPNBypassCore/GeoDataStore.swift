@@ -511,14 +511,18 @@ enum GeoIPRangePolicy {
 
 /// Which countries the Country rules route together: each one under its own limit, in rule order,
 /// until all of them would pass `GeoDataFile.maxRangesTotal`. A country that would pass it is left
-/// out whole, and its row says so; a country already taken by an earlier rule counts once.
+/// out whole, and its row says so; a country already taken by an earlier rule counts once. A rule
+/// whose route is off, gone or of a type this build does not know routes nothing (`RouteCompiler`),
+/// so it counts nothing either.
 enum GeoIPBudget {
-    static func select(rules: [Rule], counts: [String: Int], limit: Int = GeoDataFile.maxRangesTotal)
+    static func select(rules: [Rule], routes: [Route], counts: [String: Int], limit: Int = GeoDataFile.maxRangesTotal)
         -> (accepted: Set<String>, refused: [String: Int]) {
         var accepted: Set<String> = []
         var refused: [String: Int] = [:]
         var total = 0
-        for rule in rules.filter({ $0.enabled && $0.matchType == .geoip }).sorted(by: { $0.order < $1.order }) {
+        let live = Set(routes.filter { $0.enabled && $0.egress != .unsupported }.map(\.id))
+        for rule in rules.filter({ $0.enabled && $0.matchType == .geoip && live.contains($0.routeId) })
+            .sorted(by: { $0.order < $1.order }) {
             let code = rule.pattern.lowercased()
             guard !accepted.contains(code), refused[code] == nil, let count = counts[code],
                   count <= GeoDataFile.maxRangesPerCountry else { continue }
@@ -541,7 +545,7 @@ extension RouteManager {
     func geoipRanges() -> [String: [String]] {
         // A country over a limit routes nothing, and its row says why; never a part of it.
         let ranges = GeoDataFile.geoip.ranges(for: Set(config.rules.filter { $0.enabled && $0.matchType == .geoip }.map { $0.pattern.lowercased() }))
-        let accepted = GeoIPBudget.select(rules: config.rules, counts: ranges.mapValues(\.count)).accepted
+        let accepted = GeoIPBudget.select(rules: config.rules, routes: config.routes, counts: ranges.mapValues(\.count)).accepted
         return ranges.filter { accepted.contains($0.key) }
     }
 

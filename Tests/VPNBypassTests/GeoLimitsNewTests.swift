@@ -70,7 +70,7 @@ final class RuleRefusalTests: XCTestCase {
         let rules = ["gb", "fr", "de", "gb"].enumerated().map {
             Rule(matchType: .geoip, pattern: $0.element, routeId: direct.id, order: $0.offset)
         }
-        let picked = GeoIPBudget.select(rules: rules, counts: ["gb": 36_445, "fr": 33_770, "de": 30_196])
+        let picked = GeoIPBudget.select(rules: rules, routes: [direct], counts: ["gb": 36_445, "fr": 33_770, "de": 30_196])
         XCTAssertEqual(picked.accepted, ["gb", "fr"], "a country two rules name counts once")
         XCTAssertEqual(picked.refused, ["de": 30_196])
         XCTAssertGreaterThanOrEqual(GeoDataFile.maxRangesTotal, GeoDataFile.maxRangesPerCountry)
@@ -188,7 +188,7 @@ final class GeoCountryTotalRealFileTests: XCTestCase {
         let compiled = RouteCompiler.compileAll(resolvedRules: built, routes: [direct], localGateway: "192.0.2.1",
                                                 ifaceGatewayForRoute: { _ in nil })
         let planned = CFAbsoluteTimeGetCurrent() - start
-        let picked = GeoIPBudget.select(rules: rules, counts: ranges.mapValues(\.count))
+        let picked = GeoIPBudget.select(rules: rules, routes: [direct], counts: ranges.mapValues(\.count))
         let all = ranges.values.map(\.count).reduce(0, +)
         let kept = picked.accepted.map { ranges[$0]?.count ?? 0 }.reduce(0, +)
         print("GEOIP TOTAL \(largest) all=\(all) routes=\(compiled.routes.count) read=\(String(format: "%.2f", read)) s "

@@ -71,3 +71,49 @@ final class BlockRangeFirstMatchTests: XCTestCase {
         XCTAssertEqual(compiled.blocks.map(\.destination), ["203.0.113.7"])
     }
 }
+
+/// A Country rule that routes nothing takes no part of the Country total.
+@MainActor
+final class GeoCountryTotalInertRouteTests: XCTestCase {
+
+    private var rm: RouteManager { RouteManager.shared }
+    private var saved: RouteManager.Config!
+
+    override func setUp() async throws { saved = rm.config }
+
+    override func tearDown() async throws {
+        rm.config = saved
+        try? FileManager.default.removeItem(at: GeoDataFile.geoip.url)
+        GeoDataFile.geoip.invalidate()
+    }
+
+    func testACountryOnARouteThatIsOffOrGoneCountsNothing() throws {
+        let codes = ["aa", "bb", "cc", "dd", "ee"]
+        let entries = codes.enumerated().map { index, code in
+            Dat.entry(code.uppercased(), (0..<40_000).map { Dat.cidr([UInt8(20 + index), UInt8($0 >> 8), UInt8($0 & 0xFF), 1], 32) })
+        }
+        try FileManager.default.createDirectory(at: GeoDataFile.geoip.url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Dat.file(entries).write(to: GeoDataFile.geoip.url)
+        GeoDataFile.geoip.invalidate()
+
+        var c = RouteManager.Config()
+        c.routingMode = .custom
+        c.schemaVersion = 2
+        let direct = Route(name: "Direct", egress: .direct)
+        let off = Route(name: "Off", egress: .direct, enabled: false)
+        c.routes = [direct, off]
+        c.defaultRouteId = direct.id
+        c.rules = [Rule(matchType: .geoip, pattern: "aa", routeId: off.id, order: 0),
+                   Rule(matchType: .geoip, pattern: "bb", routeId: UUID(), order: 1),   // its route is gone
+                   Rule(matchType: .geoip, pattern: "cc", routeId: direct.id, order: 2),
+                   Rule(matchType: .geoip, pattern: "dd", routeId: direct.id, order: 3),
+                   Rule(matchType: .geoip, pattern: "ee", routeId: direct.id, order: 4)]
+        rm.config = c
+
+        XCTAssertEqual(Set(rm.geoipRanges().keys), ["cc", "dd"], "a rule that routes nothing took part of the total")
+        let notes = GeoDisplay.refusalNotes(config: c, wildcards: [:])
+        XCTAssertNil(notes[c.rules[2].id])
+        XCTAssertNil(notes[c.rules[3].id], "the row says left out, for a rule that routes nothing")
+        XCTAssertEqual(notes[c.rules[4].id], GeoDisplay.countryRefusal(count: 40_000), "the third live country is still refused")
+    }
+}

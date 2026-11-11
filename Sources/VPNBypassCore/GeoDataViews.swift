@@ -57,7 +57,7 @@ enum GeoDisplay {
         let codes = Set(config.rules.filter { $0.enabled && $0.matchType == .geoip }.map { $0.pattern.lowercased() })
         guard !codes.isEmpty else { return notes }
         let counts = GeoDataFile.geoip.ranges(for: codes).mapValues(\.count)
-        let refused = GeoIPBudget.select(rules: config.rules, counts: counts).refused
+        let refused = GeoIPBudget.select(rules: config.rules, routes: config.routes, counts: counts).refused
         for rule in config.rules where rule.enabled && rule.matchType == .geoip {
             if let count = refused[rule.pattern.lowercased()] { notes[rule.id] = countryRefusal(count: count, in: bundle) }
         }

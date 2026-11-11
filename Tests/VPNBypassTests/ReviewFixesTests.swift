@@ -96,14 +96,19 @@ final class GeoCountryRangesTests: XCTestCase {
 
     func testACountryThatFitsIsRouted() throws {
         try install("DE", 30_200)
-        rm.config.rules = [Rule(matchType: .geoip, pattern: "de", routeId: UUID(), order: 0)]
+        // On a route that exists: a rule whose route is gone routes nothing, and counts nothing.
+        let direct = Route(name: "Direct", egress: .direct)
+        rm.config.routes = [direct]
+        rm.config.rules = [Rule(matchType: .geoip, pattern: "de", routeId: direct.id, order: 0)]
         XCTAssertEqual(rm.geoipRanges()["de"]?.count, 30_200)
     }
 
     func testACountryOverTheLimitRoutesNothingAndSaysSo() throws {
         let over = GeoDataFile.maxRangesPerCountry + 1
         try install("US", over)
-        rm.config.rules = [Rule(matchType: .geoip, pattern: "us", routeId: UUID(), order: 0)]
+        let direct = Route(name: "Direct", egress: .direct)
+        rm.config.routes = [direct]
+        rm.config.rules = [Rule(matchType: .geoip, pattern: "us", routeId: direct.id, order: 0)]
         XCTAssertNil(rm.geoipRanges()["us"], "never a part of a country")
         XCTAssertEqual(GeoDisplay.detail(count: over, hasData: true),
                        String(localized: "Too large to route: \(over) ranges, the limit is \(GeoDataFile.maxRangesPerCountry)."))
