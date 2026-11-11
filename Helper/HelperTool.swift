@@ -615,6 +615,12 @@ class HelperTool: NSObject, HelperProtocol {
 
     func setWildcards(specs: [[String: String]], context: [String: String],
                       withReply reply: @escaping (Bool, [String], String?) -> Void) {
+        // Checked here too, at the privileged boundary: each spec becomes a root-written resolver file.
+        guard specs.count <= WildcardSpec.maxSpecs else {
+            helperLog.error("wildcard: refused \(specs.count, privacy: .public) specs, the limit is \(WildcardSpec.maxSpecs, privacy: .public)")
+            reply(false, [], "Too many wildcards (\(specs.count)); the limit is \(WildcardSpec.maxSpecs)")
+            return
+        }
         let parsed = specs.compactMap(WildcardSpec.init(dictionary:))
         if parsed.count != specs.count {
             helperLog.error("wildcard: refused \(specs.count - parsed.count, privacy: .public) invalid spec(s)")

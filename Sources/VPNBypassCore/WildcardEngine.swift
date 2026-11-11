@@ -271,8 +271,9 @@ final class WildcardEngine {
     nonisolated static func shadowWarnings(specs: [WildcardSpec], served: Set<String>, resolvers: [ScutilDNS.Resolver],
                                            warned: [String: [String]]) -> (log: [(suffix: String, hidden: [String])], warned: [String: [String]]) {
         var now: [String: [String]] = [:]
+        let index = ScutilDNS.ShadowIndex(resolvers, served: served)
         for spec in specs {
-            let hidden = ScutilDNS.shadowing(spec.suffix, in: resolvers, served: served)
+            let hidden = index.shadowing(spec.suffix)
             if !hidden.isEmpty { now[spec.suffix] = hidden }
         }
         let log = now.sorted(by: { $0.key < $1.key }).filter { warned[$0.key] != $0.value }.map { (suffix: $0.key, hidden: $0.value) }

@@ -1013,6 +1013,10 @@ public struct WildcardSpec: Equatable, Sendable {
     public static let maxExcluded = 64
     /// At most this many delegations cross to the helper.
     public static let maxDelegated = 16
+    /// At most this many wildcards are served at once, each a file in /etc/resolver: the GeoSite
+    /// lists' total (`WildcardPlanner.maxListWildcards`) and room for the user's own. The helper
+    /// refuses a larger list whole, so nothing it is handed can fill /etc/resolver.
+    public static let maxSpecs = 12_000
 
     public init(suffix: String, gateway: String, upstream: [String], interface: String, intoTunnel: Bool = false,
                 excluded: [String] = [], delegated: [WildcardDelegation] = [], block: Bool = false) {

@@ -60,6 +60,10 @@ enum WildcardPlanner {
         var excluded: [String] = []
     }
 
+    /// The most wildcards all GeoSite lists together may ask for: one list's limit
+    /// (`GeoSiteExpansion.maxSuffixes`), shared, below the helper's own limit (`WildcardSpec.maxSpecs`).
+    static let maxListWildcards = GeoSiteExpansion.maxSuffixes
+
     static func configured(_ config: Config, geosite: [String: GeoSiteExpansion]? = nil) -> [Configured] {
         var out: [Configured] = []
         var seen: Set<String> = []
@@ -88,6 +92,7 @@ enum WildcardPlanner {
             // The claimed names, and the claimed wildcards (as `*.suffix`), under each parent
             // domain, in the order they were claimed: what a wildcard at that domain must exclude.
             var namesUnder: [String: [String]] = [:]
+            var listWildcards = 0
             var wildcardsUnder: [String: [String]] = [:]
             func domains(of name: String) -> [String] { WildcardDomain.ancestors(of: name) }
             // The domain lists the Site rules name, read once per pass.
@@ -124,8 +129,14 @@ enum WildcardPlanner {
                 // trackers names `ads.example.com`, and its subdomains are the same tracker.
                 let blocked = via == .block ? suffixes + names.compactMap(WildcardDomain.normalizedSuffix) : suffixes
                 // A blackhole that asks for more wildcards than a list may is left out whole.
-                // The hosts-file fallback takes the lists this skips (GeoSiteExpansion.exceedsWildcards).
+                // The row says why (GeoSiteExpansion.exceedsWildcards, GeoDisplay.siteDetail).
                 if via == .block, blocked.count > GeoSiteExpansion.maxSuffixes { continue }
+                // Every list together stays under one total, so two large lists cannot double the
+                // number of resolver files; a list that would pass it is left out whole.
+                if rule.matchType == .geosite {
+                    guard listWildcards + blocked.count <= maxListWildcards else { continue }
+                    listWildcards += blocked.count
+                }
                 for suffix in blocked where !domains(of: suffix).contains(where: claimedSuffixes.contains) {
                     // Claimed names, then claimed wildcards, at or under this suffix.
                     let excluded = (namesUnder[suffix] ?? []) + (wildcardsUnder[suffix] ?? [])
@@ -184,6 +195,9 @@ enum WildcardPlanner {
     static func plan(_ config: Config, env: Environment) -> (specs: [WildcardSpec], skipped: [String: String]) {
         var specs: [WildcardSpec] = []
         var skipped: [String: String] = [:]
+        // The other resolvers, read once: `scutil --dns` lists every file of ours too, so filtering and
+        // sorting it again for each wildcard made a plan of thousands of wildcards quadratic.
+        let owners = ScutilDNS.OwnerCandidates(env.resolvers)
         for item in configured(config) {
             // With Tailscale running, a resolver file for a Tailscale suffix takes its names
             // away from MagicDNS. A domain with its own resolver is handed back (`delegated`),
@@ -212,7 +226,7 @@ enum WildcardPlanner {
                                         upstream: withUpstream ? servers : [],
                                         interface: withUpstream ? env.physicalInterface! : "",
                                         excluded: item.excluded,
-                                        delegated: ScutilDNS.owners(under: item.suffix, asking: [], in: env.resolvers),
+                                        delegated: owners.owners(under: item.suffix, asking: []),
                                         block: true)
                 guard WildcardSpec(dictionary: spec.dictionary) != nil else {
                     skipped[item.suffix] = "its gateway or interface is not one the helper accepts"
@@ -245,7 +259,7 @@ enum WildcardPlanner {
             }
             let spec = WildcardSpec(suffix: item.suffix, gateway: gateway, upstream: servers, interface: interface,
                                     intoTunnel: item.via != .physical, excluded: item.excluded,
-                                    delegated: ScutilDNS.owners(under: item.suffix, asking: servers, in: env.resolvers))
+                                    delegated: owners.owners(under: item.suffix, asking: servers))
             // Same check the helper makes, so a spec it would refuse is never sent.
             guard WildcardSpec(dictionary: spec.dictionary) != nil else {
                 skipped[item.suffix] = "its gateway or interface is not one the helper accepts"
@@ -437,24 +451,38 @@ enum ScutilDNS {
     /// A resolver whose servers the wildcard asks anyway is left out: its names already get
     /// that resolver's answer, and stay routed (a VPN's split DNS under a VPN Only wildcard).
     static func owners(under suffix: String, asking upstream: [String], in resolvers: [Resolver]) -> [WildcardDelegation] {
-        let suffix = domain(suffix) ?? suffix
-        let byOrder = resolvers.enumerated()
-            .filter { !$0.element.scoped && !$0.element.isWildcardForwarder }
-            .sorted { ($0.element.order ?? Int.max, $0.offset) < ($1.element.order ?? Int.max, $1.offset) }
-            .map(\.element)
-        var seen: Set<String> = []
-        var out: [WildcardDelegation] = []
-        for r in byOrder {
-            guard let d = r.domain, WildcardDomain.normalizedSuffix(d) == d, seen.insert(d).inserted,
-                  let port = UInt16(exactly: r.port ?? 53), port != 0 else { continue }
-            let servers = Array(r.nameservers.filter { WildcardDelegation.isUsableServer($0, port: port) }.prefix(4))
-            let owner = WildcardDelegation(domain: d, servers: servers, port: port,
-                                           interface: r.interface.flatMap { WildcardSpec.isValidInterfaceName($0) ? $0 : nil })
-            guard !servers.isEmpty, owner.overlaps(suffix),
-                  !(port == 53 && servers.contains(where: upstream.contains)) else { continue }
-            out.append(owner)
+        OwnerCandidates(resolvers).owners(under: suffix, asking: upstream)
+    }
+
+    /// The part of `owners` that does not depend on the wildcard: each domain's resolver, in the
+    /// order macOS would pick it. Built once per plan.
+    struct OwnerCandidates {
+        private var candidates: [WildcardDelegation] = []
+
+        init(_ resolvers: [Resolver]) {
+            let byOrder = resolvers.enumerated()
+                .filter { !$0.element.scoped && !$0.element.isWildcardForwarder }
+                .sorted { ($0.element.order ?? Int.max, $0.offset) < ($1.element.order ?? Int.max, $1.offset) }
+                .map(\.element)
+            var seen: Set<String> = []
+            for r in byOrder {
+                // The first resolver for a domain decides it, whether or not it can be asked.
+                guard let d = r.domain, WildcardDomain.normalizedSuffix(d) == d, seen.insert(d).inserted,
+                      let port = UInt16(exactly: r.port ?? 53), port != 0 else { continue }
+                let servers = Array(r.nameservers.filter { WildcardDelegation.isUsableServer($0, port: port) }.prefix(4))
+                guard !servers.isEmpty else { continue }
+                candidates.append(WildcardDelegation(domain: d, servers: servers, port: port,
+                                                     interface: r.interface.flatMap { WildcardSpec.isValidInterfaceName($0) ? $0 : nil }))
+            }
         }
-        return Array(out.sorted { $0.domain.count > $1.domain.count }.prefix(WildcardSpec.maxDelegated))
+
+        func owners(under suffix: String, asking upstream: [String]) -> [WildcardDelegation] {
+            let suffix = ScutilDNS.domain(suffix) ?? suffix
+            let out = candidates.filter { owner in
+                owner.overlaps(suffix) && !(owner.port == 53 && owner.servers.contains(where: upstream.contains))
+            }
+            return Array(out.sorted { $0.domain.count > $1.domain.count }.prefix(WildcardSpec.maxDelegated))
+        }
     }
 
     /// Resolvers for a name below `suffix` that are not ours: they have more matching labels,
@@ -467,22 +495,40 @@ enum ScutilDNS {
     /// the order they are written with, even when `resolvers` was read before they existed (a
     /// VPN connect: the list is read, then the helper writes the files).
     static func shadowing(_ suffix: String, in resolvers: [Resolver], served: Set<String> = []) -> [String] {
-        let suffix = domain(suffix) ?? suffix
-        let ours = served.compactMap(domain).map {
-            Resolver(domain: $0, nameservers: ["127.0.0.1"], port: Int(WildcardResolverFile.port),
-                     order: WildcardResolverFile.searchOrder)
-        }
-        let live = resolvers.filter { !$0.scoped } + ours
-        let domains = live.compactMap { r -> String? in
-            guard !r.isWildcardForwarder, let d = r.domain, d != suffix,
-                  WildcardDomain.matches(d, suffix: suffix) else { return nil }
-            let oursFirst = live.contains { ours in
-                guard ours.isWildcardForwarder, ours.domain == d, let mine = ours.order, let theirs = r.order else { return false }
-                return mine < theirs
+        ShadowIndex(resolvers, served: served).shadowing(suffix)
+    }
+
+    /// `shadowing` for many wildcards: the resolvers and our files are read once, so a pass over
+    /// thousands of wildcards costs one walk of the other resolvers per wildcard, not of every file.
+    struct ShadowIndex {
+        /// The other resolvers' domains.
+        private var others: [(domain: String, order: Int?)] = []
+        /// The lowest order of our own file for each domain.
+        private var oursOrder: [String: Int] = [:]
+
+        init(_ resolvers: [Resolver], served: Set<String>) {
+            for r in resolvers where !r.scoped {
+                guard let d = r.domain else { continue }
+                if r.isWildcardForwarder {
+                    if let order = r.order { oursOrder[d] = min(oursOrder[d] ?? order, order) }
+                } else {
+                    others.append((d, r.order))
+                }
             }
-            return oursFirst ? nil : d
+            for d in served.compactMap(ScutilDNS.domain) {
+                oursOrder[d] = min(oursOrder[d] ?? WildcardResolverFile.searchOrder, WildcardResolverFile.searchOrder)
+            }
         }
-        return Array(Set(domains)).sorted()
+
+        func shadowing(_ suffix: String) -> [String] {
+            let suffix = ScutilDNS.domain(suffix) ?? suffix
+            let domains = others.compactMap { r -> String? in
+                guard r.domain != suffix, WildcardDomain.matches(r.domain, suffix: suffix) else { return nil }
+                if let mine = oursOrder[r.domain], let theirs = r.order, mine < theirs { return nil }
+                return r.domain
+            }
+            return Array(Set(domains)).sorted()
+        }
     }
 }
 
