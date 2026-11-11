@@ -597,7 +597,10 @@ struct RulesTab: View {
                 }
 
                 if routeManager.usesGeoIP {
-                    GeoIPStatusLine()
+                    GeoDataControls(kind: .ip)
+                }
+                if routeManager.usesGeoSite {
+                    GeoDataControls(kind: .site)
                 }
 
                 if let change = settingsUndo.last, change.page == .rules {
@@ -755,7 +758,8 @@ struct RulesTab: View {
 struct RuleRow: View {
     @EnvironmentObject var routeManager: RouteManager
     @ObservedObject private var flowEngine = FlowEngineManager.shared
-    @ObservedObject private var geoStore = GeoIPStore.shared
+    @ObservedObject private var geoipStore = GeoDataStore.geoip
+    @ObservedObject private var geositeStore = GeoDataStore.geosite
     let rule: Rule
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -773,6 +777,7 @@ struct RuleRow: View {
         case .ip, .cidr: return "network"
         case .process: return "app"
         case .geoip: return "flag"
+        case .geosite: return "list.bullet.rectangle"
         }
     }
 
@@ -789,8 +794,8 @@ struct RuleRow: View {
         case .suffix:
             return WildcardDomain.isWildcard(rule.pattern) ? rule.pattern : WildcardDomain.entry(for: rule.pattern)
         case .geoip:
-            return GeoIPDisplay.name(for: rule.pattern)
-        case .domain, .ip, .cidr, .process:
+            return GeoDisplay.name(for: rule.pattern)
+        case .domain, .ip, .cidr, .geosite, .process:
             return rule.pattern
         }
     }
@@ -822,18 +827,24 @@ struct RuleRow: View {
         return ProxyReachNote.forRoute(route)?.line(in: bundle)
     }
 
-    /// A Country rule's second line: how many ranges its list holds, or why it holds none.
-    private var geoipDetail: String? {
-        guard rule.matchType == .geoip else { return nil }
-        let code = rule.pattern.lowercased()
-        return GeoIPDisplay.detail(count: geoStore.ranges(for: [code])[code]?.count, hasData: geoStore.hasData)
+    /// A Country or Site rule's second line: what its list holds, or why it holds nothing.
+    private var geoDetail: String? {
+        let key = rule.pattern.lowercased()
+        switch rule.matchType {
+        case .geoip:
+            return GeoDisplay.detail(count: GeoDataFile.geoip.ranges(for: [key])[key]?.count, hasData: geoipStore.hasData)
+        case .geosite:
+            return GeoDisplay.siteDetail(GeoDataFile.geosite.expansions(for: [key])[key], hasData: geositeStore.hasData)
+        default:
+            return nil
+        }
     }
 
     var body: some View {
         ListRow(
             glyph: Self.glyph(for: rule.matchType),
             name: patternDisplay,
-            detail: geoipDetail ?? Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
+            detail: geoDetail ?? Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
                                 customEngine: ProcessRule.customEngine(routeManager.config),
                                 turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: flowEngine.confirmed?.declinedTeams ?? []),
                                 counters: flowEngine.counters(forRule: rule.id.uuidString)),
@@ -956,6 +967,8 @@ struct RuleEditorSheet: View {
     /// The app the chooser picked, while the pattern is still its signing identifier: its team
     /// decides whether the rule is refused.
     @State private var chosenApp: AppIdentity?
+    /// The match before the last change, so a pattern typed for one kind of match is not kept for a list.
+    @State private var previousMatchType: MatchType
 
     /// The doc screenshots open the app chooser over the sheet.
     static var appChooserForScreenshots = false
@@ -971,6 +984,7 @@ struct RuleEditorSheet: View {
         self.onSave = onSave
         self.onCancel = onCancel
         _matchType = State(initialValue: editingRule?.matchType ?? .domain)
+        _previousMatchType = State(initialValue: editingRule?.matchType ?? .domain)
         _pattern = State(initialValue: editingRule?.matchType == .service ? "" : (editingRule?.pattern ?? ""))
         _selectedServiceId = State(initialValue: editingRule?.matchType == .service ? (editingRule?.pattern ?? "") : (services.first?.id ?? ""))
         _routeId = State(initialValue: editingRule?.routeId)
@@ -985,7 +999,7 @@ struct RuleEditorSheet: View {
         case .ip:      return "10.0.0.5"
         case .cidr:    return "10.0.0.0/8"
         case .process: return String(localized: "com.example.App or Example")
-        case .geoip:   return "ir"
+        case .geoip, .geosite: return ""
         case .service: return ""
         }
     }
@@ -1001,7 +1015,8 @@ struct RuleEditorSheet: View {
                     Text("IP").tag(MatchType.ip)
                     Text("CIDR").tag(MatchType.cidr)
                     Text("App").tag(MatchType.process)
-                    Text("Country").tag(MatchType.geoip)
+                    Text("GeoIP").tag(MatchType.geoip)
+                    Text("GeoSite").tag(MatchType.geosite)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -1024,7 +1039,9 @@ struct RuleEditorSheet: View {
                     }
                 }
             } else if matchType == .geoip {
-                GeoIPEditorField(code: $pattern)
+                GeoListField(kind: .ip, pattern: $pattern)
+            } else if matchType == .geosite {
+                GeoListField(kind: .site, pattern: $pattern)
             } else if matchType == .process {
                 SheetField(String(localized: "App"), required: true) {
                     HStack(spacing: Theme.Space.s) {
@@ -1055,6 +1072,11 @@ struct RuleEditorSheet: View {
             if let error = validationError {
                 SheetError(message: error)
             }
+        }
+        .onChange(of: matchType) { new in
+            let lists: Set<MatchType> = [.geoip, .geosite]
+            if lists.contains(new) || lists.contains(previousMatchType) { pattern = "" }
+            previousMatchType = new
         }
         .sheet(isPresented: $showingNewRouteSheet) {
             RouteEditorSheet(editingRoute: nil) { newRoute in
@@ -1106,16 +1128,28 @@ struct RuleEditorSheet: View {
         var stored = effectivePattern
         if matchType == .geoip {
             guard let code = GeoIPRule.normalized(effectivePattern) else {
-                validationError = String(localized: "Enter a country code, such as ir.")
+                validationError = String(localized: "Choose a country.")
                 return
             }
             // With the list downloaded, a code it does not hold would be a rule that routes nothing.
-            let known = GeoIPStore.shared.countries()
-            guard known.isEmpty || known.contains(where: { $0.code == code }) else {
+            let known = GeoDataFile.geoip.countries()
+            guard known.isEmpty || known[code] != nil else {
                 validationError = String(localized: "That country is not in the downloaded list.")
                 return
             }
             stored = code
+        }
+        if matchType == .geosite {
+            guard let list = GeoSiteRule.normalized(effectivePattern) else {
+                validationError = String(localized: "Choose a site list.")
+                return
+            }
+            let known = GeoDataFile.geosite.lists()
+            guard known.isEmpty || known[GeoSiteDat.parse(pattern: list).name] != nil else {
+                validationError = String(localized: "That site list is not in the downloaded file.")
+                return
+            }
+            stored = list
         }
         if matchType == .process {
             let previous = editingRule?.matchType == .process ? editingRule?.pattern : nil

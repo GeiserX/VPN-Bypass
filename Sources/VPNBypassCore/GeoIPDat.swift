@@ -71,7 +71,7 @@ enum GeoIPDat {
         }
 
         private func forEachRange(_ body: (String) -> Void) {
-            var reader = Reader(bytes: self.body)
+            var reader = ProtoReader(bytes: self.body)
             while let (field, wire) = reader.nextTag() {
                 if field == 2, wire == 2 {
                     guard let slice = reader.lengthDelimited() else { return }
@@ -84,7 +84,7 @@ enum GeoIPDat {
 
         /// "a.b.c.d/p" for one `CIDR` message, nil for IPv6 or a prefix past 32.
         private static func cidr(in bytes: UnsafeBufferPointer<UInt8>) -> String? {
-            var reader = Reader(bytes: bytes)
+            var reader = ProtoReader(bytes: bytes)
             var ip: UnsafeBufferPointer<UInt8>?
             var prefix: UInt64?
             while let (field, wire) = reader.nextTag() {
@@ -107,14 +107,14 @@ enum GeoIPDat {
     private static func scan(_ data: Data, _ visit: (Entry) -> Void) {
         data.withUnsafeBytes { raw in
             let bytes = raw.bindMemory(to: UInt8.self)
-            var list = Reader(bytes: bytes)
+            var list = ProtoReader(bytes: bytes)
             while let (field, wire) = list.nextTag() {
                 guard field == 1, wire == 2 else {
                     if !list.skip(wire) { return }
                     continue
                 }
                 guard let body = list.lengthDelimited() else { return }
-                var reader = Reader(bytes: body)
+                var reader = ProtoReader(bytes: body)
                 var code = ""
                 var reverse = false
                 while let (f, w) = reader.nextTag() {
@@ -130,57 +130,6 @@ enum GeoIPDat {
                 }
                 visit(Entry(code: code, reverse: reverse, body: body))
             }
-        }
-    }
-
-    /// A cursor over protobuf wire data that stops, rather than traps, on bad input.
-    fileprivate struct Reader {
-        let bytes: UnsafeBufferPointer<UInt8>
-        var position = 0
-
-        init(bytes: UnsafeBufferPointer<UInt8>) { self.bytes = bytes }
-
-        mutating func varint() -> UInt64? {
-            var result: UInt64 = 0
-            var shift: UInt64 = 0
-            while position < bytes.count, shift < 64 {
-                let byte = bytes[position]
-                position += 1
-                result |= UInt64(byte & 0x7F) << shift
-                if byte & 0x80 == 0 { return result }
-                shift += 7
-            }
-            return nil
-        }
-
-        /// The next field number and wire type, nil at the end or on a malformed tag.
-        mutating func nextTag() -> (field: UInt64, wire: UInt64)? {
-            guard position < bytes.count, let tag = varint() else { return nil }
-            return (tag >> 3, tag & 7)
-        }
-
-        mutating func lengthDelimited() -> UnsafeBufferPointer<UInt8>? {
-            guard let length = varint(), length <= UInt64(bytes.count - position) else { return nil }
-            let start = position
-            position += Int(length)
-            return UnsafeBufferPointer(rebasing: bytes[start..<position])
-        }
-
-        /// Steps over a field of wire type `wire`; false when it is unknown or runs past the end.
-        mutating func skip(_ wire: UInt64) -> Bool {
-            switch wire {
-            case 0: return varint() != nil
-            case 1: return advance(8)
-            case 2: return lengthDelimited() != nil
-            case 5: return advance(4)
-            default: return false
-            }
-        }
-
-        private mutating func advance(_ count: Int) -> Bool {
-            guard count <= bytes.count - position else { return false }
-            position += count
-            return true
         }
     }
 }

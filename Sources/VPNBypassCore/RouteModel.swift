@@ -42,6 +42,9 @@ public enum MatchType: String, Codable, Equatable, Sendable {
     /// A country (or other list) from the geoip list, by lower-case code (`ir`): its IPv4 ranges.
     /// An older build cannot read a config that holds one (it rejects an unknown match type).
     case geoip
+    /// A domain list from the geosite file (`steam`, `category-games@cn`): its suffixes become
+    /// wildcards and its exact names are resolved. An older build cannot read a config that holds one.
+    case geosite
     case service  // a built-in ServiceEntry id (a bundle of domains + IP ranges).
     /// An app: a bundle id (`com.example.App`, also covering `com.example.App.helper`) or an
     /// executable's file name (`Example`), never a path (ProcessRule). Only per-app routing can

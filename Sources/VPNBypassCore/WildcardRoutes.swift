@@ -53,7 +53,7 @@ enum WildcardPlanner {
         var excluded: [String] = []
     }
 
-    static func configured(_ config: Config) -> [Configured] {
+    static func configured(_ config: Config, geosite: [String: GeoSiteExpansion]? = nil) -> [Configured] {
         var out: [Configured] = []
         var seen: Set<String> = []
         func add(_ entry: String, _ via: Configured.Via, excluded: [String] = []) {
@@ -75,6 +75,9 @@ enum WildcardPlanner {
             // Every exact name an earlier rule claims. A later wildcard over it still gets its
             // resolver file, so the name is excluded there: answered, never routed.
             var claimedNames: [String] = []
+            // The domain lists the Site rules name, read once per pass.
+            let lists = geosite ?? GeoDataFile.geosite.expansions(
+                for: Set(config.rules.filter { $0.enabled && $0.matchType == .geosite }.map { $0.pattern.lowercased() }))
             for rule in config.rules.filter(\.enabled).sorted(by: { $0.order < $1.order }) {
                 guard let route = routes[rule.routeId], route.enabled else { continue }
                 let entries: [String]
@@ -89,6 +92,11 @@ enum WildcardPlanner {
                 case .domain:
                     entries = WildcardDomain.isWildcard(rule.pattern) ? [rule.pattern] : []
                     names = WildcardDomain.isWildcard(rule.pattern) ? [] : [rule.pattern]
+                case .geosite:
+                    // A list too large to route is left out whole, as a list that is missing is.
+                    let list = lists[rule.pattern.lowercased()]?.usable ?? GeoSiteExpansion(found: false)
+                    entries = list.suffixes.map(WildcardDomain.entry(for:))
+                    names = list.names
                 case .ip, .cidr, .geoip, .process:
                     entries = []
                 }

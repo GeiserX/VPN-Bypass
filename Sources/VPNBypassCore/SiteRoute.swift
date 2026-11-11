@@ -148,6 +148,8 @@ enum SiteRoute {
         var flowEngine: FlowEngineState = .unavailable(.notInThisBuild)
         /// The ranges of the countries the Country rules name, by lower-case code.
         var geoip: [String: [String]] = [:]
+        /// The domain lists the Site rules name, by pattern.
+        var geosite: [String: GeoSiteExpansion] = [:]
     }
 
     /// What `match` found, before the check.
@@ -251,7 +253,7 @@ enum SiteRoute {
             for (index, rule) in ordered.enumerated() {
                 // A rule whose route is gone or turned off is inert, as RouteCompiler and
                 // WildcardRoutes treat it: the name falls through to a later rule.
-                guard ruleMatches(rule, host: host, addresses: addresses, services: servicesOfHost, geoip: s.geoip),
+                guard ruleMatches(rule, host: host, addresses: addresses, services: servicesOfHost, geoip: s.geoip, geosite: s.geosite),
                       let route = byId[rule.routeId], route.enabled else { continue }
                 var found = Found(match: .rule, entry: rule.pattern, rulePosition: index + 1,
                                   ruleMatchType: rule.matchType.rawValue, routeName: route.name,
@@ -334,7 +336,7 @@ enum SiteRoute {
 
     /// The matchers RuleResolver uses, for a name and its addresses at once.
     static func ruleMatches(_ rule: Rule, host: String, addresses: [String], services: Set<String>,
-                            geoip: [String: [String]] = [:]) -> Bool {
+                            geoip: [String: [String]] = [:], geosite: [String: GeoSiteExpansion] = [:]) -> Bool {
         switch rule.matchType {
         // A wildcard written as a name rule covers the names under it, as WildcardRoutes reads it.
         case .domain: return domainCovers(rule.pattern, host)
@@ -347,6 +349,7 @@ enum SiteRoute {
         case .geoip:
             let ranges = geoip[rule.pattern.lowercased()] ?? []
             return addresses.contains { a in ranges.contains { RuleResolver.ipv4(a, inCIDR: $0) } }
+        case .geosite: return geosite[rule.pattern.lowercased()]?.usable.matches(host) ?? false
         case .process: return false
         }
     }
@@ -672,7 +675,7 @@ extension RouteManager {
             activeRoutes: activeRoutes.map { ($0.destination, $0.gateway, $0.source) },
             localGateway: localGateway, vpnInterface: isVPNConnected ? vpnInterface : nil,
             pause: pauseState, wildcardSpecs: wildcards.served, wildcardGuard: wildcards.safetyGuard,
-            flowEngine: FlowEngineManager.shared.state, geoip: geoipRanges())
+            flowEngine: FlowEngineManager.shared.state, geoip: geoipRanges(), geosite: geositeExpansions())
     }
 
     /// "Where does this site go?" for a name, a link or an address. Nil when the input holds

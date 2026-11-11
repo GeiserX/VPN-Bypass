@@ -21,19 +21,33 @@ A **route** is a place traffic can exit:
 | **HTTP / SOCKS5 proxy** | a local `127.0.0.1` listener that forwards to your proxy |
 | **Tailscale peer** | out through a chosen Tailscale device used as an exit |
 
-A **rule** maps traffic to a route by `domain`, `suffix`, `ip`, `cidr`, `service`, `geoip`, or `process`. A `process` rule names an app, by its bundle id (`com.example.App`) or its executable's name (`Example`), never a path or a wildcard; [per-app routing](how-it-works.md#per-app-routing) serves it when that is on and the rule's route is Direct; otherwise it routes nothing, and the Rules page, `vpnb rule.list` and `vpnb rule.add` say why. The first matching rule wins; anything unmatched takes the **default** route. Direct and detected VPN routes appear automatically; proxy and Tailscale-peer routes are ones you add.
+A **rule** maps traffic to a route by `domain`, `suffix`, `ip`, `cidr`, `service`, `geoip`, `geosite`, or `process`. A `process` rule names an app, by its bundle id (`com.example.App`) or its executable's name (`Example`), never a path or a wildcard; [per-app routing](how-it-works.md#per-app-routing) serves it when that is on and the rule's route is Direct; otherwise it routes nothing, and the Rules page, `vpnb rule.list` and `vpnb rule.add` say why. The first matching rule wins; anything unmatched takes the **default** route. Direct and detected VPN routes appear automatically; proxy and Tailscale-peer routes are ones you add.
 
-#### Country (GeoIP) rules
+#### GeoIP and GeoSite rules
 
-A `geoip` rule names a list in a `geoip.dat` file, usually a country by its two-letter code (`ir`, `ru`, `cn`), and sends that list's IPv4 ranges to its route: one rule, "Iran → Direct", instead of one CIDR rule per range. Add it on the Rules page with **Country**, or with `vpnb rule.add match=geoip pattern=ir routeId=<uuid>`. The list also holds names such as `private`, and the Choose… menu of the editor lists every one in the file with its number of ranges.
+Two rule types use the lists that OpenWrt Passwall2, Xray and v2ray publish, so one rule can stand for a whole country or a whole company:
 
-The list is a `geoip.dat` in the format OpenWrt Passwall2, Xray and v2ray read. It is downloaded the first time a Country rule needs it, and again when it is more than a week old (at launch, after a config save, and every 12 hours while the app runs; a failed download is tried again an hour later). This is the only data the app downloads. The default source is [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat); to use another one, such as a mirror where GitHub is blocked, [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat), [Chocolate4U/Iran-v2ray-rules](https://github.com/Chocolate4U/Iran-v2ray-rules) or [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat), set `geoipSourceURL` in `config.json` to its https URL. The Rules page shows the source and the age of the list, with an **Update** button, while a Country rule is on.
+- A **GeoIP** rule (`geoip`) names a list in a `geoip.dat`: a country by its two-letter code (`ir`, `ru`, `cn`) or another list such as `private`, `telegram` or `cloudflare`. It sends the list's IPv4 ranges to the rule's route: one rule, "Iran → Direct", in place of about 2,000 CIDR rules.
+- A **GeoSite** rule (`geosite`) names a list in a `geosite.dat`: `category-games`, `steam`, `microsoft`, `openai`, `netflix` and about 1,500 others. A `steam@cn` pattern keeps only the entries carrying that attribute. It sends the list's domains to the route.
 
-- A download replaces the list in use only when it reads as a geoip list; an error page, a truncated file or one over 64 MB leaves the last good copy in place.
-- The ranges become kernel routes, one per range, as the same number of CIDR rules would. A `/0` or `/1` range in a list is left out, as it is for a CIDR rule, so a list cannot take over the routing table.
-- Only IPv4 ranges are used. A list entry marked as "everything except" is skipped.
-- Until the list has been downloaded, a Country rule routes nothing, and its row says so. A config with a Country rule cannot be read by a version before this one, which rejects an unknown match type.
-- The file is kept in Application Support (`geoip.dat`), readable by your account only.
+Add either on the Rules page. The **GeoIP** and **GeoSite** choices of the Add Rule sheet open a list you search by name (or by country, for GeoIP) instead of asking for a code, and show how many ranges or domains each holds. From the command line: `vpnb rule.add match=geoip pattern=ir routeId=<uuid>` and `vpnb rule.add match=geosite pattern=category-games routeId=<uuid>`.
+
+How a GeoSite list is routed. Routing is per IP, so a domain list needs the same help a wildcard does:
+
+- A `domain` entry of the list (`steampowered.com`, which covers the name and everything under it) becomes a wildcard, served by the helper's DNS forwarder as described in [Wildcards](how-it-works.md): the addresses it answers get routes before the app connects. Wildcards need a Direct route or a VPN route pinned to one tunnel; a list on a proxy route, or on the primary VPN (which needs no route), makes none.
+- A `full` entry is one name, resolved like a Domains entry.
+- `keyword` and `regex` entries cannot be turned into either, so they are left out; the row says how many.
+- An entry already covered by a shorter suffix of the same list is dropped (`store.steampowered.com` after `steampowered.com`).
+- First match still holds: a name an earlier rule claims stays with that rule.
+- A list of more than 2,000 wildcards (or 2,000 names) is refused as a whole, and the row says so, because a part of a list would send some of a site's names one way and some another. Of the lists in Loyalsoldier's file, `category-games`, `microsoft`, `google`, `apple` and `steam` fit; `geolocation-!cn` and `category-ads-all` do not. Each wildcard is a file in `/etc/resolver`.
+
+Where the lists come from. They are downloaded the first time a rule needs one, and again when the copy is more than a week old (at launch, after a config save, and every 12 hours while the app runs; a failed download is tried again an hour later). This is the only data the app downloads. The Rules page, and the Add Rule sheet, show where each list comes from, with a **Source** menu: Loyalsoldier (the default), MetaCubeX, Chocolate4U's Iran list and runetfreedom's Russia list, the first two also through jsDelivr's mirror, or **Custom URL…** for an https address of your own (a mirror, say, where GitHub is blocked). Picking a source downloads from it at once. In `config.json` they are `geoipSourceURL` and `geositeSourceURL`.
+
+- Whoever serves a list decides what the rules route; the source is named on the Rules page for that reason.
+- A download replaces the list in use only when it reads as a list of its kind (a geosite file is not accepted as a geoip one); an error page, a truncated file or one over 160 MB leaves the last good copy in place.
+- GeoIP ranges become kernel routes, one per range, as the same number of CIDR rules would. A `/0` or `/1` range is left out, as for a CIDR rule, so a list cannot take over the routing table. Only IPv4 is used.
+- Until a list has been downloaded, its rules route nothing, and their rows say so. A config with a GeoIP or GeoSite rule cannot be read by a version before this one, which rejects an unknown match type.
+- The files are kept in Application Support (`geoip.dat`, `geosite.dat`), readable by your account only.
 
 A proxy route's `127.0.0.1` listener holds your upstream proxy credentials, so it will not serve a client that cannot prove it is you. Any process on the machine can reach a loopback port, and macOS gives a TCP listener no way to see who connected, so the listener asks for a password instead. Use **Copy Shell Exports** or **Copy Proxy URL** on the route. Both hand you the address with the credentials already in it:
 

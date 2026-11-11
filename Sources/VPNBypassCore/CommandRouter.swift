@@ -472,7 +472,7 @@ enum CommandRouter {
             }
         }
         // A country rule names a list in the geoip file; the list itself is downloaded when the
-        // app next needs it (RouteManager.refreshGeoIPIfNeeded).
+        // app next needs it (RouteManager.refreshGeoDataIfNeeded).
         var geoipCode: String?
         if matchType == .geoip {
             guard let code = GeoIPRule.normalized(pattern) else {
@@ -480,6 +480,13 @@ enum CommandRouter {
                                      message: "geoip pattern must be a country code such as ir")
             }
             geoipCode = code
+        }
+        if matchType == .geosite {
+            guard let name = GeoSiteRule.normalized(pattern) else {
+                return errorResponse(config, code: "invalid_args",
+                                     message: "geosite pattern must be a list name such as steam or category-games@cn")
+            }
+            geoipCode = name
         }
         // A process rule names an app (design doc 3.4): a bundle id or an executable's name, never
         // a path or a wildcard, which the per-app engine could never match.

@@ -19,10 +19,12 @@ enum RuleResolver {
         serviceId: String? = nil,
         rules: [Rule],
         routes: [Route],
-        defaultRouteId: UUID?
+        defaultRouteId: UUID?,
+        geosite: [String: GeoSiteExpansion] = [:]
     ) -> Route? {
         resolve(rules: rules, routes: routes, defaultRouteId: defaultRouteId) { rule in
             switch rule.matchType {
+            case .geosite: return geosite[rule.pattern.lowercased()]?.usable.matches(domain) ?? false
             case .domain:  return rule.pattern.caseInsensitiveCompare(domain) == .orderedSame
             case .suffix:  return domainMatchesSuffix(domain, suffix: rule.pattern)
             case .service: return serviceId != nil && rule.pattern == serviceId
@@ -44,7 +46,7 @@ enum RuleResolver {
             case .ip:   return rule.pattern == ip
             case .cidr: return ipv4(ip, inCIDR: rule.pattern)
             case .geoip: return (geoip[rule.pattern.lowercased()] ?? []).contains { ipv4(ip, inCIDR: $0) }
-            case .domain, .suffix, .service, .process: return false
+            case .domain, .suffix, .service, .geosite, .process: return false
             }
         }
     }

@@ -640,8 +640,8 @@ final class RouteManager: ObservableObject {
         // A wildcard added, removed or switched, or the mode changed: the helper's list follows.
         wildcards.requestSync()
         endPauseIfConfigForbidsIt()
-        // A Country rule that has no list yet (added from the CLI, imported) gets it now.
-        refreshGeoIPIfNeeded()
+        // A Country or Site rule that has no list yet (added from the CLI, imported) gets it now.
+        refreshGeoDataIfNeeded()
     }
 
     /// - Parameter recoveringFromLoadFailure: set only by `importConfig`, which is replacing an
@@ -2913,7 +2913,8 @@ final class RouteManager: ObservableObject {
     private func resolveRuleDestinations(useCacheOnly: Bool) async -> [(rule: Rule, dests: [(value: String, isNetwork: Bool)])] {
         // The full de-duplicated hostname set across ALL enabled rules — resolved once,
         // even when the same host is reachable via two rules.
-        let hosts = RuleDestinationBuilder.hostsToResolve(rules: config.rules, services: config.services)
+        let geosite = geositeExpansions()
+        let hosts = RuleDestinationBuilder.hostsToResolve(rules: config.rules, services: config.services, geosite: geosite)
 
         // Build the host→IPs map. Cache-only (instant startup) reads the disk cache with
         // no live DNS and never flags failures (a live apply follows). The live path
@@ -2943,7 +2944,7 @@ final class RouteManager: ObservableObject {
         }
 
         return RuleDestinationBuilder.build(rules: config.rules, services: config.services, resolved: resolvedMap,
-                                            geoip: geoipRanges())
+                                            geoip: geoipRanges(), geosite: geosite)
     }
 
     /// Resolve a de-duplicated host list in parallel, reusing the SAME withTaskGroup +

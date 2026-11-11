@@ -171,9 +171,14 @@ struct Config: Codable {
     /// build ignores the key.
     var bypassApps: [BypassApp] = []
     /// Where the country list for Country (GeoIP) rules is downloaded from: an https URL of a
-    /// `geoip.dat`. Nil is the default source (`GeoIPStore.defaultSource`); a mirror goes here.
+    /// `geoip.dat`. Nil is the default source (`GeoKind.defaultSource`); a mirror goes here.
     /// An older build ignores the key.
     var geoipSourceURL: String? = nil
+    /// The same for the domain lists of Site (GeoSite) rules: an https URL of a `geosite.dat`.
+    var geositeSourceURL: String? = nil
+    /// How often the lists of GeoIP and GeoSite rules are downloaded again by themselves. An older
+    /// build ignores the key.
+    var geoSync: GeoSyncSchedule = .default
 
     // Custom decoder for backward compatibility with configs missing new fields
     init(from decoder: Decoder) throws {
@@ -212,6 +217,9 @@ struct Config: Codable {
         flowEngine = try container.decodeIfPresent(FlowEngineSetting.self, forKey: .flowEngine) ?? FlowEngineSetting()
         bypassApps = BypassApp.uniqueIDs(try container.decodeIfPresent([BypassApp].self, forKey: .bypassApps) ?? [])
         geoipSourceURL = try container.decodeIfPresent(String.self, forKey: .geoipSourceURL)
+        geositeSourceURL = try container.decodeIfPresent(String.self, forKey: .geositeSourceURL)
+        // An unknown value (a hand edit, a later build) is the default, not a config that will not load.
+        geoSync = (try? container.decodeIfPresent(GeoSyncSchedule.self, forKey: .geoSync)) ?? .default
 
         // One-time migration: derive the routes/rules representation from the
         // legacy bypass list + single proxy so the new model is populated for

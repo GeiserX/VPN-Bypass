@@ -8,7 +8,7 @@ import XCTest
 @testable import VPNBypassCore
 
 /// Encodes the geoip.dat protobuf, to give the reader data in the format the real lists use.
-private enum Dat {
+enum Dat {
     static func varint(_ value: UInt64) -> [UInt8] {
         var v = value
         var out: [UInt8] = []
@@ -222,30 +222,30 @@ final class GeoIPRuleTests: XCTestCase {
 
     func testTheRowNamesACountryAndAList() {
         let en = Locale(identifier: "en_US")
-        XCTAssertEqual(GeoIPDisplay.name(for: "ir", locale: en), "Iran (IR)")
-        XCTAssertEqual(GeoIPDisplay.name(for: "private", locale: en), "PRIVATE")
+        XCTAssertEqual(GeoDisplay.name(for: "ir", locale: en), "Iran (IR)")
+        XCTAssertEqual(GeoDisplay.name(for: "private", locale: en), "PRIVATE")
         XCTAssertEqual(RuleRow.glyph(for: .geoip), "flag")
     }
 
     func testTheLineUnderARowSaysWhatItHoldsOrWhyNot() {
-        XCTAssertEqual(GeoIPDisplay.detail(count: nil, hasData: false), "Country list not downloaded yet.")
-        XCTAssertEqual(GeoIPDisplay.detail(count: nil, hasData: true), "Not in the country list.")
-        XCTAssertEqual(GeoIPDisplay.detail(count: 1, hasData: true), "1 range")
-        XCTAssertEqual(GeoIPDisplay.detail(count: 1747, hasData: true), String(localized: "\(1747) ranges"),
+        XCTAssertEqual(GeoDisplay.detail(count: nil, hasData: false), "Country list not downloaded yet.")
+        XCTAssertEqual(GeoDisplay.detail(count: nil, hasData: true), "Not in the country list.")
+        XCTAssertEqual(GeoDisplay.detail(count: 1, hasData: true), "1 range")
+        XCTAssertEqual(GeoDisplay.detail(count: 1747, hasData: true), String(localized: "\(1747) ranges"),
                        "the count is written the way the locale writes a number")
     }
 }
 
 @MainActor
-final class GeoIPStoreTests: XCTestCase {
+final class GeoDataStoreTests: XCTestCase {
 
     private var directory: URL!
-    private var store: GeoIPStore!
+    private var store: GeoDataStore!
     private let source = URL(string: "https://example.org/geoip.dat")!
 
     override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("geoip-test-\(UUID().uuidString)")
-        store = GeoIPStore(directory: directory)
+        store = GeoDataStore(kind: .ip, directory: directory)
     }
 
     override func tearDown() async throws {
@@ -267,8 +267,8 @@ final class GeoIPStoreTests: XCTestCase {
         XCTAssertTrue(replaced)
         XCTAssertEqual(store.phase, .idle)
         XCTAssertTrue(store.hasData)
-        XCTAssertEqual(store.ranges(for: ["ir"])["ir"], ["203.0.113.0/24", "198.51.100.0/22"])
-        XCTAssertEqual(store.countries().map(\.code), ["ir", "private"])
+        XCTAssertEqual(store.file.ranges(for: ["ir"])["ir"], ["203.0.113.0/24", "198.51.100.0/22"])
+        XCTAssertEqual(store.file.countries(), ["ir": 2, "private": 2])
         XCTAssertEqual(store.revision, 1)
         let mode = (try? FileManager.default.attributesOfItem(atPath: store.fileURL.path))?[.posixPermissions] as? Int
         XCTAssertEqual(mode, 0o600)
@@ -281,7 +281,7 @@ final class GeoIPStoreTests: XCTestCase {
         let replaced = await store.update(from: source)
         XCTAssertFalse(replaced)
         if case .failed = store.phase {} else { XCTFail("the failure is shown: \(store.phase)") }
-        XCTAssertEqual(store.ranges(for: ["ir"])["ir"]?.count, 2, "the copy that was in use still is")
+        XCTAssertEqual(store.file.ranges(for: ["ir"])["ir"]?.count, 2, "the copy that was in use still is")
     }
 
     func testAFailedFetchKeepsTheCopyAndSaysSo() async {
@@ -290,7 +290,7 @@ final class GeoIPStoreTests: XCTestCase {
         store.fetch = { _ in throw URLError(.notConnectedToInternet) }
         let replaced = await store.update(from: source)
         XCTAssertFalse(replaced)
-        XCTAssertEqual(store.phase, .failed("Could not download the country list."))
+        XCTAssertEqual(store.phase, .failed("Could not download the list."))
         XCTAssertTrue(store.hasData)
     }
 
@@ -304,16 +304,16 @@ final class GeoIPStoreTests: XCTestCase {
     func testANewListIsReadAfterAnUpdate() async {
         store.fetch = serving(Dat.sample)
         _ = await store.update(from: source)
-        XCTAssertEqual(store.ranges(for: ["ir"])["ir"]?.count, 2)
+        XCTAssertEqual(store.file.ranges(for: ["ir"])["ir"]?.count, 2)
         store.fetch = serving(Dat.file([Dat.entry("IR", [Dat.cidr([192, 0, 2, 0], 24)])]))
         _ = await store.update(from: source)
-        XCTAssertEqual(store.ranges(for: ["ir"])["ir"], ["192.0.2.0/24"], "the cache does not outlive its file")
+        XCTAssertEqual(store.file.ranges(for: ["ir"])["ir"], ["192.0.2.0/24"], "the cache does not outlive its file")
     }
 
     func testNoListGivesNoRanges() {
         XCTAssertFalse(store.hasData)
-        XCTAssertTrue(store.ranges(for: ["ir"]).isEmpty)
-        XCTAssertTrue(store.countries().isEmpty)
+        XCTAssertTrue(store.file.ranges(for: ["ir"]).isEmpty)
+        XCTAssertTrue(store.file.countries().isEmpty)
     }
 
     func testAListIsStaleAfterAWeekAndAMissingOneAlwaysIs() async {
@@ -321,28 +321,29 @@ final class GeoIPStoreTests: XCTestCase {
         store.fetch = serving(Dat.sample)
         _ = await store.update(from: source)
         XCTAssertFalse(store.needsRefresh())
-        XCTAssertFalse(store.needsRefresh(now: Date().addingTimeInterval(GeoIPStore.staleAfter - 60)))
-        XCTAssertTrue(store.needsRefresh(now: Date().addingTimeInterval(GeoIPStore.staleAfter + 60)))
+        let week = GeoSyncSchedule.weekly.interval!
+        XCTAssertFalse(store.needsRefresh(every: week, now: Date().addingTimeInterval(week - 60)))
+        XCTAssertTrue(store.needsRefresh(every: week, now: Date().addingTimeInterval(week + 60)))
     }
 
     func testASourceIsHTTPSWithAHostAndDefaultsWhenEmpty() {
-        XCTAssertEqual(GeoIPStore.source(from: nil)?.absoluteString, GeoIPStore.defaultSource)
-        XCTAssertEqual(GeoIPStore.source(from: "  ")?.absoluteString, GeoIPStore.defaultSource)
-        XCTAssertEqual(GeoIPStore.source(from: "https://mirror.example/geoip.dat")?.host, "mirror.example")
+        XCTAssertEqual(GeoDataStore.source(from: nil, kind: .ip)?.absoluteString, GeoKind.ip.defaultSource)
+        XCTAssertEqual(GeoDataStore.source(from: "  ", kind: .site)?.absoluteString, GeoKind.site.defaultSource)
+        XCTAssertEqual(GeoDataStore.source(from: "https://mirror.example/geoip.dat", kind: .ip)?.host, "mirror.example")
         for bad in ["http://mirror.example/geoip.dat", "file:///etc/passwd", "ftp://x/y", "https://", "mirror.example/geoip.dat"] {
-            XCTAssertNil(GeoIPStore.source(from: bad), "\(bad) is not a source")
+            XCTAssertNil(GeoDataStore.source(from: bad, kind: .ip), "\(bad) is not a source")
         }
     }
 
     func testTheStatusLineSaysWhereTheListIsFromAndHowOldItIs() {
         let now = Date()
-        XCTAssertEqual(GeoIPDisplay.status(updated: nil, host: "example.org", phase: .idle),
+        XCTAssertEqual(GeoDisplay.status(.ip, updated: nil, phase: .idle),
                        "The country list is not downloaded yet.")
-        XCTAssertEqual(GeoIPDisplay.status(updated: nil, host: nil, phase: .updating), "Downloading the country list…")
-        XCTAssertEqual(GeoIPDisplay.status(updated: nil, host: nil, phase: .failed("Could not download the country list.")),
-                       "Could not download the country list.")
-        XCTAssertTrue(GeoIPDisplay.status(updated: now.addingTimeInterval(-86_400 * 3), host: "example.org", phase: .idle, now: now)
-            .hasPrefix("Country list from example.org, updated"))
+        XCTAssertEqual(GeoDisplay.status(.ip, updated: nil, phase: .updating), "Downloading the country list…")
+        XCTAssertEqual(GeoDisplay.status(.ip, updated: nil, phase: .failed("Could not download the list.")),
+                       "Could not download the list.")
+        XCTAssertTrue(GeoDisplay.status(.ip, updated: now.addingTimeInterval(-86_400 * 3), phase: .idle, now: now)
+            .hasPrefix("Country list last synced"))
     }
 }
 
