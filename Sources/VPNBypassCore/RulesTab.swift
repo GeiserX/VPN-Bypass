@@ -852,10 +852,21 @@ struct RuleRow: View {
         if route.egress == .unsupported {
             return String(localized: "Its route comes from a newer version of VPN Bypass and carries no traffic here.")
         }
-        if route.egress == .block, [.ip, .cidr, .geoip].contains(rule.matchType) {
-            return String(localized: "Block works on names, not addresses yet: this rule does nothing.")
-        }
         return nil
+    }
+
+    /// An address rule on the Block route: how many addresses are blocked now. A country whose list is
+    /// missing says so first (`geoDetail`).
+    private var blockNote: String? {
+        guard assignedRoute?.egress == .block, [.ip, .cidr, .geoip].contains(rule.matchType) else { return nil }
+        let key = rule.pattern.lowercased()
+        if rule.matchType == .geoip, GeoDataFile.geoip.ranges(for: [key])[key] == nil { return nil }
+        let count = routeManager.ruleBlockCount(forPattern: rule.pattern)
+        switch count {
+        case 0: return String(localized: "Not blocked yet.")
+        case 1: return String(localized: "1 address blocked")
+        default: return String(localized: "\(count) addresses blocked")
+        }
     }
 
     /// A Country or Site rule's second line: what its list holds, or why it holds nothing.
@@ -875,7 +886,7 @@ struct RuleRow: View {
         ListRow(
             glyph: Self.glyph(for: rule.matchType),
             name: patternDisplay,
-            detail: inertNote ?? geoDetail ?? Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
+            detail: inertNote ?? blockNote ?? geoDetail ?? Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
                                 customEngine: ProcessRule.customEngine(routeManager.config),
                                 turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: flowEngine.confirmed?.declinedTeams ?? []),
                                 counters: flowEngine.counters(forRule: rule.id.uuidString)),
@@ -1022,9 +1033,6 @@ struct RuleEditorSheet: View {
     /// The doc screenshots open the app chooser over the sheet.
     static var appChooserForScreenshots = false
 
-    /// Wider than the usual sheet: seven kinds of match sit in one row.
-    static let sheetWidth: CGFloat = 540
-
     init(
         editingRule: Rule?,
         services: [RouteManager.ServiceEntry],
@@ -1044,6 +1052,36 @@ struct RuleEditorSheet: View {
 
     private var isEditing: Bool { editingRule != nil }
 
+    static func isGeo(_ type: MatchType) -> Bool { type == .geoip || type == .geosite }
+
+    /// The choices of the Match control: GeoIP and GeoSite are one, "Geo".
+    enum MatchKind: Hashable {
+        case domain, service, ip, cidr, app, geo
+
+        init(_ type: MatchType) {
+            switch type {
+            case .domain, .suffix, .unsupported: self = .domain
+            case .service: self = .service
+            case .ip: self = .ip
+            case .cidr: self = .cidr
+            case .process: self = .app
+            case .geoip, .geosite: self = .geo
+            }
+        }
+
+        /// The match type for this choice; "Geo" keeps GeoSite when that is what it was.
+        func matchType(keepingGeoFrom current: MatchType) -> MatchType {
+            switch self {
+            case .domain: return .domain
+            case .service: return .service
+            case .ip: return .ip
+            case .cidr: return .cidr
+            case .app: return .process
+            case .geo: return current == .geosite ? .geosite : .geoip
+            }
+        }
+    }
+
     private var patternPlaceholder: String {
         switch matchType {
         case .domain:  return "example.com"
@@ -1059,19 +1097,32 @@ struct RuleEditorSheet: View {
     var body: some View {
         SheetScaffold(isEditing ? String(localized: "Edit Rule") : String(localized: "Add Rule"),
                       confirmTitle: isEditing ? String(localized: "Save Changes") : String(localized: "Add Rule"),
-                      width: Self.sheetWidth, onCancel: onCancel, onConfirm: attemptSave) {
+                      onCancel: onCancel, onConfirm: attemptSave) {
             SheetField(String(localized: "Match"), required: true) {
-                Picker(String(localized: "Match"), selection: $matchType) {
-                    Text("Domain").tag(MatchType.domain)
-                    Text("Service").tag(MatchType.service)
-                    Text("IP").tag(MatchType.ip)
-                    Text("CIDR").tag(MatchType.cidr)
-                    Text("App").tag(MatchType.process)
-                    Text("GeoIP").tag(MatchType.geoip)
-                    Text("GeoSite").tag(MatchType.geosite)
+                // Six segments fit the sheet: GeoIP and GeoSite share "Geo", and a second choice
+                // under it picks which.
+                Picker(String(localized: "Match"), selection: Binding(
+                    get: { Self.isGeo(matchType) ? MatchKind.geo : MatchKind(matchType) },
+                    set: { kind in matchType = kind.matchType(keepingGeoFrom: matchType) }
+                )) {
+                    Text("Domain").tag(MatchKind.domain)
+                    Text("Service").tag(MatchKind.service)
+                    Text("IP").tag(MatchKind.ip)
+                    Text("CIDR").tag(MatchKind.cidr)
+                    Text("App").tag(MatchKind.app)
+                    Text("Geo").tag(MatchKind.geo)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                if Self.isGeo(matchType) {
+                    Picker(String(localized: "Match"), selection: $matchType) {
+                        Text("GeoIP: a country").tag(MatchType.geoip)
+                        Text("GeoSite: a site list").tag(MatchType.geosite)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
             }
 
             if matchType == .service {

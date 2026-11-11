@@ -14,7 +14,8 @@
 //   • .vpnDefault     → the primary VPN (ifaceGatewayForRoute == nil) emits NOTHING
 //                        (the OS default route already carries it); a *specific* VPN
 //                        (ifaceGatewayForRoute == "iface:utunX") emits an iface route.
-//   • .block / .unsupported → NOTHING, and the rule claims nothing (see below).
+//   • .block → no route; the addresses its rule names become `DesiredBlock`s (compileAll).
+//   • .unsupported → NOTHING, and the rule claims nothing (see below).
 //   • .proxyHTTP / .proxySOCKS5 / .tailscaleExit → NOTHING; a loopback listener
 //                        (ProxyListenerManager) serves these, so the routing table
 //                        must stay clear of them.
@@ -30,6 +31,42 @@ enum RouteCompiler {
         let gateway: String
         let isNetwork: Bool
         let source: String
+    }
+
+    /// One address a Block rule keeps from being reached: a reject route in the kernel.
+    struct DesiredBlock: Equatable {
+        let destination: String
+        let source: String
+    }
+
+    /// The routes, and the addresses a Block route keeps unreachable, for the enabled rules. See
+    /// `compile` for the routes; the blocks come out of the same first-match pass, so an address an
+    /// earlier rule sends somewhere is not blocked by a later one, and the other way round.
+    ///
+    /// Only addresses a rule names are blocked: an `ip`, a `cidr`, a country's ranges, a service's
+    /// ranges. The addresses a NAME resolves to are not: a blocked name is answered NXDOMAIN by the
+    /// DNS forwarder, and blocking the address it happens to have could cut off other sites that
+    /// share it (a CDN).
+    static func compileAll(
+        resolvedRules: [(rule: Rule, dests: [(value: String, isNetwork: Bool)])],
+        routes: [Route],
+        localGateway: String,
+        ifaceGatewayForRoute: (Route) -> String?
+    ) -> (routes: [DesiredRoute], blocks: [DesiredBlock]) {
+        var blocks: [DesiredBlock] = []
+        let compiled = compile(resolvedRules: resolvedRules, routes: routes, localGateway: localGateway,
+                               ifaceGatewayForRoute: ifaceGatewayForRoute, blocks: &blocks)
+        return (compiled, blocks)
+    }
+
+    /// Whether a destination of a rule of `type` is an address the rule names, as opposed to one a
+    /// name resolved to.
+    static func namesAnAddress(_ type: MatchType, isNetwork: Bool) -> Bool {
+        switch type {
+        case .ip, .cidr, .geoip: return true
+        case .service: return isNetwork
+        case .domain, .suffix, .geosite, .process, .unsupported: return false
+        }
     }
 
     /// Compile the enabled rules (in first-match order) + their already-resolved
@@ -52,6 +89,18 @@ enum RouteCompiler {
         routes: [Route],
         localGateway: String,
         ifaceGatewayForRoute: (Route) -> String?
+    ) -> [DesiredRoute] {
+        var blocks: [DesiredBlock] = []
+        return compile(resolvedRules: resolvedRules, routes: routes, localGateway: localGateway,
+                       ifaceGatewayForRoute: ifaceGatewayForRoute, blocks: &blocks)
+    }
+
+    private static func compile(
+        resolvedRules: [(rule: Rule, dests: [(value: String, isNetwork: Bool)])],
+        routes: [Route],
+        localGateway: String,
+        ifaceGatewayForRoute: (Route) -> String?,
+        blocks: inout [DesiredBlock]
     ) -> [DesiredRoute] {
         let byId = Dictionary(routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var out: [DesiredRoute] = []
@@ -94,10 +143,18 @@ enum RouteCompiler {
                 gateway = ifaceGatewayForRoute(route)   // nil = primary VPN ⇒ no route
             case .proxyHTTP, .proxySOCKS5, .tailscaleExit:
                 gateway = nil                            // a loopback listener serves it
-            case .block, .unsupported:
-                // A blackhole is served by the DNS forwarder, by name (WildcardPlanner); no kernel
-                // route blocks an address yet. A route this build does not know carries nothing.
-                // Neither claims its destinations: a later rule still decides them.
+            case .block:
+                // Names are blackholed by the DNS forwarder (WildcardPlanner). The addresses a rule
+                // names are blocked here, and claimed like any other: first match holds. The
+                // addresses a name resolved to are left alone and unclaimed (see compileAll).
+                for dest in entry.dests where namesAnAddress(entry.rule.matchType, isNetwork: dest.isNetwork) {
+                    guard claim(dest.value, in: &claimed) else { continue }
+                    blocks.append(DesiredBlock(destination: dest.value, source: entry.rule.pattern))
+                }
+                continue
+            case .unsupported:
+                // A route this build does not know carries nothing and claims nothing: a later
+                // rule still decides its destinations.
                 continue
             }
 

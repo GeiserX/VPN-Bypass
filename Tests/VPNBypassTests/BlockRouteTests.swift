@@ -225,19 +225,74 @@ final class BlockRoutePlanTests: XCTestCase {
 
     // MARK: - Addresses
 
-    /// No kernel route blocks an address yet; a rule that names one does not pretend to, and
-    /// does not stop a later rule from deciding the address.
-    func testBlockingAnAddressIsNotYetDoneAndClaimsNothing() {
-        let resolved: [(rule: Rule, dests: [(value: String, isNetwork: Bool)])] = [
-            (rule: rule(.cidr, "203.0.113.0/24", block, order: 0), dests: [("203.0.113.0/24", true)]),
-            (rule: rule(.cidr, "203.0.113.0/24", direct, order: 1), dests: [("203.0.113.0/24", true)]),
-        ]
-        let out = RouteCompiler.compile(resolvedRules: resolved, routes: [direct, block], localGateway: "192.168.10.1",
-                                        ifaceGatewayForRoute: { _ in nil })
-        XCTAssertEqual(out.map(\.destination), ["203.0.113.0/24"])
-        XCTAssertEqual(out.first?.gateway, "192.168.10.1")
-        XCTAssertTrue(RouteCompiler.compile(resolvedRules: [resolved[0]], routes: [block], localGateway: "192.168.10.1",
-                                            ifaceGatewayForRoute: { _ in nil }).isEmpty)
+    private func resolved(_ r: Rule, _ dests: [(String, Bool)]) -> (rule: Rule, dests: [(value: String, isNetwork: Bool)]) {
+        (rule: r, dests: dests.map { (value: $0.0, isNetwork: $0.1) })
+    }
+
+    private func compileAll(_ rules: [(rule: Rule, dests: [(value: String, isNetwork: Bool)])], routes: [Route]? = nil)
+        -> (routes: [RouteCompiler.DesiredRoute], blocks: [RouteCompiler.DesiredBlock]) {
+        RouteCompiler.compileAll(resolvedRules: rules, routes: routes ?? [direct, block, proxy], localGateway: "192.168.10.1",
+                                 ifaceGatewayForRoute: { _ in nil })
+    }
+
+    func testAnAddressRuleOnTheBlockRouteBlocksItAndRoutesNothing() {
+        let out = compileAll([resolved(rule(.cidr, "203.0.113.0/24", block, order: 0), [("203.0.113.0/24", true)]),
+                              resolved(rule(.ip, "198.51.100.9", block, order: 1), [("198.51.100.9", false)])])
+        XCTAssertTrue(out.routes.isEmpty)
+        XCTAssertEqual(out.blocks, [.init(destination: "203.0.113.0/24", source: "203.0.113.0/24"),
+                                    .init(destination: "198.51.100.9", source: "198.51.100.9")])
+    }
+
+    func testACountryOnTheBlockRouteBlocksItsRanges() {
+        let out = compileAll([resolved(rule(.geoip, "ir", block, order: 0), [("203.0.113.0/24", true), ("198.51.100.0/22", true)])])
+        XCTAssertEqual(out.blocks.map(\.destination), ["203.0.113.0/24", "198.51.100.0/22"])
+        XCTAssertEqual(out.blocks.map(\.source), ["ir", "ir"])
+    }
+
+    func testFirstMatchHoldsForBlocksAsForRoutes() {
+        let blockFirst = compileAll([resolved(rule(.cidr, "203.0.113.0/24", block, order: 0), [("203.0.113.0/24", true)]),
+                                     resolved(rule(.cidr, "203.0.113.0/24", direct, order: 1), [("203.0.113.0/24", true)])])
+        XCTAssertEqual(blockFirst.blocks.count, 1)
+        XCTAssertTrue(blockFirst.routes.isEmpty, "the Direct rule below the block does not route what is blocked")
+
+        let routeFirst = compileAll([resolved(rule(.cidr, "203.0.113.0/24", direct, order: 0), [("203.0.113.0/24", true)]),
+                                     resolved(rule(.cidr, "203.0.113.0/24", block, order: 1), [("203.0.113.0/24", true)])])
+        XCTAssertEqual(routeFirst.routes.map(\.destination), ["203.0.113.0/24"])
+        XCTAssertTrue(routeFirst.blocks.isEmpty, "the block below the Direct rule does not take its range")
+
+        let narrower = compileAll([resolved(rule(.cidr, "203.0.113.0/24", block, order: 0), [("203.0.113.0/24", true)]),
+                                   resolved(rule(.ip, "203.0.113.9", direct, order: 1), [("203.0.113.9", false)])])
+        XCTAssertTrue(narrower.routes.isEmpty, "an address inside a blocked range is blocked with it")
+    }
+
+    func testAnAddressANameResolvedToIsNotBlockedAndNotClaimed() {
+        let out = compileAll([resolved(rule(.domain, "ads.example.com", block, order: 0), [("203.0.113.5", false)]),
+                              resolved(rule(.geosite, "ads", block, order: 1), [("203.0.113.6", false)]),
+                              resolved(rule(.cidr, "203.0.113.5/32", direct, order: 2), [("203.0.113.5/32", true)])])
+        XCTAssertTrue(out.blocks.isEmpty, "a CDN address shared with other sites would take them down with it: the DNS answer does the blocking")
+        XCTAssertEqual(out.routes.map(\.destination), ["203.0.113.5/32"], "and it claims nothing, so a later rule still decides it")
+    }
+
+    func testAServiceBlocksItsRangesButNotItsResolvedHosts() {
+        let out = compileAll([resolved(rule(.service, "svc", block, order: 0), [("203.0.113.5", false), ("198.51.100.0/24", true)])])
+        XCTAssertEqual(out.blocks.map(\.destination), ["198.51.100.0/24"])
+    }
+
+    func testARouteOfAnUnknownTypeBlocksAndClaimsNothing() {
+        let unknown = Route(name: "?", egress: .unsupported)
+        let out = compileAll([resolved(rule(.cidr, "203.0.113.0/24", unknown, order: 0), [("203.0.113.0/24", true)]),
+                              resolved(rule(.cidr, "203.0.113.0/24", direct, order: 1), [("203.0.113.0/24", true)])],
+                             routes: [direct, unknown])
+        XCTAssertTrue(out.blocks.isEmpty)
+        XCTAssertEqual(out.routes.map(\.destination), ["203.0.113.0/24"])
+    }
+
+    func testCompileStillReturnsOnlyTheRoutes() {
+        let r = [resolved(rule(.cidr, "203.0.113.0/24", block, order: 0), [("203.0.113.0/24", true)]),
+                 resolved(rule(.cidr, "198.51.100.0/24", direct, order: 1), [("198.51.100.0/24", true)])]
+        let routes = RouteCompiler.compile(resolvedRules: r, routes: [direct, block], localGateway: "192.168.10.1",
+                                           ifaceGatewayForRoute: { _ in nil })
+        XCTAssertEqual(routes.map(\.destination), ["198.51.100.0/24"])
     }
 
     // MARK: - Route and rule
@@ -265,5 +320,65 @@ final class BlockRoutePlanTests: XCTestCase {
     func testPerAppRoutingTreatsABlockRouteAsAnotherRoute() {
         XCTAssertEqual(flowRouteKind(block), .proxy)
         XCTAssertEqual(flowRouteKind(Route(name: "?", egress: .unsupported)), .proxy)
+    }
+}
+
+final class WildcardSpecIndexTests: XCTestCase {
+
+    private func spec(_ suffix: String) -> WildcardSpec {
+        WildcardSpec(suffix: suffix, gateway: "192.168.10.1", upstream: ["1.1.1.1"], interface: "en0")
+    }
+
+    func testTheIndexFindsTheLongestSuffixThatCoversAName() {
+        let index = WildcardSpecIndex([spec("example.com"), spec("eu.example.com"), spec("other.net")])
+        XCTAssertEqual(index.spec(for: "www.example.com")?.suffix, "example.com")
+        XCTAssertEqual(index.spec(for: "a.b.eu.example.com")?.suffix, "eu.example.com")
+        XCTAssertEqual(index.spec(for: "eu.example.com")?.suffix, "eu.example.com")
+        XCTAssertEqual(index.spec(for: "EXAMPLE.com.")?.suffix, "example.com", "case and the root dot")
+        XCTAssertNil(index.spec(for: "notexample.com"))
+        XCTAssertNil(index.spec(for: "com"))
+        XCTAssertNil(index.spec(for: ""))
+    }
+
+    /// The same answer as the comparison it replaces, for names above, at and below the suffixes.
+    func testTheIndexAgreesWithMostSpecific() {
+        let suffixes = ["example.com", "eu.example.com", "a.b.example.org", "b.example.org", "x.y", "deep.er.x.y"]
+        let index = WildcardSpecIndex(suffixes.map(spec))
+        for name in ["example.com", "x.example.com", "x.eu.example.com", "eu.example.com", "b.example.org", "q.a.b.example.org",
+                     "a.b.example.org", "example.org", "z.x.y", "x.y", "deep.er.x.y", "q.deep.er.x.y", "er.x.y", "nope.net"] {
+            XCTAssertEqual(index.spec(for: name)?.suffix, WildcardDomain.mostSpecific(for: name, among: suffixes), name)
+        }
+    }
+
+    func testTheFirstOfTwoSpecsWithTheSameSuffixWins() {
+        let first = WildcardSpec(suffix: "example.com", gateway: "10.0.0.1", upstream: ["9.9.9.9"], interface: "en0")
+        let second = WildcardSpec(suffix: "example.com", gateway: "10.0.0.2", upstream: ["8.8.8.8"], interface: "en1")
+        XCTAssertEqual(WildcardSpecIndex([first, second]).spec(for: "a.example.com")?.gateway, "10.0.0.1")
+    }
+
+    func testTheForwarderAnswersTheSameWithAnIndexAndWithout() {
+        let specs = [spec("example.com"), WildcardSpec(suffix: "ads.example.com", gateway: "", upstream: [], interface: "", block: true)]
+        func query(_ name: String) -> [UInt8] {
+            DNSWire.encode(DNSWire.Message(id: 7, flags: 0x0100,
+                questions: [.init(labels: name.split(separator: ".").map { Array($0.utf8) }, type: DNSWire.typeA, qclass: 1)],
+                answers: [], authority: [], additional: []))!
+        }
+        for name in ["x.ads.example.com", "www.example.com", "nothing.test"] {
+            let plain = WildcardLookup.reply(to: query(name), overTCP: false, specs: specs, guard: WildcardSafetyGuard(), ttlCap: 300,
+                                             forward: { _, _ in nil }, admit: { ips, _ in ips }, install: { ips, _ in .init(installed: ips) })
+            let indexed = WildcardLookup.reply(to: query(name), overTCP: false, specs: specs, guard: WildcardSafetyGuard(), ttlCap: 300,
+                                               index: WildcardSpecIndex(specs), forward: { _, _ in nil }, admit: { ips, _ in ips },
+                                               install: { ips, _ in .init(installed: ips) })
+            XCTAssertEqual(plain, indexed, name)
+        }
+    }
+
+    func testTenThousandWildcardsAreLookedUpInMicroseconds() {
+        let specs = (0..<10_000).map { spec("h\($0).t\($0 % 997).example.net") }
+        let index = WildcardSpecIndex(specs)
+        let started = CFAbsoluteTimeGetCurrent()
+        for i in 0..<20_000 { XCTAssertNotNil(index.spec(for: "www.h\(i % 10_000).t\(i % 10_000 % 997).example.net")) }
+        let seconds = CFAbsoluteTimeGetCurrent() - started
+        XCTAssertLessThan(seconds, 2, "20,000 lookups took \(seconds) s")
     }
 }

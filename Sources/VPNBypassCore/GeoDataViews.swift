@@ -33,8 +33,11 @@ enum GeoDisplay {
         guard hasData else { return String(localized: "Site list not downloaded yet.", bundle: bundle) }
         guard let list, list.found else { return String(localized: "Not in the site list.", bundle: bundle) }
         if list.isTooLarge {
-            let limit = GeoSiteExpansion.maxSuffixes
-            return String(localized: "Too large to route: \(list.count) domains, the limit is \(limit).", bundle: bundle)
+            // The number that is over, with its own limit: wildcards and exact names are limited apart.
+            let namesOver = list.names.count > GeoSiteExpansion.maxNames
+            let count = namesOver ? list.names.count : list.suffixes.count
+            let limit = namesOver ? GeoSiteExpansion.maxNames : GeoSiteExpansion.maxSuffixes
+            return String(localized: "Too large to route: \(count) domains, the limit is \(limit).", bundle: bundle)
         }
         let domains = list.count == 1 ? String(localized: "1 domain", bundle: bundle)
                                       : String(localized: "\(list.count) domains", bundle: bundle)

@@ -1205,8 +1205,6 @@
 "Download the site list to choose from it." = "Téléchargez la liste des sites pour choisir dedans.";
 "Download" = "Télécharger";
 "Downloading the site list…" = "Téléchargement de la liste des sites…";
-"GeoIP" = "GeoIP";
-"GeoSite" = "GeoSite";
 "No matches." = "Aucune correspondance.";
 "Not in the site list." = "Absent de la liste des sites.";
 "Search countries" = "Rechercher un pays";
@@ -1237,7 +1235,6 @@
 "Country list last synced %@ (%@)." = "Liste des pays synchronisée pour la dernière fois le %@ (%@).";
 "Site list last synced %@ (%@)." = "Liste des sites synchronisée pour la dernière fois le %@ (%@).";
 "Rules that send names here get no answer for them, so nothing connects: ads, trackers. It works through the Mac's own DNS, so an app that brings its own, such as a browser with secure DNS, is not blocked." = "Les règles qui envoient des noms ici n'obtiennent aucune réponse pour eux, donc rien ne se connecte : publicités, traqueurs. Cela passe par le DNS du Mac lui-même, donc une app qui apporte le sien, comme un navigateur avec DNS sécurisé, n'est pas bloquée.";
-"Block works on names, not addresses yet: this rule does nothing." = "Le blocage fonctionne sur les noms, pas encore sur les adresses : cette règle ne fait rien.";
 "Block" = "Bloquer";
 "Its route comes from a newer version of VPN Bypass and carries no traffic here." = "Sa route vient d'une version plus récente de VPN Bypass et ne transporte aucun trafic ici.";
 "Names are not resolved" = "Les noms ne sont pas résolus";
@@ -1245,3 +1242,9 @@
 "Unknown" = "Inconnu";
 "Written by a newer version of VPN Bypass. Kept as it is; it matches nothing here." = "Écrite par une version plus récente de VPN Bypass. Conservée telle quelle ; elle ne correspond à rien ici.";
 "e.g. Block ads" = "p. ex. Bloquer les publicités";
+"Not blocked yet." = "Pas encore bloqué.";
+"1 address blocked" = "1 adresse bloquée";
+"%lld addresses blocked" = "%lld adresses bloquées";
+"Geo" = "Geo";
+"GeoIP: a country" = "GeoIP : un pays";
+"GeoSite: a site list" = "GeoSite : une liste de sites";

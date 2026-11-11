@@ -66,6 +66,39 @@ public enum WildcardDomain {
     }
 }
 
+// MARK: - Finding the wildcard for a name
+
+/// The wildcards by suffix, so the forwarder finds the one for a name by looking up the name and
+/// each domain above it, longest first, instead of comparing it with every suffix. With a list of
+/// thousands (a GeoSite list) the comparison was the cost of every lookup. Same answer as
+/// `WildcardDomain.mostSpecific`: the longest suffix that covers the name.
+public struct WildcardSpecIndex: Sendable {
+    public let specs: [WildcardSpec]
+    /// Some spec carries names into a tunnel, so the forwarder reads the connected networks.
+    public let hasTunnel: Bool
+    private let bySuffix: [String: Int]
+
+    public init(_ specs: [WildcardSpec]) {
+        self.specs = specs
+        hasTunnel = specs.contains { $0.intoTunnel }
+        var map: [String: Int] = [:]
+        for (i, spec) in specs.enumerated() where map[spec.suffix] == nil { map[spec.suffix] = i }
+        bySuffix = map
+    }
+
+    /// The spec whose suffix is the longest one that is `name` or above it, nil when none is.
+    public func spec(for name: String) -> WildcardSpec? {
+        var n = name.lowercased()
+        if n.hasSuffix(".") { n.removeLast() }
+        var rest = Substring(n)
+        while true {
+            if let i = bySuffix[String(rest)] { return specs[i] }
+            guard let dot = rest.firstIndex(of: ".") else { return nil }
+            rest = rest[rest.index(after: dot)...]
+        }
+    }
+}
+
 // MARK: - IPv4 helpers
 
 enum WildcardIPv4 {
@@ -822,6 +855,7 @@ public enum WildcardLookup {
     public static func reply(
         to bytes: [UInt8], overTCP: Bool, specs: [WildcardSpec], guard safetyGuard: WildcardSafetyGuard,
         ttlCap: UInt32,
+        index: WildcardSpecIndex? = nil,
         forward: (DNSWire.Message, WildcardSpec) -> [UInt8]?,
         delegate: (DNSWire.Message, WildcardDelegation) -> [UInt8]? = { _, _ in nil },
         routed: ([String], WildcardSpec) -> Set<String> = { _, _ in [] },
@@ -835,8 +869,8 @@ public enum WildcardLookup {
         // DDR probe: say nothing, so the system has no encrypted endpoint to move to.
         if name == DNSWire.ddrName { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNoError) }
 
-        guard let suffix = WildcardDomain.mostSpecific(for: name, among: specs.map(\.suffix)),
-              let spec = specs.first(where: { $0.suffix == suffix }) else {
+        // `index` is the forwarder's, built when the wildcards were set; without one it is built here.
+        guard let spec = (index ?? WildcardSpecIndex(specs)).spec(for: name) else {
             return DNSWire.reply(to: query, rcode: DNSWire.rcodeRefused)
         }
         /// Someone else's answer, passed on as it came, AAAA too; nothing is learned from it.

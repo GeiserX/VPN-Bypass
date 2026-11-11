@@ -46,6 +46,10 @@ final class RouteManager: ObservableObject {
     /// with the entry each came from. Kept apart from `activeRoutes`: nothing routes through
     /// them, and every apply, count and check reads `activeRoutes` as "what is routed".
     @Published var blockedRoutes: [ActiveRoute] = []
+    /// The addresses Custom mode's Block rules keep unreachable now (reject routes), by the rule that
+    /// asked. Apart from `blockedRoutes`, which is VPN Only's and follows the VPN: these follow the
+    /// rules, whether the VPN is up or not.
+    @Published var ruleBlocks: [ActiveRoute] = []
     var blockedDestinations: Set<String> { Set(blockedRoutes.map(\.destination)) }
     /// How many VPN Only entries have addresses blocked, for the dropdown line.
     var blockedSiteCount: Int { Set(blockedRoutes.map(\.source)).count }
@@ -2799,12 +2803,13 @@ final class RouteManager: ObservableObject {
                 && route.vpnSelector?.kind == .interface
         }
         let links = needsLinks ? await listVPNLinks() : []
-        var compiled = RouteCompiler.compile(
+        let compiledAll = RouteCompiler.compileAll(
             resolvedRules: resolved,
             routes: config.routes,
             localGateway: gateway,
             ifaceGatewayForRoute: { route in self.ifaceGateway(for: route, links: links) }
         )
+        var compiled = compiledAll.routes
 
         // Generalized GlobalProtect guard: never install a catch-all into a non-primary
         // egress while GP is up (every compiled kernel route is non-primary). Custom mode
@@ -2835,6 +2840,8 @@ final class RouteManager: ObservableObject {
             log(.info, "Custom routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
             lastUpdate = Date()
             wildcards.routesApplied()   // as the classic skip path
+            // No route changed, but a block may have: a rule edited, switched off or moved to another route.
+            await applyRuleBlocks(compiledAll.blocks)
             return true
         }
 
@@ -2861,6 +2868,9 @@ final class RouteManager: ObservableObject {
 
         let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Custom ")
         guard committed else { return false }
+        // The blocks go in after the routes are committed: the stale-route cleanup above removes by
+        // destination, and would take a block just put on an address a rule used to route.
+        await applyRuleBlocks(compiledAll.blocks)
 
         let confirmedUniqueCount = uniqueRouteCount
         // A service rule's routes are recorded under the service id; Problems names the service.
@@ -3061,7 +3071,10 @@ final class RouteManager: ObservableObject {
             }
         }
         // After the catch-alls: a time-capped quit must spend its first write on them.
-        if !keepingBlocked { await releaseBlocks(reason: "all routes removed") }
+        if !keepingBlocked {
+            await releaseBlocks(reason: "all routes removed")
+            await releaseRuleBlocks(reason: "all routes removed")
+        }
 
         cancelAllRetries()
         // A failed removal must keep its record. The retention filter below only keeps entries

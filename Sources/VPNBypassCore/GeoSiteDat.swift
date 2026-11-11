@@ -30,8 +30,11 @@ struct GeoSiteExpansion: Equatable {
     var found = true
 
     /// A list with more wildcards than this is refused as a whole: a part of a list would send
-    /// some of a site's names one way and some another. Each wildcard is a resolver file.
-    static let maxSuffixes = 2_000
+    /// some of a site's names one way and some another. Each wildcard is a resolver file in
+    /// /etc/resolver, so this is the number of files one list may ask for.
+    static let maxSuffixes = 10_000
+    /// Exact names are looked up like a Domains entry (one DNS query each at every apply), which
+    /// is far more work than a wildcard, so fewer are taken.
     static let maxNames = 2_000
 
     var count: Int { suffixes.count + names.count }

@@ -20,7 +20,7 @@ A **route** is a place traffic can exit:
 | **VPN** | a specific VPN interface — pick *which* tunnel when several are up (multi-VPN) |
 | **HTTP / SOCKS5 proxy** | a local `127.0.0.1` listener that forwards to your proxy |
 | **Tailscale peer** | out through a chosen Tailscale device used as an exit |
-| **Block** | nowhere: the names a rule sends here get no answer, so nothing connects (ads, trackers) |
+| **Block** | nowhere: the names a rule sends here get no answer, and the addresses it names are unreachable (ads, trackers, a country) |
 
 A **rule** maps traffic to a route by `domain`, `suffix`, `ip`, `cidr`, `service`, `geoip`, `geosite`, or `process`. A `process` rule names an app, by its bundle id (`com.example.App`) or its executable's name (`Example`), never a path or a wildcard; [per-app routing](how-it-works.md#per-app-routing) serves it when that is on and the rule's route is Direct; otherwise it routes nothing, and the Rules page, `vpnb rule.list` and `vpnb rule.add` say why. The first matching rule wins; anything unmatched takes the **default** route. Direct and detected VPN routes appear automatically; proxy and Tailscale-peer routes are ones you add.
 
@@ -40,7 +40,7 @@ How a GeoSite list is routed. Routing is per IP, so a domain list needs the same
 - `keyword` and `regex` entries cannot be turned into either, so they are left out; the row says how many.
 - An entry already covered by a shorter suffix of the same list is dropped (`store.steampowered.com` after `steampowered.com`).
 - First match still holds: a name an earlier rule claims stays with that rule.
-- A list of more than 2,000 wildcards (or 2,000 names) is refused as a whole, and the row says so, because a part of a list would send some of a site's names one way and some another. Of the lists in Loyalsoldier's file, `category-games`, `microsoft`, `google`, `apple` and `steam` fit; `geolocation-!cn` and `category-ads-all` do not. Each wildcard is a file in `/etc/resolver`.
+- A list of more than 10,000 wildcards (or 2,000 exact names) is refused as a whole, and the row says so, because a part of a list would send some of a site's names one way and some another. Each wildcard is a file in `/etc/resolver`: 10,000 take about 2 seconds to write and 0.2 seconds to check again, and the helper finds the wildcard for a name by lookup, so a lookup costs the same whatever the size. Of the lists in Loyalsoldier's file, `category-games` (953 wildcards and 96 names), `microsoft`, `apple`, `google`, `steam`, `category-ads` and `category-ads-and-telemetry` fit; `geolocation-!cn` (26,579) and `category-ads-all` (197,596) do not. A list that size needs a different mechanism than a file per suffix; see the design issue linked from the pull request.
 
 Where the lists come from. They are downloaded the first time a rule needs one, and again when the copy is more than a week old (at launch, after a config save, and every 12 hours while the app runs; a failed download is tried again an hour later). This is the only data the app downloads. The Rules page, and the Add Rule sheet, show where each list comes from, with a **Source** menu: Loyalsoldier (the default), MetaCubeX, Chocolate4U's Iran list and runetfreedom's Russia list, the first two also through jsDelivr's mirror, or **Custom URL…** for an https address of your own (a mirror, say, where GitHub is blocked). Picking a source downloads from it at once. In `config.json` they are `geoipSourceURL` and `geositeSourceURL`.
 
@@ -59,8 +59,8 @@ A **Block** route is a blackhole, as in OpenWrt Passwall2. A rule that sends nam
 - It works through the Mac's own DNS, as wildcards do: an app that brings its own, such as a browser with secure DNS, is not blocked, and a name already resolved keeps working until its cache expires.
 - First match holds: a rule above a Block rule that claims a name (an allow rule for `ok.ads.example.com`, say) keeps that name.
 - An exact name is blocked with what is under it.
-- Blocking an address (an `ip`, `cidr` or GeoIP rule on a Block route) is not done yet, and the row says so. It needs the helper's block routes to be tied into Custom mode, which is separate work.
-- It needs helper 2.10.0, which an updated app installs by itself without a password; until then the Block wildcards are held back and the others keep working.
+- An address a rule names (an `ip`, a `cidr`, a country's GeoIP ranges, a service's ranges) on the Block route is blocked with a reject route in the kernel, the same helper call VPN Only's blocks use: a packet to it fails at once with "no route to host". The row says how many addresses are blocked. First match holds as for routes. The addresses a blocked *name* happens to resolve to are left alone, because a CDN address shared with other sites would take them down with it; the DNS answer does the blocking. Only IPv4. A range that holds the gateway, the VPN's gateway or a DNS server the app uses is left out and logged. These blocks follow the rules, not the VPN: they stay while the VPN is down, and a mode switch, a pause, Remove All Routes or a quit takes them out with the other routes.
+- Blocking names needs helper 2.10.0, which an updated app installs by itself without a password; until then the Block wildcards are held back and the others keep working. Blocking addresses works with any helper from 2.6.0.
 
 #### Your rules are kept
 

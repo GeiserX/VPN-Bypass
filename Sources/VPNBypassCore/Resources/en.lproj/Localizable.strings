@@ -1205,8 +1205,6 @@
 "Download the site list to choose from it." = "Download the site list to choose from it.";
 "Download" = "Download";
 "Downloading the site list…" = "Downloading the site list…";
-"GeoIP" = "GeoIP";
-"GeoSite" = "GeoSite";
 "No matches." = "No matches.";
 "Not in the site list." = "Not in the site list.";
 "Search countries" = "Search countries";
@@ -1237,7 +1235,6 @@
 "Country list last synced %@ (%@)." = "Country list last synced %@ (%@).";
 "Site list last synced %@ (%@)." = "Site list last synced %@ (%@).";
 "Rules that send names here get no answer for them, so nothing connects: ads, trackers. It works through the Mac's own DNS, so an app that brings its own, such as a browser with secure DNS, is not blocked." = "Rules that send names here get no answer for them, so nothing connects: ads, trackers. It works through the Mac's own DNS, so an app that brings its own, such as a browser with secure DNS, is not blocked.";
-"Block works on names, not addresses yet: this rule does nothing." = "Block works on names, not addresses yet: this rule does nothing.";
 "Block" = "Block";
 "Its route comes from a newer version of VPN Bypass and carries no traffic here." = "Its route comes from a newer version of VPN Bypass and carries no traffic here.";
 "Names are not resolved" = "Names are not resolved";
@@ -1245,3 +1242,9 @@
 "Unknown" = "Unknown";
 "Written by a newer version of VPN Bypass. Kept as it is; it matches nothing here." = "Written by a newer version of VPN Bypass. Kept as it is; it matches nothing here.";
 "e.g. Block ads" = "e.g. Block ads";
+"Not blocked yet." = "Not blocked yet.";
+"1 address blocked" = "1 address blocked";
+"%lld addresses blocked" = "%lld addresses blocked";
+"Geo" = "Geo";
+"GeoIP: a country" = "GeoIP: a country";
+"GeoSite: a site list" = "GeoSite: a site list";

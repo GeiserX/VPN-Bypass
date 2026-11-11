@@ -76,10 +76,23 @@ enum WildcardPlanner {
             // Every suffix an earlier rule claims, whatever its route (a proxy too): a name
             // under it goes that way, so a later wildcard below it must not catch the name
             // first through a more specific resolver file.
-            var claimed: [String] = []
+            // Kept as sets and by parent domain, so a list of thousands of suffixes plans in one
+            // pass instead of comparing each suffix with every earlier one.
+            var claimedSuffixes: Set<String> = []
+            var claimedEntries: Set<String> = []
             // Every exact name an earlier rule claims. A later wildcard over it still gets its
             // resolver file, so the name is excluded there: answered, never routed.
-            var claimedNames: [String] = []
+            var claimedNameSet: Set<String> = []
+            // The claimed names, and the claimed wildcards (as `*.suffix`), under each parent
+            // domain, in the order they were claimed: what a wildcard at that domain must exclude.
+            var namesUnder: [String: [String]] = [:]
+            var wildcardsUnder: [String: [String]] = [:]
+            /// `name` and each domain above it that can be a suffix (two labels or more).
+            func domains(of name: String) -> [String] {
+                let labels = name.split(separator: ".")
+                guard labels.count >= 2 else { return [] }
+                return (0...(labels.count - 2)).map { labels[$0...].joined(separator: ".") }
+            }
             // The domain lists the Site rules name, read once per pass.
             let lists = geosite ?? GeoDataFile.geosite.expansions(
                 for: Set(config.rules.filter { $0.enabled && $0.matchType == .geosite }.map { $0.pattern.lowercased() }))
@@ -107,8 +120,15 @@ enum WildcardPlanner {
                 }
                 let suffixes = entries.compactMap(WildcardDomain.suffix(of:))
                 defer {
-                    claimed += suffixes
-                    claimedNames += names.compactMap(WildcardDomain.normalizedSuffix)
+                    for suffix in suffixes {
+                        claimedSuffixes.insert(suffix)
+                        guard claimedEntries.insert(suffix).inserted else { continue }
+                        let entry = WildcardDomain.entry(for: suffix)
+                        for above in domains(of: suffix) { wildcardsUnder[above, default: []].append(entry) }
+                    }
+                    for name in names.compactMap(WildcardDomain.normalizedSuffix) where claimedNameSet.insert(name).inserted {
+                        for above in domains(of: name) { namesUnder[above, default: []].append(name) }
+                    }
                 }
                 let via: Configured.Via
                 switch route.egress {
@@ -120,12 +140,11 @@ enum WildcardPlanner {
                 // A blackhole covers an exact name as well, and what is under it: a list of
                 // trackers names `ads.example.com`, and its subdomains are the same tracker.
                 let blocked = via == .block ? suffixes + names.compactMap(WildcardDomain.normalizedSuffix) : suffixes
-                for suffix in blocked where !claimed.contains(where: { WildcardDomain.matches(suffix, suffix: $0) }) {
-                    var excluded: [String] = []
-                    for name in claimedNames + claimed.map(WildcardDomain.entry(for:))
-                    where WildcardDomain.matches(WildcardDomain.suffix(of: name) ?? name, suffix: suffix) && !excluded.contains(name) {
-                        excluded.append(name)
-                    }
+                // A blackhole that asks for more wildcards than a list may is left out whole.
+                if via == .block, blocked.count > GeoSiteExpansion.maxSuffixes { continue }
+                for suffix in blocked where !domains(of: suffix).contains(where: claimedSuffixes.contains) {
+                    // Claimed names, then claimed wildcards, at or under this suffix.
+                    let excluded = (namesUnder[suffix] ?? []) + (wildcardsUnder[suffix] ?? [])
                     // More than the helper takes: left out, as a wildcard under an earlier
                     // suffix is, rather than route a name first match sends elsewhere.
                     guard excluded.count <= WildcardSpec.maxExcluded else { continue }

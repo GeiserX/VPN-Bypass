@@ -483,7 +483,7 @@ struct RouteEditorSheet: View {
     var body: some View {
         SheetScaffold(isEditing ? String(localized: "Edit Route") : String(localized: "Add Route"),
                       confirmTitle: isEditing ? String(localized: "Save Changes") : String(localized: "Add Route"),
-                      width: 500, onCancel: onCancel, onConfirm: attemptSave) {
+                      onCancel: onCancel, onConfirm: attemptSave) {
             SheetField(String(localized: "Name"), required: true) {
                 TextField(namePlaceholder, text: $name)
                     .textFieldStyle(.roundedBorder)
@@ -500,6 +500,8 @@ struct RouteEditorSheet: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                // Five types in a 420 pt sheet: a smaller control keeps them all in view.
+                .controlSize(.small)
             }
 
             if egress == .vpnDefault {

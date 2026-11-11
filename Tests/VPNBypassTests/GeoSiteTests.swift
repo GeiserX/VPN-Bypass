@@ -186,6 +186,37 @@ final class GeoSiteRuleTests: XCTestCase {
         XCTAssertTrue(WildcardPlanner.configured(custom([rule("big")]), geosite: big).isEmpty)
     }
 
+    func testTheLimitsAre10kWildcardsAnd2kNames() {
+        XCTAssertEqual(GeoSiteExpansion.maxSuffixes, 10_000)
+        XCTAssertEqual(GeoSiteExpansion.maxNames, 2_000)
+        XCTAssertFalse(GeoSiteExpansion(suffixes: Array(repeating: "a.example.net", count: 10_000)).isTooLarge)
+        XCTAssertTrue(GeoSiteExpansion(suffixes: Array(repeating: "a.example.net", count: 10_001)).isTooLarge)
+        XCTAssertTrue(GeoSiteExpansion(names: Array(repeating: "a.example.net", count: 2_001)).isTooLarge)
+    }
+
+    func testTheRowNamesTheNumberThatIsOver() {
+        let manyNames = GeoSiteExpansion(names: (0...GeoSiteExpansion.maxNames).map { "h\($0).example.net" })
+        XCTAssertEqual(GeoDisplay.siteDetail(manyNames, hasData: true),
+                       String(localized: "Too large to route: \(GeoSiteExpansion.maxNames + 1) domains, the limit is \(GeoSiteExpansion.maxNames)."))
+        let manySuffixes = GeoSiteExpansion(suffixes: (0...GeoSiteExpansion.maxSuffixes).map { "h\($0).example.net" })
+        XCTAssertEqual(GeoDisplay.siteDetail(manySuffixes, hasData: true),
+                       String(localized: "Too large to route: \(GeoSiteExpansion.maxSuffixes + 1) domains, the limit is \(GeoSiteExpansion.maxSuffixes)."))
+    }
+
+    /// 10,000 wildcards plan in one pass, with an earlier rule's names excluded from the right ones.
+    func testTenThousandSuffixesPlanQuicklyAndExcludeWhatAnEarlierRuleClaims() {
+        let suffixes = (0..<GeoSiteExpansion.maxSuffixes).map { "h\($0).t\($0 % 97).example.net" }
+        let lists = GeoSiteDat.expansions(for: ["many"], in: Dat.file([Dat.site("MANY", suffixes.map { Dat.domain(2, $0) })]))
+        let early = rule("login.h7.t7.example.net", order: 0, type: .domain)
+        let started = CFAbsoluteTimeGetCurrent()
+        let configured = WildcardPlanner.configured(custom([early, rule("many", order: 1)]), geosite: lists)
+        let seconds = CFAbsoluteTimeGetCurrent() - started
+        XCTAssertEqual(configured.count, 10_000)
+        XCTAssertEqual(configured.first { $0.suffix == "h7.t7.example.net" }?.excluded, ["login.h7.t7.example.net"])
+        XCTAssertTrue(configured.filter { $0.suffix != "h7.t7.example.net" }.allSatisfy { $0.excluded.isEmpty })
+        XCTAssertLessThan(seconds, 5, "planning 10,000 wildcards took \(seconds) s")
+    }
+
     func testAThousandSuffixesPlanAtOnceAndKeepTheirOrder() {
         let suffixes = (0..<1_500).map { "h\($0).example.net" }
         let data = Dat.file([Dat.site("MANY", suffixes.map { Dat.domain(2, $0) })])
