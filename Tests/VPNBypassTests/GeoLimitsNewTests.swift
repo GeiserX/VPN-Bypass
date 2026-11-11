@@ -55,6 +55,17 @@ final class RuleRefusalTests: XCTestCase {
                        String(localized: "Wildcards left out: \(1). Earlier rules take more than \(WildcardSpec.maxExcluded) names under each."))
     }
 
+    /// The user's own rules past the helper's limit: the rule that no longer fits is left out whole,
+    /// and its row says so, instead of a part of it being cut.
+    func testTheUsersOwnRulesPastTheHelpersLimitAreLeftOutWhole() {
+        let rules = (0...WildcardSpec.maxSpecs).map {
+            Rule(matchType: .suffix, pattern: "u\($0).example.org", routeId: direct.id, order: $0)
+        }
+        let selection = WildcardPlanner.selection(custom(rules))
+        XCTAssertEqual(selection.items.count, WildcardSpec.maxSpecs)
+        XCTAssertEqual(selection.refused, [rules[WildcardSpec.maxSpecs].id: .overTotal(wildcards: 1, limit: WildcardSpec.maxSpecs)])
+    }
+
     func testCountriesCountInRuleOrderUnderTheTotal() {
         let rules = ["gb", "fr", "de", "gb"].enumerated().map {
             Rule(matchType: .geoip, pattern: $0.element, routeId: direct.id, order: $0.offset)
@@ -76,6 +87,50 @@ final class RuleRefusalTests: XCTestCase {
         XCTAssertEqual(file.leftOut(for: "ir"), 1)
         XCTAssertEqual(GeoDisplay.detail(count: 1, hasData: true, leftOut: 1), String(localized: "\(1) ranges, \(1) left out"))
         XCTAssertEqual(GeoDisplay.detail(count: 1, hasData: true), String(localized: "1 range"))
+    }
+}
+
+/// A Site list the wildcard total leaves out routes none of its exact names either: never a part of a list.
+@MainActor
+final class RefusedListNamesTests: XCTestCase {
+    private var rm: RouteManager { RouteManager.shared }
+    private var saved: RouteManager.Config!
+
+    override func setUp() async throws { saved = rm.config }
+    override func tearDown() async throws {
+        rm.config = saved
+        try? FileManager.default.removeItem(at: GeoDataFile.geosite.url)
+        GeoDataFile.geosite.invalidate()
+    }
+
+    func testAListLeftOutByTheTotalRoutesNoneOfItsNames() throws {
+        let first = Dat.site("FIRST", (0..<6_000).map { Dat.domain(2, "a\($0).example.net") })
+        let second = Dat.site("SECOND", (0..<6_000).map { Dat.domain(2, "b\($0).example.org") } + [Dat.domain(3, "www.example.com")])
+        try FileManager.default.createDirectory(at: GeoDataFile.geosite.url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Dat.file([first, second]).write(to: GeoDataFile.geosite.url)
+        GeoDataFile.geosite.invalidate()
+
+        let direct = Route(name: "Direct", egress: .direct)
+        var c = RouteManager.Config()
+        c.routingMode = .custom
+        c.schemaVersion = 2
+        c.routes = [direct]
+        c.defaultRouteId = direct.id
+        let r1 = Rule(matchType: .geosite, pattern: "first", routeId: direct.id, order: 0)
+        let r2 = Rule(matchType: .geosite, pattern: "second", routeId: direct.id, order: 1)
+        c.rules = [r1, r2]
+        rm.config = c
+
+        let selection = WildcardPlanner.selection(c)
+        XCTAssertNotNil(selection.refused[r2.id], "precondition: the second list is left out by the total")
+        let hosts = RuleDestinationBuilder.hostsToResolve(rules: c.rules, services: [], geosite: rm.geositeExpansions(), routes: c.routes)
+        XCTAssertFalse(hosts.contains("www.example.com"), "a list left out whole still routes its exact names")
+
+        // Alone, the same list fits, and its name is routed.
+        c.rules = [Rule(matchType: .geosite, pattern: "second", routeId: direct.id, order: 0)]
+        rm.config = c
+        let alone = RuleDestinationBuilder.hostsToResolve(rules: c.rules, services: [], geosite: rm.geositeExpansions(), routes: c.routes)
+        XCTAssertTrue(alone.contains("www.example.com"))
     }
 }
 

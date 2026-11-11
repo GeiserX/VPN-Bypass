@@ -545,9 +545,18 @@ extension RouteManager {
         return ranges.filter { accepted.contains($0.key) }
     }
 
-    /// The domain lists the enabled Site rules name, by pattern (`steam`, `category-games@cn`).
+    /// The domain lists the enabled Site rules name, by pattern (`steam`, `category-games@cn`). A list the
+    /// wildcard planner leaves out whole by the total routes none of its exact names either: never a part
+    /// of a list.
     func geositeExpansions() -> [String: GeoSiteExpansion] {
-        GeoDataFile.geosite.expansions(for: Set(config.rules.filter { $0.enabled && $0.matchType == .geosite }.map { $0.pattern.lowercased() }))
+        let rules = config.rules.filter { $0.enabled && $0.matchType == .geosite }
+        let lists = GeoDataFile.geosite.expansions(for: Set(rules.map { $0.pattern.lowercased() }))
+        let refused = WildcardPlanner.selection(config, geosite: lists).refused
+        let kept = Set(rules.filter { rule in
+            if case .overTotal = refused[rule.id] { return false }
+            return true
+        }.map { $0.pattern.lowercased() })
+        return lists.filter { kept.contains($0.key) }
     }
 
     func usesGeoData(_ kind: GeoKind) -> Bool {
