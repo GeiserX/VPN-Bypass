@@ -744,12 +744,20 @@ struct RulesTab: View {
     }
 
     /// `rules` with each rule's `order` set to its index in `ordered`. A config.json edited by
-    /// hand can hold two rules with one id: both take the first index, and nothing traps.
+    /// hand can hold two rules with one id: each occurrence takes its own position, matched in
+    /// order, so an unmoved duplicate keeps its place among the rules around it and nothing traps.
     nonisolated static func rules(_ rules: [Rule], renumberedAs ordered: [Rule]) -> [Rule] {
-        let newOrder = Dictionary(ordered.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var positions: [UUID: [Int]] = [:]
+        for (index, rule) in ordered.enumerated() { positions[rule.id, default: []].append(index) }
+        // The occurrences in `rules` in the order `ordered` lists them: by their old order, then
+        // by their place in the array.
+        var occurrences: [UUID: [Int]] = [:]
+        for index in rules.indices { occurrences[rules[index].id, default: []].append(index) }
         var result = rules
-        for idx in result.indices {
-            if let order = newOrder[result[idx].id] { result[idx].order = order }
+        for (id, indices) in occurrences {
+            guard let slots = positions[id] else { continue }
+            let byOrder = indices.sorted { (rules[$0].order, $0) < (rules[$1].order, $1) }
+            for (k, index) in byOrder.enumerated() where k < slots.count { result[index].order = slots[k] }
         }
         return result
     }

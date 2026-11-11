@@ -57,7 +57,18 @@ final class RulesRoutesPageModelTests: XCTestCase {
         let copy = a
         let b = Rule(matchType: .domain, pattern: "b.example.com", routeId: route, order: 2)
         let result = RulesTab.rules([a, copy, b], renumberedAs: [b, a, copy])
-        XCTAssertEqual(result.map(\.order), [1, 1, 0], "both copies take the first place their id has")
+        XCTAssertEqual(result.map(\.order), [1, 2, 0], "each copy keeps its own place in the list")
+    }
+
+    /// An unmoved duplicate must not jump ahead of a rule that sat between its copies.
+    func testARepeatedIdKeepsEachCopyBetweenItsNeighbours() {
+        let route = UUID()
+        let a = Rule(matchType: .domain, pattern: "a.example.com", routeId: route, order: 0)
+        let mid = Rule(matchType: .domain, pattern: "m.example.com", routeId: route, order: 1)
+        var copy = a
+        copy.order = 2
+        let result = RulesTab.rules([a, mid, copy], renumberedAs: [a, mid, copy])
+        XCTAssertEqual(result.map(\.order), [0, 1, 2])
     }
 
     /// The two explanations of ordering are one line; the drag hint joins it at two rules.
