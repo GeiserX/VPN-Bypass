@@ -123,6 +123,13 @@ enum RouteCompiler {
         // the rest. IPv4 only; a non-IPv4 dest (IPv6 literal, ::/0, malformed) falls back
         // to exact-string claiming so the containment math never runs on it (never crashes).
         var claimed = Claims()
+        // The IPv4 ranges claimed by a rule whose route needs no kernel route (the primary VPN, a
+        // proxy, a Tailscale peer). A later Block range over one would take it: with no route of its
+        // own there, the kernel's longest-prefix match picks the reject route. So a block leaves
+        // these out (`carve`). An earlier Direct or pinned-tunnel route needs nothing: its narrower
+        // route wins in the kernel.
+        var unrouted: [(network: UInt32, prefix: Int)] = []
+        let firstBlock = blocks.count
 
         for entry in resolvedRules where entry.rule.enabled {
             // A rule pointing at a route that no longer exists — OR a route the user has
@@ -160,7 +167,10 @@ enum RouteCompiler {
 
             for dest in entry.dests {
                 guard claim(dest.value, in: &claimed) else { continue }  // first rule wins (by containment)
-                guard let gateway else { continue }
+                guard let gateway else {
+                    if let range = parseIPv4(dest.value) { unrouted.append(range) }
+                    continue
+                }
                 out.append(DesiredRoute(
                     destination: dest.value,
                     gateway: gateway,
@@ -169,7 +179,54 @@ enum RouteCompiler {
                 ))
             }
         }
+        if !unrouted.isEmpty, blocks.count > firstBlock {
+            blocks.replaceSubrange(firstBlock..., with: carve(Array(blocks[firstBlock...]), around: unrouted))
+        }
         return out
+    }
+
+    /// `blocks` with the `unrouted` ranges inside each one left out: a block range is split into the
+    /// fewest CIDRs that cover the rest of it. Only a range narrower than the block can be inside it,
+    /// and only an earlier rule's (a later one inside it was not claimed); a range as broad as the
+    /// block or broader came later and changes nothing.
+    private static func carve(_ blocks: [DesiredBlock], around unrouted: [(network: UInt32, prefix: Int)]) -> [DesiredBlock] {
+        let holes = unrouted.sorted { $0.network < $1.network }
+        var out: [DesiredBlock] = []
+        for block in blocks {
+            guard let range = parseIPv4(block.destination) else { out.append(block); continue }
+            let last = range.network | (range.prefix >= 32 ? 0 : ~UInt32(0) >> range.prefix)
+            // The first hole at or after the block's network, by binary search.
+            var low = 0, high = holes.count
+            while low < high {
+                let mid = (low + high) / 2
+                if holes[mid].network < range.network { low = mid + 1 } else { high = mid }
+            }
+            var inside: [(network: UInt32, prefix: Int)] = []
+            while low < holes.count, holes[low].network <= last {
+                if holes[low].prefix > range.prefix { inside.append(holes[low]) }
+                low += 1
+            }
+            guard !inside.isEmpty else { out.append(block); continue }
+            for piece in split(range.network, range.prefix, around: inside) {
+                out.append(DesiredBlock(destination: render(piece.network, piece.prefix), source: block.source))
+            }
+        }
+        return out
+    }
+
+    /// The CIDRs that cover `network/prefix` but none of `holes`, each hole inside it.
+    private static func split(_ network: UInt32, _ prefix: Int,
+                              around holes: [(network: UInt32, prefix: Int)]) -> [(network: UInt32, prefix: Int)] {
+        let inside = holes.filter { $0.prefix >= prefix && maskIPv4($0.network, prefix) == network }
+        if inside.isEmpty { return [(network, prefix)] }
+        if inside.contains(where: { $0.prefix == prefix }) || prefix >= 32 { return [] }
+        let upper = network | (UInt32(1) << UInt32(31 - prefix))
+        return split(network, prefix + 1, around: inside) + split(upper, prefix + 1, around: inside)
+    }
+
+    private static func render(_ network: UInt32, _ prefix: Int) -> String {
+        let dotted = [24, 16, 8, 0].map { String((network >> UInt32($0)) & 0xFF) }.joined(separator: ".")
+        return prefix == 32 ? dotted : "\(dotted)/\(prefix)"
     }
 
     // MARK: - CIDR-containment claiming
