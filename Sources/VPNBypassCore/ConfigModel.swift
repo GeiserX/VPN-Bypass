@@ -176,9 +176,12 @@ struct Config: Codable {
     var geoipSourceURL: String? = nil
     /// The same for the domain lists of Site (GeoSite) rules: an https URL of a `geosite.dat`.
     var geositeSourceURL: String? = nil
-    /// How often the lists of GeoIP and GeoSite rules are downloaded again by themselves. An older
-    /// build ignores the key.
-    var geoSync: GeoSyncSchedule = .default
+    /// How often the lists of GeoIP and GeoSite rules are downloaded again by themselves, as the user
+    /// set it; nil is the default (`geoSyncSchedule`) and is not written, so a config that never
+    /// touches the lists saves as it did. An older build ignores the key.
+    var geoSync: GeoSyncSchedule? = nil
+    /// The schedule in use.
+    var geoSyncSchedule: GeoSyncSchedule { geoSync ?? .default }
 
     // Custom decoder for backward compatibility with configs missing new fields
     init(from decoder: Decoder) throws {
@@ -219,7 +222,7 @@ struct Config: Codable {
         geoipSourceURL = try container.decodeIfPresent(String.self, forKey: .geoipSourceURL)
         geositeSourceURL = try container.decodeIfPresent(String.self, forKey: .geositeSourceURL)
         // An unknown value (a hand edit, a later build) is the default, not a config that will not load.
-        geoSync = (try? container.decodeIfPresent(GeoSyncSchedule.self, forKey: .geoSync)) ?? .default
+        geoSync = (try? container.decodeIfPresent(GeoSyncSchedule.self, forKey: .geoSync)) ?? nil
 
         // One-time migration: derive the routes/rules representation from the
         // legacy bypass list + single proxy so the new model is populated for

@@ -68,7 +68,7 @@ final class ConfigCompatTests: XCTestCase {
         let c = try decode(legacy)
         XCTAssertNil(c.geoipSourceURL)
         XCTAssertNil(c.geositeSourceURL)
-        XCTAssertEqual(c.geoSync, .weekly)
+        XCTAssertEqual(c.geoSyncSchedule, .weekly)
         XCTAssertFalse(c.routes.contains { $0.egress == .block }, "no route is added to a config that never blocks")
         XCTAssertEqual(c.routes.count, 3)
     }
@@ -110,7 +110,7 @@ final class ConfigCompatTests: XCTestCase {
         XCTAssertEqual(unknownRoute.egress, .unsupported)
         XCTAssertEqual(unknownRoute.unknownEgress, "wireguard2")
         XCTAssertEqual(unknownRoute.proxyHost, "198.51.100.7", "what the route carried is kept")
-        XCTAssertEqual(c.geoSync, .weekly, "an unknown schedule is the default")
+        XCTAssertEqual(c.geoSyncSchedule, .weekly, "an unknown schedule is the default")
         XCTAssertEqual(c.rules.first?.matchType, .domain)
     }
 

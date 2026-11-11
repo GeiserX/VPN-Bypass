@@ -480,9 +480,9 @@ final class GeoSyncTests: XCTestCase {
         c.geoSync = .monthly
         let back = try JSONDecoder().decode(RouteManager.Config.self, from: JSONEncoder().encode(c))
         XCTAssertEqual(back.geoSync, .monthly)
-        XCTAssertEqual(try JSONDecoder().decode(RouteManager.Config.self, from: Data("{}".utf8)).geoSync, .weekly)
+        XCTAssertEqual(try JSONDecoder().decode(RouteManager.Config.self, from: Data("{}".utf8)).geoSyncSchedule, .weekly)
         let odd = try JSONDecoder().decode(RouteManager.Config.self, from: Data(#"{"geoSync":"hourly"}"#.utf8))
-        XCTAssertEqual(odd.geoSync, .weekly, "an unknown value is the default, not a config that will not load")
+        XCTAssertEqual(odd.geoSyncSchedule, .weekly, "an unknown value is the default, not a config that will not load")
     }
 
     func testTheLineSaysWhenTheListWasLastSyncedAndHowLongAgo() throws {

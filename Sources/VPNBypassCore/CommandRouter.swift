@@ -450,7 +450,9 @@ enum CommandRouter {
     private static func ruleAdd(
         _ request: ControlRequest, _ config: RouteManager.Config
     ) -> (config: RouteManager.Config, response: ControlResponse) {
-        guard let matchStr = request.args?["match"], let matchType = MatchType(rawValue: matchStr) else {
+        // `unsupported` is the placeholder for a newer build's type, never one to add.
+        guard let matchStr = request.args?["match"], let matchType = MatchType(rawValue: matchStr),
+              matchType != .unsupported else {
             return errorResponse(config, code: "invalid_args", message: "match must be a valid match type")
         }
         guard let pattern = request.args?["pattern"], !pattern.isEmpty else {
@@ -549,8 +551,12 @@ enum CommandRouter {
     private static func setDefault(
         _ request: ControlRequest, _ config: RouteManager.Config
     ) -> (config: RouteManager.Config, response: ControlResponse) {
-        guard let routeId = uuid(request.args, "routeId"), config.routes.contains(where: { $0.id == routeId }) else {
+        guard let routeId = uuid(request.args, "routeId"), let route = config.routes.first(where: { $0.id == routeId }) else {
             return errorResponse(config, code: "not_found", message: "no route with that id")
+        }
+        // As on the Rules page: Everything else cannot be Block, nor a route this build cannot use.
+        guard route.egress != .block, route.egress != .unsupported else {
+            return errorResponse(config, code: "invalid_args", message: "a Block route cannot be the default route")
         }
         var updated = config
         updated.defaultRouteId = routeId

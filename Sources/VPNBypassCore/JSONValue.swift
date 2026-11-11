@@ -9,6 +9,8 @@ enum JSONValue: Codable, Equatable {
     case null
     case bool(Bool)
     case int(Int64)
+    /// A whole number past Int64, kept whole instead of turning into a rounded double.
+    case uint(UInt64)
     case double(Double)
     case string(String)
     case array([JSONValue])
@@ -22,6 +24,8 @@ enum JSONValue: Codable, Equatable {
             self = .bool(value)
         } else if let value = try? c.decode(Int64.self) {
             self = .int(value)
+        } else if let value = try? c.decode(UInt64.self) {
+            self = .uint(value)
         } else if let value = try? c.decode(Double.self) {
             self = .double(value)
         } else if let value = try? c.decode(String.self) {
@@ -39,6 +43,7 @@ enum JSONValue: Codable, Equatable {
         case .null: try c.encodeNil()
         case .bool(let value): try c.encode(value)
         case .int(let value): try c.encode(value)
+        case .uint(let value): try c.encode(value)
         case .double(let value): try c.encode(value)
         case .string(let value): try c.encode(value)
         case .array(let value): try c.encode(value)

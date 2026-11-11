@@ -526,7 +526,7 @@ extension RouteManager {
     /// and the schedule still allows it: without this a failure with nothing else to trigger a
     /// refresh would leave the rule routing nothing until the next launch or the 12-hour watchdog.
     func scheduleGeoRetry(_ kind: GeoKind) {
-        guard GeoDataStore.autoUpdate, usesGeoData(kind), config.geoSync.interval != nil else { return }
+        guard GeoDataStore.autoUpdate, usesGeoData(kind), config.geoSyncSchedule.interval != nil else { return }
         geoRetryTasks[kind]?.cancel()
         geoRetryTasks[kind] = Task { [weak self] in
             let wait = UInt64(max(GeoSyncPlan.retryAfter, 0) * 1_000_000_000)
@@ -545,7 +545,7 @@ extension RouteManager {
         for kind in GeoKind.allCases where usesGeoData(kind) {
             let store = geoStore(kind)
             guard store.phase != .updating,
-                  GeoSyncPlan.shouldFetch(schedule: config.geoSync, updated: store.updated,
+                  GeoSyncPlan.shouldFetch(schedule: config.geoSyncSchedule, updated: store.updated,
                                           lastAttempt: store.lastAttempt, now: now) else { continue }
             Task { await updateGeoData(kind) }
         }

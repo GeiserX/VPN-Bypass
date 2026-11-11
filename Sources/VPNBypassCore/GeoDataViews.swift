@@ -235,7 +235,7 @@ struct GeoSyncMenu: View {
                     routeManager.config.geoSync = schedule
                     routeManager.saveConfig()
                 } label: {
-                    if schedule == routeManager.config.geoSync {
+                    if schedule == routeManager.config.geoSyncSchedule {
                         Label(schedule.title, systemImage: "checkmark")
                     } else {
                         Text(schedule.title)
@@ -243,7 +243,7 @@ struct GeoSyncMenu: View {
                 }
             }
         } label: {
-            Text("Sync: \(routeManager.config.geoSync.title)")
+            Text("Sync: \(routeManager.config.geoSyncSchedule.title)")
                 .font(.system(size: 11))
         }
         .menuStyle(.borderlessButton)

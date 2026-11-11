@@ -46,6 +46,22 @@ extension RouteManager {
         return route
     }
 
+    /// Takes out a Block route no rule points at. The Rules page makes it on first use, and a version
+    /// before Block refuses a config that holds one, so it stays only while a rule needs it. Returns
+    /// whether one went.
+    @discardableResult
+    func removeUnusedBlockRoutes() -> Bool {
+        let used = Set(config.rules.map(\.routeId))
+        let before = config.routes.count
+        config.routes.removeAll { $0.egress == .block && !used.contains($0.id) && $0.id != config.defaultRouteId }
+        return config.routes.count != before
+    }
+
+    /// `removeUnusedBlockRoutes`, saved when one went: after a sheet that made it was cancelled.
+    func dropUnusedBlockRoute() {
+        if removeUnusedBlockRoutes() { saveConfig() }
+    }
+
     /// Deletes a rule and re-applies, as the Rules page's trash button does.
     func removeRule(_ id: UUID) {
         config.rules.removeAll { $0.id == id }
@@ -443,6 +459,7 @@ extension RouteManager {
 
     /// Saves and re-applies after a rule change (RulesTab's `persistAndReapply`).
     func saveRulesAndReapply() {
+        removeUnusedBlockRoutes()
         saveConfig()
         startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
     }
@@ -628,6 +645,8 @@ struct RulesTab: View {
                 sheetState = nil
             } onCancel: {
                 sheetState = nil
+                // Block picked in the sheet made the route; a cancelled rule leaves nothing on it.
+                routeManager.dropUnusedBlockRoute()
             }
         }
         .sheet(isPresented: $showingNewRouteSheet) {
