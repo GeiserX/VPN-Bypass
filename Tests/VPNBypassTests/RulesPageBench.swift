@@ -42,7 +42,11 @@ final class RulesPageBench: XCTestCase {
         }
         let rm = RouteManager.shared
         let saved = rm.config
-        defer { rm.config = saved }
+        let savedOverride = rm.refreshStatusOverrideForTests
+        defer {
+            rm.config = saved
+            rm.refreshStatusOverrideForTests = savedOverride
+        }
         rm.refreshStatusOverrideForTests = {}
         let direct = Route(name: "Direct", egress: .direct)
         let vpn = Route(name: "Primary VPN", egress: .vpnDefault, vpnSelector: VPNSelector(kind: .primary))
