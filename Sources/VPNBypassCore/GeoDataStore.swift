@@ -195,6 +195,11 @@ final class GeoDataStore: ObservableObject {
 
     var fileURL: URL { file.url }
     var updated: Date? { file.updated }
+    /// Written next to the list when it was used without a checksum (a custom address that
+    /// publishes none), removed when a checked one replaces it.
+    private var uncheckedMarker: URL { file.url.appendingPathExtension("unchecked") }
+    /// The list in use was not checked against a published checksum.
+    var isUnchecked: Bool { hasData && FileManager.default.fileExists(atPath: uncheckedMarker.path) }
     var hasData: Bool { updated != nil }
 
     /// The copy is missing or at least `interval` old.
@@ -252,9 +257,14 @@ final class GeoDataStore: ObservableObject {
         guard size > 0, size <= Self.maxDownloadBytes else {
             return await finish(failed: String(localized: "The download is not a list of the right kind."), from: source)
         }
-        // The digest the source publishes next to the list, when it publishes one: a truncated file or a
-        // mirror that serves another file is refused before it is read.
+        // The digest the source publishes next to the list: a truncated file or a mirror that serves
+        // another file is refused before it is read. Every preset publishes one, so a preset whose
+        // digest cannot be read fails and keeps the list in use; only a custom address that publishes
+        // none is used unchecked, and the list's status line says so.
         let expected = GeoChecksum.digest(in: await fetchChecksum(GeoChecksum.url(for: source)) ?? "")
+        if expected == nil, GeoSource.presets.contains(where: { $0.url(for: kind) == source.absoluteString }) {
+            return await finish(failed: String(localized: "Could not download the checksum its source publishes."), from: source)
+        }
         // Read off the main actor: a list is tens of megabytes. The whole file must read.
         let kind = self.kind
         let check = await Task.detached(priority: .utility) { () -> (usable: Bool, digest: String?) in
@@ -266,6 +276,11 @@ final class GeoDataStore: ObservableObject {
         }
         guard check.usable else {
             return await finish(failed: String(localized: "The download is not a list of the right kind."), from: source)
+        }
+        // Another source was chosen while this one was checked: the copy in use is left alone, and the
+        // chosen one is fetched. Installing this one would keep it if the chosen one then failed.
+        if let next = pendingSource, next != source {
+            return await finish(failed: nil, from: source)
         }
         // Staged next to the list, then swapped in: the copy in use is never removed first, so a
         // failed save (a full disk, a folder that cannot be written) leaves it as it was.
@@ -285,6 +300,11 @@ final class GeoDataStore: ObservableObject {
         }
         // 0600 like the config: the list is the owner's.
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+        if expected == nil {
+            FileManager.default.createFile(atPath: uncheckedMarker.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        } else {
+            try? FileManager.default.removeItem(at: uncheckedMarker)
+        }
         file.invalidate()
         phase = .idle
         revision += 1

@@ -62,8 +62,16 @@ enum GeoDisplay {
 
     /// A line about a list: when it was last synced (the time, and how long ago), or that it is being
     /// downloaded, or why the last download failed.
-    static func status(_ kind: GeoKind, updated: Date?, phase: GeoDataStore.Phase,
+    /// `unchecked`: the list in use came from a source that publishes no checksum.
+    static func status(_ kind: GeoKind, updated: Date?, phase: GeoDataStore.Phase, unchecked: Bool = false,
                        now: Date = Date(), in bundle: Bundle = .main) -> String {
+        let line = baseStatus(kind, updated: updated, phase: phase, now: now, in: bundle)
+        guard unchecked, updated != nil, phase != .updating else { return line }
+        return "\(line) \(String(localized: "Not checked: its source publishes no checksum.", bundle: bundle))"
+    }
+
+    private static func baseStatus(_ kind: GeoKind, updated: Date?, phase: GeoDataStore.Phase,
+                                   now: Date, in bundle: Bundle) -> String {
         switch phase {
         case .updating:
             return kind == .ip ? String(localized: "Downloading the country list…", bundle: bundle)
@@ -267,7 +275,7 @@ struct GeoDataControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(GeoDisplay.status(kind, updated: store.updated, phase: store.phase))
+            Text(GeoDisplay.status(kind, updated: store.updated, phase: store.phase, unchecked: store.isUnchecked))
                 .font(.system(size: 12))
                 .foregroundColor(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

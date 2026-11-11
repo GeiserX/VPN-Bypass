@@ -346,8 +346,10 @@ final class GeoRetryTests: XCTestCase {
                  GeoDataStore.geoip.fetchChecksum)
         attempts = 0
         // Downloads are on for these tests, so the published checksum would be fetched from the real
-        // source and would not match the made-up list: none is published here.
-        GeoDataStore.geoip.fetchChecksum = { _ in nil }
+        // source and would not match the made-up list. The default source is a preset, which must
+        // publish one: the made-up list's own digest stands in for it.
+        let digest = GeoChecksum.sha256(Dat.sample)
+        GeoDataStore.geoip.fetchChecksum = { _ in digest }
         try? FileManager.default.removeItem(at: GeoDataFile.geoip.url)
         GeoDataFile.geoip.invalidate()
         GeoDataStore.autoUpdate = true

@@ -1253,3 +1253,5 @@
 "The download is larger than a list can be." = "The download is larger than a list can be.";
 "Too large to route: %lld ranges, the limit is %lld." = "Too large to route: %lld ranges, the limit is %lld.";
 "IPv4 only; IPv6 is not routed or blocked." = "IPv4 only; IPv6 is not routed or blocked.";
+"Could not download the checksum its source publishes." = "Could not download the checksum its source publishes.";
+"Not checked: its source publishes no checksum." = "Not checked: its source publishes no checksum.";

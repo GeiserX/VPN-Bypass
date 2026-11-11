@@ -1253,3 +1253,5 @@
 "The download is larger than a list can be." = "La descarga es mayor de lo que puede ser una lista.";
 "Too large to route: %lld ranges, the limit is %lld." = "Demasiado grande para enrutar: %lld rangos, el límite es %lld.";
 "IPv4 only; IPv6 is not routed or blocked." = "Solo IPv4; IPv6 no se enruta ni se bloquea.";
+"Could not download the checksum its source publishes." = "No se pudo descargar la suma de comprobación que publica su origen.";
+"Not checked: its source publishes no checksum." = "Sin comprobar: su origen no publica suma de comprobación.";
