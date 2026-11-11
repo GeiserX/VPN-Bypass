@@ -78,7 +78,10 @@ enum RuleDestinationBuilder {
                     add(rule.pattern, true)
                 }
             case .geoip:
-                for range in geoip[rule.pattern.lowercased()] ?? [] where !DestinationInstallPolicy.refusesInstall(range) {
+                // A downloaded list is held to more than a typed CIDR: no prefix shorter than /8 and no
+                // private or reserved space outside the `private` list (GeoIPRangePolicy).
+                let code = rule.pattern.lowercased()
+                for range in geoip[code] ?? [] where GeoIPRangePolicy.allows(range, code: code) {
                     add(range, true)
                 }
             case .geosite:

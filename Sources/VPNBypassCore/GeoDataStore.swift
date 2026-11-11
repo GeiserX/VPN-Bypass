@@ -435,6 +435,34 @@ enum GeoIPRule {
     }
 }
 
+/// What a downloaded country list may route or block. The list comes from a server, so a broken or
+/// hostile one must not take over the routing table with a few short prefixes (four /2 ranges cover
+/// all of IPv4), nor send the Mac's own networks (the LAN, a VPN's internal DNS, loopback) somewhere.
+enum GeoIPRangePolicy {
+    /// No real country list goes below /8 (the shortest in the published lists is one /7, in the US).
+    static let shortestPrefix = 8
+
+    /// Address space that is not any country's: private, loopback, link-local, carrier-grade NAT,
+    /// benchmarking, multicast and reserved. Only the `private` list may name it.
+    static let specialUse = ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+                             "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/3"]
+
+    static func allows(_ range: String, code: String) -> Bool {
+        guard let (network, prefix) = RouteCIDR.parse(range), let start = WildcardIPv4.parse(network),
+              prefix >= shortestPrefix, !DestinationInstallPolicy.refusesInstall(range) else { return false }
+        if code.lowercased() == "private" { return true }
+        return !specialUse.contains { overlaps(start, prefix, $0) }
+    }
+
+    /// Two IPv4 ranges overlap when one holds the other's start.
+    private static func overlaps(_ start: UInt32, _ prefix: Int, _ other: String) -> Bool {
+        guard let (network, otherPrefix) = RouteCIDR.parse(other), let otherStart = WildcardIPv4.parse(network) else { return false }
+        let shorter = min(prefix, otherPrefix)
+        let mask: UInt32 = shorter == 0 ? 0 : ~UInt32(0) << UInt32(32 - shorter)
+        return start & mask == otherStart & mask
+    }
+}
+
 // MARK: - RouteManager
 
 extension RouteManager {
