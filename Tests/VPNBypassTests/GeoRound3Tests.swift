@@ -205,3 +205,10 @@ final class UserBlockRouteNamedBlockTests: XCTestCase {
         XCTAssertTrue(rm.config.routes.contains { $0.id == mine.id }, "a Block route the user named Block was deleted")
     }
 }
+
+final class CountryRowWordingTests: XCTestCase {
+    func testOneRangeReadsSingular() {
+        XCTAssertEqual(GeoDisplay.detail(count: 1, hasData: true, leftOut: 2), "1 range, 2 left out")
+        XCTAssertEqual(GeoDisplay.detail(count: 3, hasData: true, leftOut: 2), "3 ranges, 2 left out")
+    }
+}

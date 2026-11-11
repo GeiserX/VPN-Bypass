@@ -27,6 +27,7 @@ enum GeoDisplay {
             let limit = GeoDataFile.maxRangesPerCountry
             return String(localized: "Too large to route: \(n) ranges, the limit is \(limit).", bundle: bundle)
         case 0 where leftOut == 0: return String(localized: "Not in the country list.", bundle: bundle)
+        case 1 where leftOut > 0: return String(localized: "1 range, \(leftOut) left out", bundle: bundle)
         case let n where leftOut > 0: return String(localized: "\(n) ranges, \(leftOut) left out", bundle: bundle)
         case 1: return String(localized: "1 range", bundle: bundle)
         case let n: return String(localized: "\(n) ranges", bundle: bundle)

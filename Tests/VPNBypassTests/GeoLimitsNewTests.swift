@@ -85,7 +85,7 @@ final class RuleRefusalTests: XCTestCase {
         try Dat.file([Dat.entry("IR", [Dat.cidr([203, 0, 113, 0], 24), Dat.cidr([10, 202, 10, 10], 32)])]).write(to: file.url)
         XCTAssertEqual(file.ranges(for: ["ir"])["ir"], ["203.0.113.0/24"])
         XCTAssertEqual(file.leftOut(for: "ir"), 1)
-        XCTAssertEqual(GeoDisplay.detail(count: 1, hasData: true, leftOut: 1), String(localized: "\(1) ranges, \(1) left out"))
+        XCTAssertEqual(GeoDisplay.detail(count: 1, hasData: true, leftOut: 1), String(localized: "1 range, \(1) left out"))
         XCTAssertEqual(GeoDisplay.detail(count: 1, hasData: true), String(localized: "1 range"))
     }
 }

@@ -1255,6 +1255,7 @@
 "IPv4 only; IPv6 is not routed or blocked." = "IPv4 uniquement ; IPv6 n'est ni routé ni bloqué.";
 "Could not download the checksum its source publishes." = "Impossible de télécharger la somme de contrôle publiée par sa source.";
 "Not checked: its source publishes no checksum." = "Non vérifiée : sa source ne publie aucune somme de contrôle.";
+"1 range, %lld left out" = "1 plage, %lld exclues";
 "%lld ranges, %lld left out" = "%lld plages, %lld exclues";
 "Left out: all rules together would pass the limit of %lld wildcards (this one adds %lld)." = "Exclue : toutes les règles ensemble dépasseraient la limite de %lld jokers (celle-ci en ajoute %lld).";
 "Wildcards left out: %lld. Earlier rules take more than %lld names under each." = "Jokers exclus : %lld. Les règles précédentes prennent plus de %lld noms sous chacun.";
