@@ -70,7 +70,16 @@ final class GeoCountryRangesTests: XCTestCase {
     }
 
     private func ranges(_ count: Int) -> [[UInt8]] {
-        (0..<count).map { Dat.cidr([UInt8(10 + $0 / 65_536), UInt8(($0 / 256) % 256), UInt8($0 % 256), 0], 24) }
+        var result: [[UInt8]] = []
+        result.reserveCapacity(count)
+        for i in 0..<count {
+            let first: UInt8 = UInt8(10 + i / 65_536)
+            let second: UInt8 = UInt8((i / 256) % 256)
+            let third: UInt8 = UInt8(i % 256)
+            let ip: [UInt8] = [first, second, third, 0]
+            result.append(Dat.cidr(ip, 24))
+        }
+        return result
     }
 
     private func install(_ code: String, _ count: Int) throws {

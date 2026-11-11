@@ -27,9 +27,11 @@ final class RuleBlockLifecycleTests: XCTestCase {
         }
         var waited = 0
         while rm.isApplyingRoutes && waited < 100 { try? await Task.sleep(nanoseconds: 20_000_000); waited += 1 }
+        // A gate still held may have an owner that is running: releasing it would not stop that
+        // apply, and it would go on using the fake kernel. Stop here instead of forcing it.
         if rm.isApplyingRoutes {
-            rm.releaseRouteOperation()
-            XCTAssertFalse(rm.isApplyingRoutes, "an earlier test left the route-operation gate held")
+            XCTFail("an earlier test left the route-operation gate held")
+            throw XCTSkip("the route-operation gate is held by another test")
         }
         saved = (rm.config, rm.isVPNConnected, rm.localGateway, HelperManager.shared.helperState, rm.isLoading)
         var cfg = RouteManager.Config()
