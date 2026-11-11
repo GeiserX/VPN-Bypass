@@ -18,6 +18,19 @@ final class RuleBlockLifecycleTests: XCTestCase {
     override func setUp() async throws {
         await rm.cancelConfigFollowUps()
         await rm.waitForBackgroundRefreshForTests()
+        // Another test can leave a pause on or the route-operation gate held, and then every apply
+        // here returns at once having done nothing. Both are cleared, and the reason is named if one
+        // had to be.
+        if rm.isPaused {
+            rm.endPause(reason: "a lifecycle test", apply: false)
+            XCTAssertFalse(rm.isPaused, "an earlier test left routing paused")
+        }
+        var waited = 0
+        while rm.isApplyingRoutes && waited < 100 { try? await Task.sleep(nanoseconds: 20_000_000); waited += 1 }
+        if rm.isApplyingRoutes {
+            rm.releaseRouteOperation()
+            XCTAssertFalse(rm.isApplyingRoutes, "an earlier test left the route-operation gate held")
+        }
         saved = (rm.config, rm.isVPNConnected, rm.localGateway, HelperManager.shared.helperState, rm.isLoading)
         var cfg = RouteManager.Config()
         cfg.routingMode = .custom
