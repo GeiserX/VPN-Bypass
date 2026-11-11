@@ -584,7 +584,7 @@ struct RulesTab: View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 GroupSection {
-                    if sortedRules.isEmpty {
+                    if routeManager.config.rules.isEmpty {
                         EmptyState(systemImage: "list.bullet",
                                    title: String(localized: "No rules yet"),
                                    message: String(localized: "Add a rule to send a domain, service, or IP range through a specific route."),
@@ -601,7 +601,7 @@ struct RulesTab: View {
                 }
             }
         }
-        .pageSubtitle(Self.purpose(ruleCount: sortedRules.count))
+        .pageSubtitle(Self.purpose(ruleCount: routeManager.config.rules.count))
         .pageTitleActions([.add(String(localized: "Add Rule")) { sheetState = .add }])
         .sheet(item: $sheetState) { state in
             RuleEditorSheet(editingRule: state.rule, services: routeManager.config.services) { rule in
@@ -628,31 +628,38 @@ struct RulesTab: View {
 
     @ViewBuilder
     private var ruleRows: some View {
-        if shownRules.isEmpty {
+        // Sorted and filtered once per pass, not once per use.
+        let shown = shownRules
+        let services = routeManager.config.services
+        if shown.isEmpty {
             SettingsSearchMiss(search: searchText)
         }
-        let services = routeManager.config.services
-        ForEach(Array(shownRules.enumerated()), id: \.element.id) { idx, rule in
-            if idx > 0 { InsetDivider() }
-            RuleRow(
-                rule: rule,
-                onEdit: { sheetState = .edit(rule) },
-                onDelete: { deleteRule(rule) },
-                onToggle: { enabled in toggleRule(rule.id, enabled: enabled) },
-                onReassign: { newRouteId in reassignRule(rule.id, to: newRouteId) },
-                onNewRoute: {
-                    pendingNewRouteCompletion = { newRoute in reassignRule(rule.id, to: newRoute.id) }
-                    showingNewRouteSheet = true
-                },
-                showsActions: Self.hoveredForScreenshots == RuleRow.patternDisplay(rule, services: services)
-            )
-            .draggable(rule.id.uuidString)
-            .dropDestination(for: String.self) { items, _ in
-                // A read-only page (another mode) takes no drop: `.disabled` does not stop one.
-                guard isEnabled else { return false }
-                guard let draggedIdString = items.first, let draggedId = UUID(uuidString: draggedIdString) else { return false }
-                moveRule(draggedId: draggedId, to: rule.id)
-                return true
+        // Lazy: a list of thousands of rules (a bulk-imported range list) builds only the rows
+        // on screen. An eager VStack built every row, its chip menu and its drag/drop targets
+        // up front, which froze the page and took gigabytes.
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(shown.enumerated()), id: \.element.id) { idx, rule in
+                if idx > 0 { InsetDivider() }
+                RuleRow(
+                    rule: rule,
+                    onEdit: { sheetState = .edit(rule) },
+                    onDelete: { deleteRule(rule) },
+                    onToggle: { enabled in toggleRule(rule.id, enabled: enabled) },
+                    onReassign: { newRouteId in reassignRule(rule.id, to: newRouteId) },
+                    onNewRoute: {
+                        pendingNewRouteCompletion = { newRoute in reassignRule(rule.id, to: newRoute.id) }
+                        showingNewRouteSheet = true
+                    },
+                    showsActions: Self.hoveredForScreenshots == RuleRow.patternDisplay(rule, services: services)
+                )
+                .draggable(rule.id.uuidString)
+                .dropDestination(for: String.self) { items, _ in
+                    // A read-only page (another mode) takes no drop: `.disabled` does not stop one.
+                    guard isEnabled else { return false }
+                    guard let draggedIdString = items.first, let draggedId = UUID(uuidString: draggedIdString) else { return false }
+                    moveRule(draggedId: draggedId, to: rule.id)
+                    return true
+                }
             }
         }
     }
@@ -721,22 +728,30 @@ struct RulesTab: View {
         persistAndReapply()
     }
 
-    /// Reorders `sortedRules` (dragged rule moves to the target's position) and
-    /// renumbers every rule's `order` to its new index, so future appends
-    /// (`(max order)+1`) stay consistent.
+    /// Moves the dragged rule to the target's position and renumbers every rule's `order` to its
+    /// new index, so future appends (`(max order)+1`) stay consistent.
     private func moveRule(draggedId: UUID, to targetId: UUID) {
-        guard draggedId != targetId else { return }
-        var ordered = sortedRules
-        guard let fromIndex = ordered.firstIndex(where: { $0.id == draggedId }),
-              let toIndex = ordered.firstIndex(where: { $0.id == targetId }) else { return }
-        let moved = ordered.remove(at: fromIndex)
-        ordered.insert(moved, at: toIndex)
-        for (newOrder, rule) in ordered.enumerated() {
-            if let idx = routeManager.config.rules.firstIndex(where: { $0.id == rule.id }) {
-                routeManager.config.rules[idx].order = newOrder
-            }
-        }
+        guard draggedId != targetId,
+              let moved = Self.rules(routeManager.config.rules, moving: draggedId, onto: targetId) else { return }
+        // One write to the published config, not one per rule.
+        routeManager.config.rules = moved
         persistAndReapply()
+    }
+
+    /// `rules` with the first rule `draggedId` names moved to the place of the first rule
+    /// `targetId` names, in the order the page shows them, and every `order` renumbered to its
+    /// new place; nil when either id is missing. The move works on places in the array, not on
+    /// ids, so a config.json edited by hand with two rules sharing one id keeps each copy where
+    /// it belongs, and nothing traps.
+    nonisolated static func rules(_ rules: [Rule], moving draggedId: UUID, onto targetId: UUID) -> [Rule]? {
+        // Places in `rules`, in the order the page shows them (`sortedRules` is a stable sort).
+        var shown = rules.indices.sorted { (rules[$0].order, $0) < (rules[$1].order, $1) }
+        guard let from = shown.firstIndex(where: { rules[$0].id == draggedId }),
+              let to = shown.firstIndex(where: { rules[$0].id == targetId }) else { return nil }
+        shown.insert(shown.remove(at: from), at: to)
+        var result = rules
+        for (order, index) in shown.enumerated() { result[index].order = order }
+        return result
     }
 
     private func persistAndReapply() {

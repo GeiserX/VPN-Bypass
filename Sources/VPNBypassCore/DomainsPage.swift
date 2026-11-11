@@ -241,18 +241,22 @@ struct DomainsTab: View {
                                    ? String(localized: "Add domains or IP ranges that should use VPN")
                                    : String(localized: "Add a domain above to bypass VPN"))
                 } else {
-                    ForEach(section.rows) { row in
-                        InsetDivider()
-                        ListRow(glyph: glyph(for: row.entry), name: row.entry.domain, detail: row.detail,
-                                needsAttention: row.isStale, number: row.number, numberWidth: numberWidth,
-                                numberLabel: ListRow.addressesLabel(row.number),
-                                actions: [RowAction.delete(row.entry.domain) { removeDomain(row.entry) }],
-                                isOn: switchBinding(for: row.entry),
-                                showsActions: Self.hoveredForScreenshots == row.entry.domain,
-                                // A wildcard's words and the shared address line together
-                                // need more than one line in a narrow window.
-                                detailLineLimit: nil)
-                            .disabled(routeManager.isApplyingRoutes)
+                    // Lazy, as on the Rules page: a list of thousands of ranges builds only
+                    // the rows on screen.
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(section.rows) { row in
+                            InsetDivider()
+                            ListRow(glyph: glyph(for: row.entry), name: row.entry.domain, detail: row.detail,
+                                    needsAttention: row.isStale, number: row.number, numberWidth: numberWidth,
+                                    numberLabel: ListRow.addressesLabel(row.number),
+                                    actions: [RowAction.delete(row.entry.domain) { removeDomain(row.entry) }],
+                                    isOn: switchBinding(for: row.entry),
+                                    showsActions: Self.hoveredForScreenshots == row.entry.domain,
+                                    // A wildcard's words and the shared address line together
+                                    // need more than one line in a narrow window.
+                                    detailLineLimit: nil)
+                                .disabled(routeManager.isApplyingRoutes)
+                        }
                     }
                     // Only when nothing on the page matches: the other list may hold the match.
                     if pageHasNoMatch {
@@ -336,11 +340,13 @@ struct DomainsTab: View {
 
     private func readOnlySection(_ section: DomainsPage.Section, numberWidth: CGFloat) -> some View {
         GroupSection(section.title) {
-            ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, row in
-                if index > 0 { InsetDivider() }
-                ListRow(glyph: glyph(for: row.entry), name: row.entry.domain, detail: row.detail,
-                        number: nil, numberWidth: numberWidth)
-                    .opacity(row.entry.enabled ? 1 : 0.6)
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { InsetDivider() }
+                    ListRow(glyph: glyph(for: row.entry), name: row.entry.domain, detail: row.detail,
+                            number: nil, numberWidth: numberWidth)
+                        .opacity(row.entry.enabled ? 1 : 0.6)
+                }
             }
         }
     }
