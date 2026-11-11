@@ -99,8 +99,11 @@ enum WildcardPlanner {
                 guard let route = routes[rule.routeId], route.enabled, route.egress != .unsupported else { continue }
                 let (entries, names) = claims(of: rule, services: services, lists: lists)
                 let suffixes = entries.compactMap(WildcardDomain.suffix(of:))
+                // On Block an exact name is a blackhole for the name and everything under it, so it
+                // claims that suffix for the rules below, not only the name.
+                let blockedNames = route.egress == .block ? names.compactMap(WildcardDomain.normalizedSuffix) : []
                 defer {
-                    for suffix in suffixes {
+                    for suffix in suffixes + blockedNames {
                         claimedSuffixes.insert(suffix)
                         guard claimedEntries.insert(suffix).inserted else { continue }
                         let entry = WildcardDomain.entry(for: suffix)
@@ -121,6 +124,7 @@ enum WildcardPlanner {
                 // trackers names `ads.example.com`, and its subdomains are the same tracker.
                 let blocked = via == .block ? suffixes + names.compactMap(WildcardDomain.normalizedSuffix) : suffixes
                 // A blackhole that asks for more wildcards than a list may is left out whole.
+                // The hosts-file fallback takes the lists this skips (GeoSiteExpansion.exceedsWildcards).
                 if via == .block, blocked.count > GeoSiteExpansion.maxSuffixes { continue }
                 for suffix in blocked where !domains(of: suffix).contains(where: claimedSuffixes.contains) {
                     // Claimed names, then claimed wildcards, at or under this suffix.

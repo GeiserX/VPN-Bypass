@@ -48,6 +48,8 @@ final class GeoDataFile: @unchecked Sendable {
     private let lock = NSLock()
     private var stamp: Date?
     private var rangesByCode: [String: [String]] = [:]
+    /// Codes the file does not hold, so asking again does not read the whole file again.
+    private var missingCodes = Set<String>()
     private var expansionsByPattern: [String: GeoSiteExpansion] = [:]
     private var countryCounts: [String: Int]?
     private var listCounts: [String: Int]?
@@ -84,6 +86,7 @@ final class GeoDataFile: @unchecked Sendable {
         guard stamp != current else { return }
         stamp = current
         rangesByCode = [:]
+        missingCodes = []
         expansionsByPattern = [:]
         countryCounts = nil
         listCounts = nil
@@ -97,11 +100,11 @@ final class GeoDataFile: @unchecked Sendable {
         guard kind == .ip, !codes.isEmpty, let current = updated else { return [:] }
         lock.lock(); defer { lock.unlock() }
         refresh(current)
-        let missing = codes.subtracting(rangesByCode.keys)
+        let missing = codes.subtracting(rangesByCode.keys).subtracting(missingCodes)
         if !missing.isEmpty, let data = data() {
-            for (code, ranges) in GeoIPDat.ranges(for: missing, in: data) {
-                rangesByCode[code] = ranges
-            }
+            let found = GeoIPDat.ranges(for: missing, in: data)
+            for (code, ranges) in found { rangesByCode[code] = ranges }
+            missingCodes.formUnion(missing.subtracting(found.keys))
         }
         return rangesByCode.filter { codes.contains($0.key) }
     }
@@ -210,7 +213,9 @@ final class GeoDataStore: ObservableObject {
     @discardableResult
     func update(from source: URL) async -> Bool {
         if phase == .updating {
-            if source != activeSource { pendingSource = source }
+            // The latest choice wins: choosing the source that is running again leaves nothing queued
+            // after it, and choosing another queues that one in place of any earlier choice.
+            pendingSource = source == activeSource ? nil : source
             return false
         }
         lastAttempt = Date()

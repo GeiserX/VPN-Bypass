@@ -172,8 +172,6 @@ final class GeoStoreSafetyTests: XCTestCase {
         while gate == nil { await Task.yield() }
         let queued = await store.update(from: b)
         XCTAssertFalse(queued, "the call that finds one running returns at once")
-        let sameAgain = await store.update(from: a)
-        XCTAssertFalse(sameAgain)
         gate?.resume()
         let result = await first.value
         XCTAssertTrue(result)
@@ -181,6 +179,26 @@ final class GeoStoreSafetyTests: XCTestCase {
         XCTAssertEqual(store.file.ranges(for: ["ir"])["ir"], ["11.0.0.0/8"])
         XCTAssertNil(store.file.ranges(for: ["ru"])["ru"], "the list of the source no longer wanted was not installed")
         XCTAssertEqual(store.phase, .idle)
+    }
+
+    func testChoosingTheRunningSourceAgainCancelsTheQueuedOne() async {
+        var calls: [URL] = []
+        var gate: CheckedContinuation<Void, Never>?
+        store.fetch = { [unowned self] url in
+            calls.append(url)
+            if url == self.a { await withCheckedContinuation { gate = $0 } }
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("dl-\(UUID().uuidString)")
+            try self.list("RU", 12).write(to: file)
+            return file
+        }
+        let first = Task { await store.update(from: a) }
+        while gate == nil { await Task.yield() }
+        _ = await store.update(from: b)
+        _ = await store.update(from: a)
+        gate?.resume()
+        _ = await first.value
+        XCTAssertEqual(calls, [a], "the last choice was A, so B is never fetched")
+        XCTAssertEqual(store.file.ranges(for: ["ru"])["ru"], ["12.0.0.0/8"])
     }
 
     func testAFailureIsReportedAndTheStoreCanTryAgain() async {

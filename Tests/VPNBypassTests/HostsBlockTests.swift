@@ -112,6 +112,7 @@ final class HostsBlockLifecycleTests: XCTestCase {
         sent = []
         failWrites = false
         rm.hostsBlockSignature = nil
+        rm.hostsBlockMayExist = false
         rm.hostsBlock = HostsBlockState()
         rm.resetShutdownStateForTests()
         HelperManager.shared.helperState = .ready
@@ -137,6 +138,7 @@ final class HostsBlockLifecycleTests: XCTestCase {
         rm.config = saved.config
         HelperManager.shared.helperState = saved.helper
         rm.hostsBlockSignature = saved.signature
+        rm.hostsBlockMayExist = false
         rm.hostsBlock = saved.state
         rm.resetShutdownStateForTests()
     }
@@ -199,6 +201,42 @@ final class HostsBlockLifecycleTests: XCTestCase {
         XCTAssertTrue(RouteManager.hostsBlockNames(config: rm.config, geosite: ["bigads": big]).isEmpty)
     }
 
+    func testListsThatTogetherPassTheHelpersBudgetAreLeftOutWhole() {
+        let a = GeoSiteExpansion(suffixes: (0..<300_000).map { "a\($0).example.net" })
+        let b = GeoSiteExpansion(suffixes: (0..<300_000).map { "b\($0).example.net" })
+        rm.config.rules = [Rule(matchType: .geosite, pattern: "one", routeId: block.id, order: 0),
+                           Rule(matchType: .geosite, pattern: "two", routeId: block.id, order: 1)]
+        let names = RouteManager.hostsBlockNames(config: rm.config, geosite: ["one": a, "two": b])
+        XCTAssertEqual(names.count, 300_000, "the second list would make the update one the helper refuses")
+        XCTAssertTrue(names.allSatisfy { $0.hasPrefix("a") })
+    }
+
+    func testAListOfTenThousandSuffixesAndAnExactNameGoesToTheHostsFile() {
+        let list = GeoSiteExpansion(suffixes: (0..<GeoSiteExpansion.maxSuffixes).map { "h\($0).example.net" },
+                                    names: ["single.example.org"])
+        XCTAssertFalse(list.isTooLarge)
+        XCTAssertTrue(list.exceedsWildcards(onBlock: true))
+        XCTAssertFalse(list.exceedsWildcards(onBlock: false))
+        XCTAssertEqual(RouteManager.hostsBlockNames(config: rm.config, geosite: ["bigads": list]).count, 10_001)
+        XCTAssertTrue(WildcardPlanner.configured(rm.config, geosite: ["bigads": list]).isEmpty, "and no wildcard, so no name is lost")
+    }
+
+    func testAnExactNameOnBlockClaimsItsSuffixForLaterWildcards() {
+        let ads = GeoSiteExpansion(suffixes: [], names: ["ads.example.com"])
+        rm.config.rules = [Rule(matchType: .geosite, pattern: "adlist", routeId: block.id, order: 0),
+                           Rule(matchType: .suffix, pattern: "x.ads.example.com", routeId: direct.id, order: 1)]
+        let specs = WildcardPlanner.configured(rm.config, geosite: ["adlist": ads])
+        XCTAssertTrue(specs.contains { $0.suffix == "ads.example.com" })
+        XCTAssertFalse(specs.contains { $0.suffix == "x.ads.example.com" }, "the block above decides first")
+    }
+
+    func testAddressesTheMacNeedsAreNotBlocked() {
+        let protected = ["9.9.9.9", "1.1.1.1", "not an address"]
+        XCTAssertTrue(RouteManager.address(in: protected, isCoveredBy: "9.9.9.0/24"))
+        XCTAssertTrue(RouteManager.address(in: protected, isCoveredBy: "9.9.9.9"))
+        XCTAssertFalse(RouteManager.address(in: protected, isCoveredBy: "8.8.8.0/24"))
+    }
+
     // MARK: - Writing them
 
     func testAnApplySendsTheListOnceAndAnUnchangedListNotAgain() async {
@@ -243,6 +281,19 @@ final class HostsBlockLifecycleTests: XCTestCase {
         XCTAssertEqual(sent.count, 2, "the next apply tries again")
         XCTAssertNil(rm.hostsBlock.error)
         XCTAssertEqual(rm.hostsBlock.count, 10_002)
+    }
+
+    func testAFailedReplacementStillOwnsTheSectionForCleanup() async {
+        await rm.applyHostsBlocks()
+        install(["bigads": 10_003])
+        failWrites = true
+        await rm.applyHostsBlocks()
+        XCTAssertNil(rm.hostsBlockSignature)
+        failWrites = false
+        rm.config.rules = []
+        await rm.removeAllRoutes()
+        XCTAssertEqual(sent.last, [], "the earlier section is still taken out")
+        XCTAssertFalse(rm.hostsBlockMayExist)
     }
 
     func testTheRuleGoneTheNamesGo() async {

@@ -195,6 +195,28 @@ final class RuleBlockLifecycleTests: XCTestCase {
         rm.vpnGateway = nil
     }
 
+    func testABatchThatTimesOutStaysOwnedSoItCanBeReleased() async {
+        rm.addBlockRoutesBatchOverrideForTests = { _ in (0, 0, [], "timed out") }
+        defer { rm.addBlockRoutesBatchOverrideForTests = nil }
+        await rm.applyRuleBlocks([block("203.0.113.0/24", "r")])
+        XCTAssertEqual(rm.ruleBlocks.map(\.destination), ["203.0.113.0/24"], "the helper may still install it, so it is ours")
+    }
+
+    func testABatchThatFinishesAfterATeardownIsReleased() async {
+        let manager = rm
+        rm.addBlockRoutesBatchOverrideForTests = { destinations in
+            await manager.releaseRuleBlocks(reason: "teardown while the batch is out")
+            return (destinations.count, 0, [], nil)
+        }
+        defer { rm.addBlockRoutesBatchOverrideForTests = nil }
+        await rm.applyRuleBlocks([block("203.0.113.0/24", "r")])
+        XCTAssertTrue(rm.ruleBlocks.isEmpty, "nothing is left listed after the teardown")
+    }
+
+    func testTheDNSServersInUseAreProtectedToo() {
+        XCTAssertTrue(RouteManager.address(in: ["9.9.9.9"], isCoveredBy: "9.9.9.0/24"))
+    }
+
     func testTheRowCountsTheAddressesItBlocks() async {
         await rm.applyAllRoutes()
         let rule = rm.config.rules[0]

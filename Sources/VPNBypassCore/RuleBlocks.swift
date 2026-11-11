@@ -13,12 +13,20 @@ import Foundation
 
 extension RouteManager {
 
+    /// The addresses a block must not cover: the gateways and every DNS server in use.
+    func protectedAddresses() async -> [String] {
+        // The gateways, the DNS servers the app falls back to, the one it found at start, and the
+        // ones the system resolvers use now (the physical network's and the tunnel's).
+        let output = await runProcessAsync("/usr/sbin/scutil", arguments: ["--dns"], timeout: 3)?.output ?? ""
+        let active = ScutilDNS.parse(output).flatMap(\.nameservers)
+        return [localGateway, vpnGateway, detectedDNSServerDisplay].compactMap { $0 } + config.fallbackDNS + active
+    }
+
     /// A block on `destination` would cut the Mac off from its own network: it holds the gateway
     /// the routes go through, the VPN's, or a DNS server the app asks. Refused, as the batch add
     /// refuses a route to the VPN's gateway.
-    func blockWouldCutOffTheMac(_ destination: String) -> Bool {
-        let protected = [localGateway, vpnGateway].compactMap { $0 } + config.fallbackDNS
-        return protected.contains { address in
+    static func address(in protected: [String], isCoveredBy destination: String) -> Bool {
+        protected.contains { address in
             guard WildcardIPv4.parse(address) != nil else { return false }
             return destination.contains("/") ? RuleResolver.ipv4(address, inCIDR: destination) : destination == address
         }
@@ -32,8 +40,9 @@ extension RouteManager {
               HelperManager.shared.isHelperInstalled || addBlockRoutesBatchOverrideForTests != nil else { return }
         var wanted: [String: String] = [:]
         var refused = 0
+        let protected = await protectedAddresses()
         for block in desired where wanted[block.destination] == nil {
-            if blockWouldCutOffTheMac(block.destination) { refused += 1; continue }
+            if Self.address(in: protected, isCoveredBy: block.destination) { refused += 1; continue }
             wanted[block.destination] = block.source
         }
         if refused > 0 {
@@ -59,11 +68,19 @@ extension RouteManager {
         // decided when the rules were compiled, so this is only a race, and a block would replace it.
         let fresh = wanted.keys.filter { !have.contains($0) && !routedNow.contains($0) }.sorted()
         if !fresh.isEmpty {
+            let epoch = ruleBlockEpoch
             let result = await addBlockRoutesBatchVia(fresh)
-            let failed = (result.error != nil && result.failedDestinations.isEmpty) ? Set(fresh) : Set(result.failedDestinations)
+            // An error with no failed destinations is a deadline: the helper may still install the
+            // batch, so these are kept as ours (a removal of one that never landed is harmless).
+            let failed = Set(result.failedDestinations)
             let blocked = fresh.filter { !failed.contains($0) }
             let now = Date()
             ruleBlocks += blocked.map { ActiveRoute(destination: $0, gateway: "", source: wanted[$0] ?? "", timestamp: now) }
+            if epoch != ruleBlockEpoch {
+                // A teardown ran while the batch was out: what it installed is released now.
+                await releaseRuleBlocks(reason: "the batch finished after a teardown")
+                return
+            }
             if failed.isEmpty {
                 log(.success, "Block: \(blocked.count) address(es) blocked")
             } else {
@@ -82,6 +99,7 @@ extension RouteManager {
     /// Takes every rule block out. A failed removal keeps its record, so a later pass, the next
     /// teardown or the startup sweep can still remove it.
     func releaseRuleBlocks(reason: String) async {
+        ruleBlockEpoch &+= 1
         guard !ruleBlocks.isEmpty else { return }
         // A block an install replaced is a route, and was removed with the routes.
         let routedNow = Set(activeRoutes.map(\.destination))

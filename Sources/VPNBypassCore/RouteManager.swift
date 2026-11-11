@@ -55,6 +55,11 @@ final class RouteManager: ObservableObject {
     /// A fingerprint of the names last written, so an unchanged list is not sent again; nil when the
     /// blocked section is not there.
     var hostsBlockSignature: Int?
+    /// The hosts file may hold our blocked section (a write was sent, or one was found at start), so
+    /// a release must send the removal even when no write is known to have succeeded.
+    var hostsBlockMayExist = false
+    /// Bumped when the rule blocks are released, so an install that finishes after it can tell.
+    var ruleBlockEpoch = 0
     /// The retry waiting after a failed list download, by list (GeoDataStore.swift).
     var geoRetryTasks: [GeoKind: Task<Void, Never>] = [:]
     var blockedDestinations: Set<String> { Set(blockedRoutes.map(\.destination)) }
@@ -3007,15 +3012,22 @@ final class RouteManager: ObservableObject {
         while index < hosts.count {
             let endIndex = min(index + batchSize, hosts.count)
             let batch = Array(hosts[index..<endIndex])
+            // A sliding window, as the classic path uses: each host fans out to about five dig/curl
+            // processes, and a list of thousands of names must not start them all at once.
+            let maxConcurrentResolves = 16
             let dnsResults = await withTaskGroup(of: (host: String, ips: [String]?).self) { group in
-                for host in batch {
-                    group.addTask {
-                        let ips = await DNSResolver.resolveIPsParallel(for: host, userDNS: userDNS, fallbackDNS: fallbackDNS)
-                        return (host, ips)
-                    }
+                var next = 0
+                func add() {
+                    let host = batch[next]
+                    next += 1
+                    group.addTask { (host, await DNSResolver.resolveIPsParallel(for: host, userDNS: userDNS, fallbackDNS: fallbackDNS)) }
                 }
+                while next < batch.count && next < maxConcurrentResolves { add() }
                 var results: [(host: String, ips: [String]?)] = []
-                for await r in group { results.append(r) }
+                while let r = await group.next() {
+                    results.append(r)
+                    if next < batch.count { add() }
+                }
                 return results
             }
             for r in dnsResults {

@@ -881,7 +881,7 @@ struct RuleRow: View {
         case .geosite:
             let list = GeoDataFile.geosite.expansions(for: [key])[key]
             // On the Block route a list too large for wildcards is blocked in /etc/hosts instead.
-            if assignedRoute?.egress == .block, let list, list.found, list.isTooLarge, list.count <= HostsBlockSection.maxNames {
+            if assignedRoute?.egress == .block, let list, list.found, list.exceedsWildcards(onBlock: true), list.count <= HostsBlockSection.maxNames {
                 return GeoDisplay.hostsDetail(count: list.count, manageHosts: routeManager.config.manageHostsFile,
                                               state: routeManager.hostsBlock)
             }

@@ -37,16 +37,29 @@ extension RouteManager {
         var claimedNames = Set<String>()
         var seen = Set<String>()
         var names: [String] = []
+        var bytes = 0
         for rule in config.rules.filter(\.enabled).sorted(by: { $0.order < $1.order }) {
             guard let route = routes[rule.routeId], route.enabled, route.egress != .unsupported else { continue }
             if route.egress == .block, rule.matchType == .geosite,
-               let list = lists[rule.pattern.lowercased()], list.found, list.isTooLarge,
+               let list = lists[rule.pattern.lowercased()], list.found, list.exceedsWildcards(onBlock: true),
                list.count <= HostsBlockSection.maxNames {
+                // The helper takes the whole update or none of it, so a list that would put the
+                // total over its count or byte budget is left out whole, not cut.
+                var added: [String] = []
+                var addedBytes = 0
+                var local = Set<String>()
                 for name in list.suffixes + list.names where HostsBlockSection.isValidName(name) {
                     if claimedNames.contains(name) || WildcardDomain.ancestors(of: name).contains(where: claimedSuffixes.contains) {
                         continue
                     }
-                    if seen.insert(name).inserted { names.append(name) }
+                    guard !seen.contains(name), local.insert(name).inserted else { continue }
+                    added.append(name)
+                    addedBytes += name.utf8.count + HostsBlockSection.address.utf8.count + 2
+                }
+                if names.count + added.count <= HostsBlockSection.maxNames, bytes + addedBytes <= HostsBlockSection.maxBytes {
+                    names += added
+                    seen.formUnion(added)
+                    bytes += addedBytes
                 }
             }
             let (entries, exact) = WildcardPlanner.claims(of: rule, services: services, lists: lists)
@@ -73,17 +86,21 @@ extension RouteManager {
             names = []
             let state = HostsBlockState(count: 0, error: nil, needsHostsFile: true)
             if hostsBlock != state { hostsBlock = state }
-            if hostsBlockSignature == nil { return }
+            if hostsBlockSignature == nil && !hostsBlockMayExist { return }
         }
-        if !wanted && hostsBlockSignature == nil {
+        if !wanted && hostsBlockSignature == nil && !hostsBlockMayExist {
             if hostsBlock != HostsBlockState() { hostsBlock = HostsBlockState() }
             return
         }
         guard HelperManager.shared.isHelperInstalled || updateBlockedHostsOverrideForTests != nil else { return }
         let signature = names.hashValue
         if signature == hostsBlockSignature, hostsBlock.error == nil { return }
+        // From here on a section may exist, whatever the write reports: a timed-out write can finish
+        // later, and a failed replacement leaves the previous section in place.
+        if !names.isEmpty { hostsBlockMayExist = true }
         let result = await updateBlockedHostsVia(names)
         if result.success {
+            hostsBlockMayExist = !names.isEmpty
             hostsBlockSignature = names.isEmpty ? nil : signature
             hostsBlock = HostsBlockState(count: names.count, error: nil, needsHostsFile: wanted && names.isEmpty)
             if wanted && !names.isEmpty { log(.success, "Block: \(names.count) name(s) blocked in /etc/hosts") }
@@ -97,7 +114,7 @@ extension RouteManager {
     /// Takes the blocked section out of the hosts file. A failure keeps the signature, so a later
     /// teardown or the startup check tries again.
     func releaseHostsBlocks(reason: String) async {
-        guard hostsBlockSignature != nil else { return }
+        guard hostsBlockSignature != nil || hostsBlockMayExist else { return }
         guard HelperManager.shared.isHelperInstalled || updateBlockedHostsOverrideForTests != nil else {
             log(.error, "Cannot release the blocked names in /etc/hosts: the helper is not ready; they stay until it is")
             return
@@ -105,6 +122,7 @@ extension RouteManager {
         let result = await updateBlockedHostsVia([])
         if result.success {
             hostsBlockSignature = nil
+            hostsBlockMayExist = false
             hostsBlock = HostsBlockState()
             log(.info, "Released the blocked names in /etc/hosts: \(reason)")
         } else {
@@ -119,7 +137,12 @@ extension RouteManager {
               let hosts = try? String(contentsOfFile: "/etc/hosts", encoding: .utf8),
               HostsBlockSection.hasSection(hosts) else { return }
         let wanted = !Self.hostsBlockNames(config: config, geosite: geositeExpansions()).isEmpty
-        guard !wanted || !config.manageHostsFile else { return }
+        guard !wanted || !config.manageHostsFile else {
+            // Wanted and allowed: the next apply puts the names back, but a release before it must
+            // still take this section out.
+            hostsBlockMayExist = true
+            return
+        }
         let result = await updateBlockedHostsVia([])
         if result.success {
             log(.info, "Removed the blocked names a previous run left in /etc/hosts")

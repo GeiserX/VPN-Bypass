@@ -40,6 +40,11 @@ struct GeoSiteExpansion: Equatable {
     var count: Int { suffixes.count + names.count }
     var isTooLarge: Bool { suffixes.count > Self.maxSuffixes || names.count > Self.maxNames }
 
+    /// Whether the list is too large to serve as wildcards on its route. On the Block route the exact
+    /// names become wildcards too, so the two counts add up there; the planner, the hosts-file
+    /// fallback and the row all ask this one question.
+    func exceedsWildcards(onBlock: Bool) -> Bool { isTooLarge || (onBlock && count > Self.maxSuffixes) }
+
     /// `name` is the list's own name or under one of its suffixes.
     func matches(_ host: String) -> Bool {
         let h = host.lowercased()

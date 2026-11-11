@@ -103,7 +103,11 @@ final class WildcardForwarder {
             let result = Self.syncResolverFiles(wanted: Set(specs.map(\.suffix)))
             // A suffix whose file is someone else's is not ours to answer.
             let served = specs.filter { !result.foreign.contains($0.suffix) }
-            if served != self.specs { generation &+= 1 }
+            // A suffix can change what it does with its resolver file untouched (Direct to Block, say,
+            // with another wildcard keeping the files in place), and a cached answer would keep
+            // the old behaviour until it expired, so a change of what is served flushes too.
+            let specsChanged = served != self.specs
+            if specsChanged { generation &+= 1 }
             self.specs = served
             self.specIndex = WildcardSpecIndex(served)
             var changed = result.changed
@@ -112,7 +116,7 @@ final class WildcardForwarder {
             } else {
                 armLease()
             }
-            if changed { Self.flushLater() }
+            if changed || specsChanged { Self.flushLater() }
             helperLog.info("wildcard: serving \(self.specs.count, privacy: .public), \(result.foreign.count, privacy: .public) left to another resolver file")
             return ConfigureResult(ok: true, unserved: result.foreign.sorted(), error: nil)
         }
