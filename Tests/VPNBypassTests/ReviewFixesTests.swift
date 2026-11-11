@@ -337,12 +337,17 @@ final class GeoDownloaderTests: XCTestCase {
 final class GeoRetryTests: XCTestCase {
 
     private var rm: RouteManager { RouteManager.shared }
-    private var saved: (config: RouteManager.Config, auto: Bool, wait: TimeInterval, fetch: (URL) async throws -> URL)!
+    private var saved: (config: RouteManager.Config, auto: Bool, wait: TimeInterval, fetch: (URL) async throws -> URL,
+                        checksum: (URL) async -> String?)!
     private var attempts = 0
 
     override func setUp() async throws {
-        saved = (rm.config, GeoDataStore.autoUpdate, GeoSyncPlan.retryAfter, GeoDataStore.geoip.fetch)
+        saved = (rm.config, GeoDataStore.autoUpdate, GeoSyncPlan.retryAfter, GeoDataStore.geoip.fetch,
+                 GeoDataStore.geoip.fetchChecksum)
         attempts = 0
+        // Downloads are on for these tests, so the published checksum would be fetched from the real
+        // source and would not match the made-up list: none is published here.
+        GeoDataStore.geoip.fetchChecksum = { _ in nil }
         try? FileManager.default.removeItem(at: GeoDataFile.geoip.url)
         GeoDataFile.geoip.invalidate()
         GeoDataStore.autoUpdate = true
@@ -364,6 +369,7 @@ final class GeoRetryTests: XCTestCase {
         GeoDataStore.autoUpdate = saved.auto
         GeoSyncPlan.retryAfter = saved.wait
         GeoDataStore.geoip.fetch = saved.fetch
+        GeoDataStore.geoip.fetchChecksum = saved.checksum
         try? FileManager.default.removeItem(at: GeoDataFile.geoip.url)
         GeoDataFile.geoip.invalidate()
         await rm.cancelConfigFollowUps()

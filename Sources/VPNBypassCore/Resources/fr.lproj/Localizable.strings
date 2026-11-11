@@ -1213,6 +1213,7 @@
 "Site list" = "Liste de sites";
 "That site list is not in the downloaded file." = "Cette liste de sites n'est pas dans le fichier téléchargé.";
 "The download is not a list of the right kind." = "Le téléchargement n'est pas une liste du bon type.";
+"The download does not match the checksum its source publishes." = "Le téléchargement ne correspond pas à la somme de contrôle publiée par sa source.";
 "The site list is not downloaded yet." = "La liste des sites n'est pas encore téléchargée.";
 "Too large to route: %lld domains, the limit is %lld." = "Trop grande pour être routée : %lld domaines, la limite est %lld.";
 "Custom URL…" = "URL personnalisée…";

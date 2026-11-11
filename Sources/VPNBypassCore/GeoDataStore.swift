@@ -7,11 +7,13 @@
 // list (or the user presses Update); the source is shown on the Rules page and can be changed in
 // the config (`geoipSourceURL`, `geositeSourceURL`) to a mirror, which matters where GitHub is
 // blocked. A download only replaces the copy in use after it reads as a list of its kind, so a
-// failed, truncated or wrong download leaves the last good copy in place. Every range a country
-// lists still goes through the same install policy as a CIDR rule (RuleDestinationBuilder), so a
-// list that claims 0.0.0.0/0 cannot take over the routing table, and a site list reaches the
-// routing table only through the wildcard engine's own guards (WildcardSafetyGuard, the limiter).
+// failed, truncated or wrong download, or one that does not match the checksum its source
+// publishes, leaves the last good copy in place. Every range a country lists is held to a stricter
+// policy than a CIDR rule (GeoIPRangePolicy: nothing shorter than /8, no private or reserved space),
+// so a list cannot take over the routing table, and a site list reaches the routing table only
+// through the wildcard engine's own guards (WildcardSafetyGuard, the limiter).
 
+import CryptoKit
 import Foundation
 
 /// Which file: country ranges, or domain lists.
@@ -21,8 +23,8 @@ enum GeoKind: String, CaseIterable {
 
     var fileName: String { self == .ip ? "geoip.dat" : "geosite.dat" }
 
-    /// The first preset's list: Chocolate4U's, a build of the same lists with Iranian ones added. The
-    /// presets are the one place a source address is written.
+    /// The first preset's list: Loyalsoldier's, the default of OpenWrt Passwall2 and the general
+    /// build the others start from. The presets are the one place a source address is written.
     var defaultSource: String { GeoSource.presets[0].url(for: self) }
 
     func isUsable(_ data: Data) -> Bool {
@@ -169,6 +171,15 @@ final class GeoDataStore: ObservableObject {
     let file: GeoDataFile
     /// Fetches `url` to a local file and returns it. Replaced in tests.
     var fetch: (URL) async throws -> URL = { try await GeoDownloader(limit: GeoDataStore.maxDownloadBytes).fetch($0) }
+    /// The checksum file a source publishes next to a list (`geoip.dat.sha256sum`), nil when it has
+    /// none or it cannot be read. Never reaches the network under tests unless a test sets it.
+    var fetchChecksum: (URL) async -> String? = { await GeoDataStore.downloadChecksum($0) }
+
+    private static func downloadChecksum(_ url: URL) async -> String? {
+        guard autoUpdate, let file = try? await GeoDownloader(limit: 4096).fetch(url) else { return nil }
+        defer { try? FileManager.default.removeItem(at: file) }
+        return try? String(contentsOf: file, encoding: .utf8)
+    }
 
     /// When a download last started, so an automatic one waits `retryAfter` after a failure.
     private(set) var lastAttempt: Date?
@@ -241,13 +252,19 @@ final class GeoDataStore: ObservableObject {
         guard size > 0, size <= Self.maxDownloadBytes else {
             return await finish(failed: String(localized: "The download is not a list of the right kind."), from: source)
         }
+        // The digest the source publishes next to the list, when it publishes one: a truncated file or a
+        // mirror that serves another file is refused before it is read.
+        let expected = GeoChecksum.digest(in: await fetchChecksum(GeoChecksum.url(for: source)) ?? "")
         // Read off the main actor: a list is tens of megabytes. The whole file must read.
         let kind = self.kind
-        let usable = await Task.detached(priority: .utility) {
-            guard let data = try? Data(contentsOf: downloaded, options: .mappedIfSafe) else { return false }
-            return kind.isUsable(data)
+        let check = await Task.detached(priority: .utility) { () -> (usable: Bool, digest: String?) in
+            guard let data = try? Data(contentsOf: downloaded, options: .mappedIfSafe) else { return (false, nil) }
+            return (kind.isUsable(data), expected == nil ? nil : GeoChecksum.sha256(data))
         }.value
-        guard usable else {
+        if let expected, check.digest != expected {
+            return await finish(failed: String(localized: "The download does not match the checksum its source publishes."), from: source)
+        }
+        guard check.usable else {
             return await finish(failed: String(localized: "The download is not a list of the right kind."), from: source)
         }
         // Staged next to the list, then swapped in: the copy in use is never removed first, so a
@@ -286,6 +303,27 @@ final class GeoDataStore: ObservableObject {
         }
         pendingSource = nil
         return replaced
+    }
+}
+
+// MARK: - Checksum
+
+/// The `<file>.sha256sum` the presets publish next to each list: one line, the hex digest first.
+enum GeoChecksum {
+    static func url(for source: URL) -> URL {
+        URL(string: source.absoluteString + ".sha256sum") ?? source.appendingPathExtension("sha256sum")
+    }
+
+    /// The lower-case hex digest at the start of `text`, nil when it does not start with one (an error
+    /// page, a source that publishes none).
+    static func digest(in text: String) -> String? {
+        guard let first = text.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r" }).first,
+              first.count == 64, first.allSatisfy(\.isHexDigit) else { return nil }
+        return first.lowercased()
+    }
+
+    static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -351,17 +389,16 @@ struct GeoSource: Identifiable, Equatable {
     func url(for kind: GeoKind) -> String { base + kind.fileName }
 
     /// The first is the default: what a config with no source set uses.
+    /// Each one publishes a `.sha256sum` next to each file, which a download is checked against.
+    /// jsDelivr's mirrors are left out: they cache a file and its checksum apart, so the two can
+    /// disagree for days (Custom URL still takes such a mirror).
     static let presets: [GeoSource] = [
-        GeoSource(id: "chocolate4u", title: "Chocolate4U (Iran)",
-                  base: "https://github.com/Chocolate4U/Iran-v2ray-rules/releases/latest/download/"),
         GeoSource(id: "loyalsoldier", title: "Loyalsoldier",
                   base: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/"),
-        GeoSource(id: "loyalsoldier-cdn", title: "Loyalsoldier (jsDelivr)",
-                  base: "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/"),
+        GeoSource(id: "chocolate4u", title: "Chocolate4U (Iran)",
+                  base: "https://github.com/Chocolate4U/Iran-v2ray-rules/releases/latest/download/"),
         GeoSource(id: "metacubex", title: "MetaCubeX",
                   base: "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/"),
-        GeoSource(id: "metacubex-cdn", title: "MetaCubeX (jsDelivr)",
-                  base: "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/"),
         GeoSource(id: "runetfreedom", title: "runetfreedom (Russia)",
                   base: "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/"),
     ]

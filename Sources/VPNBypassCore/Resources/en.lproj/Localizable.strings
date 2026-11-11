@@ -1213,6 +1213,7 @@
 "Site list" = "Site list";
 "That site list is not in the downloaded file." = "That site list is not in the downloaded file.";
 "The download is not a list of the right kind." = "The download is not a list of the right kind.";
+"The download does not match the checksum its source publishes." = "The download does not match the checksum its source publishes.";
 "The site list is not downloaded yet." = "The site list is not downloaded yet.";
 "Too large to route: %lld domains, the limit is %lld." = "Too large to route: %lld domains, the limit is %lld.";
 "Custom URL…" = "Custom URL…";

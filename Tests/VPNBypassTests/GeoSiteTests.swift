@@ -357,17 +357,17 @@ final class GeoPickerTests: XCTestCase {
     }
 
     func testTheDefaultIsTheFirstPresetAndACustomAddressIsNamedByItsHost() {
-        XCTAssertEqual(GeoSource.preset(for: nil, kind: .ip)?.id, "chocolate4u")
-        XCTAssertEqual(GeoSource.preset(for: "", kind: .site)?.id, "chocolate4u")
-        XCTAssertEqual(GeoSource.defaultID, "chocolate4u")
+        XCTAssertEqual(GeoSource.preset(for: nil, kind: .ip)?.id, "loyalsoldier")
+        XCTAssertEqual(GeoSource.preset(for: "", kind: .site)?.id, "loyalsoldier")
+        XCTAssertEqual(GeoSource.defaultID, "loyalsoldier")
         XCTAssertEqual(GeoKind.ip.defaultSource, GeoSource.presets[0].url(for: .ip))
-        XCTAssertEqual(GeoKind.ip.defaultSource, "https://github.com/Chocolate4U/Iran-v2ray-rules/releases/latest/download/geoip.dat")
-        let loyal = GeoSource.presets.first { $0.id == "loyalsoldier" }!
-        XCTAssertEqual(GeoSource.preset(for: loyal.url(for: .site), kind: .site)?.title, "Loyalsoldier")
-        XCTAssertNil(GeoSource.preset(for: loyal.url(for: .site), kind: .ip), "a geosite address is not the geoip source")
+        XCTAssertEqual(GeoKind.ip.defaultSource, "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat")
+        let iran = GeoSource.presets.first { $0.id == "chocolate4u" }!
+        XCTAssertEqual(GeoSource.preset(for: iran.url(for: .site), kind: .site)?.title, "Chocolate4U (Iran)")
+        XCTAssertNil(GeoSource.preset(for: iran.url(for: .site), kind: .ip), "a geosite address is not the geoip source")
         XCTAssertNil(GeoSource.preset(for: "https://mirror.example/x/geosite.dat", kind: .site))
         XCTAssertEqual(GeoSource.title(for: "https://mirror.example/x/geosite.dat", kind: .site), "mirror.example")
-        XCTAssertEqual(GeoSource.title(for: nil, kind: .ip), "Chocolate4U (Iran)")
+        XCTAssertEqual(GeoSource.title(for: nil, kind: .ip), "Loyalsoldier")
     }
 }
 

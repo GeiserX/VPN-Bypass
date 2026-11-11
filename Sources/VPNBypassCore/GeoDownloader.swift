@@ -26,8 +26,18 @@ final class GeoDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Send
     /// `configuration` is the session's; tests give one with a stub protocol.
     init(limit: Int, configuration: URLSessionConfiguration = .ephemeral) {
         self.limit = Int64(limit)
+        // The request's 60 s is an idle timeout: a server that sends a few bytes at a time would keep a
+        // download (and the Updating state that queues every later one) open for URLSession's default
+        // of 7 days. The whole transfer gets 5 minutes; the largest list is under 20 MB.
+        configuration.timeoutIntervalForResource = min(configuration.timeoutIntervalForResource, Self.resourceTimeout)
         self.configuration = configuration
     }
+
+    /// The longest a whole download may take.
+    static let resourceTimeout: TimeInterval = 300
+
+    /// The session's whole-transfer limit, for the tests.
+    var resourceTimeout: TimeInterval { configuration.timeoutIntervalForResource }
 
     /// Downloads `url` and returns the temporary file it was saved to, which the caller removes.
     func fetch(_ url: URL) async throws -> URL {
