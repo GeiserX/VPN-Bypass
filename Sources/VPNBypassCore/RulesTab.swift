@@ -688,6 +688,7 @@ struct RulesTab: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             RulesRouteChipMenu(
                 selectedRouteId: routeManager.config.defaultRouteId,
+                allowsBlock: false,
                 rowName: String(localized: "Everything else"),
                 onSelect: { newId in setDefaultRoute(newId) },
                 onNewRoute: {
@@ -736,6 +737,8 @@ struct RulesTab: View {
     }
 
     private func setDefaultRoute(_ routeId: UUID) {
+        // Defensive: the menu does not offer Block here, and a config edited by hand could name it.
+        guard routeManager.config.routes.first(where: { $0.id == routeId })?.egress != .block else { return }
         routeManager.config.defaultRouteId = routeId
         persistAndReapply()
     }
@@ -876,20 +879,39 @@ struct RuleRow: View {
         case .geoip:
             return GeoDisplay.detail(count: GeoDataFile.geoip.ranges(for: [key])[key]?.count, hasData: geoipStore.hasData)
         case .geosite:
-            return GeoDisplay.siteDetail(GeoDataFile.geosite.expansions(for: [key])[key], hasData: geositeStore.hasData)
+            let list = GeoDataFile.geosite.expansions(for: [key])[key]
+            // On the Block route a list too large for wildcards is blocked in /etc/hosts instead.
+            if assignedRoute?.egress == .block, let list, list.found, list.isTooLarge, list.count <= HostsBlockSection.maxNames {
+                return GeoDisplay.hostsDetail(count: list.count, manageHosts: routeManager.config.manageHostsFile,
+                                              state: routeManager.hostsBlock)
+            }
+            return GeoDisplay.siteDetail(list, hasData: geositeStore.hasData)
         default:
             return nil
         }
+    }
+
+    /// The line under the row: what the rule's list holds, then what its route needs (a proxy's listener,
+    /// a route that is off). A count never hides the warning.
+    private var rowDetail: String? {
+        let routeNote = Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
+                                    customEngine: ProcessRule.customEngine(routeManager.config),
+                                    turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: flowEngine.confirmed?.declinedTeams ?? []),
+                                    counters: flowEngine.counters(forRule: rule.id.uuidString))
+        return Self.joined(inertNote ?? blockNote ?? geoDetail, routeNote)
+    }
+
+    /// Two lines under a row, either of which may be absent.
+    static func joined(_ first: String?, _ second: String?) -> String? {
+        let lines = [first, second].compactMap { $0 }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
     var body: some View {
         ListRow(
             glyph: Self.glyph(for: rule.matchType),
             name: patternDisplay,
-            detail: inertNote ?? blockNote ?? geoDetail ?? Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
-                                customEngine: ProcessRule.customEngine(routeManager.config),
-                                turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: flowEngine.confirmed?.declinedTeams ?? []),
-                                counters: flowEngine.counters(forRule: rule.id.uuidString)),
+            detail: rowDetail,
             actions: actions,
             isOn: Binding(get: { rule.enabled }, set: onToggle),
             showsActions: showsActions,
@@ -909,6 +931,9 @@ struct RuleRow: View {
 struct RulesRouteChipMenu: View {
     @EnvironmentObject var routeManager: RouteManager
     let selectedRouteId: UUID?
+    /// Block is for rules: "Everything else" is the names no rule matched, and blocking those would
+    /// still leave every name resolvable, so that row does not offer it.
+    var allowsBlock = true
     /// The row the chip belongs to, so VoiceOver tells one rule's route from another's.
     var rowName: String?
     let onSelect: (UUID) -> Void
@@ -930,10 +955,14 @@ struct RulesRouteChipMenu: View {
 
     /// Direct first, then the PRIMARY VPN — the two auto-created system routes. A
     /// VPN route pinned to a specific tunnel is user-created, so it lives in Your Routes.
-    private var systemRoutes: [Route] {
-        routeManager.config.routes
-            .filter { $0.egress == .direct || $0.egress == .block || ($0.egress == .vpnDefault && $0.vpnSelector?.kind != .interface) }
-            .sorted { Self.systemOrder($0) < Self.systemOrder($1) }
+    private var systemRoutes: [Route] { Self.systemRoutes(routeManager.config.routes, allowsBlock: allowsBlock) }
+
+    /// The routes the System section offers: Direct, the primary VPN and, where a rule is being
+    /// routed, Block.
+    static func systemRoutes(_ routes: [Route], allowsBlock: Bool) -> [Route] {
+        routes
+            .filter { $0.egress == .direct || ($0.egress == .block && allowsBlock) || ($0.egress == .vpnDefault && $0.vpnSelector?.kind != .interface) }
+            .sorted { systemOrder($0) < systemOrder($1) }
     }
 
     /// Direct, then the primary VPN, then Block.
@@ -969,7 +998,7 @@ struct RulesRouteChipMenu: View {
                     }
                     // Block is made the first time it is chosen, so a config that never blocks
                     // gets no extra route.
-                    if !routeManager.config.routes.contains(where: { $0.egress == .block }) {
+                    if allowsBlock, !routeManager.config.routes.contains(where: { $0.egress == .block }) {
                         Button {
                             onSelect(routeManager.ensureBlockRoute().id)
                         } label: {
@@ -1212,6 +1241,15 @@ struct RuleEditorSheet: View {
     }
 
     private func attemptSave() {
+        // A rule of a type from a newer version stays what it was: only its route (and pattern) change
+        // here, and its original type, which `Rule` writes back, is kept.
+        if matchType == .unsupported, var kept = editingRule {
+            if let routeId { kept.routeId = routeId }
+            let typed = pattern.trimmingCharacters(in: .whitespaces)
+            if !typed.isEmpty { kept.pattern = typed }
+            onSave(kept)
+            return
+        }
         let effectivePattern = matchType == .service ? selectedServiceId : pattern.trimmingCharacters(in: .whitespaces)
         guard !effectivePattern.isEmpty else {
             validationError = matchType == .service ? String(localized: "Select a service.") : String(localized: "Pattern is required.")

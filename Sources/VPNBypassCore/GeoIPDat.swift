@@ -44,10 +44,11 @@ enum GeoIPDat {
     /// a download must be before it replaces the copy in use.
     static func isUsable(_ data: Data) -> Bool {
         var usable = false
-        scan(data) { entry in
+        let complete = scan(data) { entry in
             if !usable, !entry.code.isEmpty, !entry.reverse, entry.rangeCount() > 0 { usable = true }
         }
-        return usable
+        // A file cut short is not a list: it would replace the last good copy with part of one.
+        return complete && usable
     }
 
     // MARK: - Protobuf reading
@@ -103,17 +104,21 @@ enum GeoIPDat {
         }
     }
 
-    /// Calls `visit` for each `GeoIP` entry. The entry is valid only inside the call.
-    private static func scan(_ data: Data, _ visit: (Entry) -> Void) {
+    /// Calls `visit` for each `GeoIP` entry, and says whether the whole file was read: false when a
+    /// length ran past the end or a field was cut short, which is what a truncated download looks like.
+    /// A file that ends cleanly between entries is complete, however short.
+    @discardableResult
+    private static func scan(_ data: Data, _ visit: (Entry) -> Void) -> Bool {
+        var complete = true
         data.withUnsafeBytes { raw in
             let bytes = raw.bindMemory(to: UInt8.self)
             var list = ProtoReader(bytes: bytes)
             while let (field, wire) = list.nextTag() {
                 guard field == 1, wire == 2 else {
-                    if !list.skip(wire) { return }
+                    if !list.skip(wire) { break }
                     continue
                 }
-                guard let body = list.lengthDelimited() else { return }
+                guard let body = list.lengthDelimited() else { break }
                 var reader = ProtoReader(bytes: body)
                 var code = ""
                 var reverse = false
@@ -128,8 +133,11 @@ enum GeoIPDat {
                         break
                     }
                 }
+                if reader.failed { complete = false }
                 visit(Entry(code: code, reverse: reverse, body: body))
             }
+            if list.failed { complete = false }
         }
+        return complete
     }
 }

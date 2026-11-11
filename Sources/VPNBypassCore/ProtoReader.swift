@@ -7,6 +7,9 @@ import Foundation
 struct ProtoReader {
     let bytes: UnsafeBufferPointer<UInt8>
     var position = 0
+    /// A read ran past the end or met something that is not wire data. Reaching the end of the
+    /// data between fields is not a failure; a field cut short is, so a truncated file shows.
+    private(set) var failed = false
 
     init(bytes: UnsafeBufferPointer<UInt8>) { self.bytes = bytes }
 
@@ -20,6 +23,7 @@ struct ProtoReader {
             if byte & 0x80 == 0 { return result }
             shift += 7
         }
+        failed = true
         return nil
     }
 
@@ -30,7 +34,11 @@ struct ProtoReader {
     }
 
     mutating func lengthDelimited() -> UnsafeBufferPointer<UInt8>? {
-        guard let length = varint(), length <= UInt64(bytes.count - position) else { return nil }
+        guard let length = varint() else { return nil }
+        guard length <= UInt64(bytes.count - position) else {
+            failed = true
+            return nil
+        }
         let start = position
         position += Int(length)
         return UnsafeBufferPointer(rebasing: bytes[start..<position])
@@ -43,12 +51,17 @@ struct ProtoReader {
         case 1: return advance(8)
         case 2: return lengthDelimited() != nil
         case 5: return advance(4)
-        default: return false
+        default:
+            failed = true
+            return false
         }
     }
 
     private mutating func advance(_ count: Int) -> Bool {
-        guard count <= bytes.count - position else { return false }
+        guard count <= bytes.count - position else {
+            failed = true
+            return false
+        }
         position += count
         return true
     }

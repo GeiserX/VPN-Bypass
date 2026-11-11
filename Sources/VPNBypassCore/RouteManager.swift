@@ -50,6 +50,13 @@ final class RouteManager: ObservableObject {
     /// asked. Apart from `blockedRoutes`, which is VPN Only's and follows the VPN: these follow the
     /// rules, whether the VPN is up or not.
     @Published var ruleBlocks: [ActiveRoute] = []
+    /// What /etc/hosts holds for Block rules whose list is too large for wildcards (HostsBlocks.swift).
+    @Published var hostsBlock = HostsBlockState()
+    /// A fingerprint of the names last written, so an unchanged list is not sent again; nil when the
+    /// blocked section is not there.
+    var hostsBlockSignature: Int?
+    /// The retry waiting after a failed list download, by list (GeoDataStore.swift).
+    var geoRetryTasks: [GeoKind: Task<Void, Never>] = [:]
     var blockedDestinations: Set<String> { Set(blockedRoutes.map(\.destination)) }
     /// How many VPN Only entries have addresses blocked, for the dropdown line.
     var blockedSiteCount: Int { Set(blockedRoutes.map(\.source)).count }
@@ -902,6 +909,9 @@ final class RouteManager: ObservableObject {
             }
             // Listed only once the import is saved: a rejected import leaves the note as it was.
             recordConvertedEntries(migration.migrated)
+            // An import can bring a GeoIP or GeoSite rule whose list is not on this Mac: fetch it now,
+            // as saveConfig does for any other change (an import saves without it).
+            refreshGeoDataIfNeeded()
 
             // An import replaces what a pause was taken on; the apply below is its own.
             if isPaused { endPause(reason: "a configuration was imported", apply: false) }
@@ -2842,6 +2852,7 @@ final class RouteManager: ObservableObject {
             wildcards.routesApplied()   // as the classic skip path
             // No route changed, but a block may have: a rule edited, switched off or moved to another route.
             await applyRuleBlocks(compiledAll.blocks)
+            await applyHostsBlocks()
             return true
         }
 
@@ -2871,6 +2882,7 @@ final class RouteManager: ObservableObject {
         // The blocks go in after the routes are committed: the stale-route cleanup above removes by
         // destination, and would take a block just put on an address a rule used to route.
         await applyRuleBlocks(compiledAll.blocks)
+        await applyHostsBlocks()
 
         let confirmedUniqueCount = uniqueRouteCount
         // A service rule's routes are recorded under the service id; Problems names the service.
@@ -2924,7 +2936,8 @@ final class RouteManager: ObservableObject {
         // The full de-duplicated hostname set across ALL enabled rules — resolved once,
         // even when the same host is reachable via two rules.
         let geosite = geositeExpansions()
-        let hosts = RuleDestinationBuilder.hostsToResolve(rules: config.rules, services: config.services, geosite: geosite)
+        let hosts = RuleDestinationBuilder.hostsToResolve(rules: config.rules, services: config.services, geosite: geosite,
+                                                          routes: config.routes)
 
         // Build the host→IPs map. Cache-only (instant startup) reads the disk cache with
         // no live DNS and never flags failures (a live apply follows). The live path
@@ -2945,16 +2958,31 @@ final class RouteManager: ObservableObject {
             // the currently-failing hosts (it's shared with the legacy path, which logs +
             // clears it, so stale entries must not leak across a mode switch).
             let failedSet = Set(failed)
+            // The names of a site list are not the user's own entries: a list of thousands has names
+            // that no longer exist, and re-resolving the whole rule set every 15 seconds for them
+            // would never stop. They are counted once and not retried.
+            let entryNames = RuleDestinationBuilder.hostsToResolve(
+                rules: config.rules.filter { $0.matchType != .geosite }, services: config.services, routes: config.routes)
             for host in hosts where !failedSet.contains(host) { failedDomains.remove(host) }
-            for host in failed {
+            let unresolved = Self.partitionUnresolved(failed, entryNames: entryNames)
+            for host in unresolved.retry {
                 failedDomains.insert(host)
                 log(.warning, "  ✗ \(host)")
                 scheduleRetry(for: host)
             }
+            if unresolved.inLists > 0 {
+                log(.info, "\(unresolved.inLists) name(s) in site lists did not resolve; they are not retried")
+            }
         }
 
         return RuleDestinationBuilder.build(rules: config.rules, services: config.services, resolved: resolvedMap,
-                                            geoip: geoipRanges(), geosite: geosite)
+                                            geoip: geoipRanges(), geosite: geosite, routes: config.routes)
+    }
+
+    /// The names that did not resolve, split into the user's own entries (logged, kept in
+    /// `failedDomains` and retried) and the names of a site list (only counted).
+    nonisolated static func partitionUnresolved(_ failed: [String], entryNames: Set<String>) -> (retry: [String], inLists: Int) {
+        (failed.filter(entryNames.contains), failed.filter { !entryNames.contains($0) }.count)
     }
 
     /// Resolve a de-duplicated host list in parallel, reusing the SAME withTaskGroup +
@@ -3074,6 +3102,7 @@ final class RouteManager: ObservableObject {
         if !keepingBlocked {
             await releaseBlocks(reason: "all routes removed")
             await releaseRuleBlocks(reason: "all routes removed")
+            await releaseHostsBlocks(reason: "all routes removed")
         }
 
         cancelAllRetries()
@@ -6128,6 +6157,7 @@ final class RouteManager: ObservableObject {
     func startupSweepIfNeeded(desired: [String]) async {
         guard !didStartupSweep else { return }
         didStartupSweep = true
+        await reconcileHostsBlocksAtStartup()
         guard let table = RouteKernel.currentTable() else { return }
         let orphans = Self.orphanedDestinations(table: table, desired: Set(desired))
         guard !orphans.isEmpty else { return }
@@ -6544,6 +6574,8 @@ final class RouteManager: ObservableObject {
     var removeRouteOverrideForTests: ((_ destination: String) async -> Bool)?
     var resolveIPsOverrideForTests: ((_ domain: String) async -> [String]?)?
     /// The helper's block batch, for the VPN Only block tests.
+    /// Test seam for the helper's blocked-names call; nil in production.
+    var updateBlockedHostsOverrideForTests: (([String]) async -> (success: Bool, error: String?))?
     var addBlockRoutesBatchOverrideForTests: (([String]) async -> (successCount: Int, failureCount: Int, failedDestinations: [String], error: String?))?
     /// What `detectVPNInterface` answers, so a test can drive `checkVPNStatus` through a drop
     /// or a flap with no real tunnel.

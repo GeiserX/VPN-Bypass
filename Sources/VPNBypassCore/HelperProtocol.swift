@@ -72,6 +72,17 @@ protocol HelperProtocol {
         withReply reply: @escaping (Bool, String?) -> Void
     )
     
+    /// Replace the blocked-names section of the hosts file (`HostsBlockSection`): Custom mode's Block
+    /// route for a list too large for wildcards. Its own section, apart from the pinned names that
+    /// `updateHostsFile` keeps, so that one's frequent updates never carry the list.
+    /// - Parameters:
+    ///   - names: The names to block, one per line; an empty string removes the section
+    ///   - reply: Callback with success status and optional error message
+    func updateBlockedHosts(
+        names: String,
+        withReply reply: @escaping (Bool, String?) -> Void
+    )
+
     /// Flush DNS cache after hosts file changes
     /// - Parameter reply: Callback with success status
     func flushDNSCache(withReply reply: @escaping (Bool) -> Void)
@@ -242,6 +253,8 @@ struct HelperConstants {
     // A 2.9.0 helper refuses such a spec (it has no gateway) and serves the others; the app holds
     // the Block wildcards back until the helper is 2.10.0. A 2.8.0 or later helper installs this
     // one itself (updateHelper), with no password.
+    // Also in 2.10.0: updateBlockedHosts, a separate megabyte-sized hosts section of blocked names
+    // for lists too large for a resolver file each (HostsBlockSection, Custom mode's Block route).
     static let helperVersion = "2.10.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"

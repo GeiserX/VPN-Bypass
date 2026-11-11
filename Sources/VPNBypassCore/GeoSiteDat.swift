@@ -96,10 +96,11 @@ enum GeoSiteDat {
     /// what a download must be before it replaces the copy in use.
     static func isUsable(_ data: Data) -> Bool {
         var usable = false
-        scan(data) { list in
+        let complete = scan(data) { list in
             if !usable, !list.name.isEmpty, list.supportedCount() > 0 { usable = true }
         }
-        return usable
+        // A file cut short is not a list: it would replace the last good copy with part of one.
+        return complete && usable
     }
 
     // MARK: - Protobuf reading
@@ -197,17 +198,20 @@ enum GeoSiteDat {
         return GeoSiteExpansion(suffixes: kept.sorted(), names: remaining.sorted(), unsupported: unsupported)
     }
 
-    /// Calls `visit` for each `GeoSite` entry in the file.
-    private static func scan(_ data: Data, _ visit: (List) -> Void) {
+    /// Calls `visit` for each `GeoSite` entry, and says whether the whole file was read (see
+    /// `GeoIPDat.scan`).
+    @discardableResult
+    private static func scan(_ data: Data, _ visit: (List) -> Void) -> Bool {
+        var complete = true
         data.withUnsafeBytes { raw in
             let bytes = raw.bindMemory(to: UInt8.self)
             var file = ProtoReader(bytes: bytes)
             while let (field, wire) = file.nextTag() {
                 guard field == 1, wire == 2 else {
-                    if !file.skip(wire) { return }
+                    if !file.skip(wire) { break }
                     continue
                 }
-                guard let body = file.lengthDelimited() else { return }
+                guard let body = file.lengthDelimited() else { break }
                 var reader = ProtoReader(bytes: body)
                 var name = ""
                 while let (f, w) = reader.nextTag() {
@@ -218,9 +222,12 @@ enum GeoSiteDat {
                         break
                     }
                 }
+                if reader.failed { complete = false }
                 visit(List(name: name, body: body))
             }
+            if file.failed { complete = false }
         }
+        return complete
     }
 }
 
@@ -238,6 +245,14 @@ enum GeoSiteRule {
             guard (1...30).contains(attribute.count), attribute.allSatisfy(Self.isNameCharacter) else { return nil }
         }
         return text
+    }
+
+    /// The pattern after `code` is picked in the list: the same list keeps the attribute it had
+    /// (`microsoft@cn` stays so when `microsoft` is picked again), another list starts without one.
+    static func pattern(afterPicking code: String, current: String) -> String {
+        let parsed = GeoSiteDat.parse(pattern: current)
+        guard parsed.name == code.lowercased(), let attribute = parsed.attribute else { return code }
+        return "\(code)@\(attribute)"
     }
 
     private static func isNameCharacter(_ c: Character) -> Bool {

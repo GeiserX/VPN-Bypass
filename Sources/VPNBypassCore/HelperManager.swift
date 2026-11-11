@@ -498,6 +498,8 @@ final class HelperManager: ObservableObject {
         static let scopedDefault = "2.9.0"
         /// A wildcard that blocks its names (`WildcardSpec.block`, the Block route).
         static let blockedNames = "2.10.0"
+        /// The blocked-names section of /etc/hosts (`HostsBlockSection`).
+        static let blockedHosts = "2.10.0"
         /// The oldest helper the app routes through while its update waits. Older ones lack
         /// the VPN Only blocks or the wildcards (a listed name would leave outside the tunnel)
         /// or the route batches (1.5.0), so the app waits for their update instead.
@@ -1220,6 +1222,36 @@ let timeout = xpcTimeout + Double(routes.count) * 0.6
     }
 
     // MARK: - Hosts File Operations
+
+    /// Replaces the blocked-names section of /etc/hosts with `names` (none removes it). The text goes
+    /// over XPC as one string, not an array of dictionaries: a list can be hundreds of thousands long.
+    func updateBlockedHosts(names: [String]) async -> (success: Bool, error: String?) {
+        guard helperState.isReady else {
+            return (false, "Helper not ready (\(helperState.statusText))")
+        }
+        guard runningHelperSupports(MethodSince.blockedHosts) else {
+            return (false, "helper v\(helperVersion ?? "?") predates blocking names in the hosts file; it starts once the helper update is installed")
+        }
+        let text = names.joined(separator: "\n")
+        let connection = getOrCreateConnection()
+        // A list of 200,000 names is a few megabytes to send, check and write, behind any route batch.
+        let timeout = max(xpcTimeout, 30) + Double(names.count) / 4_000
+        let fallback: (Bool, String?) = (false, "XPC timeout after \(Int(timeout))s")
+        let result = await withXPCDeadline(seconds: timeout, fallback: fallback) { once in
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                once.complete((false, "XPC error: \(error.localizedDescription)"))
+            } as? HelperProtocol
+            guard let helper = proxy else {
+                once.complete((false, "Failed to create XPC proxy"))
+                return
+            }
+            helper.updateBlockedHosts(names: text) { success, error in
+                once.complete((success, error))
+            }
+        }
+        if result == fallback { dropXPCConnection() }
+        return result
+    }
 
     func updateHostsFile(entries: [(domain: String, ip: String)]) async -> (success: Bool, error: String?) {
         guard helperState.isReady else {

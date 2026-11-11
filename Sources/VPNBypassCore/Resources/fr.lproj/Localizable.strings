@@ -1248,3 +1248,9 @@
 "Geo" = "Geo";
 "GeoIP: a country" = "GeoIP : un pays";
 "GeoSite: a site list" = "GeoSite : une liste de sites";
+"%@ matches rule %lld (%@), which goes to Block: its name gets no answer, so nothing connects." = "%@ correspond à la règle %lld (%@), qui va vers Bloquer : son nom n'obtient aucune réponse, donc rien ne se connecte.";
+"The download is larger than a list can be." = "Le téléchargement est plus grand que ne peut l'être une liste.";
+"Too large to route: %lld ranges, the limit is %lld." = "Trop grande pour être routée : %lld plages, la limite est %lld.";
+"Turn on “Pin listed names in /etc/hosts” in General to block this list." = "Activez « Épingler les noms de la liste dans /etc/hosts » dans Général pour bloquer cette liste.";
+"Could not write /etc/hosts: %@" = "Impossible d'écrire /etc/hosts : %@";
+"%lld names blocked in /etc/hosts. Subdomains are not covered." = "%lld noms bloqués dans /etc/hosts. Les sous-domaines ne sont pas couverts.";

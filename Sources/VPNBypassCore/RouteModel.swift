@@ -131,6 +131,9 @@ struct Route: Codable, Identifiable, Equatable {
     /// The egress as written when this build does not know it (`egress` is then `.unsupported`).
     /// Written back as it was, so a newer build's route is not lost by opening and saving here.
     var unknownEgress: String?
+    /// Every field of a route of a type this build does not know, as read, so a newer version's
+    /// other settings are written back too. Nil for a route this build knows.
+    var unknownFields: [String: JSONValue]?
 
     private enum CodingKeys: String, CodingKey {
         case id, name, egress, enabled, proxyHost, proxyPort, proxyUser, proxyPass
@@ -139,6 +142,16 @@ struct Route: Codable, Identifiable, Equatable {
     }
 
     func encode(to encoder: Encoder) throws {
+        // A route from a newer version is written as it was read, but for what this build lets the
+        // user change: its name and whether it is on.
+        if egress == .unsupported, var fields = unknownFields {
+            fields["id"] = .string(id.uuidString)
+            fields["name"] = .string(name)
+            fields["enabled"] = .bool(enabled)
+            var single = encoder.singleValueContainer()
+            try single.encode(JSONValue.object(fields))
+            return
+        }
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
@@ -205,6 +218,7 @@ struct Route: Codable, Identifiable, Equatable {
             } else {
                 egress = .unsupported
                 unknownEgress = raw
+                unknownFields = try? decoder.singleValueContainer().decode([String: JSONValue].self)
             }
         } else {
             egress = .direct
@@ -237,12 +251,26 @@ struct Rule: Codable, Identifiable, Equatable {
     /// `.unsupported`). Written back as it was, so a newer build's rule is not lost by opening
     /// and saving here.
     var unknownMatchType: String?
+    /// Every field of a rule of a type this build does not know, as read (see `Route.unknownFields`).
+    var unknownFields: [String: JSONValue]?
 
     private enum CodingKeys: String, CodingKey {
         case id, matchType, pattern, routeId, enabled, order
     }
 
     func encode(to encoder: Encoder) throws {
+        // A rule from a newer version is written as it was read, but for what this build lets the user
+        // change: whether it is on, its place, its route and its pattern.
+        if matchType == .unsupported, var fields = unknownFields {
+            fields["id"] = .string(id.uuidString)
+            fields["pattern"] = .string(pattern)
+            fields["routeId"] = .string(routeId.uuidString)
+            fields["enabled"] = .bool(enabled)
+            fields["order"] = .int(Int64(order))
+            var single = encoder.singleValueContainer()
+            try single.encode(JSONValue.object(fields))
+            return
+        }
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(unknownMatchType ?? matchType.rawValue, forKey: .matchType)
@@ -271,6 +299,7 @@ struct Rule: Codable, Identifiable, Equatable {
             } else {
                 matchType = .unsupported
                 unknownMatchType = raw
+                unknownFields = try? decoder.singleValueContainer().decode([String: JSONValue].self)
             }
         } else {
             matchType = .domain

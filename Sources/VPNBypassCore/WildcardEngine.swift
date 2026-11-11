@@ -136,14 +136,16 @@ final class WildcardEngine {
         guard !manager.isShuttingDown else { return }
         let config = manager.config
         let configured = Set(WildcardPlanner.configuredSuffixes(config))
+        // Every wildcard the list serves, a blackhole included, for noticing one that was added.
+        let served = Set(WildcardPlanner.configuredSuffixes(config, includingBlocked: true))
         // A wildcard added while routes are live works at once, as a listed name does, even
         // when no apply has run since launch (auto-apply off) or since Remove All Routes.
         // Not while paused: a wildcard added then is saved, and Resume starts it.
-        if suspended, !manager.isPaused, manager.isVPNConnected, let before = lastConfigured, !configured.subtracting(before).isEmpty {
+        if suspended, !manager.isPaused, manager.isVPNConnected, let before = lastConfigured, !served.subtracting(before).isEmpty {
             suspended = false
             adoptedLedger = false
         }
-        lastConfigured = configured
+        lastConfigured = served
         await dropLearnedRoutes(notIn: configured)
         // Whatever the helper serves: the startup sweep kept these routes for a wildcard that
         // is still configured, and only a tracked route is taken out by teardown and expiry.

@@ -21,11 +21,9 @@ enum GeoKind: String, CaseIterable {
 
     var fileName: String { self == .ip ? "geoip.dat" : "geosite.dat" }
 
-    /// Loyalsoldier's lists: the default of OpenWrt Passwall2. MetaCubeX, Chocolate4U's Iran list and
-    /// runetfreedom's Russia list use the same formats.
-    var defaultSource: String {
-        "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/" + fileName
-    }
+    /// The first preset's list: Loyalsoldier's, the default of OpenWrt Passwall2. The presets are
+    /// the one place a source address is written.
+    var defaultSource: String { GeoSource.presets[0].url(for: self) }
 
     func isUsable(_ data: Data) -> Bool {
         self == .ip ? GeoIPDat.isUsable(data) : GeoSiteDat.isUsable(data)
@@ -39,8 +37,10 @@ final class GeoDataFile: @unchecked Sendable {
     static let geoip = GeoDataFile(kind: .ip, directory: GeoDataFile.defaultDirectory())
     static let geosite = GeoDataFile(kind: .site, directory: GeoDataFile.defaultDirectory())
 
-    /// A country with more ranges than this is cut here: the largest real lists are a few thousand.
-    static let maxRangesPerCountry = 30_000
+    /// A country with more ranges than this is not routed at all, and its row says so: each range is a
+    /// kernel route, and a part of a country would send some of it one way and some another. The
+    /// real lists run from a few dozen ranges to 36,000 (GB), with the US at 127,000.
+    static let maxRangesPerCountry = 50_000
 
     let kind: GeoKind
     let url: URL
@@ -100,7 +100,7 @@ final class GeoDataFile: @unchecked Sendable {
         let missing = codes.subtracting(rangesByCode.keys)
         if !missing.isEmpty, let data = data() {
             for (code, ranges) in GeoIPDat.ranges(for: missing, in: data) {
-                rangesByCode[code] = Array(ranges.prefix(Self.maxRangesPerCountry))
+                rangesByCode[code] = ranges
             }
         }
         return rangesByCode.filter { codes.contains($0.key) }
@@ -165,7 +165,7 @@ final class GeoDataStore: ObservableObject {
     let kind: GeoKind
     let file: GeoDataFile
     /// Fetches `url` to a local file and returns it. Replaced in tests.
-    var fetch: (URL) async throws -> URL = GeoDataStore.download
+    var fetch: (URL) async throws -> URL = { try await GeoDownloader(limit: GeoDataStore.maxDownloadBytes).fetch($0) }
 
     /// When a download last started, so an automatic one waits `retryAfter` after a failure.
     private(set) var lastAttempt: Date?
@@ -200,66 +200,87 @@ final class GeoDataStore: ObservableObject {
         return url
     }
 
-    /// Downloads the list from `source` and, when it reads as a list of its kind, replaces the copy
-    /// in use. Returns whether it did; the reason a download did not is in `phase`.
+    /// A source chosen while another download is running: the latest choice wins and is fetched
+    /// when that one ends, instead of being dropped and leaving the first one's list in place.
+    private var pendingSource: URL?
+    private var activeSource: URL?
+
+    /// Downloads the list from `source` and, when it reads as a complete list of its kind, replaces the
+    /// copy in use. Returns whether it did; the reason a download did not is in `phase`.
     @discardableResult
     func update(from source: URL) async -> Bool {
-        guard phase != .updating else { return false }
+        if phase == .updating {
+            if source != activeSource { pendingSource = source }
+            return false
+        }
         lastAttempt = Date()
         phase = .updating
+        activeSource = source
+        pendingSource = nil
         let downloaded: URL
         do {
             downloaded = try await fetch(source)
+        } catch GeoDownloadError.tooLarge {
+            return await finish(failed: String(localized: "The download is larger than a list can be."), from: source)
         } catch {
-            phase = .failed(String(localized: "Could not download the list."))
-            return false
+            return await finish(failed: String(localized: "Could not download the list."), from: source)
         }
         defer { try? FileManager.default.removeItem(at: downloaded) }
 
+        // Another source was chosen meanwhile: this list is not the one wanted, so it is dropped
+        // unread and the chosen one is fetched.
+        if let next = pendingSource, next != source {
+            return await finish(failed: nil, from: source)
+        }
         let size = (try? FileManager.default.attributesOfItem(atPath: downloaded.path))?[.size] as? Int ?? 0
         guard size > 0, size <= Self.maxDownloadBytes else {
-            phase = .failed(String(localized: "The download is not a list of the right kind."))
-            return false
+            return await finish(failed: String(localized: "The download is not a list of the right kind."), from: source)
         }
-        // Read off the main actor: a list is tens of megabytes.
+        // Read off the main actor: a list is tens of megabytes. The whole file must read.
         let kind = self.kind
         let usable = await Task.detached(priority: .utility) {
             guard let data = try? Data(contentsOf: downloaded, options: .mappedIfSafe) else { return false }
             return kind.isUsable(data)
         }.value
         guard usable else {
-            phase = .failed(String(localized: "The download is not a list of the right kind."))
-            return false
+            return await finish(failed: String(localized: "The download is not a list of the right kind."), from: source)
         }
+        // Staged next to the list, then swapped in: the copy in use is never removed first, so a
+        // failed save (a full disk, a folder that cannot be written) leaves it as it was.
+        let destination = file.url
+        let staged = destination.deletingLastPathComponent().appendingPathComponent(destination.lastPathComponent + ".partial")
         do {
-            _ = try FileManager.default.replaceItemAt(file.url, withItemAt: downloaded)
-        } catch {
-            do {
-                try? FileManager.default.removeItem(at: file.url)
-                try FileManager.default.moveItem(at: downloaded, to: file.url)
-            } catch {
-                phase = .failed(String(localized: "Could not save the list."))
-                return false
+            try? FileManager.default.removeItem(at: staged)
+            try FileManager.default.copyItem(at: downloaded, to: staged)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: staged)
+            } else {
+                try FileManager.default.moveItem(at: staged, to: destination)
             }
+        } catch {
+            try? FileManager.default.removeItem(at: staged)
+            return await finish(failed: String(localized: "Could not save the list."), from: source)
         }
         // 0600 like the config: the list is the owner's.
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.url.path)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
         file.invalidate()
         phase = .idle
         revision += 1
-        return true
+        return await finish(failed: nil, from: source, replaced: true)
     }
 
-    /// The real download: an https GET with a time limit, to a temporary file.
-    nonisolated private static func download(_ url: URL) async throws -> URL {
-        var request = URLRequest(url: url, timeoutInterval: 60)
-        request.setValue("VPN-Bypass", forHTTPHeaderField: "User-Agent")
-        let (file, response) = try await URLSession.shared.download(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            try? FileManager.default.removeItem(at: file)
-            throw URLError(.badServerResponse)
+    /// Ends a download: records why it failed (nil when it did not), and starts the source chosen
+    /// while it ran, if one was.
+    private func finish(failed reason: String?, from source: URL, replaced: Bool = false) async -> Bool {
+        activeSource = nil
+        phase = reason.map { .failed($0) } ?? .idle
+        if let next = pendingSource, next != source {
+            pendingSource = nil
+            phase = .idle
+            return await update(from: next)
         }
-        return file
+        pendingSource = nil
+        return replaced
     }
 }
 
@@ -298,7 +319,8 @@ enum GeoSyncSchedule: String, Codable, CaseIterable, Equatable {
 /// When a list is downloaded by itself: the schedule, the age of the copy, and an hour's wait after a
 /// failed try. Pure, so the tests can ask it without a network.
 enum GeoSyncPlan {
-    static let retryAfter: TimeInterval = 3600
+    /// How long after a failed try the next one waits. A variable so a test can shorten it.
+    nonisolated(unsafe) static var retryAfter: TimeInterval = 3600
 
     static func shouldFetch(schedule: GeoSyncSchedule, updated: Date?, lastAttempt: Date?,
                             now: Date = Date()) -> Bool {
@@ -373,7 +395,9 @@ extension RouteManager {
     /// The ranges the enabled Country rules name, by lower-case code. Empty before the list has
     /// been downloaded.
     func geoipRanges() -> [String: [String]] {
+        // A country over the limit routes nothing, and its row says why; never a part of it.
         GeoDataFile.geoip.ranges(for: Set(config.rules.filter { $0.enabled && $0.matchType == .geoip }.map { $0.pattern.lowercased() }))
+            .filter { $0.value.count <= GeoDataFile.maxRangesPerCountry }
     }
 
     /// The domain lists the enabled Site rules name, by pattern (`steam`, `category-games@cn`).
@@ -409,12 +433,34 @@ extension RouteManager {
     @discardableResult
     func updateGeoData(_ kind: GeoKind) async -> Bool {
         guard let source = geoSourceURL(kind) else { return false }
-        let replaced = await geoStore(kind).update(from: source)
-        if replaced, usesGeoData(kind) {
-            wildcards.requestSync()
-            startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
+        let store = geoStore(kind)
+        let replaced = await store.update(from: source)
+        if replaced {
+            geoRetryTasks[kind]?.cancel()
+            geoRetryTasks[kind] = nil
+            if usesGeoData(kind) {
+                wildcards.requestSync()
+                startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
+            }
+        } else if case .failed = store.phase {
+            scheduleGeoRetry(kind)
         }
         return replaced
+    }
+
+    /// After a failed download, tries again once the wait is over, if a rule still needs the list
+    /// and the schedule still allows it: without this a failure with nothing else to trigger a
+    /// refresh would leave the rule routing nothing until the next launch or the 12-hour watchdog.
+    func scheduleGeoRetry(_ kind: GeoKind) {
+        guard GeoDataStore.autoUpdate, usesGeoData(kind), config.geoSync.interval != nil else { return }
+        geoRetryTasks[kind]?.cancel()
+        geoRetryTasks[kind] = Task { [weak self] in
+            let wait = UInt64(max(GeoSyncPlan.retryAfter, 0) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: wait)
+            guard !Task.isCancelled, let self else { return }
+            self.geoRetryTasks[kind] = nil
+            self.refreshGeoDataIfNeeded()
+        }
     }
 
     /// Fetches each list a rule needs when the schedule says it is due: missing, or older than the

@@ -22,6 +22,9 @@ enum GeoDisplay {
     static func detail(count: Int?, hasData: Bool, in bundle: Bundle = .main) -> String {
         guard hasData else { return String(localized: "Country list not downloaded yet.", bundle: bundle) }
         switch count ?? 0 {
+        case let n where n > GeoDataFile.maxRangesPerCountry:
+            let limit = GeoDataFile.maxRangesPerCountry
+            return String(localized: "Too large to route: \(n) ranges, the limit is \(limit).", bundle: bundle)
         case 0: return String(localized: "Not in the country list.", bundle: bundle)
         case 1: return String(localized: "1 range", bundle: bundle)
         case let n: return String(localized: "\(n) ranges", bundle: bundle)
@@ -43,6 +46,18 @@ enum GeoDisplay {
                                       : String(localized: "\(list.count) domains", bundle: bundle)
         guard list.unsupported > 0 else { return domains }
         return String(localized: "\(domains), \(list.unsupported) not supported", bundle: bundle)
+    }
+
+    /// The line under a Block rule whose list is too large for wildcards and is blocked in /etc/hosts.
+    static func hostsDetail(count: Int, manageHosts: Bool, state: HostsBlockState, in bundle: Bundle = .main) -> String {
+        if !manageHosts || state.needsHostsFile {
+            return String(localized: "Turn on “Pin listed names in /etc/hosts” in General to block this list.", bundle: bundle)
+        }
+        if let error = state.error {
+            return String(localized: "Could not write /etc/hosts: \(error)", bundle: bundle)
+        }
+        guard state.count > 0 else { return String(localized: "Not blocked yet.", bundle: bundle) }
+        return String(localized: "\(state.count) names blocked in /etc/hosts. Subdomains are not covered.", bundle: bundle)
     }
 
     /// A line about a list: when it was last synced (the time, and how long ago), or that it is being
@@ -328,8 +343,7 @@ struct GeoListField: View {
                 .popover(isPresented: $open, arrowEdge: .bottom) {
                     GeoPickerPopover(kind: kind, choices: choices, selected: GeoSiteDat.parse(pattern: pattern).name,
                                      store: store, onPick: { code in
-                        // A site list keeps an attribute typed before (`steam@cn`) only for the same list.
-                        pattern = code
+                        pattern = kind == .site ? GeoSiteRule.pattern(afterPicking: code, current: pattern) : code
                         open = false
                     }, onDownload: { Task { await routeManager.updateGeoData(kind) } })
                 }

@@ -52,11 +52,15 @@ struct RoutesTab: View {
     /// The doc screenshots open the page with this line under the list, as after a copy.
     static var copiedLineForScreenshots: String?
 
-    private var listenerRoutes: [Route] {
-        routeManager.config.routes.filter {
-            ProxyListenerManager.usesLocalListener($0.egress)
-                || ($0.egress == .vpnDefault && $0.vpnSelector?.kind == .interface)
-        }
+    private var listenerRoutes: [Route] { routeManager.config.routes.filter(Self.isListed) }
+
+    /// A route the Routes page lists under "Your routes": proxies, peers, a pinned VPN, and Block and a
+    /// route of a type from a newer version, so those can be renamed, switched off or deleted here and
+    /// not only chosen from a rule.
+    static func isListed(_ route: Route) -> Bool {
+        ProxyListenerManager.usesLocalListener(route.egress)
+            || (route.egress == .vpnDefault && route.vpnSelector?.kind == .interface)
+            || route.egress == .block || route.egress == .unsupported
     }
 
     /// The title bar search (⌘F), which the window owns.

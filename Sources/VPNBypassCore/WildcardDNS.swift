@@ -58,6 +58,13 @@ public enum WildcardDomain {
         return n == s || n.hasSuffix("." + s)
     }
 
+    /// `name` and each domain above it that can be a suffix (two labels or more), longest first.
+    public static func ancestors(of name: String) -> [String] {
+        let labels = name.split(separator: ".")
+        guard labels.count >= 2 else { return [] }
+        return (0...(labels.count - 2)).map { labels[$0...].joined(separator: ".") }
+    }
+
     /// The longest suffix that covers `name`, as macOS picks the resolver with the most
     /// matching labels: with `*.example.com` and `*.eu.example.com` both listed, a name under
     /// `eu.example.com` belongs to the second.

@@ -16,6 +16,8 @@ final class RuleBlockLifecycleTests: XCTestCase {
     private let block = Route(name: Route.blockName, egress: .block)
 
     override func setUp() async throws {
+        await rm.cancelConfigFollowUps()
+        await rm.waitForBackgroundRefreshForTests()
         saved = (rm.config, rm.isVPNConnected, rm.localGateway, HelperManager.shared.helperState, rm.isLoading)
         var cfg = RouteManager.Config()
         cfg.routingMode = .custom
@@ -44,6 +46,10 @@ final class RuleBlockLifecycleTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        // An apply leaves background work (a DNS refresh, a config follow-up): let it finish before
+        // the next test changes the state it reads, as the other lifecycle tests do.
+        await rm.cancelConfigFollowUps()
+        await rm.waitForBackgroundRefreshForTests()
         BlockingKernel.detach(from: rm)
         rm.activeRoutes = []
         rm.ruleBlocks = []
