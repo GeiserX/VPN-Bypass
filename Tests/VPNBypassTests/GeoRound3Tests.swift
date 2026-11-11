@@ -176,3 +176,32 @@ final class GeoChecksumAddressTests: XCTestCase {
                        "https://example.com/releases/latest/download/geosite.dat.sha256sum")
     }
 }
+
+/// A Block route the user made, even one named "Block", is never removed for having no rule.
+@MainActor
+final class UserBlockRouteNamedBlockTests: XCTestCase {
+
+    private var rm: RouteManager { RouteManager.shared }
+    private var saved: RouteManager.Config!
+
+    override func setUp() async throws { saved = rm.config }
+
+    override func tearDown() async throws {
+        rm.config = saved
+        rm.droppedBlockRoutes = []
+    }
+
+    func testABlockRouteTheUserNamedBlockStays() {
+        let direct = Route(name: "Direct", egress: .direct)
+        let mine = Route(name: Route.blockName, egress: .block)   // vpnb route.add name=Block type=block
+        var cfg = RouteManager.Config()
+        cfg.routingMode = .custom
+        cfg.schemaVersion = 2
+        cfg.routes = [direct, mine]
+        cfg.defaultRouteId = direct.id
+        cfg.rules = [Rule(matchType: .ip, pattern: "198.51.100.7", routeId: direct.id, order: 0)]
+        rm.config = cfg
+        XCTAssertFalse(rm.removeUnusedBlockRoutes())
+        XCTAssertTrue(rm.config.routes.contains { $0.id == mine.id }, "a Block route the user named Block was deleted")
+    }
+}

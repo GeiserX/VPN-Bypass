@@ -41,20 +41,20 @@ extension RouteManager {
     /// no extra route, so an existing config is not changed by this version.
     func ensureBlockRoute() -> Route {
         if let existing = config.routes.first(where: { $0.egress == .block }) { return existing }
-        let route = Route(name: Route.blockName, egress: .block)
+        let route = Route(id: Route.rulesPageBlockId, name: Route.blockName, egress: .block)
         addRoute(route)
         return route
     }
 
     /// Takes out the Block route the Rules page made (`ensureBlockRoute`) when no rule points at it.
     /// The Rules page makes it on first use, and a version before Block refuses a config that holds
-    /// one, so it stays only while a rule needs it. A Block route made in Routes, under another name,
-    /// is the user's and stays. Returns whether one went.
+    /// one, so it stays only while a rule needs it. It is known by its id: a Block route made in Routes
+    /// or with `vpnb`, under any name, "Block" too, is the user's and stays. Returns whether one went.
     @discardableResult
     func removeUnusedBlockRoutes() -> Bool {
         let used = Set(config.rules.map(\.routeId))
         let unused = config.routes.filter {
-            $0.egress == .block && $0.name == Route.blockName && !used.contains($0.id) && $0.id != config.defaultRouteId
+            $0.egress == .block && $0.id == Route.rulesPageBlockId && !used.contains($0.id) && $0.id != config.defaultRouteId
         }
         guard !unused.isEmpty else { return false }
         let ids = Set(unused.map(\.id))

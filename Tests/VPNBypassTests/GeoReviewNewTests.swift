@@ -123,7 +123,7 @@ final class BlockRouteKeptWhileUsedTests: XCTestCase {
     /// Called directly: a real save would start an apply that leaks into the next test.
     func testTheBlockRouteGoesWhenNoRuleUsesIt() {
         let direct = Route(name: "Direct", egress: .direct)
-        let block = Route(name: Route.blockName, egress: .block)
+        let block = Route(id: Route.rulesPageBlockId, name: Route.blockName, egress: .block)
         let blocked = Rule(matchType: .cidr, pattern: "203.0.113.0/24", routeId: block.id, order: 0)
         var cfg = RouteManager.Config()
         cfg.routingMode = .custom
@@ -161,7 +161,7 @@ final class BlockRouteKeptWhileUsedTests: XCTestCase {
     /// a route that no longer exists (a rule whose route is gone matches nothing).
     func testUndoOfTheLastBlockRuleBringsItsRouteBack() {
         let direct = Route(name: "Direct", egress: .direct)
-        let block = Route(name: Route.blockName, egress: .block)
+        let block = Route(id: Route.rulesPageBlockId, name: Route.blockName, egress: .block)
         let blocked = Rule(matchType: .cidr, pattern: "203.0.113.0/24", routeId: block.id, order: 0)
         var cfg = RouteManager.Config()
         cfg.routingMode = .custom

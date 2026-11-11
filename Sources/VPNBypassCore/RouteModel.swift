@@ -127,6 +127,10 @@ struct Route: Codable, Identifiable, Equatable {
 
     /// The name of the route `RouteManager.ensureBlockRoute` makes.
     static let blockName = "Block"
+    /// The id of the route `RouteManager.ensureBlockRoute` makes, the one mark that tells it from a
+    /// Block route the user made (in Routes or with `vpnb`), whatever its name. Saved with the route,
+    /// so it needs no field of its own.
+    static let rulesPageBlockId = UUID(uuidString: "AD50DAB5-AEC2-4A36-B81B-B08BE6698B45")!
 
     /// The egress as written when this build does not know it (`egress` is then `.unsupported`).
     /// Written back as it was, so a newer build's route is not lost by opening and saving here.
