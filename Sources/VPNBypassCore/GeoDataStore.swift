@@ -21,8 +21,8 @@ enum GeoKind: String, CaseIterable {
 
     var fileName: String { self == .ip ? "geoip.dat" : "geosite.dat" }
 
-    /// The first preset's list: Loyalsoldier's, the default of OpenWrt Passwall2. The presets are
-    /// the one place a source address is written.
+    /// The first preset's list: Chocolate4U's, a build of the same lists with Iranian ones added. The
+    /// presets are the one place a source address is written.
     var defaultSource: String { GeoSource.presets[0].url(for: self) }
 
     func isUsable(_ data: Data) -> Bool {
@@ -345,7 +345,10 @@ struct GeoSource: Identifiable, Equatable {
 
     func url(for kind: GeoKind) -> String { base + kind.fileName }
 
+    /// The first is the default: what a config with no source set uses.
     static let presets: [GeoSource] = [
+        GeoSource(id: "chocolate4u", title: "Chocolate4U (Iran)",
+                  base: "https://github.com/Chocolate4U/Iran-v2ray-rules/releases/latest/download/"),
         GeoSource(id: "loyalsoldier", title: "Loyalsoldier",
                   base: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/"),
         GeoSource(id: "loyalsoldier-cdn", title: "Loyalsoldier (jsDelivr)",
@@ -354,16 +357,17 @@ struct GeoSource: Identifiable, Equatable {
                   base: "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/"),
         GeoSource(id: "metacubex-cdn", title: "MetaCubeX (jsDelivr)",
                   base: "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/"),
-        GeoSource(id: "chocolate4u", title: "Chocolate4U (Iran)",
-                  base: "https://github.com/Chocolate4U/Iran-v2ray-rules/releases/latest/download/"),
         GeoSource(id: "runetfreedom", title: "runetfreedom (Russia)",
                   base: "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/"),
     ]
 
+    /// The default preset's id.
+    static var defaultID: String { presets[0].id }
+
     /// The preset whose list of `kind` is at `address`; nil and an empty address are the default.
     static func preset(for address: String?, kind: GeoKind) -> GeoSource? {
         let text = (address ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return presets.first { text.isEmpty ? $0.id == "loyalsoldier" : $0.url(for: kind) == text }
+        return presets.first { text.isEmpty ? $0.id == defaultID : $0.url(for: kind) == text }
     }
 
     /// What the source menu calls the address in use: a preset's name, or the custom address's host.
@@ -422,7 +426,7 @@ extension RouteManager {
     /// Uses `address` as the source of `kind` (nil for the default) and downloads from it now: a user
     /// who picks a source wants its list.
     func setGeoSource(_ kind: GeoKind, address: String?) {
-        let value = GeoSource.preset(for: address, kind: kind)?.id == "loyalsoldier" ? nil : address
+        let value = GeoSource.preset(for: address, kind: kind)?.id == GeoSource.defaultID ? nil : address
         if kind == .ip { config.geoipSourceURL = value } else { config.geositeSourceURL = value }
         saveConfig()
         Task { await updateGeoData(kind) }

@@ -357,14 +357,17 @@ final class GeoPickerTests: XCTestCase {
     }
 
     func testTheDefaultIsTheFirstPresetAndACustomAddressIsNamedByItsHost() {
-        XCTAssertEqual(GeoSource.preset(for: nil, kind: .ip)?.id, "loyalsoldier")
-        XCTAssertEqual(GeoSource.preset(for: "", kind: .site)?.id, "loyalsoldier")
+        XCTAssertEqual(GeoSource.preset(for: nil, kind: .ip)?.id, "chocolate4u")
+        XCTAssertEqual(GeoSource.preset(for: "", kind: .site)?.id, "chocolate4u")
+        XCTAssertEqual(GeoSource.defaultID, "chocolate4u")
         XCTAssertEqual(GeoKind.ip.defaultSource, GeoSource.presets[0].url(for: .ip))
-        XCTAssertEqual(GeoSource.preset(for: GeoSource.presets[4].url(for: .site), kind: .site)?.title, "Chocolate4U (Iran)")
-        XCTAssertNil(GeoSource.preset(for: GeoSource.presets[4].url(for: .site), kind: .ip), "a geosite address is not the geoip source")
+        XCTAssertEqual(GeoKind.ip.defaultSource, "https://github.com/Chocolate4U/Iran-v2ray-rules/releases/latest/download/geoip.dat")
+        let loyal = GeoSource.presets.first { $0.id == "loyalsoldier" }!
+        XCTAssertEqual(GeoSource.preset(for: loyal.url(for: .site), kind: .site)?.title, "Loyalsoldier")
+        XCTAssertNil(GeoSource.preset(for: loyal.url(for: .site), kind: .ip), "a geosite address is not the geoip source")
         XCTAssertNil(GeoSource.preset(for: "https://mirror.example/x/geosite.dat", kind: .site))
         XCTAssertEqual(GeoSource.title(for: "https://mirror.example/x/geosite.dat", kind: .site), "mirror.example")
-        XCTAssertEqual(GeoSource.title(for: nil, kind: .ip), "Loyalsoldier")
+        XCTAssertEqual(GeoSource.title(for: nil, kind: .ip), "Chocolate4U (Iran)")
     }
 }
 
@@ -514,7 +517,7 @@ final class GeoSiteRealFileTests: XCTestCase {
         let lists = GeoSiteDat.lists(in: data)
         let listed = (CFAbsoluteTimeGetCurrent() - start) * 1000
         start = CFAbsoluteTimeGetCurrent()
-        let wanted: Set<String> = ["category-games", "steam", "microsoft", "epicgames", "category-ir"]
+        let wanted: Set<String> = ["category-games", "steam", "microsoft", "epicgames", "category-ads"]
         let out = GeoSiteDat.expansions(for: wanted, in: data)
         let read = (CFAbsoluteTimeGetCurrent() - start) * 1000
         let summary = wanted.sorted().map { "\($0)=\(out[$0]!.suffixes.count)+\(out[$0]!.names.count)" }.joined(separator: " ")
