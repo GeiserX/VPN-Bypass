@@ -738,14 +738,20 @@ struct RulesTab: View {
               let toIndex = ordered.firstIndex(where: { $0.id == targetId }) else { return }
         let moved = ordered.remove(at: fromIndex)
         ordered.insert(moved, at: toIndex)
-        let newOrder = Dictionary(uniqueKeysWithValues: ordered.enumerated().map { ($1.id, $0) })
         // One write to the published config, not one per rule.
-        var rules = routeManager.config.rules
-        for idx in rules.indices {
-            if let order = newOrder[rules[idx].id] { rules[idx].order = order }
-        }
-        routeManager.config.rules = rules
+        routeManager.config.rules = Self.rules(routeManager.config.rules, renumberedAs: ordered)
         persistAndReapply()
+    }
+
+    /// `rules` with each rule's `order` set to its index in `ordered`. A config.json edited by
+    /// hand can hold two rules with one id: both take the first index, and nothing traps.
+    nonisolated static func rules(_ rules: [Rule], renumberedAs ordered: [Rule]) -> [Rule] {
+        let newOrder = Dictionary(ordered.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var result = rules
+        for idx in result.indices {
+            if let order = newOrder[result[idx].id] { result[idx].order = order }
+        }
+        return result
     }
 
     private func persistAndReapply() {

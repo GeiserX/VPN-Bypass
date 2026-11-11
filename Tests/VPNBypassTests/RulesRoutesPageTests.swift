@@ -38,6 +38,28 @@ final class RulesRoutesPageModelTests: XCTestCase {
         XCTAssertEqual(RuleRow.glyph(for: .process), "app")
     }
 
+    /// A drag renumbers every rule to its place in the new order.
+    func testAReorderRenumbersEveryRule() {
+        let route = UUID()
+        let a = Rule(matchType: .domain, pattern: "a.example.com", routeId: route, order: 0)
+        let b = Rule(matchType: .domain, pattern: "b.example.com", routeId: route, order: 1)
+        let c = Rule(matchType: .domain, pattern: "c.example.com", routeId: route, order: 2)
+        let result = RulesTab.rules([a, b, c], renumberedAs: [c, a, b])
+        XCTAssertEqual(result.map(\.pattern), ["a.example.com", "b.example.com", "c.example.com"], "the stored order of the list is kept")
+        XCTAssertEqual(result.map(\.order), [1, 2, 0])
+    }
+
+    /// A config.json edited by hand can repeat a rule block, id and all. A drag on that list
+    /// renumbers it and does not crash the app.
+    func testAReorderWithARepeatedRuleIdDoesNotTrap() {
+        let route = UUID()
+        let a = Rule(matchType: .domain, pattern: "a.example.com", routeId: route, order: 0)
+        let copy = a
+        let b = Rule(matchType: .domain, pattern: "b.example.com", routeId: route, order: 2)
+        let result = RulesTab.rules([a, copy, b], renumberedAs: [b, a, copy])
+        XCTAssertEqual(result.map(\.order), [1, 1, 0], "both copies take the first place their id has")
+    }
+
     /// The two explanations of ordering are one line; the drag hint joins it at two rules.
     func testThePurposeLineMentionsDraggingOnlyWithTwoRules() {
         XCTAssertEqual(RulesTab.purpose(ruleCount: 0), "The first rule that matches wins.")
