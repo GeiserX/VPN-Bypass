@@ -165,3 +165,14 @@ final class ExcludedNamesCountedOnceTests: XCTestCase {
         XCTAssertEqual(selection.refused[later.id], .tooManyExcluded(wildcards: 1))
     }
 }
+
+final class GeoChecksumAddressTests: XCTestCase {
+
+    func testTheChecksumGoesOnThePathAndKeepsTheQuery() {
+        let custom = URL(string: "https://example.com/lists/geoip.dat?token=abc#top")!
+        XCTAssertEqual(GeoChecksum.url(for: custom).absoluteString, "https://example.com/lists/geoip.dat.sha256sum?token=abc")
+        let preset = URL(string: "https://example.com/releases/latest/download/geosite.dat")!
+        XCTAssertEqual(GeoChecksum.url(for: preset).absoluteString,
+                       "https://example.com/releases/latest/download/geosite.dat.sha256sum")
+    }
+}

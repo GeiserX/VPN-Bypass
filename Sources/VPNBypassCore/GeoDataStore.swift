@@ -349,8 +349,14 @@ final class GeoDataStore: ObservableObject {
 
 /// The `<file>.sha256sum` the presets publish next to each list: one line, the hex digest first.
 enum GeoChecksum {
+    /// `.sha256sum` goes on the path: a custom address's query (`?token=…`) is kept, its fragment dropped.
     static func url(for source: URL) -> URL {
-        URL(string: source.absoluteString + ".sha256sum") ?? source.appendingPathExtension("sha256sum")
+        guard var parts = URLComponents(url: source, resolvingAgainstBaseURL: false) else {
+            return source.appendingPathExtension("sha256sum")
+        }
+        parts.percentEncodedPath += ".sha256sum"
+        parts.fragment = nil
+        return parts.url ?? source.appendingPathExtension("sha256sum")
     }
 
     /// The lower-case hex digest at the start of `text`, nil when it does not start with one (an error
