@@ -83,6 +83,8 @@ final class RouteManager: ObservableObject {
     /// that a log line still mentions after it was removed. Memory only, like `recentLogs`.
     private(set) var namesSeenThisSession = Set<String>()
     @Published var recentLogs: [LogEntry] = []
+    /// The rules the wildcard planner leaves out, and why, as of the last wildcard pass. Their rows say it.
+    @Published var wildcardRefusals: [UUID: WildcardPlanner.Refusal] = [:]
     /// The last Verify Routes, or nil before the first one and after routes are removed.
     @Published var lastRouteCheck: RouteCheck.Run?
     /// Bumped when a check starts and when routes are removed, so a check still pinging then

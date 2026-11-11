@@ -1255,3 +1255,7 @@
 "IPv4 only; IPv6 is not routed or blocked." = "IPv4 only; IPv6 is not routed or blocked.";
 "Could not download the checksum its source publishes." = "Could not download the checksum its source publishes.";
 "Not checked: its source publishes no checksum." = "Not checked: its source publishes no checksum.";
+"%lld ranges, %lld left out" = "%lld ranges, %lld left out";
+"Left out: all rules together would pass the limit of %lld wildcards (this one adds %lld)." = "Left out: all rules together would pass the limit of %lld wildcards (this one adds %lld).";
+"Wildcards left out: %lld. Earlier rules take more than %lld names under each." = "Wildcards left out: %lld. Earlier rules take more than %lld names under each.";
+"Left out: all Country rules together would pass the limit of %lld ranges (this one adds %lld)." = "Left out: all Country rules together would pass the limit of %lld ranges (this one adds %lld).";

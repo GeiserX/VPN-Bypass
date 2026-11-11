@@ -43,6 +43,10 @@ final class GeoDataFile: @unchecked Sendable {
     /// kernel route, and a part of a country would send some of it one way and some another. The
     /// real lists run from a few dozen ranges to 36,000 (GB), with the US at 127,000.
     static let maxRangesPerCountry = 50_000
+    /// The most ranges all Country rules together may route. Each range is a kernel route; the five
+    /// largest countries under the per-country limit add up to about 136,000 in the default list.
+    /// Countries count in rule order, and one that would pass the total is left out whole.
+    static let maxRangesTotal = 100_000
 
     let kind: GeoKind
     let url: URL
@@ -50,6 +54,8 @@ final class GeoDataFile: @unchecked Sendable {
     private let lock = NSLock()
     private var stamp: Date?
     private var rangesByCode: [String: [String]] = [:]
+    /// How many ranges of each list `GeoIPRangePolicy` leaves out, so the row can say so.
+    private var leftOutByCode: [String: Int] = [:]
     /// Codes the file does not hold, so asking again does not read the whole file again.
     private var missingCodes = Set<String>()
     private var expansionsByPattern: [String: GeoSiteExpansion] = [:]
@@ -88,6 +94,7 @@ final class GeoDataFile: @unchecked Sendable {
         guard stamp != current else { return }
         stamp = current
         rangesByCode = [:]
+        leftOutByCode = [:]
         missingCodes = []
         expansionsByPattern = [:]
         countryCounts = nil
@@ -96,8 +103,9 @@ final class GeoDataFile: @unchecked Sendable {
 
     private func data() -> Data? { try? Data(contentsOf: url, options: .mappedIfSafe) }
 
-    /// The IPv4 ranges of each list in `codes` (lower case). One the file lacks, or no file, gives
-    /// no entry: the rule then routes nothing, and its row says why.
+    /// The IPv4 ranges of each list in `codes` (lower case) that `GeoIPRangePolicy` allows: what a
+    /// Country rule routes. One the file lacks, or no file, gives no entry: the rule then routes
+    /// nothing, and its row says why.
     func ranges(for codes: Set<String>) -> [String: [String]] {
         guard kind == .ip, !codes.isEmpty, let current = updated else { return [:] }
         lock.lock(); defer { lock.unlock() }
@@ -105,10 +113,21 @@ final class GeoDataFile: @unchecked Sendable {
         let missing = codes.subtracting(rangesByCode.keys).subtracting(missingCodes)
         if !missing.isEmpty, let data = data() {
             let found = GeoIPDat.ranges(for: missing, in: data)
-            for (code, ranges) in found { rangesByCode[code] = ranges }
+            for (code, ranges) in found {
+                let allowed = ranges.filter { GeoIPRangePolicy.allows($0, code: code) }
+                rangesByCode[code] = allowed
+                leftOutByCode[code] = ranges.count - allowed.count
+            }
             missingCodes.formUnion(missing.subtracting(found.keys))
         }
         return rangesByCode.filter { codes.contains($0.key) }
+    }
+
+    /// How many ranges of `code` the policy leaves out (special-use space, a prefix shorter than /8).
+    func leftOut(for code: String) -> Int {
+        guard kind == .ip, ranges(for: [code])[code] != nil else { return 0 }
+        lock.lock(); defer { lock.unlock() }
+        return leftOutByCode[code] ?? 0
     }
 
     /// Every list in a geoip file with its number of IPv4 ranges.
@@ -471,15 +490,46 @@ enum GeoIPRangePolicy {
         guard let (network, prefix) = RouteCIDR.parse(range), let start = WildcardIPv4.parse(network),
               prefix >= shortestPrefix, !DestinationInstallPolicy.refusesInstall(range) else { return false }
         if code.lowercased() == "private" { return true }
-        return !specialUse.contains { overlaps(start, prefix, $0) }
+        return !specialUseRanges.contains { overlaps(start, prefix, $0.start, $0.prefix) }
+    }
+
+    /// `specialUse`, read once: a country of tens of thousands of ranges asks for each one.
+    private static let specialUseRanges: [(start: UInt32, prefix: Int)] = specialUse.compactMap { range in
+        guard let (network, prefix) = RouteCIDR.parse(range), let start = WildcardIPv4.parse(network) else { return nil }
+        return (start, prefix)
     }
 
     /// Two IPv4 ranges overlap when one holds the other's start.
-    private static func overlaps(_ start: UInt32, _ prefix: Int, _ other: String) -> Bool {
-        guard let (network, otherPrefix) = RouteCIDR.parse(other), let otherStart = WildcardIPv4.parse(network) else { return false }
+    private static func overlaps(_ start: UInt32, _ prefix: Int, _ otherStart: UInt32, _ otherPrefix: Int) -> Bool {
         let shorter = min(prefix, otherPrefix)
         let mask: UInt32 = shorter == 0 ? 0 : ~UInt32(0) << UInt32(32 - shorter)
         return start & mask == otherStart & mask
+    }
+}
+
+// MARK: - Total
+
+/// Which countries the Country rules route together: each one under its own limit, in rule order,
+/// until all of them would pass `GeoDataFile.maxRangesTotal`. A country that would pass it is left
+/// out whole, and its row says so; a country already taken by an earlier rule counts once.
+enum GeoIPBudget {
+    static func select(rules: [Rule], counts: [String: Int], limit: Int = GeoDataFile.maxRangesTotal)
+        -> (accepted: Set<String>, refused: [String: Int]) {
+        var accepted: Set<String> = []
+        var refused: [String: Int] = [:]
+        var total = 0
+        for rule in rules.filter({ $0.enabled && $0.matchType == .geoip }).sorted(by: { $0.order < $1.order }) {
+            let code = rule.pattern.lowercased()
+            guard !accepted.contains(code), refused[code] == nil, let count = counts[code],
+                  count <= GeoDataFile.maxRangesPerCountry else { continue }
+            if total + count > limit {
+                refused[code] = count
+            } else {
+                accepted.insert(code)
+                total += count
+            }
+        }
+        return (accepted, refused)
     }
 }
 
@@ -489,9 +539,10 @@ extension RouteManager {
     /// The ranges the enabled Country rules name, by lower-case code. Empty before the list has
     /// been downloaded.
     func geoipRanges() -> [String: [String]] {
-        // A country over the limit routes nothing, and its row says why; never a part of it.
-        GeoDataFile.geoip.ranges(for: Set(config.rules.filter { $0.enabled && $0.matchType == .geoip }.map { $0.pattern.lowercased() }))
-            .filter { $0.value.count <= GeoDataFile.maxRangesPerCountry }
+        // A country over a limit routes nothing, and its row says why; never a part of it.
+        let ranges = GeoDataFile.geoip.ranges(for: Set(config.rules.filter { $0.enabled && $0.matchType == .geoip }.map { $0.pattern.lowercased() }))
+        let accepted = GeoIPBudget.select(rules: config.rules, counts: ranges.mapValues(\.count)).accepted
+        return ranges.filter { accepted.contains($0.key) }
     }
 
     /// The domain lists the enabled Site rules name, by pattern (`steam`, `category-games@cn`).

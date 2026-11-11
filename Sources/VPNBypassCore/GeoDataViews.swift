@@ -18,17 +18,50 @@ enum GeoDisplay {
         return upper
     }
 
-    /// The line under a Country rule's row: what it holds, or why it holds nothing yet.
-    static func detail(count: Int?, hasData: Bool, in bundle: Bundle = .main) -> String {
+    /// The line under a Country rule's row: what it holds, or why it holds nothing yet. `leftOut` is how
+    /// many of the list's ranges `GeoIPRangePolicy` does not route (special-use space).
+    static func detail(count: Int?, hasData: Bool, leftOut: Int = 0, in bundle: Bundle = .main) -> String {
         guard hasData else { return String(localized: "Country list not downloaded yet.", bundle: bundle) }
         switch count ?? 0 {
         case let n where n > GeoDataFile.maxRangesPerCountry:
             let limit = GeoDataFile.maxRangesPerCountry
             return String(localized: "Too large to route: \(n) ranges, the limit is \(limit).", bundle: bundle)
-        case 0: return String(localized: "Not in the country list.", bundle: bundle)
+        case 0 where leftOut == 0: return String(localized: "Not in the country list.", bundle: bundle)
+        case let n where leftOut > 0: return String(localized: "\(n) ranges, \(leftOut) left out", bundle: bundle)
         case 1: return String(localized: "1 range", bundle: bundle)
         case let n: return String(localized: "\(n) ranges", bundle: bundle)
         }
+    }
+
+    /// The line under a rule the wildcard planner leaves out, in place of what its list holds.
+    static func refusal(_ refusal: WildcardPlanner.Refusal, in bundle: Bundle = .main) -> String {
+        switch refusal {
+        case .overTotal(let count, let limit):
+            return String(localized: "Left out: all rules together would pass the limit of \(limit) wildcards (this one adds \(count)).", bundle: bundle)
+        case .tooManyExcluded(let count):
+            let limit = WildcardSpec.maxExcluded
+            return String(localized: "Wildcards left out: \(count). Earlier rules take more than \(limit) names under each.", bundle: bundle)
+        }
+    }
+
+    /// The line under a Country rule left out by the total of all Country rules.
+    static func countryRefusal(count: Int, limit: Int = GeoDataFile.maxRangesTotal, in bundle: Bundle = .main) -> String {
+        String(localized: "Left out: all Country rules together would pass the limit of \(limit) ranges (this one adds \(count)).", bundle: bundle)
+    }
+
+    /// The refusal line of each rule that has one: the wildcard planner's (`refusals`, from its last
+    /// pass) and the Country total's. Built once for the whole list, not once per row.
+    static func refusalNotes(config: Config, wildcards refusals: [UUID: WildcardPlanner.Refusal],
+                             in bundle: Bundle = .main) -> [UUID: String] {
+        var notes = refusals.mapValues { refusal($0, in: bundle) }
+        let codes = Set(config.rules.filter { $0.enabled && $0.matchType == .geoip }.map { $0.pattern.lowercased() })
+        guard !codes.isEmpty else { return notes }
+        let counts = GeoDataFile.geoip.ranges(for: codes).mapValues(\.count)
+        let refused = GeoIPBudget.select(rules: config.rules, counts: counts).refused
+        for rule in config.rules where rule.enabled && rule.matchType == .geoip {
+            if let count = refused[rule.pattern.lowercased()] { notes[rule.id] = countryRefusal(count: count, in: bundle) }
+        }
+        return notes
     }
 
     /// A Country rule's line with the note that only its IPv4 ranges are routed or blocked: the lists

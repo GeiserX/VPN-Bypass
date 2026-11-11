@@ -73,7 +73,8 @@ final class GeoCountryRangesTests: XCTestCase {
         var result: [[UInt8]] = []
         result.reserveCapacity(count)
         for i in 0..<count {
-            let first: UInt8 = UInt8(10 + i / 65_536)
+            // Public space: a country's private ranges are left out when the list is read.
+            let first: UInt8 = UInt8(20 + i / 65_536)
             let second: UInt8 = UInt8((i / 256) % 256)
             let third: UInt8 = UInt8(i % 256)
             let ip: [UInt8] = [first, second, third, 0]

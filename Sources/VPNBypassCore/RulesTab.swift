@@ -684,6 +684,7 @@ struct RulesTab: View {
         // Sorted and filtered once per pass, not once per use.
         let shown = shownRules
         let services = routeManager.config.services
+        let refusals = GeoDisplay.refusalNotes(config: routeManager.config, wildcards: routeManager.wildcardRefusals)
         if shown.isEmpty {
             SettingsSearchMiss(search: searchText)
         }
@@ -703,7 +704,8 @@ struct RulesTab: View {
                         pendingNewRouteCompletion = { newRoute in reassignRule(rule.id, to: newRoute.id) }
                         showingNewRouteSheet = true
                     },
-                    showsActions: Self.hoveredForScreenshots == RuleRow.patternDisplay(rule, services: services)
+                    showsActions: Self.hoveredForScreenshots == RuleRow.patternDisplay(rule, services: services),
+                    refusalNote: refusals[rule.id]
                 )
                 .draggable(rule.id.uuidString)
                 .dropDestination(for: String.self) { items, _ in
@@ -832,6 +834,9 @@ struct RuleRow: View {
     let onNewRoute: () -> Void
     /// Draws the actions as if the pointer were over the row, for the doc screenshots.
     var showsActions = false
+    /// Why the rule is left out, in whole or in part (`GeoDisplay.refusalNotes`). Said in place of
+    /// what its list holds.
+    var refusalNote: String?
 
     /// The leading glyph says what the rule matches, in place of the old uppercase badge.
     static func glyph(for type: MatchType) -> String {
@@ -930,7 +935,8 @@ struct RuleRow: View {
         switch rule.matchType {
         case .geoip:
             let count = GeoDataFile.geoip.ranges(for: [key])[key]?.count
-            let detail = GeoDisplay.detail(count: count, hasData: geoipStore.hasData)
+            let detail = GeoDisplay.detail(count: count, hasData: geoipStore.hasData,
+                                           leftOut: GeoDataFile.geoip.leftOut(for: key))
             guard let count, (1...GeoDataFile.maxRangesPerCountry).contains(count) else { return detail }
             return GeoDisplay.withIPv4Note(detail)
         case .geosite:
@@ -948,7 +954,7 @@ struct RuleRow: View {
                                     customEngine: ProcessRule.customEngine(routeManager.config),
                                     turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: flowEngine.confirmed?.declinedTeams ?? []),
                                     counters: flowEngine.counters(forRule: rule.id.uuidString))
-        return Self.joined(inertNote ?? blockNote ?? geoDetail, routeNote)
+        return Self.joined(inertNote ?? refusalNote ?? blockNote ?? geoDetail, routeNote)
     }
 
     /// Two lines under a row, either of which may be absent.
