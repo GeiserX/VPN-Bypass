@@ -584,7 +584,7 @@ struct RulesTab: View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 GroupSection {
-                    if sortedRules.isEmpty {
+                    if routeManager.config.rules.isEmpty {
                         EmptyState(systemImage: "list.bullet",
                                    title: String(localized: "No rules yet"),
                                    message: String(localized: "Add a rule to send a domain, service, or IP range through a specific route."),
@@ -601,7 +601,7 @@ struct RulesTab: View {
                 }
             }
         }
-        .pageSubtitle(Self.purpose(ruleCount: sortedRules.count))
+        .pageSubtitle(Self.purpose(ruleCount: routeManager.config.rules.count))
         .pageTitleActions([.add(String(localized: "Add Rule")) { sheetState = .add }])
         .sheet(item: $sheetState) { state in
             RuleEditorSheet(editingRule: state.rule, services: routeManager.config.services) { rule in
@@ -628,31 +628,38 @@ struct RulesTab: View {
 
     @ViewBuilder
     private var ruleRows: some View {
-        if shownRules.isEmpty {
+        // Sorted and filtered once per pass, not once per use.
+        let shown = shownRules
+        let services = routeManager.config.services
+        if shown.isEmpty {
             SettingsSearchMiss(search: searchText)
         }
-        let services = routeManager.config.services
-        ForEach(Array(shownRules.enumerated()), id: \.element.id) { idx, rule in
-            if idx > 0 { InsetDivider() }
-            RuleRow(
-                rule: rule,
-                onEdit: { sheetState = .edit(rule) },
-                onDelete: { deleteRule(rule) },
-                onToggle: { enabled in toggleRule(rule.id, enabled: enabled) },
-                onReassign: { newRouteId in reassignRule(rule.id, to: newRouteId) },
-                onNewRoute: {
-                    pendingNewRouteCompletion = { newRoute in reassignRule(rule.id, to: newRoute.id) }
-                    showingNewRouteSheet = true
-                },
-                showsActions: Self.hoveredForScreenshots == RuleRow.patternDisplay(rule, services: services)
-            )
-            .draggable(rule.id.uuidString)
-            .dropDestination(for: String.self) { items, _ in
-                // A read-only page (another mode) takes no drop: `.disabled` does not stop one.
-                guard isEnabled else { return false }
-                guard let draggedIdString = items.first, let draggedId = UUID(uuidString: draggedIdString) else { return false }
-                moveRule(draggedId: draggedId, to: rule.id)
-                return true
+        // Lazy: a list of thousands of rules (a bulk-imported range list) builds only the rows
+        // on screen. An eager VStack built every row, its chip menu and its drag/drop targets
+        // up front, which froze the page and took gigabytes.
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(shown.enumerated()), id: \.element.id) { idx, rule in
+                if idx > 0 { InsetDivider() }
+                RuleRow(
+                    rule: rule,
+                    onEdit: { sheetState = .edit(rule) },
+                    onDelete: { deleteRule(rule) },
+                    onToggle: { enabled in toggleRule(rule.id, enabled: enabled) },
+                    onReassign: { newRouteId in reassignRule(rule.id, to: newRouteId) },
+                    onNewRoute: {
+                        pendingNewRouteCompletion = { newRoute in reassignRule(rule.id, to: newRoute.id) }
+                        showingNewRouteSheet = true
+                    },
+                    showsActions: Self.hoveredForScreenshots == RuleRow.patternDisplay(rule, services: services)
+                )
+                .draggable(rule.id.uuidString)
+                .dropDestination(for: String.self) { items, _ in
+                    // A read-only page (another mode) takes no drop: `.disabled` does not stop one.
+                    guard isEnabled else { return false }
+                    guard let draggedIdString = items.first, let draggedId = UUID(uuidString: draggedIdString) else { return false }
+                    moveRule(draggedId: draggedId, to: rule.id)
+                    return true
+                }
             }
         }
     }
@@ -731,11 +738,13 @@ struct RulesTab: View {
               let toIndex = ordered.firstIndex(where: { $0.id == targetId }) else { return }
         let moved = ordered.remove(at: fromIndex)
         ordered.insert(moved, at: toIndex)
-        for (newOrder, rule) in ordered.enumerated() {
-            if let idx = routeManager.config.rules.firstIndex(where: { $0.id == rule.id }) {
-                routeManager.config.rules[idx].order = newOrder
-            }
+        let newOrder = Dictionary(uniqueKeysWithValues: ordered.enumerated().map { ($1.id, $0) })
+        // One write to the published config, not one per rule.
+        var rules = routeManager.config.rules
+        for idx in rules.indices {
+            if let order = newOrder[rules[idx].id] { rules[idx].order = order }
         }
+        routeManager.config.rules = rules
         persistAndReapply()
     }
 
