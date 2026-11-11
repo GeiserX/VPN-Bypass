@@ -2852,7 +2852,7 @@ final class RouteManager: ObservableObject {
             lastUpdate = Date()
             wildcards.routesApplied()   // as the classic skip path
             // No route changed, but a block may have: a rule edited, switched off or moved to another route.
-            await applyRuleBlocks(compiledAll.blocks)
+            await applyRuleBlocks(compiledAll.blocks, epoch: epoch)
             return true
         }
 
@@ -2881,7 +2881,7 @@ final class RouteManager: ObservableObject {
         guard committed else { return false }
         // The blocks go in after the routes are committed: the stale-route cleanup above removes by
         // destination, and would take a block just put on an address a rule used to route.
-        await applyRuleBlocks(compiledAll.blocks)
+        await applyRuleBlocks(compiledAll.blocks, epoch: epoch)
 
         let confirmedUniqueCount = uniqueRouteCount
         // A service rule's routes are recorded under the service id; Problems names the service.

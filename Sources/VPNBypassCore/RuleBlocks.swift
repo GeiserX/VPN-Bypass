@@ -34,9 +34,11 @@ extension RouteManager {
 
     /// Makes `ruleBlocks` the blocks the rules want: puts the new ones in, takes the ones no rule
     /// wants any more out. Called by every Custom apply, so editing a rule, switching it off or
-    /// changing its route is enough.
-    func applyRuleBlocks(_ desired: [RouteCompiler.DesiredBlock]) async {
-        guard !isPaused, !isShuttingDown,
+    /// changing its route is enough. `epoch`: the `routeEpoch` the apply started at. A teardown
+    /// (Remove All Routes, a pause, a quit) bumps it, and then this apply's blocks are not put in.
+    func applyRuleBlocks(_ desired: [RouteCompiler.DesiredBlock], epoch applyEpoch: UInt64? = nil) async {
+        let applyEpoch = applyEpoch ?? routeEpoch
+        guard routeEpoch == applyEpoch, !isPaused, !isShuttingDown,
               HelperManager.shared.isHelperInstalled || addBlockRoutesBatchOverrideForTests != nil else { return }
         var wanted: [String: String] = [:]
         var refused = 0
@@ -64,6 +66,9 @@ extension RouteManager {
             if !failed.isEmpty { log(.warning, "Block: \(failed.count) address(es) could not be released and stay listed for the next try") }
         }
 
+        // A teardown that ran during the awaits above (the hosts update before this call, the DNS
+        // server read, the release) took the routes out: this plan is stale, and its blocks stay out.
+        guard routeEpoch == applyEpoch else { return }
         // An address already routed (a wildcard learned it, say) is left to its route: first match was
         // decided when the rules were compiled, so this is only a race, and a block would replace it.
         let fresh = wanted.keys.filter { !have.contains($0) && !routedNow.contains($0) }.sorted()

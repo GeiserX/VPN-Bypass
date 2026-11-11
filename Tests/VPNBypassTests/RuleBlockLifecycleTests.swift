@@ -215,6 +215,46 @@ final class RuleBlockLifecycleTests: XCTestCase {
         XCTAssertTrue(rm.ruleBlocks.isEmpty, "nothing is left listed after the teardown")
     }
 
+    /// Remove All Routes while the apply releases an old block: the apply's new blocks stay out.
+    func testATeardownDuringTheReleaseKeepsTheNewBlocksOut() async {
+        rm.ruleBlocks = [RouteManager.ActiveRoute(destination: "198.51.100.0/24", gateway: "", source: "old", timestamp: Date())]
+        kernel.blocks = ["198.51.100.0/24"]
+        let manager = rm
+        let start = rm.routeEpoch
+        let working = rm.removeRoutesBatchOverrideForTests!
+        rm.removeRoutesBatchOverrideForTests = { dests in
+            let result = await working(dests)
+            if manager.routeEpoch == start { await manager.removeAllRoutes() }
+            return result
+        }
+        defer { rm.removeRoutesBatchOverrideForTests = working }
+        await rm.applyRuleBlocks([block("203.0.113.0/24", "r")])
+        XCTAssertEqual(rm.routeEpoch, start + 1, "the teardown ran")
+        XCTAssertTrue(kernel.blocks.isEmpty, "a block of the old plan was put in after Remove All Routes")
+        XCTAssertTrue(rm.ruleBlocks.isEmpty)
+    }
+
+    /// Remove All Routes after the apply committed its routes, before its blocks went in: none go in.
+    func testATeardownAfterTheCommitKeepsTheBlocksOut() async {
+        // A VPN Only block left over makes the commit release it, an await between the commit and
+        // the rule blocks; the teardown runs there.
+        rm.isVPNConnected = true
+        rm.blockedRoutes = [RouteManager.ActiveRoute(destination: "192.0.2.50", gateway: "", source: "old", timestamp: Date())]
+        let manager = rm
+        let start = rm.routeEpoch
+        let working = rm.removeRoutesBatchOverrideForTests!
+        rm.removeRoutesBatchOverrideForTests = { dests in
+            let result = await working(dests)
+            if dests.contains("192.0.2.50"), manager.routeEpoch == start { await manager.removeAllRoutes() }
+            return result
+        }
+        defer { rm.removeRoutesBatchOverrideForTests = working }
+        await rm.applyAllRoutes()
+        XCTAssertGreaterThan(rm.routeEpoch, start, "the teardown ran")
+        XCTAssertTrue(kernel.blocks.isEmpty, "a block of the old plan was put in after Remove All Routes")
+        XCTAssertTrue(rm.ruleBlocks.isEmpty)
+    }
+
     func testTheDNSServersInUseAreProtectedToo() {
         XCTAssertTrue(RouteManager.address(in: ["9.9.9.9"], isCoveredBy: "9.9.9.0/24"))
     }
