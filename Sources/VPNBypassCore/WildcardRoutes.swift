@@ -205,8 +205,17 @@ enum WildcardPlanner {
                 guard let via = via(of: route) else { continue }
                 var tooManyExcluded = 0
                 for suffix in blocked where !domains(of: suffix).contains(where: claimedSuffixes.contains) {
-                    // Claimed names, then claimed wildcards, at or under this suffix.
-                    let excluded = (namesUnder[suffix] ?? []) + (wildcardsUnder[suffix] ?? [])
+                    // Claimed names, then claimed wildcards, at or under this suffix. One a broader
+                    // claimed wildcard here already covers is left out: it excludes nothing more, and
+                    // counting it twice could pass the limit below for nothing.
+                    let wildcardsHere = wildcardsUnder[suffix] ?? []
+                    let covering = Set(wildcardsHere.compactMap(WildcardDomain.suffix(of:)))
+                    let namesKept = (namesUnder[suffix] ?? []).filter { !domains(of: $0).contains(where: covering.contains) }
+                    let wildcardsKept = wildcardsHere.filter { entry in
+                        guard let own = WildcardDomain.suffix(of: entry) else { return true }
+                        return !domains(of: own).dropFirst().contains(where: covering.contains)
+                    }
+                    let excluded = namesKept + wildcardsKept
                     // More than the helper takes: left out, as a wildcard under an earlier
                     // suffix is, rather than route a name first match sends elsewhere. Said in the
                     // log and on the rule's row.

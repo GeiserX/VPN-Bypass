@@ -117,3 +117,51 @@ final class GeoCountryTotalInertRouteTests: XCTestCase {
         XCTAssertEqual(notes[c.rules[4].id], GeoDisplay.countryRefusal(count: 40_000), "the third live country is still refused")
     }
 }
+
+/// The 64 excluded names a wildcard may carry count each name once.
+final class ExcludedNamesCountedOnceTests: XCTestCase {
+
+    private let direct = Route(name: "Direct", egress: .direct)
+    private let block = Route(name: Route.blockName, egress: .block)
+
+    private func custom(_ rules: [Rule]) -> RouteManager.Config {
+        var c = RouteManager.Config()
+        c.routingMode = .custom
+        c.schemaVersion = 2
+        c.routes = [direct, block]
+        c.defaultRouteId = direct.id
+        c.rules = rules
+        return c
+    }
+
+    /// On Block an exact name claims the name and everything under it: one exclusion, not two.
+    func testBlockedNamesUnderALaterWildcardCountOnce() {
+        let names = (0..<33).map { Rule(matchType: .domain, pattern: "x\($0).example.com", routeId: block.id, order: $0) }
+        let later = Rule(matchType: .suffix, pattern: "example.com", routeId: direct.id, order: 33)
+        let selection = WildcardPlanner.selection(custom(names + [later]))
+        let item = selection.items.first { $0.suffix == "example.com" }
+        XCTAssertNotNil(item, "the wildcard was left out for too many excluded names")
+        XCTAssertNil(selection.refused[later.id])
+        XCTAssertEqual(Set(item?.excluded ?? []), Set((0..<33).map { "*.x\($0).example.com" }), "an earlier claim is no longer excluded")
+    }
+
+    /// Names under an earlier wildcard add nothing to what that wildcard excludes.
+    func testNamesUnderAnEarlierWildcardCountOnce() {
+        let wildcard = Rule(matchType: .suffix, pattern: "a.example.com", routeId: direct.id, order: 0)
+        let names = (0..<64).map { Rule(matchType: .domain, pattern: "n\($0).a.example.com", routeId: direct.id, order: $0 + 1) }
+        let later = Rule(matchType: .suffix, pattern: "example.com", routeId: block.id, order: 65)
+        let selection = WildcardPlanner.selection(custom([wildcard] + names + [later]))
+        let item = selection.items.first { $0.suffix == "example.com" }
+        XCTAssertEqual(item?.excluded, ["*.a.example.com"])
+        XCTAssertNil(selection.refused[later.id])
+    }
+
+    /// Positive control: 65 names no wildcard covers are still too many.
+    func testSixtyFiveSeparateNamesAreStillTooMany() {
+        let names = (0..<65).map { Rule(matchType: .domain, pattern: "n\($0).example.com", routeId: direct.id, order: $0) }
+        let later = Rule(matchType: .suffix, pattern: "example.com", routeId: block.id, order: 65)
+        let selection = WildcardPlanner.selection(custom(names + [later]))
+        XCTAssertFalse(selection.items.contains { $0.suffix == "example.com" })
+        XCTAssertEqual(selection.refused[later.id], .tooManyExcluded(wildcards: 1))
+    }
+}
