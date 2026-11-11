@@ -317,6 +317,8 @@ struct RouteRow: View {
         case .tailscaleExit: return String(localized: "Tailscale", bundle: bundle)
         case .vpnDefault: return String(localized: "VPN", bundle: bundle)
         case .direct: return String(localized: "Direct", bundle: bundle)
+        case .block: return String(localized: "Block", bundle: bundle)
+        case .unsupported: return String(localized: "Unknown", bundle: bundle)
         }
     }
 
@@ -331,6 +333,10 @@ struct RouteRow: View {
         case .proxyHTTP, .proxySOCKS5, .direct:
             let host = route.proxyHost ?? "—"
             return route.proxyPort.map { "\(host):\($0)" } ?? host
+        case .block:
+            return String(localized: "Names are not resolved", bundle: bundle)
+        case .unsupported:
+            return route.unknownEgress ?? "—"
         }
     }
 
@@ -469,6 +475,8 @@ struct RouteEditorSheet: View {
         case .tailscaleExit:           return "e.g. Home exit"
         case .vpnDefault:              return "e.g. Work VPN"
         case .direct:                  return "e.g. Direct"
+        case .block:                   return "e.g. Block ads"
+        case .unsupported:             return ""
         }
     }
 
@@ -487,6 +495,8 @@ struct RouteEditorSheet: View {
                     Text("SOCKS5").tag(Egress.proxySOCKS5)
                     Text("Tailscale Peer").tag(Egress.tailscaleExit)
                     Text("VPN").tag(Egress.vpnDefault)
+                    Text("Block").tag(Egress.block)
+                    if egress == .unsupported { Text("Unknown").tag(Egress.unsupported) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -494,6 +504,10 @@ struct RouteEditorSheet: View {
 
             if egress == .vpnDefault {
                 vpnPickerField
+            } else if egress == .block {
+                note("Rules that send names here get no answer for them, so nothing connects: ads, trackers. It works through the Mac's own DNS, so an app that brings its own, such as a browser with secure DNS, is not blocked.")
+            } else if egress == .unsupported {
+                note("This route comes from a newer version of VPN Bypass. It is kept as it is and carries no traffic here.")
             } else {
                 proxyFields
             }
@@ -624,6 +638,19 @@ struct RouteEditorSheet: View {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty else {
             validationError = String(localized: "Name is required.")
+            return
+        }
+
+        // A route from a newer version: only its name changes here, the rest is written back as it was.
+        if egress == .unsupported, var kept = editingRoute {
+            kept.name = trimmedName
+            onSave(kept)
+            return
+        }
+        // A blackhole has no host, port or tunnel.
+        if egress == .block {
+            onSave(Route(id: editingRoute?.id ?? UUID(), name: trimmedName, egress: .block,
+                         enabled: editingRoute?.enabled ?? true))
             return
         }
 

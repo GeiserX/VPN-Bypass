@@ -1236,3 +1236,12 @@
 "Sync: %@" = "Sincronización: %@";
 "Country list last synced %@ (%@)." = "Lista de países sincronizada por última vez el %@ (%@).";
 "Site list last synced %@ (%@)." = "Lista de sitios sincronizada por última vez el %@ (%@).";
+"Rules that send names here get no answer for them, so nothing connects: ads, trackers. It works through the Mac's own DNS, so an app that brings its own, such as a browser with secure DNS, is not blocked." = "Las reglas que envían nombres aquí no obtienen respuesta para ellos, así que nada se conecta: anuncios, rastreadores. Funciona a través del DNS del propio Mac, así que una app que trae el suyo, como un navegador con DNS seguro, no queda bloqueada.";
+"Block works on names, not addresses yet: this rule does nothing." = "Bloquear funciona con nombres, aún no con direcciones: esta regla no hace nada.";
+"Block" = "Bloquear";
+"Its route comes from a newer version of VPN Bypass and carries no traffic here." = "Su ruta viene de una versión más reciente de VPN Bypass y aquí no lleva tráfico.";
+"Names are not resolved" = "Los nombres no se resuelven";
+"This route comes from a newer version of VPN Bypass. It is kept as it is and carries no traffic here." = "Esta ruta viene de una versión más reciente de VPN Bypass. Se conserva tal cual y aquí no lleva tráfico.";
+"Unknown" = "Desconocido";
+"Written by a newer version of VPN Bypass. Kept as it is; it matches nothing here." = "Escrita por una versión más reciente de VPN Bypass. Se conserva tal cual; aquí no coincide con nada.";
+"e.g. Block ads" = "p. ej. Bloquear anuncios";

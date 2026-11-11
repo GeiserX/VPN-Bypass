@@ -21,6 +21,12 @@ public enum Egress: String, Codable, Equatable, Sendable {
     case tailscaleExit  // into the Tailscale utun (iface:utunX) — Mac-mini-as-exit-node.
     case proxyHTTP      // userspace 127.0.0.1:PORT listener → HTTP CONNECT upstream.
     case proxySOCKS5    // userspace 127.0.0.1:PORT listener → SOCKS5 (socks5h) upstream.
+    /// A blackhole: the names a rule sends here are not resolved, so nothing connects (ads,
+    /// trackers). Served by the DNS forwarder, as a wildcard is; no kernel route.
+    case block
+    /// An egress this build does not know, written by a newer one. The route keeps what it was
+    /// (`Route.unknownEgress`) and is written back unchanged, but carries no traffic.
+    case unsupported
 }
 
 /// Residential-proxy session behaviour. Inert in P0; consumed in P1.
@@ -50,6 +56,9 @@ public enum MatchType: String, Codable, Equatable, Sendable {
     /// executable's file name (`Example`), never a path (ProcessRule). Only per-app routing can
     /// serve it; the kernel engine skips it, and every surface says so (`ProcessRule.serving`).
     case process
+    /// A match type this build does not know, written by a newer one. The rule keeps what it was
+    /// (`Rule.unknownMatchType`) and is written back unchanged, but matches nothing.
+    case unsupported
 }
 
 /// Which VPN a `.vpnDefault` route targets when several tunnels are up. An OPTIONAL
@@ -116,6 +125,39 @@ struct Route: Codable, Identifiable, Equatable {
     /// Never hand-edited.
     var localListenPort: Int?
 
+    /// The name of the route `RouteManager.ensureBlockRoute` makes.
+    static let blockName = "Block"
+
+    /// The egress as written when this build does not know it (`egress` is then `.unsupported`).
+    /// Written back as it was, so a newer build's route is not lost by opening and saving here.
+    var unknownEgress: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, egress, enabled, proxyHost, proxyPort, proxyUser, proxyPass
+        case proxyUsernameTemplate, proxyPasswordTemplate, sessionMode, sessionTTLMinutes, remoteDNS
+        case tailscaleExitNode, vpnSelector, localListenPort
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(unknownEgress ?? egress.rawValue, forKey: .egress)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encodeIfPresent(proxyHost, forKey: .proxyHost)
+        try c.encodeIfPresent(proxyPort, forKey: .proxyPort)
+        try c.encodeIfPresent(proxyUser, forKey: .proxyUser)
+        try c.encodeIfPresent(proxyPass, forKey: .proxyPass)
+        try c.encodeIfPresent(proxyUsernameTemplate, forKey: .proxyUsernameTemplate)
+        try c.encodeIfPresent(proxyPasswordTemplate, forKey: .proxyPasswordTemplate)
+        try c.encode(sessionMode, forKey: .sessionMode)
+        try c.encodeIfPresent(sessionTTLMinutes, forKey: .sessionTTLMinutes)
+        try c.encode(remoteDNS, forKey: .remoteDNS)
+        try c.encodeIfPresent(tailscaleExitNode, forKey: .tailscaleExitNode)
+        try c.encodeIfPresent(vpnSelector, forKey: .vpnSelector)
+        try c.encodeIfPresent(localListenPort, forKey: .localListenPort)
+    }
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -156,7 +198,17 @@ struct Route: Codable, Identifiable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
-        egress = try c.decodeIfPresent(Egress.self, forKey: .egress) ?? .direct
+        // An egress this build does not know is kept, not a reason to refuse the whole config.
+        if let raw = try? c.decodeIfPresent(String.self, forKey: .egress) {
+            if let known = Egress(rawValue: raw), known != .unsupported {
+                egress = known
+            } else {
+                egress = .unsupported
+                unknownEgress = raw
+            }
+        } else {
+            egress = .direct
+        }
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         proxyHost = try c.decodeIfPresent(String.self, forKey: .proxyHost)
         proxyPort = try c.decodeIfPresent(Int.self, forKey: .proxyPort)
@@ -181,6 +233,24 @@ struct Rule: Codable, Identifiable, Equatable {
     var routeId: UUID
     var enabled: Bool
     var order: Int  // lower runs earlier; first match wins.
+    /// The match type as written when this build does not know it (`matchType` is then
+    /// `.unsupported`). Written back as it was, so a newer build's rule is not lost by opening
+    /// and saving here.
+    var unknownMatchType: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, matchType, pattern, routeId, enabled, order
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(unknownMatchType ?? matchType.rawValue, forKey: .matchType)
+        try c.encode(pattern, forKey: .pattern)
+        try c.encode(routeId, forKey: .routeId)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encode(order, forKey: .order)
+    }
 
     init(id: UUID = UUID(), matchType: MatchType, pattern: String, routeId: UUID, enabled: Bool = true, order: Int) {
         self.id = id
@@ -194,7 +264,17 @@ struct Rule: Codable, Identifiable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        matchType = try c.decodeIfPresent(MatchType.self, forKey: .matchType) ?? .domain
+        // A match type this build does not know is kept, not a reason to refuse the whole config.
+        if let raw = try? c.decodeIfPresent(String.self, forKey: .matchType) {
+            if let known = MatchType(rawValue: raw), known != .unsupported {
+                matchType = known
+            } else {
+                matchType = .unsupported
+                unknownMatchType = raw
+            }
+        } else {
+            matchType = .domain
+        }
         pattern = try c.decodeIfPresent(String.self, forKey: .pattern) ?? ""
         // routeId has no default. Decoding stays total so one malformed rule
         // cannot fail the whole config decode (matching Config's resilient

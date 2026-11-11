@@ -14,6 +14,7 @@
 //   • .vpnDefault     → the primary VPN (ifaceGatewayForRoute == nil) emits NOTHING
 //                        (the OS default route already carries it); a *specific* VPN
 //                        (ifaceGatewayForRoute == "iface:utunX") emits an iface route.
+//   • .block / .unsupported → NOTHING, and the rule claims nothing (see below).
 //   • .proxyHTTP / .proxySOCKS5 / .tailscaleExit → NOTHING; a loopback listener
 //                        (ProxyListenerManager) serves these, so the routing table
 //                        must stay clear of them.
@@ -93,6 +94,11 @@ enum RouteCompiler {
                 gateway = ifaceGatewayForRoute(route)   // nil = primary VPN ⇒ no route
             case .proxyHTTP, .proxySOCKS5, .tailscaleExit:
                 gateway = nil                            // a loopback listener serves it
+            case .block, .unsupported:
+                // A blackhole is served by the DNS forwarder, by name (WildcardPlanner); no kernel
+                // route blocks an address yet. A route this build does not know carries nothing.
+                // Neither claims its destinations: a later rule still decides them.
+                continue
             }
 
             for dest in entry.dests {

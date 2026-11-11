@@ -350,7 +350,7 @@ enum SiteRoute {
             let ranges = geoip[rule.pattern.lowercased()] ?? []
             return addresses.contains { a in ranges.contains { RuleResolver.ipv4(a, inCIDR: $0) } }
         case .geosite: return geosite[rule.pattern.lowercased()]?.usable.matches(host) ?? false
-        case .process: return false
+        case .process, .unsupported: return false
         }
     }
 
@@ -365,7 +365,7 @@ enum SiteRoute {
         case .vpnDefault:
             if route.vpnSelector?.kind == .interface, let name = pinned[route.id] { return .tunnel(name) }
             return vpnInterface.map { .tunnel($0) }
-        case .tailscaleExit, .proxyHTTP, .proxySOCKS5: return nil
+        case .tailscaleExit, .proxyHTTP, .proxySOCKS5, .block, .unsupported: return nil
         }
     }
 

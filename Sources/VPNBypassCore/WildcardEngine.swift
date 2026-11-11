@@ -237,7 +237,8 @@ final class WildcardEngine {
             vpnDNS: vpnDNS,
             pinnedGateway: { manager.ifaceGateway(for: $0, links: links) },
             dnsForInterface: { ScutilDNS.nameservers(forInterface: $0, in: resolvers) },
-            resolvers: resolvers
+            resolvers: resolvers,
+            blockSupported: HelperManager.shared.supportsBlockedNames
         )
     }
 

@@ -420,7 +420,7 @@ enum CommandRouter {
 
         guard let egress = parseEgressType(request.args?["type"]) else {
             return errorResponse(config, code: "invalid_type",
-                                 message: "type must be one of: http, socks5, tailscale, vpn")
+                                 message: "type must be one of: http, socks5, tailscale, vpn, block")
         }
 
         var route = Route(
@@ -619,6 +619,7 @@ enum CommandRouter {
         case "socks5": return .proxySOCKS5
         case "tailscale": return .tailscaleExit
         case "vpn": return .vpnDefault
+        case "block": return .block
         default: return nil
         }
     }

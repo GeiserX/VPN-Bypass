@@ -496,6 +496,8 @@ final class HelperManager: ObservableObject {
         static let selfUpdate = "2.8.0"
         /// Per-app routing's scoped default route on the physical interface (R12).
         static let scopedDefault = "2.9.0"
+        /// A wildcard that blocks its names (`WildcardSpec.block`, the Block route).
+        static let blockedNames = "2.10.0"
         /// The oldest helper the app routes through while its update waits. Older ones lack
         /// the VPN Only blocks or the wildcards (a listed name would leave outside the tunnel)
         /// or the route batches (1.5.0), so the app waits for their update instead.
@@ -518,6 +520,10 @@ final class HelperManager: ObservableObject {
     private func runningHelperSupports(_ minimum: String) -> Bool {
         Self.helper(helperVersion, supports: minimum)
     }
+
+    /// The running helper answers a blackhole wildcard; an older one reads it as a wildcard with no
+    /// gateway and refuses it. An unknown version counts as new enough, as for every method.
+    var supportsBlockedNames: Bool { runningHelperSupports(MethodSince.blockedNames) }
 
     // MARK: - XPC Connection
 

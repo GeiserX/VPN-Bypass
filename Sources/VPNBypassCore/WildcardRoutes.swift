@@ -28,6 +28,9 @@ enum WildcardPlanner {
         var dnsForInterface: (String) -> [String] = { _ in [] }
         /// `scutil --dns`, for the other resolvers that serve names under a wildcard.
         var resolvers: [ScutilDNS.Resolver] = []
+        /// The running helper answers a Block wildcard (2.10.0 or later). An older one would read
+        /// it as a wildcard without a gateway and refuse it, so the plan holds it back and says why.
+        var blockSupported = true
     }
 
     /// The wildcards the current mode routes, as suffixes, first one first, each once. Whether
@@ -46,6 +49,8 @@ enum WildcardPlanner {
             case vpn
             /// Into a Custom route pinned to one tunnel.
             case pinned(Route)
+            /// To the Block route: the forwarder answers the names NXDOMAIN, no route is learned.
+            case block
         }
         let suffix: String
         let via: Via
@@ -97,7 +102,7 @@ enum WildcardPlanner {
                     let list = lists[rule.pattern.lowercased()]?.usable ?? GeoSiteExpansion(found: false)
                     entries = list.suffixes.map(WildcardDomain.entry(for:))
                     names = list.names
-                case .ip, .cidr, .geoip, .process:
+                case .ip, .cidr, .geoip, .process, .unsupported:
                     entries = []
                 }
                 let suffixes = entries.compactMap(WildcardDomain.suffix(of:))
@@ -109,9 +114,13 @@ enum WildcardPlanner {
                 switch route.egress {
                 case .direct: via = .physical
                 case .vpnDefault where route.vpnSelector?.kind == .interface: via = .pinned(route)
+                case .block: via = .block
                 default: continue
                 }
-                for suffix in suffixes where !claimed.contains(where: { WildcardDomain.matches(suffix, suffix: $0) }) {
+                // A blackhole covers an exact name as well, and what is under it: a list of
+                // trackers names `ads.example.com`, and its subdomains are the same tracker.
+                let blocked = via == .block ? suffixes + names.compactMap(WildcardDomain.normalizedSuffix) : suffixes
+                for suffix in blocked where !claimed.contains(where: { WildcardDomain.matches(suffix, suffix: $0) }) {
                     var excluded: [String] = []
                     for name in claimedNames + claimed.map(WildcardDomain.entry(for:))
                     where WildcardDomain.matches(WildcardDomain.suffix(of: name) ?? name, suffix: suffix) && !excluded.contains(name) {
@@ -163,8 +172,31 @@ enum WildcardPlanner {
                 skipped[item.suffix] = "Tailscale answers these names itself"
                 continue
             }
+            if item.via == .block {
+                guard env.blockSupported else {
+                    skipped[item.suffix] = "the helper needs an update to block names"
+                    continue
+                }
+                // The physical network's resolver, when it is known, answers the names an earlier
+                // rule claims; with none, those names get no answer and the rest are blocked.
+                let known = env.localGateway != nil && env.physicalInterface != nil
+                let servers = Array(env.physicalDNS.filter { WildcardIPv4.parse($0) != nil && !$0.hasPrefix("127.") }.prefix(4))
+                let withUpstream = known && !servers.isEmpty
+                let spec = WildcardSpec(suffix: item.suffix, gateway: withUpstream ? env.localGateway! : "",
+                                        upstream: withUpstream ? servers : [],
+                                        interface: withUpstream ? env.physicalInterface! : "",
+                                        excluded: item.excluded, block: true)
+                guard WildcardSpec(dictionary: spec.dictionary) != nil else {
+                    skipped[item.suffix] = "its gateway or interface is not one the helper accepts"
+                    continue
+                }
+                specs.append(spec)
+                continue
+            }
             let gateway: String?, interface: String?, upstream: [String]
             switch item.via {
+            case .block:
+                continue
             case .physical:
                 (gateway, interface, upstream) = (env.localGateway, env.physicalInterface, env.physicalDNS)
             case .vpn:

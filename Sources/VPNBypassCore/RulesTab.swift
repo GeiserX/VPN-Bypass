@@ -19,6 +19,9 @@ extension Route {
             if vpnSelector?.kind == .interface { return name.isEmpty ? String(localized: "VPN", bundle: bundle) : name }
             return vpnName ?? String(localized: "VPN", bundle: bundle)
         case .proxyHTTP, .proxySOCKS5, .tailscaleExit: return name
+        // The route `ensureBlockRoute` makes is called "Block"; it reads in the language of the app.
+        case .block: return name == Route.blockName ? String(localized: "Block", bundle: bundle) : name
+        case .unsupported: return name
         }
     }
 }
@@ -32,6 +35,15 @@ extension RouteManager {
         config.routes.append(route)
         saveConfig()
         startConfigFollowUp(reconcileListeners: true, reapplyRoutes: false)
+    }
+
+    /// The Block route, made the first time a rule is sent there: a config that never blocks gets
+    /// no extra route, so an existing config is not changed by this version.
+    func ensureBlockRoute() -> Route {
+        if let existing = config.routes.first(where: { $0.egress == .block }) { return existing }
+        let route = Route(name: Route.blockName, egress: .block)
+        addRoute(route)
+        return route
     }
 
     /// Deletes a rule and re-applies, as the Rules page's trash button does.
@@ -778,6 +790,7 @@ struct RuleRow: View {
         case .process: return "app"
         case .geoip: return "flag"
         case .geosite: return "list.bullet.rectangle"
+        case .unsupported: return "questionmark.circle"
         }
     }
 
@@ -795,6 +808,8 @@ struct RuleRow: View {
             return WildcardDomain.isWildcard(rule.pattern) ? rule.pattern : WildcardDomain.entry(for: rule.pattern)
         case .geoip:
             return GeoDisplay.name(for: rule.pattern)
+        case .unsupported:
+            return "\(rule.unknownMatchType ?? "?"): \(rule.pattern)"
         case .domain, .ip, .cidr, .geosite, .process:
             return rule.pattern
         }
@@ -827,6 +842,22 @@ struct RuleRow: View {
         return ProxyReachNote.forRoute(route)?.line(in: bundle)
     }
 
+    /// A line that says a rule does nothing, ahead of what its list holds: a rule from a newer
+    /// version, a route from one, or an address sent to Block, which blocks names only so far.
+    private var inertNote: String? {
+        if rule.matchType == .unsupported {
+            return String(localized: "Written by a newer version of VPN Bypass. Kept as it is; it matches nothing here.")
+        }
+        guard let route = assignedRoute else { return nil }
+        if route.egress == .unsupported {
+            return String(localized: "Its route comes from a newer version of VPN Bypass and carries no traffic here.")
+        }
+        if route.egress == .block, [.ip, .cidr, .geoip].contains(rule.matchType) {
+            return String(localized: "Block works on names, not addresses yet: this rule does nothing.")
+        }
+        return nil
+    }
+
     /// A Country or Site rule's second line: what its list holds, or why it holds nothing.
     private var geoDetail: String? {
         let key = rule.pattern.lowercased()
@@ -844,7 +875,7 @@ struct RuleRow: View {
         ListRow(
             glyph: Self.glyph(for: rule.matchType),
             name: patternDisplay,
-            detail: geoDetail ?? Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
+            detail: inertNote ?? geoDetail ?? Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
                                 customEngine: ProcessRule.customEngine(routeManager.config),
                                 turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: flowEngine.confirmed?.declinedTeams ?? []),
                                 counters: flowEngine.counters(forRule: rule.id.uuidString)),
@@ -890,8 +921,17 @@ struct RulesRouteChipMenu: View {
     /// VPN route pinned to a specific tunnel is user-created, so it lives in Your Routes.
     private var systemRoutes: [Route] {
         routeManager.config.routes
-            .filter { $0.egress == .direct || ($0.egress == .vpnDefault && $0.vpnSelector?.kind != .interface) }
-            .sorted { ($0.egress == .direct ? 0 : 1) < ($1.egress == .direct ? 0 : 1) }
+            .filter { $0.egress == .direct || $0.egress == .block || ($0.egress == .vpnDefault && $0.vpnSelector?.kind != .interface) }
+            .sorted { Self.systemOrder($0) < Self.systemOrder($1) }
+    }
+
+    /// Direct, then the primary VPN, then Block.
+    private static func systemOrder(_ route: Route) -> Int {
+        switch route.egress {
+        case .direct: return 0
+        case .block: return 2
+        default: return 1
+        }
     }
 
     private var userRoutes: [Route] {
@@ -915,6 +955,15 @@ struct RulesRouteChipMenu: View {
                 Section("System") {
                     ForEach(systemRoutes) { route in
                         routeButton(route)
+                    }
+                    // Block is made the first time it is chosen, so a config that never blocks
+                    // gets no extra route.
+                    if !routeManager.config.routes.contains(where: { $0.egress == .block }) {
+                        Button {
+                            onSelect(routeManager.ensureBlockRoute().id)
+                        } label: {
+                            Text("Block")
+                        }
                     }
                 }
                 if !userRoutes.isEmpty {
@@ -999,7 +1048,7 @@ struct RuleEditorSheet: View {
         case .ip:      return "10.0.0.5"
         case .cidr:    return "10.0.0.0/8"
         case .process: return String(localized: "com.example.App or Example")
-        case .geoip, .geosite: return ""
+        case .geoip, .geosite, .unsupported: return ""
         case .service: return ""
         }
     }

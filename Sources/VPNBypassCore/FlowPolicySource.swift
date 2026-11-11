@@ -43,6 +43,8 @@ func flowRouteKind(_ route: VPNBypassCore.Route) -> FlowPolicyCompiler.RouteKind
     case .vpnDefault: return route.vpnSelector?.kind == .interface ? .vpnPinned : .vpnPrimary
     case .direct: return .direct
     case .tailscaleExit: return .tailscaleExit
-    case .proxyHTTP, .proxySOCKS5: return .proxy
+    // Per-app routing serves Direct and the primary VPN only: a proxy, a blackhole and a route this
+    // build does not know are all "another route" to it, which it leaves to the kernel engine.
+    case .proxyHTTP, .proxySOCKS5, .block, .unsupported: return .proxy
     }
 }

@@ -132,6 +132,7 @@ A bundled `vpnb` CLI drives the same routing the GUI does, over a user-only UNIX
 vpnb status                                   # current mode, routes, schema/version
 vpnb mode mode=custom                         # switch modes: bypass | vpnOnly | custom
 vpnb route.add name=work type=socks5 host=127.0.0.1 port=1080
+vpnb route.add name=Block type=block                    # a blackhole: names sent here get no answer
 vpnb rule.add match=suffix pattern=example.com routeId=<uuid>
 vpnb rule.add match=geoip pattern=ir routeId=<uuid>   # a country's IPv4 ranges (downloads the list)
 vpnb rule.add match=geosite pattern=category-games routeId=<uuid>   # a domain list, as wildcards and names
