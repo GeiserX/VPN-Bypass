@@ -44,9 +44,10 @@ final class RulesRoutesPageModelTests: XCTestCase {
         let a = Rule(matchType: .domain, pattern: "a.example.com", routeId: route, order: 0)
         let b = Rule(matchType: .domain, pattern: "b.example.com", routeId: route, order: 1)
         let c = Rule(matchType: .domain, pattern: "c.example.com", routeId: route, order: 2)
-        let result = RulesTab.rules([a, b, c], renumberedAs: [c, a, b])
-        XCTAssertEqual(result.map(\.pattern), ["a.example.com", "b.example.com", "c.example.com"], "the stored order of the list is kept")
-        XCTAssertEqual(result.map(\.order), [1, 2, 0])
+        let result = RulesTab.rules([a, b, c], moving: c.id, onto: a.id)
+        XCTAssertEqual(result?.map(\.pattern), ["a.example.com", "b.example.com", "c.example.com"], "the stored order of the list is kept")
+        XCTAssertEqual(result?.map(\.order), [1, 2, 0])
+        XCTAssertNil(RulesTab.rules([a, b], moving: c.id, onto: a.id), "a rule that is gone moves nothing")
     }
 
     /// A config.json edited by hand can repeat a rule block, id and all. A drag on that list
@@ -56,19 +57,34 @@ final class RulesRoutesPageModelTests: XCTestCase {
         let a = Rule(matchType: .domain, pattern: "a.example.com", routeId: route, order: 0)
         let copy = a
         let b = Rule(matchType: .domain, pattern: "b.example.com", routeId: route, order: 2)
-        let result = RulesTab.rules([a, copy, b], renumberedAs: [b, a, copy])
-        XCTAssertEqual(result.map(\.order), [1, 2, 0], "each copy keeps its own place in the list")
+        let result = RulesTab.rules([a, copy, b], moving: b.id, onto: a.id)
+        XCTAssertEqual(result?.map(\.order), [1, 2, 0], "each copy keeps its own place in the list")
     }
 
-    /// An unmoved duplicate must not jump ahead of a rule that sat between its copies.
+    /// An unmoved copy stays after the rule that sat between the two copies.
     func testARepeatedIdKeepsEachCopyBetweenItsNeighbours() {
         let route = UUID()
         let a = Rule(matchType: .domain, pattern: "a.example.com", routeId: route, order: 0)
         let mid = Rule(matchType: .domain, pattern: "m.example.com", routeId: route, order: 1)
         var copy = a
         copy.order = 2
-        let result = RulesTab.rules([a, mid, copy], renumberedAs: [a, mid, copy])
-        XCTAssertEqual(result.map(\.order), [0, 1, 2])
+        let result = RulesTab.rules([a, mid, copy], moving: mid.id, onto: a.id)
+        XCTAssertEqual(result?.map(\.order), [1, 0, 2])
+    }
+
+    /// The moved copy lands where it was dropped, past its twin: [A, X, B, Y] with B a copy of A,
+    /// A dropped on Y, reads [X, B, Y, A].
+    func testAMovedCopyPassesItsTwin() {
+        let route = UUID()
+        let a = Rule(matchType: .domain, pattern: "a.example.com", routeId: route, order: 0)
+        let x = Rule(matchType: .domain, pattern: "x.example.com", routeId: route, order: 1)
+        var b = a
+        b.pattern = "b.example.com"
+        b.order = 2
+        let y = Rule(matchType: .domain, pattern: "y.example.com", routeId: route, order: 3)
+        let result = RulesTab.rules([a, x, b, y], moving: a.id, onto: y.id)
+        let shown = result?.sorted { $0.order < $1.order }.map(\.pattern)
+        XCTAssertEqual(shown, ["x.example.com", "b.example.com", "y.example.com", "a.example.com"])
     }
 
     /// The two explanations of ordering are one line; the drag hint joins it at two rules.

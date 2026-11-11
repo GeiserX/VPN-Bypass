@@ -728,37 +728,29 @@ struct RulesTab: View {
         persistAndReapply()
     }
 
-    /// Reorders `sortedRules` (dragged rule moves to the target's position) and
-    /// renumbers every rule's `order` to its new index, so future appends
-    /// (`(max order)+1`) stay consistent.
+    /// Moves the dragged rule to the target's position and renumbers every rule's `order` to its
+    /// new index, so future appends (`(max order)+1`) stay consistent.
     private func moveRule(draggedId: UUID, to targetId: UUID) {
-        guard draggedId != targetId else { return }
-        var ordered = sortedRules
-        guard let fromIndex = ordered.firstIndex(where: { $0.id == draggedId }),
-              let toIndex = ordered.firstIndex(where: { $0.id == targetId }) else { return }
-        let moved = ordered.remove(at: fromIndex)
-        ordered.insert(moved, at: toIndex)
+        guard draggedId != targetId,
+              let moved = Self.rules(routeManager.config.rules, moving: draggedId, onto: targetId) else { return }
         // One write to the published config, not one per rule.
-        routeManager.config.rules = Self.rules(routeManager.config.rules, renumberedAs: ordered)
+        routeManager.config.rules = moved
         persistAndReapply()
     }
 
-    /// `rules` with each rule's `order` set to its index in `ordered`. A config.json edited by
-    /// hand can hold two rules with one id: each occurrence takes its own position, matched in
-    /// order, so an unmoved duplicate keeps its place among the rules around it and nothing traps.
-    nonisolated static func rules(_ rules: [Rule], renumberedAs ordered: [Rule]) -> [Rule] {
-        var positions: [UUID: [Int]] = [:]
-        for (index, rule) in ordered.enumerated() { positions[rule.id, default: []].append(index) }
-        // The occurrences in `rules` in the order `ordered` lists them: by their old order, then
-        // by their place in the array.
-        var occurrences: [UUID: [Int]] = [:]
-        for index in rules.indices { occurrences[rules[index].id, default: []].append(index) }
+    /// `rules` with the first rule `draggedId` names moved to the place of the first rule
+    /// `targetId` names, in the order the page shows them, and every `order` renumbered to its
+    /// new place; nil when either id is missing. The move works on places in the array, not on
+    /// ids, so a config.json edited by hand with two rules sharing one id keeps each copy where
+    /// it belongs, and nothing traps.
+    nonisolated static func rules(_ rules: [Rule], moving draggedId: UUID, onto targetId: UUID) -> [Rule]? {
+        // Places in `rules`, in the order the page shows them (`sortedRules` is a stable sort).
+        var shown = rules.indices.sorted { (rules[$0].order, $0) < (rules[$1].order, $1) }
+        guard let from = shown.firstIndex(where: { rules[$0].id == draggedId }),
+              let to = shown.firstIndex(where: { rules[$0].id == targetId }) else { return nil }
+        shown.insert(shown.remove(at: from), at: to)
         var result = rules
-        for (id, indices) in occurrences {
-            guard let slots = positions[id] else { continue }
-            let byOrder = indices.sorted { (rules[$0].order, $0) < (rules[$1].order, $1) }
-            for (k, index) in byOrder.enumerated() where k < slots.count { result[index].order = slots[k] }
-        }
+        for (order, index) in shown.enumerated() { result[index].order = order }
         return result
     }
 
