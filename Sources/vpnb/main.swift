@@ -35,7 +35,7 @@ func printUsage() {
                                                  Add a new route
       route.rm id=<uuid>                        Remove a route
       rule.list                                 List all rules
-      rule.add match=<domain|suffix|ip|cidr|service|process> pattern=<value> routeId=<uuid>
+      rule.add match=<domain|suffix|ip|cidr|service|process|geoip> pattern=<value> routeId=<uuid>
                                                  Add a routing rule (process: a bundle id or an
                                                  executable name; it routes the app's TCP
                                                  connections to public IPv4 addresses, unless the

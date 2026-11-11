@@ -146,6 +146,8 @@ enum SiteRoute {
         var wildcardGuard = WildcardSafetyGuard()
         /// Per-app routing's state: process rules it serves are not named as inactive.
         var flowEngine: FlowEngineState = .unavailable(.notInThisBuild)
+        /// The ranges of the countries the Country rules name, by lower-case code.
+        var geoip: [String: [String]] = [:]
     }
 
     /// What `match` found, before the check.
@@ -249,7 +251,7 @@ enum SiteRoute {
             for (index, rule) in ordered.enumerated() {
                 // A rule whose route is gone or turned off is inert, as RouteCompiler and
                 // WildcardRoutes treat it: the name falls through to a later rule.
-                guard ruleMatches(rule, host: host, addresses: addresses, services: servicesOfHost),
+                guard ruleMatches(rule, host: host, addresses: addresses, services: servicesOfHost, geoip: s.geoip),
                       let route = byId[rule.routeId], route.enabled else { continue }
                 var found = Found(match: .rule, entry: rule.pattern, rulePosition: index + 1,
                                   ruleMatchType: rule.matchType.rawValue, routeName: route.name,
@@ -331,7 +333,8 @@ enum SiteRoute {
     }
 
     /// The matchers RuleResolver uses, for a name and its addresses at once.
-    static func ruleMatches(_ rule: Rule, host: String, addresses: [String], services: Set<String>) -> Bool {
+    static func ruleMatches(_ rule: Rule, host: String, addresses: [String], services: Set<String>,
+                            geoip: [String: [String]] = [:]) -> Bool {
         switch rule.matchType {
         // A wildcard written as a name rule covers the names under it, as WildcardRoutes reads it.
         case .domain: return domainCovers(rule.pattern, host)
@@ -341,6 +344,9 @@ enum SiteRoute {
         case .service: return services.contains(rule.pattern)
         case .ip: return addresses.contains(rule.pattern)
         case .cidr: return addresses.contains { RuleResolver.ipv4($0, inCIDR: rule.pattern) }
+        case .geoip:
+            let ranges = geoip[rule.pattern.lowercased()] ?? []
+            return addresses.contains { a in ranges.contains { RuleResolver.ipv4(a, inCIDR: $0) } }
         case .process: return false
         }
     }
@@ -666,7 +672,7 @@ extension RouteManager {
             activeRoutes: activeRoutes.map { ($0.destination, $0.gateway, $0.source) },
             localGateway: localGateway, vpnInterface: isVPNConnected ? vpnInterface : nil,
             pause: pauseState, wildcardSpecs: wildcards.served, wildcardGuard: wildcards.safetyGuard,
-            flowEngine: FlowEngineManager.shared.state)
+            flowEngine: FlowEngineManager.shared.state, geoip: geoipRanges())
     }
 
     /// "Where does this site go?" for a name, a link or an address. Nil when the input holds

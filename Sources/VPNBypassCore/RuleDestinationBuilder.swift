@@ -15,6 +15,9 @@
 //   • .domain  → the resolved IPs from the map (empty when unresolved).
 //   • .service → each of the service's domains resolved from the map + its static
 //                ipRanges (network routes).
+//   • .geoip   → the country's IPv4 ranges from the geoip list (network routes), each held
+//                to the same install policy as a .cidr rule. No list, or a country the list
+//                lacks, gives nothing.
 //   • .suffix / .process → nothing (not kernel-routable — a listener / NE engine owns
 //                those, not the routing table).
 //
@@ -40,7 +43,8 @@ enum RuleDestinationBuilder {
     static func build(
         rules: [Rule],
         services: [RouteManager.ServiceEntry],
-        resolved: [String: [String]]
+        resolved: [String: [String]],
+        geoip: [String: [String]] = [:]
     ) -> [(rule: Rule, dests: [(value: String, isNetwork: Bool)])] {
         let orderedRules = rules.filter { $0.enabled }.sorted { $0.order < $1.order }
         let servicesById = Dictionary(services.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -60,6 +64,10 @@ enum RuleDestinationBuilder {
             case .cidr:
                 if !DestinationInstallPolicy.refusesInstall(rule.pattern) {
                     add(rule.pattern, true)
+                }
+            case .geoip:
+                for range in geoip[rule.pattern.lowercased()] ?? [] where !DestinationInstallPolicy.refusesInstall(range) {
+                    add(range, true)
                 }
             case .domain:
                 for ip in resolved[rule.pattern] ?? [] { add(ip, false) }
@@ -96,7 +104,7 @@ enum RuleDestinationBuilder {
                 if let service = servicesById[rule.pattern] {
                     for domain in service.domains { hosts.insert(domain) }
                 }
-            case .ip, .cidr, .suffix, .process:
+            case .ip, .cidr, .geoip, .suffix, .process:
                 break
             }
         }

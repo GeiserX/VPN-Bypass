@@ -112,6 +112,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Load config and apply routes on startup
         Task { @MainActor in
             RouteManager.shared.loadConfig()
+            RouteManager.shared.refreshGeoIPIfNeeded()
 
             // The DNS Lookups page, when the user turned it on before (off by default). It
             // waits for the helper by itself, so it starts here, before the helper check.
@@ -396,6 +397,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let uptimeStr = uptimeDays > 0 ? "\(uptimeDays)d \(remainingHours)h" : "\(uptimeHours)h"
             
             RouteManager.shared.log(.info, "🐕 Watchdog: App uptime \(uptimeStr), restarting network monitor...")
+            RouteManager.shared.refreshGeoIPIfNeeded()
             
             // Restart network monitor to prevent stale state
             restartNetworkMonitor()

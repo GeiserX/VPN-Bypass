@@ -640,6 +640,8 @@ final class RouteManager: ObservableObject {
         // A wildcard added, removed or switched, or the mode changed: the helper's list follows.
         wildcards.requestSync()
         endPauseIfConfigForbidsIt()
+        // A Country rule that has no list yet (added from the CLI, imported) gets it now.
+        refreshGeoIPIfNeeded()
     }
 
     /// - Parameter recoveringFromLoadFailure: set only by `importConfig`, which is replacing an
@@ -2940,7 +2942,8 @@ final class RouteManager: ObservableObject {
             }
         }
 
-        return RuleDestinationBuilder.build(rules: config.rules, services: config.services, resolved: resolvedMap)
+        return RuleDestinationBuilder.build(rules: config.rules, services: config.services, resolved: resolvedMap,
+                                            geoip: geoipRanges())
     }
 
     /// Resolve a de-duplicated host list in parallel, reusing the SAME withTaskGroup +

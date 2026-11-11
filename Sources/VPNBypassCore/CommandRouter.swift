@@ -471,6 +471,16 @@ enum CommandRouter {
                                      message: "CIDR /0 and /1 cannot be installed as routes")
             }
         }
+        // A country rule names a list in the geoip file; the list itself is downloaded when the
+        // app next needs it (RouteManager.refreshGeoIPIfNeeded).
+        var geoipCode: String?
+        if matchType == .geoip {
+            guard let code = GeoIPRule.normalized(pattern) else {
+                return errorResponse(config, code: "invalid_args",
+                                     message: "geoip pattern must be a country code such as ir")
+            }
+            geoipCode = code
+        }
         // A process rule names an app (design doc 3.4): a bundle id or an executable's name, never
         // a path or a wildcard, which the per-app engine could never match.
         if matchType == .process, let invalid = ProcessRule.invalid(pattern) {
@@ -488,7 +498,7 @@ enum CommandRouter {
             return errorResponse(config, code: "not_found", message: "no route with that id")
         }
         let nextOrder = (config.rules.map(\.order).max() ?? -1) + 1
-        let stored = matchType == .process ? ProcessRule.storedPattern(pattern) : pattern
+        let stored = matchType == .process ? ProcessRule.storedPattern(pattern) : (geoipCode ?? pattern)
         let rule = Rule(matchType: matchType, pattern: stored, routeId: routeId, order: nextOrder)
         var updated = config
         updated.rules.append(rule)

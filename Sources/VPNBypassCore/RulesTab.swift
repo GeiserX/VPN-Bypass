@@ -596,6 +596,10 @@ struct RulesTab: View {
                     everythingElseRow
                 }
 
+                if routeManager.usesGeoIP {
+                    GeoIPStatusLine()
+                }
+
                 if let change = settingsUndo.last, change.page == .rules {
                     UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
                 }
@@ -751,6 +755,7 @@ struct RulesTab: View {
 struct RuleRow: View {
     @EnvironmentObject var routeManager: RouteManager
     @ObservedObject private var flowEngine = FlowEngineManager.shared
+    @ObservedObject private var geoStore = GeoIPStore.shared
     let rule: Rule
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -767,6 +772,7 @@ struct RuleRow: View {
         case .service: return "square.grid.2x2"
         case .ip, .cidr: return "network"
         case .process: return "app"
+        case .geoip: return "flag"
         }
     }
 
@@ -782,6 +788,8 @@ struct RuleRow: View {
             return services.first(where: { $0.id == rule.pattern })?.name ?? rule.pattern
         case .suffix:
             return WildcardDomain.isWildcard(rule.pattern) ? rule.pattern : WildcardDomain.entry(for: rule.pattern)
+        case .geoip:
+            return GeoIPDisplay.name(for: rule.pattern)
         case .domain, .ip, .cidr, .process:
             return rule.pattern
         }
@@ -814,11 +822,18 @@ struct RuleRow: View {
         return ProxyReachNote.forRoute(route)?.line(in: bundle)
     }
 
+    /// A Country rule's second line: how many ranges its list holds, or why it holds none.
+    private var geoipDetail: String? {
+        guard rule.matchType == .geoip else { return nil }
+        let code = rule.pattern.lowercased()
+        return GeoIPDisplay.detail(count: geoStore.ranges(for: [code])[code]?.count, hasData: geoStore.hasData)
+    }
+
     var body: some View {
         ListRow(
             glyph: Self.glyph(for: rule.matchType),
             name: patternDisplay,
-            detail: Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
+            detail: geoipDetail ?? Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
                                 customEngine: ProcessRule.customEngine(routeManager.config),
                                 turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: flowEngine.confirmed?.declinedTeams ?? []),
                                 counters: flowEngine.counters(forRule: rule.id.uuidString)),
@@ -970,6 +985,7 @@ struct RuleEditorSheet: View {
         case .ip:      return "10.0.0.5"
         case .cidr:    return "10.0.0.0/8"
         case .process: return String(localized: "com.example.App or Example")
+        case .geoip:   return "ir"
         case .service: return ""
         }
     }
@@ -985,6 +1001,7 @@ struct RuleEditorSheet: View {
                     Text("IP").tag(MatchType.ip)
                     Text("CIDR").tag(MatchType.cidr)
                     Text("App").tag(MatchType.process)
+                    Text("Country").tag(MatchType.geoip)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -1006,6 +1023,8 @@ struct RuleEditorSheet: View {
                         .labelsHidden()
                     }
                 }
+            } else if matchType == .geoip {
+                GeoIPEditorField(code: $pattern)
             } else if matchType == .process {
                 SheetField(String(localized: "App"), required: true) {
                     HStack(spacing: Theme.Space.s) {
@@ -1085,6 +1104,19 @@ struct RuleEditorSheet: View {
             return
         }
         var stored = effectivePattern
+        if matchType == .geoip {
+            guard let code = GeoIPRule.normalized(effectivePattern) else {
+                validationError = String(localized: "Enter a country code, such as ir.")
+                return
+            }
+            // With the list downloaded, a code it does not hold would be a rule that routes nothing.
+            let known = GeoIPStore.shared.countries()
+            guard known.isEmpty || known.contains(where: { $0.code == code }) else {
+                validationError = String(localized: "That country is not in the downloaded list.")
+                return
+            }
+            stored = code
+        }
         if matchType == .process {
             let previous = editingRule?.matchType == .process ? editingRule?.pattern : nil
             switch ProcessRule.editorValue(effectivePattern, chosen: chosenApp, previous: previous) {

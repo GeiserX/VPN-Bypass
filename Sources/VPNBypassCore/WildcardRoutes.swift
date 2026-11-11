@@ -89,7 +89,7 @@ enum WildcardPlanner {
                 case .domain:
                     entries = WildcardDomain.isWildcard(rule.pattern) ? [rule.pattern] : []
                     names = WildcardDomain.isWildcard(rule.pattern) ? [] : [rule.pattern]
-                case .ip, .cidr, .process:
+                case .ip, .cidr, .geoip, .process:
                     entries = []
                 }
                 let suffixes = entries.compactMap(WildcardDomain.suffix(of:))

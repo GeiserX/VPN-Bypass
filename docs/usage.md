@@ -133,6 +133,7 @@ vpnb status                                   # current mode, routes, schema/ver
 vpnb mode mode=custom                         # switch modes: bypass | vpnOnly | custom
 vpnb route.add name=work type=socks5 host=127.0.0.1 port=1080
 vpnb rule.add match=suffix pattern=example.com routeId=<uuid>
+vpnb rule.add match=geoip pattern=ir routeId=<uuid>   # a country's IPv4 ranges (downloads the list)
 vpnb route.list ; vpnb rule.list
 ```
 
