@@ -42,7 +42,9 @@ if [ -z "$CONSTS" ]; then
         echo "No constant values from the build; building $MODULE once more to write them..."
         # A clean build: an incremental one may compile nothing and so write nothing.
         rm -rf "$WORK/build" "$CONSTS"
-        # The protocols whose conformances the tool needs, as Xcode lists them.
+        # The protocols whose conformances the tool needs, as Xcode lists them. The list goes to
+        # the compiler's frontend by its own flag: the driver's name for it
+        # (-const-gather-protocols-list) is not in Swift 6.3, and the frontend's is in every one.
         PROTOCOLS="$WORK/lists/protocols.json"
         echo '["AnyResolverProviding","AppEntity","AppEnum","AppExtension","AppIntent","AppIntentsPackage","AppShortcutProviding","AppShortcutsProvider","AppUnionValue","AppUnionValueCasesProviding","DynamicOptionsProvider","EntityQuery","ExtensionPointDefining","IntentValueQuery","Resolver","TransientEntity","_AssistantIntentsProvider","_GenerativeFunctionExtractable","_IntentValueRepresentable"]' > "$PROTOCOLS"
         NATIVE=()
@@ -53,7 +55,7 @@ if [ -z "$CONSTS" ]; then
         swift build --package-path "$ROOT" -c release --arch arm64 "${NATIVE[@]}" --target "$MODULE" \
             --scratch-path "$WORK/build" \
             -Xswiftc -emit-const-values-path -Xswiftc "$CONSTS" \
-            -Xswiftc -const-gather-protocols-list -Xswiftc "$PROTOCOLS"
+            -Xswiftc -Xfrontend -Xswiftc -const-gather-protocols-file -Xswiftc -Xfrontend -Xswiftc "$PROTOCOLS"
         [ -s "$CONSTS" ] || { echo "error: the compiler wrote no constant values for $MODULE" >&2; exit 1; }
     fi
 fi
