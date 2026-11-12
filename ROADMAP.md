@@ -104,7 +104,7 @@ planned in `docs/design/NETWORK-EXTENSION-DESIGN.md`, with kernel routes kept as
 | Feature | Description |
 |---------|-------------|
 | **Custom DNS** | Use specific DNS servers for bypassed traffic (DoH/DoT) |
-| **Blocklists Integration** | Block ads/trackers/malware domains |
+| ~~**Blocklists Integration**~~ | ✅ Partly done in v6.2 — a Block route blocks a GeoSite list, a country or a few suffixes. Large ad and tracker blocklists are not planned: a DNS-level blocker or a browser content blocker does that job better ([#272](https://github.com/GeiserX/VPN-Bypass/issues/272)) |
 | ~~**Network-based Profiles**~~ | ✅ Done in 6.0 by router instead of Wi-Fi name (no Location permission, works on Ethernet); see Connection Profiles |
 | **Bandwidth Monitor** | Track data through VPN vs bypassed |
 | ~~**CLI Interface**~~ | ✅ Done in v3.0 — `vpnb` command-line control over a user-only socket (`status`, `route`/`rule`/`mode`/`default` verbs) for automation. v4.9.0 adds the Bypass and VPN Only verbs (`domain.*`, `service.*`, `routes.active`, `routes.clear`, `refresh`, `dns.refresh`, `logs`), and the [vpn-bypass-mcp](https://github.com/GeiserX/vpn-bypass-mcp) MCP server lets an AI agent drive the same socket |
