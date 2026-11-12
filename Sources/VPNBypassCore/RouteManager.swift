@@ -46,6 +46,16 @@ final class RouteManager: ObservableObject {
     /// with the entry each came from. Kept apart from `activeRoutes`: nothing routes through
     /// them, and every apply, count and check reads `activeRoutes` as "what is routed".
     @Published var blockedRoutes: [ActiveRoute] = []
+    /// The addresses Custom mode's Block rules keep unreachable now (reject routes), by the rule that
+    /// asked. Apart from `blockedRoutes`, which is VPN Only's and follows the VPN: these follow the
+    /// rules, whether the VPN is up or not.
+    @Published var ruleBlocks: [ActiveRoute] = []
+    /// Bumped when the rule blocks are released, so an install that finishes after it can tell.
+    var ruleBlockEpoch = 0
+    /// The Block routes `removeUnusedBlockRoutes` took out last, so Undo of their rule puts them back.
+    var droppedBlockRoutes: [Route] = []
+    /// The retry waiting after a failed list download, by list (GeoDataStore.swift).
+    var geoRetryTasks: [GeoKind: Task<Void, Never>] = [:]
     var blockedDestinations: Set<String> { Set(blockedRoutes.map(\.destination)) }
     /// How many VPN Only entries have addresses blocked, for the dropdown line.
     var blockedSiteCount: Int { Set(blockedRoutes.map(\.source)).count }
@@ -73,6 +83,8 @@ final class RouteManager: ObservableObject {
     /// that a log line still mentions after it was removed. Memory only, like `recentLogs`.
     private(set) var namesSeenThisSession = Set<String>()
     @Published var recentLogs: [LogEntry] = []
+    /// The rules the wildcard planner leaves out, and why, as of the last wildcard pass. Their rows say it.
+    @Published var wildcardRefusals: [UUID: WildcardPlanner.Refusal] = [:]
     /// The last Verify Routes, or nil before the first one and after routes are removed.
     @Published var lastRouteCheck: RouteCheck.Run?
     /// Bumped when a check starts and when routes are removed, so a check still pinging then
@@ -640,6 +652,8 @@ final class RouteManager: ObservableObject {
         // A wildcard added, removed or switched, or the mode changed: the helper's list follows.
         wildcards.requestSync()
         endPauseIfConfigForbidsIt()
+        // A Country or Site rule that has no list yet (added from the CLI, imported) gets it now.
+        refreshGeoDataIfNeeded()
     }
 
     /// - Parameter recoveringFromLoadFailure: set only by `importConfig`, which is replacing an
@@ -896,6 +910,9 @@ final class RouteManager: ObservableObject {
             }
             // Listed only once the import is saved: a rejected import leaves the note as it was.
             recordConvertedEntries(migration.migrated)
+            // An import can bring a GeoIP or GeoSite rule whose list is not on this Mac: fetch it now,
+            // as saveConfig does for any other change (an import saves without it).
+            refreshGeoDataIfNeeded()
 
             // An import replaces what a pause was taken on; the apply below is its own.
             if isPaused { endPause(reason: "a configuration was imported", apply: false) }
@@ -2797,12 +2814,13 @@ final class RouteManager: ObservableObject {
                 && route.vpnSelector?.kind == .interface
         }
         let links = needsLinks ? await listVPNLinks() : []
-        var compiled = RouteCompiler.compile(
+        let compiledAll = RouteCompiler.compileAll(
             resolvedRules: resolved,
             routes: config.routes,
             localGateway: gateway,
             ifaceGatewayForRoute: { route in self.ifaceGateway(for: route, links: links) }
         )
+        var compiled = compiledAll.routes
 
         // Generalized GlobalProtect guard: never install a catch-all into a non-primary
         // egress while GP is up (every compiled kernel route is non-primary). Custom mode
@@ -2833,6 +2851,8 @@ final class RouteManager: ObservableObject {
             log(.info, "Custom routes already current (\(activePairs.count)) — skipping re-apply to avoid route-table churn")
             lastUpdate = Date()
             wildcards.routesApplied()   // as the classic skip path
+            // No route changed, but a block may have: a rule edited, switched off or moved to another route.
+            await applyRuleBlocks(compiledAll.blocks, epoch: epoch)
             return true
         }
 
@@ -2859,6 +2879,9 @@ final class RouteManager: ObservableObject {
 
         let committed = await commitAppliedRoutes(routesToAdd: routesToAdd, allSourceEntries: allSourceEntries, batchFailedDests: batchFailedDests, epoch: epoch, logLabel: "Custom ")
         guard committed else { return false }
+        // The blocks go in after the routes are committed: the stale-route cleanup above removes by
+        // destination, and would take a block just put on an address a rule used to route.
+        await applyRuleBlocks(compiledAll.blocks, epoch: epoch)
 
         let confirmedUniqueCount = uniqueRouteCount
         // A service rule's routes are recorded under the service id; Problems names the service.
@@ -2911,7 +2934,9 @@ final class RouteManager: ObservableObject {
     private func resolveRuleDestinations(useCacheOnly: Bool) async -> [(rule: Rule, dests: [(value: String, isNetwork: Bool)])] {
         // The full de-duplicated hostname set across ALL enabled rules — resolved once,
         // even when the same host is reachable via two rules.
-        let hosts = RuleDestinationBuilder.hostsToResolve(rules: config.rules, services: config.services)
+        let geosite = geositeExpansions()
+        let hosts = RuleDestinationBuilder.hostsToResolve(rules: config.rules, services: config.services, geosite: geosite,
+                                                          routes: config.routes)
 
         // Build the host→IPs map. Cache-only (instant startup) reads the disk cache with
         // no live DNS and never flags failures (a live apply follows). The live path
@@ -2932,15 +2957,31 @@ final class RouteManager: ObservableObject {
             // the currently-failing hosts (it's shared with the legacy path, which logs +
             // clears it, so stale entries must not leak across a mode switch).
             let failedSet = Set(failed)
+            // The names of a site list are not the user's own entries: a list of thousands has names
+            // that no longer exist, and re-resolving the whole rule set every 15 seconds for them
+            // would never stop. They are counted once and not retried.
+            let entryNames = RuleDestinationBuilder.hostsToResolve(
+                rules: config.rules.filter { $0.matchType != .geosite }, services: config.services, routes: config.routes)
             for host in hosts where !failedSet.contains(host) { failedDomains.remove(host) }
-            for host in failed {
+            let unresolved = Self.partitionUnresolved(failed, entryNames: entryNames)
+            for host in unresolved.retry {
                 failedDomains.insert(host)
                 log(.warning, "  ✗ \(host)")
                 scheduleRetry(for: host)
             }
+            if unresolved.inLists > 0 {
+                log(.info, "\(unresolved.inLists) name(s) in site lists did not resolve; they are not retried")
+            }
         }
 
-        return RuleDestinationBuilder.build(rules: config.rules, services: config.services, resolved: resolvedMap)
+        return RuleDestinationBuilder.build(rules: config.rules, services: config.services, resolved: resolvedMap,
+                                            geoip: geoipRanges(), geosite: geosite, routes: config.routes)
+    }
+
+    /// The names that did not resolve, split into the user's own entries (logged, kept in
+    /// `failedDomains` and retried) and the names of a site list (only counted).
+    nonisolated static func partitionUnresolved(_ failed: [String], entryNames: Set<String>) -> (retry: [String], inLists: Int) {
+        (failed.filter(entryNames.contains), failed.filter { !entryNames.contains($0) }.count)
     }
 
     /// Resolve a de-duplicated host list in parallel, reusing the SAME withTaskGroup +
@@ -2965,15 +3006,22 @@ final class RouteManager: ObservableObject {
         while index < hosts.count {
             let endIndex = min(index + batchSize, hosts.count)
             let batch = Array(hosts[index..<endIndex])
+            // A sliding window, as the classic path uses: each host fans out to about five dig/curl
+            // processes, and a list of thousands of names must not start them all at once.
+            let maxConcurrentResolves = 16
             let dnsResults = await withTaskGroup(of: (host: String, ips: [String]?).self) { group in
-                for host in batch {
-                    group.addTask {
-                        let ips = await DNSResolver.resolveIPsParallel(for: host, userDNS: userDNS, fallbackDNS: fallbackDNS)
-                        return (host, ips)
-                    }
+                var next = 0
+                func add() {
+                    let host = batch[next]
+                    next += 1
+                    group.addTask { (host, await DNSResolver.resolveIPsParallel(for: host, userDNS: userDNS, fallbackDNS: fallbackDNS)) }
                 }
+                while next < batch.count && next < maxConcurrentResolves { add() }
                 var results: [(host: String, ips: [String]?)] = []
-                for await r in group { results.append(r) }
+                while let r = await group.next() {
+                    results.append(r)
+                    if next < batch.count { add() }
+                }
                 return results
             }
             for r in dnsResults {
@@ -3057,7 +3105,10 @@ final class RouteManager: ObservableObject {
             }
         }
         // After the catch-alls: a time-capped quit must spend its first write on them.
-        if !keepingBlocked { await releaseBlocks(reason: "all routes removed") }
+        if !keepingBlocked {
+            await releaseBlocks(reason: "all routes removed")
+            await releaseRuleBlocks(reason: "all routes removed")
+        }
 
         cancelAllRetries()
         // A failed removal must keep its record. The retention filter below only keeps entries

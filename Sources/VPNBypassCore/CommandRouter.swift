@@ -420,7 +420,7 @@ enum CommandRouter {
 
         guard let egress = parseEgressType(request.args?["type"]) else {
             return errorResponse(config, code: "invalid_type",
-                                 message: "type must be one of: http, socks5, tailscale, vpn")
+                                 message: "type must be one of: http, socks5, tailscale, vpn, block")
         }
 
         var route = Route(
@@ -450,7 +450,9 @@ enum CommandRouter {
     private static func ruleAdd(
         _ request: ControlRequest, _ config: RouteManager.Config
     ) -> (config: RouteManager.Config, response: ControlResponse) {
-        guard let matchStr = request.args?["match"], let matchType = MatchType(rawValue: matchStr) else {
+        // `unsupported` is the placeholder for a newer build's type, never one to add.
+        guard let matchStr = request.args?["match"], let matchType = MatchType(rawValue: matchStr),
+              matchType != .unsupported else {
             return errorResponse(config, code: "invalid_args", message: "match must be a valid match type")
         }
         guard let pattern = request.args?["pattern"], !pattern.isEmpty else {
@@ -471,6 +473,23 @@ enum CommandRouter {
                                      message: "CIDR /0 and /1 cannot be installed as routes")
             }
         }
+        // A country rule names a list in the geoip file; the list itself is downloaded when the
+        // app next needs it (RouteManager.refreshGeoDataIfNeeded).
+        var geoipCode: String?
+        if matchType == .geoip {
+            guard let code = GeoIPRule.normalized(pattern) else {
+                return errorResponse(config, code: "invalid_args",
+                                     message: "geoip pattern must be a country code such as ir")
+            }
+            geoipCode = code
+        }
+        if matchType == .geosite {
+            guard let name = GeoSiteRule.normalized(pattern) else {
+                return errorResponse(config, code: "invalid_args",
+                                     message: "geosite pattern must be a list name such as steam or category-games@cn")
+            }
+            geoipCode = name
+        }
         // A process rule names an app (design doc 3.4): a bundle id or an executable's name, never
         // a path or a wildcard, which the per-app engine could never match.
         if matchType == .process, let invalid = ProcessRule.invalid(pattern) {
@@ -488,7 +507,7 @@ enum CommandRouter {
             return errorResponse(config, code: "not_found", message: "no route with that id")
         }
         let nextOrder = (config.rules.map(\.order).max() ?? -1) + 1
-        let stored = matchType == .process ? ProcessRule.storedPattern(pattern) : pattern
+        let stored = matchType == .process ? ProcessRule.storedPattern(pattern) : (geoipCode ?? pattern)
         let rule = Rule(matchType: matchType, pattern: stored, routeId: routeId, order: nextOrder)
         var updated = config
         updated.rules.append(rule)
@@ -532,8 +551,12 @@ enum CommandRouter {
     private static func setDefault(
         _ request: ControlRequest, _ config: RouteManager.Config
     ) -> (config: RouteManager.Config, response: ControlResponse) {
-        guard let routeId = uuid(request.args, "routeId"), config.routes.contains(where: { $0.id == routeId }) else {
+        guard let routeId = uuid(request.args, "routeId"), let route = config.routes.first(where: { $0.id == routeId }) else {
             return errorResponse(config, code: "not_found", message: "no route with that id")
+        }
+        // As on the Rules page: Everything else cannot be Block, nor a route this build cannot use.
+        guard route.egress != .block, route.egress != .unsupported else {
+            return errorResponse(config, code: "invalid_args", message: "a Block route cannot be the default route")
         }
         var updated = config
         updated.defaultRouteId = routeId
@@ -602,6 +625,7 @@ enum CommandRouter {
         case "socks5": return .proxySOCKS5
         case "tailscale": return .tailscaleExit
         case "vpn": return .vpnDefault
+        case "block": return .block
         default: return nil
         }
     }

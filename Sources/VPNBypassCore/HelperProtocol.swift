@@ -237,7 +237,12 @@ struct HelperConstants {
     // interface (R12, ScopedDefaultRoute / Helper/ScopedDefaultKeeper.swift), so listed apps get
     // around a VPN that covers the internet with 0/1 + 128/1 on their first connect. A 2.8.0
     // helper installs this one itself (updateHelper), with no password.
-    static let helperVersion = "2.9.0"
+    // 2.10.0: a wildcard can block its names (WildcardSpec.block, the Block route): the
+    // forwarder answers NXDOMAIN without asking an upstream (WildcardLookup.reply, WildcardDNS.swift).
+    // A 2.9.0 helper refuses such a spec (it has no gateway) and serves the others; the app holds
+    // the Block wildcards back until the helper is 2.10.0. A 2.8.0 or later helper installs this
+    // one itself (updateHelper), with no password.
+    static let helperVersion = "2.10.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

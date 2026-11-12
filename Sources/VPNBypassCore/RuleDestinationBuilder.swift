@@ -15,6 +15,11 @@
 //   • .domain  → the resolved IPs from the map (empty when unresolved).
 //   • .service → each of the service's domains resolved from the map + its static
 //                ipRanges (network routes).
+//   • .geosite → the exact names of a geosite list, resolved from the map. Its suffixes are
+//                wildcards for the DNS forwarder (WildcardPlanner), not routes here.
+//   • .geoip   → the country's IPv4 ranges from the geoip list (network routes), each held
+//                to the same install policy as a .cidr rule. No list, or a country the list
+//                lacks, gives nothing.
 //   • .suffix / .process → nothing (not kernel-routable — a listener / NE engine owns
 //                those, not the routing table).
 //
@@ -40,13 +45,24 @@ enum RuleDestinationBuilder {
     static func build(
         rules: [Rule],
         services: [RouteManager.ServiceEntry],
-        resolved: [String: [String]]
+        resolved: [String: [String]],
+        geoip: [String: [String]] = [:],
+        geosite: [String: GeoSiteExpansion] = [:],
+        routes: [Route] = []
     ) -> [(rule: Rule, dests: [(value: String, isNetwork: Bool)])] {
         let orderedRules = rules.filter { $0.enabled }.sorted { $0.order < $1.order }
+        let blockRoutes = Set(routes.filter { $0.egress == .block }.map(\.id))
         let servicesById = Dictionary(services.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         var out: [(rule: Rule, dests: [(value: String, isNetwork: Bool)])] = []
         for rule in orderedRules {
+            // A name sent to Block is answered NXDOMAIN by the DNS forwarder, and its addresses are
+            // not used: nothing is looked up for it (a lookup would only tell a DNS server which names a
+            // blocked list holds). The rules that name addresses are the compiler's.
+            if blockRoutes.contains(rule.routeId), [.domain, .suffix, .service, .geosite].contains(rule.matchType) {
+                out.append((rule: rule, dests: rule.matchType == .service ? Self.serviceRanges(of: rule, in: servicesById) : []))
+                continue
+            }
             var dests: [(value: String, isNetwork: Bool)] = []
             var seen: Set<String> = []
             func add(_ value: String, _ isNetwork: Bool) {
@@ -61,6 +77,17 @@ enum RuleDestinationBuilder {
                 if !DestinationInstallPolicy.refusesInstall(rule.pattern) {
                     add(rule.pattern, true)
                 }
+            case .geoip:
+                // A downloaded list is held to more than a typed CIDR: no prefix shorter than /8 and no
+                // private or reserved space outside the `private` list (GeoIPRangePolicy).
+                let code = rule.pattern.lowercased()
+                for range in geoip[code] ?? [] where GeoIPRangePolicy.allows(range, code: code) {
+                    add(range, true)
+                }
+            case .geosite:
+                for name in geosite[rule.pattern.lowercased()]?.usable.names ?? [] {
+                    for ip in resolved[name] ?? [] { add(ip, false) }
+                }
             case .domain:
                 for ip in resolved[rule.pattern] ?? [] { add(ip, false) }
             case .service:
@@ -70,8 +97,8 @@ enum RuleDestinationBuilder {
                     }
                     for range in service.ipRanges { add(range, true) }
                 }
-            case .suffix, .process:
-                break   // not kernel-routable
+            case .suffix, .process, .unsupported:
+                break   // not kernel-routable (an unsupported type matches nothing)
             }
             out.append((rule: rule, dests: dests))
         }
@@ -84,11 +111,15 @@ enum RuleDestinationBuilder {
     /// Pure counterpart to `build`, sharing its rule semantics.
     static func hostsToResolve(
         rules: [Rule],
-        services: [RouteManager.ServiceEntry]
+        services: [RouteManager.ServiceEntry],
+        geosite: [String: GeoSiteExpansion] = [:],
+        routes: [Route] = []
     ) -> Set<String> {
         let servicesById = Dictionary(services.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let blockRoutes = Set(routes.filter { $0.egress == .block }.map(\.id))
         var hosts: Set<String> = []
-        for rule in rules where rule.enabled {
+        // A name sent to Block is never looked up (see `build`).
+        for rule in rules where rule.enabled && !blockRoutes.contains(rule.routeId) {
             switch rule.matchType {
             case .domain:
                 hosts.insert(rule.pattern)
@@ -96,10 +127,18 @@ enum RuleDestinationBuilder {
                 if let service = servicesById[rule.pattern] {
                     for domain in service.domains { hosts.insert(domain) }
                 }
-            case .ip, .cidr, .suffix, .process:
+            case .geosite:
+                for name in geosite[rule.pattern.lowercased()]?.usable.names ?? [] { hosts.insert(name) }
+            case .ip, .cidr, .geoip, .suffix, .process, .unsupported:
                 break
             }
         }
         return hosts
+    }
+
+    /// The ranges of the service a rule names, which the compiler turns into blocks on the Block route
+    /// (the names of the service are answered by the DNS forwarder instead).
+    private static func serviceRanges(of rule: Rule, in services: [String: RouteManager.ServiceEntry]) -> [(value: String, isNetwork: Bool)] {
+        (services[rule.pattern]?.ipRanges ?? []).map { (value: $0, isNetwork: true) }
     }
 }

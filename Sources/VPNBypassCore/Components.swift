@@ -702,6 +702,8 @@ struct RouteChip: View {
         case .vpnDefault: return "key"
         case .proxyHTTP, .proxySOCKS5: return "arrow.triangle.branch"
         case .tailscaleExit: return "network"
+        case .block: return "nosign"
+        case .unsupported: return "questionmark.circle"
         }
     }
 

@@ -14,6 +14,8 @@
 //   • .vpnDefault     → the primary VPN (ifaceGatewayForRoute == nil) emits NOTHING
 //                        (the OS default route already carries it); a *specific* VPN
 //                        (ifaceGatewayForRoute == "iface:utunX") emits an iface route.
+//   • .block → no route; the addresses its rule names become `DesiredBlock`s (compileAll).
+//   • .unsupported → NOTHING, and the rule claims nothing (see below).
 //   • .proxyHTTP / .proxySOCKS5 / .tailscaleExit → NOTHING; a loopback listener
 //                        (ProxyListenerManager) serves these, so the routing table
 //                        must stay clear of them.
@@ -29,6 +31,42 @@ enum RouteCompiler {
         let gateway: String
         let isNetwork: Bool
         let source: String
+    }
+
+    /// One address a Block rule keeps from being reached: a reject route in the kernel.
+    struct DesiredBlock: Equatable {
+        let destination: String
+        let source: String
+    }
+
+    /// The routes, and the addresses a Block route keeps unreachable, for the enabled rules. See
+    /// `compile` for the routes; the blocks come out of the same first-match pass, so an address an
+    /// earlier rule sends somewhere is not blocked by a later one, and the other way round.
+    ///
+    /// Only addresses a rule names are blocked: an `ip`, a `cidr`, a country's ranges, a service's
+    /// ranges. The addresses a NAME resolves to are not: a blocked name is answered NXDOMAIN by the
+    /// DNS forwarder, and blocking the address it happens to have could cut off other sites that
+    /// share it (a CDN).
+    static func compileAll(
+        resolvedRules: [(rule: Rule, dests: [(value: String, isNetwork: Bool)])],
+        routes: [Route],
+        localGateway: String,
+        ifaceGatewayForRoute: (Route) -> String?
+    ) -> (routes: [DesiredRoute], blocks: [DesiredBlock]) {
+        var blocks: [DesiredBlock] = []
+        let compiled = compile(resolvedRules: resolvedRules, routes: routes, localGateway: localGateway,
+                               ifaceGatewayForRoute: ifaceGatewayForRoute, blocks: &blocks)
+        return (compiled, blocks)
+    }
+
+    /// Whether a destination of a rule of `type` is an address the rule names, as opposed to one a
+    /// name resolved to.
+    static func namesAnAddress(_ type: MatchType, isNetwork: Bool) -> Bool {
+        switch type {
+        case .ip, .cidr, .geoip: return true
+        case .service: return isNetwork
+        case .domain, .suffix, .geosite, .process, .unsupported: return false
+        }
     }
 
     /// Compile the enabled rules (in first-match order) + their already-resolved
@@ -52,6 +90,18 @@ enum RouteCompiler {
         localGateway: String,
         ifaceGatewayForRoute: (Route) -> String?
     ) -> [DesiredRoute] {
+        var blocks: [DesiredBlock] = []
+        return compile(resolvedRules: resolvedRules, routes: routes, localGateway: localGateway,
+                       ifaceGatewayForRoute: ifaceGatewayForRoute, blocks: &blocks)
+    }
+
+    private static func compile(
+        resolvedRules: [(rule: Rule, dests: [(value: String, isNetwork: Bool)])],
+        routes: [Route],
+        localGateway: String,
+        ifaceGatewayForRoute: (Route) -> String?,
+        blocks: inout [DesiredBlock]
+    ) -> [DesiredRoute] {
         let byId = Dictionary(routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var out: [DesiredRoute] = []
         // A destination is "claimed" by the first rule that matches it, EVEN when that
@@ -72,7 +122,14 @@ enum RouteCompiler {
         // the earlier narrower route win for its sub-range while the broader route serves
         // the rest. IPv4 only; a non-IPv4 dest (IPv6 literal, ::/0, malformed) falls back
         // to exact-string claiming so the containment math never runs on it (never crashes).
-        var claimed: [Claim] = []
+        var claimed = Claims()
+        // The IPv4 ranges claimed by a rule whose route needs no kernel route (the primary VPN, a
+        // proxy, a Tailscale peer). A later Block range over one would take it: with no route of its
+        // own there, the kernel's longest-prefix match picks the reject route. So a block leaves
+        // these out (`carve`). An earlier Direct or pinned-tunnel route needs nothing: its narrower
+        // route wins in the kernel.
+        var unrouted: [(network: UInt32, prefix: Int)] = []
+        let firstBlock = blocks.count
 
         for entry in resolvedRules where entry.rule.enabled {
             // A rule pointing at a route that no longer exists — OR a route the user has
@@ -93,11 +150,27 @@ enum RouteCompiler {
                 gateway = ifaceGatewayForRoute(route)   // nil = primary VPN ⇒ no route
             case .proxyHTTP, .proxySOCKS5, .tailscaleExit:
                 gateway = nil                            // a loopback listener serves it
+            case .block:
+                // Names are blackholed by the DNS forwarder (WildcardPlanner). The addresses a rule
+                // names are blocked here, and claimed like any other: first match holds. The
+                // addresses a name resolved to are left alone and unclaimed (see compileAll).
+                for dest in entry.dests where namesAnAddress(entry.rule.matchType, isNetwork: dest.isNetwork) {
+                    guard claim(dest.value, in: &claimed) else { continue }
+                    blocks.append(DesiredBlock(destination: dest.value, source: entry.rule.pattern))
+                }
+                continue
+            case .unsupported:
+                // A route this build does not know carries nothing and claims nothing: a later
+                // rule still decides its destinations.
+                continue
             }
 
             for dest in entry.dests {
                 guard claim(dest.value, in: &claimed) else { continue }  // first rule wins (by containment)
-                guard let gateway else { continue }
+                guard let gateway else {
+                    if let range = parseIPv4(dest.value) { unrouted.append(range) }
+                    continue
+                }
                 out.append(DesiredRoute(
                     destination: dest.value,
                     gateway: gateway,
@@ -106,38 +179,86 @@ enum RouteCompiler {
                 ))
             }
         }
+        if !unrouted.isEmpty, blocks.count > firstBlock {
+            blocks.replaceSubrange(firstBlock..., with: carve(Array(blocks[firstBlock...]), around: unrouted))
+        }
         return out
+    }
+
+    /// `blocks` with the `unrouted` ranges inside each one left out: a block range is split into the
+    /// fewest CIDRs that cover the rest of it. Only a range narrower than the block can be inside it,
+    /// and only an earlier rule's (a later one inside it was not claimed); a range as broad as the
+    /// block or broader came later and changes nothing.
+    private static func carve(_ blocks: [DesiredBlock], around unrouted: [(network: UInt32, prefix: Int)]) -> [DesiredBlock] {
+        let holes = unrouted.sorted { $0.network < $1.network }
+        var out: [DesiredBlock] = []
+        for block in blocks {
+            guard let range = parseIPv4(block.destination) else { out.append(block); continue }
+            let last = range.network | (range.prefix >= 32 ? 0 : ~UInt32(0) >> range.prefix)
+            // The first hole at or after the block's network, by binary search.
+            var low = 0, high = holes.count
+            while low < high {
+                let mid = (low + high) / 2
+                if holes[mid].network < range.network { low = mid + 1 } else { high = mid }
+            }
+            var inside: [(network: UInt32, prefix: Int)] = []
+            while low < holes.count, holes[low].network <= last {
+                if holes[low].prefix > range.prefix { inside.append(holes[low]) }
+                low += 1
+            }
+            guard !inside.isEmpty else { out.append(block); continue }
+            for piece in split(range.network, range.prefix, around: inside) {
+                out.append(DesiredBlock(destination: render(piece.network, piece.prefix), source: block.source))
+            }
+        }
+        return out
+    }
+
+    /// The CIDRs that cover `network/prefix` but none of `holes`, each hole inside it.
+    private static func split(_ network: UInt32, _ prefix: Int,
+                              around holes: [(network: UInt32, prefix: Int)]) -> [(network: UInt32, prefix: Int)] {
+        let inside = holes.filter { $0.prefix >= prefix && maskIPv4($0.network, prefix) == network }
+        if inside.isEmpty { return [(network, prefix)] }
+        if inside.contains(where: { $0.prefix == prefix }) || prefix >= 32 { return [] }
+        let upper = network | (UInt32(1) << UInt32(31 - prefix))
+        return split(network, prefix + 1, around: inside) + split(upper, prefix + 1, around: inside)
+    }
+
+    private static func render(_ network: UInt32, _ prefix: Int) -> String {
+        let dotted = [24, 16, 8, 0].map { String((network >> UInt32($0)) & 0xFF) }.joined(separator: ".")
+        return prefix == 32 ? dotted : "\(dotted)/\(prefix)"
     }
 
     // MARK: - CIDR-containment claiming
 
-    /// One entry in the containment-aware claim list: a parsed IPv4 range (compared by
-    /// CIDR containment) or a raw string (exact-match fallback for a non-IPv4 dest such
-    /// as an IPv6 literal, where the containment math doesn't apply).
-    private enum Claim {
-        case v4(network: UInt32, prefix: Int)
-        case raw(String)
+    /// The containment-aware claims so far: parsed IPv4 ranges (compared by CIDR
+    /// containment), kept by prefix length, and raw strings (exact-match fallback for a
+    /// non-IPv4 dest such as an IPv6 literal, where the containment math doesn't apply).
+    /// By prefix, a new range is checked against at most 33 sets instead of every earlier
+    /// claim: a country of tens of thousands of ranges compiled in quadratic time before.
+    private struct Claims {
+        var v4ByPrefix = [Set<UInt32>](repeating: [], count: 33)
+        var raw: Set<String> = []
     }
 
-    /// First-match claim of `dest` against the ordered `claimed` list, containment-aware.
+    /// First-match claim of `dest` against the earlier claims, containment-aware.
     /// Returns true (and records the new claim) when NO earlier claim already covers
     /// `dest`; returns false (suppress) when an earlier claim fully contains it — that
     /// earlier rule owns the IP space, so no later rule may re-route any of it. The
     /// direction is one-way: only a narrower-or-equal `dest` is suppressed; a broader
     /// `dest` is still recorded and routed (kernel LPM carves out the earlier narrower
     /// route). Mirrors Set.insert(_:).inserted, but CIDR-aware for IPv4.
-    private static func claim(_ dest: String, in claimed: inout [Claim]) -> Bool {
+    private static func claim(_ dest: String, in claimed: inout Claims) -> Bool {
         if let newRange = parseIPv4(dest) {
-            for case let .v4(network, prefix) in claimed
-                where isSubset(newRange, of: (network: network, prefix: prefix)) {
-                return false
+            // An earlier range holds this one (a subset of it, or equal) when its prefix is
+            // shorter or equal and this one's network, masked to that prefix, is its network.
+            for prefix in 0...newRange.prefix where !claimed.v4ByPrefix[prefix].isEmpty {
+                if claimed.v4ByPrefix[prefix].contains(maskIPv4(newRange.network, prefix)) { return false }
             }
-            claimed.append(.v4(network: newRange.network, prefix: newRange.prefix))
-        } else {
-            for case let .raw(string) in claimed where string == dest { return false }
-            claimed.append(.raw(dest))
+            claimed.v4ByPrefix[newRange.prefix].insert(newRange.network)
+            return true
         }
-        return true
+        return claimed.raw.insert(dest).inserted
     }
 
     /// Parse an IPv4 host ("A.B.C.D" ⇒ /32) or IPv4 CIDR ("A.B.C.D/N") into a canonical
@@ -169,16 +290,6 @@ enum RouteCompiler {
         if prefix <= 0 { return 0 }
         if prefix >= 32 { return addr }
         return addr & (~UInt32(0) << (32 - prefix))
-    }
-
-    /// True when `inner` is fully contained in (a subset of, or equal to) `outer`: outer's
-    /// prefix is shorter-or-equal AND inner's network masked to outer's prefix equals
-    /// outer's network — i.e. every address in `inner` is also in `outer`.
-    private static func isSubset(
-        _ inner: (network: UInt32, prefix: Int),
-        of outer: (network: UInt32, prefix: Int)
-    ) -> Bool {
-        outer.prefix <= inner.prefix && maskIPv4(inner.network, outer.prefix) == outer.network
     }
 
     // MARK: - GlobalProtect catch-all guard (generalizes refuseVPNOnlyUnderGlobalProtect)

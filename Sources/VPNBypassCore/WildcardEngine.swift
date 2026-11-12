@@ -135,15 +135,32 @@ final class WildcardEngine {
     private func sync() async {
         guard !manager.isShuttingDown else { return }
         let config = manager.config
-        let configured = Set(WildcardPlanner.configuredSuffixes(config))
+        // One planner pass for the whole sync: the rows read its refusals, and the plan its wildcards.
+        let selection = WildcardPlanner.selection(config)
+        if manager.wildcardRefusals != selection.refused {
+            manager.wildcardRefusals = selection.refused
+            let rules = Dictionary(config.rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            for (id, refusal) in selection.refused.sorted(by: { (rules[$0.key]?.order ?? 0) < (rules[$1.key]?.order ?? 0) }) {
+                guard let rule = rules[id] else { continue }
+                switch refusal {
+                case .overTotal(let count, let limit):
+                    manager.log(.warning, "Rule \(rule.pattern) is left out: its \(count) wildcard(s) would take all rules past the limit of \(limit)")
+                case .tooManyExcluded(let count):
+                    manager.log(.warning, "Rule \(rule.pattern): \(count) wildcard(s) left out, each has more than \(WildcardSpec.maxExcluded) names under it that earlier rules take")
+                }
+            }
+        }
+        let configured = Set(selection.items.filter { $0.via != .block }.map(\.suffix))
+        // Every wildcard the list serves, a blackhole included, for noticing one that was added.
+        let served = Set(selection.items.map(\.suffix))
         // A wildcard added while routes are live works at once, as a listed name does, even
         // when no apply has run since launch (auto-apply off) or since Remove All Routes.
         // Not while paused: a wildcard added then is saved, and Resume starts it.
-        if suspended, !manager.isPaused, manager.isVPNConnected, let before = lastConfigured, !configured.subtracting(before).isEmpty {
+        if suspended, !manager.isPaused, manager.isVPNConnected, let before = lastConfigured, !served.subtracting(before).isEmpty {
             suspended = false
             adoptedLedger = false
         }
-        lastConfigured = configured
+        lastConfigured = served
         await dropLearnedRoutes(notIn: configured)
         // Whatever the helper serves: the startup sweep kept these routes for a wildcard that
         // is still configured, and only a tracked route is taken out by teardown and expiry.
@@ -162,7 +179,7 @@ final class WildcardEngine {
         if !suspended, manager.isVPNConnected, !configured.isEmpty {
             resolvers = ScutilDNS.parse(await manager.runProcessAsync("/usr/sbin/scutil", arguments: ["--dns"], timeout: 3)?.output ?? "")
             let env = await environment(config: config, resolvers: resolvers)
-            let planned = WildcardPlanner.plan(config, env: env)
+            let planned = WildcardPlanner.plan(config, env: env, selection: selection)
             specs = planned.specs
             safetyGuard = WildcardPlanner.safetyGuard(config, env: env, specs: specs)
             if planned.skipped != lastSkipped {
@@ -237,7 +254,8 @@ final class WildcardEngine {
             vpnDNS: vpnDNS,
             pinnedGateway: { manager.ifaceGateway(for: $0, links: links) },
             dnsForInterface: { ScutilDNS.nameservers(forInterface: $0, in: resolvers) },
-            resolvers: resolvers
+            resolvers: resolvers,
+            blockSupported: HelperManager.shared.supportsBlockedNames
         )
     }
 
@@ -268,8 +286,9 @@ final class WildcardEngine {
     nonisolated static func shadowWarnings(specs: [WildcardSpec], served: Set<String>, resolvers: [ScutilDNS.Resolver],
                                            warned: [String: [String]]) -> (log: [(suffix: String, hidden: [String])], warned: [String: [String]]) {
         var now: [String: [String]] = [:]
+        let index = ScutilDNS.ShadowIndex(resolvers, served: served)
         for spec in specs {
-            let hidden = ScutilDNS.shadowing(spec.suffix, in: resolvers, served: served)
+            let hidden = index.shadowing(spec.suffix)
             if !hidden.isEmpty { now[spec.suffix] = hidden }
         }
         let log = now.sorted(by: { $0.key < $1.key }).filter { warned[$0.key] != $0.value }.map { (suffix: $0.key, hidden: $0.value) }

@@ -58,11 +58,51 @@ public enum WildcardDomain {
         return n == s || n.hasSuffix("." + s)
     }
 
+    /// `name` and each domain above it that can be a suffix (two labels or more), longest first.
+    public static func ancestors(of name: String) -> [String] {
+        let labels = name.split(separator: ".")
+        guard labels.count >= 2 else { return [] }
+        return (0...(labels.count - 2)).map { labels[$0...].joined(separator: ".") }
+    }
+
     /// The longest suffix that covers `name`, as macOS picks the resolver with the most
     /// matching labels: with `*.example.com` and `*.eu.example.com` both listed, a name under
     /// `eu.example.com` belongs to the second.
     public static func mostSpecific(for name: String, among suffixes: [String]) -> String? {
         suffixes.filter { matches(name, suffix: $0) }.max { $0.count < $1.count }
+    }
+}
+
+// MARK: - Finding the wildcard for a name
+
+/// The wildcards by suffix, so the forwarder finds the one for a name by looking up the name and
+/// each domain above it, longest first, instead of comparing it with every suffix. With a list of
+/// thousands (a GeoSite list) the comparison was the cost of every lookup. Same answer as
+/// `WildcardDomain.mostSpecific`: the longest suffix that covers the name.
+public struct WildcardSpecIndex: Sendable {
+    public let specs: [WildcardSpec]
+    /// Some spec carries names into a tunnel, so the forwarder reads the connected networks.
+    public let hasTunnel: Bool
+    private let bySuffix: [String: Int]
+
+    public init(_ specs: [WildcardSpec]) {
+        self.specs = specs
+        hasTunnel = specs.contains { $0.intoTunnel }
+        var map: [String: Int] = [:]
+        for (i, spec) in specs.enumerated() where map[spec.suffix] == nil { map[spec.suffix] = i }
+        bySuffix = map
+    }
+
+    /// The spec whose suffix is the longest one that is `name` or above it, nil when none is.
+    public func spec(for name: String) -> WildcardSpec? {
+        var n = name.lowercased()
+        if n.hasSuffix(".") { n.removeLast() }
+        var rest = Substring(n)
+        while true {
+            if let i = bySuffix[String(rest)] { return specs[i] }
+            guard let dot = rest.firstIndex(of: ".") else { return nil }
+            rest = rest[rest.index(after: dot)...]
+        }
     }
 }
 
@@ -121,6 +161,7 @@ public enum DNSWire {
 
     public static let rcodeNoError: UInt16 = 0
     public static let rcodeServFail: UInt16 = 2
+    public static let rcodeNXDomain: UInt16 = 3
     public static let rcodeRefused: UInt16 = 5
 
     /// SVCB / HTTPS parameter keys (RFC 9460).
@@ -821,6 +862,7 @@ public enum WildcardLookup {
     public static func reply(
         to bytes: [UInt8], overTCP: Bool, specs: [WildcardSpec], guard safetyGuard: WildcardSafetyGuard,
         ttlCap: UInt32,
+        index: WildcardSpecIndex? = nil,
         forward: (DNSWire.Message, WildcardSpec) -> [UInt8]?,
         delegate: (DNSWire.Message, WildcardDelegation) -> [UInt8]? = { _, _ in nil },
         routed: ([String], WildcardSpec) -> Set<String> = { _, _ in [] },
@@ -834,8 +876,8 @@ public enum WildcardLookup {
         // DDR probe: say nothing, so the system has no encrypted endpoint to move to.
         if name == DNSWire.ddrName { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNoError) }
 
-        guard let suffix = WildcardDomain.mostSpecific(for: name, among: specs.map(\.suffix)),
-              let spec = specs.first(where: { $0.suffix == suffix }) else {
+        // `index` is the forwarder's, built when the wildcards were set; without one it is built here.
+        guard let spec = (index ?? WildcardSpecIndex(specs)).spec(for: name) else {
             return DNSWire.reply(to: query, rcode: DNSWire.rcodeRefused)
         }
         /// Someone else's answer, passed on as it came, AAAA too; nothing is learned from it.
@@ -851,6 +893,9 @@ public enum WildcardLookup {
         // An earlier rule sends this name another way: answer it as the upstream does, and
         // learn nothing. A delegated name was answered above: the upstream does not know it.
         if spec.excludes(name) { return passedOn(forward(query, spec)) }
+        // A blackhole (the Block route): no answer for the name, whatever is asked, and nothing
+        // learned. The upstream is never asked, so no query for a blocked name leaves the Mac.
+        if spec.block { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNXDomain) }
         // The routes are IPv4 only; an IPv6 answer would take the connection past them.
         if question.type == DNSWire.typeAAAA { return DNSWire.reply(to: query, rcode: DNSWire.rcodeNoError) }
 
@@ -958,14 +1003,24 @@ public struct WildcardSpec: Equatable, Sendable {
     /// asked of that resolver and passed on, with no route learned: our resolver file only got
     /// the name because it comes first, and the wildcard's upstream does not know it.
     public let delegated: [WildcardDelegation]
+    /// A blackhole (the Block route): every name under the suffix, but the ones in `excluded` and
+    /// `delegated`, is answered NXDOMAIN at once, so nothing connects. No route is learned and no
+    /// upstream is asked, so `gateway`, `upstream` and `interface` may be empty; when they are not,
+    /// they serve the excluded names, which an earlier rule sends elsewhere.
+    public let block: Bool
 
     /// At most this many exclusions cross to the helper.
     public static let maxExcluded = 64
     /// At most this many delegations cross to the helper.
     public static let maxDelegated = 16
+    /// At most this many wildcards are served at once, each a file in /etc/resolver: the GeoSite
+    /// lists' total (`WildcardPlanner.maxListWildcards`) and room for the user's own. The helper
+    /// refuses a larger list whole, so nothing it is handed can fill /etc/resolver.
+    public static let maxSpecs = 12_000
 
     public init(suffix: String, gateway: String, upstream: [String], interface: String, intoTunnel: Bool = false,
-                excluded: [String] = [], delegated: [WildcardDelegation] = []) {
+                excluded: [String] = [], delegated: [WildcardDelegation] = [], block: Bool = false) {
+        self.block = block
         self.suffix = suffix
         self.gateway = gateway
         self.upstream = upstream
@@ -978,6 +1033,13 @@ public struct WildcardSpec: Equatable, Sendable {
     public var dictionary: [String: String] {
         var d = ["suffix": suffix, "gateway": gateway, "upstream": upstream.joined(separator: ","), "interface": interface]
         if intoTunnel { d["tunnel"] = "1" }
+        if block {
+            d["block"] = "1"
+            // A blackhole with no upstream sends none of the three.
+            if gateway.isEmpty && upstream.isEmpty && interface.isEmpty {
+                d["gateway"] = nil; d["upstream"] = nil; d["interface"] = nil
+            }
+        }
         if !excluded.isEmpty { d["excluded"] = excluded.joined(separator: ",") }
         if !delegated.isEmpty { d["delegated"] = delegated.map(\.encoded).joined(separator: ";") }
         return d
@@ -1001,14 +1063,24 @@ public struct WildcardSpec: Equatable, Sendable {
     /// Nil unless every field is something the helper may act on. The helper re-checks the
     /// gateway at install time like every other route.
     public init?(dictionary d: [String: String]) {
-        guard let suffix = d["suffix"], WildcardDomain.normalizedSuffix(suffix) == suffix,
-              let gateway = d["gateway"], Self.isValidGateway(gateway),
-              let interface = d["interface"], Self.isValidInterfaceName(interface) else { return nil }
-        let upstream = (d["upstream"] ?? "").split(separator: ",").map(String.init)
-        // Loopback upstreams are refused: one pointing back at the forwarder would loop.
-        guard !upstream.isEmpty, upstream.count <= 4,
-              upstream.allSatisfy({ WildcardIPv4.parse($0) != nil && !$0.hasPrefix("127.") && $0 != "0.0.0.0" })
-        else { return nil }
+        guard let suffix = d["suffix"], WildcardDomain.normalizedSuffix(suffix) == suffix else { return nil }
+        let block = d["block"] == "1"
+        // A blackhole may carry no gateway, upstream or interface; one that carries any carries all.
+        let bare = block && d["gateway"] == nil && d["upstream"] == nil && d["interface"] == nil
+        let gateway: String, interface: String, upstream: [String]
+        if bare {
+            (gateway, interface, upstream) = ("", "", [])
+        } else {
+            guard let g = d["gateway"], Self.isValidGateway(g),
+                  let i = d["interface"], Self.isValidInterfaceName(i) else { return nil }
+            gateway = g
+            interface = i
+            upstream = (d["upstream"] ?? "").split(separator: ",").map(String.init)
+            // Loopback upstreams are refused: one pointing back at the forwarder would loop.
+            guard !upstream.isEmpty, upstream.count <= 4,
+                  upstream.allSatisfy({ WildcardIPv4.parse($0) != nil && !$0.hasPrefix("127.") && $0 != "0.0.0.0" })
+            else { return nil }
+        }
         let excluded = (d["excluded"] ?? "").split(separator: ",").map(String.init)
         guard excluded.count <= Self.maxExcluded, excluded.allSatisfy({ entry in
             // An exact name may be the suffix itself; a narrower wildcard must be below it.
@@ -1023,7 +1095,7 @@ public struct WildcardSpec: Equatable, Sendable {
         guard delegated.count == delegatedText.count, delegated.count <= Self.maxDelegated,
               delegated.allSatisfy({ $0.overlaps(suffix) }) else { return nil }
         self.init(suffix: suffix, gateway: gateway, upstream: upstream, interface: interface, intoTunnel: d["tunnel"] == "1",
-                  excluded: excluded, delegated: delegated)
+                  excluded: excluded, delegated: delegated, block: block)
     }
 
     static func isValidGateway(_ g: String) -> Bool {

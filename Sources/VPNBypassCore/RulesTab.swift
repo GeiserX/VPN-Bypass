@@ -19,6 +19,9 @@ extension Route {
             if vpnSelector?.kind == .interface { return name.isEmpty ? String(localized: "VPN", bundle: bundle) : name }
             return vpnName ?? String(localized: "VPN", bundle: bundle)
         case .proxyHTTP, .proxySOCKS5, .tailscaleExit: return name
+        // The route `ensureBlockRoute` makes is called "Block"; it reads in the language of the app.
+        case .block: return name == Route.blockName ? String(localized: "Block", bundle: bundle) : name
+        case .unsupported: return name
         }
     }
 }
@@ -34,6 +37,48 @@ extension RouteManager {
         startConfigFollowUp(reconcileListeners: true, reapplyRoutes: false)
     }
 
+    /// The Block route, made the first time a rule is sent there: a config that never blocks gets
+    /// no extra route, so an existing config is not changed by this version.
+    func ensureBlockRoute() -> Route {
+        if let existing = config.routes.first(where: { $0.egress == .block }) { return existing }
+        // The fixed id is free unless the user moved the route that had it to another type in Routes.
+        // That route is theirs now and keeps the id its rules point at; this one gets its own.
+        let taken = config.routes.contains { $0.id == Route.rulesPageBlockId }
+        let route = Route(id: taken ? UUID() : Route.rulesPageBlockId, name: Route.blockName, egress: .block)
+        addRoute(route)
+        return route
+    }
+
+    /// Takes out the Block route the Rules page made (`ensureBlockRoute`) when no rule points at it.
+    /// The Rules page makes it on first use, and a version before Block refuses a config that holds
+    /// one, so it stays only while a rule needs it. It is known by its id: a Block route made in Routes
+    /// or with `vpnb`, under any name, "Block" too, is the user's and stays. Returns whether one went.
+    @discardableResult
+    func removeUnusedBlockRoutes() -> Bool {
+        let used = Set(config.rules.map(\.routeId))
+        let unused = config.routes.filter {
+            $0.egress == .block && $0.id == Route.rulesPageBlockId && !used.contains($0.id) && $0.id != config.defaultRouteId
+        }
+        guard !unused.isEmpty else { return false }
+        let ids = Set(unused.map(\.id))
+        config.routes.removeAll { $0.egress == .block && ids.contains($0.id) }
+        droppedBlockRoutes = unused
+        return true
+    }
+
+    /// Puts back the Block route `removeUnusedBlockRoutes` took out with `rule`'s delete, so Undo
+    /// brings the rule back on its route and not on one that no longer exists.
+    func restoreDroppedBlockRoute(for rule: Rule) {
+        guard !config.routes.contains(where: { $0.id == rule.routeId }),
+              let route = droppedBlockRoutes.first(where: { $0.id == rule.routeId }) else { return }
+        config.routes.append(route)
+    }
+
+    /// `removeUnusedBlockRoutes`, saved when one went: after a sheet that made it was cancelled.
+    func dropUnusedBlockRoute() {
+        if removeUnusedBlockRoutes() { saveConfig() }
+    }
+
     /// Deletes a rule and re-applies, as the Rules page's trash button does.
     func removeRule(_ id: UUID) {
         config.rules.removeAll { $0.id == id }
@@ -46,6 +91,7 @@ extension RouteManager {
     @discardableResult
     func restoreRule(_ rule: Rule) -> Bool {
         guard !config.rules.contains(where: { $0.id == rule.id }) else { return false }
+        restoreDroppedBlockRoute(for: rule)
         config.rules = Self.rules(config.rules, restoring: rule)
         saveRulesAndReapply()
         log(.success, "Restored rule: \(rule.pattern)")
@@ -431,6 +477,7 @@ extension RouteManager {
 
     /// Saves and re-applies after a rule change (RulesTab's `persistAndReapply`).
     func saveRulesAndReapply() {
+        removeUnusedBlockRoutes()
         saveConfig()
         startConfigFollowUp(reconcileListeners: false, reapplyRoutes: true)
     }
@@ -596,6 +643,13 @@ struct RulesTab: View {
                     everythingElseRow
                 }
 
+                if routeManager.usesGeoIP {
+                    GeoDataControls(kind: .ip)
+                }
+                if routeManager.usesGeoSite {
+                    GeoDataControls(kind: .site)
+                }
+
                 if let change = settingsUndo.last, change.page == .rules {
                     UndoLine(message: change.message, isDisabled: routeManager.isApplyingRoutes) { settingsUndo.undoLast() }
                 }
@@ -609,6 +663,8 @@ struct RulesTab: View {
                 sheetState = nil
             } onCancel: {
                 sheetState = nil
+                // Block picked in the sheet made the route; a cancelled rule leaves nothing on it.
+                routeManager.dropUnusedBlockRoute()
             }
         }
         .sheet(isPresented: $showingNewRouteSheet) {
@@ -631,6 +687,7 @@ struct RulesTab: View {
         // Sorted and filtered once per pass, not once per use.
         let shown = shownRules
         let services = routeManager.config.services
+        let refusals = GeoDisplay.refusalNotes(config: routeManager.config, wildcards: routeManager.wildcardRefusals)
         if shown.isEmpty {
             SettingsSearchMiss(search: searchText)
         }
@@ -650,7 +707,8 @@ struct RulesTab: View {
                         pendingNewRouteCompletion = { newRoute in reassignRule(rule.id, to: newRoute.id) }
                         showingNewRouteSheet = true
                     },
-                    showsActions: Self.hoveredForScreenshots == RuleRow.patternDisplay(rule, services: services)
+                    showsActions: Self.hoveredForScreenshots == RuleRow.patternDisplay(rule, services: services),
+                    refusalNote: refusals[rule.id]
                 )
                 .draggable(rule.id.uuidString)
                 .dropDestination(for: String.self) { items, _ in
@@ -676,6 +734,7 @@ struct RulesTab: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             RulesRouteChipMenu(
                 selectedRouteId: routeManager.config.defaultRouteId,
+                allowsBlock: false,
                 rowName: String(localized: "Everything else"),
                 onSelect: { newId in setDefaultRoute(newId) },
                 onNewRoute: {
@@ -724,6 +783,8 @@ struct RulesTab: View {
     }
 
     private func setDefaultRoute(_ routeId: UUID) {
+        // Defensive: the menu does not offer Block here, and a config edited by hand could name it.
+        guard routeManager.config.routes.first(where: { $0.id == routeId })?.egress != .block else { return }
         routeManager.config.defaultRouteId = routeId
         persistAndReapply()
     }
@@ -766,6 +827,8 @@ struct RulesTab: View {
 struct RuleRow: View {
     @EnvironmentObject var routeManager: RouteManager
     @ObservedObject private var flowEngine = FlowEngineManager.shared
+    @ObservedObject private var geoipStore = GeoDataStore.geoip
+    @ObservedObject private var geositeStore = GeoDataStore.geosite
     let rule: Rule
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -774,6 +837,9 @@ struct RuleRow: View {
     let onNewRoute: () -> Void
     /// Draws the actions as if the pointer were over the row, for the doc screenshots.
     var showsActions = false
+    /// Why the rule is left out, in whole or in part (`GeoDisplay.refusalNotes`). Said in place of
+    /// what its list holds.
+    var refusalNote: String?
 
     /// The leading glyph says what the rule matches, in place of the old uppercase badge.
     static func glyph(for type: MatchType) -> String {
@@ -782,6 +848,9 @@ struct RuleRow: View {
         case .service: return "square.grid.2x2"
         case .ip, .cidr: return "network"
         case .process: return "app"
+        case .geoip: return "flag"
+        case .geosite: return "list.bullet.rectangle"
+        case .unsupported: return "questionmark.circle"
         }
     }
 
@@ -797,7 +866,11 @@ struct RuleRow: View {
             return services.first(where: { $0.id == rule.pattern })?.name ?? rule.pattern
         case .suffix:
             return WildcardDomain.isWildcard(rule.pattern) ? rule.pattern : WildcardDomain.entry(for: rule.pattern)
-        case .domain, .ip, .cidr, .process:
+        case .geoip:
+            return GeoDisplay.name(for: rule.pattern)
+        case .unsupported:
+            return "\(rule.unknownMatchType ?? "?"): \(rule.pattern)"
+        case .domain, .ip, .cidr, .geosite, .process:
             return rule.pattern
         }
     }
@@ -829,14 +902,75 @@ struct RuleRow: View {
         return ProxyReachNote.forRoute(route)?.line(in: bundle)
     }
 
+    /// A line that says a rule does nothing, ahead of what its list holds: a rule from a newer
+    /// version, a route from one, or an address sent to Block, which blocks names only so far.
+    private var inertNote: String? {
+        if rule.matchType == .unsupported {
+            return String(localized: "Written by a newer version of VPN Bypass. Kept as it is; it matches nothing here.")
+        }
+        guard let route = assignedRoute else { return nil }
+        if route.egress == .unsupported {
+            return String(localized: "Its route comes from a newer version of VPN Bypass and carries no traffic here.")
+        }
+        return nil
+    }
+
+    /// An address rule on the Block route: how many addresses are blocked now. A country whose list is
+    /// missing says so first (`geoDetail`).
+    private var blockNote: String? {
+        guard assignedRoute?.egress == .block, [.ip, .cidr, .geoip].contains(rule.matchType) else { return nil }
+        let key = rule.pattern.lowercased()
+        if rule.matchType == .geoip, GeoDataFile.geoip.ranges(for: [key])[key] == nil { return nil }
+        let count = routeManager.ruleBlockCount(forPattern: rule.pattern)
+        let note: String
+        switch count {
+        case 0: note = String(localized: "Not blocked yet.")
+        case 1: note = String(localized: "1 address blocked")
+        default: note = String(localized: "\(count) addresses blocked")
+        }
+        // A country's IPv6 ranges are not read: say so, or a blocked country looks unreachable when it is not.
+        return rule.matchType == .geoip ? GeoDisplay.withIPv4Note(note) : note
+    }
+
+    /// A Country or Site rule's second line: what its list holds, or why it holds nothing.
+    private var geoDetail: String? {
+        let key = rule.pattern.lowercased()
+        switch rule.matchType {
+        case .geoip:
+            let count = GeoDataFile.geoip.ranges(for: [key])[key]?.count
+            let detail = GeoDisplay.detail(count: count, hasData: geoipStore.hasData,
+                                           leftOut: GeoDataFile.geoip.leftOut(for: key))
+            guard let count, (1...GeoDataFile.maxRangesPerCountry).contains(count) else { return detail }
+            return GeoDisplay.withIPv4Note(detail)
+        case .geosite:
+            let list = GeoDataFile.geosite.expansions(for: [key])[key]
+            return GeoDisplay.siteDetail(list, hasData: geositeStore.hasData, onBlock: assignedRoute?.egress == .block)
+        default:
+            return nil
+        }
+    }
+
+    /// The line under the row: what the rule's list holds, then what its route needs (a proxy's listener,
+    /// a route that is off). A count never hides the warning.
+    private var rowDetail: String? {
+        let routeNote = Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
+                                    customEngine: ProcessRule.customEngine(routeManager.config),
+                                    turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: flowEngine.confirmed?.declinedTeams ?? []),
+                                    counters: flowEngine.counters(forRule: rule.id.uuidString))
+        return Self.joined(inertNote ?? refusalNote ?? blockNote ?? geoDetail, routeNote)
+    }
+
+    /// Two lines under a row, either of which may be absent.
+    static func joined(_ first: String?, _ second: String?) -> String? {
+        let lines = [first, second].compactMap { $0 }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
     var body: some View {
         ListRow(
             glyph: Self.glyph(for: rule.matchType),
             name: patternDisplay,
-            detail: Self.detail(for: rule, route: assignedRoute, engine: flowEngine.state,
-                                customEngine: ProcessRule.customEngine(routeManager.config),
-                                turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: flowEngine.confirmed?.declinedTeams ?? []),
-                                counters: flowEngine.counters(forRule: rule.id.uuidString)),
+            detail: rowDetail,
             actions: actions,
             isOn: Binding(get: { rule.enabled }, set: onToggle),
             showsActions: showsActions,
@@ -856,6 +990,9 @@ struct RuleRow: View {
 struct RulesRouteChipMenu: View {
     @EnvironmentObject var routeManager: RouteManager
     let selectedRouteId: UUID?
+    /// Block is for rules: "Everything else" is the names no rule matched, and blocking those would
+    /// still leave every name resolvable, so that row does not offer it.
+    var allowsBlock = true
     /// The row the chip belongs to, so VoiceOver tells one rule's route from another's.
     var rowName: String?
     let onSelect: (UUID) -> Void
@@ -877,10 +1014,23 @@ struct RulesRouteChipMenu: View {
 
     /// Direct first, then the PRIMARY VPN — the two auto-created system routes. A
     /// VPN route pinned to a specific tunnel is user-created, so it lives in Your Routes.
-    private var systemRoutes: [Route] {
-        routeManager.config.routes
-            .filter { $0.egress == .direct || ($0.egress == .vpnDefault && $0.vpnSelector?.kind != .interface) }
-            .sorted { ($0.egress == .direct ? 0 : 1) < ($1.egress == .direct ? 0 : 1) }
+    private var systemRoutes: [Route] { Self.systemRoutes(routeManager.config.routes, allowsBlock: allowsBlock) }
+
+    /// The routes the System section offers: Direct, the primary VPN and, where a rule is being
+    /// routed, Block.
+    static func systemRoutes(_ routes: [Route], allowsBlock: Bool) -> [Route] {
+        routes
+            .filter { $0.egress == .direct || ($0.egress == .block && allowsBlock) || ($0.egress == .vpnDefault && $0.vpnSelector?.kind != .interface) }
+            .sorted { systemOrder($0) < systemOrder($1) }
+    }
+
+    /// Direct, then the primary VPN, then Block.
+    private static func systemOrder(_ route: Route) -> Int {
+        switch route.egress {
+        case .direct: return 0
+        case .block: return 2
+        default: return 1
+        }
     }
 
     private var userRoutes: [Route] {
@@ -904,6 +1054,15 @@ struct RulesRouteChipMenu: View {
                 Section("System") {
                     ForEach(systemRoutes) { route in
                         routeButton(route)
+                    }
+                    // Block is made the first time it is chosen, so a config that never blocks
+                    // gets no extra route.
+                    if allowsBlock, !routeManager.config.routes.contains(where: { $0.egress == .block }) {
+                        Button {
+                            onSelect(routeManager.ensureBlockRoute().id)
+                        } label: {
+                            Text("Block")
+                        }
                     }
                 }
                 if !userRoutes.isEmpty {
@@ -956,6 +1115,8 @@ struct RuleEditorSheet: View {
     /// The app the chooser picked, while the pattern is still its signing identifier: its team
     /// decides whether the rule is refused.
     @State private var chosenApp: AppIdentity?
+    /// The match before the last change, so a pattern typed for one kind of match is not kept for a list.
+    @State private var previousMatchType: MatchType
 
     /// The doc screenshots open the app chooser over the sheet.
     static var appChooserForScreenshots = false
@@ -971,12 +1132,43 @@ struct RuleEditorSheet: View {
         self.onSave = onSave
         self.onCancel = onCancel
         _matchType = State(initialValue: editingRule?.matchType ?? .domain)
+        _previousMatchType = State(initialValue: editingRule?.matchType ?? .domain)
         _pattern = State(initialValue: editingRule?.matchType == .service ? "" : (editingRule?.pattern ?? ""))
         _selectedServiceId = State(initialValue: editingRule?.matchType == .service ? (editingRule?.pattern ?? "") : (services.first?.id ?? ""))
         _routeId = State(initialValue: editingRule?.routeId)
     }
 
     private var isEditing: Bool { editingRule != nil }
+
+    static func isGeo(_ type: MatchType) -> Bool { type == .geoip || type == .geosite }
+
+    /// The choices of the Match control: GeoIP and GeoSite are one, "Geo".
+    enum MatchKind: Hashable {
+        case domain, service, ip, cidr, app, geo
+
+        init(_ type: MatchType) {
+            switch type {
+            case .domain, .suffix, .unsupported: self = .domain
+            case .service: self = .service
+            case .ip: self = .ip
+            case .cidr: self = .cidr
+            case .process: self = .app
+            case .geoip, .geosite: self = .geo
+            }
+        }
+
+        /// The match type for this choice; "Geo" keeps GeoSite when that is what it was.
+        func matchType(keepingGeoFrom current: MatchType) -> MatchType {
+            switch self {
+            case .domain: return .domain
+            case .service: return .service
+            case .ip: return .ip
+            case .cidr: return .cidr
+            case .app: return .process
+            case .geo: return current == .geosite ? .geosite : .geoip
+            }
+        }
+    }
 
     private var patternPlaceholder: String {
         switch matchType {
@@ -985,6 +1177,7 @@ struct RuleEditorSheet: View {
         case .ip:      return "10.0.0.5"
         case .cidr:    return "10.0.0.0/8"
         case .process: return String(localized: "com.example.App or Example")
+        case .geoip, .geosite, .unsupported: return ""
         case .service: return ""
         }
     }
@@ -994,15 +1187,30 @@ struct RuleEditorSheet: View {
                       confirmTitle: isEditing ? String(localized: "Save Changes") : String(localized: "Add Rule"),
                       onCancel: onCancel, onConfirm: attemptSave) {
             SheetField(String(localized: "Match"), required: true) {
-                Picker(String(localized: "Match"), selection: $matchType) {
-                    Text("Domain").tag(MatchType.domain)
-                    Text("Service").tag(MatchType.service)
-                    Text("IP").tag(MatchType.ip)
-                    Text("CIDR").tag(MatchType.cidr)
-                    Text("App").tag(MatchType.process)
+                // Six segments fit the sheet: GeoIP and GeoSite share "Geo", and a second choice
+                // under it picks which.
+                Picker(String(localized: "Match"), selection: Binding(
+                    get: { Self.isGeo(matchType) ? MatchKind.geo : MatchKind(matchType) },
+                    set: { kind in matchType = kind.matchType(keepingGeoFrom: matchType) }
+                )) {
+                    Text("Domain").tag(MatchKind.domain)
+                    Text("Service").tag(MatchKind.service)
+                    Text("IP").tag(MatchKind.ip)
+                    Text("CIDR").tag(MatchKind.cidr)
+                    Text("App").tag(MatchKind.app)
+                    Text("Geo").tag(MatchKind.geo)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                if Self.isGeo(matchType) {
+                    Picker(String(localized: "Match"), selection: $matchType) {
+                        Text("GeoIP: a country").tag(MatchType.geoip)
+                        Text("GeoSite: a site list").tag(MatchType.geosite)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
             }
 
             if matchType == .service {
@@ -1021,6 +1229,10 @@ struct RuleEditorSheet: View {
                         .labelsHidden()
                     }
                 }
+            } else if matchType == .geoip {
+                GeoListField(kind: .ip, pattern: $pattern)
+            } else if matchType == .geosite {
+                GeoListField(kind: .site, pattern: $pattern)
             } else if matchType == .process {
                 SheetField(String(localized: "App"), required: true) {
                     HStack(spacing: Theme.Space.s) {
@@ -1051,6 +1263,11 @@ struct RuleEditorSheet: View {
             if let error = validationError {
                 SheetError(message: error)
             }
+        }
+        .onChange(of: matchType) { new in
+            let lists: Set<MatchType> = [.geoip, .geosite]
+            if lists.contains(new) || lists.contains(previousMatchType) { pattern = "" }
+            previousMatchType = new
         }
         .sheet(isPresented: $showingNewRouteSheet) {
             RouteEditorSheet(editingRoute: nil) { newRoute in
@@ -1083,6 +1300,15 @@ struct RuleEditorSheet: View {
     }
 
     private func attemptSave() {
+        // A rule of a type from a newer version stays what it was: only its route (and pattern) change
+        // here, and its original type, which `Rule` writes back, is kept.
+        if matchType == .unsupported, var kept = editingRule {
+            if let routeId { kept.routeId = routeId }
+            let typed = pattern.trimmingCharacters(in: .whitespaces)
+            if !typed.isEmpty { kept.pattern = typed }
+            onSave(kept)
+            return
+        }
         let effectivePattern = matchType == .service ? selectedServiceId : pattern.trimmingCharacters(in: .whitespaces)
         guard !effectivePattern.isEmpty else {
             validationError = matchType == .service ? String(localized: "Select a service.") : String(localized: "Pattern is required.")
@@ -1100,6 +1326,31 @@ struct RuleEditorSheet: View {
             return
         }
         var stored = effectivePattern
+        if matchType == .geoip {
+            guard let code = GeoIPRule.normalized(effectivePattern) else {
+                validationError = String(localized: "Choose a country.")
+                return
+            }
+            // With the list downloaded, a code it does not hold would be a rule that routes nothing.
+            let known = GeoDataFile.geoip.countries()
+            guard known.isEmpty || known[code] != nil else {
+                validationError = String(localized: "That country is not in the downloaded list.")
+                return
+            }
+            stored = code
+        }
+        if matchType == .geosite {
+            guard let list = GeoSiteRule.normalized(effectivePattern) else {
+                validationError = String(localized: "Choose a site list.")
+                return
+            }
+            let known = GeoDataFile.geosite.lists()
+            guard known.isEmpty || known[GeoSiteDat.parse(pattern: list).name] != nil else {
+                validationError = String(localized: "That site list is not in the downloaded file.")
+                return
+            }
+            stored = list
+        }
         if matchType == .process {
             let previous = editingRule?.matchType == .process ? editingRule?.pattern : nil
             switch ProcessRule.editorValue(effectivePattern, chosen: chosenApp, previous: previous) {

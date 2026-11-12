@@ -146,6 +146,10 @@ enum SiteRoute {
         var wildcardGuard = WildcardSafetyGuard()
         /// Per-app routing's state: process rules it serves are not named as inactive.
         var flowEngine: FlowEngineState = .unavailable(.notInThisBuild)
+        /// The ranges of the countries the Country rules name, by lower-case code.
+        var geoip: [String: [String]] = [:]
+        /// The domain lists the Site rules name, by pattern.
+        var geosite: [String: GeoSiteExpansion] = [:]
     }
 
     /// What `match` found, before the check.
@@ -157,6 +161,9 @@ enum SiteRoute {
         var routedDestination: String? = nil
         var rulePosition: Int? = nil
         var ruleMatchType: String? = nil
+        /// The matching rule sends the name to the Block route: it is blackholed, so there is nothing
+        /// to probe and no address worth looking up.
+        var blocked = false
         var routeName: String? = nil
         /// Nil when the routing table does not decide the way.
         var expected: PathCheck.Way?
@@ -192,6 +199,24 @@ enum SiteRoute {
             found.appRulesEngine = s.flowEngine
         }
         return found
+    }
+
+    /// The first rule that matches the NAME alone (no addresses are known): the answer to "is this name
+    /// blackholed?" before anything is looked up. Nil when no rule by name matches, or the engine is
+    /// not Custom.
+    static func matchByName(host: String, in s: Snapshot) -> Found? {
+        guard s.custom else { return nil }
+        let servicesOfHost = Set(s.services.filter { service in service.domains.contains { domainCovers($0, host) } }.map(\.id))
+        let byId = Dictionary(s.routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for (index, rule) in s.rules.filter(\.enabled).sorted(by: { $0.order < $1.order }).enumerated() {
+            guard ruleMatches(rule, host: host, addresses: [], services: servicesOfHost, geoip: s.geoip, geosite: s.geosite),
+                  let route = byId[rule.routeId], route.enabled else { continue }
+            var found = Found(match: .rule, entry: rule.pattern, rulePosition: index + 1,
+                              ruleMatchType: rule.matchType.rawValue, routeName: route.name, expected: nil)
+            found.blocked = route.egress == .block
+            return found
+        }
+        return nil
     }
 
     private static func matchDestination(host: String, addresses: [String], in s: Snapshot) -> Found {
@@ -249,11 +274,12 @@ enum SiteRoute {
             for (index, rule) in ordered.enumerated() {
                 // A rule whose route is gone or turned off is inert, as RouteCompiler and
                 // WildcardRoutes treat it: the name falls through to a later rule.
-                guard ruleMatches(rule, host: host, addresses: addresses, services: servicesOfHost),
+                guard ruleMatches(rule, host: host, addresses: addresses, services: servicesOfHost, geoip: s.geoip, geosite: s.geosite),
                       let route = byId[rule.routeId], route.enabled else { continue }
                 var found = Found(match: .rule, entry: rule.pattern, rulePosition: index + 1,
                                   ruleMatchType: rule.matchType.rawValue, routeName: route.name,
                                   expected: way(for: route, vpnInterface: s.vpnInterface, pinned: s.pinnedInterfaces))
+                found.blocked = route.egress == .block
                 // A wildcard rule reaches its names through the forwarder, as a listed wildcard does.
                 let wildcardRule = WildcardDomain.isWildcard(rule.pattern) || rule.matchType == .suffix
                 if wildcardRule, let unrouted = wildcardUnrouted(host: host, addresses: addresses, in: s) {
@@ -331,7 +357,8 @@ enum SiteRoute {
     }
 
     /// The matchers RuleResolver uses, for a name and its addresses at once.
-    static func ruleMatches(_ rule: Rule, host: String, addresses: [String], services: Set<String>) -> Bool {
+    static func ruleMatches(_ rule: Rule, host: String, addresses: [String], services: Set<String>,
+                            geoip: [String: [String]] = [:], geosite: [String: GeoSiteExpansion] = [:]) -> Bool {
         switch rule.matchType {
         // A wildcard written as a name rule covers the names under it, as WildcardRoutes reads it.
         case .domain: return domainCovers(rule.pattern, host)
@@ -341,7 +368,11 @@ enum SiteRoute {
         case .service: return services.contains(rule.pattern)
         case .ip: return addresses.contains(rule.pattern)
         case .cidr: return addresses.contains { RuleResolver.ipv4($0, inCIDR: rule.pattern) }
-        case .process: return false
+        case .geoip:
+            let ranges = geoip[rule.pattern.lowercased()] ?? []
+            return addresses.contains { a in ranges.contains { RuleResolver.ipv4(a, inCIDR: $0) } }
+        case .geosite: return geosite[rule.pattern.lowercased()]?.usable.matches(host) ?? false
+        case .process, .unsupported: return false
         }
     }
 
@@ -356,7 +387,7 @@ enum SiteRoute {
         case .vpnDefault:
             if route.vpnSelector?.kind == .interface, let name = pinned[route.id] { return .tunnel(name) }
             return vpnInterface.map { .tunnel($0) }
-        case .tailscaleExit, .proxyHTTP, .proxySOCKS5: return nil
+        case .tailscaleExit, .proxyHTTP, .proxySOCKS5, .block, .unsupported: return nil
         }
     }
 
@@ -411,7 +442,9 @@ enum SiteRoute {
         }
         let verdict: SiteRouteAnswer.Verdict
         var reported = probes.first
-        if found.match == .unresolved {
+        if found.blocked {
+            verdict = .notChecked
+        } else if found.match == .unresolved {
             verdict = .unresolved
         } else if !vpnConnected {
             verdict = .noVPN
@@ -518,6 +551,9 @@ enum SiteRoute {
             return entry.caseInsensitiveCompare(host) == .orderedSame
                 ? String(localized: "\(host) is on your list, but none of its addresses has a route now; Re-resolve DNS adds them.")
                 : String(localized: "\(host) is listed under \(entry), but none of its addresses has a route now; Re-resolve DNS adds them.")
+        case .rule where found.blocked:
+            let position = found.rulePosition ?? 0
+            return String(localized: "\(host) matches rule \(position) (\(entry)), which goes to Block: its name gets no answer, so nothing connects.")
         case .rule:
             let position = found.rulePosition ?? 0
             let kind = found.ruleMatchType ?? ""
@@ -666,7 +702,7 @@ extension RouteManager {
             activeRoutes: activeRoutes.map { ($0.destination, $0.gateway, $0.source) },
             localGateway: localGateway, vpnInterface: isVPNConnected ? vpnInterface : nil,
             pause: pauseState, wildcardSpecs: wildcards.served, wildcardGuard: wildcards.safetyGuard,
-            flowEngine: FlowEngineManager.shared.state)
+            flowEngine: FlowEngineManager.shared.state, geoip: geoipRanges(), geosite: geositeExpansions())
     }
 
     /// "Where does this site go?" for a name, a link or an address. Nil when the input holds
@@ -674,6 +710,14 @@ extension RouteManager {
     func whereDoesItGo(_ input: String) async -> SiteRouteAnswer? {
         let host = cleanDomain(input).lowercased()
         guard !host.isEmpty, !host.contains(" ") else { return nil }
+        // A name a Block rule matches is blackholed: nothing to look up (the app's own DNS would find an
+        // address the Mac never gets) and nothing to probe.
+        if !isValidIP(host), let byName = SiteRoute.matchByName(host: host, in: siteRouteSnapshot) {
+            if byName.blocked {
+                return SiteRoute.answer(host: host, mode: config.routingMode, addresses: [], found: byName, probes: [],
+                                        control: nil, vpnConnected: siteRouteSnapshot.vpnInterface != nil)
+            }
+        }
         var addresses: [String]
         if isValidIP(host) {
             addresses = [host]

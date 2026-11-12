@@ -21,6 +21,12 @@ public enum Egress: String, Codable, Equatable, Sendable {
     case tailscaleExit  // into the Tailscale utun (iface:utunX) — Mac-mini-as-exit-node.
     case proxyHTTP      // userspace 127.0.0.1:PORT listener → HTTP CONNECT upstream.
     case proxySOCKS5    // userspace 127.0.0.1:PORT listener → SOCKS5 (socks5h) upstream.
+    /// A blackhole: the names a rule sends here are not resolved, so nothing connects (ads,
+    /// trackers). Served by the DNS forwarder, as a wildcard is; no kernel route.
+    case block
+    /// An egress this build does not know, written by a newer one. The route keeps what it was
+    /// (`Route.unknownEgress`) and is written back unchanged, but carries no traffic.
+    case unsupported
 }
 
 /// Residential-proxy session behaviour. Inert in P0; consumed in P1.
@@ -39,11 +45,20 @@ public enum MatchType: String, Codable, Equatable, Sendable {
     case suffix   // *.example.com — only meaningful with a flow-intercept engine (P3).
     case ip       // a single IP.
     case cidr     // a CIDR block.
+    /// A country (or other list) from the geoip list, by lower-case code (`ir`): its IPv4 ranges.
+    /// An older build cannot read a config that holds one (it rejects an unknown match type).
+    case geoip
+    /// A domain list from the geosite file (`steam`, `category-games@cn`): its suffixes become
+    /// wildcards and its exact names are resolved. An older build cannot read a config that holds one.
+    case geosite
     case service  // a built-in ServiceEntry id (a bundle of domains + IP ranges).
     /// An app: a bundle id (`com.example.App`, also covering `com.example.App.helper`) or an
     /// executable's file name (`Example`), never a path (ProcessRule). Only per-app routing can
     /// serve it; the kernel engine skips it, and every surface says so (`ProcessRule.serving`).
     case process
+    /// A match type this build does not know, written by a newer one. The rule keeps what it was
+    /// (`Rule.unknownMatchType`) and is written back unchanged, but matches nothing.
+    case unsupported
 }
 
 /// Which VPN a `.vpnDefault` route targets when several tunnels are up. An OPTIONAL
@@ -110,6 +125,56 @@ struct Route: Codable, Identifiable, Equatable {
     /// Never hand-edited.
     var localListenPort: Int?
 
+    /// The name of the route `RouteManager.ensureBlockRoute` makes.
+    static let blockName = "Block"
+    /// The id of the route `RouteManager.ensureBlockRoute` makes, the one mark that tells it from a
+    /// Block route the user made (in Routes or with `vpnb`), whatever its name. Saved with the route,
+    /// so it needs no field of its own.
+    static let rulesPageBlockId = UUID(uuidString: "AD50DAB5-AEC2-4A36-B81B-B08BE6698B45")!
+
+    /// The egress as written when this build does not know it (`egress` is then `.unsupported`).
+    /// Written back as it was, so a newer build's route is not lost by opening and saving here.
+    var unknownEgress: String?
+    /// Every field of a route of a type this build does not know, as read, so a newer version's
+    /// other settings are written back too. Nil for a route this build knows.
+    var unknownFields: [String: JSONValue]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, egress, enabled, proxyHost, proxyPort, proxyUser, proxyPass
+        case proxyUsernameTemplate, proxyPasswordTemplate, sessionMode, sessionTTLMinutes, remoteDNS
+        case tailscaleExitNode, vpnSelector, localListenPort
+    }
+
+    func encode(to encoder: Encoder) throws {
+        // A route from a newer version is written as it was read, but for what this build lets the
+        // user change: its name and whether it is on.
+        if egress == .unsupported, var fields = unknownFields {
+            fields["id"] = .string(id.uuidString)
+            fields["name"] = .string(name)
+            fields["enabled"] = .bool(enabled)
+            var single = encoder.singleValueContainer()
+            try single.encode(JSONValue.object(fields))
+            return
+        }
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(unknownEgress ?? egress.rawValue, forKey: .egress)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encodeIfPresent(proxyHost, forKey: .proxyHost)
+        try c.encodeIfPresent(proxyPort, forKey: .proxyPort)
+        try c.encodeIfPresent(proxyUser, forKey: .proxyUser)
+        try c.encodeIfPresent(proxyPass, forKey: .proxyPass)
+        try c.encodeIfPresent(proxyUsernameTemplate, forKey: .proxyUsernameTemplate)
+        try c.encodeIfPresent(proxyPasswordTemplate, forKey: .proxyPasswordTemplate)
+        try c.encode(sessionMode, forKey: .sessionMode)
+        try c.encodeIfPresent(sessionTTLMinutes, forKey: .sessionTTLMinutes)
+        try c.encode(remoteDNS, forKey: .remoteDNS)
+        try c.encodeIfPresent(tailscaleExitNode, forKey: .tailscaleExitNode)
+        try c.encodeIfPresent(vpnSelector, forKey: .vpnSelector)
+        try c.encodeIfPresent(localListenPort, forKey: .localListenPort)
+    }
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -150,7 +215,18 @@ struct Route: Codable, Identifiable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
-        egress = try c.decodeIfPresent(Egress.self, forKey: .egress) ?? .direct
+        // An egress this build does not know is kept, not a reason to refuse the whole config.
+        if let raw = try? c.decodeIfPresent(String.self, forKey: .egress) {
+            if let known = Egress(rawValue: raw), known != .unsupported {
+                egress = known
+            } else {
+                egress = .unsupported
+                unknownEgress = raw
+                unknownFields = try? decoder.singleValueContainer().decode([String: JSONValue].self)
+            }
+        } else {
+            egress = .direct
+        }
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         proxyHost = try c.decodeIfPresent(String.self, forKey: .proxyHost)
         proxyPort = try c.decodeIfPresent(Int.self, forKey: .proxyPort)
@@ -175,6 +251,38 @@ struct Rule: Codable, Identifiable, Equatable {
     var routeId: UUID
     var enabled: Bool
     var order: Int  // lower runs earlier; first match wins.
+    /// The match type as written when this build does not know it (`matchType` is then
+    /// `.unsupported`). Written back as it was, so a newer build's rule is not lost by opening
+    /// and saving here.
+    var unknownMatchType: String?
+    /// Every field of a rule of a type this build does not know, as read (see `Route.unknownFields`).
+    var unknownFields: [String: JSONValue]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, matchType, pattern, routeId, enabled, order
+    }
+
+    func encode(to encoder: Encoder) throws {
+        // A rule from a newer version is written as it was read, but for what this build lets the user
+        // change: whether it is on, its place, its route and its pattern.
+        if matchType == .unsupported, var fields = unknownFields {
+            fields["id"] = .string(id.uuidString)
+            fields["pattern"] = .string(pattern)
+            fields["routeId"] = .string(routeId.uuidString)
+            fields["enabled"] = .bool(enabled)
+            fields["order"] = .int(Int64(order))
+            var single = encoder.singleValueContainer()
+            try single.encode(JSONValue.object(fields))
+            return
+        }
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(unknownMatchType ?? matchType.rawValue, forKey: .matchType)
+        try c.encode(pattern, forKey: .pattern)
+        try c.encode(routeId, forKey: .routeId)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encode(order, forKey: .order)
+    }
 
     init(id: UUID = UUID(), matchType: MatchType, pattern: String, routeId: UUID, enabled: Bool = true, order: Int) {
         self.id = id
@@ -188,7 +296,18 @@ struct Rule: Codable, Identifiable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        matchType = try c.decodeIfPresent(MatchType.self, forKey: .matchType) ?? .domain
+        // A match type this build does not know is kept, not a reason to refuse the whole config.
+        if let raw = try? c.decodeIfPresent(String.self, forKey: .matchType) {
+            if let known = MatchType(rawValue: raw), known != .unsupported {
+                matchType = known
+            } else {
+                matchType = .unsupported
+                unknownMatchType = raw
+                unknownFields = try? decoder.singleValueContainer().decode([String: JSONValue].self)
+            }
+        } else {
+            matchType = .domain
+        }
         pattern = try c.decodeIfPresent(String.self, forKey: .pattern) ?? ""
         // routeId has no default. Decoding stays total so one malformed rule
         // cannot fail the whole config decode (matching Config's resilient

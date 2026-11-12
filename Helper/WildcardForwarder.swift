@@ -54,6 +54,8 @@ final class WildcardForwarder {
 
     // State below is only touched on `queue`.
     private var specs: [WildcardSpec] = []
+    /// `specs` by suffix, rebuilt whenever they change, for the lookup of every query.
+    private var specIndex = WildcardSpecIndex([])
     private var safetyGuard = WildcardSafetyGuard()
     private var limiter = WildcardLearnLimiter()
     private var learned: [LearnedWildcardRoute] = []
@@ -101,15 +103,20 @@ final class WildcardForwarder {
             let result = Self.syncResolverFiles(wanted: Set(specs.map(\.suffix)))
             // A suffix whose file is someone else's is not ours to answer.
             let served = specs.filter { !result.foreign.contains($0.suffix) }
-            if served != self.specs { generation &+= 1 }
+            // A suffix can change what it does with its resolver file untouched (Direct to Block, say,
+            // with another wildcard keeping the files in place), and a cached answer would keep
+            // the old behaviour until it expired, so a change of what is served flushes too.
+            let specsChanged = served != self.specs
+            if specsChanged { generation &+= 1 }
             self.specs = served
+            self.specIndex = WildcardSpecIndex(served)
             var changed = result.changed
             if self.specs.isEmpty {
                 changed = stopLocked(reason: "every resolver file belongs to someone else") || changed
             } else {
                 armLease()
             }
-            if changed { Self.flushLater() }
+            if changed || specsChanged { Self.flushLater() }
             helperLog.info("wildcard: serving \(self.specs.count, privacy: .public), \(result.foreign.count, privacy: .public) left to another resolver file")
             return ConfigureResult(ok: true, unserved: result.foreign.sorted(), error: nil)
         }
@@ -168,6 +175,7 @@ final class WildcardForwarder {
         leaseTimer = nil
         let wasRunning = udpListener != nil || !specs.isEmpty
         specs = []
+        specIndex = WildcardSpecIndex([])
         generation &+= 1
         udpSource?.cancel()
         tcpSource?.cancel()
@@ -325,15 +333,15 @@ final class WildcardForwarder {
 
     /// The reply to one query, or nil to send nothing (a message that is not a query).
     func answer(_ bytes: [UInt8], overTCP: Bool) -> [UInt8]? {
-        var (specs, safetyGuard, generation) = queue.sync { (self.specs, self.safetyGuard, self.generation) }
+        var (index, safetyGuard, generation) = queue.sync { (self.specIndex, self.safetyGuard, self.generation) }
         // The networks this Mac is on now, not when the list was set: a network joined since
         // must not be pulled into a tunnel. Only tunnel wildcards read them.
         // A failed read keeps the list in `safetyGuard`, the last one read.
-        if specs.contains(where: \.intoTunnel), let networks = Self.connectedNetworks() {
+        if index.hasTunnel, let networks = Self.connectedNetworks() {
             safetyGuard.connectedNetworks = networks
         }
         return WildcardLookup.reply(
-            to: bytes, overTCP: overTCP, specs: specs, guard: safetyGuard, ttlCap: Self.ttlCap,
+            to: bytes, overTCP: overTCP, specs: index.specs, guard: safetyGuard, ttlCap: Self.ttlCap, index: index,
             forward: { query, spec in Self.forward(bytes, query: query, spec: spec, overTCP: overTCP) },
             delegate: { query, owner in Self.forward(bytes, query: query, to: owner, overTCP: overTCP) },
             routed: { candidates, spec in

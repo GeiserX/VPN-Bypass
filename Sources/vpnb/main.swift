@@ -30,12 +30,12 @@ func printUsage() {
                                                  Re-point a route's host/port/user/enabled/password
       route.enable id=<uuid>                    Enable a route
       route.disable id=<uuid>                   Disable a route
-      route.add name=<name> [type=http|socks5|tailscale|vpn] [host=] [port=] [user=] [pass:-]
+      route.add name=<name> [type=http|socks5|tailscale|vpn|block] [host=] [port=] [user=] [pass:-]
                                                 [interface=utunX] [product=<label>]  (type=vpn: pin a tunnel)
                                                  Add a new route
       route.rm id=<uuid>                        Remove a route
       rule.list                                 List all rules
-      rule.add match=<domain|suffix|ip|cidr|service|process> pattern=<value> routeId=<uuid>
+      rule.add match=<domain|suffix|ip|cidr|service|process|geoip|geosite> pattern=<value> routeId=<uuid>
                                                  Add a routing rule (process: a bundle id or an
                                                  executable name; it routes the app's TCP
                                                  connections to public IPv4 addresses, unless the
