@@ -41,7 +41,10 @@ extension RouteManager {
     /// no extra route, so an existing config is not changed by this version.
     func ensureBlockRoute() -> Route {
         if let existing = config.routes.first(where: { $0.egress == .block }) { return existing }
-        let route = Route(id: Route.rulesPageBlockId, name: Route.blockName, egress: .block)
+        // The fixed id is free unless the user moved the route that had it to another type in Routes.
+        // That route is theirs now and keeps the id its rules point at; this one gets its own.
+        let taken = config.routes.contains { $0.id == Route.rulesPageBlockId }
+        let route = Route(id: taken ? UUID() : Route.rulesPageBlockId, name: Route.blockName, egress: .block)
         addRoute(route)
         return route
     }
@@ -58,7 +61,7 @@ extension RouteManager {
         }
         guard !unused.isEmpty else { return false }
         let ids = Set(unused.map(\.id))
-        config.routes.removeAll { ids.contains($0.id) }
+        config.routes.removeAll { $0.egress == .block && ids.contains($0.id) }
         droppedBlockRoutes = unused
         return true
     }

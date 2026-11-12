@@ -92,4 +92,38 @@ final class RulesPageBlockRouteIdTests: XCTestCase {
         XCTAssertTrue(rm.removeUnusedBlockRoutes(), "the route the Rules page made outlived its last rule")
         XCTAssertFalse(rm.config.routes.contains { $0.egress == .block })
     }
+    /// A route the user moved off Block keeps the fixed id. The next Block route must not share
+    /// it, and the cleanup must not take the user's route with it.
+    func testARouteTheUserMovedOffBlockKeepsItsIdAlone() {
+        let direct = Route(name: "Direct", egress: .direct)
+        let retyped = Route(id: Route.rulesPageBlockId, name: "Mine", egress: .direct)
+        var cfg = RouteManager.Config()
+        cfg.routingMode = .custom
+        cfg.schemaVersion = 2
+        cfg.routes = [direct, retyped]
+        cfg.defaultRouteId = direct.id
+        rm.config = cfg
+        let made = rm.ensureBlockRoute()
+        XCTAssertEqual(made.egress, .block)
+        XCTAssertNotEqual(made.id, Route.rulesPageBlockId, "two routes share one id")
+        XCTAssertEqual(Set(rm.config.routes.map(\.id)).count, rm.config.routes.count, "two routes share one id")
+        rm.removeUnusedBlockRoutes()
+        XCTAssertTrue(rm.config.routes.contains { $0.name == "Mine" }, "the cleanup took the user's route")
+    }
+
+    /// Two routes with the fixed id, as a config saved before this was fixed can hold: the cleanup
+    /// takes the Block one only.
+    func testTheCleanupTakesOnlyTheBlockRouteOfTwoWithOneId() {
+        let direct = Route(name: "Direct", egress: .direct)
+        var cfg = RouteManager.Config()
+        cfg.routingMode = .custom
+        cfg.schemaVersion = 2
+        cfg.routes = [direct,
+                      Route(id: Route.rulesPageBlockId, name: "Mine", egress: .direct),
+                      Route(id: Route.rulesPageBlockId, name: Route.blockName, egress: .block)]
+        cfg.defaultRouteId = direct.id
+        rm.config = cfg
+        XCTAssertTrue(rm.removeUnusedBlockRoutes())
+        XCTAssertEqual(rm.config.routes.map(\.name), ["Direct", "Mine"])
+    }
 }
