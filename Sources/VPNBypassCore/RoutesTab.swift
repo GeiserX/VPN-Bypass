@@ -484,6 +484,21 @@ struct RouteEditorSheet: View {
         }
     }
 
+    /// The Type choice. Short names so five small segments fit the sheet in every shipped
+    /// language. The route list and the fields below keep the full names (HTTP CONNECT,
+    /// Tailscale Peer).
+    private var typePicker: some View {
+        Picker(String(localized: "Type"), selection: $egress) {
+            Text("HTTP").tag(Egress.proxyHTTP)
+            Text("SOCKS5").tag(Egress.proxySOCKS5)
+            Text("Tailscale").tag(Egress.tailscaleExit)
+            Text("VPN").tag(Egress.vpnDefault)
+            Text("Block").tag(Egress.block)
+            if egress == .unsupported { Text("Unknown").tag(Egress.unsupported) }
+        }
+        .labelsHidden()
+    }
+
     var body: some View {
         SheetScaffold(isEditing ? String(localized: "Edit Route") : String(localized: "Add Route"),
                       confirmTitle: isEditing ? String(localized: "Save Changes") : String(localized: "Add Route"),
@@ -494,18 +509,13 @@ struct RouteEditorSheet: View {
             }
 
             SheetField(String(localized: "Type"), required: true) {
-                Picker(String(localized: "Type"), selection: $egress) {
-                    Text("HTTP CONNECT").tag(Egress.proxyHTTP)
-                    Text("SOCKS5").tag(Egress.proxySOCKS5)
-                    Text("Tailscale Peer").tag(Egress.tailscaleExit)
-                    Text("VPN").tag(Egress.vpnDefault)
-                    Text("Block").tag(Egress.block)
-                    if egress == .unsupported { Text("Unknown").tag(Egress.unsupported) }
+                // A segmented control is first drawn at its natural width, so one wider than the
+                // sheet shows past its edge before it is narrowed. Short labels keep every type
+                // in view as small segments; a menu is the fallback for longer translations.
+                ViewThatFits(in: .horizontal) {
+                    typePicker.pickerStyle(.segmented).controlSize(.small)
+                    typePicker.pickerStyle(.menu).fixedSize()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                // Five types in a 420 pt sheet: a smaller control keeps them all in view.
-                .controlSize(.small)
             }
 
             if egress == .vpnDefault {
