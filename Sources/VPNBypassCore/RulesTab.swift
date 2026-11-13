@@ -1182,26 +1182,35 @@ struct RuleEditorSheet: View {
         }
     }
 
+    /// The Match choice; GeoIP and GeoSite share "Geo", and a second choice under it picks which.
+    private var matchKindPicker: some View {
+        Picker(String(localized: "Match"), selection: Binding(
+            get: { Self.isGeo(matchType) ? MatchKind.geo : MatchKind(matchType) },
+            set: { kind in matchType = kind.matchType(keepingGeoFrom: matchType) }
+        )) {
+            Text("Domain").tag(MatchKind.domain)
+            Text("Service").tag(MatchKind.service)
+            Text("IP").tag(MatchKind.ip)
+            Text("CIDR").tag(MatchKind.cidr)
+            Text("App").tag(MatchKind.app)
+            Text("Geo").tag(MatchKind.geo)
+        }
+        .labelsHidden()
+    }
+
     var body: some View {
         SheetScaffold(isEditing ? String(localized: "Edit Rule") : String(localized: "Add Rule"),
                       confirmTitle: isEditing ? String(localized: "Save Changes") : String(localized: "Add Rule"),
                       onCancel: onCancel, onConfirm: attemptSave) {
             SheetField(String(localized: "Match"), required: true) {
-                // Six segments fit the sheet: GeoIP and GeoSite share "Geo", and a second choice
-                // under it picks which.
-                Picker(String(localized: "Match"), selection: Binding(
-                    get: { Self.isGeo(matchType) ? MatchKind.geo : MatchKind(matchType) },
-                    set: { kind in matchType = kind.matchType(keepingGeoFrom: matchType) }
-                )) {
-                    Text("Domain").tag(MatchKind.domain)
-                    Text("Service").tag(MatchKind.service)
-                    Text("IP").tag(MatchKind.ip)
-                    Text("CIDR").tag(MatchKind.cidr)
-                    Text("App").tag(MatchKind.app)
-                    Text("Geo").tag(MatchKind.geo)
+                // A segmented control is first drawn at its natural width, so one wider than the
+                // sheet shows past its edge before it is narrowed. Use the first form that fits:
+                // six segments need the small size, and longer translations a menu.
+                ViewThatFits(in: .horizontal) {
+                    matchKindPicker.pickerStyle(.segmented)
+                    matchKindPicker.pickerStyle(.segmented).controlSize(.small)
+                    matchKindPicker.pickerStyle(.menu).fixedSize()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
                 if Self.isGeo(matchType) {
                     Picker(String(localized: "Match"), selection: $matchType) {
                         Text("GeoIP: a country").tag(MatchType.geoip)
