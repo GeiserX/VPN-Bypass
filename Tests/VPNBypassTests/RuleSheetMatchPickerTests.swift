@@ -11,8 +11,11 @@ import XCTest
 @MainActor
 final class RuleSheetMatchPickerTests: XCTestCase {
 
-    private func segmentedControls(in view: NSView) -> [NSSegmentedControl] {
-        (view as? NSSegmentedControl).map { [$0] } ?? view.subviews.flatMap(segmentedControls)
+    /// The Match control in whichever form the sheet shows: segments, or a menu when no
+    /// segmented form fits (a language with long labels). The sheet has no other of either.
+    private func matchControls(in view: NSView) -> [NSControl] {
+        if view is NSSegmentedControl || view is NSPopUpButton { return [view as! NSControl] }
+        return view.subviews.flatMap(matchControls)
     }
 
     func testTheMatchControlFitsTheSheetAtItsNaturalWidth() {
@@ -22,7 +25,7 @@ final class RuleSheetMatchPickerTests: XCTestCase {
         hosting.frame.size = hosting.fittingSize
         hosting.layoutSubtreeIfNeeded()
 
-        let controls = segmentedControls(in: hosting)
+        let controls = matchControls(in: hosting)
         XCTAssertEqual(controls.count, 1)
         let rowWidth = SheetScaffold<EmptyView>.width - 2 * (Theme.Space.page - 4)
         for control in controls {
