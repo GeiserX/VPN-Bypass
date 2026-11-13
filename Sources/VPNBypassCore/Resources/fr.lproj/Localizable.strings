@@ -487,6 +487,7 @@
 "Name" = "Nom";
 "Type" = "Type";
 "HTTP CONNECT" = "HTTP CONNECT";
+"HTTP" = "HTTP";
 "SOCKS5" = "SOCKS5";
 "Tailscale Peer" = "Pair Tailscale";
 "100.x.x.x" = "100.x.x.x";
