@@ -31,5 +31,12 @@ final class RuleSheetMatchPickerTests: XCTestCase {
         for control in controls {
             XCTAssertLessThanOrEqual(control.intrinsicContentSize.width, rowWidth)
         }
+
+        // The test runner has no translations, so this is the English sheet. English keeps all six
+        // choices in view as small segments; only longer translations fall back to the menu.
+        let segments = controls.first as? NSSegmentedControl
+        XCTAssertNotNil(segments, "English shows the Match choices as segments, not a menu")
+        XCTAssertEqual(segments?.segmentCount, 6)
+        XCTAssertEqual(segments?.controlSize, .small)
     }
 }
