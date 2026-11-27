@@ -1284,6 +1284,7 @@
 "Blocks nothing while Pin listed names in /etc/hosts is off (General)." = "Blocks nothing while Pin listed names in /etc/hosts is off (General).";
 "1 name blocked" = "1 name blocked";
 "%lld names blocked" = "%lld names blocked";
+"Adds no names: the rules above it already cover every one." = "Adds no names: the rules above it already cover every one.";
 "%@, updated %@" = "%@, updated %@";
 "Last try failed: %@" = "Last try failed: %@";
 "StevenBlack's unified hosts list" = "StevenBlack's unified hosts list";

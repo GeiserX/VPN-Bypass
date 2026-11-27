@@ -79,12 +79,18 @@ extension RouteManager {
         let plan = blocklistPlan(for: config)
         if plan != hostsBlockPlan { hostsBlockPlan = plan }
         let names = Self.blockedHostsToSend(plan, manageHostsFile: config.manageHostsFile)
-        guard names != sentBlockedHosts else { return }
+        let confirmations = Self.confirmations(of: plan, rules: config.rules)
+        guard names != sentBlockedHosts else {
+            // The helper holds this set already, but the plan may give its names to other rules:
+            // a list whose names all sit in a list above it, two lists swapped. No call.
+            if confirmedBlockCounts != confirmations { confirmedBlockCounts = confirmations }
+            return
+        }
         // Not known, and nothing to block: a section is left only if the file holds one (an
         // earlier run that was stopped before it could remove it). Most Macs never had one.
         if names.isEmpty, sentBlockedHosts == nil, !hostsFileHasBlocklistSection() {
             sentBlockedHosts = []
-            confirmedBlockCounts = [:]
+            confirmedBlockCounts = confirmations
             return
         }
         // A name pinned now that the list blocks (a list rule added above the pinning rule, or a
@@ -92,7 +98,28 @@ extension RouteManager {
         if !pinnedHostAddresses.isEmpty, !Set(pinnedHostAddresses.keys).isDisjoint(with: names) {
             await updateHostsFile()
         }
-        await sendBlockedHosts(names, plan: plan)
+        await sendBlockedHosts(names, confirming: confirmations)
+    }
+
+    /// Each list rule's count in `plan`, with the URL the rule has in `rules`, the config that
+    /// plan was made from. An edit keeps a rule's id: a count is the rule's only while its URL
+    /// is the same (`listRuleState`).
+    nonisolated static func confirmations(of plan: HostsBlockPlanner.Plan, rules: [Rule]) -> [UUID: ListConfirmation] {
+        let patterns = Dictionary(rules.map { ($0.id, $0.pattern) }, uniquingKeysWith: { first, _ in first })
+        var out: [UUID: ListConfirmation] = [:]
+        for (id, names) in plan.accepted {
+            guard let pattern = patterns[id] else { continue }
+            out[id] = ListConfirmation(pattern: pattern, names: names)
+        }
+        return out
+    }
+
+    /// Whether Remove All Routes takes blocked names out of /etc/hosts: the helper confirmed some,
+    /// or, while that is not known, the rules would send some. No while the file holds none, as
+    /// with pinning off or after an earlier Remove All.
+    var removeAllLiftsListBlocks: Bool {
+        if let sent = sentBlockedHosts { return !sent.isEmpty }
+        return !Self.blockedHostsToSend(hostsBlockPlan, manageHostsFile: config.manageHostsFile).isEmpty
     }
 
     /// Takes the section out now, whatever the rules say: Remove All Routes. The next apply puts it
@@ -108,7 +135,7 @@ extension RouteManager {
             return
         }
         log(.info, "Blocklist: removing the /etc/hosts section (\(reason))")
-        await sendBlockedHosts([], plan: HostsBlockPlanner.Plan())
+        await sendBlockedHosts([], confirming: [:])
     }
 
     /// Forgets what the helper holds and syncs again: after a helper restart (a stopping helper
@@ -121,7 +148,7 @@ extension RouteManager {
         requestBlockedHostsSync()
     }
 
-    private func sendBlockedHosts(_ names: [String], plan: HostsBlockPlanner.Plan) async {
+    private func sendBlockedHosts(_ names: [String], confirming confirmations: [UUID: ListConfirmation]) async {
         // A send that was already out when the helper restarted reached the old helper: what it
         // confirms says nothing about the new one, which `resendBlockedHosts` asks again.
         let generation = blockedHostsGeneration
@@ -142,7 +169,7 @@ extension RouteManager {
             return
         }
         sentBlockedHosts = names
-        confirmedBlockCounts = names.isEmpty ? [:] : plan.accepted
+        confirmedBlockCounts = confirmations
         blockedHostsError = nil
         if result.error == HelperConstants.hostsUnchanged {
             log(.info, "Blocklist: /etc/hosts already holds \(names.count) blocked name(s); nothing written")
@@ -229,9 +256,15 @@ extension RouteManager {
                              downloading: source.map { listStore.updating.contains($0) } ?? false,
                              status: source.flatMap { listStore.status(for: $0) },
                              helperError: blockedHostsError,
-                             confirmed: confirmedBlockCounts?[rule.id],
+                             confirmed: confirmedBlockCounts?[rule.id].flatMap { $0.pattern == rule.pattern ? $0.names : nil },
                              helperReady: HelperManager.shared.isHelperInstalled)
     }
+}
+
+/// A list rule's names in the set the helper confirmed: how many it added, from which URL.
+struct ListConfirmation: Equatable {
+    var pattern: String
+    var names: Int
 }
 
 /// What a list rule does now, as its row and `vpnb rule.list` say it.
@@ -351,12 +384,18 @@ struct ListRuleState: Equatable {
         case .pinningOff:
             return String(localized: "Blocks nothing while Pin listed names in /etc/hosts is off (General).", bundle: bundle)
         case .blocked:
-            let count = names == 1 ? String(localized: "1 name blocked", bundle: bundle)
-                                   : String(localized: "\(names) names blocked", bundle: bundle)
-            var line = count
-            if let updated {
-                let when = RelativeDateTimeFormatter().localizedString(for: updated, relativeTo: now)
-                line = String(localized: "\(count), updated \(when)", bundle: bundle)
+            var line: String
+            if names == 0 {
+                // Each of its names is in a list or a rule above it, which already decides it.
+                line = String(localized: "Adds no names: the rules above it already cover every one.", bundle: bundle)
+            } else {
+                let count = names == 1 ? String(localized: "1 name blocked", bundle: bundle)
+                                       : String(localized: "\(names) names blocked", bundle: bundle)
+                line = count
+                if let updated {
+                    let when = RelativeDateTimeFormatter().localizedString(for: updated, relativeTo: now)
+                    line = String(localized: "\(count), updated \(when)", bundle: bundle)
+                }
             }
             if let error { line += "\n" + String(localized: "Last try failed: \(error)", bundle: bundle) }
             return line

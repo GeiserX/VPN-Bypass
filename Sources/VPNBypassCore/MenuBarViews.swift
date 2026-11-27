@@ -541,8 +541,7 @@ struct MenuContent: View {
                 : config.domains.filter { $0.enabled }.count,
             autoApplyOnVPN: config.autoApplyOnVPN,
             autoDNSRefresh: config.autoDNSRefresh,
-            liftsListBlocks: !routeManager.hostsBlockPlan.names.isEmpty
-                || routeManager.confirmedBlockCounts?.isEmpty == false
+            liftsListBlocks: routeManager.removeAllLiftsListBlocks
         )
     }
 

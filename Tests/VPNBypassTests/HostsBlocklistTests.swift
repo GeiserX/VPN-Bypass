@@ -122,6 +122,9 @@ final class HostsBlocklistTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        // setUp skipped before it saved anything: the shared state belongs to whatever holds the
+        // route gate, so leave all of it alone.
+        guard let saved else { return }
         await rm.cancelConfigFollowUps()
         await rm.waitForBackgroundRefreshForTests()
         await rm.waitForBlockedHostsSync()
@@ -145,15 +148,12 @@ final class HostsBlocklistTests: XCTestCase {
         rm.ruleBlocks = []
         rm.blockedRoutes = []
         rm.pendingKernelAdds = []
-        // setUp may have skipped before it saved anything: restore only what it set.
-        if let saved {
-            rm.listStore = saved.store
-            rm.config = saved.config
-            rm.isVPNConnected = saved.connected
-            rm.localGateway = saved.gateway
-            rm.isLoading = saved.loading
-            HelperManager.shared.helperState = saved.helper
-        }
+        rm.listStore = saved.store
+        rm.config = saved.config
+        rm.isVPNConnected = saved.connected
+        rm.localGateway = saved.gateway
+        rm.isLoading = saved.loading
+        HelperManager.shared.helperState = saved.helper
         rm.resetShutdownStateForTests()
         if let directory { try? FileManager.default.removeItem(at: directory) }
     }
@@ -161,13 +161,17 @@ final class HostsBlocklistTests: XCTestCase {
     // MARK: - Helpers
 
     private func storeCopy(_ names: [String]) async throws {
+        try await storeCopy(names, at: source)
+    }
+
+    private func storeCopy(_ names: [String], at address: String) async throws {
         let body = Data((names.map { "0.0.0.0 \($0)" }.joined(separator: "\n") + "\n").utf8)
         store.fetch = { _ in
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("dl-\(UUID().uuidString)")
             try body.write(to: file)
             return file
         }
-        let saved = await store.update(from: URL(string: source)!)
+        let saved = await store.update(from: URL(string: address)!)
         XCTAssertTrue(saved, "the fixture list was not stored")
     }
 
@@ -463,6 +467,95 @@ final class HostsBlocklistTests: XCTestCase {
         XCTAssertEqual(listed.listState, "notBlocked")
     }
 
+    /// An edit to another URL keeps the rule's id. The old list's count must not carry over: while
+    /// the send is out the row says "Not blocked yet.", and after it fails, "Not blocked".
+    func testAListEditedToAnotherURLDoesNotKeepTheOldCount() async throws {
+        await blockOnce()
+        let other = "https://other.example.org/hosts"
+        try await storeCopy(["more.example.com", "extra.example.com"], at: other)
+        var edited = try XCTUnwrap(rm.config.rules.first { $0.id == listRule.id })
+        edited.pattern = other
+        var release = false
+        rm.setBlockedHostsOverrideForTests = { _ in
+            while !release { try? await Task.sleep(nanoseconds: 5_000_000) }
+            return (false, "helper stopping")
+        }
+        rm.config.rules[1] = edited
+        rm.requestBlockedHostsSync()
+        var waited = 0
+        while rm.hostsBlockPlan.accepted[edited.id] != 2 && waited < 200 {
+            try? await Task.sleep(nanoseconds: 5_000_000); waited += 1
+        }
+        XCTAssertEqual(rm.listRuleState(edited).kind, .pending, "the old list's count showed while the send was out")
+        XCTAssertEqual(rm.listRuleState(edited).line(), "Not blocked yet.")
+        release = true
+        await rm.waitForBlockedHostsSync()
+        XCTAssertEqual(rm.listRuleState(edited).kind, .notBlocked)
+        XCTAssertEqual(rm.listRuleState(edited).line(), "Not blocked: helper stopping")
+        let response = await ControlSurface.handle(ControlRequest(cmd: "rule.list"))
+        let listed = try XCTUnwrap(response.result?.rules?.first { $0.id == edited.id })
+        XCTAssertEqual(listed.listState, "notBlocked")
+        XCTAssertEqual(listed.listError, "helper stopping")
+        XCTAssertEqual(helper.blockedNames, ["ads.example.com", "pin.example.com", "track.example.net"],
+                       "the old list's names are what the file holds")
+    }
+
+    /// A second list whose names all sit in the list above it adds none, and the set does not
+    /// change: no call, and the row says so instead of waiting for a send that never comes.
+    func testAListCoveredByTheListAboveItSaysItAddsNoNames() async throws {
+        await blockOnce()
+        let other = "https://other.example.org/hosts"
+        try await storeCopy(["ads.example.com", "track.example.net"], at: other)
+        let covered = Rule(matchType: .list, pattern: other, routeId: block.id, order: 2)
+        rm.config.rules.append(covered)
+        await sync()
+        XCTAssertEqual(helper.blockedCalls.count, 1, "the same set reached the helper again")
+        XCTAssertEqual(rm.listRuleState(covered).kind, .blocked)
+        XCTAssertEqual(rm.listRuleState(covered).line(), "Adds no names: the rules above it already cover every one.")
+        let response = await ControlSurface.handle(ControlRequest(cmd: "rule.list"))
+        let listed = try XCTUnwrap(response.result?.rules?.first { $0.id == covered.id })
+        XCTAssertEqual(listed.listState, "blocked")
+        XCTAssertEqual(listed.listNames, 0)
+        XCTAssertTrue(VPNBCLI.textLines(response).contains { $0.hasSuffix("list blocked (adds no names: the rules above it cover every one)") },
+                      "\(VPNBCLI.textLines(response))")
+    }
+
+    /// Two overlapping lists swapped block the same names: no call, and each count follows the
+    /// new order.
+    func testSwappingTwoListsMovesTheirCounts() async throws {
+        await blockOnce()
+        let other = "https://other.example.org/hosts"
+        try await storeCopy(["ads.example.com", "more.example.com"], at: other)
+        let second = Rule(matchType: .list, pattern: other, routeId: block.id, order: 2)
+        rm.config.rules.append(second)
+        await sync()
+        XCTAssertEqual(rm.listRuleState(listRule).names, 3)
+        XCTAssertEqual(rm.listRuleState(second).names, 1)
+        rm.config.rules[1].order = 3
+        await sync()
+        XCTAssertEqual(helper.blockedCalls.count, 2, "a swap of the same names reached the helper")
+        XCTAssertEqual(rm.listRuleState(second).names, 2)
+        XCTAssertEqual(rm.listRuleState(listRule).names, 2)
+        XCTAssertEqual(rm.listRuleState(listRule).kind, .blocked)
+    }
+
+    /// Remove All Routes says it unblocks listed names only when some are blocked or would be.
+    func testTheRemoveAllQuestionMentionsListsOnlyWhenNamesAreBlocked() async {
+        rm.config.manageHostsFile = false
+        await sync()
+        XCTAssertFalse(helper.hasSection)
+        XCTAssertFalse(rm.removeAllLiftsListBlocks, "pinning is off and nothing is blocked")
+        rm.config.manageHostsFile = true
+        rm.sentBlockedHosts = nil
+        rm.hostsBlockPlan = rm.blocklistPlan(for: rm.config)
+        XCTAssertTrue(rm.removeAllLiftsListBlocks, "the rules are about to block names")
+        await sync()
+        XCTAssertTrue(rm.removeAllLiftsListBlocks)
+        await rm.removeAllRoutes(releasingBlocklist: true)
+        XCTAssertFalse(helper.hasSection)
+        XCTAssertFalse(rm.removeAllLiftsListBlocks, "the section is gone")
+    }
+
     // MARK: - What sends it again
 
     /// A stopping helper removes the section; the restart puts it back.
@@ -670,6 +763,32 @@ final class HostsBlocklistTests: XCTestCase {
     }
 }
 
+// MARK: - A skipped setUp
+
+@MainActor
+final class HostsBlocklistSkipTests: XCTestCase {
+
+    /// A setUp that skips because something else holds the route gate leaves that operation's
+    /// state alone in tearDown: no detach, no cleared routes.
+    func testATearDownAfterASkippedSetUpTouchesNothing() async throws {
+        let rm = RouteManager.shared
+        guard rm.tryAcquireRouteOperationForTests() else { throw XCTSkip("the route-operation gate is held") }
+        let routes = rm.activeRoutes
+        let held = RouteManager.ActiveRoute(destination: "198.51.100.200", gateway: "192.168.1.1",
+                                            source: "198.51.100.200", timestamp: Date())
+        rm.activeRoutes = [held]
+        let fixture = HostsBlocklistTests()
+        var skipped = false
+        do { try await fixture.setUp() } catch is XCTSkip { skipped = true }
+        try await fixture.tearDown()
+        let after = rm.activeRoutes.map(\.destination)
+        rm.activeRoutes = routes
+        rm.releaseRouteOperationForTests()
+        XCTAssertTrue(skipped, "setUp ran with the gate held")
+        XCTAssertEqual(after, ["198.51.100.200"], "tearDown cleared routes it never set up")
+    }
+}
+
 // MARK: - The row
 
 final class ListRuleStateTests: XCTestCase {
@@ -694,6 +813,9 @@ final class ListRuleStateTests: XCTestCase {
         XCTAssertEqual(state(accepted).line(), "816 names blocked")
         accepted.accepted[rule.id] = 1
         XCTAssertEqual(state(accepted).line(), "1 name blocked")
+        accepted.accepted[rule.id] = 0
+        XCTAssertEqual(state(accepted, status: ListStatus(names: 2, updated: Date(), checked: Date(), error: nil)).line(),
+                       "Adds no names: the rules above it already cover every one.")
 
         var withDate = HostsBlockPlanner.Plan()
         withDate.accepted[rule.id] = 5
@@ -786,7 +908,7 @@ final class ListRuleStateTests: XCTestCase {
         "Off.", "A list blocks names only on the Block route.", "Its route is off, so this list blocks nothing.",
         "Lists block names only in Custom mode.", "Downloading…", "Not downloaded yet.", "Not downloaded: %@",
         "Not blocked. %@", "Not blocked: %@", "Blocks nothing while Pin listed names in /etc/hosts is off (General).",
-        "1 name blocked", "%lld names blocked", "%@, updated %@", "Last try failed: %@",
+        "1 name blocked", "%lld names blocked", "Adds no names: the rules above it already cover every one.", "%@, updated %@", "Last try failed: %@",
         "StevenBlack's unified hosts list", "A list blocks exactly the names in it, not their subdomains.",
         "A browser that uses its own secure DNS may skip it.",
         "Each time a list or a pinned address changes, every lookup on this Mac waits a few seconds.",

@@ -60,10 +60,10 @@ final class RouteManager: ObservableObject {
     /// nil when not known (at launch, after a helper restart, after a pin of one of them went).
     /// The next sync sends the set when it differs, or when this is nil (HostsBlocklist.swift).
     var sentBlockedHosts: [String]?
-    /// How many names each list rule added in the plan the helper last confirmed, beside
-    /// `sentBlockedHosts`, and nil with it. A row says "blocked" only from this, never from the
-    /// plan of the last sync, which may hold names the helper never wrote.
-    @Published var confirmedBlockCounts: [UUID: Int]?
+    /// How many names each list rule added in the plan the helper last confirmed, and the URL
+    /// they came from, beside `sentBlockedHosts`, and nil with it. A row says "blocked" only from
+    /// this, never from the plan of the last sync, which may hold names the helper never wrote.
+    @Published var confirmedBlockCounts: [UUID: ListConfirmation]?
     /// What the list rules do as of the last sync, for their rows and `vpnb rule.list`.
     @Published var hostsBlockPlan = HostsBlockPlanner.Plan()
     /// Why the last send of the blocklist failed; nil after one that worked.

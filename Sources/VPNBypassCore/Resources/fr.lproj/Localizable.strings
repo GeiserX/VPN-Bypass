@@ -1284,6 +1284,7 @@
 "Blocks nothing while Pin listed names in /etc/hosts is off (General)." = "Ne bloque rien tant que Épingler les noms de la liste dans /etc/hosts est désactivé (Général).";
 "1 name blocked" = "1 nom bloqué";
 "%lld names blocked" = "%lld noms bloqués";
+"Adds no names: the rules above it already cover every one." = "N'ajoute aucun nom : les règles au-dessus les couvrent déjà tous.";
 "%@, updated %@" = "%1$@, mise à jour %2$@";
 "Last try failed: %@" = "Le dernier essai a échoué : %@";
 "StevenBlack's unified hosts list" = "Liste hosts unifiée de StevenBlack";
