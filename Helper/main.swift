@@ -15,12 +15,15 @@ ScopedDefaultKeeper.shared.removeAll(reason: "helper started")
 // launchd stops the helper with SIGTERM (`launchctl bootout` on an upgrade or an uninstall, and
 // at shutdown). A helper that is not started again would leave its resolver files pointing at
 // a closed port, so they go first. A crash is covered by KeepAlive in the launchd plist: the
-// helper comes straight back and the line above removes them.
+// helper comes straight back and the line above removes them. The blocklist section of
+// /etc/hosts goes here too, so an uninstall leaves no block behind; it is not removed at start,
+// because after a crash it is still correct.
 signal(SIGTERM, SIG_IGN)
 let terminationSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
 terminationSource.setEventHandler {
     WildcardForwarder.shared.shutdown()
     ScopedDefaultKeeper.shared.removeAll(reason: "helper stopping")
+    HelperTool.removeBlockedHostsSection()
     exit(0)
 }
 terminationSource.resume()

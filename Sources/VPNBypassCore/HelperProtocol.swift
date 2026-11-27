@@ -147,6 +147,18 @@ protocol HelperProtocol {
     ///   - reply: `(true, ScopedDefaultOutcome raw value)`, or `(false, reason)` for arguments
     ///     the helper refused.
     func setScopedDefaultRoute(interface: String, gateway: String, withReply reply: @escaping (Bool, String) -> Void)
+
+    /// Sets the blocklist section of `/etc/hosts` (`HostsBlockSection`): one `0.0.0.0 name` line
+    /// per name, built by the helper; an empty list removes the section. A name another line of
+    /// the file maps is skipped. Flushes the resolver caches after a write; a call that changes
+    /// nothing writes and flushes nothing. The helper removes the section when it stops (SIGTERM).
+    /// Since 2.11.0.
+    /// - Parameters:
+    ///   - names: host names; more than `HostsBlockSection.maxNames`, or any name
+    ///     `HostsBlockSection.isValidName` refuses, refuses the whole call.
+    ///   - reply: `(true, nil)` when the section says `names`, `(false, reason)` when nothing
+    ///     was written.
+    func setBlockedHosts(names: [String], withReply reply: @escaping (Bool, String?) -> Void)
 }
 
 // MARK: - Helper Constants
@@ -242,7 +254,12 @@ struct HelperConstants {
     // A 2.9.0 helper refuses such a spec (it has no gateway) and serves the others; the app holds
     // the Block wildcards back until the helper is 2.10.0. A 2.8.0 or later helper installs this
     // one itself (updateHelper), with no password.
-    static let helperVersion = "2.10.0"
+    // 2.11.0: setBlockedHosts — the blocklist section of /etc/hosts (HostsBlockSection), one
+    // `0.0.0.0 name` line per name, apart from the pinned names, removed on SIGTERM. The pin
+    // writer no longer counts the blocklist's names as another tool's, and drops the blocklist
+    // row of a name it pins, so the pin wins. A 2.8.0 or later helper installs this one itself
+    // (updateHelper), with no password.
+    static let helperVersion = "2.11.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"

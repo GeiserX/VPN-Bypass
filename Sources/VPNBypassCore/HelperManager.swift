@@ -498,6 +498,8 @@ final class HelperManager: ObservableObject {
         static let scopedDefault = "2.9.0"
         /// A wildcard that blocks its names (`WildcardSpec.block`, the Block route).
         static let blockedNames = "2.10.0"
+        /// The blocklist section of /etc/hosts (`setBlockedHosts`).
+        static let blockedHosts = "2.11.0"
         /// The oldest helper the app routes through while its update waits. Older ones lack
         /// the VPN Only blocks or the wildcards (a listed name would leave outside the tunnel)
         /// or the route batches (1.5.0), so the app waits for their update instead.
@@ -1253,6 +1255,39 @@ let timeout = xpcTimeout + Double(routes.count) * 0.6
                 } else {
                     once.complete((false, error))
                 }
+            }
+        }
+
+        if result == fallback { dropXPCConnection() }
+        return result
+    }
+
+    /// The blocklist section of /etc/hosts (`HelperProtocol.setBlockedHosts`); an empty list
+    /// removes it. The helper flushes the resolver caches itself after a write.
+    func setBlockedHosts(names: [String]) async -> (success: Bool, error: String?) {
+        guard helperState.isReady else {
+            return (false, "Helper not ready (\(helperState.statusText))")
+        }
+        guard runningHelperSupports(MethodSince.blockedHosts) else {
+            return (false, "helper v\(helperVersion ?? "?") predates blocked hosts; they start once the helper update is installed")
+        }
+
+        let connection = getOrCreateConnection()
+        // Queued behind any route batch on the helper's mutation queue, as a pinned-name update is.
+        let hostsTimeout: TimeInterval = max(xpcTimeout, 30)
+        let fallback: (Bool, String?) = (false, "XPC timeout after \(Int(hostsTimeout))s")
+        let result = await withXPCDeadline(seconds: hostsTimeout, fallback: fallback) { once in
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                once.complete((false, "XPC error: \(error.localizedDescription)"))
+            } as? HelperProtocol
+
+            guard let helper = proxy else {
+                once.complete((false, "Failed to create XPC proxy"))
+                return
+            }
+
+            helper.setBlockedHosts(names: names) { success, error in
+                once.complete((success, error))
             }
         }
 

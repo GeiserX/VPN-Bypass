@@ -492,22 +492,14 @@ class HelperTool: NSObject, HelperProtocol {
             lines.removeLast()
         }
         
-        // Collect domains already managed by other tools (outside our block)
-        let externalDomains: Set<String> = Set(lines.flatMap { line -> [String] in
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return [] }
-            var fields = trimmed.split(whereSeparator: { $0.isWhitespace })
-            guard fields.count >= 2 else { return [] }
-            fields.removeFirst() // drop IP
-            if let commentIdx = fields.firstIndex(where: { $0.hasPrefix("#") }) {
-                fields = Array(fields[..<commentIdx])
-            }
-            return fields.map { String($0).lowercased() }
-        })
+        // Collect domains already managed by other tools (outside our block). The blocklist
+        // section is ours too: its names are not another tool's, and it can hold 200,000 lines.
+        let externalDomains = HostsBlockSection.namesManagedElsewhere(lines)
 
         // Add new section if we have entries (skip domains managed by other tools)
         if !entries.isEmpty {
             var managedEntries: [String] = []
+            var pinnedNames = Set<String>()
             for entry in entries {
                 if let domain = entry["domain"], let ip = entry["ip"] {
                     if isValidIP(ip) && isValidDomain(domain) {
@@ -515,10 +507,17 @@ class HelperTool: NSObject, HelperProtocol {
                             continue
                         }
                         managedEntries.append("\(ip) \(domain)")
+                        pinnedNames.insert(domain.lowercased())
                     }
                 }
             }
             if !managedEntries.isEmpty {
+                // A pin wins over a block. A name with a blocklist row and a pinned row gets both
+                // addresses from the resolver, so the blocklist row goes in this same write.
+                lines = HostsBlockSection.removingNames(pinnedNames, from: lines)
+                while lines.last?.isEmpty == true {
+                    lines.removeLast()
+                }
                 lines.append("")
                 lines.append(HelperConstants.hostMarkerStart)
                 lines.append(contentsOf: managedEntries)
@@ -528,7 +527,12 @@ class HelperTool: NSObject, HelperProtocol {
         
         // Write back
         let newContent = lines.joined(separator: "\n") + "\n"
-        
+        return Self.writeHostsFile(newContent)
+    }
+
+    /// Writes /etc/hosts atomically and makes it readable by the resolver. Always on `routeQueue`.
+    static func writeHostsFile(_ newContent: String) -> (success: Bool, error: String?) {
+        let hostsPath = "/etc/hosts"
         do {
             try newContent.write(toFile: hostsPath, atomically: true, encoding: .utf8)
         } catch {
@@ -547,7 +551,63 @@ class HelperTool: NSObject, HelperProtocol {
         }
         return (true, nil)
     }
-    
+
+    /// Set by SIGTERM before it removes the blocklist section; read and written on `routeQueue`
+    /// only. A call queued behind the removal would otherwise write the section back just before
+    /// `exit(0)`, and it would outlive the uninstall.
+    private static var stopping = false
+
+    /// The blocklist section (`HostsBlockSection`): replaced with `names`, or removed when there
+    /// are none, and left alone when it already says so. Serialised with the route and pinned-name
+    /// mutations, as `updateHostsFile` is.
+    func setBlockedHosts(names: [String], withReply reply: @escaping (Bool, String?) -> Void) {
+        Self.routeQueue.async {
+            let result = Self.performBlockedHostsUpdate(names: names)
+            reply(result.success, result.error)
+        }
+    }
+
+    /// Always call it on `routeQueue`. Flushes the resolver caches after a real write only:
+    /// without the flush a new section took seconds to a minute to take effect (an Apple silicon
+    /// Mac on macOS 26.6.1: 1.9 s at 50,000 names, 60.8 s at 500,000).
+    static func performBlockedHostsUpdate(names: [String]) -> (success: Bool, error: String?) {
+        if stopping && !names.isEmpty { return (false, "helper stopping") }
+        guard let current = try? String(contentsOfFile: "/etc/hosts", encoding: .utf8) else {
+            return (false, "Could not read /etc/hosts")
+        }
+        let updated: String?
+        do {
+            updated = try HostsBlockSection.rewritten(current, names: names)
+        } catch let refusal as HostsBlockSection.Refusal {
+            helperLog.error("blocked hosts refused: \(refusal.message, privacy: .public)")
+            return (false, refusal.message)
+        } catch {
+            return (false, error.localizedDescription)
+        }
+        // Nothing to write when the section already says this.
+        guard let updated else { return (true, nil) }
+        let written = writeHostsFile(updated)
+        if written.success {
+            flushResolverCaches()
+            helperLog.info("blocked hosts: section \(names.isEmpty ? "removed" : "written for \(names.count) names", privacy: .public)")
+        }
+        return written
+    }
+
+    /// Removes the blocklist section when the helper stops (SIGTERM: `launchctl bootout` on an
+    /// upgrade or an uninstall, and at shutdown), so a helper that is gone leaves no block behind.
+    /// Not at start: after a crash the section is still correct, and the app does not send it again
+    /// after a restart.
+    static func removeBlockedHostsSection() {
+        routeQueue.sync {
+            stopping = true
+            let result = performBlockedHostsUpdate(names: [])
+            if !result.success {
+                helperLog.error("blocked hosts: could not remove the section: \(result.error ?? "?", privacy: .public)")
+            }
+        }
+    }
+
     func flushDNSCache(withReply reply: @escaping (Bool) -> Void) {
         Self.flushResolverCaches()
         // Hosts write already succeeded; the app ignores this Bool. A
