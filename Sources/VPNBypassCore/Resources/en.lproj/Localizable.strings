@@ -1261,3 +1261,8 @@
 "Left out: all rules together would pass the limit of %lld wildcards (this one adds %lld)." = "Left out: all rules together would pass the limit of %lld wildcards (this one adds %lld).";
 "Wildcards left out: %lld. Earlier rules take more than %lld names under each." = "Wildcards left out: %lld. Earlier rules take more than %lld names under each.";
 "Left out: all Country rules together would pass the limit of %lld ranges (this one adds %lld)." = "Left out: all Country rules together would pass the limit of %lld ranges (this one adds %lld).";
+"The server sent a web page, not a list." = "The server sent a web page, not a list.";
+"This is not a hosts file." = "This is not a hosts file.";
+"The server answered HTTP %lld, not the list." = "The server answered HTTP %lld, not the list.";
+"The list holds no names to block." = "The list holds no names to block.";
+"The new copy has %lld names, under half of the %lld in use, so the copy in use is kept." = "The new copy has %lld names, under half of the %lld in use, so the copy in use is kept.";

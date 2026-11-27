@@ -65,7 +65,7 @@ enum RouteCompiler {
         switch type {
         case .ip, .cidr, .geoip: return true
         case .service: return isNetwork
-        case .domain, .suffix, .geosite, .process, .unsupported: return false
+        case .domain, .suffix, .geosite, .process, .list, .unsupported: return false
         }
     }
 

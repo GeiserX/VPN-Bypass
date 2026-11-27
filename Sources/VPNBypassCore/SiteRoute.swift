@@ -372,7 +372,7 @@ enum SiteRoute {
             let ranges = geoip[rule.pattern.lowercased()] ?? []
             return addresses.contains { a in ranges.contains { RuleResolver.ipv4(a, inCIDR: $0) } }
         case .geosite: return geosite[rule.pattern.lowercased()]?.usable.matches(host) ?? false
-        case .process, .unsupported: return false
+        case .process, .list, .unsupported: return false
         }
     }
 

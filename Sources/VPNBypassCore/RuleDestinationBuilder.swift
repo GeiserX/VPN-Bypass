@@ -97,7 +97,7 @@ enum RuleDestinationBuilder {
                     }
                     for range in service.ipRanges { add(range, true) }
                 }
-            case .suffix, .process, .unsupported:
+            case .suffix, .process, .list, .unsupported:
                 break   // not kernel-routable (an unsupported type matches nothing)
             }
             out.append((rule: rule, dests: dests))
@@ -129,7 +129,7 @@ enum RuleDestinationBuilder {
                 }
             case .geosite:
                 for name in geosite[rule.pattern.lowercased()]?.usable.names ?? [] { hosts.insert(name) }
-            case .ip, .cidr, .geoip, .suffix, .process, .unsupported:
+            case .ip, .cidr, .geoip, .suffix, .process, .list, .unsupported:
                 break
             }
         }

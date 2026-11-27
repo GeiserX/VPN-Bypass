@@ -56,6 +56,10 @@ public enum MatchType: String, Codable, Equatable, Sendable {
     /// executable's file name (`Example`), never a path (ProcessRule). Only per-app routing can
     /// serve it; the kernel engine skips it, and every surface says so (`ProcessRule.serving`).
     case process
+    /// A hosts-format blocklist by its https URL (HostsList, ListStore): its names are blocked one by
+    /// one, exact names only, and only on the Block route (HostsBlockPlanner). An older build cannot
+    /// read a config that holds one (it rejects an unknown match type).
+    case list
     /// A match type this build does not know, written by a newer one. The rule keeps what it was
     /// (`Rule.unknownMatchType`) and is written back unchanged, but matches nothing.
     case unsupported

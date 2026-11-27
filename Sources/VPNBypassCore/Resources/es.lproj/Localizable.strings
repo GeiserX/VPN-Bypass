@@ -1261,3 +1261,8 @@
 "Left out: all rules together would pass the limit of %lld wildcards (this one adds %lld)." = "Excluida: todas las reglas juntas superarían el límite de %lld comodines (esta añade %lld).";
 "Wildcards left out: %lld. Earlier rules take more than %lld names under each." = "Comodines excluidos: %lld. Las reglas anteriores toman más de %lld nombres bajo cada uno.";
 "Left out: all Country rules together would pass the limit of %lld ranges (this one adds %lld)." = "Excluida: todas las reglas de País juntas superarían el límite de %lld rangos (esta añade %lld).";
+"The server sent a web page, not a list." = "El servidor envió una página web, no una lista.";
+"This is not a hosts file." = "Esto no es un archivo hosts.";
+"The server answered HTTP %lld, not the list." = "El servidor respondió HTTP %lld, no la lista.";
+"The list holds no names to block." = "La lista no tiene nombres que bloquear.";
+"The new copy has %lld names, under half of the %lld in use, so the copy in use is kept." = "La copia nueva tiene %1$lld nombres, menos de la mitad de los %2$lld en uso, así que se conserva la copia en uso.";
