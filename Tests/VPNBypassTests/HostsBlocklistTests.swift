@@ -114,9 +114,11 @@ final class HostsBlocklistTests: XCTestCase {
         rm.updateHostsFileOverrideForTests = { [unowned self] in self.helper.pin($0) }
         rm.hostsFileOverrideForTests = { [unowned self] in self.helper.file }
         rm.sentBlockedHosts = nil
+        rm.confirmedBlockCounts = nil
         rm.pinnedHostAddresses = [:]
         rm.pinnedHostAddressesSeeded = false
         rm.blockedHostsError = nil
+        rm.setDNSDiskCacheForTests([:])
     }
 
     override func tearDown() async throws {
@@ -131,9 +133,11 @@ final class HostsBlocklistTests: XCTestCase {
         rm.hostsFileOverrideForTests = nil
         rm.detectVPNInterfaceOverrideForTests = nil
         rm.setDNSCacheForTests([:])
+        rm.setDNSDiskCacheForTests([:])
         rm.isConfigLoadFailed = false
         GeoDataStore.autoUpdate = false
         rm.sentBlockedHosts = nil
+        rm.confirmedBlockCounts = nil
         rm.pinnedHostAddresses = [:]
         rm.blockedHostsError = nil
         rm.hostsBlockPlan = HostsBlockPlanner.Plan()
@@ -141,14 +145,17 @@ final class HostsBlocklistTests: XCTestCase {
         rm.ruleBlocks = []
         rm.blockedRoutes = []
         rm.pendingKernelAdds = []
-        rm.listStore = saved.store
-        rm.config = saved.config
-        rm.isVPNConnected = saved.connected
-        rm.localGateway = saved.gateway
-        rm.isLoading = saved.loading
-        HelperManager.shared.helperState = saved.helper
+        // setUp may have skipped before it saved anything: restore only what it set.
+        if let saved {
+            rm.listStore = saved.store
+            rm.config = saved.config
+            rm.isVPNConnected = saved.connected
+            rm.localGateway = saved.gateway
+            rm.isLoading = saved.loading
+            HelperManager.shared.helperState = saved.helper
+        }
         rm.resetShutdownStateForTests()
-        try? FileManager.default.removeItem(at: directory)
+        if let directory { try? FileManager.default.removeItem(at: directory) }
     }
 
     // MARK: - Helpers
@@ -404,11 +411,56 @@ final class HostsBlocklistTests: XCTestCase {
 
     /// vpnb rule.list fills a list rule's count, state and error.
     func testRuleListFillsTheListFields() async throws {
+        await blockOnce()
         let response = await ControlSurface.handle(ControlRequest(cmd: "rule.list"))
         let rule = try XCTUnwrap(response.result?.rules?.first { $0.matchType == .list })
         XCTAssertEqual(rule.listState, "blocked")
         XCTAssertEqual(rule.listNames, 3)
         XCTAssertNil(rule.listError)
+    }
+
+    /// A launch with the helper not ready runs no apply: nothing was sent, so neither vpnb nor the
+    /// row may say "blocked".
+    func testWithTheHelperNotReadyAndNothingSentNothingSaysBlocked() async throws {
+        rm.setBlockedHostsOverrideForTests = nil          // the real send path
+        HelperManager.shared.helperState = .missing
+        let response = await ControlSurface.handle(ControlRequest(cmd: "rule.list"))
+        let rule = try XCTUnwrap(response.result?.rules?.first { $0.matchType == .list })
+        XCTAssertEqual(rule.listState, "notBlocked")
+        XCTAssertEqual(rule.listError, "The helper is not running.")
+        XCTAssertEqual(rm.listRuleState(listRule).line(), "Not blocked: The helper is not running.")
+        await sync()
+        XCTAssertEqual(rm.listRuleState(listRule).line(), "Not blocked: The helper is not running.")
+        XCTAssertFalse(helper.hasSection)
+    }
+
+    /// One list confirmed, then a second list whose send fails: the second says Not blocked, the
+    /// first keeps its confirmed count with the failure.
+    func testAListTheHelperNeverConfirmedIsNotBlockedBesideOneItDid() async throws {
+        await blockOnce()
+        let second = "https://other.example.org/hosts"
+        let body = Data("0.0.0.0 more.example.com\n0.0.0.0 extra.example.com\n".utf8)
+        store.fetch = { _ in
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("dl-\(UUID().uuidString)")
+            try body.write(to: file)
+            return file
+        }
+        let stored = await store.update(from: URL(string: second)!)
+        XCTAssertTrue(stored)
+        let secondRule = Rule(matchType: .list, pattern: second, routeId: block.id, order: 2)
+        rm.config.rules.append(secondRule)
+        rm.setBlockedHostsOverrideForTests = { _ in (false, "helper stopping") }
+        await sync()
+        XCTAssertEqual(rm.listRuleState(secondRule).kind, .notBlocked)
+        XCTAssertEqual(rm.listRuleState(secondRule).line(), "Not blocked: helper stopping")
+        let first = rm.listRuleState(listRule)
+        XCTAssertEqual(first.kind, .blocked)
+        XCTAssertEqual(first.names, 3)
+        XCTAssertTrue(first.line().hasSuffix("\nLast try failed: helper stopping"), first.line())
+        XCTAssertEqual(rm.listRuleState(listRule, plan: rm.blocklistPlan(for: rm.config)).names, 3)
+        let response = await ControlSurface.handle(ControlRequest(cmd: "rule.list"))
+        let listed = try XCTUnwrap(response.result?.rules?.first { $0.id == secondRule.id })
+        XCTAssertEqual(listed.listState, "notBlocked")
     }
 
     // MARK: - What sends it again
@@ -452,6 +504,7 @@ final class HostsBlocklistTests: XCTestCase {
         XCTAssertTrue(helper.file.contains("203.0.113.5 cdn.example.com"))
 
         rm.setDNSCacheForTests(["cdn.example.com": "203.0.113.6"])
+        rm.setDNSDiskCacheForTests(["cdn.example.com": ["203.0.113.6", "203.0.113.5"]])
         await rm.updateHostsFileForTests()
         XCTAssertEqual(helper.writes, 2, "a rotated answer rewrote /etc/hosts")
         XCTAssertTrue(helper.file.contains("203.0.113.5 cdn.example.com"))
@@ -475,10 +528,69 @@ final class HostsBlocklistTests: XCTestCase {
             .init(destination: "203.0.113.6", gateway: "192.168.1.1", source: "cdn.example.com", timestamp: now),
         ]
         rm.setDNSCacheForTests(["cdn.example.com": "203.0.113.6"])
+        rm.setDNSDiskCacheForTests(["cdn.example.com": ["203.0.113.6", "203.0.113.5"]])
         await rm.updateHostsFileForTests()
         XCTAssertEqual(helper.writes, writes, "the first pin write after a launch rewrote /etc/hosts")
         XCTAssertTrue(helper.file.contains("203.0.113.5 cdn.example.com"))
         XCTAssertEqual(HostsPinSection.pinnedAddresses(in: helper.file), ["cdn.example.com": "203.0.113.5"])
+    }
+
+    /// A pinned address the name no longer answers is dropped, even while another name keeps it
+    /// routed; the same goes for a pin read from the file at launch.
+    func testAPinTheNameNoLongerAnswersIsDroppedThoughAnotherNameRoutesIt() async {
+        helper.file = "127.0.0.1 localhost\n\n\(HelperConstants.hostMarkerStart)\n203.0.113.5 cdn.example.com\n\(HelperConstants.hostMarkerEnd)\n"
+        let now = Date()
+        rm.activeRoutes = [
+            .init(destination: "203.0.113.5", gateway: "192.168.1.1", source: "other.example.com", timestamp: now),
+            .init(destination: "203.0.113.9", gateway: "192.168.1.1", source: "cdn.example.com", timestamp: now),
+        ]
+        rm.setDNSCacheForTests(["cdn.example.com": "203.0.113.9", "other.example.com": "203.0.113.5"])
+        rm.setDNSDiskCacheForTests(["cdn.example.com": ["203.0.113.9"], "other.example.com": ["203.0.113.5"]])
+        await rm.updateHostsFileForTests()
+        XCTAssertEqual(HostsPinSection.pinnedAddresses(in: helper.file)["cdn.example.com"], "203.0.113.9",
+                       "the name stayed pinned to an address it no longer answers")
+    }
+
+    /// First match holds for pins: a rule below the list does not pin a name the list blocks (the
+    /// pin would drop its row), and a list that comes to block a pinned name drops the pin first.
+    func testARuleBelowTheListDoesNotPinANameItBlocks() async {
+        await blockOnce()
+        let now = Date()
+        rm.config.rules.append(Rule(matchType: .domain, pattern: "pin.example.com", routeId: direct.id, order: 5))
+        rm.activeRoutes = [.init(destination: "192.0.2.10", gateway: "192.168.1.1", source: "pin.example.com", timestamp: now)]
+        rm.setDNSCacheForTests(["pin.example.com": "192.0.2.10"])
+        rm.setDNSDiskCacheForTests(["pin.example.com": ["192.0.2.10"]])
+        await sync()
+        await rm.updateHostsFileForTests()
+        await rm.waitForBlockedHostsSync()
+        XCTAssertTrue(helper.blockedNames.contains("pin.example.com"), "a rule below the list unblocked its name")
+        XCTAssertNil(HostsPinSection.pinnedAddresses(in: helper.file)["pin.example.com"])
+
+        // A rule above the list pins the name and unblocks it.
+        rm.config.rules[rm.config.rules.count - 1].order = -1
+        await sync()
+        await rm.updateHostsFileForTests()
+        await rm.waitForBlockedHostsSync()
+        XCTAssertFalse(helper.blockedNames.contains("pin.example.com"))
+        XCTAssertEqual(HostsPinSection.pinnedAddresses(in: helper.file)["pin.example.com"], "192.0.2.10")
+
+        // Back below the list: the sync drops the pin before it sends, so the row comes back.
+        rm.config.rules[rm.config.rules.count - 1].order = 5
+        await sync()
+        XCTAssertNil(HostsPinSection.pinnedAddresses(in: helper.file)["pin.example.com"])
+        XCTAssertTrue(helper.blockedNames.contains("pin.example.com"), "the name the list blocks again stayed pinned")
+    }
+
+    /// A pin that goes while nothing is confirmed (a send in flight, a helper restart) resends, so
+    /// a confirmation of a set the pin had cut short cannot hide the missing row.
+    func testAPinThatGoesWithNothingConfirmedSendsTheSetAgain() async {
+        await blockOnce()
+        await rm.modifyHostsFile(entries: [("pin.example.com", "192.0.2.10")])
+        XCTAssertFalse(helper.blockedNames.contains("pin.example.com"))
+        rm.sentBlockedHosts = nil
+        await rm.modifyHostsFile(entries: [])
+        await rm.waitForBlockedHostsSync()
+        XCTAssertTrue(helper.blockedNames.contains("pin.example.com"), "the unpinned name was left unblocked")
     }
 
     /// Pins first, then the section (the first list, a boot, Remove All and back): the next write
@@ -564,10 +676,16 @@ final class ListRuleStateTests: XCTestCase {
 
     private let rule = Rule(matchType: .list, pattern: "https://lists.example.org/hosts", routeId: UUID(), order: 0)
 
+    /// The helper confirmed this plan.
     private func state(_ plan: HostsBlockPlanner.Plan, pinning: Bool = true, downloading: Bool = false,
                        status: ListStatus? = nil, helperError: String? = nil) -> ListRuleState {
         ListRuleState(rule: rule, plan: plan, manageHostsFile: pinning, downloading: downloading,
-                      status: status, helperError: helperError)
+                      status: status, helperError: helperError, confirmed: plan.accepted[rule.id], helperReady: true)
+    }
+
+    private func unconfirmed(_ plan: HostsBlockPlanner.Plan, helperError: String? = nil, helperReady: Bool = true) -> ListRuleState {
+        ListRuleState(rule: rule, plan: plan, manageHostsFile: true, downloading: false, status: nil,
+                      helperError: helperError, confirmed: nil, helperReady: helperReady)
     }
 
     func testEveryStateHasItsLine() {
@@ -586,14 +704,19 @@ final class ListRuleStateTests: XCTestCase {
         XCTAssertEqual(failedRefresh.line(), "5 names blocked\nLast try failed: This is not a hosts file.")
         // A failed send while an earlier set is still in the file: those names stay blocked.
         XCTAssertEqual(state(withDate, helperError: "helper stopping").line(), "5 names blocked\nLast try failed: helper stopping")
-        // The helper never confirmed a set: nothing is blocked, and the row says so.
-        let never = ListRuleState(rule: rule, plan: withDate, manageHostsFile: true, downloading: false, status: nil,
-                                  helperError: "The helper is not running.", helperHoldsNames: false)
+        // The helper never confirmed this list's names: nothing is blocked, and the row says so.
+        let never = unconfirmed(withDate, helperError: "The helper is not running.")
         XCTAssertEqual(never.kind, .notBlocked)
         XCTAssertEqual(never.line(), "Not blocked: The helper is not running.")
-        XCTAssertEqual(ListRuleState(rule: rule, plan: withDate, manageHostsFile: true, downloading: false, status: nil,
-                                     helperError: nil, helperHoldsNames: false).kind, .blocked,
-                       "with no failure the set is about to be sent")
+        XCTAssertEqual(unconfirmed(withDate, helperReady: false).line(), "Not blocked: The helper is not running.")
+        XCTAssertEqual(unconfirmed(withDate).kind, .pending, "with a ready helper and no failure the set is on its way")
+        XCTAssertEqual(unconfirmed(withDate).line(), "Not blocked yet.")
+        XCTAssertEqual(unconfirmed(withDate).names, 0)
+        // The plan grew past what the helper confirmed: the confirmed count, not the planned one.
+        var grown = withDate
+        grown.accepted[rule.id] = 9
+        XCTAssertEqual(ListRuleState(rule: rule, plan: grown, manageHostsFile: true, downloading: false, status: nil,
+                                     helperError: nil, confirmed: 5, helperReady: true).line(), "5 names blocked")
 
         XCTAssertEqual(state(withDate, pinning: false).kind, .pinningOff)
         XCTAssertEqual(state(withDate, pinning: false).line(),
@@ -623,7 +746,17 @@ final class ListRuleStateTests: XCTestCase {
         var off = rule
         off.enabled = false
         XCTAssertEqual(ListRuleState(rule: off, plan: accepted, manageHostsFile: true, downloading: false,
-                                     status: nil, helperError: nil).line(), "Off.")
+                                     status: nil, helperError: nil, confirmed: nil, helperReady: true).line(), "Off.")
+    }
+
+    /// Remove All Routes also takes the blocklist section out: its question says so when a list blocks.
+    func testTheRemoveAllQuestionSaysTheListBlocksGoToo() {
+        func message(_ lifts: Bool) -> String {
+            DropdownCopy.removeAllConfirmation(mode: .custom, routeCount: 3, serviceCount: 0, domainCount: 0,
+                                               autoApplyOnVPN: true, autoDNSRefresh: false, liftsListBlocks: lifts).message
+        }
+        XCTAssertTrue(message(true).hasSuffix(" It also unblocks the names your lists block, until routes are applied again."), message(true))
+        XCTAssertFalse(message(false).contains("lists block"))
     }
 
     func testTheFootnoteSaysWhatAListDoesNotDo() {
@@ -661,7 +794,7 @@ final class ListRuleStateTests: XCTestCase {
         "How the wait was measured", "Another list by its address", "The list's https address",
         "A hosts-format list (0.0.0.0 name per line). Adblock and wildcard lists are refused.",
         "Enter the https address of a hosts-format list.", "Add List…", "Block the names of a hosts-format list",
-        "List",
+        "List", "Not blocked yet.", "It also unblocks the names your lists block, until routes are applied again.",
     ]
 
     func testEveryNewLineIsInEnglishSpanishAndFrench() throws {
@@ -677,7 +810,7 @@ final class ListRuleStateTests: XCTestCase {
         plan.inactive[rule.id] = .notBlockRoute
         let es = try lproj("es")
         XCTAssertEqual(ListRuleState(rule: rule, plan: plan, manageHostsFile: true, downloading: false, status: nil,
-                                     helperError: nil, in: es).line(in: es),
+                                     helperError: nil, confirmed: nil, helperReady: true, in: es).line(in: es),
                        "Una lista solo bloquea nombres en la ruta Bloquear.")
     }
 }

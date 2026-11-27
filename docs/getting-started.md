@@ -59,7 +59,7 @@ If the status chip reads Not routing and the dropdown says the helper is not run
 ## Uninstall
 
 1. If you turned on per-app routing, turn it off first in Settings > General (or `vpnb engine.off`), and enter your administrator password when macOS asks: that removes its extension. Quit only once Settings > General says the extension is removed or will be removed at the next restart (`vpnb engine.status` shows `removal: removed` or `needsRestart`); quitting before that can leave it installed. Homebrew cannot remove it once the app is gone; see [Remove the per-app routing extension](troubleshooting.md#remove-the-per-app-routing-extension).
-2. If a list rule blocks names on the Block route, its section of `/etc/hosts` stays when you quit, on purpose. To take it out before you go, delete the list rule, or turn off Settings > General > Pin listed names in /etc/hosts. Step 4 removes it too.
+2. If a list rule blocks names on the Block route, its section of `/etc/hosts` stays when you quit, on purpose. To take it out before you go, delete or turn off every list rule, or turn off Settings > General > Pin listed names in /etc/hosts. Step 4 removes it too.
 3. Quit VPN Bypass from its menu. Quitting removes its routes and its pinned `/etc/hosts` entries, but not the blocklist section.
 4. `brew uninstall --cask vpn-bypass` (add `--zap` to delete your settings too), or move the app from Applications to the Bin.
 5. Remove the privileged helper. Stopping it removes its wildcard resolver files from `/etc/resolver` and the blocklist section from `/etc/hosts`:

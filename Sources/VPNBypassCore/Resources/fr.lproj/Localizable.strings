@@ -1299,3 +1299,4 @@
 "Enter the https address of a hosts-format list." = "Saisissez l’adresse https d’une liste au format hosts.";
 "Add List…" = "Ajouter une liste…";
 "Block the names of a hosts-format list" = "Bloquer les noms d’une liste au format hosts";
+"It also unblocks the names your lists block, until routes are applied again." = "Les noms que bloquent vos listes sont aussi débloqués, jusqu'à ce que les routes soient de nouveau appliquées.";

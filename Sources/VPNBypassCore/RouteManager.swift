@@ -60,6 +60,10 @@ final class RouteManager: ObservableObject {
     /// nil when not known (at launch, after a helper restart, after a pin of one of them went).
     /// The next sync sends the set when it differs, or when this is nil (HostsBlocklist.swift).
     var sentBlockedHosts: [String]?
+    /// How many names each list rule added in the plan the helper last confirmed, beside
+    /// `sentBlockedHosts`, and nil with it. A row says "blocked" only from this, never from the
+    /// plan of the last sync, which may hold names the helper never wrote.
+    @Published var confirmedBlockCounts: [UUID: Int]?
     /// What the list rules do as of the last sync, for their rows and `vpnb rule.list`.
     @Published var hostsBlockPlan = HostsBlockPlanner.Plan()
     /// Why the last send of the blocklist failed; nil after one that worked.
@@ -6727,7 +6731,7 @@ final class RouteManager: ObservableObject {
     }
     
     @discardableResult
-    private func updateHostsFile() async -> Bool {
+    func updateHostsFile() async -> Bool {
         // Collect domain -> IP mappings, filtered against activeRoutes so hosts
         // only contains entries for domains that actually have installed kernel routes.
         // Checks all cached IPs (not just first) to find a routed one.
@@ -6801,6 +6805,12 @@ final class RouteManager: ObservableObject {
             activeRoutes.contains { $0.source == name }
         }
 
+        // First match holds for pins too: a name a list blocks was claimed by no rule above the
+        // list (HostsBlockPlanner), so a rule below it must not pin the name, which would drop
+        // its blocklist row.
+        let listed = Set(Self.blockedHostsToSend(hostsBlockPlan, manageHostsFile: config.manageHostsFile))
+        if !listed.isEmpty { entries.removeAll { listed.contains($0.domain.lowercased()) } }
+
         // Update /etc/hosts (requires sudo)
         return await modifyHostsFile(entries: entries)
     }
@@ -6811,7 +6821,10 @@ final class RouteManager: ObservableObject {
         // several resolvers to answer, puts another of its routed addresses first in the cache on
         // each lookup; following it would rewrite /etc/hosts, and with a blocklist section in the
         // file every write stalls every lookup on the Mac for seconds.
-        if let pinned = pinnedHostAddresses[domain.lowercased()], routedDestinations.contains(pinned) {
+        // Only while the name's latest answer still holds it: an address another name keeps
+        // routed, or one a hand edit left in our section, is not this name's any more.
+        if let pinned = pinnedHostAddresses[domain.lowercased()], routedDestinations.contains(pinned),
+           dnsCache[domain] == pinned || dnsDiskCache[domain]?.contains(pinned) == true {
             return pinned
         }
         // Check memory cache first

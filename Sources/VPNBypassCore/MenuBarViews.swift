@@ -540,7 +540,9 @@ struct MenuContent: View {
                 ? config.inverseDomains.filter { $0.enabled }.count
                 : config.domains.filter { $0.enabled }.count,
             autoApplyOnVPN: config.autoApplyOnVPN,
-            autoDNSRefresh: config.autoDNSRefresh
+            autoDNSRefresh: config.autoDNSRefresh,
+            liftsListBlocks: !routeManager.hostsBlockPlan.names.isEmpty
+                || routeManager.confirmedBlockCounts?.isEmpty == false
         )
     }
 
@@ -1072,7 +1074,8 @@ enum DropdownCopy {
     /// with auto-apply on VPN connect on, and a DNS refresh only with the automatic refresh on
     /// and never in VPN Only, where it does not reinstall the catch-all routes.
     static func removeAllConfirmation(mode: Mode, routeCount: Int, serviceCount: Int, domainCount: Int,
-                                      autoApplyOnVPN: Bool, autoDNSRefresh: Bool) -> (title: String, message: String) {
+                                      autoApplyOnVPN: Bool, autoDNSRefresh: Bool,
+                                      liftsListBlocks: Bool = false) -> (title: String, message: String) {
         let title: String
         if routeCount == 0 && mode == .vpnOnly {
             // Only the catch-alls are installed (the item is off with nothing installed), and
@@ -1112,7 +1115,9 @@ enum DropdownCopy {
         case .custom:
             message = String(localized: "Traffic your rules send direct or to a specific VPN will follow your VPN's own routing \(until). Rules that use a proxy keep working.")
         }
-        return (title, message)
+        // It also takes the blocklist section out of /etc/hosts (HostsBlocklist.swift).
+        guard liftsListBlocks else { return (title, message) }
+        return (title, message + " " + String(localized: "It also unblocks the names your lists block, until routes are applied again."))
     }
 }
 

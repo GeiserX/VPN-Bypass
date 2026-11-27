@@ -73,6 +73,7 @@ extension RouteManager {
         // The common case, no list rule and nothing sent: no plan, no call.
         if !hasListRules, sentBlockedHosts == [] {
             if hostsBlockPlan != HostsBlockPlanner.Plan() { hostsBlockPlan = HostsBlockPlanner.Plan() }
+            if confirmedBlockCounts != [:] { confirmedBlockCounts = [:] }
             return
         }
         let plan = blocklistPlan(for: config)
@@ -83,9 +84,15 @@ extension RouteManager {
         // earlier run that was stopped before it could remove it). Most Macs never had one.
         if names.isEmpty, sentBlockedHosts == nil, !hostsFileHasBlocklistSection() {
             sentBlockedHosts = []
+            confirmedBlockCounts = [:]
             return
         }
-        await sendBlockedHosts(names)
+        // A name pinned now that the list blocks (a list rule added above the pinning rule, or a
+        // list that gained the name): the pin goes first, or the helper leaves out its row.
+        if !pinnedHostAddresses.isEmpty, !Set(pinnedHostAddresses.keys).isDisjoint(with: names) {
+            await updateHostsFile()
+        }
+        await sendBlockedHosts(names, plan: plan)
     }
 
     /// Takes the section out now, whatever the rules say: Remove All Routes. The next apply puts it
@@ -97,10 +104,11 @@ extension RouteManager {
         if sentBlockedHosts == [] { return }
         if sentBlockedHosts == nil, !hostsFileHasBlocklistSection() {
             sentBlockedHosts = []
+            confirmedBlockCounts = [:]
             return
         }
         log(.info, "Blocklist: removing the /etc/hosts section (\(reason))")
-        await sendBlockedHosts([])
+        await sendBlockedHosts([], plan: HostsBlockPlanner.Plan())
     }
 
     /// Forgets what the helper holds and syncs again: after a helper restart (a stopping helper
@@ -109,10 +117,11 @@ extension RouteManager {
     func resendBlockedHosts() {
         blockedHostsGeneration &+= 1
         sentBlockedHosts = nil
+        confirmedBlockCounts = nil
         requestBlockedHostsSync()
     }
 
-    private func sendBlockedHosts(_ names: [String]) async {
+    private func sendBlockedHosts(_ names: [String], plan: HostsBlockPlanner.Plan) async {
         // A send that was already out when the helper restarted reached the old helper: what it
         // confirms says nothing about the new one, which `resendBlockedHosts` asks again.
         let generation = blockedHostsGeneration
@@ -133,6 +142,7 @@ extension RouteManager {
             return
         }
         sentBlockedHosts = names
+        confirmedBlockCounts = names.isEmpty ? [:] : plan.accepted
         blockedHostsError = nil
         if result.error == HelperConstants.hostsUnchanged {
             log(.info, "Blocklist: /etc/hosts already holds \(names.count) blocked name(s); nothing written")
@@ -162,11 +172,14 @@ extension RouteManager {
     }
 
     /// A pinned-name write went through with `pinned`: a name that was pinned and is no longer gets
-    /// its blocklist row back, which the pin writer had dropped.
+    /// its blocklist row back, which the pin writer had dropped. With nothing confirmed yet, a send
+    /// in flight may hold the name and its confirmation would hide the missing row: resend too
+    /// (the helper writes nothing when the file already holds the set).
     func pinnedHostsChanged(to pinned: [String: String]) {
         let gone = Set(pinnedHostAddresses.keys).subtracting(pinned.keys)
         pinnedHostAddresses = pinned
-        guard !gone.isEmpty, let sent = sentBlockedHosts, !gone.isDisjoint(with: sent) else { return }
+        guard !gone.isEmpty else { return }
+        if let sent = sentBlockedHosts, gone.isDisjoint(with: sent) { return }
         resendBlockedHosts()
     }
 
@@ -216,7 +229,8 @@ extension RouteManager {
                              downloading: source.map { listStore.updating.contains($0) } ?? false,
                              status: source.flatMap { listStore.status(for: $0) },
                              helperError: blockedHostsError,
-                             helperHoldsNames: !(sentBlockedHosts ?? []).isEmpty)
+                             confirmed: confirmedBlockCounts?[rule.id],
+                             helperReady: HelperManager.shared.isHelperInstalled)
     }
 }
 
@@ -224,10 +238,13 @@ extension RouteManager {
 struct ListRuleState: Equatable {
 
     enum Kind: String, Equatable {
-        /// Its names are in the section (or about to be).
+        /// The helper confirmed its names in the section.
         case blocked
-        /// The helper never confirmed a set and the last send failed: nothing is blocked.
+        /// The helper confirmed none of its names, and the helper is not ready or the last send
+        /// failed: nothing of this list is blocked.
         case notBlocked
+        /// The helper is ready and has not confirmed its names yet: the send is on its way.
+        case pending
         /// The first copy is downloading.
         case downloading
         /// No copy yet: never downloaded, or every download was refused.
@@ -257,10 +274,12 @@ struct ListRuleState: Equatable {
         self.updated = updated
     }
 
-    /// `helperHoldsNames`: the helper confirmed a non-empty set that is still in the file. When it
-    /// did not and the last send failed, the names are not blocked at all.
+    /// `confirmed`: how many names of this rule are in the plan the helper last confirmed, nil when
+    /// it confirmed none. Only that says "blocked", with that count: a plan of the last sync or of
+    /// a config may hold names the helper never wrote.
     init(rule: Rule, plan: HostsBlockPlanner.Plan, manageHostsFile: Bool, downloading: Bool,
-         status: ListStatus?, helperError: String?, helperHoldsNames: Bool = true, in bundle: Bundle = .main) {
+         status: ListStatus?, helperError: String?, confirmed: Int?, helperReady: Bool,
+         in bundle: Bundle = .main) {
         updated = status?.updated
         guard rule.enabled else { kind = .off; return }
         if let inactive = plan.inactive[rule.id] {
@@ -288,11 +307,20 @@ struct ListRuleState: Equatable {
         }
         names = plan.accepted[rule.id] ?? 0
         guard manageHostsFile else { kind = .pinningOff; return }
-        if let helperError, !helperHoldsNames {
-            kind = .notBlocked
-            error = helperError
+        guard let confirmed else {
+            names = 0
+            if let helperError {
+                kind = .notBlocked
+                error = helperError
+            } else if !helperReady {
+                kind = .notBlocked
+                error = String(localized: "The helper is not running.", bundle: bundle)
+            } else {
+                kind = .pending
+            }
             return
         }
+        names = confirmed
         kind = .blocked
         // A write that failed outranks a refused refresh: the names in the file are the old set.
         error = helperError ?? status?.error
@@ -318,6 +346,8 @@ struct ListRuleState: Equatable {
             return String(localized: "Not blocked. \(error ?? "")", bundle: bundle)
         case .notBlocked:
             return String(localized: "Not blocked: \(error ?? "")", bundle: bundle)
+        case .pending:
+            return String(localized: "Not blocked yet.", bundle: bundle)
         case .pinningOff:
             return String(localized: "Blocks nothing while Pin listed names in /etc/hosts is off (General).", bundle: bundle)
         case .blocked:
