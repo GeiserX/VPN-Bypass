@@ -25,7 +25,7 @@ Research of November 2026, for blocklists on the Block route (#272). Blocklist s
 
 ## 2. Method
 
-All runs were on an Apple silicon Mac on macOS 26.6.1, idle, on a home network with a local DNS server.
+All runs were on an Apple silicon Mac on macOS 26.6.1, idle, on a home network with a local DNS server. Section 3 ends with one run on macOS 27.2.1.
 
 `scripts/measure-hosts.sh` runs as root. It refuses to start unless `/etc/hosts` matches a saved original. On any exit, a trap puts that original back with the same owner and mode. Then it checks the sha256, flushes and checks that `apple.com` resolves. It writes only synthetic names, `nNNNNNNN.vpnb-measure.invalid`, one per line. Each case:
 
@@ -67,6 +67,22 @@ The longest single lookup of `apple.com` in each window, in seconds. Two full ru
 - **It grows with the size**, at 50 to 90 µs per name across the two runs: 81,677 names (StevenBlack) would stall about 4 to 7 s.
 - **Removing a list stalls about half as long as adding it** (35 to 72% across both runs), even though the new file is small.
 - **What a user feels.** For those seconds, every new connection on the Mac waits for its lookup: a page that starts loading, a mail check, a `git fetch`. Connections that are already open are not affected.
+
+### macOS 27
+
+One run of the same script on macOS 27.2.1, on a Mac with the same chip and memory as the macOS 26.6.1 one (Apple M4, 16 GB), idle, with a stock `/etc/hosts`. The longest single lookup of `apple.com` in each window, in seconds:
+
+| Names | Flush | Add a list | Small write with the list in place | Remove the list |
+|---:|:---:|---:|---:|---:|
+| 50,000 | yes | 0.7 | 0.6 | 0.3 |
+| 50,000 | no | 0.5 | 0.5 | 0.3 |
+| 100,000 | yes | 2.4 | 2.5 | 0.7 |
+| 100,000 | no | 2.5 | 2.1 | 0.7 |
+
+- **The stall is shorter on macOS 27**: about a quarter as long at 50,000 names and under half as long at 100,000. It is still a stall of every lookup, and it still grows faster than the list: twice the names took about four times as long.
+- No lookup of the real name failed. Outside a stall its longest lookup was 37 ms.
+- mDNSResponder grew from 13 MB to 94 MB with 50,000 names, about the same as on macOS 26.
+- This is one run, so read the numbers as a range, not as exact values. It does not change the cap.
 
 ---
 
@@ -115,7 +131,7 @@ In run 1, 100,000 names took mDNSResponder from 204 MB to 296 MB. The memory is 
 
 - **Safari with iCloud Private Relay.** Private Relay handles DNS for Safari, and users report that it ignores `/etc/hosts`.
 - **Chrome with Secure DNS** and **Firefox with DNS over HTTPS.** Chromium's source reads the hosts file before its own DoH, but we did not check either browser live.
-- **macOS 27.** The parse cost may differ.
+- **macOS 27 at 200,000 names, and a second run.** Section 3 has one run on macOS 27.2.1 at 50,000 and 100,000 names.
 - **Intel Macs.** We expect a longer stall on slower CPUs.
 - **A write with identical content.** We measured a write that adds one name. The rename replaces the file, so we expect mDNSResponder to read it all again, but we did not measure it. PR 1 avoids that write anyway.
 - **Busy Macs.** The test Mac was idle. Under load the stall is likely longer.
