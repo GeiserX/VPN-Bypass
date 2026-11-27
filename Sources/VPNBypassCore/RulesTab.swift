@@ -576,17 +576,25 @@ struct ProxyReachNote: Equatable {
 
 private enum RuleSheetState: Identifiable {
     case add
+    /// Add List…: the editor opens on a list, on the Block route (its id).
+    case addList(UUID)
     case edit(Rule)
 
     var id: String {
         switch self {
         case .add: return "add"
+        case .addList: return "add-list"
         case .edit(let r): return "edit-\(r.id.uuidString)"
         }
     }
 
     var rule: Rule? {
         if case .edit(let r) = self { return r }
+        return nil
+    }
+
+    var newListRoute: UUID? {
+        if case .addList(let id) = self { return id }
         return nil
     }
 }
@@ -643,6 +651,15 @@ struct RulesTab: View {
                     everythingElseRow
                 }
 
+                // Not in the header: a second button there cuts the page's line at 720 pt.
+                Button(String(localized: "Add List…")) {
+                    // The Block route is made here, as the route menu makes it; a cancelled sheet drops it.
+                    sheetState = .addList(routeManager.ensureBlockRoute().id)
+                }
+                .help(String(localized: "Block the names of a hosts-format list"))
+                if routeManager.config.rules.contains(where: { $0.matchType == .list }) {
+                    HostsListFootnote()
+                }
                 if routeManager.usesGeoIP {
                     GeoDataControls(kind: .ip)
                 }
@@ -658,7 +675,8 @@ struct RulesTab: View {
         .pageSubtitle(Self.purpose(ruleCount: routeManager.config.rules.count))
         .pageTitleActions([.add(String(localized: "Add Rule")) { sheetState = .add }])
         .sheet(item: $sheetState) { state in
-            RuleEditorSheet(editingRule: state.rule, services: routeManager.config.services) { rule in
+            RuleEditorSheet(editingRule: state.rule, services: routeManager.config.services,
+                            newList: state.newListRoute) { rule in
                 saveRule(rule)
                 sheetState = nil
             } onCancel: {
@@ -829,6 +847,7 @@ struct RuleRow: View {
     @ObservedObject private var flowEngine = FlowEngineManager.shared
     @ObservedObject private var geoipStore = GeoDataStore.geoip
     @ObservedObject private var geositeStore = GeoDataStore.geosite
+    @ObservedObject private var listStore = ListStore.shared
     let rule: Rule
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -871,7 +890,9 @@ struct RuleRow: View {
             return GeoDisplay.name(for: rule.pattern)
         case .unsupported:
             return "\(rule.unknownMatchType ?? "?"): \(rule.pattern)"
-        case .domain, .ip, .cidr, .geosite, .process, .list:
+        case .list:
+            return HostsListPreset.name(for: rule.pattern)
+        case .domain, .ip, .cidr, .geosite, .process:
             return rule.pattern
         }
     }
@@ -933,6 +954,13 @@ struct RuleRow: View {
         return rule.matchType == .geoip ? GeoDisplay.withIPv4Note(note) : note
     }
 
+    /// A list rule's second line: how many names it blocks, or why none (`ListRuleState`).
+    private var listNote: String? {
+        guard rule.matchType == .list else { return nil }
+        _ = listStore.revision   // read again when a copy changes
+        return routeManager.listRuleState(rule).line()
+    }
+
     /// A Country or Site rule's second line: what its list holds, or why it holds nothing.
     private var geoDetail: String? {
         let key = rule.pattern.lowercased()
@@ -958,7 +986,7 @@ struct RuleRow: View {
                                     customEngine: ProcessRule.customEngine(routeManager.config),
                                     turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: flowEngine.confirmed?.declinedTeams ?? []),
                                     counters: flowEngine.counters(forRule: rule.id.uuidString))
-        return Self.joined(inertNote ?? refusalNote ?? blockNote ?? geoDetail, routeNote)
+        return Self.joined(inertNote ?? listNote ?? refusalNote ?? blockNote ?? geoDetail, routeNote)
     }
 
     /// Two lines under a row, either of which may be absent.
@@ -1121,22 +1149,34 @@ struct RuleEditorSheet: View {
 
     /// The doc screenshots open the app chooser over the sheet.
     static var appChooserForScreenshots = false
+    /// The language of the Match choices; the tests draw the sheet in each one.
+    var bundle: Bundle = .main
+    /// List is a choice only in a sheet opened on a list (Add List…, or editing a list rule): a
+    /// seventh segment would push the Add Rule sheet's choices into a menu in every language.
+    private let offersList: Bool
 
+    /// `newList`: Add List…, which opens on a list with the preset, on this route (the Block route).
     init(
         editingRule: Rule?,
         services: [RouteManager.ServiceEntry],
+        newList: UUID? = nil,
+        bundle: Bundle = .main,
         onSave: @escaping (Rule) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.editingRule = editingRule
         self.services = services
+        self.bundle = bundle
         self.onSave = onSave
         self.onCancel = onCancel
-        _matchType = State(initialValue: editingRule?.matchType ?? .domain)
-        _previousMatchType = State(initialValue: editingRule?.matchType ?? .domain)
-        _pattern = State(initialValue: editingRule?.matchType == .service ? "" : (editingRule?.pattern ?? ""))
+        let initial = editingRule?.matchType ?? (newList != nil ? .list : .domain)
+        offersList = initial == .list
+        _matchType = State(initialValue: initial)
+        _previousMatchType = State(initialValue: initial)
+        _pattern = State(initialValue: editingRule?.matchType == .service ? ""
+                         : (editingRule?.pattern ?? (newList != nil ? HostsListPreset.stevenBlackURL : "")))
         _selectedServiceId = State(initialValue: editingRule?.matchType == .service ? (editingRule?.pattern ?? "") : (services.first?.id ?? ""))
-        _routeId = State(initialValue: editingRule?.routeId)
+        _routeId = State(initialValue: editingRule?.routeId ?? newList)
     }
 
     private var isEditing: Bool { editingRule != nil }
@@ -1145,11 +1185,12 @@ struct RuleEditorSheet: View {
 
     /// The choices of the Match control: GeoIP and GeoSite are one, "Geo".
     enum MatchKind: Hashable {
-        case domain, service, ip, cidr, app, geo
+        case domain, service, ip, cidr, app, geo, list
 
         init(_ type: MatchType) {
             switch type {
-            case .domain, .suffix, .list, .unsupported: self = .domain
+            case .list: self = .list
+            case .domain, .suffix, .unsupported: self = .domain
             case .service: self = .service
             case .ip: self = .ip
             case .cidr: self = .cidr
@@ -1167,6 +1208,7 @@ struct RuleEditorSheet: View {
             case .cidr: return .cidr
             case .app: return .process
             case .geo: return current == .geosite ? .geosite : .geoip
+            case .list: return .list
             }
         }
     }
@@ -1178,7 +1220,8 @@ struct RuleEditorSheet: View {
         case .ip:      return "10.0.0.5"
         case .cidr:    return "10.0.0.0/8"
         case .process: return String(localized: "com.example.App or Example")
-        case .geoip, .geosite, .list, .unsupported: return ""
+        case .list:    return "https://example.com/hosts"
+        case .geoip, .geosite, .unsupported: return ""
         case .service: return ""
         }
     }
@@ -1189,12 +1232,15 @@ struct RuleEditorSheet: View {
             get: { Self.isGeo(matchType) ? MatchKind.geo : MatchKind(matchType) },
             set: { kind in matchType = kind.matchType(keepingGeoFrom: matchType) }
         )) {
-            Text("Domain").tag(MatchKind.domain)
-            Text("Service").tag(MatchKind.service)
-            Text("IP").tag(MatchKind.ip)
-            Text("CIDR").tag(MatchKind.cidr)
-            Text("App").tag(MatchKind.app)
-            Text("Geo").tag(MatchKind.geo)
+            Text(String(localized: "Domain", bundle: bundle)).tag(MatchKind.domain)
+            Text(String(localized: "Service", bundle: bundle)).tag(MatchKind.service)
+            Text(String(localized: "IP", bundle: bundle)).tag(MatchKind.ip)
+            Text(String(localized: "CIDR", bundle: bundle)).tag(MatchKind.cidr)
+            Text(String(localized: "App", bundle: bundle)).tag(MatchKind.app)
+            Text(String(localized: "Geo", bundle: bundle)).tag(MatchKind.geo)
+            if offersList {
+                Text(String(localized: "List", bundle: bundle)).tag(MatchKind.list)
+            }
         }
         .labelsHidden()
     }
@@ -1206,7 +1252,8 @@ struct RuleEditorSheet: View {
             SheetField(String(localized: "Match"), required: true) {
                 // A segmented control is first drawn at its natural width, so one wider than the
                 // sheet shows past its edge before it is narrowed. Use the first form that fits:
-                // six segments need the small size, and longer translations a menu.
+                // six segments need the small size, and longer translations (or the seventh, List)
+                // a menu.
                 ViewThatFits(in: .horizontal) {
                     matchKindPicker.pickerStyle(.segmented)
                     matchKindPicker.pickerStyle(.segmented).controlSize(.small)
@@ -1243,6 +1290,8 @@ struct RuleEditorSheet: View {
                 GeoListField(kind: .ip, pattern: $pattern)
             } else if matchType == .geosite {
                 GeoListField(kind: .site, pattern: $pattern)
+            } else if matchType == .list {
+                HostsListField(pattern: $pattern, bundle: bundle)
             } else if matchType == .process {
                 SheetField(String(localized: "App"), required: true) {
                     HStack(spacing: Theme.Space.s) {
@@ -1275,8 +1324,10 @@ struct RuleEditorSheet: View {
             }
         }
         .onChange(of: matchType) { new in
-            let lists: Set<MatchType> = [.geoip, .geosite]
-            if lists.contains(new) || lists.contains(previousMatchType) { pattern = "" }
+            let lists: Set<MatchType> = [.geoip, .geosite, .list]
+            if lists.contains(new) || lists.contains(previousMatchType) {
+                pattern = new == .list ? HostsListPreset.stevenBlackURL : ""
+            }
             previousMatchType = new
         }
         .sheet(isPresented: $showingNewRouteSheet) {
@@ -1336,6 +1387,13 @@ struct RuleEditorSheet: View {
             return
         }
         var stored = effectivePattern
+        if matchType == .list {
+            guard let source = ListStore.source(from: effectivePattern) else {
+                validationError = String(localized: "Enter the https address of a hosts-format list.")
+                return
+            }
+            stored = source.absoluteString
+        }
         if matchType == .geoip {
             guard let code = GeoIPRule.normalized(effectivePattern) else {
                 validationError = String(localized: "Choose a country.")

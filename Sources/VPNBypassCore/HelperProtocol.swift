@@ -257,12 +257,17 @@ struct HelperConstants {
     // 2.11.0: setBlockedHosts — the blocklist section of /etc/hosts (HostsBlockSection), one
     // `0.0.0.0 name` line per name, apart from the pinned names, removed on SIGTERM. The pin
     // writer no longer counts the blocklist's names as another tool's, and drops the blocklist
-    // row of a name it pins, so the pin wins. A 2.8.0 or later helper installs this one itself
-    // (updateHelper), with no password.
+    // row of a name it pins, so the pin wins. Neither hosts writer writes or flushes when the
+    // file would not change; both then reply `hostsUnchanged`. A 2.8.0 or later helper installs
+    // this one itself (updateHelper), with no password.
     static let helperVersion = "2.11.0"
     static let bundleID = "com.geiserx.vpnbypass.helper"
     static let hostMarkerStart = "# VPN-BYPASS-MANAGED - START"
     static let hostMarkerEnd = "# VPN-BYPASS-MANAGED - END"
+    /// The text a 2.11.0 or later helper puts in a successful hosts reply (`updateHostsFile`,
+    /// `setBlockedHosts`) when the file already said it: nothing was written, so there is
+    /// nothing to flush. An older helper replies nil and always wrote.
+    static let hostsUnchanged = "unchanged"
 
     /// The main app's code-signing identifier.
     static let appSigningIdentifier = "com.geiserx.vpn-bypass"

@@ -85,7 +85,13 @@ final class HelperManager: ObservableObject {
         let ready = await checkAndInstallHelper()
         if ready {
             hasBeenReady = true
-            if recovering { await restoreAfterHelperRestart(reapplyRoutes: !RouteManager.shared.activeRoutes.isEmpty) }
+            if recovering {
+                await restoreAfterHelperRestart(reapplyRoutes: !RouteManager.shared.activeRoutes.isEmpty)
+            } else {
+                // A helper that was not ready at launch (a first run, a repair from Status) gets
+                // the blocklist now, VPN or not; with nothing new to send this makes no call.
+                RouteManager.shared.requestBlockedHostsSync()
+            }
         }
         return ready
     }
@@ -96,12 +102,15 @@ final class HelperManager: ObservableObject {
     /// What a new helper process does not have that the old one had, put back once it answers:
     /// the wildcard list (it starts with no resolver files and no forwarder) and the DNS Lookups
     /// capture when the page is on, then per-app routing's scoped default route (a new helper
-    /// removes it at start, R12). Kernel routes, VPN Only blocks and `/etc/hosts` outlive the
+    /// removes it at start, R12), and the blocklist section of `/etc/hosts`, which the old helper
+    /// removed as it stopped. Kernel routes, VPN Only blocks and the pinned names outlive the
     /// helper; the routes are applied again only to put back a batch the old helper dropped as
     /// it stopped. A helper that crashed and was started again by launchd is noticed by the
     /// wildcard and capture drains instead (`running` false), which do the same for their part.
     func restoreAfterHelperRestart(reapplyRoutes: Bool) async {
         RouteManager.shared.wildcards.helperRestarted()
+        // A stopping helper removes the blocklist section from /etc/hosts: send it again.
+        RouteManager.shared.resendBlockedHosts()
         // Routes first: a capture start on a slow helper can take its full deadline, and the
         // routes must not wait for it.
         if reapplyRoutes { await reapplyRoutesAfterUpdate() }
@@ -1223,6 +1232,12 @@ let timeout = xpcTimeout + Double(routes.count) * 0.6
 
     // MARK: - Hosts File Operations
 
+    /// Whether a successful pinned-name update needs a cache flush: every reply but the helper's
+    /// "unchanged" one (nothing written, mode already right).
+    nonisolated static func hostsUpdateNeedsFlush(error: String?) -> Bool {
+        error != HelperConstants.hostsUnchanged
+    }
+
     func updateHostsFile(entries: [(domain: String, ip: String)]) async -> (success: Bool, error: String?) {
         guard helperState.isReady else {
             return (false, "Helper not ready (\(helperState.statusText))")
@@ -1248,7 +1263,10 @@ let timeout = xpcTimeout + Double(routes.count) * 0.6
             }
 
             helper.updateHostsFile(entries: dictEntries) { success, error in
-                if success {
+                if success && !Self.hostsUpdateNeedsFlush(error: error) {
+                    // Nothing was written (helper 2.11.0 and later), so there is nothing to flush.
+                    once.complete((true, nil))
+                } else if success {
                     helper.flushDNSCache { _ in
                         once.complete((true, nil))
                     }

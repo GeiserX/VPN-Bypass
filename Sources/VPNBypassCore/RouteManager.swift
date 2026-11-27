@@ -56,6 +56,40 @@ final class RouteManager: ObservableObject {
     var droppedBlockRoutes: [Route] = []
     /// The retry waiting after a failed list download, by list (GeoDataStore.swift).
     var geoRetryTasks: [GeoKind: Task<Void, Never>] = [:]
+    /// The blocklist names the helper last confirmed in its /etc/hosts section, sorted;
+    /// nil when not known (at launch, after a helper restart, after a pin of one of them went).
+    /// The next sync sends the set when it differs, or when this is nil (HostsBlocklist.swift).
+    var sentBlockedHosts: [String]?
+    /// How many names each list rule added in the plan the helper last confirmed, and the URL
+    /// they came from, beside `sentBlockedHosts`, and nil with it. A row says "blocked" only from
+    /// this, never from the plan of the last sync, which may hold names the helper never wrote.
+    @Published var confirmedBlockCounts: [UUID: ListConfirmation]?
+    /// What the list rules do as of the last sync, for their rows and `vpnb rule.list`.
+    @Published var hostsBlockPlan = HostsBlockPlanner.Plan()
+    /// Why the last send of the blocklist failed; nil after one that worked.
+    @Published var blockedHostsError: String?
+    /// The running blocklist sync, and whether another was asked for while it ran.
+    var blockedHostsSyncTask: Task<Void, Never>?
+    var blockedHostsSyncAgain = false
+    /// Bumped when what the helper holds is no longer known (`resendBlockedHosts`).
+    var blockedHostsGeneration = 0
+    /// The pins the last pinned-name write held, lowercase name to address: a pin that goes gives
+    /// its blocklist row back, and a pin whose address is still routed keeps that address, so a
+    /// resolver that answers the same addresses in another order does not rewrite /etc/hosts.
+    var pinnedHostAddresses: [String: String] = [:]
+    /// Whether `pinnedHostAddresses` was read from /etc/hosts this launch (HostsBlocklist.swift).
+    var pinnedHostAddressesSeeded = false
+    /// The retry waiting after a failed blocklist download.
+    var blocklistRetryTask: Task<Void, Never>?
+    /// The stored lists the planner reads, and their downloads. Replaced in tests.
+    var listStore: ListStore = .shared
+    /// The helper's `updateHostsFile` (the pinned names), for the tests. Nil in production.
+    var updateHostsFileOverrideForTests: (([(domain: String, ip: String)]) async -> (success: Bool, error: String?))?
+    /// The helper's `setBlockedHosts`, for the tests. Nil in production.
+    var setBlockedHostsOverrideForTests: (([String]) async -> (success: Bool, error: String?))?
+    /// What /etc/hosts holds, for the check at launch whether a blocklist section is left. Nil in
+    /// production, which reads the file.
+    var hostsFileOverrideForTests: (() -> String?)?
     var blockedDestinations: Set<String> { Set(blockedRoutes.map(\.destination)) }
     /// How many VPN Only entries have addresses blocked, for the dropdown line.
     var blockedSiteCount: Int { Set(blockedRoutes.map(\.source)).count }
@@ -651,6 +685,9 @@ final class RouteManager: ObservableObject {
         }
         // A wildcard added, removed or switched, or the mode changed: the helper's list follows.
         wildcards.requestSync()
+        // A list rule added, removed or moved, the mode or the pinning setting changed: the
+        // blocklist section follows, and is not written when it would not change.
+        requestBlockedHostsSync()
         endPauseIfConfigForbidsIt()
         // A Country or Site rule that has no list yet (added from the CLI, imported) gets it now.
         refreshGeoDataIfNeeded()
@@ -913,6 +950,8 @@ final class RouteManager: ObservableObject {
             // An import can bring a GeoIP or GeoSite rule whose list is not on this Mac: fetch it now,
             // as saveConfig does for any other change (an import saves without it).
             refreshGeoDataIfNeeded()
+            // The list rules it brings or takes away, as saveConfig does too.
+            requestBlockedHostsSync()
 
             // An import replaces what a pause was taken on; the apply below is its own.
             if isPaused { endPause(reason: "a configuration was imported", apply: false) }
@@ -2268,6 +2307,9 @@ final class RouteManager: ObservableObject {
             if HelperManager.shared.isHelperInstalled {
                 await startupSweepIfNeeded(desired: [])
             }
+            // The blocklist section too: with no rule to show, up to 100,000 blocked names would
+            // be a block nobody can explain from the app.
+            await removeBlockedHosts(reason: "config failed to load")
             return
         }
         isLoading = true
@@ -2300,6 +2342,9 @@ final class RouteManager: ObservableObject {
 
         // Check helper status
         log(.info, "Helper installed: \(HelperManager.shared.isHelperInstalled)")
+        // The blocklist section outlives the app: at launch the set is sent once, and the helper
+        // writes nothing when the file already holds it. VPN or not, the lists block.
+        requestBlockedHostsSync()
 
         // Apply routes if VPN is connected
         if isVPNConnected && localGateway != nil {
@@ -2853,6 +2898,8 @@ final class RouteManager: ObservableObject {
             wildcards.routesApplied()   // as the classic skip path
             // No route changed, but a block may have: a rule edited, switched off or moved to another route.
             await applyRuleBlocks(compiledAll.blocks, epoch: epoch)
+            // The list rules' names too; nothing is sent when they are the ones the helper holds.
+            requestBlockedHostsSync()
             return true
         }
 
@@ -2882,6 +2929,8 @@ final class RouteManager: ObservableObject {
         // The blocks go in after the routes are committed: the stale-route cleanup above removes by
         // destination, and would take a block just put on an address a rule used to route.
         await applyRuleBlocks(compiledAll.blocks, epoch: epoch)
+        // The list rules' names; nothing is sent when they are the ones the helper holds.
+        requestBlockedHostsSync()
 
         let confirmedUniqueCount = uniqueRouteCount
         // A service rule's routes are recorded under the service id; Problems names the service.
@@ -3048,7 +3097,10 @@ final class RouteManager: ObservableObject {
     /// - Parameter keepingBlocked: leave VPN Only's blocks in place (the drop teardown, which
     ///   has just put them there). Every other caller (quit, a mode switch, Remove All Routes)
     ///   takes them out too.
-    func removeAllRoutes(keepingBlocked: Bool = false) async {
+    /// - Parameter releasingBlocklist: take the list rules' /etc/hosts section out too (Remove All
+    ///   Routes, from the menu or `vpnb routes.clear`). Every other caller leaves it: it stays
+    ///   across a quit, a pause, a mode switch's rebuild and a VPN drop (HostsBlocklist.swift).
+    func removeAllRoutes(keepingBlocked: Bool = false, releasingBlocklist: Bool = false) async {
         routeEpoch &+= 1
         // Sweep the union of what the model tracks AND what was pushed to the kernel but
         // never committed (pendingKernelAdds) — the latter is invisible to the model by
@@ -3108,6 +3160,9 @@ final class RouteManager: ObservableObject {
         if !keepingBlocked {
             await releaseBlocks(reason: "all routes removed")
             await releaseRuleBlocks(reason: "all routes removed")
+        }
+        if releasingBlocklist {
+            await removeBlockedHosts(reason: "Remove All Routes")
         }
 
         cancelAllRetries()
@@ -6676,12 +6731,13 @@ final class RouteManager: ObservableObject {
     }
     
     @discardableResult
-    private func updateHostsFile() async -> Bool {
+    func updateHostsFile() async -> Bool {
         // Collect domain -> IP mappings, filtered against activeRoutes so hosts
         // only contains entries for domains that actually have installed kernel routes.
         // Checks all cached IPs (not just first) to find a routed one.
         let routedDestinations = Set(activeRoutes.map { $0.destination })
         var entries: [(domain: String, ip: String)] = []
+        seedPinnedHostAddressesIfNeeded()
 
         let activeDomains: [DomainEntry] = config.routingMode == .vpnOnly ? config.inverseDomains : config.domains
 
@@ -6749,12 +6805,28 @@ final class RouteManager: ObservableObject {
             activeRoutes.contains { $0.source == name }
         }
 
+        // First match holds for pins too: a name a list blocks was claimed by no rule above the
+        // list (HostsBlockPlanner), so a rule below it must not pin the name, which would drop
+        // its blocklist row.
+        let listed = Set(Self.blockedHostsToSend(hostsBlockPlan, manageHostsFile: config.manageHostsFile))
+        if !listed.isEmpty { entries.removeAll { listed.contains($0.domain.lowercased()) } }
+
         // Update /etc/hosts (requires sudo)
         return await modifyHostsFile(entries: entries)
     }
 
     /// Find the first cached IP for a domain that has a confirmed kernel route
     private func firstRoutedIP(for domain: String, in routedDestinations: Set<String>) -> String? {
+        // The address pinned now, while it is still routed. A round-robin name, or the first of
+        // several resolvers to answer, puts another of its routed addresses first in the cache on
+        // each lookup; following it would rewrite /etc/hosts, and with a blocklist section in the
+        // file every write stalls every lookup on the Mac for seconds.
+        // Only while the name's latest answer still holds it: an address another name keeps
+        // routed, or one a hand edit left in our section, is not this name's any more.
+        if let pinned = pinnedHostAddresses[domain.lowercased()], routedDestinations.contains(pinned),
+           dnsCache[domain] == pinned || dnsDiskCache[domain]?.contains(pinned) == true {
+            return pinned
+        }
         // Check memory cache first
         if let cachedIP = dnsCache[domain], routedDestinations.contains(cachedIP) {
             return cachedIP
@@ -6792,6 +6864,17 @@ final class RouteManager: ObservableObject {
     /// Sets the persistent DNS cache the startup and Resume applies read, without disk.
     func setDNSDiskCacheForTests(_ cache: [String: [String]]) {
         dnsDiskCache = cache
+    }
+
+    /// Sets the in-memory first-address cache the pin writer reads, as a DNS refresh leaves it.
+    func setDNSCacheForTests(_ cache: [String: String]) {
+        dnsCache = cache
+    }
+
+    /// The pinned-name write a DNS refresh or an apply runs, for the tests.
+    @discardableResult
+    func updateHostsFileForTests() async -> Bool {
+        await updateHostsFile()
     }
 
     /// Waits for the background DNS refresh a startup or a Resume started, so none outlives a test.
@@ -6867,8 +6950,8 @@ final class RouteManager: ObservableObject {
     }
     
     @discardableResult
-    private func modifyHostsFile(entries: [(domain: String, ip: String)]) async -> Bool {
-        guard HelperManager.shared.isHelperInstalled else {
+    func modifyHostsFile(entries: [(domain: String, ip: String)]) async -> Bool {
+        guard HelperManager.shared.isHelperInstalled || updateHostsFileOverrideForTests != nil else {
             log(.error, "Cannot modify hosts file: helper not ready (\(HelperManager.shared.helperState.statusText))")
             return false
         }
@@ -6879,9 +6962,16 @@ final class RouteManager: ObservableObject {
             let mode = HostsFileMode.octalMode(path: "/etc/hosts") ?? "unreadable"
             log(.warning, "/etc/hosts was \(mode), which the system resolver cannot read, so its entries were being ignored. Setting 0644 with this update.")
         }
-        let result = await HelperManager.shared.updateHostsFile(entries: entries)
+        let result: (success: Bool, error: String?)
+        if let override = updateHostsFileOverrideForTests {
+            result = await override(entries)
+        } else {
+            result = await HelperManager.shared.updateHostsFile(entries: entries)
+        }
         if !result.success {
             log(.error, "Helper hosts update failed: \(result.error ?? "unknown")")
+        } else {
+            pinnedHostsChanged(to: Dictionary(entries.map { ($0.domain.lowercased(), $0.ip) }, uniquingKeysWith: { first, _ in first }))
         }
         return result.success
     }

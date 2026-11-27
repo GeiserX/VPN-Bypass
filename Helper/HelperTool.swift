@@ -465,69 +465,39 @@ class HelperTool: NSObject, HelperProtocol {
 
     /// The /etc/hosts read-modify-write itself. Always call it on `routeQueue`.
     private func performHostsUpdate(entries: [[String: String]]) -> (success: Bool, error: String?) {
-        let hostsPath = "/etc/hosts"
-
-        // Read current hosts file
-        guard let currentContent = try? String(contentsOfFile: hostsPath, encoding: .utf8) else {
+        guard let currentContent = try? String(contentsOfFile: "/etc/hosts", encoding: .utf8) else {
             return (false, "Could not read /etc/hosts")
         }
-        
-        // Remove existing VPN-BYPASS section
-        var lines = currentContent.components(separatedBy: "\n")
-        var inSection = false
-        lines = lines.filter { line in
-            if line.contains(HelperConstants.hostMarkerStart) {
-                inSection = true
-                return false
-            }
-            if line.contains(HelperConstants.hostMarkerEnd) {
-                inSection = false
-                return false
-            }
-            return !inSection
+        let pairs = entries.compactMap { entry -> (domain: String, ip: String)? in
+            guard let domain = entry["domain"], let ip = entry["ip"] else { return nil }
+            return (domain, ip)
         }
-        
-        // Remove trailing empty lines
-        while lines.last?.isEmpty == true {
-            lines.removeLast()
+        // Written only on a change: with a large blocklist section in the file, every write stalls
+        // every lookup on the Mac for seconds while mDNSResponder reads it again (3.5 to 4.7 s for a
+        // small write at 100,000 names, docs/research/hosts-scale.md). The app calls this on every
+        // DNS refresh, mostly with the same pins.
+        guard let newContent = HostsPinSection.rewritten(currentContent, entries: pairs,
+                                                         isValid: { isValidIP($1) && isValidDomain($0) }) else {
+            return Self.hostsUnchanged()
         }
-        
-        // Collect domains already managed by other tools (outside our block). The blocklist
-        // section is ours too: its names are not another tool's, and it can hold 200,000 lines.
-        let externalDomains = HostsBlockSection.namesManagedElsewhere(lines)
-
-        // Add new section if we have entries (skip domains managed by other tools)
-        if !entries.isEmpty {
-            var managedEntries: [String] = []
-            var pinnedNames = Set<String>()
-            for entry in entries {
-                if let domain = entry["domain"], let ip = entry["ip"] {
-                    if isValidIP(ip) && isValidDomain(domain) {
-                        if externalDomains.contains(domain.lowercased()) {
-                            continue
-                        }
-                        managedEntries.append("\(ip) \(domain)")
-                        pinnedNames.insert(domain.lowercased())
-                    }
-                }
-            }
-            if !managedEntries.isEmpty {
-                // A pin wins over a block. A name with a blocklist row and a pinned row gets both
-                // addresses from the resolver, so the blocklist row goes in this same write.
-                lines = HostsBlockSection.removingNames(pinnedNames, from: lines)
-                while lines.last?.isEmpty == true {
-                    lines.removeLast()
-                }
-                lines.append("")
-                lines.append(HelperConstants.hostMarkerStart)
-                lines.append(contentsOf: managedEntries)
-                lines.append(HelperConstants.hostMarkerEnd)
-            }
-        }
-        
-        // Write back
-        let newContent = lines.joined(separator: "\n") + "\n"
         return Self.writeHostsFile(newContent)
+    }
+
+    /// The reply for a hosts update that found the file already saying it: nothing written and
+    /// nothing to flush (`HelperConstants.hostsUnchanged` tells the app to skip its flush). The
+    /// mode is still put right, as a write would: a file the resolver cannot read is ignored whole.
+    /// When it had to be put right the reply is a plain success, so the caches are flushed as after
+    /// a write: the resolver was ignoring the file and must read it again.
+    static func hostsUnchanged() -> (success: Bool, error: String?) {
+        var info = stat()
+        if stat("/etc/hosts", &info) == 0, info.st_mode & 0o777 != 0o644 {
+            if chmod("/etc/hosts", 0o644) != 0 {
+                let err = String(cString: strerror(errno))
+                return (false, "Hosts file is unchanged but could not be made readable by the resolver (chmod 644: \(err))")
+            }
+            return (true, nil)
+        }
+        return (true, HelperConstants.hostsUnchanged)
     }
 
     /// Writes /etc/hosts atomically and makes it readable by the resolver. Always on `routeQueue`.
@@ -585,7 +555,12 @@ class HelperTool: NSObject, HelperProtocol {
             return (false, error.localizedDescription)
         }
         // Nothing to write when the section already says this.
-        guard let updated else { return (true, nil) }
+        guard let updated else {
+            let unchanged = hostsUnchanged()
+            // Only the mode was put right: the resolver must read the file again.
+            if unchanged.success && unchanged.error == nil { flushResolverCaches() }
+            return unchanged
+        }
         let written = writeHostsFile(updated)
         if written.success {
             flushResolverCaches()

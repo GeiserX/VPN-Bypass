@@ -35,12 +35,15 @@ func printUsage() {
                                                  Add a new route
       route.rm id=<uuid>                        Remove a route
       rule.list                                 List all rules
-      rule.add match=<domain|suffix|ip|cidr|service|process|geoip|geosite> pattern=<value> routeId=<uuid>
+      rule.add match=<domain|suffix|ip|cidr|service|process|geoip|geosite|list> pattern=<value> routeId=<uuid>
                                                  Add a routing rule (process: a bundle id or an
                                                  executable name; it routes the app's TCP
                                                  connections to public IPv4 addresses, unless the
                                                  app binds them to an interface, only while
-                                                 per-app routing is on and its route is Direct)
+                                                 per-app routing is on and its route is Direct;
+                                                 list: the https address of a hosts-format list,
+                                                 whose exact names the Block route blocks in
+                                                 /etc/hosts)
       rule.rm id=<uuid>                         Remove a rule
       mode mode=<bypass|vpnOnly|custom>          Set the routing mode (custom carries
                                                  your listed domains into rules)

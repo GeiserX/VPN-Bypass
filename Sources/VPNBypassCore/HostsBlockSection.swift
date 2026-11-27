@@ -175,8 +175,12 @@ enum HostsBlockSection {
 
         var lines: [String]
         if hadSection {
-            // The blank line written before the section goes with it.
-            if entries.isEmpty, before.last?.isEmpty == true { before.removeLast() }
+            // The blank line written before the section goes with it, and so do any blank lines an
+            // older pin writer pushed in front of it, so they cannot pile up.
+            if entries.isEmpty {
+                while before.last?.isEmpty == true { before.removeLast() }
+                if !before.isEmpty, let next = after.first, !next.isEmpty { before.append("") }
+            }
             lines = before
             if !entries.isEmpty {
                 lines.append(startMarker)
@@ -265,5 +269,87 @@ enum HostsBlockSection {
             if names.contains(upper ? Substring(field.lowercased()) : field) { return true }
         }
         return false
+    }
+}
+
+/// The pinned-name section (`HelperConstants.hostMarkerStart`): the text work of the helper's pin
+/// writer, pure so the app's tests can run it. Shared with the helper as `HostsBlockSection` is.
+enum HostsPinSection {
+
+    /// The pins the pinned section of `content` holds, lowercase name to address. The app reads
+    /// them at launch, so its first pin write keeps an address that is still routed instead of
+    /// rewriting the file for a resolver that answered another one first.
+    static func pinnedAddresses(in content: String) -> [String: String] {
+        var pins: [String: String] = [:]
+        var inSection = false
+        for line in content.components(separatedBy: "\n") {
+            if line.contains(HelperConstants.hostMarkerStart) { inSection = true; continue }
+            if line.contains(HelperConstants.hostMarkerEnd) { break }
+            guard inSection else { continue }
+            let fields = line.split(whereSeparator: { $0.isWhitespace })
+            guard fields.count >= 2, !fields[0].hasPrefix("#") else { continue }
+            if pins[fields[1].lowercased()] == nil { pins[fields[1].lowercased()] = String(fields[0]) }
+        }
+        return pins
+    }
+
+    /// `content` with the pinned section replaced by `entries` (`ip name` lines), or without it when
+    /// no entry is left; nil when that is the text `content` already is, so the helper writes
+    /// nothing and flushes nothing. `isValid(domain, ip)` keeps an entry. A name another line maps
+    /// is skipped as another tool's; a blocklist row is not one, and goes for the name pinned in
+    /// the same write (`HostsBlockSection.removingNames`), so a pin wins over a block.
+    ///
+    /// A section already in the file is replaced where it is, as `HostsBlockSection.rewritten` does
+    /// with its own: moving it to the end when a blocklist section was added after it would make
+    /// the same pins one more full write, and a write stalls every lookup on the Mac while a large
+    /// blocklist is in the file. A new section goes at the end, after one blank line.
+    static func rewritten(_ content: String, entries: [(domain: String, ip: String)],
+                          isValid: (String, String) -> Bool) -> String? {
+        // The file around the pinned section: what comes before it and what comes after it.
+        var before: [String] = []
+        var after: [String] = []
+        var hadSection = false
+        var inSection = false
+        for line in content.components(separatedBy: "\n") {
+            if line.contains(HelperConstants.hostMarkerStart) { inSection = true; hadSection = true; continue }
+            if line.contains(HelperConstants.hostMarkerEnd) { inSection = false; continue }
+            if inSection { continue }
+            if hadSection { after.append(line) } else { before.append(line) }
+        }
+
+        // Names managed by other tools (outside our sections). The blocklist section is ours too:
+        // its names are not another tool's, and it can hold 200,000 lines.
+        let externalDomains = HostsBlockSection.namesManagedElsewhere(before + after)
+
+        var managedEntries: [String] = []
+        var pinnedNames = Set<String>()
+        for entry in entries where isValid(entry.domain, entry.ip) {
+            if externalDomains.contains(entry.domain.lowercased()) { continue }
+            managedEntries.append("\(entry.ip) \(entry.domain)")
+            pinnedNames.insert(entry.domain.lowercased())
+        }
+        if managedEntries.isEmpty && !hadSection { return nil }
+        if !managedEntries.isEmpty {
+            // A pin wins over a block. A name with a blocklist row and a pinned row gets both
+            // addresses from the resolver, so the blocklist row goes in this same write.
+            before = HostsBlockSection.removingNames(pinnedNames, from: before)
+            after = HostsBlockSection.removingNames(pinnedNames, from: after)
+        }
+
+        // One blank line before the section; none left behind when it goes.
+        while before.last?.isEmpty == true { before.removeLast() }
+        var lines = before
+        if !managedEntries.isEmpty {
+            if !lines.isEmpty { lines.append("") }
+            lines.append(HelperConstants.hostMarkerStart)
+            lines.append(contentsOf: managedEntries)
+            lines.append(HelperConstants.hostMarkerEnd)
+        }
+        if !lines.isEmpty, let next = after.first, !next.isEmpty { lines.append("") }
+        lines.append(contentsOf: after)
+        // A file that ends in a newline splits into a last empty element; one newline at the end.
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        let updated = lines.joined(separator: "\n") + "\n"
+        return updated == content ? nil : updated
     }
 }

@@ -133,6 +133,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // require the helper. This clears the "Setting Up..." spinner
                 // instead of hanging on it forever when the helper is absent.
                 await RouteManager.shared.detectVPNStateOnly()
+                // The list rules' rows: their plan, and "Not blocked" with the helper's reason
+                // rather than a count the helper never confirmed.
+                RouteManager.shared.requestBlockedHostsSync()
                 // This network's profile, which the startup apply below would have put in use,
                 // so per-app routing's first push carries this network's app list.
                 await RouteManager.shared.selectNetworkProfileBeforeStartupApply()

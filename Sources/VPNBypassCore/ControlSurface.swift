@@ -112,11 +112,16 @@ public enum ControlSurface {
             let engineState = FlowEngineManager.shared.state
             let declinedTeams = FlowEngineManager.shared.confirmed?.declinedTeams ?? []
             let byId = Dictionary(newConfig.rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            // A list rule's state, planned for the config this reply describes.
+            let lists = RouteManager.shared
+            let listPlan = rules.contains { $0.matchType == .list } ? lists.blocklistPlan(for: newConfig) : nil
             response.result?.rules = rules.map { sanitized in
                 guard let rule = byId[sanitized.id] else { return sanitized }
-                return SanitizedRule(rule, engine: engineState, routes: newConfig.routes,
-                                     customEngine: ProcessRule.customEngine(newConfig),
-                                     turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: declinedTeams))
+                let served = SanitizedRule(rule, engine: engineState, routes: newConfig.routes,
+                                           customEngine: ProcessRule.customEngine(newConfig),
+                                           turnedDown: ProcessRule.isTurnedDown(rule, declinedTeams: declinedTeams))
+                guard let listPlan, rule.matchType == .list else { return served }
+                return served.withList(lists.listRuleState(rule, plan: listPlan, config: newConfig))
             }
         }
 

@@ -632,6 +632,8 @@ extension RouteManager {
     /// 12-hour watchdog; a failure is retried an hour later.
     func refreshGeoDataIfNeeded(now: Date = Date()) {
         guard GeoDataStore.autoUpdate else { return }
+        // The list rules' hosts lists follow the same schedule (HostsBlocklist.swift).
+        refreshBlocklistsIfNeeded(now: now)
         for kind in GeoKind.allCases where usesGeoData(kind) {
             let store = geoStore(kind)
             guard store.phase != .updating,

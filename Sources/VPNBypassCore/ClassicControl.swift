@@ -449,7 +449,7 @@ enum ClassicControl {
     private static func clearRoutes() async -> ControlResponse {
         let rm = RouteManager.shared
         let before = Set(rm.activeRoutes.map(\.destination)).union(rm.pendingKernelAdds).count
-        await rm.removeAllRoutes()
+        await rm.removeAllRoutes(releasingBlocklist: true)
         let left = rm.uniqueRouteCount
         let removed = max(0, before - left)
         var message = "removed \(removed) route\(removed == 1 ? "" : "s")"
