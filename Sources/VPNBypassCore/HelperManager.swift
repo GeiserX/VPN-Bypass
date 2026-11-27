@@ -96,12 +96,15 @@ final class HelperManager: ObservableObject {
     /// What a new helper process does not have that the old one had, put back once it answers:
     /// the wildcard list (it starts with no resolver files and no forwarder) and the DNS Lookups
     /// capture when the page is on, then per-app routing's scoped default route (a new helper
-    /// removes it at start, R12). Kernel routes, VPN Only blocks and `/etc/hosts` outlive the
+    /// removes it at start, R12), and the blocklist section of `/etc/hosts`, which the old helper
+    /// removed as it stopped. Kernel routes, VPN Only blocks and the pinned names outlive the
     /// helper; the routes are applied again only to put back a batch the old helper dropped as
     /// it stopped. A helper that crashed and was started again by launchd is noticed by the
     /// wildcard and capture drains instead (`running` false), which do the same for their part.
     func restoreAfterHelperRestart(reapplyRoutes: Bool) async {
         RouteManager.shared.wildcards.helperRestarted()
+        // A stopping helper removes the blocklist section from /etc/hosts: send it again.
+        RouteManager.shared.resendBlockedHosts()
         // Routes first: a capture start on a slow helper can take its full deadline, and the
         // routes must not wait for it.
         if reapplyRoutes { await reapplyRoutesAfterUpdate() }
@@ -1248,7 +1251,10 @@ let timeout = xpcTimeout + Double(routes.count) * 0.6
             }
 
             helper.updateHostsFile(entries: dictEntries) { success, error in
-                if success {
+                if success && error == HelperConstants.hostsUnchanged {
+                    // Nothing was written (helper 2.11.0 and later), so there is nothing to flush.
+                    once.complete((true, nil))
+                } else if success {
                     helper.flushDNSCache { _ in
                         once.complete((true, nil))
                     }

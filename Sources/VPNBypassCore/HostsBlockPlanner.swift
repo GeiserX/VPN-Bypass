@@ -119,12 +119,20 @@ enum HostsBlockPlanner {
         return out
     }
 
-    /// The hosts the app downloads from, which no list may block: every list rule's own host and the
-    /// GeoIP and GeoSite sources in use. Blocking one would stop the next update that could undo it.
+    /// The hosts GitHub sends the app's downloads on to: a release asset (the GeoIP and GeoSite files,
+    /// the app's own updates) redirects from github.com to one of these, and the preset list is on raw.
+    static let downloadRedirectHosts: Set<String> = [
+        "github.com", "raw.githubusercontent.com", "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+    ]
+
+    /// The hosts the app downloads from, which no list may block: every list rule's own host, the
+    /// GeoIP and GeoSite sources in use, and the hosts GitHub redirects those downloads to. Blocking
+    /// one would stop the next update that could undo it.
     static func protectedHosts(_ config: Config) -> Set<String> {
         var hosts = Set(config.rules.filter { $0.matchType == .list }.compactMap {
             ListStore.source(from: $0.pattern)?.host?.lowercased()
-        })
+        }).union(downloadRedirectHosts)
         for kind in GeoKind.allCases {
             let address = kind == .ip ? config.geoipSourceURL : config.geositeSourceURL
             if let host = GeoDataStore.source(from: address, kind: kind)?.host?.lowercased() { hosts.insert(host) }

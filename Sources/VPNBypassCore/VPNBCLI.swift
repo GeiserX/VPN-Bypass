@@ -143,6 +143,11 @@ public enum VPNBCLI {
                     var line = "\(rule.order)  \(rule.id)  \(rule.matchType.rawValue):\(rule.pattern) -> \(rule.routeId)  \(state)"
                     if rule.servedBy == RuleServedBy.none { line += "  " + ProcessRule.inactiveNote(reason: rule.inactiveReason) }
                     if rule.servedBy == .perAppEngine { line += "  served by per-app routing" }
+                    if let listState = rule.listState {
+                        line += "  list \(listState)"
+                        if let names = rule.listNames, listState == "blocked" || listState == "refused" { line += " (\(names) names)" }
+                        if let error = rule.listError { line += ": \(error)" }
+                    }
                     out.append(line)
                 }
             }

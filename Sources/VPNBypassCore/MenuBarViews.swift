@@ -407,7 +407,7 @@ struct MenuContent: View {
         // and disconnected alike, from the ⋯ menu in the footer.
         .alert(removeAllCopy.title, isPresented: $confirmingRemoveAll) {
             Button(String(localized: "Remove Routes"), role: .destructive) {
-                Task { await routeManager.removeAllRoutes() }
+                Task { await routeManager.removeAllRoutes(releasingBlocklist: true) }
             }
             Button(String(localized: "Cancel"), role: .cancel) {}
                 .keyboardShortcut(.defaultAction)

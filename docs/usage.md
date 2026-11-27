@@ -136,6 +136,7 @@ vpnb route.add name=Block type=block                    # a blackhole: names sen
 vpnb rule.add match=suffix pattern=example.com routeId=<uuid>
 vpnb rule.add match=geoip pattern=ir routeId=<uuid>   # a country's IPv4 ranges (downloads the list)
 vpnb rule.add match=geosite pattern=category-games routeId=<uuid>   # a domain list, as wildcards and names
+vpnb rule.add match=list pattern=https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts routeId=<block uuid>   # a hosts-format list, exact names in /etc/hosts
 vpnb route.list ; vpnb rule.list
 ```
 

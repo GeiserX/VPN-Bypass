@@ -31,6 +31,17 @@ xattr -cr /Applications/VPN\ Bypass.app
 
 The app will prompt for admin password when modifying `/etc/hosts`. If you deny, disable this feature in Settings → General.
 
+## Blocked names stay blocked after VPN Bypass is gone
+
+A list rule on the Block route writes its names into their own section of `/etc/hosts`. The section stays while the app is closed, and goes when the list rule is deleted or turned off, when Pin listed names in /etc/hosts is turned off, on Remove All Routes, and when the helper stops (`sudo launchctl bootout system/com.geiserx.vpnbypass.helper`). If the helper files were deleted without stopping it first, the section is left behind. Remove it by hand: open `/etc/hosts` as an administrator (`sudo nano /etc/hosts`) and delete these two lines and every line between them:
+
+```text
+# VPN-BYPASS-BLOCKLIST - START
+# VPN-BYPASS-BLOCKLIST - END
+```
+
+Every write to `/etc/hosts` makes every lookup on the Mac wait while macOS reads the file again, a few seconds with a large section, so expect one pause when you save.
+
 ## DNS still going through VPN
 
 Some VPNs force DNS through the tunnel. The hosts file entries help bypass this, but you may also need to:

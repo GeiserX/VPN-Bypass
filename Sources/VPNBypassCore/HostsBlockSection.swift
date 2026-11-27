@@ -267,3 +267,61 @@ enum HostsBlockSection {
         return false
     }
 }
+
+/// The pinned-name section (`HelperConstants.hostMarkerStart`): the text work of the helper's pin
+/// writer, pure so the app's tests can run it. Shared with the helper as `HostsBlockSection` is.
+enum HostsPinSection {
+
+    /// `content` with the pinned section replaced by `entries` (`ip name` lines), or without it when
+    /// no entry is left; nil when that is the text `content` already is, so the helper writes
+    /// nothing and flushes nothing. `isValid(domain, ip)` keeps an entry. A name another line maps
+    /// is skipped as another tool's; a blocklist row is not one, and goes for the name pinned in
+    /// the same write (`HostsBlockSection.removingNames`), so a pin wins over a block.
+    static func rewritten(_ content: String, entries: [(domain: String, ip: String)],
+                          isValid: (String, String) -> Bool) -> String? {
+        // Remove the existing pinned section
+        var lines = content.components(separatedBy: "\n")
+        var inSection = false
+        lines = lines.filter { line in
+            if line.contains(HelperConstants.hostMarkerStart) {
+                inSection = true
+                return false
+            }
+            if line.contains(HelperConstants.hostMarkerEnd) {
+                inSection = false
+                return false
+            }
+            return !inSection
+        }
+        while lines.last?.isEmpty == true {
+            lines.removeLast()
+        }
+
+        // Names managed by other tools (outside our sections). The blocklist section is ours too:
+        // its names are not another tool's, and it can hold 200,000 lines.
+        let externalDomains = HostsBlockSection.namesManagedElsewhere(lines)
+
+        var managedEntries: [String] = []
+        var pinnedNames = Set<String>()
+        for entry in entries where isValid(entry.domain, entry.ip) {
+            if externalDomains.contains(entry.domain.lowercased()) { continue }
+            managedEntries.append("\(entry.ip) \(entry.domain)")
+            pinnedNames.insert(entry.domain.lowercased())
+        }
+        if !managedEntries.isEmpty {
+            // A pin wins over a block. A name with a blocklist row and a pinned row gets both
+            // addresses from the resolver, so the blocklist row goes in this same write.
+            lines = HostsBlockSection.removingNames(pinnedNames, from: lines)
+            while lines.last?.isEmpty == true {
+                lines.removeLast()
+            }
+            lines.append("")
+            lines.append(HelperConstants.hostMarkerStart)
+            lines.append(contentsOf: managedEntries)
+            lines.append(HelperConstants.hostMarkerEnd)
+        }
+
+        let updated = lines.joined(separator: "\n") + "\n"
+        return updated == content ? nil : updated
+    }
+}

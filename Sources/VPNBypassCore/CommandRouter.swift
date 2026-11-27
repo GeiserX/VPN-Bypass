@@ -207,6 +207,14 @@ public struct SanitizedRule: Codable, Equatable, Sendable {
     /// With `servedBy` `none`: why, as a code (`perAppRoutingNotAvailable`). A string, so a later
     /// reason still decodes in an older `vpnb`.
     public var inactiveReason: String? = nil
+    /// A `list` rule only: the names it blocks now (names a list above it holds are not counted).
+    public var listNames: Int? = nil
+    /// A `list` rule only: `blocked`, `downloading`, `noCopy`, `refused`, `pinningOff`,
+    /// `notBlockRoute`, `routeOff`, `notCustomMode` or `off` (`ListRuleState.Kind`). A string, so
+    /// a later state still decodes in an older `vpnb`.
+    public var listState: String? = nil
+    /// A `list` rule only: why it blocks nothing, or why its last download or write failed.
+    public var listError: String? = nil
 
     init(_ rule: Rule, engine: FlowEngineState = .unavailable(.notInThisBuild), routes: [Route]? = nil,
          customEngine: Bool = true, turnedDown: Bool = false) {
@@ -235,6 +243,18 @@ public struct SanitizedRule: Codable, Equatable, Sendable {
         order = try c.decode(Int.self, forKey: .order)
         servedBy = RuleServedBy.lenient(c, forKey: .servedBy)
         inactiveReason = try c.decodeIfPresent(String.self, forKey: .inactiveReason)
+        listNames = try c.decodeIfPresent(Int.self, forKey: .listNames)
+        listState = try c.decodeIfPresent(String.self, forKey: .listState)
+        listError = try c.decodeIfPresent(String.self, forKey: .listError)
+    }
+
+    /// With a list rule's state filled in (the router cannot see the downloaded lists).
+    func withList(_ state: ListRuleState) -> SanitizedRule {
+        var copy = self
+        copy.listNames = state.names
+        copy.listState = state.kind.rawValue
+        copy.listError = state.error
+        return copy
     }
 }
 
@@ -455,10 +475,6 @@ enum CommandRouter {
               matchType != .unsupported else {
             return errorResponse(config, code: "invalid_args", message: "match must be a valid match type")
         }
-        // Nothing serves a hosts-list rule yet (the parser and store come first), so none is added.
-        guard matchType != .list else {
-            return errorResponse(config, code: "invalid_args", message: "list rules are not served yet")
-        }
         guard let pattern = request.args?["pattern"], !pattern.isEmpty else {
             return errorResponse(config, code: "invalid_args", message: "pattern is required")
         }
@@ -493,6 +509,15 @@ enum CommandRouter {
                                      message: "geosite pattern must be a list name such as steam or category-games@cn")
             }
             geoipCode = name
+        }
+        // A list rule names a hosts-format list by its https address; the list is downloaded when the
+        // app next needs it (RouteManager.refreshBlocklistsIfNeeded), and blocks only on the Block route.
+        if matchType == .list {
+            guard let source = ListStore.source(from: pattern) else {
+                return errorResponse(config, code: "invalid_args",
+                                     message: "list pattern must be the https address of a hosts-format list")
+            }
+            geoipCode = source.absoluteString
         }
         // A process rule names an app (design doc 3.4): a bundle id or an executable's name, never
         // a path or a wildcard, which the per-app engine could never match.
