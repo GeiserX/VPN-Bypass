@@ -114,7 +114,8 @@ final class HostsBlocklistTests: XCTestCase {
         rm.updateHostsFileOverrideForTests = { [unowned self] in self.helper.pin($0) }
         rm.hostsFileOverrideForTests = { [unowned self] in self.helper.file }
         rm.sentBlockedHosts = nil
-        rm.pinnedHostNames = []
+        rm.pinnedHostAddresses = [:]
+        rm.pinnedHostAddressesSeeded = false
         rm.blockedHostsError = nil
     }
 
@@ -128,8 +129,12 @@ final class HostsBlocklistTests: XCTestCase {
         rm.setBlockedHostsOverrideForTests = nil
         rm.updateHostsFileOverrideForTests = nil
         rm.hostsFileOverrideForTests = nil
+        rm.detectVPNInterfaceOverrideForTests = nil
+        rm.setDNSCacheForTests([:])
+        rm.isConfigLoadFailed = false
+        GeoDataStore.autoUpdate = false
         rm.sentBlockedHosts = nil
-        rm.pinnedHostNames = []
+        rm.pinnedHostAddresses = [:]
         rm.blockedHostsError = nil
         rm.hostsBlockPlan = HostsBlockPlanner.Plan()
         rm.activeRoutes = []
@@ -237,6 +242,44 @@ final class HostsBlocklistTests: XCTestCase {
         XCTAssertFalse(helper.hasSection)
     }
 
+    /// The launch itself sends the set once, VPN or not, and the helper writes nothing when the
+    /// file already holds it: the startup routine, not a sync called by hand.
+    func testTheLaunchRoutineSendsTheSetOnceAndWritesNothing() async {
+        await blockOnce()
+        rm.sentBlockedHosts = nil          // a new process knows nothing
+        // A secret already saved, as on any Mac after the first launch: minting one saves the
+        // config, and that save syncs too, which would hide a launch that never asks.
+        rm.config.localProxySecret = "launch-test-secret"
+        rm.detectVPNInterfaceOverrideForTests = { (false, nil, nil) }
+        await rm.detectAndApplyRoutesAsync()
+        await rm.waitForBlockedHostsSync()
+        XCTAssertEqual(helper.blockedCalls.count, 2, "the launch did not ask the helper")
+        XCTAssertEqual(helper.writes, 1, "the launch wrote /etc/hosts")
+        XCTAssertEqual(rm.sentBlockedHosts, ["ads.example.com", "pin.example.com", "track.example.net"])
+    }
+
+    /// A config that failed to load shows no rule, so a section left behind would be a block
+    /// nobody can explain from the app: the latch removes it, as it removes routes.
+    func testAConfigThatFailedToLoadRemovesTheSection() async {
+        await blockOnce()
+        rm.sentBlockedHosts = nil
+        rm.isConfigLoadFailed = true
+        HelperManager.shared.helperState = .missing      // no startup sweep of the real route table
+        await rm.detectAndApplyRoutesAsync()
+        XCTAssertFalse(helper.hasSection, "the section stayed with no rule to explain it")
+    }
+
+    /// The same names in another order (two overlapping lists swapped, or a refresh that moved
+    /// names around) block the same names: no call, no write.
+    func testTheSameSetInAnotherOrderWritesNothing() async throws {
+        await blockOnce()
+        try await storeCopy(["track.example.net", "ads.example.com", "pin.example.com"])
+        await rm.updateBlocklist(from: URL(string: source)!)
+        await rm.waitForBlockedHostsSync()
+        XCTAssertEqual(helper.blockedCalls.count, 1, "a reordered set reached the helper")
+        XCTAssertEqual(helper.writes, 1)
+    }
+
     // MARK: - What keeps the section
 
     /// The quit removes the pins, one of them a blocked name, and still sends nothing: the row the
@@ -317,6 +360,57 @@ final class HostsBlocklistTests: XCTestCase {
         XCTAssertFalse(helper.hasSection)
     }
 
+    /// vpnb routes.clear is Remove All Routes: it takes the section out.
+    func testRoutesClearRemovesTheSection() async {
+        await blockOnce()
+        let response = await ControlSurface.handle(ControlRequest(cmd: "routes.clear"))
+        XCTAssertTrue(response.ok)
+        XCTAssertFalse(helper.hasSection, "routes.clear left the blocklist in /etc/hosts")
+    }
+
+    /// An import that brings a list rule syncs the section.
+    func testAnImportWithAListRuleSendsTheSet() async throws {
+        let url = try XCTUnwrap(rm.exportConfig())
+        defer { try? FileManager.default.removeItem(at: url) }
+        rm.config.rules.removeAll { $0.matchType == .list }
+        rm.sentBlockedHosts = []
+        XCTAssertTrue(rm.importConfig(from: url))
+        await rm.waitForBlockedHostsSync()
+        await rm.cancelConfigFollowUps()
+        XCTAssertEqual(helper.blockedCalls.count, 1, "the import did not send the list's names")
+        XCTAssertTrue(helper.hasSection)
+    }
+
+    /// Lists are downloaded on the GeoIP and GeoSite schedule.
+    func testTheGeoScheduleRefreshesADueList() async {
+        var fetches = 0
+        let body = Data("0.0.0.0 ads.example.com\n0.0.0.0 pin.example.com\n0.0.0.0 track.example.net\n".utf8)
+        store.fetch = { _ in
+            fetches += 1
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("dl-\(UUID().uuidString)")
+            try body.write(to: file)
+            return file
+        }
+        GeoDataStore.autoUpdate = true
+        rm.refreshGeoDataIfNeeded(now: Date().addingTimeInterval(400 * 86_400))
+        GeoDataStore.autoUpdate = false
+        var waited = 0
+        while (fetches == 0 || !store.updating.isEmpty) && waited < 200 {
+            try? await Task.sleep(nanoseconds: 10_000_000); waited += 1
+        }
+        XCTAssertEqual(fetches, 1, "the geo sync schedule did not refresh the due list")
+        await rm.waitForBlockedHostsSync()
+    }
+
+    /// vpnb rule.list fills a list rule's count, state and error.
+    func testRuleListFillsTheListFields() async throws {
+        let response = await ControlSurface.handle(ControlRequest(cmd: "rule.list"))
+        let rule = try XCTUnwrap(response.result?.rules?.first { $0.matchType == .list })
+        XCTAssertEqual(rule.listState, "blocked")
+        XCTAssertEqual(rule.listNames, 3)
+        XCTAssertNil(rule.listError)
+    }
+
     // MARK: - What sends it again
 
     /// A stopping helper removes the section; the restart puts it back.
@@ -341,6 +435,94 @@ final class HostsBlocklistTests: XCTestCase {
         await rm.waitForBlockedHostsSync()
         XCTAssertEqual(helper.blockedCalls.count, 2)
         XCTAssertTrue(helper.blockedNames.contains("pin.example.com"), "the name is blocked again")
+    }
+
+    /// A pin whose address is still routed keeps it when a lookup puts another routed address of
+    /// the name first (round robin, or another resolver answering first): no write.
+    func testARotatedAnswerKeepsThePinnedAddress() async {
+        await blockOnce()
+        let now = Date()
+        rm.activeRoutes = [
+            .init(destination: "203.0.113.5", gateway: "192.168.1.1", source: "cdn.example.com", timestamp: now),
+            .init(destination: "203.0.113.6", gateway: "192.168.1.1", source: "cdn.example.com", timestamp: now),
+        ]
+        rm.setDNSCacheForTests(["cdn.example.com": "203.0.113.5"])
+        await rm.updateHostsFileForTests()
+        XCTAssertEqual(helper.writes, 2)
+        XCTAssertTrue(helper.file.contains("203.0.113.5 cdn.example.com"))
+
+        rm.setDNSCacheForTests(["cdn.example.com": "203.0.113.6"])
+        await rm.updateHostsFileForTests()
+        XCTAssertEqual(helper.writes, 2, "a rotated answer rewrote /etc/hosts")
+        XCTAssertTrue(helper.file.contains("203.0.113.5 cdn.example.com"))
+
+        // The pinned address lost its route: the pin follows the one still routed.
+        rm.activeRoutes.removeFirst()
+        await rm.updateHostsFileForTests()
+        XCTAssertEqual(helper.writes, 3)
+        XCTAssertTrue(helper.file.contains("203.0.113.6 cdn.example.com"))
+    }
+
+    /// A relaunch: the pins in /etc/hosts are read before the first pin write, so a rotated answer
+    /// for a name whose pinned address is still routed writes nothing.
+    func testTheFirstPinWriteAfterALaunchKeepsTheAddressInTheFile() async {
+        helper.file = "127.0.0.1 localhost\n\n\(HelperConstants.hostMarkerStart)\n203.0.113.5 cdn.example.com\n\(HelperConstants.hostMarkerEnd)\n"
+        await blockOnce()
+        let writes = helper.writes
+        let now = Date()
+        rm.activeRoutes = [
+            .init(destination: "203.0.113.5", gateway: "192.168.1.1", source: "cdn.example.com", timestamp: now),
+            .init(destination: "203.0.113.6", gateway: "192.168.1.1", source: "cdn.example.com", timestamp: now),
+        ]
+        rm.setDNSCacheForTests(["cdn.example.com": "203.0.113.6"])
+        await rm.updateHostsFileForTests()
+        XCTAssertEqual(helper.writes, writes, "the first pin write after a launch rewrote /etc/hosts")
+        XCTAssertTrue(helper.file.contains("203.0.113.5 cdn.example.com"))
+        XCTAssertEqual(HostsPinSection.pinnedAddresses(in: helper.file), ["cdn.example.com": "203.0.113.5"])
+    }
+
+    /// Pins first, then the section (the first list, a boot, Remove All and back): the next write
+    /// of the same pins writes nothing.
+    func testTheSamePinsAfterTheSectionCameWriteNothing() async {
+        await rm.modifyHostsFile(entries: [("p.example.com", "192.0.2.1")])
+        XCTAssertEqual(helper.writes, 1)
+        await blockOnce()
+        XCTAssertEqual(helper.writes, 2)
+        await rm.modifyHostsFile(entries: [("p.example.com", "192.0.2.1")])
+        XCTAssertEqual(helper.writes, 2, "the same pins moved their section and rewrote /etc/hosts")
+    }
+
+    /// Removing and adding the section again while pins are in the file leaves no extra blank line.
+    func testRemovingAndAddingTheSectionAgainKeepsTheFileTheSameSize() throws {
+        let pins = [(domain: "p.example.com", ip: "192.0.2.1")]
+        var file = try XCTUnwrap(HostsPinSection.rewritten("127.0.0.1 localhost\n", entries: pins, isValid: { _, _ in true }))
+        file = try XCTUnwrap(HostsBlockSection.rewritten(file, names: ["ads.example.com"]))
+        XCTAssertNil(HostsPinSection.rewritten(file, entries: pins, isValid: { _, _ in true }),
+                     "the same pins after the section was added rewrote the file")
+        let size = file.components(separatedBy: "\n").count
+        for _ in 0..<3 {
+            file = try XCTUnwrap(HostsBlockSection.rewritten(file, names: []))
+            file = HostsPinSection.rewritten(file, entries: pins, isValid: { _, _ in true }) ?? file
+            file = try XCTUnwrap(HostsBlockSection.rewritten(file, names: ["ads.example.com"]))
+            file = HostsPinSection.rewritten(file, entries: pins, isValid: { _, _ in true }) ?? file
+        }
+        XCTAssertEqual(file.components(separatedBy: "\n").count, size, file)
+        XCTAssertFalse(file.contains("\n\n\n"), file)
+    }
+
+    /// The blank lines an older pin writer piled up in front of the section go with it; one
+    /// blank line stays before the lines that came after it.
+    func testRemovingTheSectionTakesEveryBlankLineBeforeIt() throws {
+        let piled = "127.0.0.1 localhost\n\n\n\n\(HostsBlockSection.startMarker)\n0.0.0.0 ads.example.com\n"
+            + "\(HostsBlockSection.endMarker)\n192.0.2.9 after.example.com\n"
+        XCTAssertEqual(try HostsBlockSection.rewritten(piled, names: []), "127.0.0.1 localhost\n\n192.0.2.9 after.example.com\n")
+    }
+
+    /// The pin writer's "unchanged" reply skips the cache flush; any other success flushes, the
+    /// mode-only fix among them (the resolver was ignoring the file).
+    func testOnlyAnUnchangedReplySkipsTheFlush() {
+        XCTAssertFalse(HelperManager.hostsUpdateNeedsFlush(error: HelperConstants.hostsUnchanged))
+        XCTAssertTrue(HelperManager.hostsUpdateNeedsFlush(error: nil))
     }
 
     // MARK: - What the set holds
@@ -402,7 +584,16 @@ final class ListRuleStateTests: XCTestCase {
 
         let failedRefresh = state(withDate, status: ListStatus(names: 5, updated: nil, checked: Date(), error: "This is not a hosts file."))
         XCTAssertEqual(failedRefresh.line(), "5 names blocked\nLast try failed: This is not a hosts file.")
+        // A failed send while an earlier set is still in the file: those names stay blocked.
         XCTAssertEqual(state(withDate, helperError: "helper stopping").line(), "5 names blocked\nLast try failed: helper stopping")
+        // The helper never confirmed a set: nothing is blocked, and the row says so.
+        let never = ListRuleState(rule: rule, plan: withDate, manageHostsFile: true, downloading: false, status: nil,
+                                  helperError: "The helper is not running.", helperHoldsNames: false)
+        XCTAssertEqual(never.kind, .notBlocked)
+        XCTAssertEqual(never.line(), "Not blocked: The helper is not running.")
+        XCTAssertEqual(ListRuleState(rule: rule, plan: withDate, manageHostsFile: true, downloading: false, status: nil,
+                                     helperError: nil, helperHoldsNames: false).kind, .blocked,
+                       "with no failure the set is about to be sent")
 
         XCTAssertEqual(state(withDate, pinning: false).kind, .pinningOff)
         XCTAssertEqual(state(withDate, pinning: false).line(),
@@ -440,7 +631,7 @@ final class ListRuleStateTests: XCTestCase {
         XCTAssertTrue(text.contains("not their subdomains"))
         XCTAssertTrue(text.contains("secure DNS"))
         XCTAssertTrue(text.contains("waits a few seconds"))
-        XCTAssertTrue(text.contains("stay while VPN Bypass is closed"))
+        XCTAssertTrue(text.contains("stay while VPN Bypass is closed, until the Mac restarts"))
         XCTAssertTrue(text.contains("above the list"))
         XCTAssertTrue(HostsListFootnote.measurementURL.absoluteString.hasSuffix("docs/research/hosts-scale.md"))
         XCTAssertEqual(HostsListPreset.name(for: HostsListPreset.stevenBlackURL), "StevenBlack's unified hosts list")
@@ -461,20 +652,20 @@ final class ListRuleStateTests: XCTestCase {
         "It holds %lld names, over the limit of %lld.", "Its %lld names would take all lists past the limit of %lld.",
         "Off.", "A list blocks names only on the Block route.", "Its route is off, so this list blocks nothing.",
         "Lists block names only in Custom mode.", "Downloading…", "Not downloaded yet.", "Not downloaded: %@",
-        "Not blocked. %@", "Blocks nothing while Pin listed names in /etc/hosts is off (General).",
+        "Not blocked. %@", "Not blocked: %@", "Blocks nothing while Pin listed names in /etc/hosts is off (General).",
         "1 name blocked", "%lld names blocked", "%@, updated %@", "Last try failed: %@",
         "StevenBlack's unified hosts list", "A list blocks exactly the names in it, not their subdomains.",
         "A browser that uses its own secure DNS may skip it.",
         "Each time a list or a pinned address changes, every lookup on this Mac waits a few seconds.",
-        "The blocks stay while VPN Bypass is closed.", "To unblock a name, add a rule for it above the list.",
+        "The blocks stay while VPN Bypass is closed, until the Mac restarts; they come back when it opens.", "To unblock a name, add a rule for it above the list.",
         "How the wait was measured", "Another list by its address", "The list's https address",
         "A hosts-format list (0.0.0.0 name per line). Adblock and wildcard lists are refused.",
         "Enter the https address of a hosts-format list.", "Add List…", "Block the names of a hosts-format list",
         "List",
     ]
 
-    func testEveryNewLineIsInSpanishAndFrench() throws {
-        for language in ["es", "fr"] {
+    func testEveryNewLineIsInEnglishSpanishAndFrench() throws {
+        for language in ["en", "es", "fr"] {
             let bundle = try lproj(language)
             for key in Self.keys {
                 let value = bundle.localizedString(forKey: key, value: "\u{0}MISSING", table: nil)

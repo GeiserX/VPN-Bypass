@@ -1291,7 +1291,7 @@ struct RuleEditorSheet: View {
             } else if matchType == .geosite {
                 GeoListField(kind: .site, pattern: $pattern)
             } else if matchType == .list {
-                HostsListField(pattern: $pattern)
+                HostsListField(pattern: $pattern, bundle: bundle)
             } else if matchType == .process {
                 SheetField(String(localized: "App"), required: true) {
                     HStack(spacing: Theme.Space.s) {

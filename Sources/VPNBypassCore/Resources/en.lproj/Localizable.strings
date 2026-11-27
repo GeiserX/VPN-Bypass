@@ -1266,3 +1266,36 @@
 "The server answered HTTP %lld, not the list." = "The server answered HTTP %lld, not the list.";
 "The list holds no names to block." = "The list holds no names to block.";
 "The new copy has %lld names, under half of the %lld in use, so the copy in use is kept." = "The new copy has %lld names, under half of the %lld in use, so the copy in use is kept.";
+
+/* ===== Hosts lists on the Block route ===== */
+"The helper is not running." = "The helper is not running.";
+"The helper did not answer." = "The helper did not answer.";
+"It holds %lld names, over the limit of %lld." = "It holds %lld names, over the limit of %lld.";
+"Its %lld names would take all lists past the limit of %lld." = "Its %lld names would take all lists past the limit of %lld.";
+"Off." = "Off.";
+"A list blocks names only on the Block route." = "A list blocks names only on the Block route.";
+"Its route is off, so this list blocks nothing." = "Its route is off, so this list blocks nothing.";
+"Lists block names only in Custom mode." = "Lists block names only in Custom mode.";
+"Downloading…" = "Downloading…";
+"Not downloaded yet." = "Not downloaded yet.";
+"Not downloaded: %@" = "Not downloaded: %@";
+"Not blocked. %@" = "Not blocked. %@";
+"Not blocked: %@" = "Not blocked: %@";
+"Blocks nothing while Pin listed names in /etc/hosts is off (General)." = "Blocks nothing while Pin listed names in /etc/hosts is off (General).";
+"1 name blocked" = "1 name blocked";
+"%lld names blocked" = "%lld names blocked";
+"%@, updated %@" = "%@, updated %@";
+"Last try failed: %@" = "Last try failed: %@";
+"StevenBlack's unified hosts list" = "StevenBlack's unified hosts list";
+"A list blocks exactly the names in it, not their subdomains." = "A list blocks exactly the names in it, not their subdomains.";
+"A browser that uses its own secure DNS may skip it." = "A browser that uses its own secure DNS may skip it.";
+"Each time a list or a pinned address changes, every lookup on this Mac waits a few seconds." = "Each time a list or a pinned address changes, every lookup on this Mac waits a few seconds.";
+"The blocks stay while VPN Bypass is closed, until the Mac restarts; they come back when it opens." = "The blocks stay while VPN Bypass is closed, until the Mac restarts; they come back when it opens.";
+"To unblock a name, add a rule for it above the list." = "To unblock a name, add a rule for it above the list.";
+"How the wait was measured" = "How the wait was measured";
+"Another list by its address" = "Another list by its address";
+"The list's https address" = "The list's https address";
+"A hosts-format list (0.0.0.0 name per line). Adblock and wildcard lists are refused." = "A hosts-format list (0.0.0.0 name per line). Adblock and wildcard lists are refused.";
+"Enter the https address of a hosts-format list." = "Enter the https address of a hosts-format list.";
+"Add List…" = "Add List…";
+"Block the names of a hosts-format list" = "Block the names of a hosts-format list";

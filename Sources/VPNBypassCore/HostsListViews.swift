@@ -27,7 +27,7 @@ struct HostsListFootnote: View {
             String(localized: "A list blocks exactly the names in it, not their subdomains.", bundle: bundle),
             String(localized: "A browser that uses its own secure DNS may skip it.", bundle: bundle),
             String(localized: "Each time a list or a pinned address changes, every lookup on this Mac waits a few seconds.", bundle: bundle),
-            String(localized: "The blocks stay while VPN Bypass is closed.", bundle: bundle),
+            String(localized: "The blocks stay while VPN Bypass is closed, until the Mac restarts; they come back when it opens.", bundle: bundle),
             String(localized: "To unblock a name, add a rule for it above the list.", bundle: bundle),
         ].joined(separator: " ")
     }
@@ -47,6 +47,9 @@ struct HostsListFootnote: View {
 /// The rule editor's field for a list: the preset, or an https address typed in.
 struct HostsListField: View {
     @Binding var pattern: String
+    /// Where the menu's and the note's texts come from: the app's catalog, or one language's in the
+    /// sheet width tests.
+    var bundle: Bundle = .main
 
     private enum Choice: Hashable { case preset, custom }
 
@@ -58,11 +61,11 @@ struct HostsListField: View {
     }
 
     var body: some View {
-        SheetField(String(localized: "List"), required: true) {
+        SheetField(String(localized: "List", bundle: bundle), required: true) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Picker(String(localized: "List"), selection: choice) {
-                    Text("StevenBlack's unified hosts list").tag(Choice.preset)
-                    Text("Another list by its address").tag(Choice.custom)
+                Picker(String(localized: "List", bundle: bundle), selection: choice) {
+                    Text(String(localized: "StevenBlack's unified hosts list", bundle: bundle)).tag(Choice.preset)
+                    Text(String(localized: "Another list by its address", bundle: bundle)).tag(Choice.custom)
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
@@ -71,9 +74,9 @@ struct HostsListField: View {
                     TextField("https://example.com/hosts" as String, text: $pattern)
                         .textFieldStyle(.roundedBorder)
                         .font(Theme.Font.body)
-                        .accessibilityLabel(String(localized: "The list's https address"))
+                        .accessibilityLabel(String(localized: "The list's https address", bundle: bundle))
                 }
-                Text("A hosts-format list (0.0.0.0 name per line). Adblock and wildcard lists are refused.")
+                Text(String(localized: "A hosts-format list (0.0.0.0 name per line). Adblock and wildcard lists are refused.", bundle: bundle))
                     .font(Theme.Font.detail)
                     .foregroundColor(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

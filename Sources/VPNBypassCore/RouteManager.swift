@@ -56,7 +56,7 @@ final class RouteManager: ObservableObject {
     var droppedBlockRoutes: [Route] = []
     /// The retry waiting after a failed list download, by list (GeoDataStore.swift).
     var geoRetryTasks: [GeoKind: Task<Void, Never>] = [:]
-    /// The blocklist names the helper last confirmed in its /etc/hosts section, in the order sent;
+    /// The blocklist names the helper last confirmed in its /etc/hosts section, sorted;
     /// nil when not known (at launch, after a helper restart, after a pin of one of them went).
     /// The next sync sends the set when it differs, or when this is nil (HostsBlocklist.swift).
     var sentBlockedHosts: [String]?
@@ -69,8 +69,12 @@ final class RouteManager: ObservableObject {
     var blockedHostsSyncAgain = false
     /// Bumped when what the helper holds is no longer known (`resendBlockedHosts`).
     var blockedHostsGeneration = 0
-    /// The names the last pinned-name write held, so a pin that goes can give its blocklist row back.
-    var pinnedHostNames: Set<String> = []
+    /// The pins the last pinned-name write held, lowercase name to address: a pin that goes gives
+    /// its blocklist row back, and a pin whose address is still routed keeps that address, so a
+    /// resolver that answers the same addresses in another order does not rewrite /etc/hosts.
+    var pinnedHostAddresses: [String: String] = [:]
+    /// Whether `pinnedHostAddresses` was read from /etc/hosts this launch (HostsBlocklist.swift).
+    var pinnedHostAddressesSeeded = false
     /// The retry waiting after a failed blocklist download.
     var blocklistRetryTask: Task<Void, Never>?
     /// The stored lists the planner reads, and their downloads. Replaced in tests.
@@ -2299,6 +2303,9 @@ final class RouteManager: ObservableObject {
             if HelperManager.shared.isHelperInstalled {
                 await startupSweepIfNeeded(desired: [])
             }
+            // The blocklist section too: with no rule to show, up to 100,000 blocked names would
+            // be a block nobody can explain from the app.
+            await removeBlockedHosts(reason: "config failed to load")
             return
         }
         isLoading = true
@@ -6726,6 +6733,7 @@ final class RouteManager: ObservableObject {
         // Checks all cached IPs (not just first) to find a routed one.
         let routedDestinations = Set(activeRoutes.map { $0.destination })
         var entries: [(domain: String, ip: String)] = []
+        seedPinnedHostAddressesIfNeeded()
 
         let activeDomains: [DomainEntry] = config.routingMode == .vpnOnly ? config.inverseDomains : config.domains
 
@@ -6799,6 +6807,13 @@ final class RouteManager: ObservableObject {
 
     /// Find the first cached IP for a domain that has a confirmed kernel route
     private func firstRoutedIP(for domain: String, in routedDestinations: Set<String>) -> String? {
+        // The address pinned now, while it is still routed. A round-robin name, or the first of
+        // several resolvers to answer, puts another of its routed addresses first in the cache on
+        // each lookup; following it would rewrite /etc/hosts, and with a blocklist section in the
+        // file every write stalls every lookup on the Mac for seconds.
+        if let pinned = pinnedHostAddresses[domain.lowercased()], routedDestinations.contains(pinned) {
+            return pinned
+        }
         // Check memory cache first
         if let cachedIP = dnsCache[domain], routedDestinations.contains(cachedIP) {
             return cachedIP
@@ -6836,6 +6851,17 @@ final class RouteManager: ObservableObject {
     /// Sets the persistent DNS cache the startup and Resume applies read, without disk.
     func setDNSDiskCacheForTests(_ cache: [String: [String]]) {
         dnsDiskCache = cache
+    }
+
+    /// Sets the in-memory first-address cache the pin writer reads, as a DNS refresh leaves it.
+    func setDNSCacheForTests(_ cache: [String: String]) {
+        dnsCache = cache
+    }
+
+    /// The pinned-name write a DNS refresh or an apply runs, for the tests.
+    @discardableResult
+    func updateHostsFileForTests() async -> Bool {
+        await updateHostsFile()
     }
 
     /// Waits for the background DNS refresh a startup or a Resume started, so none outlives a test.
@@ -6932,7 +6958,7 @@ final class RouteManager: ObservableObject {
         if !result.success {
             log(.error, "Helper hosts update failed: \(result.error ?? "unknown")")
         } else {
-            pinnedHostsChanged(to: Set(entries.map { $0.domain.lowercased() }))
+            pinnedHostsChanged(to: Dictionary(entries.map { ($0.domain.lowercased(), $0.ip) }, uniquingKeysWith: { first, _ in first }))
         }
         return result.success
     }

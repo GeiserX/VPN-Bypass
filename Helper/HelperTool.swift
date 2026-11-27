@@ -486,6 +486,8 @@ class HelperTool: NSObject, HelperProtocol {
     /// The reply for a hosts update that found the file already saying it: nothing written and
     /// nothing to flush (`HelperConstants.hostsUnchanged` tells the app to skip its flush). The
     /// mode is still put right, as a write would: a file the resolver cannot read is ignored whole.
+    /// When it had to be put right the reply is a plain success, so the caches are flushed as after
+    /// a write: the resolver was ignoring the file and must read it again.
     static func hostsUnchanged() -> (success: Bool, error: String?) {
         var info = stat()
         if stat("/etc/hosts", &info) == 0, info.st_mode & 0o777 != 0o644 {
@@ -493,6 +495,7 @@ class HelperTool: NSObject, HelperProtocol {
                 let err = String(cString: strerror(errno))
                 return (false, "Hosts file is unchanged but could not be made readable by the resolver (chmod 644: \(err))")
             }
+            return (true, nil)
         }
         return (true, HelperConstants.hostsUnchanged)
     }
@@ -552,7 +555,12 @@ class HelperTool: NSObject, HelperProtocol {
             return (false, error.localizedDescription)
         }
         // Nothing to write when the section already says this.
-        guard let updated else { return hostsUnchanged() }
+        guard let updated else {
+            let unchanged = hostsUnchanged()
+            // Only the mode was put right: the resolver must read the file again.
+            if unchanged.success && unchanged.error == nil { flushResolverCaches() }
+            return unchanged
+        }
         let written = writeHostsFile(updated)
         if written.success {
             flushResolverCaches()

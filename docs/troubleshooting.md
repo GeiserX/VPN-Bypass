@@ -33,7 +33,7 @@ The app will prompt for admin password when modifying `/etc/hosts`. If you deny,
 
 ## Blocked names stay blocked after VPN Bypass is gone
 
-A list rule on the Block route writes its names into their own section of `/etc/hosts`. The section stays while the app is closed, and goes when the list rule is deleted or turned off, when Pin listed names in /etc/hosts is turned off, on Remove All Routes, and when the helper stops (`sudo launchctl bootout system/com.geiserx.vpnbypass.helper`). If the helper files were deleted without stopping it first, the section is left behind. Remove it by hand: open `/etc/hosts` as an administrator (`sudo nano /etc/hosts`) and delete these two lines and every line between them:
+A list rule on the Block route writes its names into their own section of `/etc/hosts`. The section stays while the app is closed, and goes when the list rule is deleted or turned off, when Pin listed names in /etc/hosts is turned off, on Remove All Routes, when config.json fails to load, and when the helper stops (at shutdown, or with `sudo launchctl bootout system/com.geiserx.vpnbypass.helper`). After a restart of the Mac the names are not blocked until VPN Bypass opens and writes the section again. If the helper files were deleted without stopping it first, the section is left behind. Remove it by hand: open `/etc/hosts` as an administrator (`sudo nano /etc/hosts`) and delete these two lines and every line between them:
 
 ```text
 # VPN-BYPASS-BLOCKLIST - START

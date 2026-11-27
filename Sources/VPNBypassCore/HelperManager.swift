@@ -85,7 +85,13 @@ final class HelperManager: ObservableObject {
         let ready = await checkAndInstallHelper()
         if ready {
             hasBeenReady = true
-            if recovering { await restoreAfterHelperRestart(reapplyRoutes: !RouteManager.shared.activeRoutes.isEmpty) }
+            if recovering {
+                await restoreAfterHelperRestart(reapplyRoutes: !RouteManager.shared.activeRoutes.isEmpty)
+            } else {
+                // A helper that was not ready at launch (a first run, a repair from Status) gets
+                // the blocklist now, VPN or not; with nothing new to send this makes no call.
+                RouteManager.shared.requestBlockedHostsSync()
+            }
         }
         return ready
     }
@@ -1226,6 +1232,12 @@ let timeout = xpcTimeout + Double(routes.count) * 0.6
 
     // MARK: - Hosts File Operations
 
+    /// Whether a successful pinned-name update needs a cache flush: every reply but the helper's
+    /// "unchanged" one (nothing written, mode already right).
+    nonisolated static func hostsUpdateNeedsFlush(error: String?) -> Bool {
+        error != HelperConstants.hostsUnchanged
+    }
+
     func updateHostsFile(entries: [(domain: String, ip: String)]) async -> (success: Bool, error: String?) {
         guard helperState.isReady else {
             return (false, "Helper not ready (\(helperState.statusText))")
@@ -1251,7 +1263,7 @@ let timeout = xpcTimeout + Double(routes.count) * 0.6
             }
 
             helper.updateHostsFile(entries: dictEntries) { success, error in
-                if success && error == HelperConstants.hostsUnchanged {
+                if success && !Self.hostsUpdateNeedsFlush(error: error) {
                     // Nothing was written (helper 2.11.0 and later), so there is nothing to flush.
                     once.complete((true, nil))
                 } else if success {

@@ -14,7 +14,8 @@
 //     a pause or a drop does not change what the rules block;
 //   - it goes when no list rule blocks any more (deleted, off, on another route, a route that is
 //     off, another mode), when "Pin listed names in /etc/hosts" is turned off, on Remove All
-//     Routes, and when the helper stops (its SIGTERM handler).
+//     Routes, when config.json fails to load, and when the helper stops (its SIGTERM handler, at
+//     shutdown too, so the first launch after a restart writes the section once).
 
 import Foundation
 
@@ -36,9 +37,11 @@ extension RouteManager {
     }
 
     /// The names to send for `plan`: none while pinning is off, since writing /etc/hosts is what
-    /// that setting allows.
+    /// that setting allows. Sorted, so the same set is the same section whatever order the lists
+    /// are in: two overlapping list rules swapped, or a refresh that moved names around, block
+    /// the same names and must not rewrite the file.
     nonisolated static func blockedHostsToSend(_ plan: HostsBlockPlanner.Plan, manageHostsFile: Bool) -> [String] {
-        manageHostsFile ? plan.names : []
+        manageHostsFile ? plan.names.sorted() : []
     }
 
     /// Run a sync soon. Syncs never overlap: one asked for while another runs follows it.
@@ -148,11 +151,21 @@ extension RouteManager {
         return text.contains(HostsBlockSection.startMarker)
     }
 
+    /// Once per launch, before the first pin write: the pins already in /etc/hosts, so a pinned
+    /// address that is still routed is kept and the write is skipped. Unreadable: start empty.
+    func seedPinnedHostAddressesIfNeeded() {
+        guard !pinnedHostAddressesSeeded else { return }
+        pinnedHostAddressesSeeded = true
+        let text = hostsFileOverrideForTests.map { $0() } ?? (try? String(contentsOfFile: "/etc/hosts", encoding: .utf8))
+        guard pinnedHostAddresses.isEmpty, let text else { return }
+        pinnedHostAddresses = HostsPinSection.pinnedAddresses(in: text)
+    }
+
     /// A pinned-name write went through with `pinned`: a name that was pinned and is no longer gets
     /// its blocklist row back, which the pin writer had dropped.
-    func pinnedHostsChanged(to pinned: Set<String>) {
-        let gone = pinnedHostNames.subtracting(pinned)
-        pinnedHostNames = pinned
+    func pinnedHostsChanged(to pinned: [String: String]) {
+        let gone = Set(pinnedHostAddresses.keys).subtracting(pinned.keys)
+        pinnedHostAddresses = pinned
         guard !gone.isEmpty, let sent = sentBlockedHosts, !gone.isDisjoint(with: sent) else { return }
         resendBlockedHosts()
     }
@@ -202,7 +215,8 @@ extension RouteManager {
         return ListRuleState(rule: rule, plan: plan ?? hostsBlockPlan, manageHostsFile: (config ?? self.config).manageHostsFile,
                              downloading: source.map { listStore.updating.contains($0) } ?? false,
                              status: source.flatMap { listStore.status(for: $0) },
-                             helperError: blockedHostsError)
+                             helperError: blockedHostsError,
+                             helperHoldsNames: !(sentBlockedHosts ?? []).isEmpty)
     }
 }
 
@@ -212,6 +226,8 @@ struct ListRuleState: Equatable {
     enum Kind: String, Equatable {
         /// Its names are in the section (or about to be).
         case blocked
+        /// The helper never confirmed a set and the last send failed: nothing is blocked.
+        case notBlocked
         /// The first copy is downloading.
         case downloading
         /// No copy yet: never downloaded, or every download was refused.
@@ -241,8 +257,10 @@ struct ListRuleState: Equatable {
         self.updated = updated
     }
 
+    /// `helperHoldsNames`: the helper confirmed a non-empty set that is still in the file. When it
+    /// did not and the last send failed, the names are not blocked at all.
     init(rule: Rule, plan: HostsBlockPlanner.Plan, manageHostsFile: Bool, downloading: Bool,
-         status: ListStatus?, helperError: String?, in bundle: Bundle = .main) {
+         status: ListStatus?, helperError: String?, helperHoldsNames: Bool = true, in bundle: Bundle = .main) {
         updated = status?.updated
         guard rule.enabled else { kind = .off; return }
         if let inactive = plan.inactive[rule.id] {
@@ -270,8 +288,13 @@ struct ListRuleState: Equatable {
         }
         names = plan.accepted[rule.id] ?? 0
         guard manageHostsFile else { kind = .pinningOff; return }
+        if let helperError, !helperHoldsNames {
+            kind = .notBlocked
+            error = helperError
+            return
+        }
         kind = .blocked
-        // A write that failed outranks a refused refresh: the names are not blocked at all.
+        // A write that failed outranks a refused refresh: the names in the file are the old set.
         error = helperError ?? status?.error
     }
 
@@ -293,6 +316,8 @@ struct ListRuleState: Equatable {
             return String(localized: "Not downloaded: \(error)", bundle: bundle)
         case .refused:
             return String(localized: "Not blocked. \(error ?? "")", bundle: bundle)
+        case .notBlocked:
+            return String(localized: "Not blocked: \(error ?? "")", bundle: bundle)
         case .pinningOff:
             return String(localized: "Blocks nothing while Pin listed names in /etc/hosts is off (General).", bundle: bundle)
         case .blocked:
