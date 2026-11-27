@@ -516,8 +516,60 @@ final class HostsBlocklistTests: XCTestCase {
         let listed = try XCTUnwrap(response.result?.rules?.first { $0.id == covered.id })
         XCTAssertEqual(listed.listState, "blocked")
         XCTAssertEqual(listed.listNames, 0)
-        XCTAssertTrue(VPNBCLI.textLines(response).contains { $0.hasSuffix("list blocked (adds no names: the rules above it cover every one)") },
+        XCTAssertTrue(VPNBCLI.textLines(response).contains { $0.hasSuffix("list blocked (adds no names of its own)") },
                       "\(VPNBCLI.textLines(response))")
+    }
+
+    /// A list whose only names are hosts no list blocks (the app's download hosts) adds none, and
+    /// no rule above it is the reason: neither the row nor vpnb may blame the rules above it.
+    func testAListOfProtectedHostsDoesNotBlameTheRulesAboveIt() async throws {
+        try await storeCopy(["github.com", "raw.githubusercontent.com"])
+        await sync()
+        XCTAssertFalse(helper.hasSection)
+        XCTAssertEqual(rm.listRuleState(listRule).kind, .blocked)
+        XCTAssertEqual(rm.listRuleState(listRule).line(), "Adds no names of its own.")
+        let response = await ControlSurface.handle(ControlRequest(cmd: "rule.list"))
+        let lines = VPNBCLI.textLines(response)
+        XCTAssertTrue(lines.contains { $0.hasSuffix("list blocked (adds no names of its own)") }, "\(lines)")
+        XCTAssertFalse(lines.contains { $0.contains("rules above") }, "\(lines)")
+    }
+
+    /// The plan names a list as covered only when the rules and lists above it hold every one of
+    /// its names: not for protected hosts, and not for a mix of the two.
+    func testOnlyAListTheRulesAboveHoldWhollyIsCoveredAbove() {
+        let second = Rule(matchType: .list, pattern: "https://other.example.org/hosts", routeId: block.id, order: 2)
+        rm.config.rules.append(second)
+        func plan(_ names: [String]) -> HostsBlockPlanner.Plan {
+            HostsBlockPlanner.plan(rm.config, lists: [source: ["ads.example.com", "track.example.net"], second.pattern: names],
+                                   geosite: [:])
+        }
+        XCTAssertEqual(plan(["ads.example.com", "track.example.net", "ads.example.com"]).coveredAbove, [second.id])
+        XCTAssertEqual(plan(["github.com"]).coveredAbove, [])
+        XCTAssertEqual(plan(["ads.example.com", "github.com"]).coveredAbove, [])
+        XCTAssertEqual(plan(["ads.example.com", "new.example.com"]).coveredAbove, [])
+        XCTAssertEqual(plan(["ads.example.com"]).accepted[second.id], 0)
+    }
+
+    /// A change whose send failed, then undone (the failing list removed): the set is the one the
+    /// helper holds, so nothing is sent, and the failure no longer shows on the other rows.
+    func testUndoingAChangeWhoseSendFailedClearsTheFailure() async throws {
+        await blockOnce()
+        let other = "https://other.example.org/hosts"
+        try await storeCopy(["more.example.com"], at: other)
+        let second = Rule(matchType: .list, pattern: other, routeId: block.id, order: 2)
+        rm.config.rules.append(second)
+        rm.setBlockedHostsOverrideForTests = { _ in (false, "helper stopping") }
+        await sync()
+        XCTAssertTrue(rm.listRuleState(listRule).line().hasSuffix("\nLast try failed: helper stopping"), rm.listRuleState(listRule).line())
+
+        rm.setBlockedHostsOverrideForTests = { [unowned self] in self.helper.setBlocked($0) }
+        rm.config.rules.removeAll { $0.id == second.id }
+        await sync()
+        XCTAssertEqual(helper.blockedCalls.count, 1, "undoing the change reached the helper")
+        XCTAssertEqual(rm.listRuleState(listRule).kind, .blocked)
+        XCTAssertFalse(rm.listRuleState(listRule).line().contains("Last try failed"), rm.listRuleState(listRule).line())
+        let response = await ControlSurface.handle(ControlRequest(cmd: "rule.list"))
+        XCTAssertNil(try XCTUnwrap(response.result?.rules?.first { $0.id == listRule.id }).listError)
     }
 
     /// Two overlapping lists swapped block the same names: no call, and each count follows the
@@ -582,14 +634,45 @@ final class HostsBlocklistTests: XCTestCase {
         XCTAssertEqual(helper.blockedCalls.count, 1)
     }
 
-    /// The pin of a listed name cannot be removed: nothing is sent and nothing says blocked; the
-    /// next sync tries again.
-    func testAPinThatCannotGoStopsTheSend() async {
+    /// The first sync of a launch runs before any route is applied. It drops only the listed
+    /// name's pin, in the order the file has the others, so the route apply finds every routed
+    /// pin in place and writes nothing: two writes in all, and no routed name loses its pin.
+    func testTheFirstSyncOfALaunchKeepsTheOtherPins() async {
+        helper.file = "127.0.0.1 localhost\n\n\(HelperConstants.hostMarkerStart)\n203.0.113.9 zz.example.com\n"
+            + "192.0.2.10 pin.example.com\n203.0.113.5 cdn.example.com\n\(HelperConstants.hostMarkerEnd)\n"
+        await sync()
+        XCTAssertEqual(HostsPinSection.pinnedAddresses(in: helper.file), ["zz.example.com": "203.0.113.9", "cdn.example.com": "203.0.113.5"],
+                       "the sync dropped the pins of routed names")
+        XCTAssertEqual(helper.blockedNames, ["ads.example.com", "pin.example.com", "track.example.net"])
+        XCTAssertEqual(helper.writes, 2)
+
+        // The route apply that follows.
+        let now = Date()
+        rm.activeRoutes = [
+            .init(destination: "203.0.113.9", gateway: "192.168.1.1", source: "zz.example.com", timestamp: now),
+            .init(destination: "203.0.113.5", gateway: "192.168.1.1", source: "cdn.example.com", timestamp: now),
+        ]
+        rm.setDNSCacheForTests(["zz.example.com": "203.0.113.9", "cdn.example.com": "203.0.113.5"])
+        rm.setDNSDiskCacheForTests(["zz.example.com": ["203.0.113.9"], "cdn.example.com": ["203.0.113.5"]])
+        await rm.updateHostsFileForTests()
+        await rm.waitForBlockedHostsSync()
+        XCTAssertEqual(helper.writes, 2, "the route apply wrote /etc/hosts again")
+        XCTAssertEqual(helper.blockedCalls.count, 1)
+    }
+
+    /// The pin of a listed name cannot be removed: nothing is sent and nothing says blocked, the
+    /// row and vpnb say why, and the next sync tries again.
+    func testAPinThatCannotGoStopsTheSend() async throws {
         helper.file = "127.0.0.1 localhost\n\n\(HelperConstants.hostMarkerStart)\n192.0.2.10 pin.example.com\n\(HelperConstants.hostMarkerEnd)\n"
         rm.updateHostsFileOverrideForTests = { _ in (false, "helper stopping") }
         await sync()
         XCTAssertEqual(helper.blockedCalls, [], "the set went out with the pin still hiding a name")
-        XCTAssertNotEqual(rm.listRuleState(listRule).kind, .blocked)
+        XCTAssertEqual(rm.listRuleState(listRule).kind, .notBlocked)
+        XCTAssertEqual(rm.listRuleState(listRule).line(), "Not blocked: A pinned name that a list blocks could not be unpinned.")
+        let response = await ControlSurface.handle(ControlRequest(cmd: "rule.list"))
+        let listed = try XCTUnwrap(response.result?.rules?.first { $0.id == listRule.id })
+        XCTAssertEqual(listed.listState, "notBlocked")
+        XCTAssertEqual(listed.listError, "A pinned name that a list blocks could not be unpinned.")
         rm.updateHostsFileOverrideForTests = { [unowned self] in self.helper.pin($0) }
         await sync()
         XCTAssertEqual(helper.blockedNames, ["ads.example.com", "pin.example.com", "track.example.net"])
@@ -855,6 +938,9 @@ final class ListRuleStateTests: XCTestCase {
         XCTAssertEqual(state(accepted).line(), "1 name blocked")
         accepted.accepted[rule.id] = 0
         XCTAssertEqual(state(accepted, status: ListStatus(names: 2, updated: Date(), checked: Date(), error: nil)).line(),
+                       "Adds no names of its own.")
+        accepted.coveredAbove = [rule.id]
+        XCTAssertEqual(state(accepted, status: ListStatus(names: 2, updated: Date(), checked: Date(), error: nil)).line(),
                        "Adds no names: the rules above it already cover every one.")
 
         var withDate = HostsBlockPlanner.Plan()
@@ -943,12 +1029,12 @@ final class ListRuleStateTests: XCTestCase {
 
     /// Every line this feature adds, as its catalog key.
     static let keys = [
-        "The helper is not running.", "The helper did not answer.",
+        "The helper is not running.", "The helper did not answer.", "A pinned name that a list blocks could not be unpinned.",
         "It holds %lld names, over the limit of %lld.", "Its %lld names would take all lists past the limit of %lld.",
         "Off.", "A list blocks names only on the Block route.", "Its route is off, so this list blocks nothing.",
         "Lists block names only in Custom mode.", "Downloading…", "Not downloaded yet.", "Not downloaded: %@",
         "Not blocked. %@", "Not blocked: %@", "Blocks nothing while Pin listed names in /etc/hosts is off (General).",
-        "1 name blocked", "%lld names blocked", "Adds no names: the rules above it already cover every one.", "%@, updated %@", "Last try failed: %@",
+        "1 name blocked", "%lld names blocked", "Adds no names: the rules above it already cover every one.", "Adds no names of its own.", "%@, updated %@", "Last try failed: %@",
         "StevenBlack's unified hosts list", "A list blocks exactly the names in it, not their subdomains.",
         "A browser that uses its own secure DNS may skip it.",
         "Each time a list or a pinned address changes, every lookup on this Mac waits a few seconds.",

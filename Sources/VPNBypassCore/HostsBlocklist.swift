@@ -85,6 +85,9 @@ extension RouteManager {
             // The helper holds this set already, but the plan may give its names to other rules:
             // a list whose names all sit in a list above it, two lists swapped. No call.
             if confirmedBlockCounts != confirmations { confirmedBlockCounts = confirmations }
+            // A change whose send failed was undone (the list removed, its URL edited back): the
+            // file holds what the rules say again, so that failure is no longer the last word.
+            if blockedHostsError != nil { blockedHostsError = nil }
             return
         }
         // Not known, and nothing to block: a section is left only if the file holds one (an
@@ -96,11 +99,19 @@ extension RouteManager {
         }
         // A name pinned now that the list blocks (a list rule added above the pinning rule, a
         // list that gained the name, a pin an earlier run left in the file): the pin goes first,
-        // or the helper leaves out its row. If the pin stays, nothing is sent and the next sync
-        // tries again.
+        // or the helper leaves out its row. Only that pin goes: at launch this runs before any
+        // route is applied, and pins rebuilt from the routes then would drop every routed name's
+        // pin for the route apply to write back, one more write. If the pin stays, nothing is
+        // sent, the rows say why, and the next sync tries again.
         seedPinnedHostAddressesIfNeeded()
-        if !pinnedHostAddresses.isEmpty, !Set(pinnedHostAddresses.keys).isDisjoint(with: names) {
-            guard await updateHostsFile() else { return }
+        let listed = Set(names)
+        if !pinnedHostAddresses.isEmpty, !Set(pinnedHostAddresses.keys).isDisjoint(with: listed) {
+            let kept = hostsFileText().map { Self.pins(in: $0, without: listed) }
+                ?? pinnedHostAddresses.filter { !listed.contains($0.key) }.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+            guard await modifyHostsFile(entries: kept) else {
+                blockedHostsError = String(localized: "A pinned name that a list blocks could not be unpinned.")
+                return
+            }
         }
         await sendBlockedHosts(names, confirming: confirmations)
     }
@@ -184,12 +195,37 @@ extension RouteManager {
         }
     }
 
-    /// Whether /etc/hosts holds a blocklist start marker. Read as the user (the file is 0644).
+    /// /etc/hosts, read as the user (the file is 0644). Nil when it cannot be read.
+    private func hostsFileText() -> String? {
+        hostsFileOverrideForTests.map { $0() } ?? (try? String(contentsOfFile: "/etc/hosts", encoding: .utf8))
+    }
+
+    /// Whether /etc/hosts holds a blocklist start marker.
     func hostsFileHasBlocklistSection() -> Bool {
-        let text = hostsFileOverrideForTests.map { $0() } ?? (try? String(contentsOfFile: "/etc/hosts", encoding: .utf8))
         // Unreadable: assume a section may be there, so the helper is asked.
-        guard let text else { return true }
+        guard let text = hostsFileText() else { return true }
         return text.contains(HostsBlockSection.startMarker)
+    }
+
+    /// The pins the pinned section of `content` holds, as the file spells and orders them, without
+    /// the names in `names` (lowercase). The route apply writes the pins in the order the file
+    /// already has them, so it then finds the file unchanged and writes nothing. Parsed as
+    /// `HostsPinSection.pinnedAddresses` parses the section.
+    nonisolated static func pins(in content: String, without names: Set<String>) -> [(domain: String, ip: String)] {
+        var out: [(domain: String, ip: String)] = []
+        var seen: Set<String> = []
+        var inSection = false
+        for line in content.components(separatedBy: "\n") {
+            if line.contains(HelperConstants.hostMarkerStart) { inSection = true; continue }
+            if line.contains(HelperConstants.hostMarkerEnd) { break }
+            guard inSection else { continue }
+            let fields = line.split(whereSeparator: { $0.isWhitespace })
+            guard fields.count >= 2, !fields[0].hasPrefix("#") else { continue }
+            let name = fields[1].lowercased()
+            guard !names.contains(name), seen.insert(name).inserted else { continue }
+            out.append((String(fields[1]), String(fields[0])))
+        }
+        return out
     }
 
     /// Once per launch, before the first pin write: the pins already in /etc/hosts, so a pinned
@@ -197,8 +233,7 @@ extension RouteManager {
     func seedPinnedHostAddressesIfNeeded() {
         guard !pinnedHostAddressesSeeded else { return }
         pinnedHostAddressesSeeded = true
-        let text = hostsFileOverrideForTests.map { $0() } ?? (try? String(contentsOfFile: "/etc/hosts", encoding: .utf8))
-        guard pinnedHostAddresses.isEmpty, let text else { return }
+        guard pinnedHostAddresses.isEmpty, let text = hostsFileText() else { return }
         pinnedHostAddresses = HostsPinSection.pinnedAddresses(in: text)
     }
 
@@ -303,6 +338,8 @@ struct ListRuleState: Equatable {
     var error: String?
     /// When the copy in use was downloaded.
     var updated: Date?
+    /// It adds no names because the rules above it hold every one (`HostsBlockPlanner.Plan.coveredAbove`).
+    var coveredAbove = false
 
     init(kind: Kind, names: Int = 0, error: String? = nil, updated: Date? = nil) {
         self.kind = kind
@@ -359,6 +396,7 @@ struct ListRuleState: Equatable {
         }
         names = confirmed
         kind = .blocked
+        coveredAbove = plan.coveredAbove.contains(rule.id)
         // A write that failed outranks a refused refresh: the names in the file are the old set.
         error = helperError ?? status?.error
     }
@@ -390,8 +428,11 @@ struct ListRuleState: Equatable {
         case .blocked:
             var line: String
             if names == 0 {
-                // Each of its names is in a list or a rule above it, which already decides it.
-                line = String(localized: "Adds no names: the rules above it already cover every one.", bundle: bundle)
+                // The cause only when it is the cause: a list can add none for other reasons, such
+                // as names that are the app's own download hosts, which no list blocks.
+                line = coveredAbove
+                    ? String(localized: "Adds no names: the rules above it already cover every one.", bundle: bundle)
+                    : String(localized: "Adds no names of its own.", bundle: bundle)
             } else {
                 let count = names == 1 ? String(localized: "1 name blocked", bundle: bundle)
                                        : String(localized: "\(names) names blocked", bundle: bundle)

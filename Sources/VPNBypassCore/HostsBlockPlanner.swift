@@ -44,6 +44,10 @@ enum HostsBlockPlanner {
         var accepted: [UUID: Int] = [:]
         var refused: [UUID: Refusal] = [:]
         var inactive: [UUID: Inactive] = [:]
+        /// Accepted list rules that add no names because a rule or a list above holds every one of
+        /// theirs. A list can add none for other reasons too (its names are the protected download
+        /// hosts), and its row must not blame the rules above it then.
+        var coveredAbove: Set<UUID> = []
     }
 
     /// `lists` holds the names of each list's copy in use, keyed by the rule's pattern (its URL).
@@ -101,8 +105,9 @@ enum HostsBlockPlanner {
             }
             var fresh: [String] = []
             var seen: Set<String> = []
-            for name in names where !taken.contains(name) && !protected.contains(name) && !claimed(name) {
-                if seen.insert(name).inserted { fresh.append(name) }
+            var covered = 0
+            for name in names where seen.insert(name).inserted && !protected.contains(name) {
+                if taken.contains(name) || claimed(name) { covered += 1 } else { fresh.append(name) }
             }
             if fresh.count > limit {
                 out.refused[rule.id] = .tooLarge(names: fresh.count, limit: limit)
@@ -115,6 +120,7 @@ enum HostsBlockPlanner {
             out.names.append(contentsOf: fresh)
             taken.formUnion(fresh)
             out.accepted[rule.id] = fresh.count
+            if fresh.isEmpty, covered > 0, covered == seen.count { out.coveredAbove.insert(rule.id) }
         }
         return out
     }

@@ -1270,6 +1270,7 @@
 /* ===== Hosts lists on the Block route ===== */
 "The helper is not running." = "The helper is not running.";
 "The helper did not answer." = "The helper did not answer.";
+"A pinned name that a list blocks could not be unpinned." = "A pinned name that a list blocks could not be unpinned.";
 "It holds %lld names, over the limit of %lld." = "It holds %lld names, over the limit of %lld.";
 "Its %lld names would take all lists past the limit of %lld." = "Its %lld names would take all lists past the limit of %lld.";
 "Off." = "Off.";
@@ -1285,6 +1286,7 @@
 "1 name blocked" = "1 name blocked";
 "%lld names blocked" = "%lld names blocked";
 "Adds no names: the rules above it already cover every one." = "Adds no names: the rules above it already cover every one.";
+"Adds no names of its own." = "Adds no names of its own.";
 "%@, updated %@" = "%@, updated %@";
 "Last try failed: %@" = "Last try failed: %@";
 "StevenBlack's unified hosts list" = "StevenBlack's unified hosts list";
