@@ -93,8 +93,12 @@ restore() {
   echo "RESTORED rc=$rc sha_match=$([ "$now" = "$orig_sha" ] && echo YES || echo NO)" \
        "owner_mode=$(stat -f '%u:%g %Lp' "$HOSTS") test_lines=$(grep -c 'vpnb-measure' "$HOSTS" || true)" \
        "${REAL_NAME:-apple.com}_resolves=$real_ok"
+  if [ "$now" != "$orig_sha" ]; then
+    echo "RESTORE FAILED: the saved original is kept at $orig" >&2
+    exit 3
+  fi
   rm -rf "$work"
-  [ "$now" = "$orig_sha" ] && [ "$real_ok" = YES ] || exit 3
+  [ "$real_ok" = YES ] || exit 3
   exit "$rc"
 }
 trap restore EXIT
@@ -146,7 +150,9 @@ def fresh():
 
 def install(path):
     """Atomic rename of path into place, mode 0644 as the helper writes it."""
-    sh("cp", path, TMP)
+    r = sh("cp", path, TMP)
+    if r.returncode != 0:
+        raise RuntimeError("could not stage the test file: " + r.stderr.strip())
     os.chmod(TMP, 0o644)
     os.rename(TMP, HOSTS)
 
