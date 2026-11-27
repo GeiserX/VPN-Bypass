@@ -13,7 +13,7 @@ Research of November 2026, for blocklists on the Block route (#272). Blocklist s
 
 ## 1. Decision
 
-- **Cap: keep 100,000 names in the app (`H`), with a helper-side ceiling of 200,000.** StevenBlack's unified list (81,677 names) fits, and a cap of 50,000 would shut out that one preset. At 100,000 names, adding the section already stalls lookups for 5 to 7 s (removing it 3.2 to 3.4 s, a small write with it in place 3.5 to 4.7 s). At 200,000 it stalls them for 11 to 18 s, and mDNSResponder grows by about 260 MB. That cost is acceptable only if it comes with real changes, not with every write (next points).
+- **Cap: keep 100,000 names in the app (`H`), with a helper-side ceiling of 200,000.** StevenBlack's unified list (81,677 names) fits, and a cap of 50,000 would shut out that one preset. On macOS 26.6.1 at 100,000 names, adding the section already stalls lookups for 5 to 7 s (removing it 3.2 to 3.4 s, a small write with it in place 3.5 to 4.7 s). At 200,000 it stalls them for 11 to 18 s, and mDNSResponder grows by about 260 MB. macOS 27.2.1 stalls under half as long (section 3). That cost is acceptable only if it comes with real changes, not with every write (next points).
 - **Every hosts write stalls every lookup on the Mac while a large section is in place.** It is 2.4 to 3.1 s at 50,000 names, 5.2 to 7.0 s at 100,000 and 10.7 to 18.4 s at 200,000. It happens when a list is added, when it is removed, and on any other write to the file, such as an update of a pinned name. No lookup failed. They all waited.
 - **So PR 1 must not write `/etc/hosts` when nothing changed.** Today the helper rewrites the file on every `updateHostsFile` call, even when the content is the same. One such call comes with each DNS refresh (`dnsRefreshInterval`, 3600 s by default). A small changed write with a 100,000-name section in place froze lookups for 3.5 to 4.7 s. A write with identical content was not measured, so we assume it costs the same. The section writer must return early on unchanged content, and so must the pin writer.
 - **Keep the flush after every write.** It does not make the stall longer or shorter. With the flush, the stall starts at once and the new names answer when it ends. Section 4 has the case without it.
@@ -25,7 +25,7 @@ Research of November 2026, for blocklists on the Block route (#272). Blocklist s
 
 ## 2. Method
 
-All runs were on an Apple silicon Mac on macOS 26.6.1, idle, on a home network with a local DNS server.
+All runs were on an Apple silicon Mac on macOS 26.6.1, idle, on a home network with a local DNS server. Section 3 ends with one run on macOS 27.2.1.
 
 `scripts/measure-hosts.sh` runs as root. It refuses to start unless `/etc/hosts` matches a saved original. On any exit, a trap puts that original back with the same owner and mode. Then it checks the sha256, flushes and checks that `apple.com` resolves. It writes only synthetic names, `nNNNNNNN.vpnb-measure.invalid`, one per line. Each case:
 
@@ -67,6 +67,22 @@ The longest single lookup of `apple.com` in each window, in seconds. Two full ru
 - **It grows with the size**, at 50 to 90 µs per name across the two runs: 81,677 names (StevenBlack) would stall about 4 to 7 s.
 - **Removing a list stalls about half as long as adding it** (35 to 72% across both runs), even though the new file is small.
 - **What a user feels.** For those seconds, every new connection on the Mac waits for its lookup: a page that starts loading, a mail check, a `git fetch`. Connections that are already open are not affected.
+
+### macOS 27
+
+One run of the same script on macOS 27.2.1, on a Mac with the same chip and memory as the macOS 26.6.1 one (Apple M4, 16 GB), idle, with a stock `/etc/hosts`. The longest single lookup of `apple.com` in each window, in seconds:
+
+| Names | Flush | Add a list | Small write with the list in place | Remove the list |
+|---:|:---:|---:|---:|---:|
+| 50,000 | yes | 0.7 | 0.6 | 0.3 |
+| 50,000 | no | 0.5 | 0.5 | 0.3 |
+| 100,000 | yes | 2.4 | 2.5 | 0.7 |
+| 100,000 | no | 2.5 | 2.1 | 0.7 |
+
+- **The stall is shorter on macOS 27**: about a quarter as long at 50,000 names and under half as long at 100,000. It is still a stall of every lookup (the fresh unlisted name stalled for the same time, within 0.1 s), and it still grows faster than the list: twice the names took about four times as long.
+- No lookup of the real name failed. Outside a stall its longest lookup was 37 ms.
+- mDNSResponder grew from 13 MB to 94 MB with 50,000 names, about the same as on macOS 26.
+- This is one run, so read the numbers as a range, not as exact values. It does not change the cap.
 
 ---
 
@@ -115,7 +131,7 @@ In run 1, 100,000 names took mDNSResponder from 204 MB to 296 MB. The memory is 
 
 - **Safari with iCloud Private Relay.** Private Relay handles DNS for Safari, and users report that it ignores `/etc/hosts`.
 - **Chrome with Secure DNS** and **Firefox with DNS over HTTPS.** Chromium's source reads the hosts file before its own DoH, but we did not check either browser live.
-- **macOS 27.** The parse cost may differ.
+- **macOS 27 at 200,000 names, and a second run.** Section 3 has one run on macOS 27.2.1 at 50,000 and 100,000 names.
 - **Intel Macs.** We expect a longer stall on slower CPUs.
 - **A write with identical content.** We measured a write that adds one name. The rename replaces the file, so we expect mDNSResponder to read it all again, but we did not measure it. PR 1 avoids that write anyway.
 - **Busy Macs.** The test Mac was idle. Under load the stall is likely longer.
