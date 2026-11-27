@@ -556,6 +556,46 @@ final class HostsBlocklistTests: XCTestCase {
         XCTAssertFalse(rm.removeAllLiftsListBlocks, "the section is gone")
     }
 
+    /// With pinning off nothing is in the file, so turning it on and failing the first send must
+    /// not show a count from the plan.
+    func testPinningTurnedOnWithAFailedSendIsNotBlocked() async throws {
+        rm.config.manageHostsFile = false
+        await sync()
+        XCTAssertEqual(rm.sentBlockedHosts, [])
+        XCTAssertEqual(rm.confirmedBlockCounts, [:], "pinning off left counts for names never sent")
+        rm.config.manageHostsFile = true
+        rm.setBlockedHostsOverrideForTests = { _ in (false, "helper stopping") }
+        await sync()
+        XCTAssertEqual(rm.listRuleState(listRule).kind, .notBlocked)
+        XCTAssertEqual(rm.listRuleState(listRule).line(), "Not blocked: helper stopping")
+        let response = await ControlSurface.handle(ControlRequest(cmd: "rule.list"))
+        XCTAssertEqual(response.result?.rules?.first { $0.id == listRule.id }?.listState, "notBlocked")
+    }
+
+    /// A pin an earlier run left in the file for a name the list blocks goes before the first
+    /// send of a launch, so that send writes the name's row and no second send is needed.
+    func testTheFirstSyncOfALaunchDropsALeftoverPinFirst() async {
+        helper.file = "127.0.0.1 localhost\n\n\(HelperConstants.hostMarkerStart)\n192.0.2.10 pin.example.com\n\(HelperConstants.hostMarkerEnd)\n"
+        await sync()
+        XCTAssertNil(HostsPinSection.pinnedAddresses(in: helper.file)["pin.example.com"], "the leftover pin stayed")
+        XCTAssertEqual(helper.blockedNames, ["ads.example.com", "pin.example.com", "track.example.net"])
+        XCTAssertEqual(helper.blockedCalls.count, 1)
+    }
+
+    /// The pin of a listed name cannot be removed: nothing is sent and nothing says blocked; the
+    /// next sync tries again.
+    func testAPinThatCannotGoStopsTheSend() async {
+        helper.file = "127.0.0.1 localhost\n\n\(HelperConstants.hostMarkerStart)\n192.0.2.10 pin.example.com\n\(HelperConstants.hostMarkerEnd)\n"
+        rm.updateHostsFileOverrideForTests = { _ in (false, "helper stopping") }
+        await sync()
+        XCTAssertEqual(helper.blockedCalls, [], "the set went out with the pin still hiding a name")
+        XCTAssertNotEqual(rm.listRuleState(listRule).kind, .blocked)
+        rm.updateHostsFileOverrideForTests = { [unowned self] in self.helper.pin($0) }
+        await sync()
+        XCTAssertEqual(helper.blockedNames, ["ads.example.com", "pin.example.com", "track.example.net"])
+        XCTAssertEqual(rm.listRuleState(listRule).kind, .blocked)
+    }
+
     // MARK: - What sends it again
 
     /// A stopping helper removes the section; the restart puts it back.

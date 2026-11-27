@@ -79,7 +79,8 @@ extension RouteManager {
         let plan = blocklistPlan(for: config)
         if plan != hostsBlockPlan { hostsBlockPlan = plan }
         let names = Self.blockedHostsToSend(plan, manageHostsFile: config.manageHostsFile)
-        let confirmations = Self.confirmations(of: plan, rules: config.rules)
+        // With pinning off no name goes to the file, so no list has a confirmed count.
+        let confirmations = config.manageHostsFile ? Self.confirmations(of: plan, rules: config.rules) : [:]
         guard names != sentBlockedHosts else {
             // The helper holds this set already, but the plan may give its names to other rules:
             // a list whose names all sit in a list above it, two lists swapped. No call.
@@ -93,10 +94,13 @@ extension RouteManager {
             confirmedBlockCounts = confirmations
             return
         }
-        // A name pinned now that the list blocks (a list rule added above the pinning rule, or a
-        // list that gained the name): the pin goes first, or the helper leaves out its row.
+        // A name pinned now that the list blocks (a list rule added above the pinning rule, a
+        // list that gained the name, a pin an earlier run left in the file): the pin goes first,
+        // or the helper leaves out its row. If the pin stays, nothing is sent and the next sync
+        // tries again.
+        seedPinnedHostAddressesIfNeeded()
         if !pinnedHostAddresses.isEmpty, !Set(pinnedHostAddresses.keys).isDisjoint(with: names) {
-            await updateHostsFile()
+            guard await updateHostsFile() else { return }
         }
         await sendBlockedHosts(names, confirming: confirmations)
     }
