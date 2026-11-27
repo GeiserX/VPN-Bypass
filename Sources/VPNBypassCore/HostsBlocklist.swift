@@ -70,8 +70,9 @@ extension RouteManager {
     func syncBlockedHosts() async {
         guard !isShuttingDown, !isConfigLoadFailed else { return }
         let hasListRules = config.rules.contains { $0.matchType == .list }
-        // The common case, no list rule and nothing sent: no plan, no call.
-        if !hasListRules, sentBlockedHosts == [] {
+        // The common case, no list rule and nothing sent: no plan, no call. Not after a failed
+        // send, which may have written the file (below).
+        if !hasListRules, sentBlockedHosts == [], blockedHostsError == nil {
             if hostsBlockPlan != HostsBlockPlanner.Plan() { hostsBlockPlan = HostsBlockPlanner.Plan() }
             if confirmedBlockCounts != [:] { confirmedBlockCounts = [:] }
             return

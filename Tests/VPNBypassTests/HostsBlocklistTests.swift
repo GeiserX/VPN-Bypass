@@ -576,6 +576,30 @@ final class HostsBlocklistTests: XCTestCase {
         XCTAssertEqual(helper.blockedCalls.count, 2, "a set confirmed with no failure reached the helper again")
     }
 
+    /// The first list on a Mac with none, whose send wrote the file and then failed: removing the
+    /// list takes the section out, though no list rule is left to plan.
+    func testRemovingTheOnlyListAfterAFailedSendThatWroteRemovesTheSection() async {
+        let rules = rm.config.rules
+        rm.config.rules = [rules[0]]
+        await sync()
+        XCTAssertEqual(rm.sentBlockedHosts, [])
+        rm.config.rules = rules
+        rm.setBlockedHostsOverrideForTests = { [unowned self] names in
+            _ = self.helper.setBlocked(names)
+            return (false, "chmod failed")
+        }
+        await sync()
+        XCTAssertTrue(helper.hasSection)
+
+        rm.setBlockedHostsOverrideForTests = { [unowned self] in self.helper.setBlocked($0) }
+        rm.config.rules = [rules[0]]
+        await sync()
+        XCTAssertFalse(helper.hasSection, "the removed list's names stayed blocked")
+        XCTAssertNil(rm.blockedHostsError)
+        await sync()
+        XCTAssertEqual(helper.blockedCalls.count, 2, "no list and nothing failed, yet the helper was asked again")
+    }
+
     /// A send that fails after the helper wrote the file (a chmod that failed, a reply that came
     /// too late): when the change is undone, the old set goes again and the file holds it.
     func testUndoingAChangeWhoseFailedSendStillWroteRestoresTheFile() async throws {
