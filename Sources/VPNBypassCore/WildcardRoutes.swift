@@ -258,7 +258,7 @@ enum WildcardPlanner {
         case .geosite:
             let list = lists[rule.pattern.lowercased()]?.usable ?? GeoSiteExpansion(found: false)
             return (list.suffixes.map(WildcardDomain.entry(for:)), list.names)
-        case .ip, .cidr, .geoip, .process, .unsupported:
+        case .ip, .cidr, .geoip, .process, .list, .unsupported:
             return ([], [])
         }
     }

@@ -850,6 +850,7 @@ struct RuleRow: View {
         case .process: return "app"
         case .geoip: return "flag"
         case .geosite: return "list.bullet.rectangle"
+        case .list: return "list.bullet"
         case .unsupported: return "questionmark.circle"
         }
     }
@@ -870,7 +871,7 @@ struct RuleRow: View {
             return GeoDisplay.name(for: rule.pattern)
         case .unsupported:
             return "\(rule.unknownMatchType ?? "?"): \(rule.pattern)"
-        case .domain, .ip, .cidr, .geosite, .process:
+        case .domain, .ip, .cidr, .geosite, .process, .list:
             return rule.pattern
         }
     }
@@ -1148,7 +1149,7 @@ struct RuleEditorSheet: View {
 
         init(_ type: MatchType) {
             switch type {
-            case .domain, .suffix, .unsupported: self = .domain
+            case .domain, .suffix, .list, .unsupported: self = .domain
             case .service: self = .service
             case .ip: self = .ip
             case .cidr: self = .cidr
@@ -1177,7 +1178,7 @@ struct RuleEditorSheet: View {
         case .ip:      return "10.0.0.5"
         case .cidr:    return "10.0.0.0/8"
         case .process: return String(localized: "com.example.App or Example")
-        case .geoip, .geosite, .unsupported: return ""
+        case .geoip, .geosite, .list, .unsupported: return ""
         case .service: return ""
         }
     }

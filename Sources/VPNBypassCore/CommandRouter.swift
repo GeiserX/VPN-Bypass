@@ -455,6 +455,10 @@ enum CommandRouter {
               matchType != .unsupported else {
             return errorResponse(config, code: "invalid_args", message: "match must be a valid match type")
         }
+        // Nothing serves a hosts-list rule yet (the parser and store come first), so none is added.
+        guard matchType != .list else {
+            return errorResponse(config, code: "invalid_args", message: "list rules are not served yet")
+        }
         guard let pattern = request.args?["pattern"], !pattern.isEmpty else {
             return errorResponse(config, code: "invalid_args", message: "pattern is required")
         }
