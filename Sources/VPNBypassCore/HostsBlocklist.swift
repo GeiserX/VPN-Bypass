@@ -81,13 +81,15 @@ extension RouteManager {
         let names = Self.blockedHostsToSend(plan, manageHostsFile: config.manageHostsFile)
         // With pinning off no name goes to the file, so no list has a confirmed count.
         let confirmations = config.manageHostsFile ? Self.confirmations(of: plan, rules: config.rules) : [:]
-        guard names != sentBlockedHosts else {
+        // A failed send can still have changed the file (the helper wrote it before a chmod that
+        // failed, or finished the write after the app stopped waiting), so with a failure on
+        // record the same set goes again: a change undone after its send failed (the list
+        // removed, its URL edited back). The helper writes nothing when the file already holds
+        // it, and the success clears the failure.
+        if names == sentBlockedHosts, blockedHostsError == nil {
             // The helper holds this set already, but the plan may give its names to other rules:
             // a list whose names all sit in a list above it, two lists swapped. No call.
             if confirmedBlockCounts != confirmations { confirmedBlockCounts = confirmations }
-            // A change whose send failed was undone (the list removed, its URL edited back): the
-            // file holds what the rules say again, so that failure is no longer the last word.
-            if blockedHostsError != nil { blockedHostsError = nil }
             return
         }
         // Not known, and nothing to block: a section is left only if the file holds one (an

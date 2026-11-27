@@ -550,8 +550,9 @@ final class HostsBlocklistTests: XCTestCase {
         XCTAssertEqual(plan(["ads.example.com"]).accepted[second.id], 0)
     }
 
-    /// A change whose send failed, then undone (the failing list removed): the set is the one the
-    /// helper holds, so nothing is sent, and the failure no longer shows on the other rows.
+    /// A change whose send failed, then undone (the failing list removed): the same set goes once
+    /// more, the helper finds the file holding it and writes nothing, and the failure no longer
+    /// shows on the other rows.
     func testUndoingAChangeWhoseSendFailedClearsTheFailure() async throws {
         await blockOnce()
         let other = "https://other.example.org/hosts"
@@ -565,11 +566,37 @@ final class HostsBlocklistTests: XCTestCase {
         rm.setBlockedHostsOverrideForTests = { [unowned self] in self.helper.setBlocked($0) }
         rm.config.rules.removeAll { $0.id == second.id }
         await sync()
-        XCTAssertEqual(helper.blockedCalls.count, 1, "undoing the change reached the helper")
+        XCTAssertEqual(helper.blockedCalls.count, 2, "the set was not sent again after the failure")
+        XCTAssertEqual(helper.writes, 1, "the resend of a set the file holds wrote /etc/hosts")
         XCTAssertEqual(rm.listRuleState(listRule).kind, .blocked)
         XCTAssertFalse(rm.listRuleState(listRule).line().contains("Last try failed"), rm.listRuleState(listRule).line())
         let response = await ControlSurface.handle(ControlRequest(cmd: "rule.list"))
         XCTAssertNil(try XCTUnwrap(response.result?.rules?.first { $0.id == listRule.id }).listError)
+        await sync()
+        XCTAssertEqual(helper.blockedCalls.count, 2, "a set confirmed with no failure reached the helper again")
+    }
+
+    /// A send that fails after the helper wrote the file (a chmod that failed, a reply that came
+    /// too late): when the change is undone, the old set goes again and the file holds it.
+    func testUndoingAChangeWhoseFailedSendStillWroteRestoresTheFile() async throws {
+        await blockOnce()
+        let other = "https://other.example.org/hosts"
+        try await storeCopy(["more.example.com"], at: other)
+        let second = Rule(matchType: .list, pattern: other, routeId: block.id, order: 2)
+        rm.config.rules.append(second)
+        rm.setBlockedHostsOverrideForTests = { [unowned self] names in
+            _ = self.helper.setBlocked(names)
+            return (false, "chmod failed")
+        }
+        await sync()
+        XCTAssertTrue(helper.blockedNames.contains("more.example.com"))
+
+        rm.setBlockedHostsOverrideForTests = { [unowned self] in self.helper.setBlocked($0) }
+        rm.config.rules.removeAll { $0.id == second.id }
+        await sync()
+        XCTAssertEqual(helper.blockedNames, ["ads.example.com", "pin.example.com", "track.example.net"],
+                       "the file kept the set of the failed send")
+        XCTAssertNil(rm.blockedHostsError)
     }
 
     /// Two overlapping lists swapped block the same names: no call, and each count follows the
