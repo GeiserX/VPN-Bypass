@@ -499,6 +499,7 @@ class HelperTool: NSObject, HelperProtocol {
         // Add new section if we have entries (skip domains managed by other tools)
         if !entries.isEmpty {
             var managedEntries: [String] = []
+            var pinnedNames = Set<String>()
             for entry in entries {
                 if let domain = entry["domain"], let ip = entry["ip"] {
                     if isValidIP(ip) && isValidDomain(domain) {
@@ -506,10 +507,17 @@ class HelperTool: NSObject, HelperProtocol {
                             continue
                         }
                         managedEntries.append("\(ip) \(domain)")
+                        pinnedNames.insert(domain.lowercased())
                     }
                 }
             }
             if !managedEntries.isEmpty {
+                // A pin wins over a block. A name with a blocklist row and a pinned row gets both
+                // addresses from the resolver, so the blocklist row goes in this same write.
+                lines = HostsBlockSection.removingNames(pinnedNames, from: lines)
+                while lines.last?.isEmpty == true {
+                    lines.removeLast()
+                }
                 lines.append("")
                 lines.append(HelperConstants.hostMarkerStart)
                 lines.append(contentsOf: managedEntries)
@@ -544,6 +552,11 @@ class HelperTool: NSObject, HelperProtocol {
         return (true, nil)
     }
 
+    /// Set by SIGTERM before it removes the blocklist section; read and written on `routeQueue`
+    /// only. A call queued behind the removal would otherwise write the section back just before
+    /// `exit(0)`, and it would outlive the uninstall.
+    private static var stopping = false
+
     /// The blocklist section (`HostsBlockSection`): replaced with `names`, or removed when there
     /// are none, and left alone when it already says so. Serialised with the route and pinned-name
     /// mutations, as `updateHostsFile` is.
@@ -558,6 +571,7 @@ class HelperTool: NSObject, HelperProtocol {
     /// without the flush a new section took seconds to a minute to take effect (an Apple silicon
     /// Mac on macOS 26.6.1: 1.9 s at 50,000 names, 60.8 s at 500,000).
     static func performBlockedHostsUpdate(names: [String]) -> (success: Bool, error: String?) {
+        if stopping && !names.isEmpty { return (false, "helper stopping") }
         guard let current = try? String(contentsOfFile: "/etc/hosts", encoding: .utf8) else {
             return (false, "Could not read /etc/hosts")
         }
@@ -586,6 +600,7 @@ class HelperTool: NSObject, HelperProtocol {
     /// after a restart.
     static func removeBlockedHostsSection() {
         routeQueue.sync {
+            stopping = true
             let result = performBlockedHostsUpdate(names: [])
             if !result.success {
                 helperLog.error("blocked hosts: could not remove the section: \(result.error ?? "?", privacy: .public)")

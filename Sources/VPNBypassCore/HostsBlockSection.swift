@@ -31,6 +31,9 @@ enum HostsBlockSection {
     enum Refusal: Error, Equatable {
         case tooManyNames(Int)
         case invalidName(String)
+        /// The file has a start marker with no end marker after it. The lines after the marker
+        /// may be the user's own, so nothing is written until someone fixes the file.
+        case unterminatedSection
 
         var message: String {
             switch self {
@@ -42,6 +45,9 @@ enum HostsBlockSection {
                     $0.isASCII && $0.value >= 0x20 && $0.value != 0x7F ? Character($0) : "?"
                 })
                 return "Not a host name: \(shown)"
+            case .unterminatedSection:
+                return "/etc/hosts has \(HostsBlockSection.startMarker) with no \(HostsBlockSection.endMarker) after it; "
+                    + "nothing was written, fix the file by hand"
             }
         }
     }
@@ -116,7 +122,7 @@ enum HostsBlockSection {
 
     /// The names that `lines` (a hosts file with the pinned-name section already taken out) map
     /// outside the blocklist section. The pin writer skips these, as names another tool manages; a
-    /// blocked name is not one of them.
+    /// blocked name is not one of them: the pin writer drops its row instead (`removingNames`).
     static func namesManagedElsewhere(_ lines: [String]) -> Set<String> {
         mappedNames(in: linesOutsideSection(lines))
     }
@@ -134,7 +140,8 @@ enum HostsBlockSection {
     ///
     /// Throws `Refusal` for more than `maxNames` names or for any name `isValidName` refuses; a
     /// set with one bad name is refused whole, because the app validates every name before it
-    /// sends one.
+    /// sends one. Throws `Refusal.unterminatedSection` for a start marker with no end marker: the
+    /// lines after it may be the user's own or the pinned names, and a rewrite would drop them.
     static func rewritten(_ content: String, names: [String]) throws -> String? {
         guard names.count <= maxNames else { throw Refusal.tooManyNames(names.count) }
         for name in names where !isValidName(name) { throw Refusal.invalidName(name) }
@@ -150,6 +157,7 @@ enum HostsBlockSection {
             if inSection { continue }
             if hadSection { after.append(line) } else { before.append(line) }
         }
+        guard !inSection else { throw Refusal.unterminatedSection }
         if names.isEmpty && !hadSection { return nil }
 
         var entries: [String] = []
@@ -188,5 +196,74 @@ enum HostsBlockSection {
         while lines.last?.isEmpty == true { lines.removeLast() }
         let result = lines.joined(separator: "\n") + "\n"
         return result == content ? nil : result
+    }
+
+    /// `lines` without the blocklist rows that map any of `names` (lowercase). The pin writer runs
+    /// this with the names it is about to pin, in the same write: a name with a `0.0.0.0` row and
+    /// a pinned row gets both addresses from the resolver, so the pin would not win. When no row
+    /// is left, the markers go too, with the blank line written before them. Returns `lines`
+    /// unchanged when nothing matches, and when the section has no end marker (see
+    /// `Refusal.unterminatedSection`).
+    static func removingNames(_ names: Set<String>, from lines: [String]) -> [String] {
+        guard !names.isEmpty else { return lines }
+        let wanted = Set(names.map { Substring($0) })
+        let ownRows = Set(names.map { "\(address) \($0)" })
+        var out: [String] = []
+        out.reserveCapacity(lines.count)
+        var inSection = false
+        var sectionStart = 0
+        var kept = 0
+        var changed = false
+        for line in lines {
+            if isMarker(line, startMarker) {
+                inSection = true
+                sectionStart = out.count
+                kept = 0
+                out.append(line)
+                continue
+            }
+            if inSection, isMarker(line, endMarker) {
+                inSection = false
+                if kept == 0 && changed {
+                    out.removeSubrange(sectionStart...)
+                    if out.last?.isEmpty == true { out.removeLast() }
+                } else {
+                    out.append(line)
+                }
+                continue
+            }
+            if inSection {
+                if ownRows.contains(line) || (!isOwnRow(line) && rowMaps(line, anyOf: wanted)) {
+                    changed = true
+                    continue
+                }
+                kept += 1
+            }
+            out.append(line)
+        }
+        guard !inSection, changed else { return lines }
+        return out
+    }
+
+    /// Whether `line` has the form this file writes: `0.0.0.0`, one space, one lowercase name. Such a
+    /// row needs no parsing; an exact lookup answers for it. Checked by byte, with no string built.
+    private static func isOwnRow(_ line: String) -> Bool {
+        var bytes = line.utf8.makeIterator()
+        for expected in (address + " ").utf8 where bytes.next() != expected { return false }
+        while let byte = bytes.next() {
+            if byte == 0x20 || byte == 0x09 || byte == 0x23 || (byte >= 0x41 && byte <= 0x5A) { return false }
+        }
+        return true
+    }
+
+    /// Whether the hosts row `line` maps a name in `names`. Only for rows edited by hand.
+    private static func rowMaps(_ line: String, anyOf names: Set<Substring>) -> Bool {
+        guard line.utf8.first != 0x23 else { return false }         // #
+        for field in line.split(whereSeparator: { $0 == " " || $0 == "\t" }).dropFirst() {
+            if field.hasPrefix("#") { return false }
+            let upper = field.utf8.contains { $0 >= 0x41 && $0 <= 0x5A }
+            if names.contains(upper ? Substring(field.lowercased()) : field) { return true }
+        }
+        return false
     }
 }
