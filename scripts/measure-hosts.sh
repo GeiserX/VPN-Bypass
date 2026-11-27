@@ -58,6 +58,10 @@ work="$(mktemp -d /tmp/vpnb-measure.XXXXXX)"
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 
 if [ -z "$orig" ]; then
+  if grep -q 'vpnb-measure' "$HOSTS"; then
+    echo "/etc/hosts already holds test lines from an earlier run; restore it first, or pass --orig and --orig-sha" >&2
+    exit 2
+  fi
   orig="$work/hosts.orig"
   cp -p "$HOSTS" "$orig"
   orig_sha="$(sha "$orig")"
@@ -72,6 +76,7 @@ echo "original sha256=$orig_sha owner=$owner mode=$mode"
 restore() {
   rc=$?
   trap - EXIT INT TERM HUP
+  set +e  # a failing step below must not skip the sha check and the report
   if [ "$(sha "$HOSTS")" != "$orig_sha" ]; then
     cp "$orig" "$TMP" && chown "$owner" "$TMP" && chmod "$mode" "$TMP" && mv -f "$TMP" "$HOSTS"
   fi
