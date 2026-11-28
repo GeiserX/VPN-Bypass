@@ -133,9 +133,11 @@ extension RouteManager {
     }
 
     /// Whether Remove All Routes takes blocked names out of /etc/hosts: the helper confirmed some,
-    /// or, while that is not known, the rules would send some. No while the file holds none, as
-    /// with pinning off or after an earlier Remove All.
+    /// a send failed and may have written some all the same (`syncBlockedHosts`), or, while that
+    /// is not known, the rules would send some. No while the file holds none, as with pinning off
+    /// or after an earlier Remove All.
     var removeAllLiftsListBlocks: Bool {
+        if blockedHostsError != nil { return true }
         if let sent = sentBlockedHosts { return !sent.isEmpty }
         return !Self.blockedHostsToSend(hostsBlockPlan, manageHostsFile: config.manageHostsFile).isEmpty
     }
@@ -146,7 +148,10 @@ extension RouteManager {
         guard !isShuttingDown else { return }
         // After the sync running now, so it cannot write the section back behind this.
         await waitForBlockedHostsSync()
-        if sentBlockedHosts == [] { return }
+        // Nothing confirmed and nothing failed: no call. A failed send may have written the
+        // section all the same (`syncBlockedHosts`), so with a failure on record it goes; the
+        // helper writes nothing when the file holds none.
+        if sentBlockedHosts == [], blockedHostsError == nil { return }
         if sentBlockedHosts == nil, !hostsFileHasBlocklistSection() {
             sentBlockedHosts = []
             confirmedBlockCounts = [:]
