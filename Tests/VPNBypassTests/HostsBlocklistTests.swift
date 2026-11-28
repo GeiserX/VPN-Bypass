@@ -600,6 +600,54 @@ final class HostsBlocklistTests: XCTestCase {
         XCTAssertEqual(helper.blockedCalls.count, 2, "no list and nothing failed, yet the helper was asked again")
     }
 
+    /// The first list on a Mac with none, whose send wrote the file and then failed: nothing is
+    /// confirmed, but the file holds the section.
+    private func failFirstSendAfterItWrote() async {
+        let rules = rm.config.rules
+        rm.config.rules = [rules[0]]
+        await sync()
+        XCTAssertEqual(rm.sentBlockedHosts, [])
+        rm.config.rules = rules
+        rm.setBlockedHostsOverrideForTests = { [unowned self] names in
+            _ = self.helper.setBlocked(names)
+            return (false, "late reply")
+        }
+        await sync()
+        XCTAssertTrue(helper.hasSection)
+        XCTAssertEqual(rm.sentBlockedHosts, [])
+        XCTAssertNotNil(rm.blockedHostsError)
+        rm.setBlockedHostsOverrideForTests = { [unowned self] in self.helper.setBlocked($0) }
+    }
+
+    /// Remove All Routes after such a send takes the section out.
+    func testRemoveAllAfterAFailedSendThatWroteRemovesTheSection() async {
+        await failFirstSendAfterItWrote()
+        let calls = helper.blockedCalls.count
+        await rm.removeAllRoutes(releasingBlocklist: true)
+        XCTAssertFalse(helper.hasSection, "Remove All left the names of the failed send blocked")
+        XCTAssertEqual(helper.blockedCalls.count, calls + 1)
+        XCTAssertEqual(rm.sentBlockedHosts, [])
+        XCTAssertNil(rm.blockedHostsError)
+    }
+
+    /// Its question says the list blocks go too.
+    func testTheRemoveAllQuestionAfterAFailedSendThatWroteMentionsLists() async {
+        await failFirstSendAfterItWrote()
+        XCTAssertTrue(rm.removeAllLiftsListBlocks, "the file may hold blocked names, yet the question leaves them out")
+    }
+
+    /// Nothing sent and nothing failed: Remove All Routes asks the helper nothing and says nothing
+    /// about lists.
+    func testRemoveAllWithNothingSentMakesNoCall() async {
+        rm.config.rules = [rm.config.rules[0]]
+        await sync()
+        XCTAssertEqual(rm.sentBlockedHosts, [])
+        XCTAssertFalse(rm.removeAllLiftsListBlocks)
+        await rm.removeAllRoutes(releasingBlocklist: true)
+        XCTAssertEqual(helper.blockedCalls.count, 0, "Remove All asked the helper with nothing in the file")
+        XCTAssertEqual(helper.writes, 0)
+    }
+
     /// A send that fails after the helper wrote the file (a chmod that failed, a reply that came
     /// too late): when the change is undone, the old set goes again and the file holds it.
     func testUndoingAChangeWhoseFailedSendStillWroteRestoresTheFile() async throws {
