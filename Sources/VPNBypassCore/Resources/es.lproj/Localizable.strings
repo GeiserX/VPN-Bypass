@@ -1270,6 +1270,7 @@
 /* ===== Listas hosts en la ruta Bloquear ===== */
 "The helper is not running." = "El asistente no está en marcha.";
 "The helper did not answer." = "El asistente no respondió.";
+"A pinned name that a list blocks could not be unpinned." = "No se pudo quitar la fijación de un nombre que bloquea una lista.";
 "It holds %lld names, over the limit of %lld." = "Tiene %1$lld nombres, por encima del límite de %2$lld.";
 "Its %lld names would take all lists past the limit of %lld." = "Sus %1$lld nombres llevarían el total de las listas por encima del límite de %2$lld.";
 "Off." = "Desactivada.";
@@ -1285,6 +1286,7 @@
 "1 name blocked" = "1 nombre bloqueado";
 "%lld names blocked" = "%lld nombres bloqueados";
 "Adds no names: the rules above it already cover every one." = "No añade nombres: las reglas de encima ya los cubren todos.";
+"Adds no names of its own." = "No añade nombres propios.";
 "%@, updated %@" = "%1$@, actualizada %2$@";
 "Last try failed: %@" = "El último intento falló: %@";
 "StevenBlack's unified hosts list" = "Lista hosts unificada de StevenBlack";
